@@ -35,6 +35,8 @@ import {
   verdictRule,
 } from "./test-compare-report";
 
+const noop = () => {};
+
 export type CompareOptions = {
   cwd: string;
   base?: string;
@@ -790,7 +792,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
     cleanup = false,
   ): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let cancel = () => {};
+    let cancel = noop;
 
     try {
       return await Promise.race([

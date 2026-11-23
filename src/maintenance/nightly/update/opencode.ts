@@ -6,6 +6,27 @@ import type { UpdateReceipt } from "../../update-notice";
 import { StepError } from "../exec";
 import type { ModelRef } from "./versions";
 
+const at = (directory: string | undefined) =>
+  directory ? { location: { directory } } : {};
+
+const guard = async <T>(work: () => Promise<T>): Promise<T> => {
+  try {
+    return await work();
+  } catch {
+    // Raw SDK errors can carry request headers; never surface them.
+    throw new StepError("health-failed");
+  }
+};
+
+const ref = (model: ModelRef | undefined) =>
+  model
+    ? {
+        providerID: model.providerID,
+        id: model.id,
+        ...(model.variant ? { variant: model.variant } : {}),
+      }
+    : null;
+
 /** The OpenCode server operations maintenance needs; tests use a fake. */
 export interface OpenCodeControl {
   /** Passive host-local context queues only: never sends a native input. */
@@ -70,27 +91,6 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
 
   const bounded = (signal: AbortSignal) =>
     AbortSignal.any([signal, AbortSignal.timeout(openCodeCallMs)]);
-
-  const at = (directory: string | undefined) =>
-    directory ? { location: { directory } } : {};
-
-  const guard = async <T>(work: () => Promise<T>): Promise<T> => {
-    try {
-      return await work();
-    } catch {
-      // Raw SDK errors can carry request headers; never surface them.
-      throw new StepError("health-failed");
-    }
-  };
-
-  const ref = (model: ModelRef | undefined) =>
-    model
-      ? {
-          providerID: model.providerID,
-          id: model.id,
-          ...(model.variant ? { variant: model.variant } : {}),
-        }
-      : null;
 
   return {
     maintenanceNotice: (notice, signal) =>

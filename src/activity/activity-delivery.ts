@@ -10,6 +10,8 @@ import type { TransportDelivery } from "../gateway/ports";
 import type { Job } from "../gateway/store";
 import type { ActivityRecords } from "./store";
 
+const noop = () => {};
+
 export type ActivityHandle = { finish(): void; cancel(): void };
 
 type Pending = {
@@ -33,7 +35,7 @@ type Options = {
 
 async function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
-  let abort = () => {};
+  let abort = noop;
 
   try {
     return await Promise.race([

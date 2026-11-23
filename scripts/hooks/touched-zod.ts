@@ -61,23 +61,23 @@ function declarations(
   if (headFiles.get(declarationsPath) !== "100644")
     throw new Error("head declared-change list must exist as a regular file");
 
-  try {
-    function read(revision: string) {
-      const entries = Schema.decodeUnknownSync(declarationSchema, {
-        onExcessProperty: "error",
-      })(JSON.parse(git("show", `${revision}:${declarationsPath}`)));
+  function read(revision: string) {
+    const entries = Schema.decodeUnknownSync(declarationSchema, {
+      onExcessProperty: "error",
+    })(JSON.parse(git("show", `${revision}:${declarationsPath}`)));
 
-      const seen = new Set<string>();
+    const seen = new Set<string>();
 
-      for (const entry of entries) {
-        if (posix.normalize(entry.path) !== entry.path || seen.has(entry.path))
-          throw new Error("invalid declared path");
-        seen.add(entry.path);
-      }
-
-      return entries;
+    for (const entry of entries) {
+      if (posix.normalize(entry.path) !== entry.path || seen.has(entry.path))
+        throw new Error("invalid declared path");
+      seen.add(entry.path);
     }
 
+    return entries;
+  }
+
+  try {
     const entries = read("HEAD");
 
     if (

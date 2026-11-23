@@ -15,6 +15,10 @@ import {
   settingsURL,
 } from "../config/settings-schema";
 
+const lower = (value: string) => fold(value);
+
+const exact = (value: string) => fold(value, "ascii");
+
 // IRC names are matched without case. Accounts and nicks stay within the
 // Common RFC 2812 nick alphabet; channels use `#` or `&`, no spaces/commas.
 const ircNickPattern = /^[A-Za-z[\]\\`_^{|}][A-Za-z0-9[\]\\`_^{|}-]{0,31}$/;
@@ -716,8 +720,6 @@ export function createIrcConfig<
       // Any server treats as equal are refused. Grants (crew ⊆ captain) only
       // ASCII-lower-case, the narrowest: a name that differs under any
       // Mapping is not the captain's channel.
-      const lower = (value: string) => fold(value);
-      const exact = (value: string) => fold(value, "ascii");
 
       const accounts = [
         irc.account,

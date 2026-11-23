@@ -1,3 +1,5 @@
+const invalid = () => new Error("Invalid Git index");
+
 /** Read only the split-index reference from a private, size-checked copy. */
 function sharedIndexName(path: string, format: "sha1" | "sha256") {
   // The copy cannot change under this mapping. Map it without a second buffer.
@@ -11,7 +13,6 @@ function sharedIndexName(path: string, format: "sha1" | "sha256") {
 
   const hashBytes = format === "sha1" ? 20 : 32;
   const end = index.length - hashBytes;
-  const invalid = () => new Error("Invalid Git index");
 
   if (end < 12 || index.toString("ascii", 0, 4) !== "DIRC") throw invalid();
   const version = index.readUInt32BE(4);

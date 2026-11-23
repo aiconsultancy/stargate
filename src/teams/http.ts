@@ -13,6 +13,20 @@ import { BodyTooLargeError, readBody, sendJson } from "../lib/http-util";
 import type { Logger } from "./log";
 import { describeError } from "./log";
 
+// Answers before the body has been read, and drops the connection so a client
+// Cannot keep it open by trickling an unwanted body.
+function refuse(
+  req: IncomingMessage,
+  res: ServerResponse,
+  status: number,
+): void {
+  res.setHeader("connection", "close");
+  res.once("finish", () => {
+    if (!req.complete) req.destroy();
+  });
+  sendJson(res, status);
+}
+
 export const MESSAGES_PATH = "/api/messages";
 export const MAX_ACTIVITY_BYTES = 512 * 1024;
 export const HEADERS_TIMEOUT_MS = 10_000;
@@ -57,20 +71,6 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
   server.requestTimeout = requestTimeout;
 
   return server;
-
-  // Answers before the body has been read, and drops the connection so a client
-  // Cannot keep it open by trickling an unwanted body.
-  function refuse(
-    req: IncomingMessage,
-    res: ServerResponse,
-    status: number,
-  ): void {
-    res.setHeader("connection", "close");
-    res.once("finish", () => {
-      if (!req.complete) req.destroy();
-    });
-    sendJson(res, status);
-  }
 
   function reject(
     req: IncomingMessage,

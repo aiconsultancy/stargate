@@ -411,7 +411,20 @@
             "allowNullableString": true,
             "allowNullableNumber": true
           }
-        ]
+        ],
+        "eslint/max-lines-per-function": [
+          "error",
+          { "max": 250, "skipBlankLines": true, "skipComments": true }
+        ],
+        "eslint/max-statements": ["error", { "max": 60 }],
+        "eslint/max-params": ["error", { "max": 6 }],
+        "eslint/max-depth": ["error", { "max": 6 }],
+        "eslint/complexity": ["error", { "max": 40 }],
+        "unicorn/max-nested-calls": ["error", { "max": 6 }],
+        "eslint/max-classes-per-file": ["error", { "max": 3 }],
+        "eslint/no-inner-declarations": "error",
+        "anti-slop/no-object-parameters": "error",
+        "unicorn/consistent-function-scoping": "error"
       },
       "env": {
         "node": true,
@@ -421,6 +434,125 @@
         "Bun": "readonly",
         "HTMLRewriter": "readonly"
       }
+    },
+    {
+      "files": [
+        "scripts/test-compare.ts",
+        "src/activity/activity-delivery.ts",
+        "src/app/cli.ts",
+        "src/app/runtime.ts",
+        "src/backends/opencode/opencode.ts",
+        "src/crew/messaging/messaging.ts",
+        "src/dashboard/api/server.ts",
+        "src/dashboard/api/v1/events.ts",
+        "src/dashboard/api/v1/projection.ts",
+        "src/dashboard/dashboard-source.ts",
+        "src/gateway/gateway.ts",
+        "src/irc/config.ts",
+        "src/irc/ship.ts",
+        "src/maintenance/nightly/cleanup/cleanup.ts"
+      ],
+      "rules": {
+        "eslint/max-lines-per-function": [
+          "error",
+          { "max": 1334, "skipBlankLines": true, "skipComments": true }
+        ]
+      }
+    },
+    {
+      "files": [
+        "scripts/test-compare.ts",
+        "src/activity/activity-delivery.ts",
+        "src/app/cli.ts",
+        "src/app/runtime.ts",
+        "src/attachments/attachment-delivery.ts",
+        "src/backends/claude.ts",
+        "src/backends/codex.ts",
+        "src/backends/opencode/opencode.ts",
+        "src/captain-post/captain-post.ts",
+        "src/crew/messaging/messaging.ts",
+        "src/gateway/gateway.ts",
+        "src/irc/client.ts",
+        "src/irc/routing.ts",
+        "src/irc/ship.ts"
+      ],
+      "rules": { "eslint/max-statements": ["error", { "max": 185 }] }
+    },
+    {
+      "files": [
+        "scripts/hooks/touched-zod.ts",
+        "src/app/setup.ts",
+        "src/backends/claude.ts",
+        "src/backends/codex.ts",
+        "src/backends/opencode/opencode.ts",
+        "src/crew/execution/engine.ts",
+        "src/crew/pi/pi-worker.ts",
+        "src/cron/index.ts",
+        "src/dashboard/api/v1/git.ts",
+        "src/dashboard/api/v1/projection.ts",
+        "src/gateway/gateway.ts",
+        "src/irc/client.ts",
+        "src/irc/delivery.ts",
+        "src/questions/questions.ts",
+        "src/questions/slack-questions.ts",
+        "src/slack/crew-ui.ts",
+        "src/slack/pairing.ts",
+        "src/teams/presence.ts"
+      ],
+      "rules": { "eslint/max-params": ["error", { "max": 13 }] }
+    },
+    {
+      "files": ["src/gateway/gateway.ts"],
+      "rules": { "eslint/max-depth": ["error", { "max": 7 }] }
+    },
+    {
+      "files": [
+        "scripts/test-compare.ts",
+        "src/activity/activity-delivery.ts",
+        "src/app/cli.ts",
+        "src/app/runtime.ts",
+        "src/attachments/attachment-delivery.ts",
+        "src/backends/claude.ts",
+        "src/backends/codex.ts",
+        "src/backends/opencode/opencode.ts",
+        "src/captain-post/captain-post.ts",
+        "src/crew/execution/engine.ts",
+        "src/crew/messaging/messaging.ts",
+        "src/dispatch/polling.ts",
+        "src/fleet/protocol.ts",
+        "src/gateway/gateway.ts",
+        "src/gateway/routing.ts",
+        "src/irc/client.ts",
+        "src/irc/config.ts",
+        "src/irc/routing.ts",
+        "src/irc/ship.ts",
+        "src/maintenance/nightly/update/archive.ts",
+        "src/meta-commands/meta-commands.ts",
+        "src/questions/questions.ts",
+        "src/questions/slack-questions.ts"
+      ],
+      "rules": { "eslint/complexity": ["error", { "max": 169 }] }
+    },
+    {
+      "files": [
+        "src/backends/pi/pi-durable.ts",
+        "src/gateway/cancellation.ts",
+        "src/gateway/routing.ts",
+        "src/irc/config.ts",
+        "src/irc/delivery.ts",
+        "src/maintenance/nightly/config.ts",
+        "src/questions/questions.ts"
+      ],
+      "rules": { "unicorn/max-nested-calls": ["error", { "max": 9 }] }
+    },
+    {
+      "files": [
+        "src/backends/claude.ts",
+        "src/irc/client.ts",
+        "src/notifications/ingest/model.ts",
+        "src/shared/request-failure.ts"
+      ],
+      "rules": { "eslint/max-classes-per-file": ["error", { "max": 5 }] }
     },
     {
       "files": ["tests/**"],

@@ -127,6 +127,22 @@ import {
   workspaceRoot,
 } from "../workspace/workspace";
 
+const nested = (a: string, b: string) => {
+  const rel = relative(a, b);
+
+  return (
+    rel === "" ||
+    (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+  );
+};
+
+const elapsed = (current: CrewTask, notices: CrewNotice[]): CrewResult => ({
+  status: current.status,
+  task: current,
+  notices,
+  diagnostic: `Observation window elapsed; task ${current.id} is still ${current.status}. Work continues independently; nothing was cancelled or resubmitted. Reply with progress. End this turn; collect this task later with status or wait. Do not resubmit the assignment.`,
+});
+
 const decodeJournalInput = Schema.decodeUnknownResult(journalInputSchema, {
   onExcessProperty: "error",
 });
@@ -187,15 +203,6 @@ export const crewOptionsSchema = settingsStruct({
 
     for (const [index, path] of paths.entries()) {
       for (const other of paths.slice(index + 1)) {
-        const nested = (a: string, b: string) => {
-          const rel = relative(a, b);
-
-          return (
-            rel === "" ||
-            (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-          );
-        };
-
         if (nested(path, other) || nested(other, path))
           context.addIssue({
             code: "custom",
@@ -3448,13 +3455,6 @@ export class CrewEngine {
     caller: CrewCaller,
     deadline: number,
   ): Promise<CrewResult> {
-    const elapsed = (current: CrewTask, notices: CrewNotice[]): CrewResult => ({
-      status: current.status,
-      task: current,
-      notices,
-      diagnostic: `Observation window elapsed; task ${current.id} is still ${current.status}. Work continues independently; nothing was cancelled or resubmitted. Reply with progress. End this turn; collect this task later with status or wait. Do not resubmit the assignment.`,
-    });
-
     // Queued waits do not observe/interrupt the different task occupying this slot.
     while (task.status === "queued") {
       caller.signal.throwIfAborted();

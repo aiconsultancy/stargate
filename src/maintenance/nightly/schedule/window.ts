@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
 export type WindowSpec = {
   start: string;
   end: string;
@@ -134,7 +136,6 @@ export function previousWindow(now: number, spec: WindowSpec, jitter: number) {
 export function addClock(time: string, minutes: number) {
   const { hour, minute } = clock(time);
   const total = (((hour * 60 + minute + minutes) % 1440) + 1440) % 1440;
-  const pad = (n: number) => String(n).padStart(2, "0");
 
   return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
 }
@@ -143,7 +144,6 @@ export function addClock(time: string, minutes: number) {
 export function timerCalendar(spec: WindowSpec, jitter: number) {
   const { hour, minute } = clock(spec.start);
   const total = (hour * 60 + minute + jitter) % 1440;
-  const pad = (n: number) => String(n).padStart(2, "0");
 
   return `*-*-* ${pad(Math.floor(total / 60))}:${pad(total % 60)}:00 ${spec.timeZone}`;
 }

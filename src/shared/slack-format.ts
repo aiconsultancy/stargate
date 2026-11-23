@@ -1,5 +1,19 @@
 import { markdownChunks } from "../slack/markdown-chunks";
 
+const nonempty = (items: Inline[]) =>
+  items.filter((item) => !("text" in item) || item.text !== "");
+
+const inlineText = (element: Inline) => {
+  switch (element.type) {
+    case "user":
+      return `<@${element.user_id}>`;
+    case "channel":
+      return `<#${element.channel_id}>`;
+    default:
+      return element.text;
+  }
+};
+
 /** Native Markdown cannot represent Slack mentions. Use structured text only
  * when controls occur; Slack never interprets text elements as notifications. */
 const slackControls =
@@ -303,9 +317,6 @@ function structuredMarkdown(text: string) {
       : [{ type: "rich_text_section" as const, elements: [part] }],
   );
 
-  const nonempty = (items: Inline[]) =>
-    items.filter((item) => !("text" in item) || item.text !== "");
-
   return {
     type: "rich_text" as const,
     elements: elements.flatMap((element): Exclude<Part, Inline>[] => {
@@ -598,17 +609,6 @@ export function prepareSlackReply(
     current = [];
     fallback = "";
     used = 0;
-  };
-
-  const inlineText = (element: Inline) => {
-    switch (element.type) {
-      case "user":
-        return `<@${element.user_id}>`;
-      case "channel":
-        return `<#${element.channel_id}>`;
-      default:
-        return element.text;
-    }
   };
 
   for (const unit of units) {

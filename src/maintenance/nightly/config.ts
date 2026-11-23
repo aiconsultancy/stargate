@@ -17,6 +17,12 @@ import {
 } from "../../config/settings-schema";
 import { cleanupSchema } from "./cleanup/cleanup-config";
 
+const minutes = (clock: string) => {
+  const [hour = 0, minute = 0] = clock.split(":").map(Number);
+
+  return hour * 60 + minute;
+};
+
 /** Strict `maintenance` section of stargate.json. Every component is opt-in. */
 const absolutePath = Schema.String.check(Schema.isMaxCodePoints(4096))
   .check(settingsRefine(isAbsolute, { message: "Use an absolute path" }))
@@ -406,12 +412,6 @@ export const maintenanceSchema = settingsStruct({
   ),
 }).check(
   settingsCheck((value, context) => {
-    const minutes = (clock: string) => {
-      const [hour = 0, minute = 0] = clock.split(":").map(Number);
-
-      return hour * 60 + minute;
-    };
-
     const { start, end, jitterMinutes, reserveMinutes } = value.window;
     const length = (minutes(end) - minutes(start) + 1440) % 1440;
 

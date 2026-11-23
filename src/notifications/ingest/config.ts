@@ -6,6 +6,8 @@ import { Schema } from "effect";
 import { settingsDefault, settingsStruct } from "../../config/settings-schema";
 import { Audience, Id, type Limits, Subscription, TopicPattern } from "./model";
 
+const digest = (value: string) => createHash("sha256").update(value).digest();
+
 const positive = (max: number) =>
   Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(max));
 
@@ -153,8 +155,6 @@ export async function checkProducerCredentials(
 
 // Fixed-length digests keep timingSafeEqual safe for every input length.
 export function equalCredential(left: string, right: string) {
-  const digest = (value: string) => createHash("sha256").update(value).digest();
-
   return timingSafeEqual(digest(left), digest(right));
 }
 

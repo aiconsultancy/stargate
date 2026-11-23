@@ -13,6 +13,20 @@ import { IrcShip } from "../src/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer } from "../tests/irc-fixture";
 
+const chunk = (
+  value: Readonly<Record<string, unknown>>,
+  reason: string | null,
+) =>
+  "data: " +
+  JSON.stringify({
+    id: "fixture",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "fixture",
+    choices: [{ index: 0, delta: value, finish_reason: reason }],
+  }) +
+  "\n\n";
+
 const binary = process.argv[2];
 const loseBeforeWrite = process.argv.includes("--drop-answer");
 
@@ -69,17 +83,6 @@ const model = Bun.serve({
             },
           ],
         };
-
-    const chunk = (value: object, reason: string | null) =>
-      "data: " +
-      JSON.stringify({
-        id: "fixture",
-        object: "chat.completion.chunk",
-        created: 1,
-        model: "fixture",
-        choices: [{ index: 0, delta: value, finish_reason: reason }],
-      }) +
-      "\n\n";
 
     return new Response(
       chunk({ role: "assistant" }, null) +
@@ -342,7 +345,7 @@ try {
 
   const log = pino({ level: "silent" });
 
-  async function startGateway() {
+  const startGateway = async function () {
     const store = openStore(join(home, "stargate.sqlite"));
 
     const ship = await IrcShip.create(opts, store, log, {
@@ -384,7 +387,7 @@ try {
         store.close();
       },
     };
-  }
+  };
 
   let gateway = await startGateway();
 

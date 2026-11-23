@@ -22,6 +22,11 @@ import {
 } from "../shared/registration";
 import type { JobStatus } from "../gateway/store";
 
+const line = (text: string, max: number) =>
+  Array.from(text.replace(/[\r\n\t]+/g, " "))
+    .slice(0, max)
+    .join("");
+
 export { type CronInput, validateCronInput } from "./input";
 
 export type ScheduledInput = {
@@ -374,11 +379,6 @@ export class CronScheduler {
       .dailyResults(this.key, cutoff - 86_400_000, cutoff)
       .filter((run) => run.evaluation?.verdict !== "ignore")
       .filter((run) => this.allowed({ ...run, botKey: this.key }));
-
-    const line = (text: string, max: number) =>
-      Array.from(text.replace(/[\r\n\t]+/g, " "))
-        .slice(0, max)
-        .join("");
 
     const roster = jobs
       .slice(0, 10)

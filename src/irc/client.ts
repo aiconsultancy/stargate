@@ -19,6 +19,9 @@ import {
 } from "./protocol";
 import { IrcStatus, type StatusResult, type StatusTiming } from "./status";
 
+const line = (names: readonly string[]) =>
+  formatMessage("JOIN", [names.join(",")]);
+
 export type IrcTiming = {
   /** Idle time before the client sends its own PING. */
   pingMs: number;
@@ -2080,9 +2083,6 @@ function isupportValue(value: string) {
 export function joinLines(channels: readonly string[]) {
   const lines: string[] = [];
   let batch: string[] = [];
-
-  const line = (names: readonly string[]) =>
-    formatMessage("JOIN", [names.join(",")]);
 
   for (const channel of channels) {
     if (batch.length && utf8Bytes(line([...batch, channel])) > lineBytes) {

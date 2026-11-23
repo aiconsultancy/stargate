@@ -90,6 +90,9 @@ export type AgentDispatcherOptions = {
   log: Logger;
 };
 
+/** Fields added to a warning log line; never bodies or secrets. */
+type LogDetail = Readonly<Record<string, unknown>>;
+
 type Captain = CaptainRef & { available: boolean; reachable: boolean };
 
 /** The fleet's captains, by user ID, and when the roster was read (ms). */
@@ -152,7 +155,7 @@ export class DispatchPolling {
   }
 
   /** Log a problem once until it clears; never logs bodies or secrets. */
-  public warnOnce(key: string, message: string, detail: object = {}) {
+  public warnOnce(key: string, message: string, detail: LogDetail = {}) {
     if (this.warned.has(key)) return;
     this.warned.add(key);
     this.options.log.warn(detail, message);
@@ -172,7 +175,7 @@ export class DispatchPolling {
     key: string,
     message: string,
     error: unknown,
-    detail: object = {},
+    detail: LogDetail = {},
   ) {
     const status = errorStatus(error);
 

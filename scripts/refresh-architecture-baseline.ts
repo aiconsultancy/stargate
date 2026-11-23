@@ -37,6 +37,17 @@ import {
   sourceRootFiles,
 } from "../tests/architecture-graph";
 
+const parse = (key: string) => {
+  const match =
+    /^(direction|private|neighbour|shared-dependency):(src\/\S+) -> (src\/\S+)$/.exec(
+      key,
+    );
+
+  return match
+    ? { kind: match[1], source: match[2], target: match[3] }
+    : undefined;
+};
+
 interface Inventory {
   sourceCommit: string;
   measurementStatus?: string;
@@ -268,17 +279,6 @@ const allowedWorkingExceptions = [...baseline.exceptions];
 if (exceptionRekeys.length) {
   const previous = await rekeyBase();
   const paths = sourceIdentities(source.keys(), policy);
-
-  const parse = (key: string) => {
-    const match =
-      /^(direction|private|neighbour|shared-dependency):(src\/\S+) -> (src\/\S+)$/.exec(
-        key,
-      );
-
-    return match
-      ? { kind: match[1], source: match[2], target: match[3] }
-      : undefined;
-  };
 
   for (const { oldKey, newKey } of exceptionRekeys) {
     const old = parse(oldKey);

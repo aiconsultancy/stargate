@@ -12,6 +12,11 @@ import {
 import { CrewError } from "../execution/state";
 import { agentIDSchema } from "../team";
 
+const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+
+const count = (value?: string) =>
+  value === undefined || value === "-" ? null : Number(value);
+
 const expected = settingsStruct({
   head: Schema.String.check(settingsPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/)),
   fingerprint: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
@@ -389,7 +394,6 @@ export async function inspectWorkspace(
       untracked.push(
         `${change.path}\0${await untrackedHash(root, change.path, budget)}`,
       );
-  const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
   const diffstat = numstat
     .split("\0")
@@ -397,9 +401,6 @@ export async function inspectWorkspace(
     .slice(0, listLimit)
     .map((line) => {
       const [added, deleted, ...path] = line.split("\t");
-
-      const count = (value?: string) =>
-        value === undefined || value === "-" ? null : Number(value);
 
       return {
         path: path.join("\t"),
