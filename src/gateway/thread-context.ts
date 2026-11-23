@@ -35,7 +35,7 @@ export type ThreadContext = {
 };
 
 export class ThreadContextUnavailable extends Error {
-  constructor() {
+  public constructor() {
     super("Initial Slack thread context unavailable");
   }
 }

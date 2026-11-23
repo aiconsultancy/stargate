@@ -150,16 +150,16 @@ const controlID = (token: string) =>
   createHash("sha256").update(token).digest("hex");
 
 export class CrewState {
-  readonly updateNotices: UpdateNotices;
-  readonly reporting: ReportingStore;
-  readonly activity: MemberActivityStore;
-  readonly mailRoutes: MailRoutes;
-  readonly ircSessions: IrcSessions;
+  public readonly updateNotices: UpdateNotices;
+  public readonly reporting: ReportingStore;
+  public readonly activity: MemberActivityStore;
+  public readonly mailRoutes: MailRoutes;
+  public readonly ircSessions: IrcSessions;
   private constructor(
-    readonly path: string,
+    public readonly path: string,
     private readonly db: Database,
     /** Configured root of a pinned team; not part of the crew identity. */
-    readonly captainSessionID?: string,
+    public readonly captainSessionID?: string,
   ) {
     this.updateNotices = new UpdateNotices(db);
     this.reporting = new ReportingStore(db, (id) => this.captainRoute(id));
@@ -168,7 +168,7 @@ export class CrewState {
     this.ircSessions = new IrcSessions(db);
   }
 
-  static async open(
+  public static async open(
     directory: string,
     namespace: string,
     fingerprint: string,
@@ -402,13 +402,13 @@ export class CrewState {
     }
   }
 
-  peer(crewID: CrewID): Peer | null {
+  public peer(crewID: CrewID): Peer | null {
     return this.db
       .query<Peer, [string]>("SELECT * FROM peers WHERE crewID=?")
       .get(crewID);
   }
 
-  peerBySession(sessionID: string): Peer | null {
+  public peerBySession(sessionID: string): Peer | null {
     return this.db
       .query<Peer, [string]>("SELECT * FROM peers WHERE sessionID=?")
       .get(sessionID);
@@ -419,7 +419,7 @@ export class CrewState {
    * team's stored evidence records as a captain. Never a worker, an empty
    * context, or an unknown session.
    */
-  captainLineage(id: string): boolean {
+  public captainLineage(id: string): boolean {
     const pin = this.captainSessionID;
 
     if (!pin || !id || this.peerBySession(id)) return false;
@@ -437,11 +437,11 @@ export class CrewState {
   }
 
   /** Mail, wakes and journal context for stored lineage use the pinned root. */
-  captainRoute(id: string): string {
+  public captainRoute(id: string): string {
     return this.captainLineage(id) ? (this.captainSessionID ?? id) : id;
   }
 
-  reservePeer(crewID: CrewID): Peer {
+  public reservePeer(crewID: CrewID): Peer {
     return this.db
       .transaction(() => {
         this.db
@@ -457,11 +457,11 @@ export class CrewState {
       .immediate();
   }
 
-  readyPeer(crewID: CrewID) {
+  public readyPeer(crewID: CrewID) {
     this.db.query("UPDATE peers SET status='ready' WHERE crewID=?").run(crewID);
   }
 
-  piPeer(sessionID: string) {
+  public piPeer(sessionID: string) {
     return this.db
       .query<{ conversationID: string | null }, [string]>(
         "SELECT conversationID FROM pi_peers WHERE sessionID=?",
@@ -469,7 +469,7 @@ export class CrewState {
       .get(sessionID);
   }
 
-  reservePiPeer(sessionID: string): boolean {
+  public reservePiPeer(sessionID: string): boolean {
     return (
       this.db
         .query("INSERT OR IGNORE INTO pi_peers(sessionID) VALUES (?)")
@@ -477,7 +477,7 @@ export class CrewState {
     );
   }
 
-  readyPiPeer(sessionID: string, conversationID: string) {
+  public readyPiPeer(sessionID: string, conversationID: string) {
     if (
       this.db
         .query(
@@ -493,7 +493,7 @@ export class CrewState {
   /** Persist before native admission. Idempotent for the same conversation;
    * only the current, unreleased dispatching/running task may bind.
    */
-  savePiTaskConversation(taskID: string, conversationID: string) {
+  public savePiTaskConversation(taskID: string, conversationID: string) {
     this.db
       .transaction(() => {
         const task = this.db
@@ -521,7 +521,7 @@ export class CrewState {
       .immediate();
   }
 
-  piTaskConversation(taskID: string): string | undefined {
+  public piTaskConversation(taskID: string): string | undefined {
     return (
       this.db
         .query<{ conversationID: string }, [string]>(
@@ -532,7 +532,10 @@ export class CrewState {
   }
 
   /** History authorization is a state read, never task reconciliation. */
-  piOwnsConversation(sessionID: string, conversationID: string): boolean {
+  public piOwnsConversation(
+    sessionID: string,
+    conversationID: string,
+  ): boolean {
     return Boolean(
       this.db
         .query(`SELECT 1 FROM pi_peers
@@ -545,7 +548,7 @@ export class CrewState {
   }
 
   /** Distinct recorded task/report conversations; bounded keyset pagination. */
-  piHistoryConversations(
+  public piHistoryConversations(
     sessionID: string,
     after: string,
     limit: number,
@@ -572,7 +575,7 @@ export class CrewState {
       .all(sessionID, after, limit, updatedSince);
   }
 
-  task(id: string): CrewTask | null {
+  public task(id: string): CrewTask | null {
     return (
       this.db
         .query<CrewTask, [string]>("SELECT * FROM tasks WHERE id=?")
@@ -585,7 +588,7 @@ export class CrewState {
     );
   }
 
-  activeTask(crewID: CrewID): CrewTask | null {
+  public activeTask(crewID: CrewID): CrewTask | null {
     return this.db
       .query<CrewTask, [string]>(
         "SELECT * FROM tasks WHERE crewID=? AND released=0",
@@ -594,7 +597,7 @@ export class CrewState {
   }
 
   /** Share gateway presence across the daemon's separate plugin locations. */
-  noteCrewQuestionConsumer(at: number) {
+  public noteCrewQuestionConsumer(at: number) {
     if (!this.captainSessionID) return;
     this.db
       .query(`INSERT INTO crew_question_consumer VALUES (1,?,?,?)
@@ -603,7 +606,7 @@ export class CrewState {
       .run(this.captainSessionID, process.pid, at);
   }
 
-  hasCrewQuestionConsumer(at: number, leaseMs: number) {
+  public hasCrewQuestionConsumer(at: number, leaseMs: number) {
     return (
       !!this.captainSessionID &&
       !!this.db
@@ -613,7 +616,7 @@ export class CrewState {
     );
   }
 
-  offerCrewQuestion(offer: CrewQuestionOffer): CrewQuestionOffer | null {
+  public offerCrewQuestion(offer: CrewQuestionOffer): CrewQuestionOffer | null {
     this.db
       .query(`INSERT OR IGNORE INTO crew_questions
       (token,taskID,workerSessionID,inputID,originCaptainID,formID,
@@ -641,7 +644,7 @@ export class CrewState {
       .get(offer.taskID, offer.formID);
   }
 
-  crewQuestion(token: string): CrewQuestionOffer | null {
+  public crewQuestion(token: string): CrewQuestionOffer | null {
     return this.db
       .query<CrewQuestionOffer, [string]>(
         "SELECT * FROM crew_questions WHERE token=?",
@@ -649,7 +652,7 @@ export class CrewState {
       .get(token);
   }
 
-  crewQuestionOffers(taskID: string): CrewQuestionOffer[] {
+  public crewQuestionOffers(taskID: string): CrewQuestionOffer[] {
     return this.db
       .query<CrewQuestionOffer, [string]>(
         `SELECT * FROM crew_questions WHERE taskID=?
@@ -659,14 +662,18 @@ export class CrewState {
       .all(taskID);
   }
 
-  crewQuestionNotified(token: string) {
+  public crewQuestionNotified(token: string) {
     this.db
       .query("UPDATE crew_questions SET notified=1 WHERE token=?")
       .run(token);
   }
 
   /** The write lease survives crashes; native requests are never replayed. */
-  claimCrewQuestion(token: string, now: number, expired = false): boolean {
+  public claimCrewQuestion(
+    token: string,
+    now: number,
+    expired = false,
+  ): boolean {
     return (
       this.db
         .query(`UPDATE crew_questions SET state='attempted'
@@ -683,7 +690,7 @@ export class CrewState {
     );
   }
 
-  crewQuestionOutcome(
+  public crewQuestionOutcome(
     token: string,
     outcome: NonNullable<CrewQuestionOffer["outcome"]>,
   ) {
@@ -693,7 +700,7 @@ export class CrewState {
       .run(outcome, token);
   }
 
-  reserveTask(
+  public reserveTask(
     peer: Peer,
     captainID: string,
     text = "",
@@ -728,13 +735,13 @@ export class CrewState {
       .immediate();
   }
 
-  controlled(crewID: string): boolean {
+  public controlled(crewID: string): boolean {
     return Boolean(
       this.db.query("SELECT 1 FROM worker_controls WHERE crewID=?").get(crewID),
     );
   }
 
-  queuedTasks(crewID: string): CrewTask[] {
+  public queuedTasks(crewID: string): CrewTask[] {
     return this.db
       .query<CrewTask, [string]>(
         `SELECT id,crewID,workerSessionID,originCaptainID,originInputID,inputID,status,result,released,notifying
@@ -743,7 +750,7 @@ export class CrewState {
       .all(crewID);
   }
 
-  reconciliation(taskID: string): TaskReconciliation | null {
+  public reconciliation(taskID: string): TaskReconciliation | null {
     return this.db
       .query<TaskReconciliation, [string]>(
         "SELECT * FROM task_reconciliations WHERE taskID=?",
@@ -768,7 +775,7 @@ export class CrewState {
     );
   }
 
-  reserveReconciliation(expected: CrewTask): string {
+  public reserveReconciliation(expected: CrewTask): string {
     return this.db
       .transaction(() => {
         if (
@@ -791,7 +798,7 @@ export class CrewState {
       .immediate();
   }
 
-  resumeBoundaries(taskID: string, unconfirmedOnly = false): number[] {
+  public resumeBoundaries(taskID: string, unconfirmedOnly = false): number[] {
     return this.db
       .query<{ idleAt: number }, [string, number]>(
         "SELECT idleAt FROM task_resume_attempts WHERE taskID=? AND (?=0 OR admitted=0)",
@@ -800,7 +807,7 @@ export class CrewState {
       .map(({ idleAt }) => idleAt);
   }
 
-  confirmResumeAttempt(taskID: string, idleAt: number): void {
+  public confirmResumeAttempt(taskID: string, idleAt: number): void {
     this.db
       .query(
         "UPDATE task_resume_attempts SET admitted=1 WHERE taskID=? AND idleAt=?",
@@ -808,7 +815,7 @@ export class CrewState {
       .run(taskID, idleAt);
   }
 
-  resumeAttempted(taskID: string, idleAt: number): boolean {
+  public resumeAttempted(taskID: string, idleAt: number): boolean {
     return (
       this.db
         .query("SELECT 1 FROM task_resume_attempts WHERE taskID=? AND idleAt=?")
@@ -817,7 +824,7 @@ export class CrewState {
   }
 
   /** Record the identity before admission or a retry of that same input. */
-  recordResumeAttempt(
+  public recordResumeAttempt(
     task: CrewTask,
     token: string,
     idleAt: number,
@@ -854,7 +861,7 @@ export class CrewState {
   }
 
   /** Hash only; the token itself stays private to its holder. */
-  controlID(crewID: string): string | null {
+  public controlID(crewID: string): string | null {
     const row = this.db
       .query<{ token: string }, [string]>(
         "SELECT token FROM worker_controls WHERE crewID=?",
@@ -864,7 +871,7 @@ export class CrewState {
     return row ? controlID(row.token) : null;
   }
 
-  abandonment(taskID: string): TaskAbandonment | null {
+  public abandonment(taskID: string): TaskAbandonment | null {
     return this.db
       .query<TaskAbandonment, [string]>(
         `SELECT ${abandonmentColumns} FROM task_abandonments WHERE taskID=?`,
@@ -875,7 +882,7 @@ export class CrewState {
   /** Releases the slot and holds the control for the stop attempt. History,
    * result, notices and mail stay intact; the outcome remains uncertain.
    */
-  beginAbandon(
+  public beginAbandon(
     expected: AbandonExpected,
     audit: Pick<TaskAbandonment, "abandonedBy" | "reason" | "operationKey">,
   ): string {
@@ -965,7 +972,7 @@ export class CrewState {
   }
 
   /** Crash recovery: retry only a pending stop whose own control remains. */
-  resumeAbandon(taskID: string): string | null {
+  public resumeAbandon(taskID: string): string | null {
     return this.db
       .transaction(() => {
         const row = this.db
@@ -1004,7 +1011,7 @@ export class CrewState {
       .immediate();
   }
 
-  finishAbandon(
+  public finishAbandon(
     taskID: string,
     token: string,
     stop: Exclude<StopPhase, "pending">,
@@ -1031,7 +1038,10 @@ export class CrewState {
   /** Workspace changes share the dispatch slot. Uncertain or completed work
    * may stay assigned; Stargate-active work must be stopped or abandoned first.
    */
-  reserveWorkspace(crewID: string, expectedTaskID: string | null): string {
+  public reserveWorkspace(
+    crewID: string,
+    expectedTaskID: string | null,
+  ): string {
     return this.db
       .transaction(() => {
         if (this.controlled(crewID))
@@ -1059,7 +1069,7 @@ export class CrewState {
       .immediate();
   }
 
-  finishReconciliation(
+  public finishReconciliation(
     expected: CrewTask,
     token: string,
     result: string,
@@ -1127,7 +1137,7 @@ export class CrewState {
       .immediate();
   }
 
-  statusRequest(id: string): StatusRequest | null {
+  public statusRequest(id: string): StatusRequest | null {
     return this.db
       .query<StatusRequest, [string]>(
         "SELECT * FROM crew_status_requests WHERE id=?1 OR receiptID=?1",
@@ -1136,7 +1146,7 @@ export class CrewState {
   }
 
   /** Caller must be an authenticated captain; the pin inherits lineage. */
-  requestedStatus(taskID: string, captainID: string): boolean {
+  public requestedStatus(taskID: string, captainID: string): boolean {
     return this.db
       .query<{ captainID: string }, [string]>(
         "SELECT captainID FROM crew_status_requests WHERE taskID=?",
@@ -1150,7 +1160,7 @@ export class CrewState {
       );
   }
 
-  reserveStatusRequest(id: string, task: CrewTask, captainID: string) {
+  public reserveStatusRequest(id: string, task: CrewTask, captainID: string) {
     this.db
       .transaction(() => {
         if (!this.unchangedTask(task))
@@ -1165,13 +1175,13 @@ export class CrewState {
       .immediate();
   }
 
-  statusRequestReceipt(id: string, receiptID: string) {
+  public statusRequestReceipt(id: string, receiptID: string) {
     this.db
       .query("UPDATE crew_status_requests SET receiptID=? WHERE id=?")
       .run(receiptID, id);
   }
 
-  enqueue(
+  public enqueue(
     peer: Peer,
     captainID: string,
     text: string,
@@ -1259,7 +1269,7 @@ export class CrewState {
   }
 
   /** Called only after SDK idle confirmation. Snapshot guards concurrent reuse. */
-  promote(
+  public promote(
     id: string,
     previousID: string | null,
   ): { task: CrewTask; text: string } | null {
@@ -1301,7 +1311,7 @@ export class CrewState {
       .immediate();
   }
 
-  cancelQueued(id: string, captainID: string): boolean {
+  public cancelQueued(id: string, captainID: string): boolean {
     const cancelled =
       this.db
         .query(
@@ -1320,7 +1330,7 @@ export class CrewState {
   }
 
   /** Drain-queued tasks still waiting, oldest first; spent marks are pruned. */
-  drainQueued(): CrewTask[] {
+  public drainQueued(): CrewTask[] {
     this.db
       .query(
         `DELETE FROM maintenance_queued_tasks WHERE taskID NOT IN
@@ -1341,7 +1351,7 @@ export class CrewState {
    * Passive context for one session, once per ID even after it was consumed.
    * An unread older drain notice is withdrawn: only the newest phase remains.
    */
-  queueDrainNotice(
+  public queueDrainNotice(
     sessionID: string,
     id: string,
     text: string,
@@ -1369,7 +1379,7 @@ export class CrewState {
       .immediate();
   }
 
-  reserveControl(crewID: string): string {
+  public reserveControl(crewID: string): string {
     return this.db
       .transaction(() => {
         if (this.controlled(crewID))
@@ -1388,14 +1398,14 @@ export class CrewState {
       .immediate();
   }
 
-  releaseControl(crewID: string, token: string) {
+  public releaseControl(crewID: string, token: string) {
     liveControls.delete(`${this.path}\0${token}`);
     this.db
       .query("DELETE FROM worker_controls WHERE crewID=? AND token=?")
       .run(crewID, token);
   }
 
-  running(id: string) {
+  public running(id: string) {
     const changed = this.db
       .query(
         "UPDATE tasks SET status='running' WHERE id=? AND status='dispatching'",
@@ -1413,7 +1423,7 @@ export class CrewState {
   /** Exact native evidence (own input queued or placed, worker active) shows
    * an uncertain task is still admitted. CAS; never while a control is held.
    */
-  readmit(expected: CrewTask, controlToken?: string): CrewTask {
+  public readmit(expected: CrewTask, controlToken?: string): CrewTask {
     return this.db
       .transaction(() => {
         const changed = this.db
@@ -1452,7 +1462,7 @@ export class CrewState {
    * confirmed-stop audit instead of leaving an uncertain blocker.
    * `captainID` is the stored origin; `actor` is the cancelling captain.
    */
-  withdrawCancelled(
+  public withdrawCancelled(
     expected: CrewTask,
     captainID: string,
     detail: string,
@@ -1505,7 +1515,7 @@ export class CrewState {
       .immediate();
   }
 
-  uncertain(id: string, phase = "uncertain") {
+  public uncertain(id: string, phase = "uncertain") {
     const changed = this.db
       .query(
         "UPDATE tasks SET status='uncertain' WHERE id=? AND released=0 AND status NOT IN ('completed','uncertain')",
@@ -1520,7 +1530,7 @@ export class CrewState {
     }
   }
 
-  complete(id: string, workerSessionID: string, result: string) {
+  public complete(id: string, workerSessionID: string, result: string) {
     if (this.reporting.isReport(id)) result = redactCredentials(result, 3000);
 
     return this.db
@@ -1561,7 +1571,7 @@ export class CrewState {
       .immediate();
   }
 
-  recoverResult(expected: CrewTask, result: string): CrewTask {
+  public recoverResult(expected: CrewTask, result: string): CrewTask {
     if (this.reporting.isReport(expected.id))
       result = redactCredentials(result, 3000);
 
@@ -1593,7 +1603,7 @@ export class CrewState {
       .immediate();
   }
 
-  release(id: string): boolean {
+  public release(id: string): boolean {
     return (
       this.db
         .query(`UPDATE tasks SET released=1
@@ -1603,7 +1613,7 @@ export class CrewState {
     );
   }
 
-  beginCancel(id: string, captainID: string): boolean {
+  public beginCancel(id: string, captainID: string): boolean {
     const changed =
       this.db
         .query(`UPDATE tasks SET status='cancelling'
@@ -1618,13 +1628,13 @@ export class CrewState {
     return changed;
   }
 
-  notice(taskID: string, text: string) {
+  public notice(taskID: string, text: string) {
     this.db
       .query("INSERT INTO notices(taskID,text) VALUES (?,?)")
       .run(taskID, text);
   }
 
-  noticeOnce(messageID: string, taskID: string, text: string) {
+  public noticeOnce(messageID: string, taskID: string, text: string) {
     this.db
       .transaction(() => {
         if (this.mailRoutes.notice(messageID)) this.notice(taskID, text);
@@ -1632,7 +1642,7 @@ export class CrewState {
       .immediate();
   }
 
-  notices(taskID: string, after: number): CrewNotice[] {
+  public notices(taskID: string, after: number): CrewNotice[] {
     return this.db
       .query<CrewNotice, [string, number]>(
         "SELECT * FROM notices WHERE taskID=? AND id>? ORDER BY id",
@@ -1640,7 +1650,7 @@ export class CrewState {
       .all(taskID, after);
   }
 
-  beginNotify(taskID: string): boolean {
+  public beginNotify(taskID: string): boolean {
     return (
       this.db
         .query(`UPDATE tasks SET notifying=notifying+1 WHERE id=?
@@ -1649,7 +1659,7 @@ export class CrewState {
     );
   }
 
-  endNotify(taskID: string) {
+  public endNotify(taskID: string) {
     this.db
       .query(
         "UPDATE tasks SET notifying=notifying-1 WHERE id=? AND notifying>0",
@@ -1657,7 +1667,11 @@ export class CrewState {
       .run(taskID);
   }
 
-  mailCursor(sessionID: string, taskID: string, acknowledged?: number): number {
+  public mailCursor(
+    sessionID: string,
+    taskID: string,
+    acknowledged?: number,
+  ): number {
     return this.db
       .transaction(() => {
         if (acknowledged !== undefined)
@@ -1678,7 +1692,7 @@ export class CrewState {
       .immediate();
   }
 
-  close() {
+  public close() {
     this.db.close();
   }
 }

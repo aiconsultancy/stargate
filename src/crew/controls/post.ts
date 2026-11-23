@@ -18,12 +18,12 @@ interface PostAuthority {
 
 /** Captain-only `stargate_post`; crew and child sessions are refused. */
 export class CrewPost {
-  constructor(
+  public constructor(
     private readonly authority: PostAuthority,
     private readonly runner: typeof runCaptainPost = runCaptainPost,
   ) {}
 
-  async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
+  public async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
     const parsed = Schema.decodeUnknownResult(postInputSchema)(raw);
 
     if (Result.isFailure(parsed))

@@ -37,7 +37,7 @@ const decodeEntries = Schema.decodeUnknownSync(historyEntriesInputSchema);
  * characters. Every component is authorized from state, not from this encoding.
  */
 export class CrewHistoryRPC {
-  constructor(
+  public constructor(
     private readonly team: Team,
     private readonly state: CrewState,
     private readonly pi: HistoryReader,
@@ -106,7 +106,7 @@ export class CrewHistoryRPC {
     return { member, sessionID, conversationID, child: childID !== undefined };
   }
 
-  historyRoots(signal: AbortSignal) {
+  public historyRoots(signal: AbortSignal) {
     return this.safe(signal, async () => {
       const sessions = this.team.crew.flatMap((member) => {
         const root = this.root(member);
@@ -120,7 +120,7 @@ export class CrewHistoryRPC {
     });
   }
 
-  historyDescribe(ids: readonly string[], signal: AbortSignal) {
+  public historyDescribe(ids: readonly string[], signal: AbortSignal) {
     return this.safe(signal, async () => {
       decodeDescribe({ ids });
       const sessions: HistorySession[] = [];
@@ -148,7 +148,7 @@ export class CrewHistoryRPC {
     });
   }
 
-  historyChildren(raw: HistoryChildrenInput, signal: AbortSignal) {
+  public historyChildren(raw: HistoryChildrenInput, signal: AbortSignal) {
     return this.safe(signal, async () => {
       const input = decodeChildren(raw);
       const owned = this.authorized(input.parentID);
@@ -207,7 +207,7 @@ export class CrewHistoryRPC {
     });
   }
 
-  historyEntries(raw: HistoryEntriesInput, signal: AbortSignal) {
+  public historyEntries(raw: HistoryEntriesInput, signal: AbortSignal) {
     return this.safe(signal, async () => {
       const input = decodeEntries(raw);
       const owned = this.authorized(input.sessionID);

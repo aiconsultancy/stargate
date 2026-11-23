@@ -67,7 +67,7 @@ export class AgentDispatcher {
   private runSignal: AbortSignal | undefined;
   private readonly wait: (ms: number, signal: AbortSignal) => Promise<void>;
 
-  constructor(private readonly options: AgentDispatcherOptions) {
+  public constructor(private readonly options: AgentDispatcherOptions) {
     this.now = options.now ?? Date.now;
     this.wait = options.wait ?? pause;
     this.polling = new DispatchPolling({
@@ -95,12 +95,12 @@ export class AgentDispatcher {
   }
 
   /** Behaviour 2 is unavailable when the API does not return the flag. */
-  get readyForAgentsAvailable() {
+  public get readyForAgentsAvailable() {
     return this.polling.readyForAgentsAvailable;
   }
 
   /** One poll followed by due timers; tests drive this with a fake clock. */
-  step(signal: AbortSignal) {
+  public step(signal: AbortSignal) {
     return this.serial(async () => {
       await this.polling.poll(signal);
       await this.timers(signal);
@@ -108,12 +108,12 @@ export class AgentDispatcher {
   }
 
   /** Due timers only: deadlines, next rounds and pending writes. */
-  tick(signal: AbortSignal) {
+  public tick(signal: AbortSignal) {
     return this.serial(() => this.timers(signal));
   }
 
   /** A captain's answer from the transport; untrusted until checked here. */
-  answer(input: DispatchAnswerInput, signal?: AbortSignal) {
+  public answer(input: DispatchAnswerInput, signal?: AbortSignal) {
     const stop = signal ?? this.runSignal ?? new AbortController().signal;
 
     return this.serial(() => this.handleAnswer(input, stop)).finally(() =>
@@ -125,6 +125,7 @@ export class AgentDispatcher {
   private dueAt(tracked: TrackedIssue): number | undefined {
     const offer = tracked.offer;
 
+    // A pending write is retried by every timer run; never spin for it.
     const at =
       tracked.state === "asking"
         ? offer && tracked.closedOffer === offer.id
@@ -134,8 +135,7 @@ export class AgentDispatcher {
           ? (tracked.nextRoundAt ?? this.now())
           : tracked.state === "done"
             ? undefined
-            : // A pending write is retried by every timer run; never spin for it.
-              this.now() + this.settings.pollIntervalMs;
+            : this.now() + this.settings.pollIntervalMs;
 
     const retry = this.retryAt.get(tracked.issue);
 
@@ -160,7 +160,7 @@ export class AgentDispatcher {
    * signal aborts. A failed poll or step is logged once and tried again at
    * the next interval, never sooner: errors are never thrown from here.
    */
-  async run(signal: AbortSignal) {
+  public async run(signal: AbortSignal) {
     this.runSignal = signal;
     let nextPoll = this.now();
 

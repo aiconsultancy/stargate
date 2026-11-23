@@ -18,18 +18,18 @@ export type AttachmentDelivery = PublishedFile & {
 };
 
 export class AttachmentRecords {
-  constructor(private readonly db: Database) {}
+  public constructor(private readonly db: Database) {}
 
-  inputFiles(id: number): string[] {
+  public inputFiles(id: number): string[] {
     const row = this.db
       .query<{ input_files: string | null }, [number]>(
         "SELECT input_files FROM jobs WHERE id=?",
       )
       .get(id);
 
+    // Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
     return row?.input_files
-      ? // Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
-        Schema.decodeUnknownSync(
+      ? Schema.decodeUnknownSync(
           Schema.mutable(
             Schema.Array(
               Schema.String.check(
@@ -42,7 +42,7 @@ export class AttachmentRecords {
       : [];
   }
 
-  attachments(id: number): AttachmentDelivery[] {
+  public attachments(id: number): AttachmentDelivery[] {
     const row = this.db
       .query<{ output_files: string | null }, [number]>(
         "SELECT output_files FROM jobs WHERE id=?",
@@ -54,7 +54,7 @@ export class AttachmentRecords {
       : [];
   }
 
-  saveAttachments(id: number, files: readonly AttachmentDelivery[]) {
+  public saveAttachments(id: number, files: readonly AttachmentDelivery[]) {
     this.db
       .query("UPDATE jobs SET output_files=? WHERE id=?")
       .run(JSON.stringify(files), id);

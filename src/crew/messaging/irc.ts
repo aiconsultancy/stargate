@@ -28,7 +28,7 @@ function role(value: string): "captain" | "crew" {
  * member; they never get a task, and nothing ever prompts them.
  */
 export class IrcSessions {
-  constructor(private readonly db: Database) {
+  public constructor(private readonly db: Database) {
     db.exec(`CREATE TABLE IF NOT EXISTS irc_sessions (
       sessionID TEXT PRIMARY KEY, crewID TEXT NOT NULL
     );
@@ -45,7 +45,10 @@ export class IrcSessions {
    * Mesij receipt. Rows older than `outboxMs`, and beyond `outboxRows`,
    * are pruned: a copy is a convenience, never the record.
    */
-  enqueue(item: Omit<OutboxItem, "sequence" | "created">, now = Date.now()) {
+  public enqueue(
+    item: Omit<OutboxItem, "sequence" | "created">,
+    now = Date.now(),
+  ) {
     this.db
       .transaction(() => {
         this.db
@@ -77,7 +80,7 @@ export class IrcSessions {
    * away; one snapshot, so no items with `latest` past `after` means every
    * later entry expired.
    */
-  outbox(
+  public outbox(
     input: { after?: number | undefined; limit: number },
     now = Date.now(),
   ) {
@@ -134,7 +137,7 @@ export class IrcSessions {
     return { items, latest };
   }
 
-  crewID(sessionID: string): string | undefined {
+  public crewID(sessionID: string): string | undefined {
     return (
       this.db
         .query<{ crewID: string }, [string]>(
@@ -144,7 +147,7 @@ export class IrcSessions {
     );
   }
 
-  sessions() {
+  public sessions() {
     return this.db
       .query<{ sessionID: string; crewID: string }, []>(
         "SELECT sessionID,crewID FROM irc_sessions ORDER BY rowid",
@@ -153,7 +156,7 @@ export class IrcSessions {
   }
 
   /** True when the session is now bound to `crewID` (new or unchanged). */
-  bind(sessionID: string, crewID: string) {
+  public bind(sessionID: string, crewID: string) {
     this.db
       .query("INSERT OR IGNORE INTO irc_sessions VALUES (?,?)")
       .run(sessionID, crewID);

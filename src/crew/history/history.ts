@@ -292,10 +292,13 @@ function continuation(cursor?: string): Continuation {
 }
 
 export class CrewHistory {
-  constructor(private readonly options: HistoryOptions) {}
+  public constructor(private readonly options: HistoryOptions) {}
 
   // Caller authorization belongs to the plugin; visibility is rechecked here.
-  async run(input: unknown, signal: AbortSignal): Promise<HistoryResult> {
+  public async run(
+    input: unknown,
+    signal: AbortSignal,
+  ): Promise<HistoryResult> {
     try {
       signal.throwIfAborted();
       const parsed = Schema.decodeUnknownResult(historyInputSchema)(input);

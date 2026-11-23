@@ -120,17 +120,17 @@ export class ShellCompletionContext {
   private readonly launches = new Map<string, Witness[]>();
   private witnesses = 0;
   private readonly workerAgents: ReadonlySet<string>;
-  constructor(workerAgent: string, crewID = workerAgent) {
+  public constructor(workerAgent: string, crewID = workerAgent) {
     // Match the two identifiers already accepted by validPeer and final proof.
     this.workerAgents = new Set([workerAgent, crewID]);
   }
 
-  get exceededBounds() {
+  public get exceededBounds() {
     return !this.valid;
   }
 
   /** True only means defer a strict candidate; finish must still prove it. */
-  track(message: ShellContextRecord): boolean {
+  public track(message: ShellContextRecord): boolean {
     const order = this.order++;
 
     if (this.order > 10_000) this.valid = false;
@@ -175,7 +175,7 @@ export class ShellCompletionContext {
   }
 
   /** Native descending order proves the launch precedes its callback. */
-  finish(inputCreated: number): boolean {
+  public finish(inputCreated: number): boolean {
     if (!this.valid || !Number.isFinite(inputCreated) || inputCreated < 0)
       return false;
     const seen = new Set<string>();

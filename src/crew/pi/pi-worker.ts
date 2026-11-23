@@ -130,7 +130,7 @@ export class PiCrewWorkers {
   private readonly historyReads = new Set<Promise<unknown>>();
   private closed = false;
 
-  constructor(
+  public constructor(
     private readonly state: CrewState,
     private readonly stateDirectory: string,
     private readonly factory: PiWorkerFactory = nativeFactory,
@@ -295,7 +295,7 @@ export class PiCrewWorkers {
     return backend;
   }
 
-  async ensure(
+  public async ensure(
     member: CrewMember,
     directory: string,
     peer: Peer,
@@ -333,7 +333,7 @@ export class PiCrewWorkers {
     }
   }
 
-  reconcile(task: CrewTask): CrewTask {
+  public reconcile(task: CrewTask): CrewTask {
     if (
       (task.status === "running" || task.status === "dispatching") &&
       !executions.has(`${this.state.path}:${task.workerSessionID}`)
@@ -345,7 +345,7 @@ export class PiCrewWorkers {
   }
 
   /** Recover only this task's committed answer; never initialize a worker. */
-  async recover(
+  public async recover(
     task: CrewTask,
     member: CrewMember,
     _directory: string,
@@ -422,7 +422,7 @@ export class PiCrewWorkers {
     return this.closed ? expected : (this.state.task(task.id) ?? expected);
   }
 
-  async idle(
+  public async idle(
     peer: Peer,
     member: CrewMember,
     directory: string,
@@ -449,7 +449,7 @@ export class PiCrewWorkers {
     }
   }
 
-  async notify(
+  public async notify(
     member: CrewMember,
     directory: string,
     peer: Peer,
@@ -478,7 +478,7 @@ export class PiCrewWorkers {
   }
 
   /** Observation only: never initialize a backend or reconcile durable state. */
-  observed(task: CrewTask): boolean {
+  public observed(task: CrewTask): boolean {
     return (
       executions.get(`${this.state.path}:${task.workerSessionID}`)?.taskID ===
       task.id
@@ -488,7 +488,7 @@ export class PiCrewWorkers {
   /** Never call backend(): that path opens a scheduling harness. A live pool
    * lease keeps its owner from closing during reads; otherwise open readOnly.
    */
-  async readHistory<T>(
+  public async readHistory<T>(
     member: CrewMember,
     callerSignal: AbortSignal,
     read: (history: SessionHistory, signal: AbortSignal) => Promise<T>,
@@ -557,13 +557,16 @@ export class PiCrewWorkers {
     }
   }
 
-  async canReport(member: CrewMember, directory: string): Promise<boolean> {
+  public async canReport(
+    member: CrewMember,
+    directory: string,
+  ): Promise<boolean> {
     return (
       typeof (await this.backend(member, directory)).promptReport === "function"
     );
   }
 
-  start(
+  public start(
     member: CrewMember,
     directory: string,
     peer: Peer,
@@ -698,7 +701,7 @@ export class PiCrewWorkers {
     })();
   }
 
-  async interrupt(peer: Peer) {
+  public async interrupt(peer: Peer) {
     const execution = executions.get(this.key(peer));
 
     if (execution) {
@@ -707,7 +710,7 @@ export class PiCrewWorkers {
     }
   }
 
-  async close() {
+  public async close() {
     this.closed = true;
     this.recoveryController.abort();
     const running = [...this.owned];

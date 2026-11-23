@@ -17,7 +17,7 @@ type ActivityTask = {
  * greybeard: latest visible snapshot, not a transcript or Pi session browser.
  */
 export class MemberActivityStore {
-  constructor(private readonly db: Database) {
+  public constructor(private readonly db: Database) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS member_activity (
         taskID TEXT PRIMARY KEY, crewID TEXT NOT NULL,
@@ -32,7 +32,11 @@ export class MemberActivityStore {
     `);
   }
 
-  assignment<T extends ActivityTask>(task: T, text: string, report = false) {
+  public assignment<T extends ActivityTask>(
+    task: T,
+    text: string,
+    report = false,
+  ) {
     const now = Date.now();
     this.db
       .query(`INSERT INTO member_activity
@@ -52,7 +56,7 @@ export class MemberActivityStore {
     this.trim(task.crewID);
   }
 
-  phase<T extends ActivityTask>(task: T, phase: string) {
+  public phase<T extends ActivityTask>(task: T, phase: string) {
     const now = Date.now();
 
     const terminal = [
@@ -86,7 +90,7 @@ export class MemberActivityStore {
     this.trim(task.crewID);
   }
 
-  progress(taskID: string, text: string) {
+  public progress(taskID: string, text: string) {
     const safe = redactCredentials(text, 64_000).slice(-400);
     this.db
       .query(`UPDATE member_activity SET progress=?,updatedAt=?
@@ -94,7 +98,7 @@ export class MemberActivityStore {
       .run(safe, Date.now(), taskID, safe);
   }
 
-  task(task: Pick<ActivityTask, "id" | "status">): CrewStatusTask {
+  public task(task: Pick<ActivityTask, "id" | "status">): CrewStatusTask {
     const activity = this.db
       .query<Activity, [string]>(`SELECT kind,summary,phase,
       progress,createdAt,startedAt,updatedAt,finishedAt
@@ -136,7 +140,7 @@ export class MemberActivityStore {
     };
   }
 
-  read(crewID: string) {
+  public read(crewID: string) {
     const queued = this.db
       .query<Pick<ActivityTask, "id" | "status">, [string]>(
         `SELECT id,status FROM pending_tasks WHERE crewID=? AND status='queued'

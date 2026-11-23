@@ -53,7 +53,7 @@ export type ReviewRecord = {
 /** Gateway-only state. The engine may connect its socket, never open this DB. */
 export class FleetLedger {
   private readonly db: Database;
-  constructor(path: string) {
+  public constructor(path: string) {
     if (path !== ":memory:") {
       if (resolve(path) !== path)
         throw new FleetError(
@@ -158,7 +158,7 @@ export class FleetLedger {
     }
   }
 
-  close() {
+  public close() {
     this.db.close();
   }
 
@@ -166,7 +166,7 @@ export class FleetLedger {
    * An agent dispatch offer this captain's authenticated intake admitted.
    * The first record wins; a later copy (catch-up) never changes it.
    */
-  recordOffer(offer: DispatchOffer, now = Date.now()) {
+  public recordOffer(offer: DispatchOffer, now = Date.now()) {
     this.db
       .query("DELETE FROM fleet_dispatch_offers WHERE received < ?")
       .run(now - 7 * 24 * 3_600_000);
@@ -177,7 +177,7 @@ export class FleetLedger {
       .run(offer.account, offer.offerID, JSON.stringify(offer), now);
   }
 
-  dispatchOffer(
+  public dispatchOffer(
     account: string,
     offerID: string,
   ):
@@ -201,7 +201,7 @@ export class FleetLedger {
     };
   }
 
-  answerOffer(account: string, offerID: string, answer: string) {
+  public answerOffer(account: string, offerID: string, answer: string) {
     this.db
       .query(
         "UPDATE fleet_dispatch_offers SET answer=? WHERE account=? AND offerID=? AND answer IS NULL",
@@ -209,7 +209,7 @@ export class FleetLedger {
       .run(answer, account, offerID);
   }
 
-  record(ownerSessionID: string, input: FleetSource): VerifiedSource {
+  public record(ownerSessionID: string, input: FleetSource): VerifiedSource {
     const source = Schema.decodeUnknownSync(sourceSchema)(input);
     const value = JSON.stringify(source);
 
@@ -249,7 +249,7 @@ export class FleetLedger {
       .immediate();
   }
 
-  verify(sessionID: string, reference: string): VerifiedSource {
+  public verify(sessionID: string, reference: string): VerifiedSource {
     const row = this.db
       .query<
         SourceRow,
@@ -272,7 +272,7 @@ export class FleetLedger {
     };
   }
 
-  reserve(input: {
+  public reserve(input: {
     ownerSessionID: string;
     requestID: string;
     source: VerifiedSource;
@@ -417,7 +417,10 @@ export class FleetLedger {
       .get(sessionID, requestID);
   }
 
-  dispatch(sessionID: string, requestID: string): DispatchResult | undefined {
+  public dispatch(
+    sessionID: string,
+    requestID: string,
+  ): DispatchResult | undefined {
     const row = this.read(sessionID, requestID);
 
     if (!row) return;
@@ -445,7 +448,7 @@ export class FleetLedger {
       : result;
   }
 
-  sent(sessionID: string, result: DispatchResult): DispatchResult {
+  public sent(sessionID: string, result: DispatchResult): DispatchResult {
     const sent = { ...result, state: "sent" as const };
     this.db
       .query(
@@ -457,7 +460,7 @@ export class FleetLedger {
   }
 
   /** Exact trusted gateway delegation, not a model-written dispatch label. */
-  assignment(
+  public assignment(
     input: {
       sessionID: string;
       account: string;
@@ -529,7 +532,7 @@ export class FleetLedger {
       .immediate();
   }
 
-  complete(
+  public complete(
     sessionID: string,
     account: string,
     botKey: string,
@@ -599,7 +602,7 @@ export class FleetLedger {
       .immediate();
   }
 
-  bindInput(
+  public bindInput(
     sessionID: string,
     account: string,
     botKey: string,
@@ -644,7 +647,7 @@ export class FleetLedger {
       .immediate();
   }
 
-  pendingResults(sessionID: string): FleetResultDelivery[] {
+  public pendingResults(sessionID: string): FleetResultDelivery[] {
     return this.db
       .query<{ origin: string; completion: string }, [string]>(
         "SELECT origin,completion FROM fleet_results WHERE ownerSessionID=? AND completion IS NOT NULL AND acknowledged=0 ORDER BY rowid LIMIT 100",
@@ -660,7 +663,7 @@ export class FleetLedger {
       }));
   }
 
-  delegation(sessionID: string, account: string, dispatchID: string) {
+  public delegation(sessionID: string, account: string, dispatchID: string) {
     const row = this.db
       .query<
         {
@@ -682,7 +685,7 @@ export class FleetLedger {
     return { target, sourceReference: row.sourceReference };
   }
 
-  acknowledgeResult(sessionID: string, dispatchID: string) {
+  public acknowledgeResult(sessionID: string, dispatchID: string) {
     this.db
       .query(
         "UPDATE fleet_results SET acknowledged=1 WHERE dispatchID=? AND ownerSessionID=? AND completion IS NOT NULL",
@@ -706,7 +709,7 @@ export class FleetLedger {
     };
   }
 
-  reviewContext(sessionID: string, ship: string, reviewID: string) {
+  public reviewContext(sessionID: string, ship: string, reviewID: string) {
     const row = this.db
       .query<{ context: string; text: string }, [string]>(
         "SELECT context,text FROM fleet_review_requests WHERE id=?",
@@ -728,7 +731,7 @@ export class FleetLedger {
     return { context, text: row.text };
   }
 
-  reserveReview(input: {
+  public reserveReview(input: {
     ownerSessionID: string;
     ship: string;
     reviewID: string;
@@ -854,13 +857,16 @@ export class FleetLedger {
       .immediate();
   }
 
-  reviewState(id: string, state: "admitted" | "uncertain") {
+  public reviewState(id: string, state: "admitted" | "uncertain") {
     this.db
       .query("UPDATE fleet_reviews SET state=? WHERE id=? AND proof IS NULL")
       .run(state, id);
   }
 
-  reviewRecord(ownerSessionID: string, id: string): ReviewRecord | undefined {
+  public reviewRecord(
+    ownerSessionID: string,
+    id: string,
+  ): ReviewRecord | undefined {
     const row = this.db
       .query<ReviewRow, [string, string]>(
         "SELECT binding,state,proof FROM fleet_reviews WHERE ownerSessionID=? AND id=?",
@@ -871,7 +877,7 @@ export class FleetLedger {
   }
 
   /** Rotate bounded read-only recovery across all work, including uncertainty. */
-  pendingReviews(ownerSessionID: string): ReviewRecord[] {
+  public pendingReviews(ownerSessionID: string): ReviewRecord[] {
     return this.db
       .transaction(() => {
         const lastID =
@@ -914,7 +920,7 @@ export class FleetLedger {
       .immediate();
   }
 
-  completeReview(binding: FleetReviewBinding, proof: FleetReviewProof) {
+  public completeReview(binding: FleetReviewBinding, proof: FleetReviewProof) {
     const parsed = Schema.decodeUnknownSync(reviewProofSchema)(proof);
     this.db
       .transaction(() => {
@@ -961,7 +967,7 @@ export class FleetLedger {
       .immediate();
   }
 
-  reviewProof(id: string, ship: string): FleetReviewProof | undefined {
+  public reviewProof(id: string, ship: string): FleetReviewProof | undefined {
     const row = this.db
       .query<{ proof: string | null }, [string]>(
         "SELECT proof FROM fleet_reviews WHERE id=?",
@@ -983,7 +989,7 @@ export class FleetLedger {
       : undefined;
   }
 
-  reviewProofs(
+  public reviewProofs(
     ship: string,
     target: { repository: string; pullRequest: number; headSHA: string },
   ): FleetReviewProof[] {

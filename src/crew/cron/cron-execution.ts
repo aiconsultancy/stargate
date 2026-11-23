@@ -123,13 +123,13 @@ function parseModel(value: string): ModelRef {
  * The gateway commits its run claim before calling. Uncertain calls are not retried.
  */
 export class CrewCronExecution {
-  constructor(
+  public constructor(
     private readonly authority: CronExecutionAuthority,
     private readonly api: CronExecutionAPI,
     private readonly pi: CronArbiterFactory = PiDurableBackend.open,
   ) {}
 
-  async model(input: CronModelInput, signal: AbortSignal) {
+  public async model(input: CronModelInput, signal: AbortSignal) {
     try {
       Schema.decodeUnknownSync(cronModelInputSchema)(input);
       const model = await this.resolveModel(input, signal);
@@ -144,7 +144,7 @@ export class CrewCronExecution {
     }
   }
 
-  async evaluate(
+  public async evaluate(
     input: CronEvaluateInput,
     signal: AbortSignal,
   ): Promise<CronEvaluation> {

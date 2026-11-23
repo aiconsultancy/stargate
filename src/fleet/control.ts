@@ -58,7 +58,7 @@ export type FleetControlOptions = {
     reason: string | undefined,
     signal: AbortSignal,
   ): Promise<void>;
-  status?(): Promise<unknown> | unknown;
+  status?(): unknown;
   /** Resolve the immutable authenticated ingress job and native input locally. */
   origin?(source: VerifiedSource): FleetOrigin | undefined;
   /** Transport test seam; production uses the kernel startup lock. */
@@ -106,7 +106,7 @@ export class FleetControl {
     }
   }
 
-  static async open(options: FleetControlOptions) {
+  public static async open(options: FleetControlOptions) {
     const control = new FleetControl(options);
 
     try {
@@ -120,12 +120,12 @@ export class FleetControl {
   }
 
   /** Only authenticated gateway intake calls this; it is never an IPC operation. */
-  recordSource(source: FleetSource) {
+  public recordSource(source: FleetSource) {
     return this.ledger.record(this.options.sessionID, source);
   }
 
   /** Authenticated IRC intake only: an offer addressed to this captain. */
-  recordOffer(offer: Omit<DispatchOffer, "account">) {
+  public recordOffer(offer: Omit<DispatchOffer, "account">) {
     this.ledger.recordOffer({ ...offer, account: this.options.account });
   }
 
@@ -179,10 +179,10 @@ export class FleetControl {
     return result;
   }
 
-  get resultsEnabled() {
+  public get resultsEnabled() {
     return this.options.config.results === true;
   }
-  reviewAssignmentPrompt(dispatchID: string): string | undefined {
+  public reviewAssignmentPrompt(dispatchID: string): string | undefined {
     if (!this.reviews) return;
 
     const assignment = this.ledger.reviewContext(
@@ -202,11 +202,11 @@ export class FleetControl {
 
     return reviewContextPrompt(assignment.context, assignment.text);
   }
-  async pollReviews(signal: AbortSignal) {
+  public async pollReviews(signal: AbortSignal) {
     await this.reviews?.poll(signal);
   }
 
-  assignment(
+  public assignment(
     input: {
       sender: string;
       channel: string;
@@ -228,7 +228,7 @@ export class FleetControl {
       : undefined;
   }
 
-  delegation(dispatchID: string) {
+  public delegation(dispatchID: string) {
     return this.resultsEnabled
       ? this.ledger.delegation(
           this.options.sessionID,
@@ -238,7 +238,11 @@ export class FleetControl {
       : undefined;
   }
 
-  complete(botKey: string, eventId: string, completion: FleetCompletion) {
+  public complete(
+    botKey: string,
+    eventId: string,
+    completion: FleetCompletion,
+  ) {
     if (!this.resultsEnabled)
       throw new FleetError("Fleet results are disabled");
     this.ledger.complete(
@@ -250,7 +254,7 @@ export class FleetControl {
     );
   }
 
-  bindInput(
+  public bindInput(
     botKey: string,
     eventId: string,
     dispatchID: string,
@@ -268,12 +272,12 @@ export class FleetControl {
     );
   }
 
-  pendingResults() {
+  public pendingResults() {
     return this.resultsEnabled
       ? this.ledger.pendingResults(this.options.sessionID)
       : [];
   }
-  acknowledgeResult(dispatchID: string) {
+  public acknowledgeResult(dispatchID: string) {
     this.ledger.acknowledgeResult(this.options.sessionID, dispatchID);
   }
 
@@ -558,7 +562,7 @@ export class FleetControl {
     );
   }
 
-  async close() {
+  public async close() {
     if (this.closed) return;
     this.closed = true;
     this.stop.abort();

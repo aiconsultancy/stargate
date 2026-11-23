@@ -157,7 +157,7 @@ export type FilehostOptions = {
  * carry URLs, headers or credentials.
  */
 export class Filehost {
-  constructor(
+  public constructor(
     private readonly url: () => URL | undefined,
     private readonly options: FilehostOptions,
   ) {}
@@ -191,7 +191,7 @@ export class Filehost {
   }
 
   /** True when `value` is a file URL on the current FILEHOST origin. */
-  owns(value: string) {
+  public owns(value: string) {
     const host = this.url();
 
     if (!host || !URL.canParse(value)) return false;
@@ -199,7 +199,7 @@ export class Filehost {
     return safeFileURL(new URL(value), host);
   }
 
-  async download(
+  public async download(
     urls: readonly string[],
     signal: AbortSignal,
   ): Promise<Attachment[]> {
@@ -254,7 +254,7 @@ export class Filehost {
    * timeout or a 201 without a usable Location may leave a stored file,
    * so those rejections are uncertain and the caller never repeats them.
    */
-  async upload(file: Attachment, signal: AbortSignal): Promise<string> {
+  public async upload(file: Attachment, signal: AbortSignal): Promise<string> {
     const target = this.uploadURL();
     const ascii = /^[ -~]+$/.test(file.name) && !/["\\]/.test(file.name);
     let response: Response;

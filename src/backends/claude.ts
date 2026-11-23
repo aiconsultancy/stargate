@@ -371,16 +371,16 @@ export class ClaudeTurn {
   private readonly complete = new Map<string, string[]>();
   private streaming: string | undefined;
   private failure: string | undefined;
-  session: string | undefined;
+  public session: string | undefined;
   /** A tool call was seen: the turn may have changed something. */
-  worked = false;
-  result:
+  public worked = false;
+  public result:
     | { ok: true; text: string }
     | { ok: false; cause: string; status?: number }
     | undefined;
 
   /** Returns true when the visible text may have changed. */
-  add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
+  public add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
     if (isToolFrame(raw)) this.worked = true;
     const init = decodeInitFrame(raw);
 
@@ -489,7 +489,7 @@ export class ClaudeTurn {
     if (!this.order.includes(id)) this.order.push(id);
   }
 
-  visible(): string {
+  public visible(): string {
     return this.order
       .map((id) => {
         const blocks = this.streamed.get(id);
@@ -508,7 +508,7 @@ export class ClaudeTurn {
       .join("\n\n");
   }
 
-  answer(): string {
+  public answer(): string {
     const text = this.order
       .map((id) => (this.complete.get(id) ?? []).join("\n"))
       .filter(Boolean)
@@ -524,9 +524,9 @@ const turnVariable = "STARGATE_CLAUDE_TURN";
 /** One spawned Claude Code CLI in its own process group. */
 class ClaudeProcess implements SpawnedProcess {
   private signalled = false;
-  readonly exited: Promise<void>;
+  public readonly exited: Promise<void>;
 
-  constructor(
+  public constructor(
     private readonly child: ChildProcessByStdio<Writable, Readable, null>,
   ) {
     this.exited = new Promise((resolve) => {
@@ -535,29 +535,29 @@ class ClaudeProcess implements SpawnedProcess {
     });
   }
 
-  get stdin() {
+  public get stdin() {
     return this.child.stdin;
   }
-  get stdout() {
+  public get stdout() {
     return this.child.stdout;
   }
-  get killed() {
+  public get killed() {
     return this.signalled || this.child.killed;
   }
-  get exitCode() {
+  public get exitCode() {
     return this.child.exitCode;
   }
-  get signalCode() {
+  public get signalCode() {
     return this.child.signalCode;
   }
-  get running() {
+  public get running() {
     return this.child.exitCode === null && this.child.signalCode === null;
   }
   /**
    * Signal the CLI's whole group while the CLI is Stargate's unreaped child: its
    * PID, and so its group ID, cannot be reused before Stargate reaps it.
    */
-  kill(signal: NodeJS.Signals) {
+  public kill(signal: NodeJS.Signals) {
     if (!this.running) return false;
     this.signalled = true;
 
@@ -571,12 +571,12 @@ class ClaudeProcess implements SpawnedProcess {
     }
   }
 
-  on(
+  public on(
     event: "exit",
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
   ): void;
-  on(event: "error", listener: (error: Error) => void): void;
-  on(
+  public on(event: "error", listener: (error: Error) => void): void;
+  public on(
     event: "exit" | "error",
     listener:
       | ((code: number | null, signal: NodeJS.Signals | null) => void)
@@ -585,12 +585,12 @@ class ClaudeProcess implements SpawnedProcess {
     this.child.on(event, listener);
   }
 
-  once(
+  public once(
     event: "exit",
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
   ): void;
-  once(event: "error", listener: (error: Error) => void): void;
-  once(
+  public once(event: "error", listener: (error: Error) => void): void;
+  public once(
     event: "exit" | "error",
     listener:
       | ((code: number | null, signal: NodeJS.Signals | null) => void)
@@ -599,12 +599,12 @@ class ClaudeProcess implements SpawnedProcess {
     this.child.once(event, listener);
   }
 
-  off(
+  public off(
     event: "exit",
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
   ): void;
-  off(event: "error", listener: (error: Error) => void): void;
-  off(
+  public off(event: "error", listener: (error: Error) => void): void;
+  public off(
     event: "exit" | "error",
     listener:
       | ((code: number | null, signal: NodeJS.Signals | null) => void)
@@ -647,7 +647,7 @@ export type ClaudeRuntime = {
 };
 
 export class ClaudeBackend implements AgentBackend {
-  readonly supportsAttachments = true;
+  public readonly supportsAttachments = true;
   private readonly runs = new Map<string, Run>();
   /** Titles for sessions whose first turn has not started in this process. */
   private readonly titles = new Map<string, string>();
@@ -666,7 +666,7 @@ export class ClaudeBackend implements AgentBackend {
     return this.runtime.graceMs ?? 5000;
   }
 
-  static async open(
+  public static async open(
     config: Config,
     context: BackendContext,
     runtime: ClaudeRuntime = {},
@@ -684,7 +684,7 @@ export class ClaudeBackend implements AgentBackend {
     return new ClaudeBackend(config, home, records, runtime);
   }
 
-  async createSession({
+  public async createSession({
     title,
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
@@ -721,7 +721,7 @@ export class ClaudeBackend implements AgentBackend {
     return false;
   }
 
-  async prompt(
+  public async prompt(
     sessionId: string,
     text: string,
     signal: AbortSignal,
@@ -1070,7 +1070,7 @@ export class ClaudeBackend implements AgentBackend {
     await rm(path, { force: true });
   }
 
-  async interrupt(sessionId: string, signal: AbortSignal) {
+  public async interrupt(sessionId: string, signal: AbortSignal) {
     if (!isSessionID(sessionId)) return;
     const run = this.runs.get(sessionId);
 
@@ -1085,7 +1085,7 @@ export class ClaudeBackend implements AgentBackend {
     await this.stopOrphan(sessionId, signal);
   }
 
-  async close() {
+  public async close() {
     this.closed = true;
     const runs = [...this.runs.values()];
 

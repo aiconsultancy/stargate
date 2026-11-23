@@ -36,7 +36,7 @@ export function crewLink(
 
 class OpenCodeCrewLink implements CrewLink {
   private readonly client;
-  constructor(
+  public constructor(
     private readonly captain: OpenCodeBackend,
     env: NodeJS.ProcessEnv,
   ) {
@@ -51,7 +51,7 @@ class OpenCodeCrewLink implements CrewLink {
     });
   }
 
-  async bind(sessionID: string, crewID: string, signal: AbortSignal) {
+  public async bind(sessionID: string, crewID: string, signal: AbortSignal) {
     try {
       await this.client
         .rpc(CrewIrc)
@@ -65,7 +65,10 @@ class OpenCodeCrewLink implements CrewLink {
     }
   }
 
-  async outbox(input: { after?: number; limit: number }, signal: AbortSignal) {
+  public async outbox(
+    input: { after?: number; limit: number },
+    signal: AbortSignal,
+  ) {
     try {
       return Schema.decodeUnknownSync(outboxPageSchema)(
         await this.client.rpc(CrewIrc).outbox(input, {

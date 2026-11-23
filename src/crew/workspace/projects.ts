@@ -37,9 +37,14 @@ const overlap = (a: string, b: string) => within(a, b) || within(b, a);
 
 /** One legacy team plus explicit independent project contexts. Never a path from a tool. */
 export class CrewProjects {
-  private constructor(readonly contexts: ReadonlyMap<string, CrewEngine>) {}
+  private constructor(
+    public readonly contexts: ReadonlyMap<string, CrewEngine>,
+  ) {}
 
-  static async open(raw: unknown, factory: Factory): Promise<CrewProjects> {
+  public static async open(
+    raw: unknown,
+    factory: Factory,
+  ): Promise<CrewProjects> {
     const parsed = Schema.decodeUnknownResult(crewOptionsSchema)(raw);
 
     if (Result.isFailure(parsed))
@@ -154,13 +159,13 @@ export class CrewProjects {
     }
   }
 
-  get enabled() {
+  public get enabled() {
     return this.contexts.size > 1;
   }
-  get default() {
+  public get default() {
     return this.get("default");
   }
-  get(key: string): CrewEngine {
+  public get(key: string): CrewEngine {
     const engine = this.contexts.get(key);
 
     if (!engine)
@@ -171,7 +176,7 @@ export class CrewProjects {
     return engine;
   }
 
-  owner(sessionID: string): string | undefined {
+  public owner(sessionID: string): string | undefined {
     const contexts = [...this.contexts].filter(
       ([, engine]) =>
         engine.state.peerBySession(sessionID) || engine.ircMember(sessionID),
@@ -185,7 +190,7 @@ export class CrewProjects {
     return contexts[0]?.[0];
   }
 
-  async select(raw: unknown, caller: CrewCaller, mail = false) {
+  public async select(raw: unknown, caller: CrewCaller, mail = false) {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw))
       throw new CrewError("Invalid project tool input.");
 
@@ -223,7 +228,7 @@ export class CrewProjects {
     return { engine, input, project: key };
   }
 
-  async run(raw: unknown, caller: CrewCaller) {
+  public async run(raw: unknown, caller: CrewCaller) {
     const selected = await this.select(raw, caller);
     const input = selected.input;
 
@@ -254,7 +259,7 @@ export class CrewProjects {
     return this.enabled ? { ...result, project: selected.project } : result;
   }
 
-  status(input: CrewStatusInput = {}): CrewStatus {
+  public status(input: CrewStatusInput = {}): CrewStatus {
     if (!this.enabled) return this.default.status(input);
 
     const pages = [...this.contexts].map(([project, engine]) => ({
@@ -274,7 +279,7 @@ export class CrewProjects {
     };
   }
 
-  fleetStatus(input: CrewStatusInput): FleetCrewStatus {
+  public fleetStatus(input: CrewStatusInput): FleetCrewStatus {
     const status = this.status(input);
 
     const contexts = status.members.flatMap(({ id, project }) => {
@@ -305,7 +310,7 @@ export class CrewProjects {
     };
   }
 
-  async historyRoots(signal: AbortSignal) {
+  public async historyRoots(signal: AbortSignal) {
     const sessions: HistorySession[] = [];
 
     for (const [project, engine] of this.contexts) {
@@ -337,14 +342,14 @@ export class CrewProjects {
     return { sessions };
   }
 
-  historyEngine(id: string) {
+  public historyEngine(id: string) {
     const native =
       (id.startsWith("pi:") ? id.slice(3) : id).split("~")[0] ?? "";
 
     return this.get(this.owner(native) ?? "default");
   }
 
-  async historyDescribe(ids: readonly string[], signal: AbortSignal) {
+  public async historyDescribe(ids: readonly string[], signal: AbortSignal) {
     const pages = await Promise.all(
       [...this.contexts.values()].map((engine) =>
         engine.history.historyDescribe(ids, signal),
@@ -359,21 +364,21 @@ export class CrewProjects {
     return { sessions };
   }
 
-  historyChildren(input: HistoryChildrenInput, signal: AbortSignal) {
+  public historyChildren(input: HistoryChildrenInput, signal: AbortSignal) {
     return this.historyEngine(input.parentID).history.historyChildren(
       input,
       signal,
     );
   }
 
-  historyEntries(input: HistoryEntriesInput, signal: AbortSignal) {
+  public historyEntries(input: HistoryEntriesInput, signal: AbortSignal) {
     return this.historyEngine(input.sessionID).history.historyEntries(
       input,
       signal,
     );
   }
 
-  async close() {
+  public async close() {
     const results = await Promise.allSettled(
       [...this.contexts.values()].reverse().map((engine) => engine.close()),
     );

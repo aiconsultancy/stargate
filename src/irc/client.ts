@@ -138,7 +138,7 @@ export interface IrcEvents {
 
 /** The connection is not registered; the caller retries later. */
 export class IrcUnavailable extends Error {
-  constructor() {
+  public constructor() {
     super("IRC connection unavailable");
   }
 }
@@ -188,14 +188,14 @@ type Output = {
  * removed and is never written, so nothing reached the server.
  */
 export class IrcSendExpired extends Error {
-  constructor() {
+  public constructor() {
     super("IRC send expired before it was written");
   }
 }
 
 /** A direct message whose recipient no longer holds the target nick. */
 export class IrcRecipientChanged extends Error {
-  constructor() {
+  public constructor() {
     super("IRC recipient changed before delivery");
   }
 }
@@ -205,10 +205,10 @@ export type SendPriority = "normal" | "low";
 
 /** Insertion-ordered set with a size bound. */
 export class Recent<V = true> extends Map<string, V> {
-  constructor(private readonly limit: number) {
+  public constructor(private readonly limit: number) {
     super();
   }
-  override set(key: string, value: V) {
+  public override set(key: string, value: V) {
     super.delete(key);
     super.set(key, value);
 
@@ -231,7 +231,7 @@ export class Recent<V = true> extends Map<string, V> {
 export class IrcClient {
   private readonly timing: IrcTiming;
   private mapping: Casemapping = "rfc1459";
-  private socket: Socket<undefined> | undefined;
+  private socket: Socket | undefined;
   private generation = 0;
   private caps = new Set<string>();
   private currentNick: string;
@@ -297,7 +297,8 @@ export class IrcClient {
   private lastData = 0;
   private lastPing = 0;
   private readonly status: IrcStatus | undefined;
-  private statusLimit = 344; // Ergo: key + value <=350 bytes; "status" owns six.
+  // Ergo: key + value <=350 bytes; "status" owns six.
+  private statusLimit = 344;
   private metadataPending:
     | {
         value: string | undefined;
@@ -305,7 +306,7 @@ export class IrcClient {
       }
     | undefined;
 
-  constructor(
+  public constructor(
     private readonly options: IrcClientOptions,
     private readonly events: IrcEvents = {},
   ) {
@@ -330,42 +331,42 @@ export class IrcClient {
   }
 
   /** Case folding under the server's CASEMAPPING (rfc1459 until known). */
-  readonly fold = (value: string) => fold(value, this.mapping);
+  public readonly fold = (value: string) => fold(value, this.mapping);
 
-  get nick() {
+  public get nick() {
     return this.currentNick;
   }
-  get account() {
+  public get account() {
     return this.options.account;
   }
-  get registered() {
+  public get registered() {
     return this.registeredNow;
   }
-  hasCap(name: string) {
+  public hasCap(name: string) {
     return this.caps.has(name);
   }
   /**
    * Soju.im/FILEHOST or draft/FILEHOST from the last completed registration
    * (kept across a reconnect until the next one finishes). Unvalidated.
    */
-  get filehost() {
+  public get filehost() {
     return this.readyFilehost;
   }
   /** Draft/multiline limits when negotiated (needs batch). */
-  get multiline() {
+  public get multiline() {
     return this.caps.has("draft/multiline") && this.caps.has("batch")
       ? this.multilineOffer
       : undefined;
   }
   /** True when the IRC connection uses TLS (FILEHOST must then be HTTPS). */
-  get secure() {
+  public get secure() {
     return this.options.tls;
   }
-  isChannel(target: string) {
+  public isChannel(target: string) {
     return target !== "" && this.chantypes.includes(target[0] ?? "");
   }
   /** Configured spelling of an allowed channel, or undefined. */
-  channel(name: string) {
+  public channel(name: string) {
     const key = this.fold(name);
 
     if (this.isAudit(name)) return this.options.auditChannel;
@@ -377,7 +378,7 @@ export class IrcClient {
     return this.options.channels.find((channel) => this.fold(channel) === key);
   }
   /** The captain's DM audit channel (never one on a crew connection). */
-  isAudit(name: string) {
+  public isAudit(name: string) {
     const audit = this.options.auditChannel;
 
     return (
@@ -387,31 +388,31 @@ export class IrcClient {
       this.fold(name) === this.fold(audit)
     );
   }
-  inChannel(name: string) {
+  public inChannel(name: string) {
     const channel = this.channel(name);
 
     return channel !== undefined && this.joinedChannels.has(channel);
   }
   /** A message ID that this connection sent (from its echo). */
-  sent(msgid: string) {
+  public sent(msgid: string) {
     return this.own.has(msgid);
   }
   /** The wire thread root that one of our messages replied to. */
-  anchor(msgid: string) {
+  public anchor(msgid: string) {
     return this.own.get(msgid)?.root;
   }
   /** Stop targets the answered request, not its visible thread root. */
-  requestAnchor(msgid: string) {
+  public requestAnchor(msgid: string) {
     const own = this.own.get(msgid);
 
     return own?.request ?? own?.root;
   }
   /** The account last seen for a nick (a hint; WHOIS proves it), if any. */
-  knownAccount(nick: string) {
+  public knownAccount(nick: string) {
     return this.nickAccounts.get(this.fold(nick));
   }
   /** The nick bound to an account in both directions, if any. */
-  boundNick(account: string) {
+  public boundNick(account: string) {
     const key = this.fold(account);
     const nick = this.accountNicks.get(key);
     const holder = nick && this.nickAccounts.get(this.fold(nick));
@@ -424,7 +425,7 @@ export class IrcClient {
    * then the account name (Ergo keeps nick = account). Never a nick whose
    * account is unknown or different; throws when no candidate holds it.
    */
-  async verifiedNick(account: string) {
+  public async verifiedNick(account: string) {
     const key = this.fold(account);
     const candidates: string[] = [];
 
@@ -491,7 +492,7 @@ export class IrcClient {
   }
 
   /** UTF-8 bytes left for message text to `target` with these tags. */
-  budget(command: string, target: string, tags: Record<string, string>) {
+  public budget(command: string, target: string, tags: Record<string, string>) {
     // Our own line carries client tags; the relayed copy carries our source.
     // Greybeard: both are subtracted, so text fits either framing within
     // 512 bytes. An unknown user@host assumes 16 + 63 characters.
@@ -510,7 +511,7 @@ export class IrcClient {
   }
 
   /** Resolve once registered; reject after `timeoutMs`. */
-  async waitReady(timeoutMs: number, signal?: AbortSignal) {
+  public async waitReady(timeoutMs: number, signal?: AbortSignal) {
     if (this.registeredNow) return;
     const ready = Promise.withResolvers<void>();
     const wake = () => ready.resolve();
@@ -528,7 +529,7 @@ export class IrcClient {
     }
   }
 
-  privmsg(
+  public privmsg(
     target: string,
     text: string,
     tags: Record<string, string> = {},
@@ -544,7 +545,7 @@ export class IrcClient {
    * authenticated with this connection's account. Undefined without
    * echo-message, or when no echo arrives within the confirmation window.
    */
-  async publish(
+  public async publish(
     target: string,
     text: string,
     tags: Record<string, string> = {},
@@ -577,7 +578,11 @@ export class IrcClient {
     }
   }
 
-  tagmsg(target: string, tags: Record<string, string>, guard?: () => boolean) {
+  public tagmsg(
+    target: string,
+    tags: Record<string, string>,
+    guard?: () => boolean,
+  ) {
     if (!this.caps.has("message-tags"))
       return Promise.reject(new Error("IRC message tags unavailable"));
 
@@ -590,7 +595,11 @@ export class IrcClient {
    * queue, so it cannot delay them. `guard` is checked now and again at
    * the socket write, as for direct lines.
    */
-  notify(target: string, tags: Record<string, string>, guard?: () => boolean) {
+  public notify(
+    target: string,
+    tags: Record<string, string>,
+    guard?: () => boolean,
+  ) {
     if (
       !this.registeredNow ||
       !this.socket ||
@@ -607,16 +616,16 @@ export class IrcClient {
     return true;
   }
 
-  get typingMs() {
+  public get typingMs() {
     return this.timing.typingMs;
   }
 
-  get turnStatusMs() {
+  public get turnStatusMs() {
     return this.timing.turnStatusMs;
   }
 
   /** Shared by every conversation on this captain or crew connection. */
-  startStatus(): () => void {
+  public startStatus(): () => void {
     return this.status?.begin() ?? (() => {});
   }
 
@@ -657,7 +666,8 @@ export class IrcClient {
     };
 
     const timer = setTimeout(() => {
-      this.unqueue(item); // Never write an expired busy value after the turn ended.
+      // Never write an expired busy value after the turn ended.
+      this.unqueue(item);
       pending.finish({ kind: "unavailable" });
     }, this.timing.confirmMs);
 
@@ -721,14 +731,14 @@ export class IrcClient {
   }
 
   /** True while `nick` is bound to `account` in both directions. */
-  holds(account: string, nick: string) {
+  public holds(account: string, nick: string) {
     const bound = this.boundNick(account);
 
     return bound !== undefined && this.fold(bound) === this.fold(nick);
   }
 
   /** Retain the authenticated sender only for this IRC connection. */
-  recipientGuard(account: string, nick: string) {
+  public recipientGuard(account: string, nick: string) {
     const connection = this.generation;
 
     return () =>
@@ -737,7 +747,7 @@ export class IrcClient {
       this.holds(account, nick);
   }
   /** Join an allowed channel; anything else is refused. */
-  join(name: string) {
+  public join(name: string) {
     const channel = this.channel(name);
 
     if (!channel || !this.registeredNow) return false;
@@ -747,7 +757,7 @@ export class IrcClient {
   }
 
   /** Invite a nick to a channel this connection is in. */
-  invite(nick: string, name: string) {
+  public invite(nick: string, name: string) {
     const channel = this.channel(name);
 
     if (!channel || !this.inChannel(channel))
@@ -763,7 +773,7 @@ export class IrcClient {
    * after the throttle wait; when it fails the line is dropped and the send
    * rejects with IrcRecipientChanged.
    */
-  send(
+  public send(
     command: string,
     params: readonly string[],
     tags: Record<string, string> = {},
@@ -863,7 +873,7 @@ export class IrcClient {
    * with `draft/multiline-concat`), then `BATCH -ref`, written together as
    * one throttled unit. The server delivers it atomically.
    */
-  sendBatch(
+  public sendBatch(
     target: string,
     lines: readonly { text: string; concat: boolean }[],
     tags: Record<string, string> = {},
@@ -974,7 +984,7 @@ export class IrcClient {
   }
 
   /** Connect, and reconnect with backoff, until the signal aborts. */
-  async run(signal: AbortSignal) {
+  public async run(signal: AbortSignal) {
     let attempt = 0;
 
     while (!signal.aborted) {
@@ -2002,7 +2012,7 @@ export class IrcClient {
    * Draft/read-marker: mark `target` (a channel, or a direct partner's
    * nick) read up to this server time. Best effort.
    */
-  markRead(target: string, time: string) {
+  public markRead(target: string, time: string) {
     if (
       this.options.presence?.readMarker === false ||
       !this.caps.has("draft/read-marker") ||

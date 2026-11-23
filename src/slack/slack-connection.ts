@@ -108,13 +108,13 @@ export async function retrySlack<A>(
 
 /** One owner for startup and later outages. The SDK's unbounded reconnect loop is disabled. */
 export class SlackSocket {
-  state: ConnectionState = "closed";
+  public state: ConnectionState = "closed";
   private readonly stop = new AbortController();
   private readonly first = Promise.withResolvers<void>();
   private running?: Promise<void>;
   private socket: Socket | undefined;
   private readonly timing;
-  constructor(
+  public constructor(
     private readonly create: () => Socket,
     private readonly log: Logger,
     timing: Partial<typeof defaults> = {},
@@ -123,7 +123,7 @@ export class SlackSocket {
     // Either startup or watch owns the rejection; never leak a raw SDK error.
     void this.first.promise.catch(() => {});
   }
-  start(signal?: AbortSignal) {
+  public start(signal?: AbortSignal) {
     if (!this.running) {
       const combined = signal
         ? AbortSignal.any([signal, this.stop.signal])
@@ -135,12 +135,12 @@ export class SlackSocket {
 
     return this.first.promise;
   }
-  watch() {
+  public watch() {
     return (
       this.running ?? Promise.reject(new Error("Slack connection not started"))
     );
   }
-  async close() {
+  public async close() {
     this.stop.abort();
     await this.disconnect();
     await this.running?.catch(() => {});

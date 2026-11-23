@@ -74,7 +74,7 @@ export function resourceScope() {
   return {
     own<A>(
       acquire: () => Promise<A>,
-      release: (value: A) => Promise<unknown> | unknown,
+      release: (value: A) => unknown,
     ): Promise<A> {
       return Effect.runPromise(
         Effect.acquireRelease(Effect.promise(acquire), (value) =>

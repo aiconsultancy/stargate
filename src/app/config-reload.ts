@@ -163,7 +163,7 @@ const messages = {
 
 /** Runtime refusal before commit; the message is fixed and safe to log. */
 export class ReloadRejected extends Error {
-  constructor(readonly status: keyof typeof rejectedMessages) {
+  public constructor(public readonly status: keyof typeof rejectedMessages) {
     super(rejectedMessages[status]);
     this.name = "ReloadRejected";
   }
@@ -188,7 +188,7 @@ export class ConfigReload {
   #queue: Promise<unknown> = Promise.resolve();
   #closed = false;
 
-  constructor(
+  public constructor(
     initial: ReloadCandidate,
     private readonly read: () => Promise<ReloadCandidate>,
     private readonly log: Pick<Logger, "info" | "warn">,
@@ -196,12 +196,12 @@ export class ConfigReload {
     this.#current = initial;
   }
 
-  get current() {
+  public get current() {
     return this.#current;
   }
 
   /** One runtime listener; the returned function removes it. */
-  listen(apply: (next: ReloadCandidate) => Promise<void>) {
+  public listen(apply: (next: ReloadCandidate) => Promise<void>) {
     this.#apply = apply;
 
     return () => {
@@ -210,7 +210,7 @@ export class ConfigReload {
   }
 
   /** Never rejects; each request waits for the previous one. */
-  request(): Promise<ReloadResult> {
+  public request(): Promise<ReloadResult> {
     const result = this.#queue.then(() => this.#reload());
     this.#queue = result;
 
@@ -218,7 +218,7 @@ export class ConfigReload {
   }
 
   /** Later and pending requests become unavailable before they apply. */
-  close() {
+  public close() {
     this.#closed = true;
     this.#apply = undefined;
   }

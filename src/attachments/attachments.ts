@@ -99,14 +99,14 @@ export type PreparedAttachment = typeof preparedAttachmentSchema.Type;
  * other upload failure is uncertain.
  */
 export class UploadRefused extends Error {
-  constructor() {
+  public constructor() {
     super("Upload refused");
   }
 }
 
 export class AttachmentUnavailable extends Error {
-  constructor(
-    readonly reason:
+  public constructor(
+    public readonly reason:
       | "invalid"
       | "denied"
       | "missing"

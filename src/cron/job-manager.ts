@@ -46,17 +46,17 @@ export function cronjobPrompt(definition: CronjobDefinition, path: string) {
 
 /** Files define tasks; SQLite owns admission, retries and execution state. */
 export class CronjobManager {
-  readonly key: string;
-  constructor(
-    readonly config: BotConfig,
-    readonly identity: Identity,
-    readonly store: CronStore,
+  public readonly key: string;
+  public constructor(
+    public readonly config: BotConfig,
+    public readonly identity: Identity,
+    public readonly store: CronStore,
     private readonly resolveModel?: CronModelResolver,
   ) {
     this.key = botKey(config, identity);
   }
 
-  allowed(scope: CronScope) {
+  public allowed(scope: CronScope) {
     return (
       scope.botKey === this.key &&
       scope.user !== this.identity.user &&
@@ -79,7 +79,7 @@ export class CronjobManager {
     return undefined;
   }
 
-  async sync(now: number, signal = new AbortController().signal) {
+  public async sync(now: number, signal = new AbortController().signal) {
     const settings = this.config.cronjobs;
 
     if (!settings) return [];
@@ -137,7 +137,7 @@ export class CronjobManager {
     return errors;
   }
 
-  async add(
+  public async add(
     scope: CronScope,
     raw: CronInput,
     now: number,

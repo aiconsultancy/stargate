@@ -147,18 +147,18 @@ const permissionFingerprint = (request: PendingPermission) =>
 
 /** Authenticated intake and durable references; no approval text reaches a model. */
 export class TeamsRegistration {
-  sourceRecorder: ((source: FleetSource) => void) | undefined;
-  readonly key: string;
-  readonly transport: GatewayTransport;
-  readonly delivery: TransportDelivery;
+  public sourceRecorder: ((source: FleetSource) => void) | undefined;
+  public readonly key: string;
+  public readonly transport: GatewayTransport;
+  public readonly delivery: TransportDelivery;
   private readonly db: Database;
   private readonly connector: Pick<ConnectorClient, "sendToConversation">;
   private server: Server | undefined;
   private socketIdentity: SocketIdentity | undefined;
   private readonly abort = new AbortController();
   private loop: Promise<void> | undefined;
-  constructor(
-    readonly config: TeamsConfig,
+  public constructor(
+    public readonly config: TeamsConfig,
     path: string,
     private readonly store: Store,
     private readonly backend: AgentBackend,
@@ -386,7 +386,7 @@ export class TeamsRegistration {
 
     return response.id;
   }
-  async accept(raw: unknown): Promise<boolean> {
+  public async accept(raw: unknown): Promise<boolean> {
     const parsed = Schema.decodeUnknownResult(activitySchema)(raw);
 
     if (
@@ -571,7 +571,7 @@ export class TeamsRegistration {
 
     return request;
   }
-  async pollApprovals() {
+  public async pollApprovals() {
     const session = this.backend.sessionID;
 
     if (
@@ -712,7 +712,7 @@ export class TeamsRegistration {
         .run(row.token);
     }
   }
-  async start(open: () => boolean) {
+  public async start(open: () => boolean) {
     const keyStore = new BotFrameworkKeyStore();
     this.server = createTeamsListener({
       verifyToken: (authorization) =>
@@ -747,7 +747,7 @@ export class TeamsRegistration {
       }
     })();
   }
-  async close() {
+  public async close() {
     this.abort.abort();
     const server = this.server;
 

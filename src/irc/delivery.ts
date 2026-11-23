@@ -145,7 +145,7 @@ function planTarget(channel: string) {
 }
 
 export class IrcDelivery implements TransportDelivery {
-  constructor(
+  public constructor(
     private readonly client: IrcClient,
     /** Wait for a reconnect before a delivery attempt fails. */
     private readonly readyMs = 30_000,
@@ -169,7 +169,7 @@ export class IrcDelivery implements TransportDelivery {
    * socket write like direct lines: once the nick changes hands, typing
    * stops for this turn. Skipped when the send queue is busy.
    */
-  async working(
+  public async working(
     channel: string,
     thread: string,
     signal: AbortSignal,
@@ -284,7 +284,7 @@ export class IrcDelivery implements TransportDelivery {
     }
   }
 
-  async requestSettled(
+  public async requestSettled(
     channel: string,
     request: string,
     outcome: RequestOutcome,
@@ -430,7 +430,7 @@ export class IrcDelivery implements TransportDelivery {
    * FILEHOST attachments while the server offers one; undefined otherwise,
    * so the gateway keeps its "attachment unavailable" behaviour.
    */
-  get files(): AttachmentTransport | undefined {
+  public get files(): AttachmentTransport | undefined {
     const hosted = this.hosted;
 
     if (!hosted?.filehost()) return undefined;
@@ -526,7 +526,7 @@ export class IrcDelivery implements TransportDelivery {
    * last confirmed one: no line or batch is repeated, except one whose
    * confirmation was lost.
    */
-  async post(
+  public async post(
     channel: string,
     thread: string,
     text: string,
@@ -633,7 +633,7 @@ export class IrcDelivery implements TransportDelivery {
   }
 
   /** +draft/react to a request's message; absent with reactions off. */
-  react?: (
+  public react?: (
     channel: string,
     ts: string,
     name: ReactionName,

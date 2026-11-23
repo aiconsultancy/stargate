@@ -55,7 +55,7 @@ function summary(record: ReviewRecord) {
 }
 
 export class FleetReviews {
-  constructor(
+  public constructor(
     private readonly options: {
       ledger: FleetLedger;
       config: NonNullable<FleetControlConfig["reviews"]>;
@@ -65,7 +65,7 @@ export class FleetReviews {
     },
   ) {}
 
-  async start(
+  public async start(
     input: { reviewID: string; reviewerAgent: string },
     origin: FleetOrigin | undefined,
     callerAgent: string,
@@ -133,7 +133,7 @@ export class FleetReviews {
     return summary(current ?? reserved.record);
   }
 
-  async poll(signal: AbortSignal) {
+  public async poll(signal: AbortSignal) {
     for (const record of this.options.ledger.pendingReviews(
       this.options.sessionID,
     )) {

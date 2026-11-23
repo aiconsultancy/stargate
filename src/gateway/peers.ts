@@ -101,13 +101,16 @@ export class PeerDirectory {
     { bot: string | undefined; until: number }
   >();
 
-  constructor(
+  public constructor(
     private readonly lookup: UserLookup,
     private readonly team: string,
     private readonly now: () => number = Date.now,
   ) {}
 
-  async verify(sender: PeerSender, signal: AbortSignal): Promise<boolean> {
+  public async verify(
+    sender: PeerSender,
+    signal: AbortSignal,
+  ): Promise<boolean> {
     const cached = this.cache.get(sender.user);
 
     if (cached && cached.until > this.now())

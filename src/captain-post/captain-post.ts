@@ -207,7 +207,7 @@ const fileStateSchema = settingsStruct({
 export class CaptainPostStore {
   private readonly db: Database;
 
-  constructor(path: string) {
+  public constructor(path: string) {
     if (path !== ":memory:") {
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 
@@ -258,11 +258,11 @@ export class CaptainPostStore {
       .immediate();
   }
 
-  close() {
+  public close() {
     this.db.close();
   }
 
-  get(botKey: string, requestKey: string): PostRow | undefined {
+  public get(botKey: string, requestKey: string): PostRow | undefined {
     const row = this.db
       .query<Omit<PostRow, "files"> & { files: string }, [string, string]>(
         `SELECT channel, thread, length, status, ts, permalink, error, files,
@@ -284,7 +284,7 @@ export class CaptainPostStore {
    * Atomically return an existing record, refuse over the rolling hourly
    * limit, or insert a `sending` record. Retries do not count again.
    */
-  admit(
+  public admit(
     botKey: string,
     requestKey: string,
     draft: Omit<PostRow, "status" | "ts" | "permalink" | "error">,
@@ -345,7 +345,12 @@ export class CaptainPostStore {
   }
 
   /** Message outcome only; file states belong to the upload owner. */
-  saveOutcome(botKey: string, requestKey: string, row: PostRow, now: number) {
+  public saveOutcome(
+    botKey: string,
+    requestKey: string,
+    row: PostRow,
+    now: number,
+  ) {
     this.db
       .query(
         `UPDATE captain_posts SET status = ?, ts = ?, permalink = ?, error = ?,
@@ -363,7 +368,7 @@ export class CaptainPostStore {
   }
 
   /** Compare-and-set upload ownership: free, already ours, or expired. */
-  claim(botKey: string, requestKey: string, owner: string, now: number) {
+  public claim(botKey: string, requestKey: string, owner: string, now: number) {
     return (
       this.db
         .query(
@@ -377,7 +382,7 @@ export class CaptainPostStore {
   }
 
   /** Owner-only file write that renews the lease; false means ownership lost. */
-  saveFiles(
+  public saveFiles(
     botKey: string,
     requestKey: string,
     owner: string,
@@ -403,7 +408,7 @@ export class CaptainPostStore {
     );
   }
 
-  release(botKey: string, requestKey: string, owner: string) {
+  public release(botKey: string, requestKey: string, owner: string) {
     this.db
       .query(
         `UPDATE captain_posts SET uploadOwner = NULL, uploadLeaseUntil = NULL

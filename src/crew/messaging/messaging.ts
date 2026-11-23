@@ -163,7 +163,7 @@ export type MailRoute = {
 type MailIntent = Omit<MailRoute, "id"> & { fingerprint: string };
 
 export class MailRoutes {
-  constructor(private readonly db: Database) {
+  public constructor(private readonly db: Database) {
     db.exec(`CREATE TABLE IF NOT EXISTS mail_routes (
       id TEXT PRIMARY KEY, sender TEXT NOT NULL, recipient TEXT NOT NULL,
       captainID TEXT NOT NULL, sourceTaskID TEXT, targetTaskID TEXT
@@ -184,12 +184,12 @@ export class MailRoutes {
     );
     CREATE INDEX IF NOT EXISTS mail_intents_fingerprint ON mail_intents(fingerprint);`);
   }
-  get(id: string) {
+  public get(id: string) {
     return this.db
       .query<MailRoute, [string]>("SELECT * FROM mail_routes WHERE id=?")
       .get(id);
   }
-  save(route: MailRoute, key?: string) {
+  public save(route: MailRoute, key?: string) {
     this.db
       .transaction(() => {
         if (key !== undefined) {
@@ -235,7 +235,7 @@ export class MailRoutes {
       })
       .immediate();
   }
-  prepare(key: string, intent: MailIntent) {
+  public prepare(key: string, intent: MailIntent) {
     this.db
       .transaction(() => {
         this.db
@@ -273,7 +273,7 @@ export class MailRoutes {
       })
       .immediate();
   }
-  recover(event: MesijMessage) {
+  public recover(event: MesijMessage) {
     // Only a pre-authorized intent can repair a lost receipt. The digest binds
     // Native sender/recipient/type/reply identity and the exact namespaced
     // Task/captain envelope, not merely arbitrary JSON claims in the event.
@@ -310,14 +310,14 @@ export class MailRoutes {
 
     return repaired.route;
   }
-  notice(id: string): boolean {
+  public notice(id: string): boolean {
     return (
       this.db.query("INSERT OR IGNORE INTO mail_notices VALUES (?)").run(id)
         .changes === 1
     );
   }
   /** `holes` "" bounds ACKs by every unrepaired route to this recipient. */
-  cursor(
+  public cursor(
     sessionID: string,
     captainID: string,
     after?: number,
@@ -350,12 +350,12 @@ export class MailRoutes {
 
 /** One durable inbox; DM adds only a native notification receipt. */
 export class CrewMessaging {
-  constructor(
+  public constructor(
     private readonly engine: MessagingHost,
     private readonly mailer: Pick<MesijClient, "register" | "send" | "inbox">,
   ) {}
 
-  async run(raw: unknown, caller: MailCaller, direct = false) {
+  public async run(raw: unknown, caller: MailCaller, direct = false) {
     const parsed = direct
       ? Schema.decodeUnknownResult(dmInputSchema)(raw)
       : Schema.decodeUnknownResult(mailInputSchema)(raw);

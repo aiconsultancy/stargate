@@ -200,7 +200,7 @@ export function quotaStatusView(
 }
 
 export class CrewUI {
-  constructor(
+  public constructor(
     private config: BotConfig,
     private readonly identity: Identity,
     private readonly backend: Pick<AgentBackend, "crewStatus" | "quota">,
@@ -212,7 +212,7 @@ export class CrewUI {
   ) {}
 
   /** Access changes apply before the next operation or delivery. */
-  reconfigure(config: BotConfig) {
+  public reconfigure(config: BotConfig) {
     this.config = config;
   }
 
@@ -228,7 +228,7 @@ export class CrewUI {
     );
   }
 
-  async command(body: unknown, ack: SlackAck) {
+  public async command(body: unknown, ack: SlackAck) {
     const parsed = Schema.decodeUnknownResult(commandSchema)(body);
     const usage = Result.isSuccess(parsed) && parsed.success.text === "usage";
 
@@ -322,7 +322,7 @@ export class CrewUI {
     }
   }
 
-  async interactive(_body: unknown, ack: SlackAck) {
+  public async interactive(_body: unknown, ack: SlackAck) {
     await ack();
   }
 }

@@ -511,7 +511,7 @@ export class DrainRuntime implements DrainControl {
   private readonly now: () => number;
   private readonly directory: string;
 
-  constructor(
+  public constructor(
     private readonly options: {
       dataDirectory: string;
       pinnedSessions: () => string[];
@@ -525,12 +525,12 @@ export class DrainRuntime implements DrainControl {
     this.directory = options.directory ?? maintenanceDrainDirectory();
   }
 
-  attach(handler: DrainHandler) {
+  public attach(handler: DrainHandler) {
     this.handlers.push(handler);
   }
 
   /** Register before any worker starts so a run can never miss this runtime. */
-  async start() {
+  public async start() {
     await this.discover();
     this.handle = await registerDrainParticipant(
       {
@@ -544,14 +544,14 @@ export class DrainRuntime implements DrainControl {
     this.refreshedAt = this.now();
   }
 
-  async close() {
+  public async close() {
     this.closed = true;
     await this.running?.catch(() => {});
     await this.handle?.close();
   }
 
   /** Re-read at the admission boundary; a prior poll must not hide a new drain. */
-  held() {
+  public held() {
     const state = drainState(this.directory);
 
     return (
@@ -570,7 +570,7 @@ export class DrainRuntime implements DrainControl {
     );
   }
 
-  tick() {
+  public tick() {
     if (this.closed || this.running || this.now() < this.nextAt) return;
     this.nextAt = this.now() + 1000;
     this.running = this.step()

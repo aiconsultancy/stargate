@@ -3,9 +3,9 @@ import type { ReplyChunk } from "../shared/slack-format";
 import type { JobStatus } from "./store-types";
 
 export class TranscriptRecords {
-  constructor(private readonly db: Database) {}
+  public constructor(private readonly db: Database) {}
 
-  transcriptCursor(conversation: string): string | undefined {
+  public transcriptCursor(conversation: string): string | undefined {
     return (
       this.db
         .query<{ cursor: string | null }, [string]>(
@@ -16,7 +16,7 @@ export class TranscriptRecords {
   }
 
   /** Seed a missing cursor without moving an existing one. */
-  baselineTranscript(conversation: string, cursor: string) {
+  public baselineTranscript(conversation: string, cursor: string) {
     this.db
       .query(
         "UPDATE sessions SET cursor=? WHERE conversation=? AND cursor IS NULL",
@@ -27,7 +27,7 @@ export class TranscriptRecords {
   }
 
   /** Every mapped conversation of this bot namespace, or one session's. */
-  transcripts(botKey: string, session?: string): string[] {
+  public transcripts(botKey: string, session?: string): string[] {
     // Separate statements keep the session_id index usable for settle events.
     return this.db
       .query<{ conversation: string }, string[]>(
@@ -40,7 +40,7 @@ export class TranscriptRecords {
   }
 
   /** The mapped session plus the latest request's source and delivery mode. */
-  transcriptTarget(botKey: string, conversation: string) {
+  public transcriptTarget(botKey: string, conversation: string) {
     const row = this.db
       .query<
         {
@@ -69,7 +69,7 @@ export class TranscriptRecords {
   }
 
   /** Bot keys with requests in one Slack thread, for targeted repair. */
-  threadBots(channel: string, thread: string): string[] {
+  public threadBots(channel: string, thread: string): string[] {
     return this.db
       .query<{ botKey: string }, [string, string]>(
         "SELECT DISTINCT botKey FROM jobs WHERE channel=? AND thread=?",
@@ -79,7 +79,7 @@ export class TranscriptRecords {
   }
 
   /** Persisted reply chunks, including replies that are still delivering. */
-  replies(botKey: string, conversation: string): ReplyChunk[][] {
+  public replies(botKey: string, conversation: string): ReplyChunk[][] {
     return this.db
       .query<{ response: string }, [string, string]>(`SELECT response FROM jobs
       WHERE botKey=? AND conversation=? AND response IS NOT NULL
@@ -89,7 +89,7 @@ export class TranscriptRecords {
   }
 
   /** This thread's `transcript:*` outbox rows, for targeted repair. */
-  transcriptRows(botKey: string, conversation: string) {
+  public transcriptRows(botKey: string, conversation: string) {
     return this.db
       .query<
         { eventId: string; status: JobStatus; response: string | null },
@@ -103,7 +103,7 @@ export class TranscriptRecords {
       }));
   }
 
-  interruptedSessions(botKey: string): string[] {
+  public interruptedSessions(botKey: string): string[] {
     return this.db
       .query<
         { session_id: string },
@@ -115,7 +115,7 @@ export class TranscriptRecords {
   }
 
   /** Native sessions this bot namespace has used, most recently used first. */
-  sessionIDs(botKey: string, limit: number): string[] {
+  public sessionIDs(botKey: string, limit: number): string[] {
     return this.db
       .query<
         { session_id: string },
@@ -128,7 +128,7 @@ export class TranscriptRecords {
   }
 
   /** True only when this bot namespace has a request mapped to the session. */
-  ownsSession(botKey: string, sessionID: string): boolean {
+  public ownsSession(botKey: string, sessionID: string): boolean {
     return (
       this.db
         .query(`SELECT 1 FROM sessions s

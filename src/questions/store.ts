@@ -2,9 +2,9 @@ import type { Database } from "bun:sqlite";
 import type { NativeQuestion, QuestionOffer } from "./questions";
 
 export class QuestionRecords {
-  constructor(private readonly db: Database) {}
+  public constructor(private readonly db: Database) {}
 
-  recordQuestionSource(input: {
+  public recordQuestionSource(input: {
     botKey: string;
     eventId: string;
     user: string;
@@ -27,7 +27,7 @@ export class QuestionRecords {
       );
   }
 
-  ownsQuestionSource(job: {
+  public ownsQuestionSource(job: {
     botKey: string;
     eventId: string;
     user: string;
@@ -47,7 +47,7 @@ export class QuestionRecords {
   }
 
   /** Historical source evidence only, never current permission to reply. */
-  recordedQuestionSource(job: {
+  public recordedQuestionSource(job: {
     botKey: string;
     eventId: string;
     user: string;
@@ -71,7 +71,10 @@ export class QuestionRecords {
     );
   }
 
-  questionByToken(botKey: string, token: string): QuestionOffer | undefined {
+  public questionByToken(
+    botKey: string,
+    token: string,
+  ): QuestionOffer | undefined {
     return (
       this.db
         .query<QuestionOffer, [string, string]>(
@@ -81,7 +84,7 @@ export class QuestionRecords {
     );
   }
 
-  questionOffers(
+  public questionOffers(
     botKey: string,
     includeRunningOutcomes = false,
   ): QuestionOffer[] {
@@ -92,7 +95,7 @@ export class QuestionRecords {
       .all(botKey, includeRunningOutcomes ? 1 : 0);
   }
 
-  activeQuestionSessions(botKey: string, pinned?: string): string[] {
+  public activeQuestionSessions(botKey: string, pinned?: string): string[] {
     const sessions = this.db
       .query<{ session_id: string }, [string]>(
         "SELECT DISTINCT s.session_id FROM sessions s JOIN jobs j ON j.conversation=s.conversation JOIN irc_question_sources q ON q.botKey=j.botKey AND q.eventId=j.eventId WHERE j.botKey=? AND j.status='running' AND j.cancel_requested=0 AND j.failure IS NOT 'cancelled' AND j.input IS NOT NULL",
@@ -113,7 +116,7 @@ export class QuestionRecords {
     return [...new Set(sessions)];
   }
 
-  renewQuestion(
+  public renewQuestion(
     token: string,
     replacement: string,
     now: number,
@@ -143,7 +146,7 @@ export class QuestionRecords {
     );
   }
 
-  questionOutcome(
+  public questionOutcome(
     token: string,
     outcome: NonNullable<QuestionOffer["outcome"]>,
   ) {
@@ -154,7 +157,7 @@ export class QuestionRecords {
       .run(outcome, token);
   }
 
-  questionOutcomeNotified(token: string) {
+  public questionOutcomeNotified(token: string) {
     this.db
       .query(
         "UPDATE native_questions SET outcomeNotified=1 WHERE token=? AND outcome IS NOT NULL",
@@ -162,7 +165,7 @@ export class QuestionRecords {
       .run(token);
   }
 
-  questionSourceCancelled(offer: QuestionOffer): boolean {
+  public questionSourceCancelled(offer: QuestionOffer): boolean {
     return (
       this.db
         .query(
@@ -172,7 +175,7 @@ export class QuestionRecords {
     );
   }
 
-  retireQuestion(token: string) {
+  public retireQuestion(token: string) {
     this.db
       .query(
         "UPDATE native_questions SET state='closed',outcomeNotified=1 WHERE token=? AND recovering=0",
@@ -180,7 +183,11 @@ export class QuestionRecords {
       .run(token);
   }
 
-  saveSlackQuestion(token: string, ts: string, question: NativeQuestion) {
+  public saveSlackQuestion(
+    token: string,
+    ts: string,
+    question: NativeQuestion,
+  ) {
     this.db
       .query(
         "INSERT OR IGNORE INTO slack_questions(token,ts,question) VALUES(?,?,?)",
@@ -188,7 +195,7 @@ export class QuestionRecords {
       .run(token, ts, JSON.stringify(question));
   }
 
-  slackQuestion(
+  public slackQuestion(
     token: string,
   ):
     | { ts: string; question: string; progress: string; revision: number }
@@ -205,7 +212,7 @@ export class QuestionRecords {
     );
   }
 
-  advanceSlackQuestion(
+  public advanceSlackQuestion(
     token: string,
     revision: number,
     progress: string,
@@ -219,7 +226,7 @@ export class QuestionRecords {
     );
   }
 
-  claimExpiredQuestion(token: string, now: number): boolean {
+  public claimExpiredQuestion(token: string, now: number): boolean {
     return (
       this.db
         .query(
@@ -229,7 +236,7 @@ export class QuestionRecords {
     );
   }
 
-  startQuestionPublication(
+  public startQuestionPublication(
     botKey: string,
     token: string,
     timeoutMs = 1_800_000,
@@ -247,7 +254,7 @@ export class QuestionRecords {
       : undefined;
   }
 
-  questionNotified(token: string) {
+  public questionNotified(token: string) {
     this.db
       .query(
         "UPDATE native_questions SET notified=1 WHERE token=? AND state='offered'",
@@ -255,7 +262,7 @@ export class QuestionRecords {
       .run(token);
   }
 
-  questionRecovering(token: string) {
+  public questionRecovering(token: string) {
     this.db
       .query(
         "UPDATE native_questions SET recovering=1 WHERE token=? AND (state!='closed' OR outcome IS NOT NULL)",
@@ -263,7 +270,7 @@ export class QuestionRecords {
       .run(token);
   }
 
-  claimQuestionStop(offer: QuestionOffer): boolean {
+  public claimQuestionStop(offer: QuestionOffer): boolean {
     return (
       this.db
         .query(
@@ -273,13 +280,13 @@ export class QuestionRecords {
     );
   }
 
-  closeQuestion(token: string) {
+  public closeQuestion(token: string) {
     this.db
       .query("UPDATE native_questions SET state='closed' WHERE token=?")
       .run(token);
   }
 
-  attemptQuestion(token: string, now: number): boolean {
+  public attemptQuestion(token: string, now: number): boolean {
     return (
       this.db
         .query(

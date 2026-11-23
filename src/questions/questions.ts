@@ -510,7 +510,7 @@ export class Questions {
     { count: number; until: number }
   >();
   private readonly missing = new Map<string, number>();
-  constructor(
+  public constructor(
     private readonly key: string,
     private readonly store: QuestionStore,
     private readonly backend: QuestionBackend,
@@ -565,7 +565,7 @@ export class Questions {
   }
 
   /** New holds need pending forms; established holds preserve their exact input. */
-  async recover(signal: AbortSignal): Promise<string[]> {
+  public async recover(signal: AbortSignal): Promise<string[]> {
     const retained: string[] = [];
 
     for (const offer of this.store.questions.questionOffers(this.key, true)) {
@@ -600,7 +600,7 @@ export class Questions {
   }
 
   /** Called only for a newly received, authenticated Stop, never by recovery. */
-  async stop(jobID: number, signal: AbortSignal): Promise<boolean> {
+  public async stop(jobID: number, signal: AbortSignal): Promise<boolean> {
     const offer = this.store.questions
       .questionOffers(this.key)
       .find((o) => o.jobID === jobID && o.recovering);
@@ -626,7 +626,7 @@ export class Questions {
     return true;
   }
 
-  reconcileBackground() {
+  public reconcileBackground() {
     this.nextBackgroundPoll = 0;
   }
   private nextBackgroundPoll = 0;
@@ -686,7 +686,7 @@ export class Questions {
     }
   }
 
-  async operatorAnswer(
+  public async operatorAnswer(
     actor: string,
     text: string,
     signal: AbortSignal,
@@ -868,7 +868,7 @@ export class Questions {
     await route.send("OpenCode accepted your answer.", allowed);
   }
 
-  async poll(signal: AbortSignal) {
+  public async poll(signal: AbortSignal) {
     await Promise.all([
       this.checkBackground(signal).catch(() => signal.throwIfAborted()),
       this.pollOwned(signal),
@@ -1271,7 +1271,7 @@ export class Questions {
     }
   }
 
-  async answer(
+  public async answer(
     input: Incoming,
     control: NonNullable<ReturnType<typeof questionControl>>,
     signal: AbortSignal,

@@ -106,7 +106,7 @@ type Confirmation = {
 /** No codes, URLs or SDK errors enter persistent state or logging. */
 export class PairingUI {
   private readonly pending = new Map<string, Confirmation>();
-  constructor(
+  public constructor(
     private config: BotConfig,
     private readonly identity: Identity,
     private readonly backend: Pick<AgentBackend, "pair">,
@@ -120,7 +120,7 @@ export class PairingUI {
   ) {}
 
   /** Access changes apply before the next operation or delivery. */
-  reconfigure(config: BotConfig) {
+  public reconfigure(config: BotConfig) {
     this.config = config;
   }
 
@@ -138,7 +138,7 @@ export class PairingUI {
     );
   }
 
-  async command(body: unknown, ack: SlackAck) {
+  public async command(body: unknown, ack: SlackAck) {
     let acknowledged = false;
 
     const once: SlackAck = async (payload) => {
@@ -222,7 +222,7 @@ export class PairingUI {
     }
   }
 
-  async interactive(body: unknown, ack: SlackAck) {
+  public async interactive(body: unknown, ack: SlackAck) {
     // Acknowledge before any network work, including error notices.
     // Consume the confirmation before ACK: a failed ACK must not replay minting.
     const parsed = Schema.decodeUnknownResult(actionSchema)(body);

@@ -26,7 +26,7 @@ export function operatorControl(text: string) {
 }
 
 export class BackgroundCases {
-  constructor(private readonly db: Database) {
+  public constructor(private readonly db: Database) {
     db.exec(`CREATE TABLE IF NOT EXISTS background_questions (
       ship TEXT NOT NULL, session TEXT NOT NULL, form TEXT NOT NULL, input TEXT NOT NULL,
       fingerprint TEXT NOT NULL, owner TEXT NOT NULL, reference TEXT NOT NULL UNIQUE,
@@ -35,7 +35,7 @@ export class BackgroundCases {
       PRIMARY KEY(ship,session,form))`);
   }
 
-  remember<
+  public remember<
     Question extends {
       sessionID: string;
       id: string;
@@ -63,7 +63,7 @@ export class BackgroundCases {
       )
       .get(ship, q.sessionID, q.id);
   }
-  find(ship: string, value: string, answering: boolean) {
+  public find(ship: string, value: string, answering: boolean) {
     const column = answering ? "token" : "reference";
 
     return this.db
@@ -72,14 +72,14 @@ export class BackgroundCases {
       )
       .get(ship, value);
   }
-  alerted(ref: string) {
+  public alerted(ref: string) {
     this.db
       .query(
         "UPDATE background_questions SET state='alerted' WHERE reference=? AND state='new'",
       )
       .run(ref);
   }
-  show(ref: string) {
+  public show(ref: string) {
     const now = Date.now();
 
     return this.db
@@ -97,7 +97,7 @@ export class BackgroundCases {
         ref,
       )?.token;
   }
-  attempt(token: string) {
+  public attempt(token: string) {
     return (
       this.db
         .query(
@@ -106,19 +106,19 @@ export class BackgroundCases {
         .run(token, Date.now()).changes === 1
     );
   }
-  unsettled(ship: string) {
+  public unsettled(ship: string) {
     return this.db
       .query<BackgroundCase, [string]>(
         "SELECT * FROM background_questions WHERE ship=? AND state IN ('new','alerted','attempted') ORDER BY checked,rowid LIMIT 16",
       )
       .all(ship);
   }
-  checked(ref: string) {
+  public checked(ref: string) {
     this.db
       .query("UPDATE background_questions SET checked=? WHERE reference=?")
       .run(Date.now(), ref);
   }
-  close(ref: string, outcome: "answered" | "cancelled") {
+  public close(ref: string, outcome: "answered" | "cancelled") {
     this.db
       .query("UPDATE background_questions SET state=? WHERE reference=?")
       .run(outcome, ref);

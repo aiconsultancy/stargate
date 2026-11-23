@@ -15,12 +15,12 @@ interface CronAuthority {
 }
 
 export class CrewCron {
-  constructor(
+  public constructor(
     private readonly authority: CronAuthority,
     private readonly runner: typeof runCronOperation = runCronOperation,
   ) {}
 
-  async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
+  public async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
     const parsed = cronOperationSchema.safeParse(raw);
 
     if (!parsed.success)

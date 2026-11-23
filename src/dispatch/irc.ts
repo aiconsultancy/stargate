@@ -59,7 +59,7 @@ function fitBytes(text: string, bytes: number) {
 export class IrcDispatchMessenger implements DispatchMessenger {
   private warnedTags = false;
   private joinWaitExpired = false;
-  constructor(
+  public constructor(
     private readonly client: DispatchClient,
     private readonly channel: string,
     private readonly allowed: () => boolean,
@@ -177,7 +177,11 @@ export class IrcDispatchMessenger implements DispatchMessenger {
       );
   }
 
-  async assigned(captain: CaptainRef, issue: IssueLabel, signal: AbortSignal) {
+  public async assigned(
+    captain: CaptainRef,
+    issue: IssueLabel,
+    signal: AbortSignal,
+  ) {
     this.carried(issue);
     await this.ready(signal);
 
@@ -209,7 +213,7 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     return true;
   }
 
-  async offer(
+  public async offer(
     captain: CaptainRef,
     offer: { id: string; issue: IssueLabel; timeoutSeconds: number },
     signal: AbortSignal,
@@ -264,7 +268,7 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     return { messageID };
   }
 
-  async announce(event: DispatchEvent, signal: AbortSignal) {
+  public async announce(event: DispatchEvent, signal: AbortSignal) {
     await this.ready(signal);
 
     const marker: DispatchMarker | undefined =

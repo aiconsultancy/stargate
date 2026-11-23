@@ -105,16 +105,16 @@ export class CrewQuestionHandoff {
   private readonly pending = new Map<string, Pending>();
   private lastTake = -Infinity;
 
-  constructor(
+  public constructor(
     private readonly captain: string | undefined,
     private readonly now = () => performance.now(),
   ) {}
 
-  hasConsumer() {
+  public hasConsumer() {
     return this.now() - this.lastTake < crewQuestionConsumerLeaseMs;
   }
 
-  route(preference?: boolean, externalHistory = false) {
+  public route(preference?: boolean, externalHistory = false) {
     if (preference === false) return "direct";
 
     if (preference || this.hasConsumer()) return "gateway";
@@ -124,7 +124,7 @@ export class CrewQuestionHandoff {
     return this.captain && externalHistory ? "unavailable" : "direct";
   }
 
-  take(captain: string) {
+  public take(captain: string) {
     if (captain !== this.captain) return { work: null };
     this.lastTake = this.now();
 
@@ -143,7 +143,7 @@ export class CrewQuestionHandoff {
     return { work: null };
   }
 
-  confirm(captain: string, id: string) {
+  public confirm(captain: string, id: string) {
     const entry = this.pending.get(id);
 
     if (
@@ -160,7 +160,7 @@ export class CrewQuestionHandoff {
     return { approved: true };
   }
 
-  finish(captain: string, id: string, result: CrewQuestionReceipt) {
+  public finish(captain: string, id: string, result: CrewQuestionReceipt) {
     const entry = this.pending.get(id);
 
     if (!entry || entry.work.owner.captain !== captain || !entry.taken)
@@ -172,7 +172,7 @@ export class CrewQuestionHandoff {
     return { received: true };
   }
 
-  backend(
+  public backend(
     task: CrewTask,
     identity: Pick<
       CrewQuestionWork["owner"],
