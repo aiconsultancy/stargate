@@ -10,7 +10,7 @@ import {
   totalmem,
   uptime,
 } from "node:os";
-import { createReadSlot } from "../../../lib/read-deadline";
+import { createReadSlot } from "../../../../lib/read-deadline";
 import type { V1Host } from "./types";
 
 export function memAvailableBytes(meminfo: string) {

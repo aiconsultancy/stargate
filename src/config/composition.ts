@@ -7,12 +7,12 @@ import {
 } from "../backends/claude/config";
 import { codexBackendSchema } from "../backends/codex/config";
 import { crewActivitySchema } from "../activity/activity";
-import { apiV1ConfigSchema } from "../dashboard/api/v1/config";
+import { apiV1ConfigSchema } from "../observability/dashboard/api/v1/config";
 import { captainPostSchema } from "../captain-post/config";
 import { cronjobsSchema } from "../cron/config";
 import { validateFleetPermissions } from "../fleet/permissions";
 import { fleetPolicySchema } from "../fleet/fleet-policy";
-import { healthConfigSchema } from "../health/config";
+import { healthConfigSchema } from "../observability/health/config";
 import {
   createIrcConfig,
   ircAccount,

@@ -34,7 +34,7 @@ import { CrewProjects } from "../src/crew/workspace/projects";
 import { teamSchema } from "../src/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
 import { CronStore } from "../src/cron/store";
-import { dashboardSource } from "../src/dashboard/dashboard-source";
+import { dashboardSource } from "../src/observability/dashboard/dashboard-source";
 import { openStore } from "../src/app/open-store";
 import { bot, identity as dashboardIdentity } from "./fixtures";
 

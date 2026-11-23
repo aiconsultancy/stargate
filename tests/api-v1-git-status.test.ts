@@ -17,8 +17,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { readCommand } from "../src/dashboard/api/v1/command";
-import { createGitReader as makeGitReader } from "../src/dashboard/api/v1/git";
+import { readCommand } from "../src/observability/dashboard/api/v1/command";
+import { createGitReader as makeGitReader } from "../src/observability/dashboard/api/v1/git";
 
 // Every reader made here is stopped after the file, so no private temporary
 // Snapshot folder is left behind.

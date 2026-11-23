@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
-import type { AgentBackend } from "../backends/backend";
+import type { AgentBackend } from "../../backends/backend";
 import {
   type BotConfig,
   type IrcConfig,
   type TeamsConfig,
   effectiveIrcConfig,
-} from "../config";
-import type { FleetCrewStatus } from "../crew/reporting/fleet-status";
-import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
+} from "../../config";
+import type { FleetCrewStatus } from "../../crew/reporting/fleet-status";
+import type { CrewStatus, CrewStatusInput } from "../../shared/crew-status";
 import type {
   DashboardCaptain,
   DashboardSource,
@@ -19,15 +19,15 @@ import {
   dashboardCrewMembers,
   dashboardCrewSummary,
 } from "./dashboard-projection";
-import type { IrcRegistration } from "../transports/irc/ship";
-import { createReadSlot, readWithDeadline } from "../lib/read-deadline";
-import { type Identity, backendFingerprint } from "../shared/registration";
+import type { IrcRegistration } from "../../transports/irc/ship";
+import { createReadSlot, readWithDeadline } from "../../lib/read-deadline";
+import { type Identity, backendFingerprint } from "../../shared/registration";
 import {
   HISTORY_PAGE,
   type HistorySession,
   type SessionHistory,
-} from "../shared/session-history";
-import type { RequestFailure } from "../shared/request-failure";
+} from "../../shared/session-history";
+import type { RequestFailure } from "../../shared/request-failure";
 
 export type DashboardShip = {
   bot: Pick<

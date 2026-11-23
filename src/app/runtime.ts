@@ -16,10 +16,10 @@ import {
   Scope,
 } from "effect";
 import pino, { type Logger } from "pino";
-import { diffEvents } from "../dashboard/api/v1/diff";
-import { gatewayVersion } from "../dashboard/api/v1/gateway";
-import { createApiV1Source } from "../dashboard/api/v1/projection";
-import { startApiV1Server } from "../dashboard/api/v1/server";
+import { diffEvents } from "../observability/dashboard/api/v1/diff";
+import { gatewayVersion } from "../observability/dashboard/api/v1/gateway";
+import { createApiV1Source } from "../observability/dashboard/api/v1/projection";
+import { startApiV1Server } from "../observability/dashboard/api/v1/server";
 import type { AgentBackend, BackendContext } from "../backends/backend";
 import { createBackend } from "../backends/factory";
 import { OpenCodeBackend } from "../backends/opencode/opencode";
@@ -45,13 +45,13 @@ import {
 } from "../cron/index";
 import { CronStore } from "../cron/store";
 import { CronUI, type CronUIApi } from "../cron/ui";
-import { startDashboard } from "../dashboard/dashboard";
+import { startDashboard } from "../observability/dashboard/dashboard";
 import {
   type DashboardShip,
   dashboardSource,
   ircDashboardShip,
   teamsDashboardShip,
-} from "../dashboard/dashboard-source";
+} from "../observability/dashboard/dashboard-source";
 import { sendDispatchAnswer } from "../dispatch/irc";
 import { startAgentDispatch } from "../dispatch/start";
 import { abortable } from "../lib/effect";
@@ -61,7 +61,7 @@ import { FleetResults, fleetOrigin } from "../fleet/results";
 import { sendFleetAssignment } from "../fleet/fleet-irc";
 import { Gateway } from "../gateway/gateway";
 import type { TransportDelivery } from "../gateway/ports";
-import { createHealthReader } from "../health/health";
+import { createHealthReader } from "../observability/health/health";
 import { controlInteractions } from "../transports/slack/interactions";
 import { type IrcRegistration, IrcShip, ircKey } from "../transports/irc/ship";
 import { templatesDirectory } from "../lib/installation-paths";

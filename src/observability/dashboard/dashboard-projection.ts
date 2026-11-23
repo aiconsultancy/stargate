@@ -1,4 +1,4 @@
-import type { CrewStatus } from "../shared/crew-status";
+import type { CrewStatus } from "../../shared/crew-status";
 import type { DashboardCrewMember, ShipSummary } from "./dashboard-model";
 
 /** A person can have independent task state in several repository contexts. */

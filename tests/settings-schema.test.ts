@@ -22,7 +22,7 @@ import { cronToolInput } from "../src/crew/cron/cron";
 import { cronjobsSchema } from "../src/cron/config";
 import { fleetControlSchema } from "../src/fleet/protocol";
 import { fleetPolicySchema } from "../src/fleet/fleet-policy";
-import { healthConfigSchema } from "../src/health/config";
+import { healthConfigSchema } from "../src/observability/health/config";
 import {
   mentionNameSchema,
   textMentionRuleSchema,

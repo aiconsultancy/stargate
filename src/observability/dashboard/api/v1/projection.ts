@@ -1,24 +1,24 @@
 import { hostname } from "node:os";
 import { Semaphore } from "effect";
-import type { AgentBackend } from "../../../backends/backend";
-import { ircFeedbackDefaults } from "../../../config";
-import { redactCredentials } from "../../../lib/credentials";
-import type { FleetCrewStatus } from "../../../crew/reporting/fleet-status";
+import type { AgentBackend } from "../../../../backends/backend";
+import { ircFeedbackDefaults } from "../../../../config";
+import { redactCredentials } from "../../../../lib/credentials";
+import type { FleetCrewStatus } from "../../../../crew/reporting/fleet-status";
 import {
   type CrewStatus,
   type CrewStatusTask,
   crewAssignmentText,
-} from "../../../shared/crew-status";
+} from "../../../../shared/crew-status";
 import type { DashboardCrewMember, ShipSummary } from "../../dashboard-model";
 import { dashboardCrewSummary } from "../../dashboard-projection";
 import type { DashboardFleetSource } from "../../dashboard-source";
-import { abortable, runAbortable } from "../../../lib/effect";
-import { isLoopbackHost } from "../../../lib/loopback";
-import { backendFingerprint } from "../../../shared/registration";
+import { abortable, runAbortable } from "../../../../lib/effect";
+import { isLoopbackHost } from "../../../../lib/loopback";
+import { backendFingerprint } from "../../../../shared/registration";
 import {
   HISTORY_PAGE,
   type HistorySession,
-} from "../../../shared/session-history";
+} from "../../../../shared/session-history";
 import {
   type ApiV1Config,
   type Registration,

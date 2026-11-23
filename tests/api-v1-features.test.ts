@@ -3,7 +3,7 @@ import { Schema } from "effect";
 import {
   gatewayFeatures,
   registrationFeatures,
-} from "../src/dashboard/api/v1/features";
+} from "../src/observability/dashboard/api/v1/features";
 import { configSchema, ircFeatureDefaults } from "../src/config";
 import { bot } from "./fixtures";
 

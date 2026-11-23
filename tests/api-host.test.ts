@@ -15,8 +15,8 @@ import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate as nextTurn } from "node:timers/promises";
-import type { ApiRoute } from "../src/dashboard/api/route";
-import { startApiServer } from "../src/dashboard/api/server";
+import type { ApiRoute } from "../src/observability/dashboard/api/route";
+import { startApiServer } from "../src/observability/dashboard/api/server";
 import {
   flockCommand,
   listenOnUnixSocket,

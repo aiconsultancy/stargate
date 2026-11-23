@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Writable } from "node:stream";
 import { Effect, Schema } from "effect";
 import pino from "pino";
-import { apiToken } from "../src/dashboard/api/v1/token";
+import { apiToken } from "../src/observability/dashboard/api/v1/token";
 import type { AgentBackend } from "../src/backends/backend";
 import { type Config, configSchema, ircSchema } from "../src/config";
 import { ConfigReload, readReloadCandidate } from "../src/app/config-reload";

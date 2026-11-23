@@ -1,9 +1,9 @@
 import { join } from "node:path";
 import { Option, Schema } from "effect";
-import type { AgentBackend } from "../backends/backend";
-import type { BotConfig, Config } from "../config";
-import { crewStatusSchema } from "../shared/crew-status";
-import type { CronReportRow } from "../cron/store";
+import type { AgentBackend } from "../../backends/backend";
+import type { BotConfig, Config } from "../../config";
+import { crewStatusSchema } from "../../shared/crew-status";
+import type { CronReportRow } from "../../cron/store";
 import { type HealthConfig, healthConfigSchema } from "./config";
 import {
   createHostHealthReader,
@@ -13,18 +13,21 @@ import {
 import {
   maintenanceDrainSchema,
   readMaintenanceDrain,
-} from "../maintenance/maintenance-drain";
+} from "../../maintenance/maintenance-drain";
 import {
   readReports,
   readUnit,
-} from "../maintenance/nightly/droid/droid-facts";
-import { type CommandRunner, processRunner } from "../maintenance/nightly/exec";
-import { readReady, readySchema } from "../maintenance/nightly/update/ready";
-import { reportOutcomes } from "../maintenance/nightly/reports/report";
-import { quotaSnapshotSchema } from "../quota/quota";
-import { botStatusReport } from "../app/status-report";
-import { settingsPattern } from "../config/settings-schema";
-import { exactStruct } from "../shared/session-history";
+} from "../../maintenance/nightly/droid/droid-facts";
+import {
+  type CommandRunner,
+  processRunner,
+} from "../../maintenance/nightly/exec";
+import { readReady, readySchema } from "../../maintenance/nightly/update/ready";
+import { reportOutcomes } from "../../maintenance/nightly/reports/report";
+import { quotaSnapshotSchema } from "../../quota/quota";
+import { botStatusReport } from "../../app/status-report";
+import { settingsPattern } from "../../config/settings-schema";
+import { exactStruct } from "../../shared/session-history";
 
 export const healthSections = [
   "host",

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { assetsDirectory } from "../lib/installation-paths";
+import { assetsDirectory } from "../../lib/installation-paths";
 
 // Fixed package assets only. No configuration or request can select a file.
 const png = (name: string) =>

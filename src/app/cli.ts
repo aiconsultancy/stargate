@@ -3,7 +3,7 @@ import { open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Result, Schema } from "effect";
-import { apiToken } from "../dashboard/api/v1/token";
+import { apiToken } from "../observability/dashboard/api/v1/token";
 import { checkCodexConfiguration } from "../backends/codex-paths";
 import { loadConfig } from "../config";
 import { teamSchema } from "../crew/team";

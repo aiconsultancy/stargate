@@ -9,7 +9,7 @@ import type {
   PromptSourceContext,
 } from "../src/backends/backend";
 import { type IrcConfig, ircSchema } from "../src/config";
-import { ircDashboardShip } from "../src/dashboard/dashboard-source";
+import { ircDashboardShip } from "../src/observability/dashboard/dashboard-source";
 import { Gateway } from "../src/gateway/gateway";
 import {
   fold,

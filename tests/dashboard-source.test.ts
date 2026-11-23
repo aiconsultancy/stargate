@@ -5,7 +5,7 @@ import { CronStore } from "../src/cron/store";
 import {
   type DashboardShip,
   dashboardSource,
-} from "../src/dashboard/dashboard-source";
+} from "../src/observability/dashboard/dashboard-source";
 import { botKey, conversationKey } from "../src/gateway/routing";
 import type {
   HistorySession,

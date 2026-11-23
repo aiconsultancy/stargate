@@ -1,12 +1,12 @@
-import type { CrewStatus } from "../shared/crew-status";
-import type { CronReportRow, CronRun } from "../cron/store";
+import type { CrewStatus } from "../../shared/crew-status";
+import type { CronReportRow, CronRun } from "../../cron/store";
 import type {
   HistoryEntriesInput,
   HistoryEntryPage,
   HistorySession,
   HistorySessionPage,
-} from "../shared/session-history";
-import type { JobStatus } from "../gateway/store";
+} from "../../shared/session-history";
+import type { JobStatus } from "../../gateway/store";
 
 /** JSON shapes served by the fleet dashboard. Additive changes only. */
 export type QueueCounts = Record<JobStatus, number>;

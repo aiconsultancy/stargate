@@ -6,7 +6,7 @@ import {
   type SocketIdentity,
   listenOnUnixSocket,
   unlinkOwnSocket,
-} from "../../lib/unix-socket";
+} from "../../../lib/unix-socket";
 import { type ApiRoute, apiRoutes } from "./route";
 
 type Options = {

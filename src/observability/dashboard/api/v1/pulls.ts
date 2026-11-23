@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect";
-import { redactCredentials } from "../../../lib/credentials";
+import { redactCredentials } from "../../../../lib/credentials";
 import { readCommand } from "./command";
 import type { V1PullRequest } from "./types";
 

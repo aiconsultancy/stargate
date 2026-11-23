@@ -278,7 +278,7 @@ async function regenerate(): Promise<void> {
     const queries = lint(imports);
 
     if (queries.length > 0) {
-      const file = "src/dashboard/api/v1/types.ts";
+      const file = "src/observability/dashboard/api/v1/types.ts";
 
       if (
         queries.length !== 3 ||
@@ -289,8 +289,8 @@ async function regenerate(): Promise<void> {
         );
       replace(
         file,
-        'import type { JobStatus } from "../../../gateway/store";',
-        'import type { JobStatus } from "../../../gateway/store";\nimport type { TurnStage } from "../../../shared/turn-progress";\nimport type { RequestFailure } from "../../../shared/request-failure";',
+        'import type { JobStatus } from "../../../../gateway/store";',
+        'import type { JobStatus } from "../../../../gateway/store";\nimport type { TurnStage } from "../../../../shared/turn-progress";\nimport type { RequestFailure } from "../../../../shared/request-failure";',
       );
 
       for (const [name, module] of [
@@ -298,7 +298,7 @@ async function regenerate(): Promise<void> {
         ["JobStatus", "gateway/store"],
         ["RequestFailure", "shared/request-failure"],
       ] as const)
-        replace(file, `import("../../../${module}").${name}`, name);
+        replace(file, `import("../../../../${module}").${name}`, name);
     }
 
     requireGreen(imports);

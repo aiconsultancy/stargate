@@ -4,15 +4,15 @@ import { runInNewContext } from "node:vm";
 import type { AgentBackend } from "../src/backends/backend";
 import type { CrewStatus } from "../src/shared/crew-status";
 import { CronStore } from "../src/cron/store";
-import type { DashboardTransport } from "../src/dashboard/dashboard-model";
+import type { DashboardTransport } from "../src/observability/dashboard/dashboard-model";
 import {
   dashboardCrewMembers,
   dashboardCrewSummary,
-} from "../src/dashboard/dashboard-projection";
+} from "../src/observability/dashboard/dashboard-projection";
 import {
   type DashboardShip,
   dashboardSource,
-} from "../src/dashboard/dashboard-source";
+} from "../src/observability/dashboard/dashboard-source";
 import { conversationKey } from "../src/gateway/routing";
 import { openStore } from "../src/app/open-store";
 import { bot } from "./fixtures";

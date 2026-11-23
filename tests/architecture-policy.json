@@ -288,68 +288,95 @@
       "src/agent-profile-switch.ts",
       "src/ops/agent-profile-switch.ts"
     ],
-    "src/api/route.ts": ["src/api/route.ts", "src/dashboard/api/route.ts"],
-    "src/api/server.ts": ["src/api/server.ts", "src/dashboard/api/server.ts"],
+    "src/api/route.ts": [
+      "src/api/route.ts",
+      "src/dashboard/api/route.ts",
+      "src/observability/dashboard/api/route.ts"
+    ],
+    "src/api/server.ts": [
+      "src/api/server.ts",
+      "src/dashboard/api/server.ts",
+      "src/observability/dashboard/api/server.ts"
+    ],
     "src/api/v1/command.ts": [
       "src/api/v1/command.ts",
-      "src/dashboard/api/v1/command.ts"
+      "src/dashboard/api/v1/command.ts",
+      "src/observability/dashboard/api/v1/command.ts"
     ],
     "src/api/v1/config.ts": [
       "src/api/v1/config.ts",
-      "src/dashboard/api/v1/config.ts"
+      "src/dashboard/api/v1/config.ts",
+      "src/observability/dashboard/api/v1/config.ts"
     ],
     "src/api/v1/diff.ts": [
       "src/api/v1/diff.ts",
-      "src/dashboard/api/v1/diff.ts"
+      "src/dashboard/api/v1/diff.ts",
+      "src/observability/dashboard/api/v1/diff.ts"
     ],
     "src/api/v1/events.ts": [
       "src/api/v1/events.ts",
-      "src/dashboard/api/v1/events.ts"
+      "src/dashboard/api/v1/events.ts",
+      "src/observability/dashboard/api/v1/events.ts"
     ],
     "src/api/v1/features.ts": [
       "src/api/v1/features.ts",
-      "src/dashboard/api/v1/features.ts"
+      "src/dashboard/api/v1/features.ts",
+      "src/observability/dashboard/api/v1/features.ts"
     ],
     "src/api/v1/gateway.ts": [
       "src/api/v1/gateway.ts",
-      "src/dashboard/api/v1/gateway.ts"
+      "src/dashboard/api/v1/gateway.ts",
+      "src/observability/dashboard/api/v1/gateway.ts"
     ],
     "src/api/v1/git-index.ts": [
       "src/api/v1/git-index.ts",
-      "src/dashboard/api/v1/git-index.ts"
+      "src/dashboard/api/v1/git-index.ts",
+      "src/observability/dashboard/api/v1/git-index.ts"
     ],
-    "src/api/v1/git.ts": ["src/api/v1/git.ts", "src/dashboard/api/v1/git.ts"],
+    "src/api/v1/git.ts": [
+      "src/api/v1/git.ts",
+      "src/dashboard/api/v1/git.ts",
+      "src/observability/dashboard/api/v1/git.ts"
+    ],
     "src/api/v1/github-repository.ts": [
       "src/api/v1/github-repository.ts",
-      "src/dashboard/api/v1/github-repository.ts"
+      "src/dashboard/api/v1/github-repository.ts",
+      "src/observability/dashboard/api/v1/github-repository.ts"
     ],
     "src/api/v1/host.ts": [
       "src/api/v1/host.ts",
-      "src/dashboard/api/v1/host.ts"
+      "src/dashboard/api/v1/host.ts",
+      "src/observability/dashboard/api/v1/host.ts"
     ],
     "src/api/v1/network.ts": [
       "src/api/v1/network.ts",
-      "src/dashboard/api/v1/network.ts"
+      "src/dashboard/api/v1/network.ts",
+      "src/observability/dashboard/api/v1/network.ts"
     ],
     "src/api/v1/projection.ts": [
       "src/api/v1/projection.ts",
-      "src/dashboard/api/v1/projection.ts"
+      "src/dashboard/api/v1/projection.ts",
+      "src/observability/dashboard/api/v1/projection.ts"
     ],
     "src/api/v1/pulls.ts": [
       "src/api/v1/pulls.ts",
-      "src/dashboard/api/v1/pulls.ts"
+      "src/dashboard/api/v1/pulls.ts",
+      "src/observability/dashboard/api/v1/pulls.ts"
     ],
     "src/api/v1/server.ts": [
       "src/api/v1/server.ts",
-      "src/dashboard/api/v1/server.ts"
+      "src/dashboard/api/v1/server.ts",
+      "src/observability/dashboard/api/v1/server.ts"
     ],
     "src/api/v1/token.ts": [
       "src/api/v1/token.ts",
-      "src/dashboard/api/v1/token.ts"
+      "src/dashboard/api/v1/token.ts",
+      "src/observability/dashboard/api/v1/token.ts"
     ],
     "src/api/v1/types.ts": [
       "src/api/v1/types.ts",
-      "src/dashboard/api/v1/types.ts"
+      "src/dashboard/api/v1/types.ts",
+      "src/observability/dashboard/api/v1/types.ts"
     ],
     "src/attachment-delivery.ts": [
       "src/attachment-delivery.ts",
@@ -437,21 +464,29 @@
     ],
     "src/dashboard-branding.ts": [
       "src/dashboard-branding.ts",
-      "src/dashboard/dashboard-branding.ts"
+      "src/dashboard/dashboard-branding.ts",
+      "src/observability/dashboard/dashboard-branding.ts"
     ],
     "src/dashboard-model.ts": [
       "src/dashboard-model.ts",
-      "src/dashboard/dashboard-model.ts"
+      "src/dashboard/dashboard-model.ts",
+      "src/observability/dashboard/dashboard-model.ts"
     ],
     "src/dashboard-projection.ts": [
       "src/dashboard-projection.ts",
-      "src/dashboard/dashboard-projection.ts"
+      "src/dashboard/dashboard-projection.ts",
+      "src/observability/dashboard/dashboard-projection.ts"
     ],
     "src/dashboard-source.ts": [
       "src/dashboard-source.ts",
-      "src/dashboard/dashboard-source.ts"
+      "src/dashboard/dashboard-source.ts",
+      "src/observability/dashboard/dashboard-source.ts"
     ],
-    "src/dashboard.ts": ["src/dashboard.ts", "src/dashboard/dashboard.ts"],
+    "src/dashboard.ts": [
+      "src/dashboard.ts",
+      "src/dashboard/dashboard.ts",
+      "src/observability/dashboard/dashboard.ts"
+    ],
     "src/effect.ts": ["src/effect.ts", "src/lib/effect.ts"],
     "src/fleet-irc.ts": ["src/fleet-irc.ts", "src/fleet/fleet-irc.ts"],
     "src/fleet-policy.ts": ["src/fleet-policy.ts", "src/fleet/fleet-policy.ts"],
@@ -460,10 +495,19 @@
     "src/health-config.ts": [
       "src/health-config.ts",
       "src/health/health-config.ts",
-      "src/health/config.ts"
+      "src/health/config.ts",
+      "src/observability/health/config.ts"
     ],
-    "src/health-host.ts": ["src/health-host.ts", "src/health/health-host.ts"],
-    "src/health.ts": ["src/health.ts", "src/health/health.ts"],
+    "src/health-host.ts": [
+      "src/health-host.ts",
+      "src/health/health-host.ts",
+      "src/observability/health/health-host.ts"
+    ],
+    "src/health.ts": [
+      "src/health.ts",
+      "src/health/health.ts",
+      "src/observability/health/health.ts"
+    ],
     "src/input-boundary.ts": [
       "src/input-boundary.ts",
       "src/backends/opencode/input-boundary.ts"

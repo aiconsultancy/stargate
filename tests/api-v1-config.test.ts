@@ -6,14 +6,14 @@ import {
   cpuTotals,
   cpuUsage,
   memAvailableBytes,
-} from "../src/dashboard/api/v1/host";
+} from "../src/observability/dashboard/api/v1/host";
 import {
   defaultCorsOrigins,
   originMatcher,
   parseApiListen,
   peerAddress,
-} from "../src/dashboard/api/v1/network";
-import { apiToken } from "../src/dashboard/api/v1/token";
+} from "../src/observability/dashboard/api/v1/network";
+import { apiToken } from "../src/observability/dashboard/api/v1/token";
 import { runCli } from "../src/app/cli";
 import { configSchema } from "../src/config";
 import { restartRequired } from "../src/app/config-reload";

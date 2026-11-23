@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 import { Effect, Predicate, Result, Schema, SchemaIssue } from "effect";
-import { settingsIssues } from "../../../config/settings-schema";
+import { settingsIssues } from "../../../../config/settings-schema";
 import { isGitHubRepositoryName } from "./github-repository";
 import { isOriginPattern, isPrivateNetwork, parseApiListen } from "./network";
 

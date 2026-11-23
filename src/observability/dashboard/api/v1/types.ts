@@ -13,9 +13,9 @@
  *   /api/v1/ships/{id}/crew/{member}    -> V1CrewDetail
  *   /api/v1/events                      -> text/event-stream of V1Event
  */
-import type { JobStatus } from "../../../gateway/store";
-import type { TurnStage } from "../../../shared/turn-progress";
-import type { RequestFailure } from "../../../shared/request-failure";
+import type { JobStatus } from "../../../../gateway/store";
+import type { TurnStage } from "../../../../shared/turn-progress";
+import type { RequestFailure } from "../../../../shared/request-failure";
 
 export const API_V1_VERSION = 1 as const;
 
