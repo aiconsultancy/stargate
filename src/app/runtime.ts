@@ -77,16 +77,16 @@ import {
 import { NotificationStore } from "../notifications/preferences/notification-store";
 import { notificationKey } from "../notifications/preferences/notifications";
 import {
+  type SlackRegistration,
   notifyConfigError,
   resolveDestinations,
-  type SlackRegistration,
 } from "../notifications/ingest/binding";
 import { coreLimits, notifyEnabled } from "../notifications/ingest/config";
 import { notificationRoutes } from "../notifications/ingest/http";
 import { ShuttingDown } from "../notifications/ingest/model";
 import {
-  makeNotifications,
   type NotificationCore,
+  makeNotifications,
 } from "../notifications/ingest/notifications";
 import type { NotificationSink } from "../notifications/ingest/sink";
 import {
@@ -98,9 +98,9 @@ import { PeerDirectory } from "../gateway/peers";
 import { QuotaReader } from "../quota/quota";
 import { QuotaWatch } from "../quota/quota-watch";
 import {
+  type Identity,
   backendFingerprint,
   botKey,
-  type Identity,
   isAllowedChannel,
 } from "../gateway/routing";
 import { SlackConnection, type SlackInteractions } from "../slack/slack";
@@ -109,9 +109,9 @@ import { type Store } from "../gateway/store";
 import { TeamsRegistration } from "../teams/registration";
 import { createTranscriber } from "../transcription/startup";
 import {
-  buildUpdateSnapshot,
   type UpdateReceipt,
   type UpdateSnapshot,
+  buildUpdateSnapshot,
 } from "../maintenance/update-notice";
 
 export async function loadEnvironment(configPath: string) {

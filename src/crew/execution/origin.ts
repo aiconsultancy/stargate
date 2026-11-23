@@ -1,6 +1,6 @@
 import {
-  closesBoundaryContext,
   type InputBoundaryRecord,
+  closesBoundaryContext,
   resolveBoundaryContext,
 } from "../../backends/opencode/input-boundary";
 import { InputBoundaryReader } from "../../backends/opencode/input-origin";

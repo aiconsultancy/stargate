@@ -12,9 +12,9 @@ import {
 } from "../shared/session-history";
 import { close as closeHttpServer } from "../lib/http-util";
 import {
-  listenOnUnixSocket,
   type Ownership,
   type SocketIdentity,
+  listenOnUnixSocket,
   unlinkOwnSocket,
 } from "../lib/unix-socket";
 

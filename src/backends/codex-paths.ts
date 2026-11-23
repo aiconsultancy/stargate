@@ -4,7 +4,7 @@
  * or read may be writable from inside the sandbox. This module has no SDK
  * import, so `stargate config check` can use it.
  */
-import { constants, type Stats } from "node:fs";
+import { type Stats, constants } from "node:fs";
 import {
   access,
   lstat,

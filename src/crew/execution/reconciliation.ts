@@ -4,8 +4,8 @@ import type {
   OpenCodeClient,
   SessionGetInput,
   SessionInboxCancelInput,
-  SessionMessageInfo,
   SessionInfo,
+  SessionMessageInfo,
 } from "@opencode/client";
 import { Schema } from "effect";
 import {
@@ -21,9 +21,9 @@ import {
   taskEnvelopePayload,
 } from "../message-protocol";
 import {
-  isShellCompletionCandidate,
   ShellCompletionContext,
   type ShellContextRecord,
+  isShellCompletionCandidate,
 } from "./shell-context";
 import { CrewError, type CrewTask } from "./state";
 import { agentIDSchema } from "../team";

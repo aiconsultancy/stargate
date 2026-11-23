@@ -1,10 +1,10 @@
 import {
   type Attachment,
+  UploadRefused,
   checkAttachments,
   maxAttachmentBytes,
-  maxAttachments,
   maxAttachmentTotalBytes,
-  UploadRefused,
+  maxAttachments,
 } from "../attachments/attachments";
 import { isLoopbackAddress } from "../lib/loopback";
 

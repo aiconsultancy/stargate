@@ -366,7 +366,26 @@
             "variables": false
           }
         ],
-        "eslint/no-unmodified-loop-condition": "error"
+        "eslint/no-unmodified-loop-condition": "error",
+        "typescript/dot-notation": [
+          "error",
+          {
+            "allowIndexSignaturePropertyAccess": true
+          }
+        ],
+        "eslint/one-var": ["error", "never"],
+        "eslint/sort-imports": [
+          "error",
+          {
+            "ignoreDeclarationSort": true
+          }
+        ],
+        "eslint/new-cap": [
+          "error",
+          {
+            "capIsNewExceptionPattern": "^(?:Schema|Data|Context)\\."
+          }
+        ]
       },
       "env": {
         "node": true,

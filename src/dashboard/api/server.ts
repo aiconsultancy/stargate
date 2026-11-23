@@ -3,8 +3,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
 import {
-  listenOnUnixSocket,
   type SocketIdentity,
+  listenOnUnixSocket,
   unlinkOwnSocket,
 } from "../../lib/unix-socket";
 import { type ApiRoute, apiRoutes } from "./route";

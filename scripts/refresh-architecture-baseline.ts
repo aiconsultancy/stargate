@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
-  open,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   realpath,
   rename,
@@ -23,6 +23,7 @@ import {
 } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
+  type ArchitecturePolicy,
   architectureDocuments,
   boundaryViolations,
   buildGraph,
@@ -34,7 +35,6 @@ import {
   sizeRegressions,
   sourceIdentities,
   sourceRootFiles,
-  type ArchitecturePolicy,
 } from "../tests/architecture-graph";
 
 interface Inventory {
@@ -72,8 +72,8 @@ for (let index = 0; index < argv.length; index++) {
       throw new Error(`duplicate-closure-addition:${file}`);
     allowedClosureFiles.push(file);
   } else if (argument === "--rekey-exception") {
-    const oldKey = argv[++index],
-      newKey = argv[++index];
+    const oldKey = argv[++index];
+    const newKey = argv[++index];
 
     if (
       !oldKey ||
@@ -281,8 +281,8 @@ if (exceptionRekeys.length) {
   };
 
   for (const { oldKey, newKey } of exceptionRekeys) {
-    const old = parse(oldKey),
-      next = parse(newKey);
+    const old = parse(oldKey);
+    const next = parse(newKey);
 
     let reason: string | undefined;
 

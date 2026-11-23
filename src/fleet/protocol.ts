@@ -55,14 +55,14 @@ export const reviewTargetSchema = settingsStruct({
 function completeReviewDiff(text: string): boolean {
   if (!text.endsWith("\n")) return false;
 
-  let files = 0,
-    old = 0,
-    next = 0,
-    hunk = false,
-    fileContent = false,
-    metadata = false,
-    from = false,
-    to = false;
+  let files = 0;
+  let old = 0;
+  let next = 0;
+  let hunk = false;
+  let fileContent = false;
+  let metadata = false;
+  let from = false;
+  let to = false;
 
   for (const raw of text.split("\n").slice(0, -1)) {
     const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;

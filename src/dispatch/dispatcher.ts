@@ -8,10 +8,10 @@ import {
 } from "./polling";
 import {
   type DispatchAnswer,
-  dispatchText,
-  newOfferID,
   type RefusedReason,
   type WithdrawReason,
+  dispatchText,
+  newOfferID,
 } from "./protocol";
 
 export {

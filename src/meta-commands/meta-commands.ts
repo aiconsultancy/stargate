@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { Result, Schema } from "effect";
 import type { BotConfig } from "../config";
 import {
-  buildConfigPanel,
   type ConfigPanelRow,
+  type MutePage,
+  buildConfigPanel,
   configActionCandidate,
   configActionPrefix,
   configActionSchema,
@@ -13,7 +14,6 @@ import {
   configReplyTarget,
   configSnapshotSchema,
   readConfigSnapshot,
-  type MutePage,
   sameConfigSnapshot,
 } from "./config-panel";
 import { notificationKey } from "../notifications/preferences/notifications";

@@ -26,10 +26,10 @@ import type {
 import { Result, Schema } from "effect";
 import type { CrewStatus, CrewStatusInput } from "../../shared/crew-status";
 import {
+  type MaintenanceDrain,
   drainNoticeID,
   drainNoticePhase,
   drainNoticeText,
-  type MaintenanceDrain,
 } from "../../maintenance/maintenance-drain";
 import {
   QuotaReader,
@@ -46,16 +46,16 @@ import {
   settingsStruct,
 } from "../../config/settings-schema";
 import {
-  noticeTools,
-  scopedUpdate,
   type UpdateReceipt,
   type UpdateSnapshot,
+  noticeTools,
+  scopedUpdate,
 } from "../../maintenance/update-notice";
 import {
+  type CrewInput,
   crewInputSchema,
   crewTaskID,
   crewText,
-  type CrewInput,
 } from "../input/crew-tool-input";
 
 export { crewInputBranches, crewInputSchema } from "../input/crew-tool-input";
@@ -86,12 +86,12 @@ import {
   type ExecutionInspection,
   type InspectInput,
   type InspectionConnector,
-  idleBoundary,
-  observeExecution,
-  observePlacement,
   type Placement,
   type ReconcileInput,
   type ResumeInput,
+  idleBoundary,
+  observeExecution,
+  observePlacement,
   requireQuiescent,
   resumeAdmitted,
   sha256,
@@ -112,18 +112,18 @@ import {
   withdrawKey,
 } from "./state";
 import {
-  agentIDSchema,
   type CrewMember,
+  agentIDSchema,
   defaultTeam,
   teamSchema,
 } from "../team";
 import {
-  inspectWorkspace,
-  resetWorkspace,
-  stashWorkspace,
   type WorkspaceCheckpoint,
   type WorkspaceInput,
   type WorkspaceInspection,
+  inspectWorkspace,
+  resetWorkspace,
+  stashWorkspace,
   workspaceRoot,
 } from "../workspace/workspace";
 

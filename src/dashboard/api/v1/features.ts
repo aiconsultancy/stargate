@@ -1,11 +1,11 @@
 import {
   type BotConfig,
   type Config,
-  effectiveIrcConfig,
   type IrcConfig,
+  type TeamsConfig,
+  effectiveIrcConfig,
   ircFeatureDefaults,
   ircFeedbackDefaults,
-  type TeamsConfig,
 } from "../../../config";
 import { resolveQuestionSettings } from "../../../questions/question-settings";
 import type { V1Feature } from "./types";

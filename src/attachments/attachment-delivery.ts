@@ -1,11 +1,11 @@
 import {
   type Attachment,
+  UploadRefused,
   inspectAttachment,
-  maxAttachments,
   maxAttachmentTotalBytes,
+  maxAttachments,
   opencodeScratchDirectory,
   readPreparedAttachment,
-  UploadRefused,
 } from "./attachments";
 import type { BackendConfig } from "../config";
 import { isLocalhost } from "../lib/loopback";

@@ -16,14 +16,14 @@ import {
 import { validMsgid } from "../irc/protocol";
 import type { IrcBurstMessage, IrcOperations } from "../irc/store-contract";
 import { FleetRecords } from "../fleet/store";
-import { decodeJob, decodeStoredJob, type StoredJob } from "./row-codec";
+import { type StoredJob, decodeJob, decodeStoredJob } from "./row-codec";
 import { TranscriptRecords } from "./transcript-store";
 import { MetaRecords } from "../meta-commands/store";
 import { notificationContextSchema } from "../notifications/preferences/notifications";
 import type { QuestionOffer } from "../questions/questions";
 import { QuestionRecords } from "../questions/store";
 import { inboundReactionSchema } from "../shared/reactions";
-import { failureText, type RequestFailure } from "../shared/request-failure";
+import { type RequestFailure, failureText } from "../shared/request-failure";
 import type { ReplyChunk } from "../shared/slack-format";
 import { type Incoming, type Job, type JobStatus } from "./store-types";
 import type { TurnProgress } from "../shared/turn-progress";

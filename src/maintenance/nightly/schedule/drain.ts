@@ -1,5 +1,5 @@
 import type { MaintenanceDrain } from "../../maintenance-drain";
-import { checkIdle, type IdleInput, type IdleResult } from "./idle";
+import { type IdleInput, type IdleResult, checkIdle } from "./idle";
 
 export type Clock = {
   now(): number;

@@ -1,6 +1,6 @@
 import { Predicate } from "effect";
 import { slackContent } from "../../shared/slack-format";
-import { bindingAllowed, type SlackRegistration } from "./binding";
+import { type SlackRegistration, bindingAllowed } from "./binding";
 import type { NotifyConfig } from "./config";
 import type { Destination, DisplayPayload } from "./model";
 import type { NotificationSink, SinkOutcome } from "./sink";

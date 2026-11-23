@@ -1,9 +1,9 @@
-import { lstat, readdir, readFile, readlink } from "node:fs/promises";
+import { lstat, readFile, readdir, readlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { StepError } from "../exec";
 import {
-  formatRef,
   type ModelRef,
+  formatRef,
   newerModels,
   parseModel,
   parseRef,

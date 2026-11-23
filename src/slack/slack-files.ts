@@ -5,8 +5,8 @@ import {
   type Attachment,
   checkAttachments,
   maxAttachmentBytes,
-  maxAttachments,
   maxAttachmentTotalBytes,
+  maxAttachments,
 } from "../attachments/attachments";
 import {
   settingsPattern,

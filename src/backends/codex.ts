@@ -24,8 +24,8 @@ import {
   type AgentBackend,
   type BackendContext,
   type PromptSourceContext,
-  sourceLine,
   type TextSink,
+  sourceLine,
 } from "./backend";
 import { type BackendConfig, secret } from "../config";
 import {
@@ -36,12 +36,12 @@ import {
 } from "../shared/request-failure";
 import type { TurnProgress, TurnStage } from "../shared/turn-progress";
 import {
+  type TurnMarker,
   bootTicks,
   inherited,
   isTextAttachment,
   stopTurnProcesses,
   systemProcesses,
-  type TurnMarker,
   textAttachment,
 } from "./cli-agent";
 import {

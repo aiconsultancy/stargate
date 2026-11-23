@@ -109,7 +109,7 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
     let token: VerifiedToken;
 
     try {
-      token = await options.verifyToken(req.headers["authorization"]);
+      token = await options.verifyToken(req.headers.authorization);
     } catch (err) {
       return reject(req, res, err);
     }

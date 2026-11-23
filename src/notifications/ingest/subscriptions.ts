@@ -1,12 +1,12 @@
 import { Result, Schema } from "effect";
 import {
-  audienceAllowed,
   Destination,
   type NotificationInput,
-  physicalKey,
   type Source,
   StoreUnavailable,
   Subscription,
+  audienceAllowed,
+  physicalKey,
 } from "./model";
 
 export const topicMatches = (pattern: string, topic: string) =>

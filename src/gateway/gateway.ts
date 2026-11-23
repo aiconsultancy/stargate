@@ -11,20 +11,20 @@ import {
 } from "../attachments/attachment-delivery";
 import {
   type Attachment,
-  checkAttachments,
   type PublishedFile,
+  checkAttachments,
   parseAttachments,
 } from "../attachments/attachments";
 import {
   type AgentBackend,
-  latestInput,
   type PromptSourceContext,
   type SteerInput,
   type SteerResult,
-  sourceLine,
   type Transcript,
   type TranscriptEntry,
   TranscriptUnavailable,
+  latestInput,
+  sourceLine,
 } from "../backends/backend";
 import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "../config";
@@ -36,14 +36,14 @@ import type {
   RequestOutcome,
   TransportDelivery,
 } from "./ports";
-import { maintenanceText, TurnBudget } from "../maintenance/maintenance";
+import { TurnBudget, maintenanceText } from "../maintenance/maintenance";
 import { startMaintenanceDelivery } from "../maintenance/maintenance-delivery";
 import {
   type DrainControl,
+  type MaintenanceDrain,
   drainNoticeID,
   drainNoticePhase,
   drainNoticeText,
-  type MaintenanceDrain,
 } from "../maintenance/maintenance-drain";
 import { textMentionNote } from "../shared/mentions";
 import {
@@ -56,10 +56,10 @@ import {
   notificationNote,
 } from "../notifications/preferences/notifications";
 import {
-  botSender,
-  isSlackHuman,
   type PeerDirectory,
   type PeerSender,
+  botSender,
+  isSlackHuman,
   peerLookupMs,
   peerPrefix,
   peerTurnsPerHour,
@@ -75,17 +75,17 @@ import { parseReactionReply } from "../shared/reactions";
 import {
   AttachmentInputUnavailable,
   BackendFailure,
-  failureText,
   PendingBackendQuestion,
   PromptNotSubmitted,
-  providerFailure,
   type RequestFailure,
+  failureText,
+  providerFailure,
 } from "../shared/request-failure";
 import {
+  type Identity,
   botKey,
   chunks,
   conversationKey,
-  type Identity,
   isAllowedChannel,
   isAllowedUser,
   routeEvent,
@@ -106,11 +106,11 @@ import {
 import { LiveReply } from "./streaming";
 import { ThreadContextUnavailable, withThreadContext } from "./thread-context";
 import {
+  type Transcriber,
+  TranscriptionUnavailable,
   isMedia,
   spokenMention,
   spokenMentionNote,
-  type Transcriber,
-  TranscriptionUnavailable,
   transcribeMedia,
 } from "../transcription/transcription";
 import { type TurnProgress, turnProgressText } from "../shared/turn-progress";

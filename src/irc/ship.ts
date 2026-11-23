@@ -5,8 +5,8 @@ import { type PromptSourceContext, sourceLine } from "../backends/backend";
 import { operatorControl } from "../questions/background-questions";
 import {
   type BackendConfig,
-  effectiveIrcConfig,
   type IrcConfig,
+  effectiveIrcConfig,
   secret,
 } from "../config";
 import { type OutboxPage, outboxMaxAgeMs } from "../crew/messaging/irc-rpc";
@@ -22,10 +22,10 @@ import { fleetSourceReference } from "../fleet/fleet-source";
 import type { GatewayConfig } from "../gateway/gateway";
 import type { GatewayTransport } from "../gateway/ports";
 import { questionControl, questionFingerprint } from "../questions/questions";
-import { backendFingerprint, type Identity } from "../gateway/routing";
+import { type Identity, backendFingerprint } from "../gateway/routing";
 import type { Incoming, Store } from "../gateway/store";
 import { turnProgressText } from "../shared/turn-progress";
-import { ctcp, IrcAudit, sensitive, serviceNick } from "./audit";
+import { IrcAudit, ctcp, sensitive, serviceNick } from "./audit";
 import { ircBurstEligible } from "./burst";
 import {
   IrcClient,
@@ -39,15 +39,15 @@ import { CrewQuestionGateway } from "./crew-question-gateway";
 import { IrcDelivery } from "./delivery";
 import { Filehost, filehostURL } from "./filehost";
 import {
+  type IrcMessage,
   cleanText,
   fold,
-  type IrcMessage,
   sourceNick,
   validMsgid,
 } from "./protocol";
 import {
-  agentTurn,
   type IrcMember,
+  agentTurn,
   ircAllowed,
   ircDispatchAnswerAllowed,
   ircNote,

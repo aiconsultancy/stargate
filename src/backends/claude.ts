@@ -9,8 +9,8 @@ import {
   chmod,
   mkdir,
   mkdtemp,
-  readdir,
   readFile,
+  readdir,
   rm,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -22,10 +22,10 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   type Options,
-  query,
   type SDKUserMessage,
-  type SpawnedProcess,
   type SpawnOptions,
+  type SpawnedProcess,
+  query,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Option, Schema } from "effect";
 import { type Attachment, checkAttachments } from "../attachments/attachments";
@@ -33,8 +33,8 @@ import {
   type AgentBackend,
   type BackendContext,
   type PromptSourceContext,
-  sourceLine,
   type TextSink,
+  sourceLine,
 } from "./backend";
 import { type BackendConfig, secret } from "../config";
 import {

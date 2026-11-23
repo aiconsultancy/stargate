@@ -2,8 +2,8 @@ import { join } from "node:path";
 import type { Logger } from "pino";
 import {
   type AgentDispatchConfig,
-  agentDispatchTarget,
   type IrcConfig,
+  agentDispatchTarget,
 } from "../config";
 import type { IrcShip } from "../irc/ship";
 import { SubspaceApi } from "./api";
