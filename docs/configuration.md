@@ -204,6 +204,19 @@ is off by default (`enabled: false`) and every key requires a restart. Keys:
 `[3600, 10800, 21600, 43200]`). See [agent dispatch](agent-dispatch.md) for
 each key, the credential it needs and how captains answer.
 
+## Subspace agent identity
+
+The optional top-level `subspaceAgents` object is absent by default. When it
+is present with `enabled: true`, Stargate holds one key and certificate per
+officer, enrols each with the Subspace API, and signs each officer's API
+requests on a per-officer Unix socket. Keys: `enabled`, `api.baseUrl`,
+`api.audience`, `api.headersEnv`, `api.timeoutSeconds` (default 60),
+`enrolment.tokenFile` or `enrolment.tokenEnv`, `keyAlgorithm` (default
+`ed25519`), `stateDirectory` (default `<dataDirectory>/subspace-agents`) and
+`officers` (`name`, `rank`, `ship`, `model`, `ircNick`, `bundlePath`,
+`socketPath`, `registration`). Every key requires a restart. See
+[Subspace API agent identity](subspace-agents.md).
+
 ## Backend configuration
 
 ### OpenCode V2

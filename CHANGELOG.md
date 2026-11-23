@@ -8,6 +8,11 @@
   off. It enables the private ship feedback inbox for pinned teams. Submit
   and captain review require separate native permissions.
 
+- New flag: `subspaceAgents.enabled`; the whole `subspaceAgents` section is
+  absent by default, and absent or off loads nothing, creates no file or
+  socket and makes no request. When on, the gateway holds one key and
+  certificate per officer, enrols it with the Subspace API and signs each
+  officer's API requests on that officer's Unix socket.
 - New flag: `agentDispatch.enabled` defaults off. When on, the rear admiral's
   IRC gateway polls the Subspace API, tells a captain about an issue assigned
   to it and offers issues flagged _Ready for agents_ to the fleet's captains
@@ -41,6 +46,15 @@
 
 ### Changes
 
+- Add optional Subspace API agent identity
+  ([docs](docs/subspace-agents.md)). `stargate subspace enrol` gives each
+  configured officer a private Ed25519 key and self-signed certificate and
+  enrols it with a one-time fleet enrolment token; `--rotate` replaces it and
+  reports the old fingerprint. Each officer's socket forwards `/api/v1/` and
+  `/mcp` requests with a fresh agent token signed by that officer's key.
+  `stargate subspace mcp` is a stdio MCP bridge for harnesses and
+  `stargate subspace request` a REST call; Claude officers get the bridge
+  automatically.
 - Add optional agent dispatch for a fleet's rear admiral
   ([docs](docs/agent-dispatch.md)). It polls the Subspace API outbound only
   (default every 120 seconds) with the rear admiral's bearer token from
