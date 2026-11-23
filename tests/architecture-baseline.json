@@ -15,7 +15,7 @@
     "src/store.ts"
   ],
   "sourceFiles": 274,
-  "sourceEdges": 1148,
+  "sourceEdges": 1147,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],

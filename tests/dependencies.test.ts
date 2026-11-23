@@ -1,30 +1,35 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { z } from "zod";
+import { Effect, Schema } from "effect";
+import { zodStringRecord } from "./fixtures/zod-string-record";
+
+// An exact release: three numbers, no range.
+const decodePin = Schema.decodeUnknownSync(
+  Schema.String.check(Schema.isPattern(/^\d+\.\d+\.\d+$/)),
+);
 
 test("Pi runtime packages stay pinned to one release", async () => {
-  const { dependencies } = z
-    .object({ dependencies: z.record(z.string(), z.string()) })
-    .parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
+  const { dependencies } = Schema.decodeUnknownSync(
+    Schema.Struct({
+      dependencies: zodStringRecord(Schema.String),
+    }),
+  )(await Bun.file(new URL("../package.json", import.meta.url)).json());
 
   const versions = [
     "@earendil-works/chord",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-durable",
-  ].map((name) =>
-    z
-      .string()
-      .regex(/^\d+\.\d+\.\d+$/)
-      .parse(dependencies[name]),
-  );
+  ].map((name) => decodePin(dependencies[name]));
 
   expect(new Set(versions).size).toBe(1);
 });
 
 test("Claude Agent SDK stays pinned to one exact release", async () => {
-  const { dependencies } = z
-    .object({ dependencies: z.record(z.string(), z.string()) })
-    .parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
+  const { dependencies } = Schema.decodeUnknownSync(
+    Schema.Struct({
+      dependencies: zodStringRecord(Schema.String),
+    }),
+  )(await Bun.file(new URL("../package.json", import.meta.url)).json());
 
   // The SDK bundles its Claude Code CLI; a range would change it silently.
   expect(dependencies["@anthropic-ai/claude-agent-sdk"]).toMatch(
@@ -33,52 +38,54 @@ test("Claude Agent SDK stays pinned to one exact release", async () => {
 });
 
 test("Codex SDK stays pinned to one exact release with its CLI", async () => {
-  const { dependencies } = z
-    .object({ dependencies: z.record(z.string(), z.string()) })
-    .parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
+  const { dependencies } = Schema.decodeUnknownSync(
+    Schema.Struct({
+      dependencies: zodStringRecord(Schema.String),
+    }),
+  )(await Bun.file(new URL("../package.json", import.meta.url)).json());
 
-  const pinned = z
-    .string()
-    .regex(/^\d+\.\d+\.\d+$/)
-    .parse(dependencies["@openai/codex-sdk"]);
+  const pinned = decodePin(dependencies["@openai/codex-sdk"]);
 
   // The SDK runs the CLI of its own version; the lock must agree.
-  const sdk = z
-    .object({
-      version: z.string(),
-      dependencies: z.record(z.string(), z.string()),
-    })
-    .parse(
-      await Bun.file(
-        new URL(
-          "../node_modules/@openai/codex-sdk/package.json",
-          import.meta.url,
-        ),
-      ).json(),
-    );
+  const sdk = Schema.decodeUnknownSync(
+    Schema.Struct({
+      version: Schema.String,
+      dependencies: zodStringRecord(Schema.String),
+    }),
+  )(
+    await Bun.file(
+      new URL(
+        "../node_modules/@openai/codex-sdk/package.json",
+        import.meta.url,
+      ),
+    ).json(),
+  );
 
   expect(sdk.version).toBe(pinned);
   expect(sdk.dependencies["@openai/codex"]).toBe(pinned);
 });
 
 test("dependency provenance checks every page, signature, count, and current head", async () => {
-  const workflow = z
-    .object({
-      jobs: z.object({
-        quality: z.object({
-          steps: z.array(
-            z.object({ name: z.string(), run: z.string().optional() }),
+  const workflow = Schema.decodeUnknownSync(
+    Schema.Struct({
+      jobs: Schema.Struct({
+        quality: Schema.Struct({
+          steps: Schema.Array(
+            Schema.Struct({
+              name: Schema.String,
+              run: Schema.optional(Schema.String),
+            }),
           ),
         }),
       }),
-    })
-    .parse(
-      Bun.YAML.parse(
-        await Bun.file(
-          new URL("../.github/workflows/check.yml", import.meta.url),
-        ).text(),
-      ),
-    );
+    }),
+  )(
+    Bun.YAML.parse(
+      await Bun.file(
+        new URL("../.github/workflows/check.yml", import.meta.url),
+      ).text(),
+    ),
+  );
 
   const script = workflow.jobs.quality.steps.find(
     ({ name }) => name === "Verify dependency commit provenance",
@@ -129,24 +136,26 @@ test("dependency provenance checks every page, signature, count, and current hea
 });
 
 test("OpenCode SDK packages share an exact stable release and its Effect version", async () => {
-  const manifest = z.object({
-    version: z.string(),
-    dependencies: z.record(z.string(), z.string()),
-    peerDependencies: z.record(z.string(), z.string()).default({}),
-  });
+  // Zod's `.default({})` filled a missing or undefined key.
+  const decodeManifest = Schema.decodeUnknownSync(
+    Schema.Struct({
+      version: Schema.String,
+      dependencies: zodStringRecord(Schema.String),
+      peerDependencies: zodStringRecord(Schema.String).pipe(
+        Schema.withDecodingDefault(Effect.succeed({})),
+      ),
+    }),
+  );
 
   const read = async (path: string) =>
-    manifest.parse(await Bun.file(new URL(path, import.meta.url)).json());
+    decodeManifest(await Bun.file(new URL(path, import.meta.url)).json());
 
   const stargate = await read("../package.json");
   const plugin = await read("../node_modules/@opencode/plugin/package.json");
   const client = await read("../node_modules/@opencode/client/package.json");
   const schema = await read("../node_modules/@opencode/schema/package.json");
 
-  const sdkVersion = z
-    .string()
-    .regex(/^\d+\.\d+\.\d+$/)
-    .parse(stargate.dependencies["@opencode/plugin"]);
+  const sdkVersion = decodePin(stargate.dependencies["@opencode/plugin"]);
 
   expect(stargate.dependencies["@opencode/client"]).toBe(sdkVersion);
   expect(stargate.dependencies["@opencode/schema"]).toBe(sdkVersion);
@@ -170,28 +179,30 @@ test("OpenCode SDK packages share an exact stable release and its Effect version
 });
 
 test("Dependabot updates OpenCode and Effect together after one day", async () => {
-  const { updates } = z
-    .object({
-      updates: z.array(
-        z.object({
-          "package-ecosystem": z.string(),
-          schedule: z.object({ interval: z.string() }),
-          cooldown: z.object({ "default-days": z.number() }),
-          ignore: z.array(z.unknown()).default([]),
-          groups: z.record(
-            z.string(),
-            z.object({ patterns: z.array(z.string()) }),
+  const { updates } = Schema.decodeUnknownSync(
+    Schema.Struct({
+      updates: Schema.Array(
+        Schema.Struct({
+          "package-ecosystem": Schema.String,
+          schedule: Schema.Struct({ interval: Schema.String }),
+          cooldown: Schema.Struct({ "default-days": Schema.Finite }),
+          // Zod's `.default([])` filled a missing or undefined key.
+          ignore: Schema.Array(Schema.Unknown).pipe(
+            Schema.withDecodingDefault(Effect.succeed([])),
+          ),
+          groups: zodStringRecord(
+            Schema.Struct({ patterns: Schema.Array(Schema.String) }),
           ),
         }),
       ),
-    })
-    .parse(
-      Bun.YAML.parse(
-        await Bun.file(
-          new URL("../.github/dependabot.yml", import.meta.url),
-        ).text(),
-      ),
-    );
+    }),
+  )(
+    Bun.YAML.parse(
+      await Bun.file(
+        new URL("../.github/dependabot.yml", import.meta.url),
+      ).text(),
+    ),
+  );
 
   const bun = updates.find((update) => update["package-ecosystem"] === "bun");
   expect(bun?.groups["opencode-sdk"]?.patterns).toEqual([

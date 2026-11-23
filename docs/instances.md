@@ -130,28 +130,30 @@ existing match. It refuses a changed plan. It does not contact Slack.
 mise exec -- bun - <<'BUN'
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "zod";
+import { Schema } from "effect";
 import { botSchema } from "./src/config";
+import { settingsPattern, settingsStruct, settingsURL } from "./src/config/settings-schema";
 
-const env = z.object({
-  INSTANCE: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
-  ROOT: z.string().startsWith("/"),
-  PROFILE_JSON: z.string().min(1),
-  SLACK_TEAM_ID: z.string().regex(/^T[A-Z0-9]+$/),
-  SLACK_USER_ID: z.string().regex(/^[UW][A-Z0-9]+$/),
-  SLACK_CHANNEL_ID: z.string().regex(/^[CGD][A-Z0-9]+$/),
-  OPENCODE_URL: z.url(),
-}).parse(process.env);
-const profile = z.object({
-  directory: z.string().startsWith("/"),
-  agent: z.string().min(1),
-  permissions: z.array(z.object({
-    action: z.string(), resource: z.string(),
-    effect: z.enum(["allow", "deny"]),
+const env = Schema.decodeUnknownSync(Schema.Struct({
+  INSTANCE: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  ROOT: Schema.String.check(Schema.isStartingWith("/")),
+  PROFILE_JSON: Schema.String.check(Schema.isMinCodePoints(1)),
+  SLACK_TEAM_ID: Schema.String.check(settingsPattern(/^T[A-Z0-9]+$/)),
+  SLACK_USER_ID: Schema.String.check(settingsPattern(/^[UW][A-Z0-9]+$/)),
+  SLACK_CHANNEL_ID: Schema.String.check(settingsPattern(/^[CGD][A-Z0-9]+$/)),
+  OPENCODE_URL: settingsURL,
+}))(process.env);
+const profile = Schema.decodeUnknownSync(Schema.Struct({
+  directory: Schema.String.check(Schema.isStartingWith("/")),
+  agent: Schema.String.check(Schema.isMinCodePoints(1)),
+  permissions: Schema.Array(Schema.Struct({
+    action: Schema.String, resource: Schema.String,
+    effect: Schema.Literals(["allow", "deny"]),
   })),
-}).parse(JSON.parse(env.PROFILE_JSON));
+}))(JSON.parse(env.PROFILE_JSON));
 const prefix = `STARGATE_${env.INSTANCE.toUpperCase().replaceAll("-", "_")}`;
-const bot = botSchema.omit({ slack: true }).parse({
+const { slack: _slack, ...planBotFields } = botSchema.fields;
+const bot = Schema.decodeUnknownSync(settingsStruct(planBotFields))({
   id: env.INSTANCE,
   displayName: profile.agent,
   access: { users: [env.SLACK_USER_ID], channels: [env.SLACK_CHANNEL_ID] },

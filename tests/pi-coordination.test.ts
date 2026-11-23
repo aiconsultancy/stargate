@@ -4,11 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Schema } from "effect";
-import { z } from "zod";
 import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
 import { piCrewExtension } from "../src/crew/pi/pi-extension";
 import { CrewError } from "../src/crew/execution/state";
+import { zodStringRecord } from "./fixtures/zod-string-record";
+
+const decodeMessages = Schema.decodeUnknownSync(
+  Schema.Array(Schema.Struct({ role: Schema.String, content: Schema.Unknown })),
+);
 
 function completion(
   text: string,
@@ -225,21 +229,19 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
       "Read own history",
     );
 
-    const toolMessages = z
-      .array(z.object({ role: z.string(), content: z.unknown() }))
-      .parse(requests[1]?.["messages"]);
+    const toolMessages = decodeMessages(requests[1]?.["messages"]);
 
     const output = toolMessages.find(({ role }) => role === "tool")?.content;
 
     if (typeof output !== "string")
       throw new Error("Missing native history result");
 
-    const page = z
-      .object({
-        items: z.array(z.object({ conversationId: z.number() })),
-        next: z.unknown(),
-      })
-      .parse(JSON.parse(output));
+    const page = Schema.decodeUnknownSync(
+      Schema.Struct({
+        items: Schema.Array(Schema.Struct({ conversationId: Schema.Finite })),
+        next: Schema.Unknown,
+      }),
+    )(JSON.parse(output));
 
     expect(page.items.length).toBeGreaterThan(0);
     expect(
@@ -578,9 +580,7 @@ for (const scenario of [
 
       await backend.prompt(saved, "Read a page", signal);
 
-      const messages = z
-        .array(z.object({ role: z.string(), content: z.unknown() }))
-        .parse(requests[1]?.["messages"]);
+      const messages = decodeMessages(requests[1]?.["messages"]);
 
       const output = messages.find(({ role }) => role === "tool")?.content;
 
@@ -679,25 +679,24 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
     await backend.prompt(saved, "First turn", signal);
     await backend.prompt(saved, "Read history", signal);
 
-    const messages = z
-      .array(z.object({ role: z.string(), content: z.unknown() }))
-      .parse(requests[2]?.["messages"]);
+    const messages = decodeMessages(requests[2]?.["messages"]);
 
     const output = messages.find(({ role }) => role === "tool")?.content;
 
     if (typeof output !== "string") throw new Error("Missing history output");
 
-    const page = z
-      .object({
-        next: z.record(z.string(), z.unknown()),
-        items: z.array(
-          z.object({
-            role: z.enum(["user", "assistant"]),
-            text: z.string().max(1500),
+    const page = Schema.decodeUnknownSync(
+      Schema.Struct({
+        next: zodStringRecord(Schema.Unknown),
+        items: Schema.Array(
+          Schema.Struct({
+            role: Schema.Literals(["user", "assistant"]),
+            // Zod counted string bounds in code points.
+            text: Schema.String.check(Schema.isMaxCodePoints(1500)),
           }),
         ),
-      })
-      .parse(JSON.parse(output));
+      }),
+    )(JSON.parse(output));
 
     expect(page.items.some(({ text }) => text.includes("Visible prior"))).toBe(
       true,

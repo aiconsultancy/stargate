@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { Schema } from "effect";
-import { z } from "zod";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import {
@@ -9,6 +8,7 @@ import {
   reviewBindingSchema,
 } from "../src/fleet/protocol";
 import { reviewContextPrompt, reviewNativePrompt } from "../src/fleet/reviews";
+import { zodStringRecord } from "./fixtures/zod-string-record";
 
 const diff =
   "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n";
@@ -144,9 +144,9 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
         });
 
       if (path === "/api/session" && request.method === "POST") {
-        const data = z
-          .record(z.string(), z.unknown())
-          .parse(await request.json());
+        const data = Schema.decodeUnknownSync(zodStringRecord(Schema.Unknown))(
+          await request.json(),
+        );
 
         creates.push(data);
 
@@ -154,9 +154,9 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
       }
 
       if (path === `/api/session/${b.sessionID}/prompt`) {
-        const data = z
-          .record(z.string(), z.unknown())
-          .parse(await request.json());
+        const data = Schema.decodeUnknownSync(zodStringRecord(Schema.Unknown))(
+          await request.json(),
+        );
 
         admissions.push(data);
 

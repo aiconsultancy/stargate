@@ -230,7 +230,7 @@ test("the digest follows the file that Bun runs", async () => {
     await pluginDigest(
       await release({
         "src/crew/plugin.ts":
-          'import { z } from "zod";\nexport const plugin = z;\n',
+          'import { sample } from "fixture-uninstalled-package";\nexport const plugin = sample;\n',
       }),
     ),
   ).toBeUndefined();

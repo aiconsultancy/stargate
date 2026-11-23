@@ -48,9 +48,7 @@ which the scope finalizer sets from another fiber.
 rule, then Oxfmt. It repeats until a round makes no changes. It does not apply
 suggestions, dangerous fixes, or fixes from the advisory configuration.
 The hand-work lint rules are off for `tests/**`; tests keep the bundle gate.
-The new lint rules and the formatter skip the explicit Zod paths in
-`.oxlintrc.json`. The previous lint and formatting checks still run on those
-paths. The approved bundle may apply tool-only form changes to the four fixed
+The approved bundle may apply tool-only form changes to the four fixed
 entry files if compiler-emitted JavaScript stays equal. This does not permit
 hand-written changes to their bodies. For an emit comparison, use
 `bun scripts/compare-js-emit.ts --capture OUT_DIR` before and after the sweep,
@@ -59,17 +57,15 @@ with the tool files present in both trees. Then run
 TypeScript compiler’s JavaScript output and reports each file as raw-equal,
 syntax-equal or failed. Keep new comments out of the emit; test and check
 types separately. Numeric and cooked string spelling can differ. Tagged
-template raw text, regex pattern text and directive spelling must match. `bun run lint` checks the Zod list
-using the same module syntax
-and source scope as the touched-Zod guard. Listed files must exist and import
-Zod. All guarded Zod imports must be listed; test imports need not be listed.
+template raw text, regex pattern text and directive spelling must match.
 
-When a file no longer imports Zod after migration, remove its path from the
-`excludeFiles` list in `.oxlintrc.json` in the same change. Run `make format`,
-inspect the diff and run `bun run lint`. If a guarded file moves and retains Zod,
-update its path in the same change, subject to the touched-Zod policy.
+`eslint/no-restricted-imports` rejects `zod` and its subpaths in `src`,
+`tests`, `scripts` and `perf`. The same rule runs separately on repo-owned
+`tools/oxlint` files without linting its vendored copies. SDK-owned transitive
+Zod is not a first-party dependency. The empty `excludeFiles` array marks
+the general set for the lint-list checker and formatter; it exempts no file.
 
-Seven ceiling rules apply outside `tests/**`, the Zod paths and the four fixed
+Seven ceiling rules apply outside `tests/**` and the four fixed
 entry files: at most 250 lines in a function (blank lines and comments not
 counted), 60 statements, 6 parameters, block depth 6, complexity 40, nested
 calls 6 and 3 classes in a file. For each rule, one override in
@@ -81,10 +77,6 @@ for `serve` in `src/app/runtime.ts` went from 1,334 to 1,350. The approved
 repairs put braces around callbacks and add no statement to `serve`. It is
 the only raise. `eslint/max-lines` stays off: the architecture size guard
 owns file length (non-blank lines, limit 1,000, with its own list).
-A file that leaves the Zod exclusion list must meet the ceiling limits or be
-added to the list of each rule it exceeds; for example, `src/health/health.ts`
-has complexity 212.
-
 An exception list is an override that turns one or more rules off for literal,
 sorted file paths, because those files hold places that must stay as they are.
 Exception lists may also only shrink.
@@ -92,7 +84,7 @@ Exception lists may also only shrink.
 `bun run lint` runs `scripts/check-lint-lists.ts`. It puts every override in
 `.oxlintrc.json` into exactly one kind and fails on an override of no kind:
 
-- the general set: the one override with `excludeFiles` (the Zod paths);
+- the general set: the one override with empty `excludeFiles`;
 - the `tests/**` and fixed-entry overrides, matched by their exact `files` in
   `structuralOverrides` in the script; they may only turn rules off, and they
   must turn all seven ceiling rules off;
@@ -104,7 +96,7 @@ The check fails when a ceiling list file no longer exceeds the general limit,
 when a list maximum is above the largest value of its files (the message gives
 the value), when an exception list file has no finding of its rule with the
 rule on, and when a listed path does not exist, is a pattern, or is a test, a
-fixed entry or a Zod file. When a change brings a file under a limit or removes
+fixed entry. When a change brings a file under a limit or removes
 its last finding of a listed rule, remove the file from that list in the same
 change. A new file or a file that is not listed must meet the general rules.
 The check also fails when Oxlint fails, gives no output, or reports fewer files
@@ -117,7 +109,7 @@ branch at freshly fetched `origin/main`. It applies the tool patch to the index,
 leaves the generated sweep unstaged, reports changes by top-level folder, and
 fails if a second format run changes anything.
 
-Two lint rules have options with a reason. `eslint/sort-imports` sets
+`eslint/sort-imports` sets
 `ignoreDeclarationSort: true`: the order of import declarations is the order
 in which modules are evaluated, so the rule checks only the order of names
 inside one import. `eslint/new-cap` sets `capIsNewExceptionPattern` to
@@ -246,8 +238,7 @@ output is redacted; do not add real credentials to test the hook. Keep secrets
 outside tracked files and use environment references in configuration.
 GitHub Actions runs this gate and an explicit `mise run check` for pull requests
 and pushes to `main`, using pinned tools and frozen dependency installation.
-The hosted **Quality checks** gate always runs the full suite, plus the existing
-touched-Zod policy and self-update environment checks. No Slack or provider
+The hosted **Quality checks** gate always runs the full suite, plus self-update environment checks. No Slack or provider
 credentials are required.
 
 `check-affected` keeps the strict typecheck and lint. It selects transitive
@@ -257,10 +248,8 @@ importers from the index. Deleted tests do not run themselves. Imported test
 helpers and data files are graph inputs too.
 Source edits also select architecture tests, which read the source graph.
 A small reader table maps architecture baseline/policy JSON to architecture
-tests, hook data to touched-Zod hook tests, and documentation to architecture
-tests. `docs/api.md` also selects the API Git-status test that reads it.
-The touched-Zod and affected-test hook implementations map to their hook tests,
-which invoke them as subprocesses rather than import them.
+tests, and documentation to architecture tests. `docs/api.md` also selects the API Git-status test that reads it.
+The affected-test hook maps to its subprocess tests.
 
 Untrusted paths have no graph edge or reader mapping. The default mode is
 `defer`: run selected tests, name the untrusted paths in a notice, and rely on

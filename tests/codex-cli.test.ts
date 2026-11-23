@@ -12,8 +12,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Schema } from "effect";
-import { z } from "zod";
+import { Effect, Result, Schema } from "effect";
 import {
   bootTicks,
   systemProcesses,
@@ -64,31 +63,32 @@ type Tool = {
   type: string;
   name?: string | undefined;
   description?: string | undefined;
-  tools?: Tool[] | undefined;
+  tools?: readonly Tool[] | undefined;
 };
 
-const toolSchema: z.ZodType<Tool> = z.lazy(() =>
-  z.object({
-    type: z.string(),
-    name: z.string().optional(),
-    description: z.string().optional(),
-    tools: z.array(toolSchema).optional(),
+const toolSchema: Schema.Codec<Tool> = Schema.Struct({
+  type: Schema.String,
+  name: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  tools: Schema.optional(Schema.Array(Schema.suspend(() => toolSchema))),
+});
+
+// Zod's `.default([])` filled a missing or undefined key.
+const emptyList = Effect.succeed([]);
+
+const decodeBody = Schema.decodeUnknownResult(
+  Schema.Struct({
+    model: Schema.String,
+    tools: Schema.Array(toolSchema).pipe(Schema.withDecodingDefault(emptyList)),
+    input: Schema.Array(
+      Schema.Struct({
+        type: Schema.String,
+        output: Schema.optional(Schema.Unknown),
+        tools: Schema.optional(Schema.Array(toolSchema)),
+      }),
+    ).pipe(Schema.withDecodingDefault(emptyList)),
   }),
 );
-
-const body = z.object({
-  model: z.string(),
-  tools: z.array(toolSchema).default([]),
-  input: z
-    .array(
-      z.object({
-        type: z.string(),
-        output: z.unknown().optional(),
-        tools: z.array(toolSchema).optional(),
-      }),
-    )
-    .default([]),
-});
 
 /**
  * Every tool the model is offered: namespaced tools, and the nested tools
@@ -147,7 +147,7 @@ function fixture(script: Reply[] = []) {
       }
 
       const text = request.method === "POST" ? await request.text() : "";
-      const parsed = body.safeParse(text ? JSON.parse(text) : {});
+      const parsed = decodeBody(text ? JSON.parse(text) : {});
       requests.push({
         path: url.pathname,
         bearer: request.headers.get("authorization") === `Bearer ${key}`,
@@ -157,14 +157,14 @@ function fixture(script: Reply[] = []) {
         memory: text.includes(memory),
         skill: text.includes(skill) || text.includes("skill-creator"),
         body: text,
-        ...(parsed.success
+        ...(Result.isSuccess(parsed)
           ? {
-              model: parsed.data.model,
+              model: parsed.success.model,
               tools: toolNames([
-                ...parsed.data.tools,
-                ...parsed.data.input.flatMap((item) => item.tools ?? []),
+                ...parsed.success.tools,
+                ...parsed.success.input.flatMap((item) => item.tools ?? []),
               ]).sort(),
-              outputs: parsed.data.input
+              outputs: parsed.success.input
                 .filter((item) => item.type.endsWith("_output"))
                 .map((item) => JSON.stringify(item.output)),
             }
@@ -492,9 +492,9 @@ args = ["${join(root, "mcp")}"]
   expect(last?.body).toContain("input_image");
   expect(last?.body).toContain("Attachment: dot.png (image 1)");
   expect(
-    z
-      .object({ reasoning: z.object({ effort: z.string() }) })
-      .parse(JSON.parse(last?.body ?? "{}")).reasoning.effort,
+    Schema.decodeUnknownSync(
+      Schema.Struct({ reasoning: Schema.Struct({ effort: Schema.String }) }),
+    )(JSON.parse(last?.body ?? "{}")).reasoning.effort,
   ).toBe("high");
 
   for (const request of requests) {
@@ -790,7 +790,10 @@ test.skipIf(process.platform !== "linux")(
 
       const sleeping = async () => {
         marker ||= await readFile(record, "utf8").then(
-          (text) => z.object({ turn: z.string() }).parse(JSON.parse(text)).turn,
+          (text) =>
+            Schema.decodeUnknownSync(Schema.Struct({ turn: Schema.String }))(
+              JSON.parse(text),
+            ).turn,
           () => "",
         );
 

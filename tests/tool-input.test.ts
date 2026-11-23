@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
-import { z } from "zod";
 import { postInputSchema } from "../src/captain-post/captain-post";
 import {
   crewOpenCodeInput,
@@ -26,7 +25,6 @@ import {
   modelInputSchema,
   modelToolInputSchema,
 } from "../src/crew/controls/models";
-import { projectToolInput } from "../src/crew/input/project-options";
 import * as toolInputs from "../src/crew/input/tool-input";
 import { cronToolInput } from "../src/crew/cron/cron";
 import { notificationToolInput } from "../src/crew/controls/notifications";
@@ -373,26 +371,6 @@ test("native mail project envelope retains branch requirements and field paths",
   if (!invalid.issues) throw new Error("Missing mail recipient accepted");
   expect(invalid.issues).toContainEqual(
     expect.objectContaining({ path: ["to"] }),
-  );
-});
-
-test("Zod project helper preserves required operation fields after separating project", () => {
-  const schema = projectToolInput(
-    z.discriminatedUnion("op", [
-      z.strictObject({ op: z.literal("report") }),
-      z.strictObject({ op: z.literal("run"), name: z.string().min(1) }),
-    ]),
-  );
-
-  expect(schema.parse({ op: "report", project: "stargate" })).toEqual({
-    op: "report",
-    project: "stargate",
-  });
-  const missing = schema.safeParse({ op: "run", project: "stargate" });
-
-  if (missing.success) throw new Error("Missing operation name accepted");
-  expect(missing.error.issues).toContainEqual(
-    expect.objectContaining({ path: ["name"] }),
   );
 });
 

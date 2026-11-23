@@ -18,7 +18,6 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Codex } from "@openai/codex-sdk";
 import { Result, Schema } from "effect";
-import { z } from "zod";
 import { createBackend } from "../src/backends/factory";
 import { inheritedEnvironment } from "../src/backends/cli-agent";
 import {
@@ -47,6 +46,7 @@ import {
 } from "../src/shared/request-failure";
 import { backendFingerprint } from "../src/gateway/routing";
 import { toolchain } from "./codex-toolchain";
+import { zodStringRecord } from "./fixtures/zod-string-record";
 
 const apiKeyEnv = "STARGATE_CODEX_TEST_PROXY_KEY";
 const key = "local-proxy-test-only";
@@ -99,16 +99,21 @@ function config(extra: Record<string, unknown> = {}, directory = "/workspace") {
   });
 }
 
-const logEntry = z.union([
-  z.object({
-    pid: z.number(),
-    argv: z.array(z.string()),
-    env: z.record(z.string(), z.string()),
-    cwd: z.string(),
-  }),
-  z.object({ prompt: z.string(), images: z.array(z.boolean()) }),
-  z.object({ grandchild: z.number() }),
-]);
+const decodeLogEntry = Schema.decodeUnknownSync(
+  Schema.Union([
+    Schema.Struct({
+      pid: Schema.Finite,
+      argv: Schema.Array(Schema.String),
+      env: zodStringRecord(Schema.String),
+      cwd: Schema.String,
+    }),
+    Schema.Struct({
+      prompt: Schema.String,
+      images: Schema.Array(Schema.Boolean),
+    }),
+    Schema.Struct({ grandchild: Schema.Finite }),
+  ]),
+);
 
 async function open(extra: Record<string, unknown> = {}, root?: string) {
   root ??= await mkdtemp(join(tmpdir(), "stargate-codex-"));
@@ -137,7 +142,7 @@ async function open(extra: Record<string, unknown> = {}, root?: string) {
     (await readFile(join(dataDirectory, "codex", "fixture.jsonl"), "utf8"))
       .trim()
       .split("\n")
-      .map((line) => logEntry.parse(JSON.parse(line)));
+      .map((line) => decodeLogEntry(JSON.parse(line)));
 
   const runs = async () =>
     (await log()).flatMap((entry) => ("argv" in entry ? [entry] : []));
@@ -562,14 +567,14 @@ test.skipIf(process.platform !== "linux")(
 test("the launcher starts the CLI that the SDK would start", () => {
   // Read from the SDK's internals in this test only, so that an SDK update
   // That moves its CLI fails here.
-  const sdk = z
-    .object({
-      exec: z.object({
-        executablePath: z.string(),
-        pathDirs: z.array(z.string()),
+  const sdk = Schema.decodeUnknownSync(
+    Schema.Struct({
+      exec: Schema.Struct({
+        executablePath: Schema.String,
+        pathDirs: Schema.mutable(Schema.Array(Schema.String)),
       }),
-    })
-    .parse(new Codex());
+    }),
+  )(new Codex());
 
   const native = nativeCodex();
   expect(native.executable).toBe(sdk.exec.executablePath);
@@ -944,7 +949,7 @@ test("without a root-controlled system directory, start-up fails clearly", async
       .split("\n")
       .filter(Boolean)
       .flatMap((line) => {
-        const entry = logEntry.parse(JSON.parse(line));
+        const entry = decodeLogEntry(JSON.parse(line));
 
         return "grandchild" in entry ? [entry.grandchild] : [];
       });

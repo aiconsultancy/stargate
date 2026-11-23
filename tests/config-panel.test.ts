@@ -2,7 +2,7 @@ import { afterEach, expect, test as bunTest } from "bun:test";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { z } from "zod";
+import { Schema } from "effect";
 import {
   buildConfigPanel,
   readConfigSnapshot,
@@ -197,41 +197,51 @@ test("panel snapshot refuses symbolic or oversized waiting files without followi
   await expect(readConfigSnapshot(f.config, undefined)).rejects.toThrow();
 });
 
+// Zod counted string bounds in code points.
+const text = (minimum: number, maximum: number) =>
+  Schema.String.check(Schema.isBetweenCodePoints(minimum, maximum));
+
 const plain = (max: number) =>
-  z.strictObject({
-    type: z.literal("plain_text"),
-    text: z.string().min(1).max(max),
-    emoji: z.boolean().optional(),
+  Schema.Struct({
+    type: Schema.Literal("plain_text"),
+    text: text(1, max),
+    emoji: Schema.optional(Schema.Boolean),
   });
 
-const buttonSchema = z.strictObject({
-  type: z.literal("button"),
-  action_id: z.string().min(1).max(255),
+const buttonSchema = Schema.Struct({
+  type: Schema.Literal("button"),
+  action_id: text(1, 255),
   text: plain(75),
-  value: z.string().min(1).max(2000),
-  accessibility_label: z.string().max(75).optional(),
+  value: text(1, 2000),
+  accessibility_label: Schema.optional(
+    Schema.String.check(Schema.isMaxCodePoints(75)),
+  ),
 });
 
-const panelSchema = z.strictObject({
-  text: z.string().min(1),
-  blocks: z
-    .array(
-      z.union([
-        z.strictObject({
-          type: z.literal("section"),
-          block_id: z.string().min(1).max(255),
+// Every object of the panel is strict: an unknown key fails.
+const decodePanel = Schema.decodeUnknownSync(
+  Schema.Struct({
+    text: Schema.String.check(Schema.isMinCodePoints(1)),
+    blocks: Schema.Array(
+      Schema.Union([
+        Schema.Struct({
+          type: Schema.Literal("section"),
+          block_id: text(1, 255),
           text: plain(3000),
         }),
-        z.strictObject({
-          type: z.literal("actions"),
-          block_id: z.string().min(1).max(255),
-          elements: z.array(buttonSchema).min(1).max(25),
+        Schema.Struct({
+          type: Schema.Literal("actions"),
+          block_id: text(1, 255),
+          elements: Schema.Array(buttonSchema).check(
+            Schema.isMinLength(1),
+            Schema.isMaxLength(25),
+          ),
         }),
       ]),
-    )
-    .min(1)
-    .max(50),
-});
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(50)),
+  }),
+  { onExcessProperty: "error" },
+);
 
 async function fixture(options: MetaOptions = {}) {
   const directory = await mkdtemp(join(tmpdir(), "config-panel-"));
@@ -322,7 +332,7 @@ async function fixture(options: MetaOptions = {}) {
     const result = updates.at(-1)?.content ?? posts.at(-1)?.content;
     expect(result).toBeDefined();
 
-    return panelSchema.parse(result);
+    return decodePanel(result);
   };
 
   const press = (
@@ -475,7 +485,7 @@ test("enabled panel has six table-derived rows and bounded plain controls", asyn
 });
 
 test("pure builder accepts only table-derived controls and produces a valid synthetic fixture", () => {
-  const panel = panelSchema.parse(
+  const panel = decodePanel(
     buildConfigPanel(configPanelRows(), {
       nonce: "00000000-0000-4000-8000-000000000000",
       revision: 1,

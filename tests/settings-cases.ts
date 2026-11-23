@@ -314,10 +314,16 @@ export type SettingsCase = { label: string; input: unknown };
 
 // Bounded record-key corpus: only the outer __proto__ entry is discarded.
 export const settingsRecordCases = [
-  '{"__proto__":{"fixture":true},"ordinary":1}',
-  '{"__proto__":null,"constructor":1,"prototype":2,"nested":{"__proto__":{"keep":true}}}',
-  '{"ordinary":1,"__proto__":"ignored","after":2}',
-].map((input): unknown => JSON.parse(input));
+  ['{"__proto__":{"fixture":true},"ordinary":1}', '{"ordinary":1}'],
+  [
+    '{"__proto__":null,"constructor":1,"prototype":2,"nested":{"__proto__":{"keep":true}}}',
+    '{"constructor":1,"prototype":2,"nested":{"__proto__":{"keep":true}}}',
+  ],
+  [
+    '{"ordinary":1,"__proto__":"ignored","after":2}',
+    '{"ordinary":1,"after":2}',
+  ],
+] as const;
 
 /** Replace every populated field in raw and decoded seeds, including defaults. */
 export function settingsCases(

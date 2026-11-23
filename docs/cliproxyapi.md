@@ -44,7 +44,7 @@ mise exec -- bun - <<'BUN'
 import { randomBytes } from "node:crypto";
 import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { z } from "zod";
+import { Schema } from "effect";
 
 const root = resolve(".local/cliproxyapi");
 let go;
@@ -59,10 +59,12 @@ if (keyPath) {
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error("Cannot fetch public Go catalog.");
-  const catalog = z.object({ data: z.array(z.object({
-    id: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,127}$/),
-    type: z.string(),
-  })) }).parse(await response.json());
+  const catalog = Schema.decodeUnknownSync(Schema.Struct({
+    data: Schema.Array(Schema.Struct({
+      id: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9._-]{0,127}$/)),
+      type: Schema.String,
+    })),
+  }))(await response.json());
   const models = catalog.data.filter((model) => model.type === "chat")
     .map(({ id }) => ({ name: id, alias: `opencode-go/${id}` }));
   if (!models.length) throw new Error("Public Go catalog has no chat models.");

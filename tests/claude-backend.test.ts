@@ -12,8 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { BUILTIN_TOOL_NAMES } from "@anthropic-ai/claude-agent-sdk";
-import { Result, Schema } from "effect";
-import { z } from "zod";
+import { Predicate, Result, Schema, SchemaTransformation } from "effect";
 import { createBackend } from "../src/backends/factory";
 import {
   ClaudeBackend,
@@ -34,6 +33,7 @@ import {
   BackendFailure,
 } from "../src/shared/request-failure";
 import { backendFingerprint } from "../src/gateway/routing";
+import { zodStringRecord } from "./fixtures/zod-string-record";
 
 const apiKeyEnv = "STARGATE_CLAUDE_TEST_PROXY_KEY";
 const key = "local-proxy-test-only";
@@ -81,16 +81,43 @@ function config(extra: Record<string, unknown> = {}, directory = "/workspace") {
   });
 }
 
-const logEntry = z.union([
-  z.object({
-    pid: z.number(),
-    argv: z.array(z.string()),
-    env: z.record(z.string(), z.string()),
-    cwd: z.string(),
-  }),
-  z.object({ input: z.object({ type: z.string() }).loose() }),
-  z.object({ grandchild: z.number() }),
-]);
+// Loose objects accept instances with a valid `type` and keep enumerable
+// String extras (including inherited ones), except __proto__.
+const looseLogInput = Schema.Unknown.pipe(
+  Schema.decodeTo(
+    Schema.Unknown,
+    SchemaTransformation.transform({
+      decode: (input) => {
+        if (!Predicate.isObject(input)) return input;
+        const copy: Record<string, unknown> = { type: input["type"] };
+
+        for (const key in input)
+          if (key !== "type" && key !== "__proto__") copy[key] = input[key];
+
+        return copy;
+      },
+      encode: (input) => input,
+    }),
+  ),
+  Schema.decodeTo(
+    Schema.StructWithRest(Schema.Struct({ type: Schema.String }), [
+      Schema.Record(Schema.String, Schema.Unknown),
+    ]),
+  ),
+);
+
+const decodeLogEntry = Schema.decodeUnknownSync(
+  Schema.Union([
+    Schema.Struct({
+      pid: Schema.Finite,
+      argv: Schema.Array(Schema.String),
+      env: zodStringRecord(Schema.String),
+      cwd: Schema.String,
+    }),
+    Schema.Struct({ input: looseLogInput }),
+    Schema.Struct({ grandchild: Schema.Finite }),
+  ]),
+);
 
 async function open(
   extra: Record<string, unknown> = {},
@@ -121,7 +148,7 @@ async function open(
     (await readFile(join(dataDirectory, "claude", "fixture.jsonl"), "utf8"))
       .trim()
       .split("\n")
-      .map((line) => logEntry.parse(JSON.parse(line)));
+      .map((line) => decodeLogEntry(JSON.parse(line)));
 
   const runs = async () =>
     (await log()).flatMap((entry) => ("argv" in entry ? [entry] : []));

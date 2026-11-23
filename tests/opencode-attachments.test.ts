@@ -1,23 +1,23 @@
 import { expect, test } from "bun:test";
 import { Schema } from "effect";
-import { z } from "zod";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 
 test("attachment eval: OpenCode receives image and document bytes through native inline files", async () => {
-  const payload = z.object({
-    id: z.string(),
-    text: z.string(),
-    files: z.array(
-      z.object({
-        name: z.string(),
-        uri: z.string(),
-        source: z.object({ type: z.literal("inline") }),
+  const payload = Schema.Struct({
+    id: Schema.String,
+    text: Schema.String,
+    files: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        uri: Schema.String,
+        source: Schema.Struct({ type: Schema.Literal("inline") }),
       }),
     ),
   });
 
-  const received: z.infer<typeof payload>[] = [];
+  const decodePayload = Schema.decodeUnknownSync(payload);
+  const received: (typeof payload.Type)[] = [];
   let input = "";
 
   const server = Bun.serve({
@@ -27,7 +27,7 @@ test("attachment eval: OpenCode receives image and document bytes through native
       const url = new URL(request.url);
 
       if (url.pathname.endsWith("/prompt")) {
-        const body = payload.parse(await request.json());
+        const body = decodePayload(await request.json());
         received.push(body);
         input = body.id;
 

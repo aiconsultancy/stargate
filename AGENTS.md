@@ -87,24 +87,10 @@ comments. LF and CRLF count equally, and a final newline adds no line. See
   Migrate existing Zod schemas in component batches, preserving validation and
   wire formats. Keep coupled schemas, direct consumers and parity tests together.
   Follow the PR budget and batch order in `docs/effect-schema-migration.md`.
-  Keep remaining Zod consumers until their migration phase. Touched-Zod
-  ratchet: a substantive change to a file importing `zod` must migrate that
-  file's schemas to Effect Schema in the same change, or revert the touch.
-  NET1766 permits mechanically verified import/path moves. The guard
-  requires an existing base file or Git-detected rename, with byte-identical
-  source except relative static import/reexport and literal dynamic import
-  paths that resolve to the same base file through the actual rename map.
-  Dynamic literal rewrites require the consumer itself to be renamed;
-  stationary consumers keep the previous declared-change requirement.
-  New files/copies and extra
-  Zod imports, sources or bindings are not exempt. Formatting, comments,
-  logic edits and constant/helper extraction need a declared NET issue entry
-  in `scripts/hooks/touched-zod-changes.json`: an existing file, byte-identical
-  Zod declarations, and at most 20 added plus removed lines. No file may gain
-  a Zod import. The head list is required; only entries new or changed against
-  the merge base apply to this PR. Unchanged entries grant nothing. This scoped
-  restructure policy does not prove behavior. See the exact
-  supported path-resolution limits in `docs/effect-schema-migration.md`.
+  Do not import `zod` or its subpaths in first-party code or tests. The
+  `no-restricted-imports` lint rule enforces this for imports and re-exports.
+  Keep SDK-owned transitive dependencies. Store legacy parity expectations
+  as data, not as a runtime validation dependency.
 - Prefer the installed Effect capability over another dependency when required
   behavior and security properties are equivalent. Do not remove SDK-required
   dependencies or change public behavior merely to reduce dependency count.

@@ -2,9 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import pino from "pino";
-import { z } from "zod";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";
 import { notificationKey } from "../src/notifications/preferences/notifications";
 import {
@@ -155,24 +154,24 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
     expect(backendCalls).toEqual(["quota"]);
     await accept(event("<@UBOT> /config", "3.000"));
 
-    const content = z
-      .object({
-        blocks: z.array(
-          z.object({
-            type: z.string(),
-            elements: z
-              .array(
-                z.object({
-                  action_id: z.string(),
-                  value: z.string(),
-                  text: z.object({ text: z.string() }),
+    const content = Schema.decodeUnknownSync(
+      Schema.Struct({
+        blocks: Schema.Array(
+          Schema.Struct({
+            type: Schema.String,
+            elements: Schema.optional(
+              Schema.Array(
+                Schema.Struct({
+                  action_id: Schema.String,
+                  value: Schema.String,
+                  text: Schema.Struct({ text: Schema.String }),
                 }),
-              )
-              .optional(),
+              ),
+            ),
           }),
         ),
-      })
-      .parse(updates.at(-1)?.content);
+      }),
+    )(updates.at(-1)?.content);
 
     const button = content.blocks
       .flatMap((block) => block.elements ?? [])

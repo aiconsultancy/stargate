@@ -5,117 +5,20 @@ Keep accepted inputs, decoded values, public configuration, stored records and
 tool wire formats unchanged. Keep Bun SQLite and the Promise adapter contract.
 This migration does not upgrade Effect or the SDKs.
 
-## Touched-file ratchet
+## Import rule
 
-Any substantive change to a file importing `zod` must replace that file's
-Zod schemas with Effect Schema in the same change; otherwise revert the touch.
-CI enforces this on every pull request through `scripts/hooks/touched-zod.sh`.
-The guard compares committed HEAD with the merge base of the supplied PR base.
-It checks TypeScript files under `src`, `scripts` and `perf`. Direct imports,
-subpath imports, reexports, import types, dynamic imports and `require` calls
-all count, including single-quoted and static template literals.
-Untouched Zod files keep working until their migration batch.
-The legacy-oracle tests are exempt: they compare
-against captured Zod behaviour by design and stay until the migration
-removes the oracle.
-
-**Decision (operator, 21 November 2026):** the ratchet intentionally
-outranks the batch boundaries. A fix that touches a Zod file migrates that
-file immediately, even mid-batch inside an otherwise unrelated PR; record
-such a forced migration under the file's home batch so the remaining budget
-stays accurate. Batches remain the plan for _untouched_ files.
-
-### NET1766 mechanical import/path exception
-
-The operator permits existing Zod imports to survive a narrowly verified move.
-This exception does not permit new Zod imports or unrelated source edits.
-The ordinary CI command applies these checks automatically. There is no label,
-environment switch or alternate CI mode that bypasses them.
-
-- The source must be an existing scoped base file or a Git-detected rename
-  from one. Git compares all paths with 50% rename similarity. An added file
-  or copy cannot inherit a legacy file's imports. A move that Git does not
-  identify as a rename fails while it retains Zod.
-- The guard parses committed source with the installed TypeScript API. It
-  compares exact source text, not a token sequence with whitespace removed.
-  Comments, formatting, ASI-sensitive newlines, import declarations, bindings,
-  Zod specifiers and executable code must remain byte-identical.
-- Only relative static import/reexport and dynamic import literal contents
-  can change. Each target must resolve uniquely in both Git trees to the same
-  base file, applying the actual rename map. An in-place consumer can change
-  a path only when its target was renamed. A moved consumer can update paths to unchanged
-  targets. The guard also checks unchanged relative paths in these
-  files, so moving a consumer cannot silently select a different target.
-  Dynamic import literal contents can change only when the consumer itself
-  is a Git-detected rename. In-place consumers keep dynamic imports unchanged
-  through this exception, even when their target is renamed; a qualifying
-  declared change is still required for an in-place dynamic path rewrite.
-- Resolution supports regular `.ts` files through explicit `.ts` paths,
-  extensionless paths and directory `index.ts` paths. Ambiguous file/index
-  candidates, symlinks, aliases, package resolution and JS-to-TS mappings are
-  not proof of identity. Unresolved or unsupported paths fail the exception.
-  Changed literals cannot change quote kind or use escaped path spellings.
-- `require`, import-equals and import-type expressions must remain unchanged.
-  A Zod file with a relative expression of one of these forms cannot move
-  through this exception. Nonliteral dynamic imports and `require` arguments
-  prevent a retained-Zod file from qualifying for the exception. They do not
-  cause the ordinary guard to reject clean files without a literal Zod import.
-  The guard detects literal module targets;
-  it does not perform general semantic analysis of computed runtime module
-  targets. Parse or Git comparison errors also fail closed. No supplied
-  base still means no comparison, as before.
-
-This mechanical proof covers import-only and move-only source edits, not arbitrary
-behavior-preserving refactors. Constant extraction, importing a new helper,
-changing a helper call, and other root/helper logic edits outside the declared
-restructure policy below still require
-migration or reversion of the Zod-file touch. This check does not prove general
-runtime equivalence of a module move. Normal tests and review still cover
-path-sensitive runtime behavior and changes inside imported modules.
-
-### Declared scoped restructure changes
-
-The owner permits small scoped restructure edits in existing Zod files.
-Each PR can declare `path`, a `NET-` issue identifier and a one-line `reason`
-in `scripts/hooks/touched-zod-changes.json`. The guard reads the committed PR
-head, requires that list as a regular file, validates it and rejects duplicate
-or invalid entries. Only an entry new or changed from the merge base applies;
-an unchanged entry grants nothing to a later PR. An absent base list means an
-empty list; malformed base data fails closed. The mechanism ships an empty
-list. Each restructure PR must add or update its own entry. JSON formatting
-changes alone do not renew an entry. Declared files must exist as regular files at base and head, without
-copy or rename substitution. Their Zod declarations must be byte-identical.
-No file may gain a Zod import. A declared edit has a fixed budget of 20 added
-plus removed lines, so a ten-line replacement uses the full budget. This
-covers the small root/syntax edits without granting a large rewrite. Unknown
-loaders and failed Git, parse or declaration checks fail closed. Undeclared
-files retain ordinary and mechanical policy. For the NET1769 root extraction
-and NET1771 syntax import retarget, the respective PRs can add these entries:
-
-```json
-[
-  {
-    "path": "src/maintenance/nightly/update/ready.ts",
-    "issue": "NET-1769",
-    "reason": "Centralize the installation root."
-  },
-  {
-    "path": "src/maintenance/update-notice.ts",
-    "issue": "NET-1771",
-    "reason": "Retarget the extracted syntax leaf."
-  }
-]
-```
-
-This is a quality check, not proof of behavior or verification of live issue
-approval. Review and focused tests must establish scope and preserved behavior.
+First-party TypeScript, including tests and repo-owned lint tooling, must not
+import `zod` or its subpaths. `bun run lint` enforces this through
+`eslint/no-restricted-imports`. The rule checks static imports, exports with a
+module source, and literal dynamic imports. Do not load Zod through CommonJS
+or a computed specifier. The old touched-file and exclusion-list guards were
+removed with the direct dependency. Tests keep legacy expected values and
+advertisements as data.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**. Fifteen migration PRs
-are merged. That leaves three component batches. One contingency split can bring the
-total to 19, still below 20. Report a proposed
-budget change before opening another PR; do not weaken verification to fit it.
+The migration uses 18 component batches. Batch 18 closes the migration by
+removing the last first-party imports, bridges, and direct dependency.
 
 This replaces the original estimate of approximately 410 one-schema PRs. The
 inventory at `2ef51cf` found 348 named schema bindings and 52 inline parse
@@ -128,7 +31,7 @@ new schemas from current main before starting a batch. Move coupled definitions
 between the planned batches when composition requires it. Do not introduce an
 adapter merely to retain an artificial file split. Do not stack migration PRs.
 
-Completed:
+Migration batches:
 
 - [Claude session UUID schema](https://github.com/aiconsultancy/stargate/pull/43).
 - [OpenCode pairing-response schema](https://github.com/aiconsultancy/stargate/pull/44).
@@ -146,42 +49,19 @@ Completed:
 - [Cron operations and records](https://github.com/aiconsultancy/stargate/pull/211).
 - [Maintenance execution and offline scripts](https://github.com/aiconsultancy/stargate/pull/212).
 - [Maintenance records and readiness](https://github.com/aiconsultancy/stargate/pull/213).
-- Status, quota, notifications and health (batch 15).
+- [Status, quota, notifications and health](https://github.com/aiconsultancy/stargate/pull/215).
+- Dependency removal, test validators and retired bridges (batch 18, NET-1806).
 
 The first batch-6 timing pair failed at +18.27%. Its diagnostic pair measured
 +2.63% with retained coverage; this is not a performance repair. The earlier
 batch-4 first-pair +10.9% failure also remains recorded.
 
-## Remaining component batches
-
-Seventeen batches are complete. Batch 18 removes the direct dependency.
-File names identify primary scope, not a restriction against updating a coupled
-consumer. Tests belong to the batch
-that owns their production boundary, rather than a separate test-only PR.
-
-15. Status, quota, notifications, Fleet API configuration and health: merged
-    (see Completed). The tools keep the previous JSON Schema advertisement.
-16. Maintenance records and readiness: merged (see Completed). The `maintenance
-    schema` output keeps the Zod 4.6.7 report advertisement byte for byte.
-    `droid-facts.ts` decodes reports with the native report schema.
-17. Maintenance execution and migration scripts: merged (see Completed).
-18. Dependency removal. Check for residual first-party Zod use in production,
-    tests and tooling. Remove obsolete bridges and the direct Zod dependency.
-    Keep SDK-owned transitive Zod and dependency provenance checks.
-
-Inspect imports and schema composition before finalizing each batch's scope.
-Execute shared prerequisites first. A dependency can move into an earlier batch
-without creating another PR. Each merged batch must leave main working.
-
-For mixed composition, add an adapter only when the selected schema requires
-one. It must delegate to the authoritative Effect decoder, not copy its rules.
-Remove the adapter when its remaining consumer migrates.
-
 ### Configuration settings composed into later batches
 
-Migrated components use `settings-legacy.ts` only where an authoritative Effect setting is
-still embedded in a Zod container. It does not retain a second validation rule.
-Remove each bridge with its owning container:
+Batch 18 removes `legacySetting`, `objectToolInput`, `projectToolInput` and
+`projectKeySchema`. `settings-legacy.ts` keeps its native projectors,
+`settingsAdvertisement` and `settingsInputAdvertisement`. Earlier batches
+removed adapters at their owning boundaries:
 
 - Engine inbox/mail now compose native task-ID/text primitives directly;
   batch 10 removes their two bridges. Batch 9 removed the team/agent-ID and
@@ -218,9 +98,7 @@ field trimming and nested defaults. Top-level branch defaults stay with the
 handler. Pi retains an exclusive operation
 union with required defaulted fields and installed argument coercion. Its crew
 decoder is separate from journal/history. The reviewed native advertisement
-projector is shared without adding a Zod advertisement validator. Batch 18 must
-retain or move its pure functions when removing the legacy-bridge module;
-crew's native adapters still use them. Recovery RPC
+projector is shared by the native adapters. Recovery RPC
 uses native codecs through the installed Promise SDK's Standard Schema input
 contract; nested strictness does not depend on caller decode options. Resume
 remains a general crew operation, not an operator recovery RPC operation.
@@ -235,8 +113,7 @@ trimmed 64,000-code-point limit. Strict old task envelopes and loose modern
 text envelopes remain separate. IRC/local-report RPC retain structured output
 and native nested-strict decoding/encoding. Batch 15 moves the quota tool to
 the native project envelope; the unused project-selection alias is removed
-with IRC's native consumer. Batch 18 must retain/move the pure projectors
-these adapters use.
+with IRC's native consumer. The pure projectors these adapters use remain.
 
 Fleet runtime codecs preserve strict nested decode/encode behavior and schema
 field order. The tool registrations keep their original object/union forms
@@ -263,7 +140,7 @@ Effect's general UUID check also accepts uppercase or mixed-case max UUIDs;
 the old Zod boundary accepted that sentinel only in lowercase. Ordinary UUIDs
 remain case-insensitive and are forwarded without changing their spelling.
 
-Each batch needs focused parity tests, strict TypeScript, Biome, full required
+Each batch needs focused parity tests, strict TypeScript, Oxlint, Oxfmt, full required
 quality gates and clean independent review. Preserve the coverage and runtime
 requirements. A measured full-suite duration increase above 10% fails the
 runtime condition; do not reduce test selection or raise deadlines to hide it.
@@ -288,8 +165,9 @@ direct decoders. Use Effect's Standard Schema adapter where client types require
 it; verify that the installed SDK still recognizes the underlying Effect codec.
 
 The Claude SDK's `tool()` helper requires a Zod raw shape, but Stargate's current
-Claude backend does not call it. Its transitive Zod dependency remains SDK-owned.
-Check the installed interface before migrating another SDK or RPC boundary.
+Claude backend does not call it. `package.json` has no direct Zod dependency;
+SDK-required transitive Zod stays in `bun.lock`. Dependency and provenance
+checks are unchanged. Check the installed interface before migrating another SDK or RPC boundary.
 
 Prefer Effect capabilities over other direct dependencies only after verifying
 equivalent behavior and security properties. This plan does not establish that

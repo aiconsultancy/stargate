@@ -12,7 +12,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { z } from "zod";
 import { latestInput, TranscriptUnavailable } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, loadConfig } from "../src/config";
@@ -509,7 +508,9 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
         );
 
       if (url.pathname.endsWith("/prompt")) {
-        inputID = z.object({ id: z.string() }).parse(await request.json()).id;
+        inputID = Schema.decodeUnknownSync(
+          Schema.Struct({ id: Schema.String }),
+        )(await request.json()).id;
 
         return Response.json({ data: { id: inputID } });
       }

@@ -28,7 +28,6 @@ import plugin from "../src/crew/plugin";
 import {
   effectProjectKeySchema,
   effectProjectToolInput,
-  projectKeySchema,
   projectsSchema,
 } from "../src/crew/input/project-options";
 import { CrewProjects } from "../src/crew/workspace/projects";
@@ -612,7 +611,6 @@ test("Effect project envelope separates selection from strict operation decoding
     expect(
       Result.isSuccess(Schema.decodeUnknownResult(effectProjectKeySchema)(key)),
     ).toBe(accepted);
-    expect(projectKeySchema.safeParse(key).success).toBe(accepted);
   }
 
   const json = Schema.toJsonSchemaDocument(tool, {

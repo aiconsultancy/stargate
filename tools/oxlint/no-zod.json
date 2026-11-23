@@ -1,0 +1,12 @@
+{
+  "categories": { "correctness": "off" },
+  "rules": {
+    "eslint/no-restricted-imports": [
+          "error",
+          {
+            "paths": [{ "name": "zod", "message": "Use Effect Schema in first-party code." }],
+            "patterns": [{ "group": ["zod/*", "zod/**"], "message": "Use Effect Schema in first-party code." }]
+          }
+        ]
+  }
+}
