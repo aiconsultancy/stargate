@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { TurnProgress } from "../shared/turn-progress";
 import { waitingPhrase } from "../shared/waiting";
 import { type WaitingSettings } from "../config/waiting";
-import { isDefiniteRefusal, type OutgoingActivity } from "./connector";
+import { type OutgoingActivity, isDefiniteRefusal } from "./connector";
 
 type Send = (
   activity: OutgoingActivity,
@@ -67,9 +67,9 @@ export class TeamsPresence {
 
     if (slot) this.slots.set(channel, slot);
 
-    let sequence = 0,
-      previous = "",
-      informative = !!slot;
+    let sequence = 0;
+    let previous = "";
+    let informative = !!slot;
 
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(600_000)]);
 

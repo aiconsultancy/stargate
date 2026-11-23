@@ -2,14 +2,14 @@ import { Schema } from "effect";
 import type { BotConfig } from "../config";
 import {
   type NativeQuestion,
-  nativeQuestionSchema,
   type QuestionAnswer,
   type QuestionOffer,
+  nativeQuestionSchema,
   questionAnswer,
 } from "./questions";
 import {
-  botKey,
   type Identity,
+  botKey,
   isAllowedChannel,
   isAllowedUser,
 } from "../shared/registration";

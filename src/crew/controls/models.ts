@@ -19,7 +19,7 @@ import {
 import type { CrewCaller, WorkerModelPeer } from "../execution/engine";
 import { effectProjectToolInput } from "../input/project-options";
 import { CrewError } from "../execution/state";
-import { agentIDSchema, defaultModelProviders, type Team } from "../team";
+import { type Team, agentIDSchema, defaultModelProviders } from "../team";
 
 const target = agentIDSchema.pipe(settingsDefault("captain"));
 

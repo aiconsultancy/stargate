@@ -1,7 +1,7 @@
 import { readFile, stat, statfs } from "node:fs/promises";
 import {
-  arch,
   type CpuInfo,
+  arch,
   cpus,
   freemem,
   hostname,

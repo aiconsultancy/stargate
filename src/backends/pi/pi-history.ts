@@ -8,26 +8,26 @@ import {
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type ConversationId,
-  createRegistry,
   type EntryRecord,
   Harness,
+  createRegistry,
 } from "@earendil-works/pi-durable";
 import { CURRENT_SQLITE_SCHEMA_VERSION } from "@earendil-works/pi-durable/storage/sqlite";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { Result, Schema, SchemaTransformation } from "effect";
 import {
-  clipHistory,
-  exactStruct,
   HISTORY_PARTS,
   HISTORY_TEXT,
   type HistoryEntriesInput,
   type HistoryEntry,
   type HistoryPart,
   type HistorySession,
+  type SessionHistory,
+  clipHistory,
+  exactStruct,
   historyChildrenInputSchema,
   historyDescribeInputSchema,
   historyEntriesInputSchema,
-  type SessionHistory,
 } from "../../shared/session-history";
 
 const unavailable = "Pi history unavailable or cancelled.";

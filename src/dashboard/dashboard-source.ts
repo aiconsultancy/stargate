@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import type { AgentBackend } from "../backends/backend";
 import {
   type BotConfig,
-  effectiveIrcConfig,
   type IrcConfig,
   type TeamsConfig,
+  effectiveIrcConfig,
 } from "../config";
 import type { FleetCrewStatus } from "../crew/reporting/fleet-status";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
@@ -21,7 +21,7 @@ import {
 } from "./dashboard-projection";
 import type { IrcRegistration } from "../irc/ship";
 import { createReadSlot, readWithDeadline } from "../lib/read-deadline";
-import { backendFingerprint, type Identity } from "../shared/registration";
+import { type Identity, backendFingerprint } from "../shared/registration";
 import {
   HISTORY_PAGE,
   type HistorySession,

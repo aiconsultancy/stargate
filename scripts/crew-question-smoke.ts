@@ -35,9 +35,9 @@ const home = await realpath(
   await mkdtemp(join(tmpdir(), "crew-clarification-")),
 );
 
-const captainDirectory = join(home, "captain"),
-  worktree = join(home, "worker"),
-  captainID = "ses_fixtureCaptain";
+const captainDirectory = join(home, "captain");
+const worktree = join(home, "worker");
+const captainID = "ses_fixtureCaptain";
 
 await Promise.all([captainDirectory, worktree].map((p) => mkdir(p)));
 

@@ -24,6 +24,7 @@ import {
   type FleetReviewProof,
   type FleetSource,
   type FleetTarget,
+  type VerifiedSource,
   fleetAssignmentText,
   fleetCompletionSchema,
   fleetOriginSchema,
@@ -31,7 +32,6 @@ import {
   reviewContextSchema,
   reviewProofSchema,
   sourceSchema,
-  type VerifiedSource,
 } from "./protocol";
 
 type SourceRow = { ownerSessionID: string; value: string };

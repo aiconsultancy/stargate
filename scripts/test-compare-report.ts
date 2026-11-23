@@ -335,8 +335,8 @@ export function verdict(runs: Measurement[], complete = true): string {
   if (runs.some((run) => run.side === "tree"))
     return `Single tree failed ${failed("tree")} of ${runs.length} runs; no comparison.`;
 
-  const base = failed("base"),
-    candidate = failed("candidate");
+  const base = failed("base");
+  const candidate = failed("candidate");
 
   if (!base && !candidate) return "None failed; no observed difference.";
 

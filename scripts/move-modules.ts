@@ -14,6 +14,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { API } from "typescript/unstable/async";
 import { createVirtualFileSystem } from "typescript/unstable/fs";
 import {
+  type Node,
+  SyntaxKind,
   isCallExpression,
   isExportDeclaration,
   isImportDeclaration,
@@ -21,8 +23,6 @@ import {
   isLiteralTypeNode,
   isStringLiteralLikeNode,
   skipTrivia,
-  SyntaxKind,
-  type Node,
 } from "typescript/unstable/ast";
 
 type Move = readonly [string, string];

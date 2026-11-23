@@ -1,12 +1,12 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
 import {
-  isAgentNotFoundError,
-  isFormNotFoundError,
-  isSessionNotFoundError,
   OpenCode,
   type OpenCodeClient,
   type SessionMessageInfo,
+  isAgentNotFoundError,
+  isFormNotFoundError,
+  isSessionNotFoundError,
 } from "@opencode/client";
 import { SessionMessage } from "@opencode/schema";
 import { Option, Result, Schema } from "effect";
@@ -20,15 +20,15 @@ import {
 } from "../../attachments/attachments";
 import {
   type AgentBackend,
-  latestInput,
   type PromptSourceContext,
-  sourceLine,
   type SteerInput,
   type SteerResult,
   type TextSink,
   type Transcript,
   type TranscriptEntry,
   TranscriptUnavailable,
+  latestInput,
+  sourceLine,
 } from "../backend";
 import { type BackendConfig, secret } from "../../config";
 import { redactCredentials } from "../../lib/credentials";
@@ -51,10 +51,10 @@ import type {
 } from "../../fleet/protocol";
 import { reviewContextPrompt, reviewNativePrompt } from "../../fleet/reviews";
 import {
-  boundaryRecord,
-  closesBoundaryContext,
   InputBoundaryFold,
   type InputBoundaryRecord,
+  boundaryRecord,
+  closesBoundaryContext,
   resolveBoundaryContext,
 } from "./input-boundary";
 import { InputBoundaryReader } from "./input-origin";
@@ -66,9 +66,9 @@ import {
 import type { MaintenanceDrain } from "../../maintenance/maintenance-drain";
 import {
   type NativeQuestion,
-  nativeQuestionSchema,
   type PendingQuestion,
   type QuestionAnswer,
+  nativeQuestionSchema,
   questionFingerprint,
 } from "../../questions/questions";
 import { quotaObservationSchema, quotaSnapshotSchema } from "../../quota/quota";
@@ -76,15 +76,15 @@ import { createReadSlot, readWithDeadline } from "../../lib/read-deadline";
 import {
   BackendFailure,
   type BackendFailureKind,
-  connectionFailure,
   PendingBackendQuestion,
   PromptNotSubmitted,
+  connectionFailure,
   statusKind,
 } from "../../shared/request-failure";
 import type { TurnProgress, TurnStage } from "../../shared/turn-progress";
 import {
-  scopedUpdate,
   type UpdateSnapshot,
+  scopedUpdate,
 } from "../../maintenance/update-notice";
 import { OpenCodeHistory } from "./opencode-history";
 

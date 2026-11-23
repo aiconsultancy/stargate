@@ -1,4 +1,4 @@
-import { readdir, readFile, rename } from "node:fs/promises";
+import { readFile, readdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";

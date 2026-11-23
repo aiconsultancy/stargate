@@ -1,9 +1,9 @@
 import { dirname, isAbsolute } from "node:path";
 import { quote } from "../../../app/service";
 import {
+  type WindowSpec,
   addClock,
   timerCalendar,
-  type WindowSpec,
   windowMinutes,
 } from "./window";
 

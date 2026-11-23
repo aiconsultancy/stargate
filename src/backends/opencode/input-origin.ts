@@ -3,9 +3,9 @@ import { Option, Schema } from "effect";
 import { crewMessageMetadataKey } from "../../crew/message-protocol";
 import type { ResultAPI, ResultMessage } from "../../crew/execution/result";
 import {
-  boundaryRecord,
   InputBoundaryFold,
   type InputBoundaryRecord,
+  boundaryRecord,
 } from "./input-boundary";
 
 const shellID = Schema.String.check(

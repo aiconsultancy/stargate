@@ -1,5 +1,4 @@
 import {
-  isSessionNotFoundError,
   type MessageListInput,
   type ModelRef,
   type SessionGetInput,
@@ -7,17 +6,19 @@ import {
   type SessionListInput,
   type SessionMessageAssistantTool,
   type SessionMessageInfo,
+  isSessionNotFoundError,
 } from "@opencode/client";
 import { Schema } from "effect";
 import { CrewReporting } from "../../crew/reporting/report-rpc";
 import {
-  clipHistory,
   HISTORY_PARTS,
   type HistoryChildrenInput,
   type HistoryEntriesInput,
   type HistoryEntry,
   type HistoryPart,
   type HistorySession,
+  type SessionHistory,
+  clipHistory,
   historyChildrenInputSchema,
   historyDescribeInputSchema,
   historyEntriesInputSchema,
@@ -25,7 +26,6 @@ import {
   historySessionPageSchema,
   historySessionsSchema,
   piHistoryPrefix,
-  type SessionHistory,
 } from "../../shared/session-history";
 
 type Session = Pick<

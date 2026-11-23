@@ -17,15 +17,15 @@ import { Result, Schema } from "effect";
 import {
   type AgentDispatchConfig,
   type BotConfig,
+  type IrcConfig,
   botSchema,
   configSchema,
-  type IrcConfig,
   reloadConfigSchema,
 } from "../config";
 import { clientPem } from "../irc/client-pem";
 import {
-  checkProducerCredentials,
   type NotifyConfig,
+  checkProducerCredentials,
 } from "../notifications/ingest/config";
 import { settingsIssues } from "../config/settings-schema";
 

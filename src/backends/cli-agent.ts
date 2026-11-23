@@ -4,7 +4,7 @@
  * and stopping every process that a turn started.
  */
 import { readFileSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Attachment } from "../attachments/attachments";

@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import type { IrcConfig } from "../config";
 import { type IrcClient, IrcUnavailable } from "../irc/client";
-import { fold, type IrcMessage, validMsgid } from "../irc/protocol";
+import { type IrcMessage, fold, validMsgid } from "../irc/protocol";
 import {
   type CaptainRef,
   type DispatchAnswerInput,
@@ -13,11 +13,11 @@ import {
 import {
   type DispatchAnswer,
   type DispatchMarker,
+  type IssueLabel,
   dispatchTag,
   dispatchText,
   dispatchTurnText,
   formatDispatchMarker,
-  type IssueLabel,
   isMarkerIssue,
   parseDispatchMarker,
 } from "./protocol";

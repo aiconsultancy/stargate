@@ -2,14 +2,17 @@ import { execFileSync } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
-  readdir,
   readFile,
+  readdir,
   rm,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  type Node,
+  type SourceFile,
+  SyntaxKind,
   createScanner,
   getTokenPosOfNode,
   isBigIntLiteral,
@@ -24,9 +27,6 @@ import {
   isTemplateExpression,
   isTemplateLiteralToken,
   isTemplateSpan,
-  SyntaxKind,
-  type Node,
-  type SourceFile,
 } from "typescript/unstable/ast";
 import { API } from "typescript/unstable/async";
 import { createVirtualFileSystem } from "typescript/unstable/fs";
@@ -214,8 +214,8 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
       return;
     }
 
-    const ac = children(a),
-      bc = children(b);
+    const ac = children(a);
+    const bc = children(b);
 
     if (ac.length !== bc.length) {
       difference(
@@ -235,8 +235,8 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
 
     // Preserve tokens that TS stores outside the child walk, such as unary
     // Operators and declaration keywords. Only trivia is ignored here.
-    const ag = gaps(a, left, ac),
-      bg = gaps(b, right, bc);
+    const ag = gaps(a, left, ac);
+    const bg = gaps(b, right, bc);
 
     if (ag !== bg) difference("structural tokens", ag, bg);
 
@@ -255,8 +255,8 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
 
   const shebang = (text: string) => /^#![^\r\n]*/.exec(text)?.[0] ?? "";
 
-  const before = shebang(left.text),
-    after = shebang(right.text);
+  const before = shebang(left.text);
+  const after = shebang(right.text);
 
   if (before !== after) difference("shebang", before, after);
 
@@ -280,8 +280,8 @@ async function comparePair({ path, before, after }: Pair): Promise<Result> {
 
   const suffix = /\.[cm]?jsx?$/.exec(path)?.[0] ?? ".js";
 
-  const left = `/before${suffix}`,
-    right = `/after${suffix}`;
+  const left = `/before${suffix}`;
+  const right = `/after${suffix}`;
 
   const config = "/tsconfig.json";
 
@@ -419,8 +419,8 @@ async function main() {
     return;
   }
 
-  const before = (await listDirectory(a)).sort(),
-    after = new Set(await listDirectory(b));
+  const before = (await listDirectory(a)).sort();
+  const after = new Set(await listDirectory(b));
 
   if (
     !before.length ||

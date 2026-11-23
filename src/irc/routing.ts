@@ -1,15 +1,15 @@
 import { createHash } from "node:crypto";
 import { maxAttachments } from "../attachments/attachments";
 import {
+  type IrcConfig,
   defaultAllCallWords,
   effectiveIrcConfig,
-  type IrcConfig,
 } from "../config";
 import { fleetAuthority, ircPullRequestGuidance } from "../fleet/fleet-policy";
 import { findMention } from "../shared/mentions";
 import { defaultIrcPeerTurnsPerHour, peerWindowMs } from "../gateway/peers";
 import type { Incoming, Job } from "../gateway/store";
-import { cleanText, fold, type IrcMessage, validMsgid } from "./protocol";
+import { type IrcMessage, cleanText, fold, validMsgid } from "./protocol";
 
 export { validMsgid } from "./protocol";
 

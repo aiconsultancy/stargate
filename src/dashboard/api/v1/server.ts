@@ -10,7 +10,7 @@ import {
   createEventStreams,
   fleetOverviewReadMs,
 } from "./events";
-import { cacheOpenCodeVersion, type OpenCodeVersionLookup } from "./gateway";
+import { type OpenCodeVersionLookup, cacheOpenCodeVersion } from "./gateway";
 import { startHostMetrics } from "./host";
 import {
   defaultCorsOrigins,

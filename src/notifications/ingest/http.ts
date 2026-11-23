@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Effect, Result, Schema } from "effect";
 import {
-  equalCredential,
   type NotifyConfig,
+  equalCredential,
   producerCredentials,
 } from "./config";
 import { NotificationInput, Source } from "./model";

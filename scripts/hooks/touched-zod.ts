@@ -2,6 +2,9 @@ import { spawnSync } from "node:child_process";
 import { posix } from "node:path";
 import { Schema } from "effect";
 import {
+  type Node,
+  type SourceFile,
+  SyntaxKind,
   createScanner,
   getTokenPosOfNode,
   isCallExpression,
@@ -13,9 +16,6 @@ import {
   isImportTypeNode,
   isLiteralTypeNode,
   isStringLiteralLikeNode,
-  type Node,
-  type SourceFile,
-  SyntaxKind,
 } from "typescript/unstable/ast";
 import { API } from "typescript/unstable/async";
 import { createVirtualFileSystem } from "typescript/unstable/fs";

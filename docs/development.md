@@ -76,6 +76,14 @@ branch at freshly fetched `origin/main`. It applies the tool patch to the index,
 leaves the generated sweep unstaged, reports changes by top-level folder, and
 fails if a second format run changes anything.
 
+Two lint rules have options with a reason. `eslint/sort-imports` sets
+`ignoreDeclarationSort: true`: the order of import declarations is the order
+in which modules are evaluated, so the rule checks only the order of names
+inside one import. `eslint/new-cap` sets `capIsNewExceptionPattern` to
+`^(?:Schema|Data|Context)\.`: Effect constructors such as `Schema.Struct`
+are functions with capital names. Other capitalised calls and `new` with a
+lower-case name are still reported.
+
 `hooks-install` installs prek's
 pre-commit and pre-push hooks for this clone. `hooks` runs the pre-commit gate,
 including workflow validation, merge/case conflicts, broken symlinks, large

@@ -18,18 +18,18 @@ import {
   notificationOutcome,
 } from "../notifications/ingest/slack";
 import { type ReactionName, slackTimestamp } from "../shared/reactions";
-import { failureContent, type RequestFailure } from "../shared/request-failure";
+import { type RequestFailure, failureContent } from "../shared/request-failure";
 import type { Identity } from "../gateway/routing";
-import { retrySlack, SlackSocket } from "./slack-connection";
+import { SlackSocket, retrySlack } from "./slack-connection";
 import { SlackFiles, type SlackFilesFetch } from "./slack-files";
 import {
-  prepareSlackReply,
   type SlackContent,
+  prepareSlackReply,
   slackContent,
 } from "../shared/slack-format";
 import {
-  loadThreadContext,
   type ThreadContextRequest,
+  loadThreadContext,
 } from "../gateway/thread-context";
 
 type ModalView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;

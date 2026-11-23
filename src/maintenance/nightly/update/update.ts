@@ -9,12 +9,12 @@ import { layout, readMetadata } from "./release";
 import { type Report, summary } from "../reports/report";
 import {
   type Dependencies,
-  defaultDependencies,
   type RunInput,
   type RunResult,
+  UpdateRefused,
+  defaultDependencies,
   runMaintenance,
   samePlugin,
-  UpdateRefused,
 } from "../run";
 import { buildUpdateCommand } from "../schedule/timer";
 import { normalizeVersion } from "./versions";

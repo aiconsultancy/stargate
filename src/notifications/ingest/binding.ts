@@ -5,7 +5,7 @@ import {
   isAllowedUser,
 } from "../../shared/registration";
 import type { NotifyConfig } from "./config";
-import { audienceAllowed, Destination, physicalKey } from "./model";
+import { Destination, audienceAllowed, physicalKey } from "./model";
 import type { DeliveryDestination } from "./sink";
 import { topicMatches } from "./subscriptions";
 

@@ -21,8 +21,8 @@ import {
 } from "../../../shared/session-history";
 import {
   type ApiV1Config,
-  gatewayFeatures,
   type Registration,
+  gatewayFeatures,
   registrationFeatures,
 } from "./features";
 import { createGitReader } from "./git";

@@ -10,9 +10,9 @@ import { reasonOf } from "../exec";
 import { probeModel, proxyModels } from "./host";
 import type { Journal } from "../journal";
 import {
+  type ProfilesSnapshot,
   chooseUpgrades,
   modelRefs,
-  type ProfilesSnapshot,
   readProfiles,
   refsInProfiles,
   upgradeCandidates,
@@ -22,7 +22,7 @@ import {
 } from "./models";
 import { type OpenCodeControl, openCodeCallMs } from "./opencode";
 import type { ModelChange } from "../reports/report";
-import { formatRef, type ModelRef, parseModel } from "./versions";
+import { type ModelRef, formatRef, parseModel } from "./versions";
 
 export type Session = {
   id: string;

@@ -7,8 +7,8 @@ import type { FleetControl } from "./control";
 import {
   type FleetCompletion,
   type FleetOrigin,
-  nativeMakerSchema,
   type VerifiedSource,
+  nativeMakerSchema,
 } from "./protocol";
 
 /** Resolve by immutable ingress identity and native input, never latest chat. */

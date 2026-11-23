@@ -4,10 +4,10 @@ import type { Socket } from "bun";
 import type { Logger } from "pino";
 import {
   type Casemapping,
+  type IrcMessage,
   casemapping,
   fold,
   formatMessage,
-  type IrcMessage,
   lineBytes,
   maxReceivedBytes,
   parseCapabilities,

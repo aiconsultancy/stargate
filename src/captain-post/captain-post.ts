@@ -22,10 +22,10 @@ import {
 } from "effect";
 import {
   AttachmentUnavailable,
+  type PreparedAttachment,
   checkPreparedAttachments,
   inspectAttachment,
   maxAttachments,
-  type PreparedAttachment,
   preparedAttachmentSchema,
   readPreparedAttachment,
 } from "../attachments/attachments";

@@ -30,10 +30,10 @@ import { createTeamsListener } from "./http";
 import { teamsImageTransport } from "./images";
 import { TeamsPresence } from "./presence";
 import { isAllowedServiceUrl } from "./service-url";
-import { chunkText, extractText, TEAMS_MESSAGE_BYTE_BUDGET } from "./teams";
+import { TEAMS_MESSAGE_BYTE_BUDGET, chunkText, extractText } from "./teams";
 import {
-  listenOnUnixSocket,
   type SocketIdentity,
+  listenOnUnixSocket,
   unlinkOwnSocket,
 } from "../lib/unix-socket";
 

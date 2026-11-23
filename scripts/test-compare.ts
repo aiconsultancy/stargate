@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { constants, readFileSync, readdirSync } from "node:fs";
 import {
   chmod,
@@ -21,18 +21,18 @@ import { availableParallelism, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
-  type LoadAverage,
-  type ProcessIdentity,
-  type GroupSnapshot,
   type CleanupReport,
+  type GroupSnapshot,
+  type LoadAverage,
   type Measurement,
+  type ProcessIdentity,
   type Side,
   type TreeInfo,
+  cleanupMessage,
   parseJUnit,
   renderSummary,
   verdict,
   verdictRule,
-  cleanupMessage,
 } from "./test-compare-report";
 
 export type CompareOptions = {
@@ -144,12 +144,12 @@ function processIdentity(pid: number): ProcessIdentity {
     .trim()
     .split(/\s+/);
 
-  const parentPid = Number(fields[1]),
-    groupId = Number(fields[2]),
-    sessionId = Number(fields[3]);
+  const parentPid = Number(fields[1]);
+  const groupId = Number(fields[2]);
+  const sessionId = Number(fields[3]);
 
-  const startTimeTicks = fields[19],
-    state = fields[0];
+  const startTimeTicks = fields[19];
+  const state = fields[0];
 
   if (
     !state ||
@@ -411,8 +411,8 @@ async function trackedSnapshot(source: string, destination: string) {
   );
 
   for (const name of names) {
-    const from = join(source, name),
-      to = join(destination, name);
+    const from = join(source, name);
+    const to = join(destination, name);
 
     await rm(to, { recursive: true, force: true });
 
@@ -1068,8 +1068,8 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
         let child: Group | undefined;
         const name = `${String(iteration).padStart(3, "0")}-${tree.side}`;
 
-        const logPath = join(output, "runs", `${name}.log`),
-          junit = join(output, "runs", `${name}.xml`);
+        const logPath = join(output, "runs", `${name}.log`);
+        const junit = join(output, "runs", `${name}.xml`);
 
         const log = await open(logPath, "wx", 0o600);
 

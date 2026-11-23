@@ -3,8 +3,8 @@ import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
 import {
   type NativeQuestion,
-  nativeQuestionSchema,
   type QuestionAnswer,
+  nativeQuestionSchema,
 } from "../../questions/questions";
 import { settingsStruct } from "../../config/settings-schema";
 import { messagePortableSchema as portable } from "../messaging/message-tool-input";

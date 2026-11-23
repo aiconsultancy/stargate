@@ -289,7 +289,7 @@ export function signingKeyResolver(
     if (!key) throw new AuthError("token is signed with an unknown key");
     onKey(key);
 
-    return importJWK({ kty: "RSA", n: key["n"], e: key["e"] }, "RS256");
+    return importJWK({ kty: "RSA", n: key.n, e: key.e }, "RS256");
   };
 }
 

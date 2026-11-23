@@ -28,7 +28,7 @@ import {
 } from "../../cron/decision";
 import type { CrewCaller, CrewSession } from "../execution/engine";
 import { CrewError } from "../execution/state";
-import { defaultModelProviders, type Team } from "../team";
+import { type Team, defaultModelProviders } from "../team";
 
 type ModelRef = NonNullable<CrewSession["model"]>;
 

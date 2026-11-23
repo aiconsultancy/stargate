@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { Schema } from "effect";
-import { nativeMakerSchema, type NativeMaker } from "./protocol";
+import { type NativeMaker, nativeMakerSchema } from "./protocol";
 
 export class FleetRecords<TStored, TJob> {
   public constructor(

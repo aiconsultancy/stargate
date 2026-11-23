@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { StepError } from "../exec";
-import { compareModels, type ModelRef, parseModel } from "./versions";
+import { type ModelRef, compareModels, parseModel } from "./versions";
 
 const record = Schema.Record(Schema.String, Schema.Unknown);
 const decodeRecord = Schema.decodeUnknownSync(record);

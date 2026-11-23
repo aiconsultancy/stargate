@@ -3,7 +3,7 @@ import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Schema } from "effect";
 import { settingsStruct } from "../config/settings-schema";
-import { waitingDelaySchema, type WaitingSettings } from "../config/waiting";
+import { type WaitingSettings, waitingDelaySchema } from "../config/waiting";
 
 export {
   waitingDelaySchema,

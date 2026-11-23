@@ -4,8 +4,8 @@ import { lstat, open } from "node:fs/promises";
 import { Result, Schema } from "effect";
 import type { BotConfig } from "../config";
 import {
-  decodeQuestionSettings,
   type QuestionSettings,
+  decodeQuestionSettings,
   questionSettingsPath,
   resolveQuestionSettings,
 } from "../questions/question-settings";

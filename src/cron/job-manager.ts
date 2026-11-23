@@ -10,8 +10,8 @@ import {
   writeCronjob,
 } from "./job-files";
 import {
-  botKey,
   type Identity,
+  botKey,
   isAllowedChannel,
   isAllowedUser,
 } from "../shared/registration";
