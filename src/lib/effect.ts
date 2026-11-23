@@ -42,9 +42,9 @@ export function abortable<A, E>(
 
       return restore(wait).pipe(
         Effect.onInterrupt(() =>
-          Effect.sync(() => controller.abort()).pipe(
-            Effect.andThen(Effect.promise(() => settled)),
-          ),
+          Effect.sync(() => {
+            controller.abort();
+          }).pipe(Effect.andThen(Effect.promise(() => settled))),
         ),
       );
     }),

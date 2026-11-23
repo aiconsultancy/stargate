@@ -72,7 +72,7 @@ export async function realPath(path: string): Promise<string> {
 
   for (;;) {
     try {
-      return join(await realpath(current), ...missing.reverse());
+      return join(await realpath(current), ...missing.toReversed());
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       const parent = dirname(current);
@@ -249,7 +249,7 @@ export async function checkCodexPaths(
   ];
 
   for (const [name, paths] of named)
-    for (const path of await Promise.all(paths.map(realPath))) {
+    for (const path of await Promise.all(paths.map((item) => realPath(item)))) {
       if (within(path, directory) || within(directory, path))
         throw new Error(
           `Codex workspace-write directory must not contain or be inside ${name}`,

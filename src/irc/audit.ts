@@ -38,8 +38,8 @@ export function ctcp(text: string) {
   const space = body.indexOf(" ");
 
   return {
-    verb: (space < 0 ? body : body.slice(0, space)).toUpperCase(),
-    text: space < 0 ? "" : body.slice(space + 1),
+    verb: (space === -1 ? body : body.slice(0, space)).toUpperCase(),
+    text: space === -1 ? "" : body.slice(space + 1),
   };
 }
 
@@ -122,7 +122,12 @@ export function auditLine(event: DmEvent): string | undefined {
   if (command && command.verb !== "ACTION") return;
   const action = command !== undefined;
   const text = command ? command.text : event.text;
-  const clean = text.split("\n").map(cleanText).join("\n").trim();
+
+  const clean = text
+    .split("\n")
+    .map((item) => cleanText(item))
+    .join("\n")
+    .trim();
 
   if (!clean) return;
   const shown = sensitive(event.text) || sensitive(clean) ? withheld : clean;
@@ -246,7 +251,7 @@ export class IrcAudit {
 
     this.report(true);
 
-    if (this.queue.length)
+    if (this.queue.length > 0)
       this.log.warn(
         { pending: this.queue.length },
         "IRC DM audit lines not posted at shutdown",

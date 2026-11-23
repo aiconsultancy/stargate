@@ -115,7 +115,7 @@ export function newerModels(
 
       return [{ id, parsed }];
     })
-    .sort(
+    .toSorted(
       (a, b) => compareModels(b.parsed, a.parsed) || a.id.localeCompare(b.id),
     )
     .map(({ id }) => id);
@@ -132,7 +132,7 @@ export function parseRef(text: string): ModelRef | null {
   return {
     providerID: match[1],
     id: match[2],
-    ...(match[3] ? { variant: match[3] } : {}),
+    ...(match[3] && { variant: match[3] }),
   };
 }
 

@@ -525,7 +525,9 @@ const defaults: PostDependencies = {
   now: Date.now,
   token: botToken,
   fetch: (url, init) => globalThis.fetch(url, init),
-  audit: (entry) => console.error(JSON.stringify(entry)),
+  audit: (entry) => {
+    console.error(JSON.stringify(entry));
+  },
 };
 
 const settled = new Set<FileStatus>(["shared", "unavailable"]);
@@ -643,7 +645,7 @@ function result(row: PostRow, replay: boolean, busy = false) {
 
   const base = {
     channel: row.channel,
-    ...(row.thread ? { thread_ts: row.thread } : {}),
+    ...(row.thread && { thread_ts: row.thread }),
     replay,
   };
 
@@ -654,7 +656,7 @@ function result(row: PostRow, replay: boolean, busy = false) {
         : ("partial" as const),
       ...base,
       ts: row.ts,
-      ...(row.permalink ? { permalink: row.permalink } : {}),
+      ...(row.permalink && { permalink: row.permalink }),
       files,
       effect: replay
         ? "already-posted-not-resent"
@@ -772,7 +774,7 @@ export async function runCaptainPost(
       )
       .digest("hex");
 
-    const audit = (row: PostRow, replay: boolean) =>
+    const audit = (row: PostRow, replay: boolean) => {
       dependencies.audit({
         event: "stargate_post",
         bot: bot.id,
@@ -784,12 +786,14 @@ export async function runCaptainPost(
         status: row.status,
         replay,
       });
+    };
 
     const posts = store;
     const caller = randomUUID();
 
-    const saveOutcome = (row: PostRow) =>
+    const saveOutcome = (row: PostRow) => {
       posts.saveOutcome(botKey, requestKey, row, dependencies.now());
+    };
 
     const saveFiles = (row: PostRow) => () =>
       posts.saveFiles(
@@ -800,7 +804,10 @@ export async function runCaptainPost(
         dependencies.now(),
       );
 
-    release = () => posts.release(botKey, requestKey, caller);
+    release = () => {
+      posts.release(botKey, requestKey, caller);
+    };
+
     const previous = store.get(botKey, requestKey);
 
     if (previous) {

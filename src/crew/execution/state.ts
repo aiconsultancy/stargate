@@ -298,13 +298,13 @@ export class CrewState {
       );
 
       // Older state predates the terminal abandoned/cancelled task statuses.
-      const legacyTasks = !/'abandoned'/.test(
+      const legacyTasks = !(
         db
           .query<{ sql: string }, []>(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'",
           )
-          .get()?.sql ?? "",
-      );
+          .get()?.sql ?? ""
+      ).includes("'abandoned'");
 
       if ((allowCrewExpansion && legacyPeers) || legacyTasks)
         db.run("PRAGMA foreign_keys=OFF");
@@ -342,7 +342,7 @@ export class CrewState {
             ALTER TABLE peers_expansion RENAME TO peers;
           `);
 
-          if (db.query("PRAGMA foreign_key_check").all().length)
+          if (db.query("PRAGMA foreign_key_check").all().length > 0)
             throw new CrewError(
               "Crew expansion failed its reference check; original state retained.",
             );
@@ -363,7 +363,7 @@ export class CrewState {
               ON tasks(crewID) WHERE released=0;
           `);
 
-          if (db.query("PRAGMA foreign_key_check").all().length)
+          if (db.query("PRAGMA foreign_key_check").all().length > 0)
             throw new CrewError(
               "Crew task status upgrade failed its reference check; original state retained.",
             );
@@ -506,8 +506,7 @@ export class CrewState {
 
         if (
           saved !== undefined ||
-          !task ||
-          task.released !== 0 ||
+          task?.released !== 0 ||
           (task.status !== "dispatching" && task.status !== "running") ||
           this.activeTask(task.crewID)?.id !== task.id
         )
@@ -903,7 +902,7 @@ export class CrewState {
             "Task ownership or state changed; inspect again. Nothing abandoned.",
           );
 
-        if (this.resumeBoundaries(task.id, true).length)
+        if (this.resumeBoundaries(task.id, true).length > 0)
           throw new CrewError(
             "Resume admission is still unconfirmed. Inspect status before releasing the task.",
           );
@@ -1530,10 +1529,12 @@ export class CrewState {
     }
   }
 
-  public complete(id: string, workerSessionID: string, result: string) {
+  public complete(id: string, workerSessionID: string, resultInput: string) {
+    let result = resultInput;
+
     if (this.reporting.isReport(id)) result = redactCredentials(result, 3000);
 
-    return this.db
+    this.db
       .transaction(() => {
         const task = this.task(id);
 
@@ -1571,7 +1572,9 @@ export class CrewState {
       .immediate();
   }
 
-  public recoverResult(expected: CrewTask, result: string): CrewTask {
+  public recoverResult(expected: CrewTask, resultInput: string): CrewTask {
+    let result = resultInput;
+
     if (this.reporting.isReport(expected.id))
       result = redactCredentials(result, 3000);
 

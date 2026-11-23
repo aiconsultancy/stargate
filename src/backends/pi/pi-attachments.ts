@@ -17,7 +17,7 @@ export function piInputContent(
     throw new AttachmentInputUnavailable("Invalid or oversized Pi attachments");
   }
 
-  if (!files.length) return text;
+  if (files.length === 0) return text;
   const content: Exclude<UserInput, string> = [];
 
   if (text) content.push({ type: "text", text });

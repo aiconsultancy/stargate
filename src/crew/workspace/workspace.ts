@@ -94,8 +94,8 @@ const secretPaths = ["*.env", "*.env.*", "*.key", "*.pem"];
  */
 export function gitProcessOptions(write: boolean, signal?: AbortSignal) {
   return {
-    ...(signal ? { signal } : {}),
-    ...(write ? {} : { timeout: 60_000 }),
+    ...(signal && { signal }),
+    ...(!write && { timeout: 60_000 }),
     killSignal: "SIGKILL" as const,
   };
 }
@@ -319,7 +319,7 @@ export async function inspectWorkspace(
     git(root, args, {
       signal,
       failure,
-      ...(limit ? { limit } : {}),
+      ...(limit && { limit }),
     }).then(({ text }) => text);
 
   const head = (
@@ -453,7 +453,7 @@ export async function inspectWorkspace(
     truncated: changes.length > listLimit,
     nested,
     diffstat,
-    ...(patch ? { patch } : {}),
+    ...(patch && { patch }),
   };
 }
 
@@ -502,7 +502,7 @@ async function refuseObstructions(root: string, action: string) {
     if (hit) blocked.push(entry);
   }
 
-  if (blocked.length)
+  if (blocked.length > 0)
     throw new CrewError(
       `Untracked or ignored entries occupy paths that HEAD would restore (${blocked.length}: ${blocked
         .slice(0, 5)

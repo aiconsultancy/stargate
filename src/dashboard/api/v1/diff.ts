@@ -79,7 +79,7 @@ function quoted(prefix: string, text: string, suffix = "") {
 function outcomes({ recent, lastOutcome }: V1CrewContext) {
   const tasks = new Map<string, V1Task>();
 
-  for (const task of [...recent].reverse().concat(lastOutcome ?? [])) {
+  for (const task of [...recent].toReversed().concat(lastOutcome ?? [])) {
     if (
       task.status === "completed" ||
       task.status === "cancelled" ||
@@ -206,7 +206,7 @@ export function diffEvents(
     }
   }
 
-  for (const id of Object.keys(next.ships).sort()) {
+  for (const id of Object.keys(next.ships).toSorted()) {
     const ship = next.ships[id];
 
     if (!ship) continue;
@@ -257,7 +257,9 @@ export function diffEvents(
             old,
             context,
             clean(member.name, 60) || member.id,
-            (kind, text, extra) => activity(member.id, kind, text, extra),
+            (kind, text, extra) => {
+              activity(member.id, kind, text, extra);
+            },
           );
       }
     }

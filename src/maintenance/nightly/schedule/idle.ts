@@ -247,7 +247,7 @@ export async function describeRunningWork(
           )
           .all())
           work.push({
-            ...(row.sessionID ? { sessionID: row.sessionID } : {}),
+            ...(row.sessionID && { sessionID: row.sessionID }),
             reason: "busy-gateway",
           });
       },
@@ -313,7 +313,7 @@ export async function describeRunningWork(
     }
   }
 
-  if (sessions.size) {
+  if (sessions.size > 0) {
     try {
       const control = await input.connect();
 

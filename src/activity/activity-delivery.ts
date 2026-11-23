@@ -41,7 +41,10 @@ async function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
     return await Promise.race([
       work,
       new Promise<never>((_, reject) => {
-        abort = () => reject(new Error("Activity cancelled"));
+        abort = () => {
+          reject(new Error("Activity cancelled"));
+        };
+
         signal.addEventListener("abort", abort, { once: true });
       }),
     ]);
@@ -124,10 +127,9 @@ export class ActivityDelivery {
         return;
       }
 
-      entry.grace = setTimeout(
-        () => entry.controller.abort(),
-        this.options.finalizeTimeoutMs ?? 615_000,
-      );
+      entry.grace = setTimeout(() => {
+        entry.controller.abort();
+      }, this.options.finalizeTimeoutMs ?? 615_000);
       const wake = entry.wake;
       entry.wake = new AbortController();
       wake.abort();
@@ -227,7 +229,7 @@ export class ActivityDelivery {
           if (
             detail !== "off" &&
             snapshot.revision !== revision &&
-            (snapshot.entries.length || ts)
+            (snapshot.entries.length > 0 || ts)
           ) {
             ts = await abortable(
               publish(
@@ -244,7 +246,7 @@ export class ActivityDelivery {
             if (capture)
               this.options.store?.saveActivity(job.id, {
                 capture,
-                ...(ts ? { ts } : {}),
+                ...(ts && { ts }),
                 revision,
                 done: isTerminal,
               });
@@ -255,7 +257,7 @@ export class ActivityDelivery {
           if (terminal && capture)
             this.options.store?.saveActivity(job.id, {
               capture,
-              ...(ts ? { ts } : {}),
+              ...(ts && { ts }),
               revision,
               done: true,
             });

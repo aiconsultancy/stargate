@@ -16,7 +16,9 @@ async function checkoutTagVersion(directory: string): Promise<string | null> {
       { stdout: "pipe", stderr: "ignore", stdin: "ignore" },
     );
 
-    const timer = setTimeout(() => child.kill(), 2000);
+    const timer = setTimeout(() => {
+      child.kill();
+    }, 2000);
 
     const [output, code] = await Promise.all([
       new Response(child.stdout).text(),
@@ -94,7 +96,10 @@ async function probeVersion(
 
   try {
     const deadline = new Promise<null>((resolve) => {
-      abort = () => resolve(null);
+      abort = () => {
+        resolve(null);
+      };
+
       signal.addEventListener("abort", abort, { once: true });
     });
 

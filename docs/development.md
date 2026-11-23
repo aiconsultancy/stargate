@@ -75,8 +75,12 @@ counted), 60 statements, 6 parameters, block depth 6, complexity 40, nested
 calls 6 and 3 classes in a file. For each rule, one override in
 `.oxlintrc.json` lists the files that already exceed the limit, with literal
 sorted paths, and sets that rule to the largest value in its files. These
-ceiling lists may only shrink. `eslint/max-lines` stays off: the architecture
-size guard owns file length (non-blank lines, limit 1,000, with its own list).
+ceiling lists may only shrink. One raise is recorded: with the async rules
+(NET-1822, comment `d65f8ac4`), the `eslint/max-lines-per-function` maximum
+for `serve` in `src/app/runtime.ts` went from 1,334 to 1,350. The approved
+repairs put braces around callbacks and add no statement to `serve`. It is
+the only raise. `eslint/max-lines` stays off: the architecture size guard
+owns file length (non-blank lines, limit 1,000, with its own list).
 A file that leaves the Zod exclusion list must meet the ceiling limits or be
 added to the list of each rule it exceeds; for example, `src/health/health.ts`
 has complexity 212.
@@ -171,6 +175,60 @@ These type-contract rules stay off, each for a reason:
 - `eslint/class-methods-use-this`: Oxlint ignores the option for methods that
   implement an interface; public contract methods and per-instance hooks
   cannot change.
+
+The async and performance rules (NET-1822) run in `src`, `scripts` and
+`perf`. These stay off, each for a reason:
+
+- `oxc/no-optional-chaining`: the code uses optional chaining on purpose; the
+  rule is for runtimes without it and contradicts `prefer-optional-chain`.
+- `oxc/no-rest-spread-properties`: `Object.assign` is not equal to object
+  spread or rest, and the rule opposes `no-conditional-empty-object-spread`.
+- `eslint/no-await-in-loop`: the loops are sequential by design; awaiting
+  together would change order, concurrency and failure behaviour.
+- `eslint/require-await`: `typescript/require-await` is the type-aware form
+  and does not contradict `promise-function-async`.
+- `oxc/no-map-spread`: the repair mutates the mapped objects and changes
+  identity and aliasing.
+- `unicorn/prefer-spread`: it turns `Array.from(text)` into `[...text]`, and
+  `typescript/no-misused-spread` requires the reverse for strings.
+- `typescript/promise-function-async`: adding `async` returns a new promise
+  on each call and adds microtask turns. Code and tests depend on both: for
+  example, `startHostMetrics().read()` must return the same pending promise.
+  15 places in 12 files cannot take `async` without a change of behaviour.
+- `unicorn/no-await-expression-member`: moving the `await` into a `const`
+  before the statement runs it earlier or unconditionally where the old
+  expression evaluated another operand first, for example the right side of
+  `||` or `&&`. 20 places in 16 files are like this.
+
+These rules are off only for the files listed in `.oxlintrc.json`, because
+the repair would change behaviour there. Keep each list as short as it is;
+remove a file when its places are repaired.
+
+- `typescript/await-thenable` in `src/teams/registration.ts`: removing the
+  `await` of `allowed()` removes a microtask turn before a Teams post.
+- `unicorn/prefer-top-level-await` in `scripts/irc-question-smoke.ts`:
+  top-level await changes when the smoke module finishes evaluating.
+- `typescript/return-await` in `src/backends/opencode/opencode.ts`: the file
+  is on this list for the steer `try` (line 1567). A second read with tests
+  (NET-1822) found that this place is not a fault: `reconcileSteer` always
+  resolves, so no rejection can skip the `catch`. `return await` there has the
+  same behaviour, so the file can leave this list in a follow-up.
+- `oxc/no-accumulating-spread` in `src/dispatch/dispatcher.ts`: mutating the
+  tracked issue would alias the record that the caller holds.
+- `typescript/no-confusing-void-expression` in
+  `scripts/hooks/affected-tests.ts`: its test rewrites the signal handler
+  lines by their exact text.
+- `unicorn/no-useless-spread` in three files: the loops copy a list or the
+  header keys because they change it while they iterate.
+- `typescript/require-await` in ten files: each reported function returns a
+  promise that its callers use; removing `async` changes the return type and
+  turns a rejection into a throw.
+- `typescript/strict-void-return` in `src/app/service.ts` and
+  `src/backends/claude.ts`: `promisify(execFile)` relies on the custom
+  promisified `execFile`; a wrapper callback would lose it. The abort
+  listener at `src/backends/claude.ts:999` could take braces, but the file
+  stays listed for its `promisify` place, so that repair would shrink
+  nothing; it is left as it is.
 
 `hooks-install` installs prek's
 pre-commit and pre-push hooks for this clone. `hooks` runs the pre-commit gate,

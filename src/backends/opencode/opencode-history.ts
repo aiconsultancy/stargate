@@ -294,13 +294,14 @@ export class OpenCodeHistory implements SessionHistory {
       const input = decodeDescribe({ ids });
       const piIDs = input.ids.filter((id) => id.startsWith(piHistoryPrefix));
 
-      const sessions = piIDs.length
-        ? decodeSessions(
-            await this.client
-              .rpc(CrewReporting)
-              .historyDescribe({ ids: piIDs }, this.request(signal)),
-          ).sessions
-        : [];
+      const sessions =
+        piIDs.length > 0
+          ? decodeSessions(
+              await this.client
+                .rpc(CrewReporting)
+                .historyDescribe({ ids: piIDs }, this.request(signal)),
+            ).sessions
+          : [];
 
       const nativeIDs = input.ids.filter(
         (id) => !id.startsWith(piHistoryPrefix),

@@ -52,8 +52,10 @@ export class JournalStore {
 
   public append(
     input: Omit<JournalEntry, "id" | "created">,
-    replayKey: string,
+    replayKeyInput: string,
   ): JournalEntry {
+    let replayKey = replayKeyInput;
+
     replayKey = createHash("sha256").update(replayKey).digest("hex");
     this.db
       .query(`INSERT OR IGNORE INTO journal
@@ -129,6 +131,6 @@ export class JournalStore {
        ORDER BY id DESC LIMIT ?`,
       )
       .all(captainID, after, end, end, excluded, limit)
-      .reverse();
+      .toReversed();
   }
 }

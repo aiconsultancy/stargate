@@ -47,13 +47,13 @@ export type CleanupReport = {
 };
 
 export function cleanupMessage(cleanup: CleanupReport): string {
-  const lines = [cleanup.groups.length ? "Cleanup failed:" : "Cleanup status:"];
+  const lines = [
+    cleanup.groups.length > 0 ? "Cleanup failed:" : "Cleanup status:",
+  ];
 
   for (const group of cleanup.groups) {
     lines.push(
       `group ${group.groupId}: ${group.reason}; signal ${group.signalDisposition}; signals sent ${group.signalsSent}`,
-    );
-    lines.push(
       `expected session ${group.sessionId ?? "unreadable"}; spawn leader start ticks ${group.spawnLeader?.startTimeTicks ?? "unreadable"}`,
     );
 
@@ -62,7 +62,7 @@ export function cleanupMessage(cleanup: CleanupReport): string {
         `PID ${member.pid}, parent ${member.parentPid}, group ${member.groupId}, session ${member.sessionId}, start ticks ${member.startTimeTicks}, state ${member.state}`,
       );
 
-    if (!group.currentMembers.length)
+    if (group.currentMembers.length === 0)
       lines.push("No readable current group members.");
 
     for (const error of group.errors)
@@ -71,8 +71,8 @@ export function cleanupMessage(cleanup: CleanupReport): string {
 
   lines.push(
     `workspace ${cleanup.workspace.state}: ${cleanup.workspace.path ?? "none"}`,
+    `lock ${cleanup.lock.state}: ${cleanup.lock.path ?? "none"}`,
   );
-  lines.push(`lock ${cleanup.lock.state}: ${cleanup.lock.path ?? "none"}`);
 
   return lines.join("\n");
 }
@@ -162,7 +162,7 @@ function parseXml(text: string): Xml {
     if (match) {
       const end = text.indexOf(match[1], index + match[0].length);
 
-      if (end < 0) throw new Error("Unclosed JUnit XML section");
+      if (end === -1) throw new Error("Unclosed JUnit XML section");
 
       if (match[2]) current.text += text.slice(index + match[0].length, end);
       index = end + match[1].length;
@@ -221,8 +221,8 @@ function parseXml(text: string): Xml {
       index = end + 1;
     } else {
       const end = text.indexOf("<", index);
-      current.text += entity(text.slice(index, end < 0 ? undefined : end));
-      index = end < 0 ? text.length : end;
+      current.text += entity(text.slice(index, end === -1 ? undefined : end));
+      index = end === -1 ? text.length : end;
     }
   }
 
@@ -285,11 +285,12 @@ export function parseJUnit(text: string) {
       name,
       className,
       seconds: seconds(node.attributes["time"]),
-      status: failures.length
-        ? "failed"
-        : node.children.some((child) => child.tag === "skipped")
-          ? "skipped"
-          : "passed",
+      status:
+        failures.length > 0
+          ? "failed"
+          : node.children.some((child) => child.tag === "skipped")
+            ? "skipped"
+            : "passed",
       messages: failures.map((failure) =>
         [failure.attributes["message"], fullText(failure)]
           .filter(Boolean)
@@ -298,16 +299,17 @@ export function parseJUnit(text: string) {
     };
   });
 
-  if (!tests.length || Number(suite.attributes["tests"]) !== tests.length)
+  if (tests.length === 0 || Number(suite.attributes["tests"]) !== tests.length)
     throw new Error("Incomplete JUnit testcase list");
 
   return { fileSeconds: seconds(suite.attributes["time"]), tests };
 }
 
 export function statistics(values: number[]) {
-  const sorted = [...values].sort((a, b) => a - b);
+  const sorted = [...values].toSorted((a, b) => a - b);
 
-  if (!sorted.length) return { samples: 0, median: null, p95: null, max: null };
+  if (sorted.length === 0)
+    return { samples: 0, median: null, p95: null, max: null };
   const mid = Math.floor(sorted.length / 2);
   const lower = sorted[Math.ceil(sorted.length / 2) - 1];
   const upper = sorted[mid];
@@ -382,7 +384,7 @@ export function renderSummary(
         load[index] === undefined ? [] : [load[index]],
       );
 
-      return values.length
+      return values.length > 0
         ? `${Math.min(...values).toFixed(2)}–${Math.max(...values).toFixed(2)}`
         : "unavailable";
     });

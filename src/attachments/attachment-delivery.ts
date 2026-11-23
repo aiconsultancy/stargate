@@ -77,7 +77,7 @@ function links(
   return {
     upload: upload.bind(transport),
     link: link.bind(transport),
-    ...(transport.publishOnce ? { publishOnce: true } : {}),
+    ...(transport.publishOnce && { publishOnce: true }),
   };
 }
 
@@ -155,8 +155,12 @@ export async function deliverAttachments(
 ) {
   const files = context.store.attachments(job.id);
 
-  if (!files.length) return;
-  const save = () => context.store.saveAttachments(job.id, files);
+  if (files.length === 0) return;
+
+  const save = () => {
+    context.store.saveAttachments(job.id, files);
+  };
+
   const linked = links(context.transport);
   const transport = linked ? undefined : uploads(context.transport);
 

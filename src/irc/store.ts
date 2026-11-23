@@ -17,7 +17,7 @@ export class IrcRecords implements IrcOperations {
     since: number;
     scope: { conversation: string } | { channel: string };
   }): number {
-    if (!input.botKeys.length) return 0;
+    if (input.botKeys.length === 0) return 0;
     const keys = input.botKeys.map(() => "?").join(",");
 
     const [column, value] =

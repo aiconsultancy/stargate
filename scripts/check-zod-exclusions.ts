@@ -73,7 +73,7 @@ async function check() {
     await api.close();
   }
 
-  if (failures.length) throw new Error(failures.sort().join("\n"));
+  if (failures.length > 0) throw new Error(failures.toSorted().join("\n"));
 }
 
 try {

@@ -30,7 +30,7 @@ export function upgradeCandidates(
     if (!providers.includes(ref.providerID) || result.has(ref.id)) continue;
     const newer = newerModels(ref.id, catalog, families);
 
-    if (newer.length) result.set(ref.id, newer);
+    if (newer.length > 0) result.set(ref.id, newer);
   }
 
   return result;
@@ -143,7 +143,8 @@ function upgradeTeamObject(
   const crew = team["crew"];
 
   if (!Array.isArray(crew)) return;
-  crew.forEach((member, index) => {
+
+  for (const [index, member] of crew.entries()) {
     if (isObject(member) && member["backend"] === undefined)
       setString(
         member,
@@ -153,7 +154,7 @@ function upgradeTeamObject(
         providers,
         changes,
       );
-  });
+  }
 }
 
 /** Team.json used by `stargate crew init`. */
@@ -196,7 +197,7 @@ export function upgradeOpenCodeProfile(
     const plugins = parsed["plugins"];
 
     if (Array.isArray(plugins))
-      plugins.forEach((plugin, index) => {
+      for (const [index, plugin] of plugins.entries()) {
         if (isObject(plugin) && isObject(plugin["options"]))
           upgradeTeamObject(
             plugin["options"]["team"],
@@ -205,7 +206,7 @@ export function upgradeOpenCodeProfile(
             providers,
             changes,
           );
-      });
+      }
   }
 
   return { text: `${JSON.stringify(parsed, null, 2)}\n`, changes };
@@ -379,7 +380,7 @@ function setDisabled(content: string, disabled: boolean) {
   if (!content.startsWith("---\n")) throw new StepError("config-format");
   const end = content.indexOf("\n---\n", 3);
 
-  if (end < 0) throw new StepError("config-format");
+  if (end === -1) throw new StepError("config-format");
 
   const head = content
     .slice(4, end)
@@ -510,14 +511,15 @@ export function upgradeProfiles(
     });
   }
 
-  const links = [...renames.values()]
-    .map(({ name }) => `${name}.md`)
-    .filter((file, index, all) => all.indexOf(file) === index)
+  // First occurrences in insertion order, as the former indexOf filter kept.
+  const links = new Set(renames.values().map(({ name }) => `${name}.md`))
+    .values()
     .filter((file) => !(file in snapshot.links))
     .map((file) => ({
       path: join(snapshot.agentsDirectory, file),
       target: `../agent-profiles/current/${file}`,
-    }));
+    }))
+    .toArray();
 
   /** New agents that the selected profile routes: the ones OpenCode loads. */
   const live = (snapshot.current ? (folderRoutes[snapshot.current] ?? []) : [])

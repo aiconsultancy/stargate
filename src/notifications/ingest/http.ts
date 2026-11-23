@@ -37,10 +37,10 @@ function failure(status: number, code: string, retry = 1) {
       headers: {
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
-        ...(status === 401 ? { "WWW-Authenticate": "Bearer" } : {}),
-        ...(status === 429 || status === 503
-          ? { "Retry-After": String(retry) }
-          : {}),
+        ...(status === 401 && { "WWW-Authenticate": "Bearer" }),
+        ...((status === 429 || status === 503) && {
+          "Retry-After": String(retry),
+        }),
       },
     },
   );

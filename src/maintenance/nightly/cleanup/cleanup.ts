@@ -291,7 +291,7 @@ export function scratchBatch(
 ): { names: string[]; partial: boolean } {
   if (children.length <= limit)
     return {
-      names: children.map((child) => child.name).sort(),
+      names: children.map((child) => child.name).toSorted(),
       partial: false,
     };
 
@@ -299,7 +299,7 @@ export function scratchBatch(
 
   const old = children
     .filter((child) => child.mtimeMs < cutoff)
-    .sort((a, b) =>
+    .toSorted((a, b) =>
       a.mtimeMs !== b.mtimeMs
         ? a.mtimeMs - b.mtimeMs
         : a.name < b.name
@@ -365,13 +365,13 @@ function worktrees(text: string): Worktree[] {
     result.push({
       path: resolve(path),
       tip,
-      ...(branch ? { branch } : {}),
+      ...(branch && { branch }),
       locked: lines.some((line) => line.startsWith("locked")),
       bare,
     });
   }
 
-  if (!result.length) refuse("git-unknown");
+  if (result.length === 0) refuse("git-unknown");
 
   return result;
 }
@@ -608,7 +608,7 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       );
 
       if (info.isDirectory())
-        for (const name of bounded(await readdir(current)).sort()) {
+        for (const name of bounded(await readdir(current)).toSorted()) {
           // The root .git pointer is metadata of an explicitly listed worktree, not a nested repository.
           if (
             current === path &&
@@ -658,7 +658,7 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
           "--untracked-files=all",
           "--ignore-submodules=none",
         )
-      ).length
+      ).length > 0
     )
       refuse("dirty");
 
@@ -696,7 +696,7 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       },
     );
 
-    if (!tips.length) refuse("git-unknown");
+    if (tips.length === 0) refuse("git-unknown");
 
     return tips;
   }
@@ -1030,7 +1030,7 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
           kind: "worktree",
           path: worktree.path,
           tip: worktree.tip,
-          ...(worktree.branch ? { branch: worktree.branch } : {}),
+          ...(worktree.branch && { branch: worktree.branch }),
         };
 
         await attempt(item, async () => {

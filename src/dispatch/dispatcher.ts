@@ -37,7 +37,11 @@ export type DispatchAnswerInput = {
 /** Resolves after `ms`, or as soon as `signal` aborts; never rejects. */
 function pause(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve) => {
-    if (signal.aborted) return resolve();
+    if (signal.aborted) {
+      resolve();
+
+      return;
+    }
 
     const done = () => {
       clearTimeout(timer);
@@ -204,7 +208,9 @@ export class AgentDispatcher {
 
       // An answer wakes the loop early so its follow-up timer is not late.
       const wake = new AbortController();
-      this.kick = () => wake.abort();
+      this.kick = () => {
+        wake.abort();
+      };
 
       try {
         await this.wait(wait, AbortSignal.any([signal, wake.signal]));
@@ -229,7 +235,7 @@ export class AgentDispatcher {
       state: "done",
       offer: undefined,
       outcome: `withdrawn:${reason}`,
-      ...(version === undefined ? {} : { doneVersion: version }),
+      ...(version !== undefined && { doneVersion: version }),
       updatedAt: this.now(),
     });
 
@@ -362,8 +368,8 @@ export class AgentDispatcher {
     const current = await this.stillReady(tracked, signal);
 
     if (!current) return;
-    const ids = [...roster.captains.keys()].sort();
-    const shift = ids.length ? tracked.start % ids.length : 0;
+    const ids = [...roster.captains.keys()].toSorted();
+    const shift = ids.length > 0 ? tracked.start % ids.length : 0;
     const order = [...ids.slice(shift), ...ids.slice(0, shift)];
 
     const next: TrackedIssue = {
@@ -452,7 +458,7 @@ export class AgentDispatcher {
             offer: undefined,
             resume: undefined,
             outcome: "undeliverable",
-            ...(version === undefined ? {} : { doneVersion: version }),
+            ...(version !== undefined && { doneVersion: version }),
             updatedAt: now,
           });
           this.options.log.warn(
@@ -486,9 +492,7 @@ export class AgentDispatcher {
         ...asking,
         offer: {
           ...offer,
-          ...(sent.messageID === undefined
-            ? {}
-            : { messageID: sent.messageID }),
+          ...(sent.messageID !== undefined && { messageID: sent.messageID }),
         },
       });
       this.options.log.info(

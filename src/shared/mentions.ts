@@ -69,7 +69,7 @@ export function findMention(
   names: readonly string[],
 ): string | undefined {
   return [...names]
-    .sort((a, b) => b.length - a.length)
+    .toSorted((a, b) => b.length - a.length)
     .find((name) => {
       const match = pattern(name);
 

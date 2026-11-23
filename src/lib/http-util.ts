@@ -62,7 +62,9 @@ export function close(server: Server): Promise<void> {
       return;
     }
 
-    server.close(() => resolve());
+    server.close(() => {
+      resolve();
+    });
     server.closeAllConnections?.();
   });
 }

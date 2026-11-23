@@ -159,16 +159,15 @@ function checkoutText(metadata?: Metadata) {
     ...new Set(
       paths.flatMap((path) => [path, JSON.stringify(path).slice(1, -1)]),
     ),
-  ].sort((a, b) => b.length - a.length);
+  ].toSorted((a, b) => b.length - a.length);
 
-  return (text: string, limit: number) =>
-    redactCredentials(
-      spellings.reduce(
-        (value, path) => value.replaceAll(path, "[checkout]"),
-        text,
-      ),
-      limit,
-    );
+  return (text: string, limit: number) => {
+    let value = text;
+
+    for (const path of spellings) value = value.replaceAll(path, "[checkout]");
+
+    return redactCredentials(value, limit);
+  };
 }
 
 type CrewText = ReturnType<typeof checkoutText>;
@@ -198,9 +197,9 @@ function projectContext(context: Context, text: CrewText): V1CrewContext {
     observed: context.observed,
     current: context.current && task(context.current),
     queuedCount: context.queuedCount,
-    queued: context.queued.slice(0, 5).map(task),
+    queued: context.queued.slice(0, 5).map((item) => task(item)),
     lastOutcome: context.lastOutcome && task(context.lastOutcome),
-    recent: context.recent.slice(0, 8).map(task),
+    recent: context.recent.slice(0, 8).map((item) => task(item)),
     recentCount: context.recentCount,
     git: null,
     pullRequest: null,
@@ -309,11 +308,9 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       id,
       name: redactCredentials(name, 100),
       ...(registration.kind === "irc" &&
-      (registration.config.features.liveProgress ??
-        ircFeedbackDefaults(registration.config).liveProgress) &&
-      deps.requests
-        ? { requests: deps.requests(registration, at) }
-        : {}),
+        (registration.config.features.liveProgress ??
+          ircFeedbackDefaults(registration.config).liveProgress) &&
+        deps.requests && { requests: deps.requests(registration, at) }),
       role: role(registration),
       transport: registration.kind,
       backend: backend.type,
@@ -413,7 +410,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       captain: officer,
       repository: project?.repository ?? null,
       available: !error,
-      ...(error ? { error: "Crew status unavailable." } : {}),
+      ...(error && { error: "Crew status unavailable." }),
       crew: crew
         ? {
             people: people.length,
@@ -423,9 +420,9 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
             queued: people.filter((member) =>
               member.contexts.some((context) => context.queuedCount > 0),
             ).length,
-            ...(crew.people?.partial || crew.busyPartial
-              ? { partial: true as const }
-              : {}),
+            ...((crew.people?.partial ?? crew.busyPartial) && {
+              partial: true as const,
+            }),
           }
         : null,
       features,
@@ -478,7 +475,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     }
 
     return [...recent.values()]
-      .sort(
+      .toSorted(
         (a, b) =>
           (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.id.localeCompare(b.id),
       )
@@ -527,7 +524,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       crewMember(id, person, at, text, metadata, view.sessions),
     );
 
-    if (only && !crewMembers.length) return;
+    if (only && crewMembers.length === 0) return;
 
     // Every emitted child belongs to one of this ship's dashboard-owned crew roots.
     const roots = view.sessions
@@ -560,9 +557,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
                 ...context,
                 git: state,
                 pullRequest: pr ?? null,
-                ...(pr !== undefined
-                  ? { pullRequestKnown: true as const }
-                  : {}),
+                ...(pr !== undefined && { pullRequestKnown: true as const }),
               };
             }),
           ),
@@ -605,9 +600,9 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     return {
       ...summary,
       crewMembers,
-      ...(snapshot?.crewObservedAt !== undefined
-        ? { detailUpdatedAt: snapshot.crewObservedAt }
-        : {}),
+      ...(snapshot?.crewObservedAt !== undefined && {
+        detailUpdatedAt: snapshot.crewObservedAt,
+      }),
     };
   }
 
@@ -658,7 +653,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       let longestIdle: V1Fleet["longestIdle"] = null;
       const pending: Promise<V1Ship>[] = [];
 
-      for (const row of [...fleet.ships].sort((a, b) =>
+      for (const row of [...fleet.ships].toSorted((a, b) =>
         a.summary.id.localeCompare(b.summary.id),
       )) {
         const { summary, metadata, error } = row;

@@ -134,7 +134,7 @@ export async function readModelInputs(input: {
     directories: input.crews.flatMap((crew) =>
       crew.roots.map((root) => root.directory),
     ),
-    ...(globalCatalog ? { globalCatalog } : {}),
+    ...(globalCatalog && { globalCatalog }),
   };
 }
 
@@ -213,9 +213,8 @@ export async function selectModelUpgrades(input: {
       reason: "probe-failed",
     });
 
-  const opencode = chosen.size
-    ? await input.connect().catch(() => {})
-    : undefined;
+  const opencode =
+    chosen.size > 0 ? await input.connect().catch(() => {}) : undefined;
 
   const locations = [
     undefined,
@@ -291,7 +290,7 @@ export function buildModelWork(
     changes: [],
   };
 
-  if (!upgrades.size) return work;
+  if (upgrades.size === 0) return work;
   const { providers } = inputs;
 
   if (inputs.globalCatalog) {
@@ -302,7 +301,7 @@ export function buildModelWork(
       providers,
     );
 
-    if (catalog.additions.length) {
+    if (catalog.additions.length > 0) {
       work.files.push({
         path: inputs.globalCatalog.path,
         text: catalog.text,
@@ -375,7 +374,7 @@ export function buildModelWork(
           ? upgradeTeamFile(document.text, upgrades, providers)
           : upgradeOpenCodeProfile(document.text, upgrades, providers);
 
-      if (!result.changes.length) continue;
+      if (result.changes.length === 0) continue;
       work.files.push({ path: document.path, text: result.text });
 
       for (const change of result.changes)
@@ -490,7 +489,7 @@ export async function applyLiveModels(
     }
   }
 
-  if (!work.agents.length) return { ok: true, skipped };
+  if (work.agents.length === 0) return { ok: true, skipped };
   const agents = await opencode.agents(undefined, signal).catch(() => null);
 
   return {

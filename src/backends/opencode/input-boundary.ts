@@ -83,7 +83,7 @@ export function boundaryRecord(
   return {
     id: message.id,
     type: message.type,
-    ...(input !== undefined ? { input } : {}),
+    ...(input !== undefined && { input }),
   };
 }
 

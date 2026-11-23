@@ -104,7 +104,7 @@ export async function connectHistoryAPI(
       headers =
         Service.headers({
           url: endpoint.url,
-          ...(endpoint.auth ? { auth: endpoint.auth } : {}),
+          ...(endpoint.auth && { auth: endpoint.auth }),
         }) ?? {};
     }
 

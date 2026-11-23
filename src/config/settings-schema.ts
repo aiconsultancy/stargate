@@ -31,7 +31,7 @@ export function settingsStruct<const F extends Schema.Struct.Fields>(
 
       for (const key in value) if (!keys.has(key)) extra.push(key);
 
-      return extra.length
+      return extra.length > 0
         ? `Unrecognized key${extra.length === 1 ? "" : "s"}: ${extra.map((key) => JSON.stringify(key)).join(", ")}`
         : undefined;
     },
@@ -145,8 +145,9 @@ export function settingsCheck<T>(
     (value) => {
       const issues: Schema.FilterIssue[] = [];
       check(value, {
-        addIssue: ({ path = [], message = "Invalid input" }) =>
-          issues.push({ path, issue: message }),
+        addIssue: ({ path = [], message = "Invalid input" }) => {
+          issues.push({ path, issue: message });
+        },
       });
 
       return issues;

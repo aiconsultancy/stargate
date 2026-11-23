@@ -192,7 +192,7 @@ export class MesijClient {
         to: message.to,
         message: message.text,
         key: message.key,
-        ...(message.replyTo ? { reply_to: message.replyTo } : {}),
+        ...(message.replyTo && { reply_to: message.replyTo }),
       }),
     );
 
@@ -251,8 +251,8 @@ export class MesijClient {
         ...receipt(event),
         actor: event.actor,
         sessionID: event.session,
-        ...(event.recipient_session ? { to: event.recipient_session } : {}),
-        ...(event.reply_to ? { replyTo: event.reply_to } : {}),
+        ...(event.recipient_session && { to: event.recipient_session }),
+        ...(event.reply_to && { replyTo: event.reply_to }),
         type: event.type,
         text: event.payload.message ?? "",
       };
@@ -303,12 +303,22 @@ export class MesijClient {
         }
       };
 
-      const abort = () => stop("cancelled");
-      const timer = setTimeout(() => stop("timeout"), this.options.timeoutMs);
+      const abort = () => {
+        stop("cancelled");
+      };
+
+      const timer = setTimeout(() => {
+        stop("timeout");
+      }, this.options.timeoutMs);
+
       timer.unref();
       signal.addEventListener("abort", abort, { once: true });
-      child.on("error", () => stop("process"));
-      child.stdin.on("error", () => stop("process"));
+      child.on("error", () => {
+        stop("process");
+      });
+      child.stdin.on("error", () => {
+        stop("process");
+      });
       child.stdout.on("data", (chunk: Buffer) => {
         if (failure) return;
         length += chunk.length;

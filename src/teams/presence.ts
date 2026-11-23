@@ -124,7 +124,7 @@ export class TeamsPresence {
                   type: "streamInfo",
                   streamType: "informative",
                   streamSequence: ++sequence,
-                  ...(slot.id ? { streamId: slot.id } : {}),
+                  ...(slot.id && { streamId: slot.id }),
                 },
               ],
             },

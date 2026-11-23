@@ -127,7 +127,7 @@ export function upgradeGlobalCatalog(
       Object.defineProperty(models, next, {
         value: {
           ...structuredClone(template),
-          ...(Object.hasOwn(template, "modelID") ? { modelID: next } : {}),
+          ...(Object.hasOwn(template, "modelID") && { modelID: next }),
         },
         enumerable: true,
         writable: true,
@@ -144,9 +144,10 @@ export function upgradeGlobalCatalog(
   }
 
   return {
-    text: additions.length
-      ? `${JSON.stringify({ ...parsed.config, providers: updatedProviders }, null, 2)}\n`
-      : text,
+    text:
+      additions.length > 0
+        ? `${JSON.stringify({ ...parsed.config, providers: updatedProviders }, null, 2)}\n`
+        : text,
     additions,
   };
 }

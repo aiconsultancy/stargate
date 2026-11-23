@@ -356,7 +356,9 @@ export class CrewMessaging {
     private readonly mailer: Pick<MesijClient, "register" | "send" | "inbox">,
   ) {}
 
-  public async run(raw: unknown, caller: MailCaller, direct = false) {
+  public async run(raw: unknown, callerInput: MailCaller, direct = false) {
+    let caller = callerInput;
+
     const parsed = direct
       ? Schema.decodeUnknownResult(dmInputSchema)(raw)
       : Schema.decodeUnknownResult(mailInputSchema)(raw);
@@ -481,10 +483,8 @@ export class CrewMessaging {
                 from:
                   memberOf(route.sender) ?? this.engine.options.team.captain.id,
                 text: envelope.success.text,
-                ...(route.sourceTaskID
-                  ? { sourceTaskID: route.sourceTaskID }
-                  : {}),
-                ...(event.replyTo ? { replyTo: event.replyTo } : {}),
+                ...(route.sourceTaskID && { sourceTaskID: route.sourceTaskID }),
+                ...(event.replyTo && { replyTo: event.replyTo }),
               },
             ]
           : [];
@@ -644,10 +644,10 @@ export class CrewMessaging {
           sourceTaskID: source?.id,
           targetTaskID: target?.id,
           text: input.text,
-          ...(statusReply ? { statusRequestID: statusReply.id } : {}),
+          ...(statusReply && { statusRequestID: statusReply.id }),
         }),
         key: intentKey,
-        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        ...(input.replyTo && { replyTo: input.replyTo }),
       };
 
       try {

@@ -110,7 +110,7 @@ export async function repairTranscript(input: {
       ...input.store.transcript.replies(input.botKey, conversation),
       ...requeue.map((row) => row.response),
     ]
-      .map(replySource)
+      .map((item) => replySource(item))
       .join("\n"),
   );
 
@@ -133,13 +133,15 @@ export async function repairTranscript(input: {
   const existing = new Set(rows.map((row) => row.eventId));
 
   const conflicts = missing
+    .values()
     .filter((entry) => existing.has(`transcript:${entry.id}`))
-    .map((entry) => entry.id);
+    .map((entry) => entry.id)
+    .toArray();
 
   let queued = 0;
 
   if (input.apply) {
-    if (conflicts.length)
+    if (conflicts.length > 0)
       throw new Error(
         `Outbox rows conflict with missing replies: ${conflicts.join(", ")}`,
       );

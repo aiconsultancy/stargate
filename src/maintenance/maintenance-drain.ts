@@ -542,7 +542,7 @@ export class DrainRuntime implements DrainControl {
         dataDirectory: this.options.dataDirectory,
         crews: this.crews,
         pinnedSessions: this.options.pinnedSessions(),
-        ...(this.unknown ? { unknown: true as const } : {}),
+        ...(this.unknown && { unknown: true as const }),
       },
       this.directory,
     );
@@ -579,7 +579,9 @@ export class DrainRuntime implements DrainControl {
     if (this.closed || this.running || this.now() < this.nextAt) return;
     this.nextAt = this.now() + 1000;
     this.running = this.step()
-      .catch(() => this.options.warn("Maintenance drain observation failed"))
+      .catch(() => {
+        this.options.warn("Maintenance drain observation failed");
+      })
       .finally(() => {
         this.running = undefined;
       });
@@ -671,9 +673,9 @@ export class DrainRuntime implements DrainControl {
         noticePhase: phase,
         noticeStatus: ok ? "queued" : "uncertain",
       })
-      .catch(() =>
-        this.options.warn("Maintenance drain acknowledgement failed"),
-      );
+      .catch(() => {
+        this.options.warn("Maintenance drain acknowledgement failed");
+      });
 
     if (ok || attempt >= 5) {
       this.done.add(key);

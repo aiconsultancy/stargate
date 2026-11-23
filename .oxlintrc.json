@@ -424,7 +424,36 @@
         "eslint/max-classes-per-file": ["error", { "max": 3 }],
         "eslint/no-inner-declarations": "error",
         "anti-slop/no-object-parameters": "error",
-        "unicorn/consistent-function-scoping": "error"
+        "unicorn/consistent-function-scoping": "error",
+        "unicorn/consistent-existence-index-check": "error",
+        "unicorn/explicit-length-check": "error",
+        "unicorn/prefer-at": "error",
+        "typescript/prefer-includes": "error",
+        "unicorn/no-useless-fallback-in-spread": "error",
+        "unicorn/prefer-set-has": "error",
+        "unicorn/no-immediate-mutation": "error",
+        "unicorn/prefer-single-call": "error",
+        "unicorn/no-useless-collection-argument": "error",
+        "unicorn/prefer-array-find": "error",
+        "unicorn/no-array-for-each": "error",
+        "unicorn/no-array-reduce": "error",
+        "eslint/no-promise-executor-return": "error",
+        "eslint/no-param-reassign": "error",
+        "typescript/prefer-optional-chain": "error",
+        "unicorn/no-object-as-default-parameter": "error",
+        "typescript/await-thenable": "error",
+        "unicorn/prefer-top-level-await": "error",
+        "typescript/return-await": "error",
+        "oxc/no-accumulating-spread": "error",
+        "anti-slop/no-conditional-empty-object-spread": "error",
+        "unicorn/no-array-sort": "error",
+        "unicorn/no-array-reverse": "error",
+        "unicorn/no-array-callback-reference": "error",
+        "anti-slop/no-array-filter-map": "error",
+        "typescript/no-confusing-void-expression": "error",
+        "unicorn/no-useless-spread": "error",
+        "typescript/require-await": "error",
+        "typescript/strict-void-return": "error"
       },
       "env": {
         "node": true,
@@ -455,7 +484,7 @@
       "rules": {
         "eslint/max-lines-per-function": [
           "error",
-          { "max": 1334, "skipBlankLines": true, "skipComments": true }
+          { "max": 1350, "skipBlankLines": true, "skipComments": true }
         ]
       }
     },
@@ -984,6 +1013,69 @@
       ],
       "rules": {
         "typescript/strict-boolean-expressions": "off"
+      }
+    },
+    {
+      "files": ["src/teams/registration.ts"],
+      "rules": {
+        "typescript/await-thenable": "off"
+      }
+    },
+    {
+      "files": ["scripts/irc-question-smoke.ts"],
+      "rules": {
+        "unicorn/prefer-top-level-await": "off"
+      }
+    },
+    {
+      "files": ["src/backends/opencode/opencode.ts"],
+      "rules": {
+        "typescript/return-await": "off"
+      }
+    },
+    {
+      "files": ["src/dispatch/dispatcher.ts"],
+      "rules": {
+        "oxc/no-accumulating-spread": "off"
+      }
+    },
+    {
+      "files": ["scripts/hooks/affected-tests.ts"],
+      "rules": {
+        "typescript/no-confusing-void-expression": "off"
+      }
+    },
+    {
+      "files": [
+        "src/dashboard/api/server.ts",
+        "src/maintenance/nightly/cleanup/cleanup.ts",
+        "src/maintenance/nightly/update/model-step.ts"
+      ],
+      "rules": {
+        "unicorn/no-useless-spread": "off"
+      }
+    },
+    {
+      "files": [
+        "scripts/crew-question-smoke.ts",
+        "scripts/irc-question-smoke.ts",
+        "src/backends/claude.ts",
+        "src/backends/codex.ts",
+        "src/backends/pi/pi-durable.ts",
+        "src/backends/pi/pi-history.ts",
+        "src/crew/history/history-rpc.ts",
+        "src/gateway/gateway.ts",
+        "src/meta-commands/meta-commands.ts",
+        "src/teams/images.ts"
+      ],
+      "rules": {
+        "typescript/require-await": "off"
+      }
+    },
+    {
+      "files": ["src/app/service.ts", "src/backends/claude.ts"],
+      "rules": {
+        "typescript/strict-void-return": "off"
       }
     }
   ]

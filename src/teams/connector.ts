@@ -23,7 +23,9 @@ type FetchFn = typeof fetch;
 type Sleep = (ms: number) => Promise<void>;
 
 const defaultSleep: Sleep = (ms) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 // Settles with the promise, or rejects as soon as the signal aborts. The underlying
 // Work (a shared token request, say) carries on, but this caller stops waiting.
@@ -36,7 +38,10 @@ function untilAborted<T>(
   if (signal.aborted) return Promise.reject(signal.reason);
 
   return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
+    const onAbort = () => {
+      reject(signal.reason);
+    };
+
     signal.addEventListener("abort", onAbort, { once: true });
     promise.then(
       (value) => {
@@ -86,8 +91,8 @@ async function readError(
       ].filter((part) => typeof part === "string" && part !== "");
 
       return {
-        ...(code ? { code } : {}),
-        detail: parts.length ? `: ${parts.join(" - ").slice(0, 300)}` : "",
+        ...(code && { code }),
+        detail: parts.length > 0 ? `: ${parts.join(" - ").slice(0, 300)}` : "",
       };
     } catch {
       return { detail: "" };

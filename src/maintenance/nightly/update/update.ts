@@ -171,8 +171,8 @@ export async function maintenanceUpdate(
     mode,
     update: {
       version,
-      ...(options.retryFailed ? { retryFailed: true } : {}),
-      ...(runnerRelease ? { runnerRelease } : {}),
+      ...(options.retryFailed && { retryFailed: true }),
+      ...(runnerRelease && { runnerRelease }),
     },
     signal: deps.signal,
   });

@@ -226,7 +226,7 @@ export function buildQuestionBlocks(
     { type: "actions" }
   >["elements"] = [];
 
-  if (field.type === "multiselect" && field.options.length) {
+  if (field.type === "multiselect" && field.options.length > 0) {
     for (let start = 0; start < field.options.length; start += 10)
       blocks.push({
         type: "actions",

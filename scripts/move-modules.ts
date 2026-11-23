@@ -63,9 +63,9 @@ function git(
     env: {
       ...process.env,
       GIT_OPTIONAL_LOCKS: "0",
-      ...(index ? { GIT_INDEX_FILE: index } : {}),
+      ...(index && { GIT_INDEX_FILE: index }),
     },
-    ...(input ? { stdin: input } : {}),
+    ...(input && { stdin: input }),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -109,7 +109,7 @@ function readTree(root: string, ref: string): Tree {
     const end = bytes.indexOf(10, offset);
     const size = Number(bytes.subarray(offset, end).toString().split(" ")[2]);
 
-    if (end < 0 || !Number.isSafeInteger(size) || size < 0)
+    if (end === -1 || !Number.isSafeInteger(size) || size < 0)
       throw new Error("Invalid Git blob response");
     offset = end + 1;
     tree.set(entry.path, {
@@ -127,7 +127,8 @@ function readTree(root: string, ref: string): Tree {
 }
 
 function validateMoves(tree: Tree, moves: readonly Move[]) {
-  if (!moves.length) throw new Error("Supply at least one old/new path pair");
+  if (moves.length === 0)
+    throw new Error("Supply at least one old/new path pair");
   const sources = new Set<string>();
   const destinations = new Set<string>();
 
@@ -396,7 +397,7 @@ async function transformedTree(
           await project.program.getSyntacticDiagnostics(
             `${virtualRoot}/${file}`,
           )
-        ).length
+        ).length > 0
       )
         throw new Error(`Cannot parse module: ${file}`);
       let text = virtualFiles[`${virtualRoot}/${file}`] ?? "";
@@ -435,7 +436,7 @@ async function transformedTree(
 
       visit(source);
 
-      for (const edit of edits.sort((a, b) => b.start - a.start))
+      for (const edit of edits.toSorted((a, b) => b.start - a.start))
         text = text.slice(0, edit.start) + edit.value + text.slice(edit.end);
       const entry = before.get(file);
 
@@ -543,7 +544,7 @@ async function checkTree(
           "--ignore-submodules=none",
           "--",
           path,
-        ]).length
+        ]).length > 0
       )
         throw new Error(`Unexpected change: ${path}`);
       continue;
@@ -653,7 +654,7 @@ async function applyTree(
         parent = dirname(parent);
       }
 
-      for (const path of missing.reverse()) {
+      for (const path of missing.toReversed()) {
         await mkdir(path);
         created.push(path);
       }
@@ -677,7 +678,7 @@ async function applyTree(
     await rename(`${indexPath}.lock`, indexPath);
     published = true;
   } catch (error) {
-    for (const path of written.reverse()) {
+    for (const path of written.toReversed()) {
       const oldPath =
         pairs.find(([, destination]) => destination === path)?.[0] ?? path;
 
@@ -686,7 +687,7 @@ async function applyTree(
       if (entry) await Bun.write(join(root, path), entry.bytes);
     }
 
-    for (const [oldPath, newPath] of moved.reverse()) {
+    for (const [oldPath, newPath] of moved.toReversed()) {
       const destination = await pathStat(join(root, newPath));
 
       if (!destination) continue;
@@ -699,7 +700,7 @@ async function applyTree(
       await rename(join(root, newPath), join(root, oldPath));
     }
 
-    for (const path of created.reverse()) await rmdir(path);
+    for (const path of created.toReversed()) await rmdir(path);
     throw error;
   } finally {
     await lock.close();
@@ -711,11 +712,11 @@ async function applyTree(
 
 /** Apply declared moves, or compare their exact generated tree with the checkout. */
 export async function moveModules(
-  root: string,
+  rootInput: string,
   pairs: readonly Move[],
   options: { check?: boolean; base?: string } = {},
 ): Promise<void> {
-  root = resolve(root);
+  const root = resolve(rootInput);
 
   if (
     ["GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE"].some(
@@ -784,7 +785,7 @@ if (import.meta.main) {
         else positional.push(arg);
       }
 
-      if (!positional.length || positional.length % 2)
+      if (positional.length === 0 || positional.length % 2)
         throw new Error("Supply old/new path pairs; use --help");
       const pairs: Move[] = [];
 
@@ -792,7 +793,7 @@ if (import.meta.main) {
         pairs.push([positional[i] ?? "", positional[i + 1] ?? ""]);
       await moveModules(process.cwd(), pairs, {
         check,
-        ...(base ? { base } : {}),
+        ...(base && { base }),
       });
       console.log(
         check

@@ -37,9 +37,10 @@ export function cronRuntimeBinding(config: BotConfig, identity: Identity) {
 }
 
 export function cronjobPrompt(definition: CronjobDefinition, path: string) {
-  const skills = definition.skills.length
-    ? `Required agent skills: ${definition.skills.join(", ")}. Load these skills before doing the task; if unavailable, report the gap rather than inventing their instructions.\n`
-    : "";
+  const skills =
+    definition.skills.length > 0
+      ? `Required agent skills: ${definition.skills.join(", ")}. Load these skills before doing the task; if unavailable, report the gap rather than inventing their instructions.\n`
+      : "";
 
   return `Cronjob: ${definition.name}\nDefinition: ${JSON.stringify(path)}\nSupporting files resolve relative to its directory. The accepted task body is below; do not substitute a newer definition for this run.\n${skills}Reporting: ${definition.report === "daily" ? "deferred to the daily Slack digest; do not post to Slack yourself" : "Stargate delivers the final answer to Slack"}. Return a concise verified result, failures and deferred work; never credentials, tool transcripts or private reasoning.\n\n${definition.prompt}`;
 }
@@ -160,7 +161,7 @@ export class CronjobManager {
     const definition: CronjobDefinition = {
       name: input.name,
       description: details.description ?? input.name,
-      ...(input.expression ? { schedule: input.expression } : {}),
+      ...(input.expression && { schedule: input.expression }),
       timezone: input.timezone,
       prompt: input.prompt,
       report: input.report ?? "immediate",

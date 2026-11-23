@@ -154,7 +154,7 @@ export function crewStatusView(
       );
   }
 
-  if (!status.members.length)
+  if (status.members.length === 0)
     blocks.push(
       section(
         "No configured crew member found. Use /stargate crew for the roster.",

@@ -31,34 +31,26 @@ export function decodeStoredJob(row: StoredJob): Job {
   return {
     ...job,
     deferDelivery: row.deferDelivery === 1,
-    ...(slack_reaction
-      ? {
-          slackReaction: Schema.decodeUnknownSync(inboundReactionSchema)(
-            JSON.parse(slack_reaction),
-          ),
-        }
-      : {}),
-    ...(notification_context
-      ? {
-          notification: notificationContextSchema.parse(
-            JSON.parse(notification_context),
-          ),
-        }
-      : {}),
-    ...(fleet_context
-      ? {
-          fleet: Schema.decodeUnknownSync(fleetJobSchema)(
-            JSON.parse(fleet_context),
-          ),
-        }
-      : {}),
-    ...(makers
-      ? {
-          makers: Schema.decodeUnknownSync(
-            Schema.mutable(Schema.Array(nativeMakerSchema)),
-          )(JSON.parse(makers)),
-        }
-      : {}),
+    ...(slack_reaction && {
+      slackReaction: Schema.decodeUnknownSync(inboundReactionSchema)(
+        JSON.parse(slack_reaction),
+      ),
+    }),
+    ...(notification_context && {
+      notification: notificationContextSchema.parse(
+        JSON.parse(notification_context),
+      ),
+    }),
+    ...(fleet_context && {
+      fleet: Schema.decodeUnknownSync(fleetJobSchema)(
+        JSON.parse(fleet_context),
+      ),
+    }),
+    ...(makers && {
+      makers: Schema.decodeUnknownSync(
+        Schema.mutable(Schema.Array(nativeMakerSchema)),
+      )(JSON.parse(makers)),
+    }),
   };
 }
 

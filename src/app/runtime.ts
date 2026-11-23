@@ -294,7 +294,10 @@ export function serve(
       const lock = join(config.dataDirectory, "instance.sqlite");
       yield* Effect.acquireRelease(
         Effect.sync(() => lockInstance(lock)),
-        (lock) => Effect.sync(() => lock.close()),
+        (lock) =>
+          Effect.sync(() => {
+            lock.close();
+          }),
       );
       yield* Effect.promise(() =>
         rm(join(config.dataDirectory, "ready.json"), { force: true }),
@@ -313,7 +316,10 @@ export function serve(
         Effect.sync(() =>
           openStore(join(config.dataDirectory, "stargate.sqlite")),
         ),
-        (store) => Effect.sync(() => store.close()),
+        (store) =>
+          Effect.sync(() => {
+            store.close();
+          }),
       );
 
       // Registered before any worker starts; a failure never stops the gateway.
@@ -333,10 +339,12 @@ export function serve(
                       : [],
                   ),
                 discover: () => discoverCrews(config as Config, true),
-                warn: (message) => log.warn(message),
-                ...(dependencies.drain?.directory
-                  ? { directory: dependencies.drain.directory }
-                  : {}),
+                warn: (message) => {
+                  log.warn(message);
+                },
+                ...(dependencies.drain?.directory && {
+                  directory: dependencies.drain.directory,
+                }),
               });
 
               await control.start().catch(() => {
@@ -353,7 +361,10 @@ export function serve(
         Effect.sync(
           () => new CronStore(join(config.dataDirectory, "cron.sqlite")),
         ),
-        (store) => Effect.sync(() => store.close()),
+        (store) =>
+          Effect.sync(() => {
+            store.close();
+          }),
       );
 
       // One intake gate for every bot: the first close stops all ACKs, and
@@ -534,7 +545,9 @@ export function serve(
                 join(dataDirectory, "teams.sqlite"),
                 store,
                 resource.backend,
-                (message) => teamLog.warn(message),
+                (message) => {
+                  teamLog.warn(message);
+                },
               ),
           ),
           (registration) =>
@@ -791,7 +804,7 @@ export function serve(
           const watcher = new QuotaWatch(
             quota,
             new QuotaReader(
-              viaProxy.length ? quota.proxy : undefined,
+              viaProxy.length > 0 ? quota.proxy : undefined,
               Date.now,
               viaProxy,
             ),
@@ -1037,28 +1050,16 @@ export function serve(
                 allowDispatch:
                   irc.fleetPolicy?.capabilities.includes("dispatch") === true,
                 ...(entry.resource.backend.startReview &&
-                entry.resource.backend.readReview
-                  ? {
-                      nativeReviews: {
-                        startReview: (binding, signal) =>
-                          entry.resource.backend.startReview?.(
-                            binding,
-                            signal,
-                          ) ??
-                          Promise.reject(
-                            new Error("Review backend unavailable"),
-                          ),
-                        readReview: (binding, signal) =>
-                          entry.resource.backend.readReview?.(
-                            binding,
-                            signal,
-                          ) ??
-                          Promise.reject(
-                            new Error("Review backend unavailable"),
-                          ),
-                      },
-                    }
-                  : {}),
+                  entry.resource.backend.readReview && {
+                    nativeReviews: {
+                      startReview: (binding, signal) =>
+                        entry.resource.backend.startReview?.(binding, signal) ??
+                        Promise.reject(new Error("Review backend unavailable")),
+                      readReview: (binding, signal) =>
+                        entry.resource.backend.readReview?.(binding, signal) ??
+                        Promise.reject(new Error("Review backend unavailable")),
+                    },
+                  }),
                 authorize: async (caller, signal, request) => {
                   const { action } = fleetRequestAction(request);
 
@@ -1129,7 +1130,9 @@ export function serve(
             control.recordSource(source);
           };
 
-          ship.offerRecorder = (offer) => control.recordOffer(offer);
+          ship.offerRecorder = (offer) => {
+            control.recordOffer(offer);
+          };
 
           for (const team of relatedTeams)
             team.sourceRecorder = (source) => {
@@ -1260,7 +1263,9 @@ export function serve(
             }),
           ),
           (dashboard) =>
-            Effect.sync(() => viewers.abort()).pipe(
+            Effect.sync(() => {
+              viewers.abort();
+            }).pipe(
               Effect.andThen(release(log, "Dashboard", () => dashboard.stop())),
               Effect.timeoutOption("5 seconds"),
             ),
@@ -1309,32 +1314,32 @@ export function serve(
                 opencodeVersion: (signal) => openCodeVersion(ships, signal),
               },
               signal: viewers.signal,
-              ...(notify
-                ? {
-                    composeRoutes: (token: string) => {
-                      producer = notificationRoutes(
-                        notify,
-                        dependencies.notification?.environment ??
-                          reload?.current.environment ??
-                          process.env,
-                        token,
-                        {
-                          publish: (source, input) =>
-                            notificationCore?.publish(source, input) ??
-                            Effect.fail(new ShuttingDown()),
-                        },
-                      );
-
-                      return producer.routes;
+              ...(notify && {
+                composeRoutes: (token: string) => {
+                  producer = notificationRoutes(
+                    notify,
+                    dependencies.notification?.environment ??
+                      reload?.current.environment ??
+                      process.env,
+                    token,
+                    {
+                      publish: (source, input) =>
+                        notificationCore?.publish(source, input) ??
+                        Effect.fail(new ShuttingDown()),
                     },
-                  }
-                : {}),
+                  );
+
+                  return producer.routes;
+                },
+              }),
             }),
           ),
           (server) =>
             notify
               ? Effect.promise(stopNotifications)
-              : Effect.sync(() => viewers.abort()).pipe(
+              : Effect.sync(() => {
+                  viewers.abort();
+                }).pipe(
                   Effect.andThen(
                     release(log, "Fleet API", () => server.stop()),
                   ),
@@ -1536,7 +1541,7 @@ export function serve(
                 if (entry) {
                   const index = ships.indexOf(entry.dashboard);
 
-                  if (index >= 0) ships.splice(index, 1);
+                  if (index !== -1) ships.splice(index, 1);
                   fleetDashboard?.retireFleetBackend(entry.resource.backend);
                 }
               }
@@ -1558,15 +1563,17 @@ export function serve(
                 binding.entries.delete(registration.key);
                 await Effect.runPromise(
                   FiberMap.remove(fibers, registration.key),
-                ).catch(() => log.warn("Retired worker cleanup failed"));
-                await entry?.resource
-                  .close()
-                  .catch(() => log.warn("Retired backend cleanup failed"));
+                ).catch(() => {
+                  log.warn("Retired worker cleanup failed");
+                });
+                await entry?.resource.close().catch(() => {
+                  log.warn("Retired backend cleanup failed");
+                });
               }
 
-              await plan
-                .retire()
-                .catch(() => log.warn("Retired IRC cleanup failed"));
+              await plan.retire().catch(() => {
+                log.warn("Retired IRC cleanup failed");
+              });
             }
           } finally {
             if (!committed) {
@@ -1576,9 +1583,9 @@ export function serve(
                 await Effect.runPromise(
                   FiberMap.remove(fibers, entry.registration.key),
                 );
-                await entry.resource
-                  .close()
-                  .catch(() => log.warn("Staged backend cleanup failed"));
+                await entry.resource.close().catch(() => {
+                  log.warn("Staged backend cleanup failed");
+                });
               }
             }
           }
@@ -1599,7 +1606,7 @@ export function serve(
         const deadline = Date.now() + connectionTiming.outageMs;
 
         while (
-          transportSnapshot().length &&
+          transportSnapshot().length > 0 &&
           !transportSnapshot().some(
             (transport) => transport.state === "connected",
           )
@@ -1719,7 +1726,9 @@ export function serve(
                   "This Stargate directory has no valid .stargate-release.json; the readiness record has no version and maintenance cannot verify an update. Install releases with stargate maintenance update or adopt.",
                 );
             },
-            () => log.warn("Readiness record not written"),
+            () => {
+              log.warn("Readiness record not written");
+            },
           ),
         );
 
@@ -1760,7 +1769,7 @@ export function serve(
             }
 
             if (
-              transports.length &&
+              transports.length > 0 &&
               !transports.some((transport) => transport.state === "connected")
             ) {
               lostSince ??= Date.now();
@@ -1776,12 +1785,21 @@ export function serve(
       yield* Effect.raceFirst(
         Deferred.await(stopped),
         Effect.callback<void>((resume) => {
-          const stop = () => resume(Effect.void);
+          const stop = () => {
+            resume(Effect.void);
+          };
 
-          if (shutdown.aborted) return stop();
+          if (shutdown.aborted) {
+            stop();
+
+            return;
+          }
+
           shutdown.addEventListener("abort", stop, { once: true });
 
-          return Effect.sync(() => shutdown.removeEventListener("abort", stop));
+          return Effect.sync(() => {
+            shutdown.removeEventListener("abort", stop);
+          });
         }),
       );
     }),
@@ -1864,7 +1882,11 @@ export async function start(configPath: string) {
   );
 
   const controller = new AbortController();
-  const stop = () => controller.abort();
+
+  const stop = () => {
+    controller.abort();
+  };
+
   const unlisten = listenForReload(reload);
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);

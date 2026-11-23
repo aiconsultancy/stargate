@@ -452,7 +452,9 @@ export class CrewEngine {
         };
 
         return {
-          authorize,
+          authorize: (conversationID) => {
+            authorize(conversationID);
+          },
           run: async (name, input, conversationID, id, signal) => {
             const peer = authorize(conversationID);
 
@@ -528,13 +530,11 @@ export class CrewEngine {
       }),
       total: members.length,
       truncated: members.length > 20,
-      ...(options?.aggregate
-        ? {
-            busy: [...tasks.values()].filter(
-              (task) => task && task.status !== "completed",
-            ).length,
-          }
-        : {}),
+      ...(options?.aggregate && {
+        busy: [...tasks.values()].filter(
+          (task) => task && task.status !== "completed",
+        ).length,
+      }),
     };
   }
 
@@ -783,7 +783,9 @@ export class CrewEngine {
       this.state.updateNotices.consumeContext(
         sessionID,
         this.options.namespace,
-        (text) => system.push({ type: "text", text }),
+        (text) => {
+          system.push({ type: "text", text });
+        },
       );
 
       return;
@@ -806,7 +808,9 @@ export class CrewEngine {
     this.state.updateNotices.consumeContext(
       sessionID,
       this.options.namespace,
-      (text) => system.push({ type: "text", text }),
+      (text) => {
+        system.push({ type: "text", text });
+      },
     );
   }
 
@@ -886,7 +890,7 @@ export class CrewEngine {
             directory: this.options.captainDirectory,
             parentID: null,
             limit: 100,
-            ...(cursor ? { cursor } : {}),
+            ...(cursor && { cursor }),
           },
           { signal },
         );
@@ -1144,8 +1148,8 @@ export class CrewEngine {
     return null;
   }
 
-  public async mail(raw: unknown, caller: CrewCaller) {
-    caller = this.logicalCaller(caller);
+  public async mail(raw: unknown, callerInput: CrewCaller) {
+    const caller = this.logicalCaller(callerInput);
     const input = Schema.decodeUnknownResult(mailInputSchema)(raw);
 
     if (Result.isFailure(input))
@@ -1164,7 +1168,7 @@ export class CrewEngine {
         (message) =>
           !(result.messages ?? []).some((current) => current.id === message.id),
       ),
-    ].sort((a, b) => a.sequence - b.sequence);
+    ].toSorted((a, b) => a.sequence - b.sequence);
 
     return {
       ...result,
@@ -1316,12 +1320,10 @@ export class CrewEngine {
           description: "Crew direct message",
           metadata: {
             [crewMessageMetadataKey]: {
-              ...(busy ? { taskID: busy.id } : {}),
-              ...(route.sourceTaskID
-                ? { sourceTaskID: route.sourceTaskID }
-                : {}),
+              ...(busy && { taskID: busy.id }),
+              ...(route.sourceTaskID && { sourceTaskID: route.sourceTaskID }),
               originCaptainID: route.captainID,
-              ...(originInputID ? { originInputID } : {}),
+              ...(originInputID && { originInputID }),
               messageID: route.id,
             },
           },
@@ -1377,8 +1379,8 @@ export class CrewEngine {
     return member ? { ...caller, agent: member.id } : caller;
   }
 
-  public async journal(raw: unknown, caller: CrewCaller) {
-    caller = this.logicalCaller(caller);
+  public async journal(raw: unknown, callerInput: CrewCaller) {
+    const caller = this.logicalCaller(callerInput);
     const input = decodeJournalInput(raw);
 
     if (Result.isFailure(input))
@@ -1545,8 +1547,8 @@ export class CrewEngine {
     }
   }
 
-  public async run(raw: unknown, caller: CrewCaller): Promise<CrewResult> {
-    caller = this.logicalCaller(caller);
+  public async run(raw: unknown, callerInput: CrewCaller): Promise<CrewResult> {
+    const caller = this.logicalCaller(callerInput);
     const parsed = Schema.decodeUnknownResult(crewInputSchema)(raw);
 
     if (Result.isFailure(parsed))
@@ -1686,8 +1688,8 @@ export class CrewEngine {
     }
   }
 
-  public async captain(caller: CrewCaller): Promise<void> {
-    caller = this.logicalCaller(caller);
+  public async captain(callerInput: CrewCaller): Promise<void> {
+    const caller = this.logicalCaller(callerInput);
 
     if (
       caller.agent !== this.options.team.captain.id ||
@@ -1794,8 +1796,8 @@ export class CrewEngine {
    * Stargate-bound IRC sessions, which act only as their member. The member
    * comes from the binding and must equal the host's agent for the call.
    */
-  public async authorizeMail(caller: CrewCaller): Promise<CrewCaller> {
-    caller = this.logicalCaller(caller);
+  public async authorizeMail(callerInput: CrewCaller): Promise<CrewCaller> {
+    const caller = this.logicalCaller(callerInput);
     const bound = this.state.ircSessions.crewID(caller.sessionID);
 
     if (!bound) {
@@ -1816,8 +1818,8 @@ export class CrewEngine {
     return { ...caller, [ircIdentity]: bound };
   }
 
-  public async authorize(caller: CrewCaller): Promise<void> {
-    caller = this.logicalCaller(caller);
+  public async authorize(callerInput: CrewCaller): Promise<void> {
+    const caller = this.logicalCaller(callerInput);
 
     if (caller.agent === this.options.team.captain.id)
       return this.captain(caller);
@@ -1859,9 +1861,9 @@ export class CrewEngine {
   /** Read one existing own-roster model target, without ensure, prompt or control. */
   public async inspectWorkerModel(
     crewID: string,
-    caller: CrewCaller,
+    callerInput: CrewCaller,
   ): Promise<WorkerModelPeer> {
-    caller = this.logicalCaller(caller);
+    const caller = this.logicalCaller(callerInput);
     caller.signal.throwIfAborted();
     await this.captain(caller);
 
@@ -1884,16 +1886,16 @@ export class CrewEngine {
     caller.signal.throwIfAborted();
     this.validPeer(session, peer);
 
-    return { ...peer, ...(session.model ? { model: session.model } : {}) };
+    return { ...peer, ...(session.model && { model: session.model }) };
   }
 
   public async withWorkerControl<T>(
     crewID: string,
-    caller: CrewCaller,
+    callerInput: CrewCaller,
     operation: (peer: WorkerModelPeer) => Promise<T>,
     options: { requireReady?: boolean } = {},
   ): Promise<T> {
-    caller = this.logicalCaller(caller);
+    const caller = this.logicalCaller(callerInput);
     await this.captain(caller);
 
     if (this.member(crewID).backend)
@@ -1939,7 +1941,7 @@ export class CrewEngine {
         );
 
         this.validPeer(session, ready);
-        peer = { ...ready, ...(session.model ? { model: session.model } : {}) };
+        peer = { ...ready, ...(session.model && { model: session.model }) };
       }
 
       if (!peer)
@@ -2034,7 +2036,7 @@ export class CrewEngine {
               member.permissionProfile,
               this.options.team.toolAccess,
             ),
-            ...(agent?.data.model ? { model: agent.data.model } : {}),
+            ...(agent?.data.model && { model: agent.data.model }),
           },
           { signal },
         );
@@ -2109,7 +2111,9 @@ export class CrewEngine {
       peers: peer ? [peer] : [],
       active: active ? inspectTask(active) : null,
       inspectedTask: selected ? inspectTask(selected) : null,
-      queued: this.state.queuedTasks(input.crew).map(inspectTask),
+      queued: this.state
+        .queuedTasks(input.crew)
+        .map((item) => inspectTask(item)),
       controlled: this.state.controlled(input.crew),
       controlID: this.state.controlID(input.crew),
       reconciliation: selected ? this.state.reconciliation(selected.id) : null,
@@ -2331,7 +2335,7 @@ export class CrewEngine {
   ): Promise<void> {
     const pending = this.state.resumeBoundaries(task.id, true);
 
-    if (!pending.length) return;
+    if (pending.length === 0) return;
 
     const signal = AbortSignal.any([
       caller.signal,
@@ -2659,11 +2663,9 @@ export class CrewEngine {
       status: "abandoned",
       task: this.state.task(task.id) ?? task,
       abandonment: this.state.abandonment(task.id),
-      ...(outcome.stop === "unconfirmed"
-        ? {
-            diagnostic: `Task ${task.id} abandoned; native stop unconfirmed: ${outcome.detail} Dispatch still requires confirmed native idle. Inspect the workspace before reuse.`,
-          }
-        : {}),
+      ...(outcome.stop === "unconfirmed" && {
+        diagnostic: `Task ${task.id} abandoned; native stop unconfirmed: ${outcome.detail} Dispatch still requires confirmed native idle. Inspect the workspace before reuse.`,
+      }),
     };
   }
 
@@ -2711,7 +2713,7 @@ export class CrewEngine {
       ? await this.inspectionAPI({ ...caller, signal }).catch(() => null)
       : null;
 
-    if (this.state.resumeBoundaries(task.id, true).length)
+    if (this.state.resumeBoundaries(task.id, true).length > 0)
       return {
         stop: "unconfirmed",
         detail:
@@ -2725,7 +2727,7 @@ export class CrewEngine {
         .map((idleAt) => resumeMessageID(task, idleAt)),
     );
 
-    if (resumeIDs.size) {
+    if (resumeIDs.size > 0) {
       const queuedResumes = async () =>
         (
           await api?.session.inbox.list(
@@ -2743,7 +2745,7 @@ export class CrewEngine {
 
       const queued = await queuedResumes().catch(() => {});
 
-      if (!queued || (queued.length && !api?.session.inbox.cancel))
+      if (!queued || (queued.length > 0 && !api?.session.inbox.cancel))
         return stopUnconfirmed;
 
       for (const { id } of queued)
@@ -2752,7 +2754,7 @@ export class CrewEngine {
           .catch(() => {});
       const remaining = await queuedResumes().catch(() => {});
 
-      if (!remaining || remaining.length) return stopUnconfirmed;
+      if (!remaining || remaining.length > 0) return stopUnconfirmed;
     }
 
     let placement: Placement = api
@@ -2982,13 +2984,11 @@ export class CrewEngine {
         workspace: await inspectWorkspace(root, input.crew, caller.signal),
         checkpoint,
         executionConfirmed,
-        ...(input.op === "reset"
-          ? {
-              diagnostic: checkpoint
-                ? "Tracked changes were reset to HEAD; untracked and ignored files were left in place."
-                : "No tracked changes to reset; untracked and ignored files were left in place.",
-            }
-          : {}),
+        ...(input.op === "reset" && {
+          diagnostic: checkpoint
+            ? "Tracked changes were reset to HEAD; untracked and ignored files were left in place."
+            : "No tracked changes to reset; untracked and ignored files were left in place.",
+        }),
       };
     } finally {
       this.state.releaseControl(input.crew, token);
@@ -3046,14 +3046,11 @@ export class CrewEngine {
 
     const busy: CrewResult = {
       status: "busy",
-      ...(active && this.ownsCaptainLineage(active.originCaptainID, caller)
-        ? {
-            task: active,
-            ...(recovered?.diagnostic
-              ? { diagnostic: recovered.diagnostic }
-              : {}),
-          }
-        : {}),
+      ...(active &&
+        this.ownsCaptainLineage(active.originCaptainID, caller) && {
+          task: active,
+          ...(recovered?.diagnostic && { diagnostic: recovered.diagnostic }),
+        }),
     };
 
     if (active) {
@@ -3450,11 +3447,13 @@ export class CrewEngine {
   }
 
   private async wait(
-    task: CrewTask,
+    taskInput: CrewTask,
     after: number,
     caller: CrewCaller,
     deadline: number,
   ): Promise<CrewResult> {
+    let task = taskInput;
+
     // Queued waits do not observe/interrupt the different task occupying this slot.
     while (task.status === "queued") {
       caller.signal.throwIfAborted();
@@ -3464,7 +3463,7 @@ export class CrewEngine {
       if (task.status !== "queued") break;
       const notices = this.state.notices(task.id, after);
 
-      if (notices.length) return { status: task.status, task, notices };
+      if (notices.length > 0) return { status: task.status, task, notices };
       const remaining = deadline - this.waitNow();
 
       if (remaining <= 0) return elapsed(task, notices);
@@ -3523,7 +3522,7 @@ export class CrewEngine {
         if (
           current.status === "completed" ||
           current.status === "uncertain" ||
-          notices.length
+          notices.length > 0
         )
           return { status: current.status, task: current, notices };
 
@@ -3603,7 +3602,7 @@ export class CrewEngine {
       (task.status !== "running" && task.status !== "uncertain") ||
       task.released
     )
-      return { task, ...(readmission ? { diagnostic: readmission } : {}) };
+      return { task, ...(readmission && { diagnostic: readmission }) };
 
     const signal = AbortSignal.any([
       caller.signal,

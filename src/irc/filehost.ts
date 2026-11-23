@@ -186,7 +186,7 @@ export class Filehost {
         signal,
         AbortSignal.timeout(this.options.timeoutMs ?? 30_000),
       ]),
-      ...(this.options.ca ? { tls: { ca: this.options.ca } } : {}),
+      ...(this.options.ca && { tls: { ca: this.options.ca } }),
     };
   }
 

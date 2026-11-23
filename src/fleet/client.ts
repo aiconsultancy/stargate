@@ -38,13 +38,13 @@ export function fleetRequest(
             );
           } else chunks.push(chunk);
         });
-        response.once("error", () =>
+        response.once("error", () => {
           reject(
             new FleetError(
               "Fleet response was interrupted; inspect the same request ID before retrying.",
             ),
-          ),
-        );
+          );
+        });
         response.once("end", () => {
           try {
             const value: unknown = JSON.parse(
@@ -73,14 +73,16 @@ export function fleetRequest(
       },
     );
 
-    req.once("timeout", () => req.destroy());
-    req.once("error", () =>
+    req.once("timeout", () => {
+      req.destroy();
+    });
+    req.once("error", () => {
       reject(
         new FleetError(
           "Fleet control unavailable or interrupted; inspect the same request ID before retrying.",
         ),
-      ),
-    );
+      );
+    });
     req.end(body);
   });
 }

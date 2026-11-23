@@ -83,8 +83,8 @@ export function coreLimits(config: NotifyConfig) {
   const { maxAgeHours, dedupDays, ...limits } = config.limits ?? {};
 
   const result: Partial<Limits> = {
-    ...(maxAgeHours === undefined ? {} : { maxAgeMs: maxAgeHours * 3_600_000 }),
-    ...(dedupDays === undefined ? {} : { dedupMs: dedupDays * 86_400_000 }),
+    ...(maxAgeHours !== undefined && { maxAgeMs: maxAgeHours * 3_600_000 }),
+    ...(dedupDays !== undefined && { dedupMs: dedupDays * 86_400_000 }),
   };
 
   for (const key of [

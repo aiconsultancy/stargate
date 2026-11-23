@@ -72,9 +72,9 @@ export class CrewHistoryRPC {
       harness: member.backend ? "pi-durable" : "opencode",
       kind: "crew",
       member: member.id,
-      ...(member.name ? { title: member.name } : {}),
-      ...(member.agent ? { agent: member.agent.slice(0, 200) } : {}),
-      ...(model ? { model: model.slice(0, 200) } : {}),
+      ...(member.name && { title: member.name }),
+      ...(member.agent && { agent: member.agent.slice(0, 200) }),
+      ...(model && { model: model.slice(0, 200) }),
     };
   }
 
@@ -189,20 +189,18 @@ export class CrewHistoryRPC {
           kind: "conversation",
           parentID: input.parentID,
           title: row.title,
-          ...(input.updatedSince !== undefined && row.updatedAt !== null
-            ? { updatedAt: row.updatedAt }
-            : {}),
+          ...(input.updatedSince !== undefined &&
+            row.updatedAt !== null && { updatedAt: row.updatedAt }),
         })),
-        ...(input.updatedSince === undefined && rows.length > input.limit
-          ? {
-              cursor: Buffer.from(
-                JSON.stringify({
-                  parentID: input.parentID,
-                  after: selected.at(-1)?.conversationID,
-                }),
-              ).toString("base64url"),
-            }
-          : {}),
+        ...(input.updatedSince === undefined &&
+          rows.length > input.limit && {
+            cursor: Buffer.from(
+              JSON.stringify({
+                parentID: input.parentID,
+                after: selected.at(-1)?.conversationID,
+              }),
+            ).toString("base64url"),
+          }),
       };
     });
   }

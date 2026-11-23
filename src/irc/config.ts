@@ -438,7 +438,7 @@ export function createIrcConfig<
     );
 
     const enrolled = new Set(
-      config.fleetPolicy?.agentAccounts.map((account) => fold(account)) ?? [],
+      config.fleetPolicy?.agentAccounts.map((account) => fold(account)),
     );
 
     return (
@@ -713,8 +713,9 @@ export function createIrcConfig<
           });
       }
 
-      const issue = (message: string) =>
+      const issue = (message: string) => {
         context.addIssue({ code: "custom", message });
+      };
 
       // Collisions fold with rfc1459, the widest classic CASEMAPPING, so names
       // Any server treats as equal are refused. Grants (crew ⊆ captain) only
@@ -726,7 +727,7 @@ export function createIrcConfig<
         ...irc.crew.map((member) => member.account),
       ];
 
-      if (new Set(accounts.map(lower)).size !== accounts.length)
+      if (new Set(accounts.map((item) => lower(item))).size !== accounts.length)
         issue("Captain and crew need distinct IRC accounts");
 
       const nicks = [
@@ -734,7 +735,7 @@ export function createIrcConfig<
         ...irc.crew.map((member) => member.nick ?? member.account),
       ];
 
-      if (new Set(nicks.map(lower)).size !== nicks.length)
+      if (new Set(nicks.map((item) => lower(item))).size !== nicks.length)
         issue("Captain and crew need distinct IRC nicks");
 
       for (const member of [irc, ...irc.crew]) {
@@ -768,7 +769,7 @@ export function createIrcConfig<
       for (const member of irc.crew)
         if (!member.channels.every((channel) => granted.has(exact(channel))))
           issue(`IRC crew ${member.id} may only join captain channels`);
-      const ship = new Set(accounts.map(lower));
+      const ship = new Set(accounts.map((item) => lower(item)));
 
       if (irc.access.peerCaptains.some((account) => ship.has(lower(account))))
         issue("peerCaptains must not list this ship's own accounts");

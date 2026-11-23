@@ -66,9 +66,10 @@ export function nextVersion(
     number,
   ];
 
-  let bump = messages
-    .map(bumpFor)
-    .reduce<Bump>((a, b) => (order[b] > order[a] ? b : a), "none");
+  let bump: Bump = "none";
+
+  for (const next of messages.map((item) => bumpFor(item)))
+    if (order[next] > order[bump]) bump = next;
 
   if (bump === "none") {
     if (!force || messages.length === 0) return undefined;
@@ -129,11 +130,10 @@ async function git(...args: string[]) {
 }
 
 if (import.meta.main) {
-  const tags = (await git("tag", "--list", "v*.*.*", "--sort=-v:refname"))
+  const last = (await git("tag", "--list", "v*.*.*", "--sort=-v:refname"))
     .split("\n")
-    .filter(Boolean);
+    .find(Boolean);
 
-  const last = tags[0];
   const range = last ? `${last}..HEAD` : "HEAD";
 
   const messages = (await git("log", "--format=%B%x00", range))

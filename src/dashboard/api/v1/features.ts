@@ -36,7 +36,7 @@ const flag = (
   label,
   enabled,
   defaultEnabled,
-  ...(value !== undefined ? { value } : {}),
+  ...(value !== undefined && { value }),
 });
 
 export function gatewayFeatures(config: ApiV1Config): V1Feature[] {

@@ -10,7 +10,11 @@ export function readWithDeadline<T>(
       : AbortSignal.any([parent, AbortSignal.timeout(timeout)]);
 
   const aborted = Promise.withResolvers<never>();
-  const abort = () => aborted.reject(signal.reason);
+
+  const abort = () => {
+    aborted.reject(signal.reason);
+  };
+
   signal.addEventListener("abort", abort, { once: true });
 
   const reading = Promise.resolve().then(() => {
@@ -25,7 +29,9 @@ export function readWithDeadline<T>(
 
       return value;
     })
-    .finally(() => signal.removeEventListener("abort", abort));
+    .finally(() => {
+      signal.removeEventListener("abort", abort);
+    });
 
   const settled = reading.then(
     () => {},

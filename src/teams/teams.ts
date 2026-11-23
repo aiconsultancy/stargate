@@ -38,8 +38,10 @@ export type Activity = {
 
 export function activityTenantIds(activity: Activity): string[] {
   return [activity.channelData?.tenant?.id, activity.conversation?.tenantId]
+    .values()
     .filter((id): id is string => typeof id === "string" && id.length > 0)
-    .map((id) => id.toLowerCase());
+    .map((id) => id.toLowerCase())
+    .toArray();
 }
 
 function decodeEntities(text: string): string {

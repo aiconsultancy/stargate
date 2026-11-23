@@ -136,7 +136,9 @@ export class IrcStatus {
     this.shutdownPromise = new Promise<void>((resolve) => {
       this.finishShutdown = resolve;
     });
-    this.shutdownTimer = setTimeout(() => this.stop(), this.timing.shutdownMs);
+    this.shutdownTimer = setTimeout(() => {
+      this.stop();
+    }, this.timing.shutdownMs);
     this.wake();
 
     return this.shutdownPromise;

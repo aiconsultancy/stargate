@@ -259,7 +259,7 @@ export class DispatchLedger {
 
         return value ? [value] : [];
       })
-      .sort(
+      .toSorted(
         (a, b) => a.updatedAt - b.updatedAt || a.issue.localeCompare(b.issue),
       );
   }

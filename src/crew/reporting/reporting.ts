@@ -391,7 +391,7 @@ export class ReportingStore {
       )
       .map(({ id, taskID, member, kind, text }) => ({
         id,
-        ...(taskID ? { taskID } : {}),
+        ...(taskID && { taskID }),
         member: this.names.get(member) ?? member,
         kind,
         text,
@@ -628,7 +628,7 @@ export class CrewReporter {
         const reference = () =>
           JSON.stringify({ records, tasks: taskStatuses, truncated });
 
-        while (reference().length > 60_000 && records.length) {
+        while (reference().length > 60_000 && records.length > 0) {
           records.shift();
           truncated = true;
         }

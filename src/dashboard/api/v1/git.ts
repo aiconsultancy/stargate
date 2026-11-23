@@ -88,7 +88,7 @@ function statusOptions(output: string) {
     if (!entry) continue;
     const [key, value = "true", ...rest] = entry.split("\n");
 
-    if (key && statusSettings.test(key) && !rest.length)
+    if (key && statusSettings.test(key) && rest.length === 0)
       options.push("-c", `${key}=${value}`);
   }
 
@@ -536,7 +536,7 @@ async function prepareStatus(
     !commonGit ||
     !isAbsolute(commonGit) ||
     (format !== "sha1" && format !== "sha256") ||
-    rest.length
+    rest.length > 0
   )
     throw new Error("Git metadata unavailable");
 
@@ -549,7 +549,7 @@ async function prepareStatus(
   const configuredExcludes =
     excludes.code === 0 &&
     terminator === "" &&
-    !extraExcludes.length &&
+    extraExcludes.length === 0 &&
     excludesPath &&
     resolve(directory, excludesPath);
 
@@ -981,7 +981,9 @@ export function createGitReader(
           deadline,
         )
           .catch(reply.reject)
-          .finally(() => reads.delete(task));
+          .finally(() => {
+            reads.delete(task);
+          });
 
         reads.add(task);
 

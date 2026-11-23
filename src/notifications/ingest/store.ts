@@ -469,7 +469,7 @@ export class NotifyStore {
   public recover(now: number) {
     checkTime(now);
 
-    if (this.active.size) throw new StoreUnavailable();
+    if (this.active.size > 0) throw new StoreUnavailable();
 
     const recovered = this.transaction(() => {
       const dropped = this.db
@@ -628,7 +628,7 @@ export class NotifyStore {
   }
 
   public close() {
-    if (this.active.size) throw new StoreUnavailable();
+    if (this.active.size > 0) throw new StoreUnavailable();
 
     if (!this.closed) {
       this.db.close();

@@ -235,12 +235,8 @@ export async function observeExecution(
       time: session.time
         ? {
             updated: session.time.updated,
-            ...(session.time.busy !== undefined
-              ? { busy: session.time.busy }
-              : {}),
-            ...(session.time.idle !== undefined
-              ? { idle: session.time.idle }
-              : {}),
+            ...(session.time.busy !== undefined && { busy: session.time.busy }),
+            ...(session.time.idle !== undefined && { idle: session.time.idle }),
           }
         : null,
       outcome: session.outcome ?? null,
@@ -285,7 +281,7 @@ async function* newest(
         limit,
         ...(cursor
           ? { cursor }
-          : { order: "desc" as const, ...(type ? { type } : {}) }),
+          : { order: "desc" as const, ...(type && { type }) }),
       },
       { signal },
     );
@@ -526,7 +522,7 @@ export async function verifyResult(
         sessionID: task.workerSessionID,
         order: "desc",
         limit: 64,
-        ...(cursor ? { cursor } : {}),
+        ...(cursor && { cursor }),
       },
       { signal },
     );

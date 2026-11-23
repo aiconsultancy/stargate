@@ -90,15 +90,17 @@ export function parseReactionReply(text: string, complete = true) {
     )
       return { text: "", pending: true, reaction, silent };
     const newline = rest.indexOf("\n");
-    const line = newline < 0 ? rest : rest.slice(0, newline).replace(/\r$/, "");
+
+    const line =
+      newline === -1 ? rest : rest.slice(0, newline).replace(/\r$/, "");
 
     if (!open.includes(line)) break;
 
     if (line === silentDirective) silent = true;
     else reaction = directives.find((item) => item.line === line)?.name;
-    rest = newline < 0 ? "" : rest.slice(newline + 1);
+    rest = newline === -1 ? "" : rest.slice(newline + 1);
 
-    if (newline < 0) break;
+    if (newline === -1) break;
   }
 
   return { text: silent ? "" : rest, pending: false, reaction, silent };

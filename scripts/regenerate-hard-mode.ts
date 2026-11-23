@@ -11,7 +11,7 @@ const [, , option, patch, ...extra] = process.argv;
 
 if (
   (option !== undefined && (option !== "--tool-patch" || !patch)) ||
-  extra.length
+  extra.length > 0
 ) {
   throw new Error(
     "Usage: bun scripts/regenerate-hard-mode.ts [--tool-patch /path/to/tool.patch]",
@@ -92,7 +92,7 @@ for (const row of git("diff", "--numstat", "--no-renames", "-z")
   folders.set(folder, counts);
 }
 
-for (const [folder, { files, added, removed }] of [...folders].sort()) {
+for (const [folder, { files, added, removed }] of [...folders].toSorted()) {
   console.log(`${folder}: ${files} files, +${added}/-${removed}`);
 }
 

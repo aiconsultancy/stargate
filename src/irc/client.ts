@@ -517,8 +517,15 @@ export class IrcClient {
   public async waitReady(timeoutMs: number, signal?: AbortSignal) {
     if (this.registeredNow) return;
     const ready = Promise.withResolvers<void>();
-    const wake = () => ready.resolve();
-    const fail = () => ready.reject(new IrcUnavailable());
+
+    const wake = () => {
+      ready.resolve();
+    };
+
+    const fail = () => {
+      ready.reject(new IrcUnavailable());
+    };
+
     this.waiters.add(wake);
     const timer = setTimeout(fail, timeoutMs);
     signal?.addEventListener("abort", fail, { once: true });
@@ -564,15 +571,16 @@ export class IrcClient {
       "normal",
       undefined,
       true,
-      (msgid) => echoed.resolve(msgid),
+      (msgid) => {
+        echoed.resolve(msgid);
+      },
     );
 
     if (!echo) return;
 
-    const timer = setTimeout(
-      () => echoed.resolve(undefined),
-      this.timing.confirmMs,
-    );
+    const timer = setTimeout(() => {
+      echoed.resolve(undefined);
+    }, this.timing.confirmMs);
 
     try {
       return await echoed.promise;
@@ -607,13 +615,13 @@ export class IrcClient {
       !this.registeredNow ||
       !this.socket ||
       !this.caps.has("message-tags") ||
-      this.queue.length ||
+      this.queue.length > 0 ||
       (guard && !guard())
     )
       return false;
     this.enqueue({
       lines: [formatMessage("TAGMSG", [target], tags)],
-      ...(guard ? { guard } : {}),
+      ...(guard && { guard }),
     });
 
     return true;
@@ -802,7 +810,7 @@ export class IrcClient {
 
         return [
           formatMessage(command, params, {
-            ...(label === undefined ? {} : { label }),
+            ...(label !== undefined && { label }),
             ...tags,
           }),
         ];
@@ -844,7 +852,7 @@ export class IrcClient {
       root: tags["+draft/reply"],
       label,
       request: validMsgid(request) ? request : undefined,
-      ...(onEcho ? { onEcho } : {}),
+      ...(onEcho && { onEcho }),
     });
 
     return id;
@@ -902,13 +910,13 @@ export class IrcClient {
 
         return [
           formatMessage("BATCH", [`+${reference}`, "draft/multiline", target], {
-            ...(label === undefined ? {} : { label }),
+            ...(label !== undefined && { label }),
             ...tags,
           }),
           ...lines.map((line) =>
             formatMessage("PRIVMSG", [target, line.text], {
               batch: reference,
-              ...(line.concat ? { "draft/multiline-concat": "" } : {}),
+              ...(line.concat && { "draft/multiline-concat": "" }),
             }),
           ),
           formatMessage("BATCH", [`-${reference}`]),
@@ -941,7 +949,7 @@ export class IrcClient {
 
         const item: Queued = {
           lines: build(label),
-          ...(guard ? { guard } : {}),
+          ...(guard && { guard }),
           done: (error) => {
             if (!error) return;
             clearTimeout(timer);
@@ -971,8 +979,11 @@ export class IrcClient {
         this.enqueue(
           {
             lines: build(undefined),
-            ...(guard ? { guard } : {}),
-            done: (error) => (error ? result.reject(error) : result.resolve()),
+            ...(guard && { guard }),
+            done: (error) => {
+              if (error) result.reject(error);
+              else result.resolve();
+            },
           },
           priority,
         );
@@ -1040,9 +1051,9 @@ export class IrcClient {
       port,
       tls: tls
         ? {
-            ...(ca ? { ca } : {}),
-            ...(clientCertificate ?? {}),
-            ...(isIP(host) ? {} : { serverName: host }),
+            ...(ca && { ca }),
+            ...clientCertificate,
+            ...(!isIP(host) && { serverName: host }),
             rejectUnauthorized: true,
           }
         : false,
@@ -1088,12 +1099,16 @@ export class IrcClient {
         drain: () => {
           if (generation === this.generation) this.flush();
         },
-        close: () => closed.resolve(),
+        close: () => {
+          closed.resolve();
+        },
         end: (socket) => {
           socket.end();
         },
         error: () => {},
-        connectError: () => closed.resolve(),
+        connectError: () => {
+          closed.resolve();
+        },
       },
     });
 
@@ -1129,7 +1144,9 @@ export class IrcClient {
     signal.addEventListener("abort", abort, { once: true });
 
     const timers = setInterval(
-      () => this.tick(),
+      () => {
+        this.tick();
+      },
       Math.min(1000, this.timing.pingMs / 2, this.timing.reclaimMs),
     );
 
@@ -1137,7 +1154,9 @@ export class IrcClient {
       if (!abandon() && !this.registeredNow) this.socket?.end();
     }, this.timing.registerMs);
 
-    void opened.catch(() => closed.resolve());
+    void opened.catch(() => {
+      closed.resolve();
+    });
 
     return closed.promise.then(() => {
       signal.removeEventListener("abort", abort);
@@ -1248,8 +1267,8 @@ export class IrcClient {
     this.output.push({
       bytes,
       started: false,
-      ...(guard ? { guard } : {}),
-      ...(done ? { done } : {}),
+      ...(guard && { guard }),
+      ...(done && { done }),
     });
     this.flush();
   }
@@ -1259,7 +1278,7 @@ export class IrcClient {
 
     if (!socket) return;
 
-    while (this.output.length) {
+    while (this.output.length > 0) {
       const output = this.output[0];
 
       if (!output) return;
@@ -1298,7 +1317,7 @@ export class IrcClient {
     for (const lane of [this.queue, this.background]) {
       const index = lane.indexOf(item);
 
-      if (index >= 0) {
+      if (index !== -1) {
         lane.splice(index, 1);
 
         return true;
@@ -1382,13 +1401,17 @@ export class IrcClient {
         this.raw(
           formatMessage(
             "PONG",
-            params.length ? [params.at(-1) ?? ""] : ["stargate"],
+            params.length > 0 ? [params.at(-1) ?? ""] : ["stargate"],
           ),
         );
 
         return;
-      case "CAP":
-        return this.capability(message);
+      case "CAP": {
+        this.capability(message);
+
+        return;
+      }
+
       case "AUTHENTICATE":
         if (params[0] === "+") this.authenticate();
 
@@ -1441,10 +1464,10 @@ export class IrcClient {
       case "005":
         for (const token of params.slice(1, -1)) {
           const equals = token.indexOf("=");
-          const key = equals < 0 ? token : token.slice(0, equals);
+          const key = equals === -1 ? token : token.slice(0, equals);
 
           const value =
-            equals < 0 ? undefined : isupportValue(token.slice(equals + 1));
+            equals === -1 ? undefined : isupportValue(token.slice(equals + 1));
 
           if (key === "CHANTYPES" && value) this.chantypes = value;
 
@@ -1466,8 +1489,12 @@ export class IrcClient {
         return;
       // End of MOTD, or no MOTD: ISUPPORT is complete.
       case "376":
-      case "422":
-        return this.welcome();
+      case "422": {
+        this.welcome();
+
+        return;
+      }
+
       case "432":
       case "433":
       case "436":
@@ -1585,8 +1612,12 @@ export class IrcClient {
         if (params[1]) this.events.joinFailed?.(params[1], command);
 
         return;
-      case "BATCH":
-        return this.batch(message, label);
+      case "BATCH": {
+        this.batch(message, label);
+
+        return;
+      }
+
       case "PERSISTENCE":
         // PERSISTENCE STATUS <requested> <effective>
         if (params[0] === "STATUS")
@@ -1615,21 +1646,26 @@ export class IrcClient {
         return;
       case "PRIVMSG":
       case "NOTICE":
-      case "TAGMSG":
-        return this.chat(
+      case "TAGMSG": {
+        this.chat(
           message,
           label,
           batch !== undefined && this.replayBatches.has(batch),
         );
+
+        return;
+      }
     }
   }
 
   /** One chat message (or an assembled multiline batch). */
   private chat(
     message: IrcMessage,
-    label: string | undefined,
+    labelInput: string | undefined,
     replay: boolean,
   ) {
+    let label = labelInput;
+
     label ??= this.labelBatches.get(message.tags.get("batch") ?? "");
     const nick = sourceNick(message.source);
     const account = message.tags.get("account");
@@ -1664,8 +1700,8 @@ export class IrcClient {
 
       if (echo) this.echoes.delete(echo[0]);
       this.own.set(msgid, {
-        ...(validMsgid(root) ? { root } : {}),
-        ...(echo?.[1].request ? { request: echo[1].request } : {}),
+        ...(validMsgid(root) && { root }),
+        ...(echo?.[1].request && { request: echo[1].request }),
       });
 
       if (
@@ -1682,7 +1718,7 @@ export class IrcClient {
               target,
               msgid,
               request,
-              ...(validMsgid(root) ? { root } : {}),
+              ...(validMsgid(root) && { root }),
             });
           onEcho?.(msgid);
         } catch {
@@ -1811,7 +1847,7 @@ export class IrcClient {
     this.chat(
       {
         tags,
-        ...(source ? { source } : {}),
+        ...(source && { source }),
         command: first.command,
         params: [batch.open.params[2] ?? first.params[0] ?? "", text],
       },
@@ -2085,7 +2121,7 @@ export function joinLines(channels: readonly string[]) {
   let batch: string[] = [];
 
   for (const channel of channels) {
-    if (batch.length && utf8Bytes(line([...batch, channel])) > lineBytes) {
+    if (batch.length > 0 && utf8Bytes(line([...batch, channel])) > lineBytes) {
       lines.push(line(batch));
       batch = [];
     }
@@ -2093,7 +2129,7 @@ export function joinLines(channels: readonly string[]) {
     batch.push(channel);
   }
 
-  if (batch.length) lines.push(line(batch));
+  if (batch.length > 0) lines.push(line(batch));
 
   return lines;
 }

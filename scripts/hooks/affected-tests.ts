@@ -146,7 +146,8 @@ async function affected(existing: Set<string>) {
   const mappedTests = new Set<string>();
   const untrusted: string[] = [];
 
-  if (!changes.length) return { selected, graphTests, mappedTests, untrusted };
+  if (changes.length === 0)
+    return { selected, graphTests, mappedTests, untrusted };
 
   const root = mkdtempSync(join(tmpdir(), "stargate-affected-"));
   let terminationStatus: number | undefined;
@@ -158,6 +159,7 @@ async function affected(existing: Set<string>) {
 
   const term = () => terminate(143);
   const interrupt = () => terminate(130);
+
   process.on("SIGTERM", term);
   process.on("SIGINT", interrupt);
 
@@ -186,7 +188,10 @@ async function affected(existing: Set<string>) {
     const before = await buildGraph(join(root, "head"), directories);
 
     const deleted = new Set(
-      changes.filter(({ status }) => status === "D").map(({ path }) => path),
+      changes
+        .values()
+        .filter(({ status }) => status === "D")
+        .map(({ path }) => path),
     );
 
     const after = await buildGraph(join(root, "index"), directories, deleted);
@@ -228,7 +233,10 @@ async function affected(existing: Set<string>) {
 
       // Attribute coverage per path. Another changed file selecting tests must
       // Not hide an orphan script, module, helper, or data file in the same commit.
-      if (!isTest && (status === "T" || (!reached.length && !mapped.length)))
+      if (
+        !isTest &&
+        (status === "T" || (reached.length === 0 && mapped.length === 0))
+      )
         untrusted.push(path);
 
       for (const { test } of reached) graphTests.add(test);
@@ -242,7 +250,12 @@ async function affected(existing: Set<string>) {
 
     for (const test of [...graphTests, ...mappedTests]) selected.add(test);
 
-    return { selected, graphTests, mappedTests, untrusted: untrusted.sort() };
+    return {
+      selected,
+      graphTests,
+      mappedTests,
+      untrusted: untrusted.toSorted(),
+    };
   } finally {
     try {
       await rm(root, { recursive: true, force: true });
@@ -282,13 +295,13 @@ try {
     throw new Error("Invalid STARGATE_UNTRUSTED_TESTS mode");
   const result = await affected(existing);
   const full = result.untrusted.length > 0 && UNTRUSTED_MODE === "full";
-  tests = full ? undefined : [...result.selected].sort();
+  tests = full ? undefined : [...result.selected].toSorted();
   console.log(
     `affected-tests: ${full ? total : tests?.length} test files selected of ${total} ` +
       `(graph=${result.graphTests.size}, mapped=${result.mappedTests.size}, untrusted-mode=${UNTRUSTED_MODE})`,
   );
 
-  if (result.untrusted.length)
+  if (result.untrusted.length > 0)
     console.log(
       `Untrusted paths: ${JSON.stringify(result.untrusted)}. ` +
         (full
