@@ -1,4 +1,4 @@
-import { containsCredential } from "../../../lib/credentials";
+import { containsCredential } from "../../../../lib/credentials";
 
 // Config.ts imports this module, so it is part of the crew plugin's import
 // Closure. Keep it free of module-location lookups (the "import" + ".meta"

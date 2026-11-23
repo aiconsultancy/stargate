@@ -1,5 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
-import { createReadSlot, readWithDeadline } from "../../../lib/read-deadline";
+import {
+  createReadSlot,
+  readWithDeadline,
+} from "../../../../lib/read-deadline";
 import type { V1EventSnapshot } from "./diff";
 import { hostSampleOrder } from "./host";
 import type {

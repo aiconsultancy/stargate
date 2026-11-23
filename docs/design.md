@@ -92,27 +92,28 @@ Entries below are relative to the future source root. Names without `.ts` are
 module stems, not declarations of public files. These paths are not current-path
 references or a complete file inventory.
 
-| Target directory                                              | Ownership or module stems                                                                                                                                           |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app/`                                                        | Composition and startup                                                                                                                                             |
-| `ops/`                                                        | Operator interfaces and operations                                                                                                                                  |
-| `lib/`                                                        | Domain-free helpers and types                                                                                                                                       |
-| `shared/`                                                     | Shared domain helpers and types                                                                                                                                     |
-| `config/`                                                     | Configuration                                                                                                                                                       |
-| `gateway/`                                                    | Turn engine only: gateway, ports, routing, store core, streaming, request-failure, turn-progress, cancellation, thread-context, reactions, mentions, peers, waiting |
-| `transports/slack/`                                           | Transport only: connection, format, files, interactions, bot-web, pairing, crew-ui                                                                                  |
-| `transports/irc/`, `transports/teams/`                        | Transport implementations                                                                                                                                           |
-| `questions/`                                                  | questions, background-questions, question-settings, slack-questions                                                                                                 |
-| `activity/`                                                   | activity, activity-delivery, activity-slack                                                                                                                         |
-| `attachments/`                                                | attachments, attachment-delivery                                                                                                                                    |
-| `meta-commands/`                                              | meta-commands, config-panel                                                                                                                                         |
-| `captain-post/`                                               | captain-post, config                                                                                                                                                |
-| `cron/`                                                       | cron, cron-advanced, cron-control, cron-decision, cron-input, cron-store, cron-ui, config, cronjob-files, cronjob-manager                                           |
-| `notifications/preferences/`, `notifications/ingest/`         | Notification preferences and ingestion                                                                                                                              |
-| `maintenance/`                                                | maintenance modules, update-notice, nightly/                                                                                                                        |
-| `quota/`, `fleet/`, `dashboard/`, `transcription/`, `health/` | Their named domains                                                                                                                                                 |
-| `backends/`                                                   | Contract, factory, opencode/, pi/, claude, codex                                                                                                                    |
-| `crew/`                                                       | Fixed plugin.ts, protocol/, engine, pi, messaging, reporting                                                                                                        |
+| Target directory                                      | Ownership or module stems                                                                                                                                           |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/`                                                | Composition and startup                                                                                                                                             |
+| `ops/`                                                | Operator interfaces and operations                                                                                                                                  |
+| `lib/`                                                | Domain-free helpers and types                                                                                                                                       |
+| `shared/`                                             | Shared domain helpers and types                                                                                                                                     |
+| `config/`                                             | Configuration                                                                                                                                                       |
+| `gateway/`                                            | Turn engine only: gateway, ports, routing, store core, streaming, request-failure, turn-progress, cancellation, thread-context, reactions, mentions, peers, waiting |
+| `transports/slack/`                                   | Transport only: connection, format, files, interactions, bot-web, pairing, crew-ui                                                                                  |
+| `transports/irc/`, `transports/teams/`                | Transport implementations                                                                                                                                           |
+| `questions/`                                          | questions, background-questions, question-settings, slack-questions                                                                                                 |
+| `activity/`                                           | activity, activity-delivery, activity-slack                                                                                                                         |
+| `attachments/`                                        | attachments, attachment-delivery                                                                                                                                    |
+| `meta-commands/`                                      | meta-commands, config-panel                                                                                                                                         |
+| `captain-post/`                                       | captain-post, config                                                                                                                                                |
+| `cron/`                                               | cron, cron-advanced, cron-control, cron-decision, cron-input, cron-store, cron-ui, config, cronjob-files, cronjob-manager                                           |
+| `notifications/preferences/`, `notifications/ingest/` | Notification preferences and ingestion                                                                                                                              |
+| `maintenance/`                                        | maintenance modules, update-notice, nightly/                                                                                                                        |
+| `quota/`, `fleet/`, `transcription/`                  | Their named domains                                                                                                                                                 |
+| `observability/dashboard/`, `observability/health/`   | Dashboard and health, as separate slices                                                                                                                            |
+| `backends/`                                           | Contract, factory, opencode/, pi/, claude, codex                                                                                                                    |
+| `crew/`                                               | Fixed plugin.ts, protocol/, engine, pi, messaging, reporting                                                                                                        |
 
 The current paths `src/main.ts`, `src/config.ts`, `src/crew/plugin.ts` and
 `src/fleet/plugin.ts` are fixed and must never move. Tests stay flat in `tests/`.
@@ -375,7 +376,7 @@ and transcript pages in one harness-independent shape
 ([`session-history.ts`](../src/shared/session-history.ts)). OpenCode reads its
 server API and asks the crew plugin for crew roots and Pi crew transcripts.
 Pi Durable reads its own store. Adapters answer what they are asked;
-[`dashboard-source.ts`](../src/dashboard/dashboard-source.ts) decides which sessions
+[`dashboard-source.ts`](../src/observability/dashboard/dashboard-source.ts) decides which sessions
 belong to a bot. The dashboard listens on a Unix socket in the private data
 directory, so Stargate still opens no network port.
 

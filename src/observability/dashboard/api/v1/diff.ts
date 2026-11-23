@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { redactCredentials } from "../../../lib/credentials";
+import { redactCredentials } from "../../../../lib/credentials";
 import type {
   V1ActivityEvent,
   V1CrewContext,

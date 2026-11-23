@@ -1,8 +1,8 @@
-import { packageManifest } from "../../../lib/installation-paths";
+import { packageManifest } from "../../../../lib/installation-paths";
 import {
   packageDirectory,
   runningVersion,
-} from "../../../maintenance/nightly/update/ready";
+} from "../../../../maintenance/nightly/update/ready";
 
 const noop = () => {};
 

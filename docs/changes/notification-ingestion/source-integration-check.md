@@ -29,11 +29,11 @@ PR #77 / b19 was not treated as merged or inspected as current main.
 Current main already has a private Fleet HTTP listener:
 
 - `src/config.ts:1152-1155` owns top-level `api`.
-- `src/dashboard/api/v1/config.ts:5-30` requires `listen`; it has no `enabled` or
+- `src/observability/dashboard/api/v1/config.ts:5-30` requires `listen`; it has no `enabled` or
   Unix-socket setting. Omission disables the API. Existing configurations
   must not require a new `enabled: true` to keep working.
-- `src/dashboard/api/v1/server.ts:78-128,130-217` owns the Bun listener, Fleet source,
-  host sampler and event streams. `src/dashboard/api/v1/host.ts` is host metrics,
+- `src/observability/dashboard/api/v1/server.ts:78-128,130-217` owns the Bun listener, Fleet source,
+  host sampler and event streams. `src/observability/dashboard/api/v1/host.ts` is host metrics,
   not an unused HTTP-host filename.
 - `src/app/runtime.ts:982-1011` acquires this server once, before worker startup.
   A bind failure fails startup. The same runtime separately owns dashboard
@@ -52,7 +52,7 @@ The existing Fleet paths are exactly:
 - `GET/HEAD /api/v1/ships/{id}/crew/{member}`
 - `GET/HEAD /api/v1/events`
 
-Source: `src/dashboard/api/v1/server.ts:168-209`. Preserve those paths and their
+Source: `src/observability/dashboard/api/v1/server.ts:168-209`. Preserve those paths and their
 encoded-ID handling. Register notification POST mounts separately under
 `/v1/notifications/<mount>`, R7:135-142,511-512. Reserve `/api/v1/...`
 for Fleet and `/api/messages` for Teams. Do not reinterpret Fleet paths
@@ -62,8 +62,8 @@ and return fixed 404 for disabled notification mounts.
 
 Existing Fleet TCP binds accept literal private addresses only; they do
 not accept wildcard/public binds. CIDR checks use the actual peer, not
-forwarded headers. Preserve `src/dashboard/api/v1/network.ts:3-11,58-99` and
-`src/dashboard/api/v1/server.ts:140-141`.
+forwarded headers. Preserve `src/observability/dashboard/api/v1/network.ts:3-11,58-99` and
+`src/observability/dashboard/api/v1/server.ts:140-141`.
 
 The plan must state how Unix-only notification admission and legacy Fleet
 TCP configuration coexist. A conservative implementation can add an
@@ -79,7 +79,7 @@ existing Fleet exposure alone is not producer-route approval.
 
 The current server applies peer checks, Fleet CORS/preflight, a GET/HEAD
 method gate and one Fleet bearer check before route selection.
-See `src/dashboard/api/v1/server.ts:33-59,136-168`.
+See `src/observability/dashboard/api/v1/server.ts:33-59,136-168`.
 Adding POST to that global method list is insufficient and risks sharing
 operator authority with producers.
 
@@ -91,7 +91,7 @@ producer identity. Do not implement an "operator OR producer" authenticator.
 Reject ambiguous producer credentials and cross-role credential reuse,
 including different environment names resolving to the same secret.
 
-`src/dashboard/api/v1/token.ts:10-35,39-85` already owns private token creation and
+`src/observability/dashboard/api/v1/token.ts:10-35,39-85` already owns private token creation and
 rotation. `src/app/cli.ts:501-509` exposes the existing operator token command.
 Reuse this owner; do not make a second Fleet API token. Producer credential
 references belong to the new adapter configuration. Integrate presence
@@ -102,7 +102,7 @@ must reject unknown fields. The existing strict helper is
 so account for the separately pending migration rather than assuming it.
 
 Fleet CORS defaults are deliberately enabled for Subspace origins:
-`src/dashboard/api/v1/network.ts:102-127`, `src/dashboard/api/v1/server.ts:142-155`.
+`src/observability/dashboard/api/v1/network.ts:102-127`, `src/observability/dashboard/api/v1/server.ts:142-155`.
 Preserve those responses for Fleet, including token-free GET preflight.
 Notification routes must not inherit them. Recommend rejecting browser
 `Origin` on notification POSTs, with bearer-only machine requests and no
@@ -111,7 +111,7 @@ cookies/CORS. No new operator write, config or health routes are needed.
 Existing HTTP limits are not the R7 host contract. `idleTimeout: 30`, a
 20-second read signal and eight event streams do not implement bounded
 producer bodies, absolute pre-body lifetimes or reserved route capacity.
-See `src/dashboard/api/v1/server.ts:130-183` and `src/dashboard/api/v1/events.ts:26-29,144-183`.
+See `src/observability/dashboard/api/v1/server.ts:130-183` and `src/observability/dashboard/api/v1/events.ts:26-29,144-183`.
 The host adaptation needs streamed byte counting, per-route/source limits,
 bounded rejected-request disposal, header/connection limits and a global
 budget that leaves operator capacity available. Keep timed-out work in its
@@ -121,7 +121,7 @@ apply a 20-second notification deadline to the existing event stream.
 ## 3. Socket protection exists, but neither helper is a drop-in
 
 For a Unix transport, keep the private directory and mode 0600 contract.
-`src/dashboard/dashboard.ts:354-382` uses the instance lock, checks the old path is a
+`src/observability/dashboard/dashboard.ts:354-382` uses the instance lock, checks the old path is a
 socket, unlinks it, binds through Bun and chmods to 0600. Its comment relies
 on exclusive directory ownership and Bun's path removal on stop; this is
 not an identity-checked cleanup implementation.
@@ -271,9 +271,9 @@ These are source-backed test entry points, not evidence of tests run here.
 - Echo: extend `tests/peers.test.ts:184-273` with multi-registration notify
   conflicts and access reload. Assert no Gateway/backend calls from accepted
   notifications and preserve ordinary peer admission.
-- Version: preserve `src/dashboard/api/v1/gateway.ts:30-42` installed-release, checkout
+- Version: preserve `src/observability/dashboard/api/v1/gateway.ts:30-42` installed-release, checkout
   tag, package fallback; retain `tests/api-v1-gateway-version.test.ts`.
-  Preserve feature reporting at `src/dashboard/api/v1/features.ts:41-52` if adding an
+  Preserve feature reporting at `src/observability/dashboard/api/v1/features.ts:41-52` if adding an
   explicit enable flag. Do not bump dependencies or release versions.
 
 ## Minimum decisions for the completed plan

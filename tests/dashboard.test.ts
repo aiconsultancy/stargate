@@ -17,8 +17,11 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { dashboardHandler, startDashboard } from "../src/dashboard/dashboard";
-import type { DashboardSource } from "../src/dashboard/dashboard-model";
+import {
+  dashboardHandler,
+  startDashboard,
+} from "../src/observability/dashboard/dashboard";
+import type { DashboardSource } from "../src/observability/dashboard/dashboard-model";
 import type { Ownership } from "../src/lib/unix-socket";
 
 const html =

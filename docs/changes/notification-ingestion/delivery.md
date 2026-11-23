@@ -156,9 +156,9 @@ Before each build, check only later relevant main changes against b9.
 
 ### Extend the actual API, not R7's empty-host sketch
 
-`src/dashboard/api/v1/server.ts:startApiV1Server` already owns a Bun listener, Fleet
+`src/observability/dashboard/api/v1/server.ts:startApiV1Server` already owns a Bun listener, Fleet
 source, host metrics, event streams, operator bearer authentication and CORS.
-`src/dashboard/api/v1/config.ts:apiV1ConfigSchema` already occupies top-level `api`.
+`src/observability/dashboard/api/v1/config.ts:apiV1ConfigSchema` already occupies top-level `api`.
 It requires `listen`; omission of `api` means off. `api.enabled` is currently
 an unknown key, explicitly rejected by `tests/api-v1-config.test.ts`.
 `src/app/runtime.ts:982-1011` starts this owner once.
@@ -197,7 +197,7 @@ absolute header lifetime, connection ceiling or route-slot settlement.
 Use the existing `node:http` precedent from `src/transports/teams/http.ts` for the common
 API listener mechanics, retaining `startApiV1Server` as the public entry point.
 Extract Fleet request handling without changing its policy or response shape.
-One new `src/dashboard/api/server.ts` owns either TCP or Unix, never both. This replaces
+One new `src/observability/dashboard/api/server.ts` owns either TCP or Unix, never both. This replaces
 the API's underlying listener; it does not start a competing host.
 
 Reuse `src/lib/unix-socket.ts` ownership checks and identity cleanup. Its
@@ -327,7 +327,7 @@ affect send-time checks. A revoked or conflicting row is dropped, never moved.
 Proposed new modules are deliberately small. Implementation can combine
 adjacent pure helpers within its task boundary; no plugin framework is needed.
 
-- `src/dashboard/api/route.ts`, unit 01: trusted static exact-route descriptor,
+- `src/observability/dashboard/api/route.ts`, unit 01: trusted static exact-route descriptor,
   header-only authorization, per-route limits and Promise handler with signal.
   No notification import.
 - `src/notifications/ingest/model.ts`, unit 02: strict input, source scope/audience, resolved

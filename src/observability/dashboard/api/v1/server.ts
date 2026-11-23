@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { readWithDeadline } from "../../../lib/read-deadline";
+import { readWithDeadline } from "../../../../lib/read-deadline";
 import type { ApiRoute } from "../route";
 import { apiRequestMs, maxFleetReads, startApiServer } from "../server";
 import type { ApiV1Config } from "./config";

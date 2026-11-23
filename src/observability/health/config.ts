@@ -4,7 +4,7 @@ import {
   settingsDefault,
   settingsRefine,
   settingsStruct,
-} from "../config/settings-schema";
+} from "../../config/settings-schema";
 
 const absolutePath = Schema.String.check(Schema.isMinCodePoints(1))
   .check(Schema.isMaxCodePoints(4096))

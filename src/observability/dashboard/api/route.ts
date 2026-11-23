@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { settingsStruct } from "../../config/settings-schema";
+import { settingsStruct } from "../../../config/settings-schema";
 
 export type ApiAuthorization<Caller> =
   | { readonly allowed: true; readonly caller: Caller }

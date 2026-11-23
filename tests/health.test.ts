@@ -13,8 +13,8 @@ import { Result, Schema } from "effect";
 import {
   createHealthReader,
   readStarfleetSnapshot,
-} from "../src/health/health";
-import { healthConfigSchema } from "../src/health/config";
+} from "../src/observability/health/health";
+import { healthConfigSchema } from "../src/observability/health/config";
 import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import { bot } from "./fixtures";
 

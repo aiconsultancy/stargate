@@ -9,14 +9,14 @@ import type { DashboardSource } from "./dashboard-model";
 import {
   historyChildrenInputSchema,
   historyEntriesInputSchema,
-} from "../shared/session-history";
-import { close as closeHttpServer } from "../lib/http-util";
+} from "../../shared/session-history";
+import { close as closeHttpServer } from "../../lib/http-util";
 import {
   type Ownership,
   type SocketIdentity,
   listenOnUnixSocket,
   unlinkOwnSocket,
-} from "../lib/unix-socket";
+} from "../../lib/unix-socket";
 
 const noop = () => {};
 

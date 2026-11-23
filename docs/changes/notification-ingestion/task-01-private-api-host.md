@@ -42,7 +42,7 @@ or turn this task into a general schema migration.
 
 Existing:
 
-- `src/dashboard/api/v1/server.ts`, `src/dashboard/api/v1/config.ts`.
+- `src/observability/dashboard/api/v1/server.ts`, `src/observability/dashboard/api/v1/config.ts`.
 - `src/lib/unix-socket.ts`, only the explicit private-mode extension.
 - `tests/api-v1-server.test.ts`, `tests/api-v1-config.test.ts`.
 - `tests/teams-http.test.ts`, only shared socket-helper regression if needed.
@@ -51,11 +51,11 @@ Existing:
 
 New:
 
-- `src/dashboard/api/server.ts`, `src/dashboard/api/route.ts`.
+- `src/observability/dashboard/api/server.ts`, `src/observability/dashboard/api/route.ts`.
 - `tests/api-host.test.ts`.
 
 Keep `startApiV1Server` caller compatibility so this unit does not edit runtime.
-Do not edit core files, root config, `src/dashboard/api/v1/gateway.ts`, API projections,
+Do not edit core files, root config, `src/observability/dashboard/api/v1/gateway.ts`, API projections,
 drain/steer code or package versions. Changes outside this list require a
 specific interface need and plan-boundary update before a second writer acts.
 

@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import packageManifest from "../package.json";
-import { gatewayVersion } from "../src/dashboard/api/v1/gateway";
+import { gatewayVersion } from "../src/observability/dashboard/api/v1/gateway";
 
 test("the Fleet API reports the installed release's version", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-release-"));
