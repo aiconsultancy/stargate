@@ -40,7 +40,7 @@ import { type BackendConfig, secret } from "../config";
 import {
   compareVersions,
   parseVersion,
-} from "../maintenance/nightly/update/versions";
+} from "../automation/maintenance/nightly/update/versions";
 import {
   AttachmentInputUnavailable,
   BackendFailure,

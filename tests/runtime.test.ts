@@ -7,9 +7,9 @@ import { Effect, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { type BotConfig, botSchema } from "../src/config";
-import { maintenanceSchema } from "../src/maintenance/nightly/config";
-import { readReady } from "../src/maintenance/nightly/update/ready";
-import { queueNotice } from "../src/maintenance/nightly/reports/report";
+import { maintenanceSchema } from "../src/automation/maintenance/nightly/config";
+import { readReady } from "../src/automation/maintenance/nightly/update/ready";
+import { queueNotice } from "../src/automation/maintenance/nightly/reports/report";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";
 import { notificationKey } from "../src/notifications/preferences/notifications";
 import { botKey, conversationKey } from "../src/gateway/routing";
@@ -23,7 +23,7 @@ import {
 import { handleSlackRequest } from "../src/transports/slack/slack";
 import type { ConnectionState } from "../src/transports/slack/slack-connection";
 import { openStore } from "../src/app/open-store";
-import { scopedUpdate } from "../src/maintenance/update-notice";
+import { scopedUpdate } from "../src/automation/maintenance/update-notice";
 import { bot, event, identity } from "./fixtures";
 
 const silent = pino({ level: "silent" });

@@ -63,7 +63,7 @@ store or current migration worktree. Unit 01 can own all API paths in parallel.
 3. Build a separate synchronous SQLite store with schema version, dedup table
    and outbox table. Guard private file ownership and reject symlink/corrupt or
    unsupported-version state without replacing it. Reuse the privacy pattern
-   in `src/cron/store.ts:165-183`, with private mode before WAL/SHM creation,
+   in `src/automation/cron/store.ts:165-183`, with private mode before WAL/SHM creation,
    rather than relying on process umask. Use WAL and bounded busy timeout.
    Caller must hold the existing runtime instance lock in production.
 4. Implement one admission transaction with dedup-first lookup, pending-only

@@ -3,7 +3,7 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { botSchema } from "../src/config";
-import type { CronView } from "../src/cron/ui";
+import type { CronView } from "../src/automation/cron/ui";
 import { PairingUI } from "../src/transports/slack/pairing";
 import { bot, identity } from "./fixtures";
 

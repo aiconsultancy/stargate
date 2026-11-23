@@ -21,15 +21,15 @@ import {
   runCleanup as cleanup,
   cleanupPathUse,
   scratchBatch,
-} from "../src/maintenance/nightly/cleanup/cleanup";
+} from "../src/automation/maintenance/nightly/cleanup/cleanup";
 import {
   cleanupResultSchema,
   cleanupSchema,
-} from "../src/maintenance/nightly/cleanup/cleanup-config";
+} from "../src/automation/maintenance/nightly/cleanup/cleanup-config";
 import {
   type CommandRunner,
   processRunner,
-} from "../src/maintenance/nightly/exec";
+} from "../src/automation/maintenance/nightly/exec";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-cleanup-"));
 

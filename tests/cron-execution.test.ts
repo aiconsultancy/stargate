@@ -19,8 +19,8 @@ import {
   cronDecision,
   cronEvaluateInputSchema,
   cronModelInputSchema,
-} from "../src/cron/decision";
-import { cronjobPrompt } from "../src/cron/job-manager";
+} from "../src/automation/cron/decision";
+import { cronjobPrompt } from "../src/automation/cron/job-manager";
 
 const risks = {
   approval: false,

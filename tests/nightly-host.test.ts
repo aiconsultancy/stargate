@@ -12,15 +12,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { maintenanceSchema } from "../src/maintenance/nightly/config";
-import { processRunner } from "../src/maintenance/nightly/exec";
+import { maintenanceSchema } from "../src/automation/maintenance/nightly/config";
+import { processRunner } from "../src/automation/maintenance/nightly/exec";
 import {
   binaryPath,
   cliProxyCandidate,
   cliProxyPrepare,
   npmInstallCommand,
-} from "../src/maintenance/nightly/update/host";
-import { restoreCutoff } from "../src/maintenance/nightly/run";
+} from "../src/automation/maintenance/nightly/update/host";
+import { restoreCutoff } from "../src/automation/maintenance/nightly/run";
 import { tarball } from "./tar";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-host-"));

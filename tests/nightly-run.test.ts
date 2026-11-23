@@ -20,28 +20,28 @@ import { dirname, join } from "node:path";
 import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
 import { CrewState } from "../src/crew/execution/state";
-import { CronStore } from "../src/cron/store";
+import { CronStore } from "../src/automation/cron/store";
 import {
   type CommandResult,
   type CommandRunner,
   processRunner,
-} from "../src/maintenance/nightly/exec";
-import { probeModel } from "../src/maintenance/nightly/update/host";
+} from "../src/automation/maintenance/nightly/exec";
+import { probeModel } from "../src/automation/maintenance/nightly/update/host";
 import {
   backupDirectory,
   describeEntry,
   FileChanges,
   Journal,
   readJournalFile,
-} from "../src/maintenance/nightly/journal";
-import { applyLiveModels } from "../src/maintenance/nightly/update/model-step";
-import type { OpenCodeControl } from "../src/maintenance/nightly/update/opencode";
-import { writePluginDigest } from "../src/maintenance/nightly/update/plugin-digest";
+} from "../src/automation/maintenance/nightly/journal";
+import { applyLiveModels } from "../src/automation/maintenance/nightly/update/model-step";
+import type { OpenCodeControl } from "../src/automation/maintenance/nightly/update/opencode";
+import { writePluginDigest } from "../src/automation/maintenance/nightly/update/plugin-digest";
 import {
   adoptRelease,
   linkedRelease,
-} from "../src/maintenance/nightly/update/release";
-import { reportSchema } from "../src/maintenance/nightly/reports/report";
+} from "../src/automation/maintenance/nightly/update/release";
+import { reportSchema } from "../src/automation/maintenance/nightly/reports/report";
 import {
   acceptCurrent,
   applyBudgetMs,
@@ -49,14 +49,17 @@ import {
   recoverInterruptedRun,
   runMaintenance,
   UpdateRefused,
-} from "../src/maintenance/nightly/run";
-import { readState, updateState } from "../src/maintenance/nightly/state";
+} from "../src/automation/maintenance/nightly/run";
+import {
+  readState,
+  updateState,
+} from "../src/automation/maintenance/nightly/state";
 import {
   maintenanceUpdate,
   type UpdateOptions,
   updateUnit,
-} from "../src/maintenance/nightly/update/update";
-import type { ModelRef } from "../src/maintenance/nightly/update/versions";
+} from "../src/automation/maintenance/nightly/update/update";
+import type { ModelRef } from "../src/automation/maintenance/nightly/update/versions";
 import { botKey } from "../src/gateway/routing";
 import { openStore } from "../src/app/open-store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";

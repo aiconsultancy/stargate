@@ -33,7 +33,7 @@ import { textMentionInstructions } from "../shared/mentions";
 import {
   nightlyInstructions,
   nightlyWindowSchema,
-} from "../maintenance/nightly/instructions";
+} from "../automation/maintenance/nightly/instructions";
 import { peerInstructions } from "../gateway/peers";
 import { reactionInstructions } from "../shared/reactions";
 import {

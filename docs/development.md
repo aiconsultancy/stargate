@@ -124,7 +124,7 @@ The gate applies these type-contract rules in `src`, `scripts` and
   `src/transports/slack/slack.ts` only: `result.ok === true` checks an untrusted Slack
   Web API response, whose declared `boolean` type is not proved at run time.
 - `anti-slop/no-chained-type-assertions` is off for
-  `src/maintenance/maintenance-drain.ts` only: one cast covers the gap between
+  `src/automation/maintenance/maintenance-drain.ts` only: one cast covers the gap between
   `Schema.optional` fields of the participant schema and the exported
   `DrainParticipant` type under `exactOptionalPropertyTypes`.
 - `anti-slop-effect/no-service-constructor-imports` is off for
@@ -140,7 +140,7 @@ The gate applies these type-contract rules in `src`, `scripts` and
   six files where a condition tests SDK data or an `unknown` or generic value
   whose run-time kind the type does not prove: `scripts/crew-question-smoke.ts`,
   `scripts/irc-question-smoke.ts`, `src/backends/opencode/opencode-history.ts`,
-  `src/backends/opencode/opencode.ts`, `src/cron/index.ts` and
+  `src/backends/opencode/opencode.ts`, `src/automation/cron/index.ts` and
   `src/gateway/gateway.ts`.
 
 These type-contract rules stay off, each for a reason:
@@ -215,7 +215,7 @@ remove a file when its places are repaired.
 - `typescript/require-await` in eleven files: each reported function returns a
   promise that its callers use; removing `async` changes the return type and
   turns a rejection into a throw.
-  `src/maintenance/nightly/droid/droid.ts` joined when it left the Zod list (batch 17): its `status` and `reports` droid tools are this case.
+  `src/automation/maintenance/nightly/droid/droid.ts` joined when it left the Zod list (batch 17): its `status` and `reports` droid tools are this case.
 - `typescript/strict-void-return` in `src/app/service.ts` and
   `src/backends/claude.ts`: `promisify(execFile)` relies on the custom
   promisified `execFile`; a wrapper callback would lose it. The abort

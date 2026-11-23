@@ -15,9 +15,9 @@ import {
   readMaintenanceDrain,
   registerDrainParticipant,
   writeMaintenanceDrain,
-} from "../src/maintenance/maintenance-drain";
-import type { DrainParticipant } from "../src/maintenance/maintenance-drain";
-import type { Crew } from "../src/maintenance/nightly/crews";
+} from "../src/automation/maintenance/maintenance-drain";
+import type { DrainParticipant } from "../src/automation/maintenance/maintenance-drain";
+import type { Crew } from "../src/automation/maintenance/nightly/crews";
 
 export type DrainCrewParity<
   T extends ((<U>() => U extends DrainParticipant["crews"][number]

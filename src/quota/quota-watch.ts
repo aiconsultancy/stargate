@@ -4,7 +4,10 @@ import { dirname, isAbsolute } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
 import type { Logger } from "pino";
-import { atomicWrite, readOptional } from "../maintenance/nightly/files";
+import {
+  atomicWrite,
+  readOptional,
+} from "../automation/maintenance/nightly/files";
 import {
   type QuotaReader,
   type QuotaSnapshot,

@@ -5,7 +5,7 @@ import {
   type MaintenanceNotice,
   maintenancePlanSchema,
   maintenanceWindowMs,
-} from "../../maintenance/maintenance";
+} from "../../automation/maintenance/maintenance";
 import type { CrewCaller } from "../execution/engine";
 import { CrewError } from "../execution/state";
 

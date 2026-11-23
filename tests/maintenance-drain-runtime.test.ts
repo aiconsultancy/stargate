@@ -10,7 +10,7 @@ import {
   type MaintenanceDrain,
   readDrainParticipants,
   writeMaintenanceDrain,
-} from "../src/maintenance/maintenance-drain";
+} from "../src/automation/maintenance/maintenance-drain";
 import {
   type RuntimeDependencies,
   type SlackApp,

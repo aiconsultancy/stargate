@@ -28,7 +28,7 @@ import {
 import * as toolInputs from "../src/crew/input/tool-input";
 import { cronToolInput } from "../src/crew/cron/cron";
 import { notificationToolInput } from "../src/crew/controls/notifications";
-import { cronOperationSchema } from "../src/cron/control";
+import { cronOperationSchema } from "../src/automation/cron/control";
 import { notificationInputSchema } from "../src/notifications/preferences/notification-store";
 
 test("native post SDK input keeps defaults, raw text and its input advertisement", async () => {

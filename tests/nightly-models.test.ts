@@ -6,13 +6,13 @@ import {
   upgradeOpenCodeProfile,
   upgradeProfiles,
   upgradeTeamFile,
-} from "../src/maintenance/nightly/update/models";
+} from "../src/automation/maintenance/nightly/update/models";
 import {
   compareModels,
   newerModels,
   parseModel,
   parseRef,
-} from "../src/maintenance/nightly/update/versions";
+} from "../src/automation/maintenance/nightly/update/versions";
 
 const families = [
   "claude-opus",

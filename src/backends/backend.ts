@@ -2,15 +2,15 @@ import type { ActivityWatch } from "../activity/activity";
 import type { Attachment } from "../attachments/attachments";
 import type { FleetCrewStatus } from "../crew/reporting/fleet-status";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
-import type { CronAdvanced, CronEvaluation } from "../cron/advanced";
+import type { CronAdvanced, CronEvaluation } from "../automation/cron/advanced";
 import type {
   FleetReviewBinding,
   FleetReviewEvidence,
   NativeMaker,
 } from "../fleet/protocol";
 import { validMsgid } from "../transports/irc/protocol";
-import type { MaintenanceWatch } from "../maintenance/maintenance";
-import type { MaintenanceDrain } from "../maintenance/maintenance-drain";
+import type { MaintenanceWatch } from "../automation/maintenance/maintenance";
+import type { MaintenanceDrain } from "../automation/maintenance/maintenance-drain";
 import type {
   NativeQuestion,
   PendingQuestion,
@@ -23,7 +23,7 @@ import type { TurnProgress } from "../shared/turn-progress";
 import type {
   UpdateReceipt,
   UpdateSnapshot,
-} from "../maintenance/update-notice";
+} from "../automation/maintenance/update-notice";
 
 /** Compact source identity; IRC optionally adds `;r=<encoded thread root>`. */
 export function sourceLine({ source }: PromptSourceContext) {

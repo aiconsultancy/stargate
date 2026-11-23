@@ -144,7 +144,7 @@ for the new socket and never unlink an arbitrary occupied path.
 
 `src/app/runtime.ts:91-99,238-260` takes `instance.sqlite`'s exclusive lock
 before opening stores. Add private `notify.sqlite` inside this ownership,
-never a second instance lock or entries in `jobs`. `src/cron/store.ts:165-183`
+never a second instance lock or entries in `jobs`. `src/automation/cron/store.ts:165-183`
 provides the better privacy pattern: no-follow regular-file open, mode 0600
 before WAL/SHM, WAL, busy timeout and foreign keys. The older primary store
 opens SQLite directly at `src/gateway/store.ts:307-315`; do not copy that as the
@@ -180,7 +180,7 @@ the lock/store owned until local users settle or the process terminates.
 Maintenance drain holds new agent turns while existing reply deliveries
 can finish: `src/gateway/gateway.ts:1102-1120`; steering separately checks the hold
 at `599-616`. The drain controller's API is
-`src/maintenance/maintenance-drain.ts:423-436,493-518`. Do not add notification work to
+`src/automation/maintenance/maintenance-drain.ts:423-436,493-518`. Do not add notification work to
 agent admission, change the drain marker, readiness criteria or steering.
 The notification runtime must have its own producer shutdown gate.
 

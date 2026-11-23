@@ -14,7 +14,7 @@ import type {
   MesijSend,
 } from "../src/crew/messaging/mesij";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
-import type { MaintenanceDrain } from "../src/maintenance/maintenance-drain";
+import type { MaintenanceDrain } from "../src/automation/maintenance/maintenance-drain";
 import { fixtureRoot } from "./fixture-root";
 
 const cleanup: (() => unknown)[] = [];

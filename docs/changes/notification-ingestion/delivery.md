@@ -237,7 +237,7 @@ Notification retries must never become retries of agent work.
 
 `src/app/runtime.ts:lockInstance` holds `instance.sqlite` exclusively.
 Acquire the new database only under that existing lock, with private file
-and directory checks. Follow `src/cron/store.ts:165-183` for no-follow,
+and directory checks. Follow `src/automation/cron/store.ts:165-183` for no-follow,
 regular-file open and mode 0600 before WAL/SHM creation. Programmatic `serve`
 must be safe without relying on `start` having set process umask. Preserve
 the file on unknown schema, corruption or startup failure. Use versioned,

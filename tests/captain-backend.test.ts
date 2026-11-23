@@ -3,7 +3,7 @@ import { Schema } from "effect";
 import type { AgentBackend } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, configSchema } from "../src/config";
-import { buildUpdateSnapshot } from "../src/maintenance/update-notice";
+import { buildUpdateSnapshot } from "../src/automation/maintenance/update-notice";
 import { bot } from "./fixtures";
 
 const sessionID = "ses_captain";

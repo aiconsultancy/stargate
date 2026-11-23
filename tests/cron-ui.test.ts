@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ViewsOpenArguments } from "@slack/web-api";
 import pino from "pino";
-import { CronStore } from "../src/cron/store";
-import { CronUI, type SlackAck } from "../src/cron/ui";
+import { CronStore } from "../src/automation/cron/store";
+import { CronUI, type SlackAck } from "../src/automation/cron/ui";
 import { botKey } from "../src/gateway/routing";
 import { bot, identity } from "./fixtures";
 

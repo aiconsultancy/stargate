@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { waitForMaintenanceDrain } from "../src/maintenance/nightly/schedule/drain";
-import type { IdleInput } from "../src/maintenance/nightly/schedule/idle";
+import { waitForMaintenanceDrain } from "../src/automation/maintenance/nightly/schedule/drain";
+import type { IdleInput } from "../src/automation/maintenance/nightly/schedule/idle";
 
 test("drain observes idle only after notices, then proceeds without waiting for the deadline", async () => {
   let now = 1000;

@@ -10,7 +10,7 @@ import type { TransportDelivery } from "../src/gateway/ports";
 import type {
   DrainControl,
   DrainHandler,
-} from "../src/maintenance/maintenance-drain";
+} from "../src/automation/maintenance/maintenance-drain";
 import { openStore } from "../src/app/open-store";
 import { bot, identity } from "./fixtures";
 

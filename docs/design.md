@@ -107,9 +107,9 @@ references or a complete file inventory.
 | `attachments/`                                        | attachments, attachment-delivery                                                                                                                                    |
 | `meta-commands/`                                      | meta-commands, config-panel                                                                                                                                         |
 | `captain-post/`                                       | captain-post, config                                                                                                                                                |
-| `cron/`                                               | cron, cron-advanced, cron-control, cron-decision, cron-input, cron-store, cron-ui, config, cronjob-files, cronjob-manager                                           |
+| `automation/cron/`                                    | cron, cron-advanced, cron-control, cron-decision, cron-input, cron-store, cron-ui, config, cronjob-files, cronjob-manager                                           |
 | `notifications/preferences/`, `notifications/ingest/` | Notification preferences and ingestion                                                                                                                              |
-| `maintenance/`                                        | maintenance modules, update-notice, nightly/                                                                                                                        |
+| `automation/maintenance/`                             | maintenance modules, update-notice, nightly/                                                                                                                        |
 | `quota/`, `fleet/`, `transcription/`                  | Their named domains                                                                                                                                                 |
 | `observability/dashboard/`, `observability/health/`   | Dashboard and health, as separate slices                                                                                                                            |
 | `backends/`                                           | Contract, factory, opencode/, pi/, claude, codex                                                                                                                    |
@@ -121,7 +121,9 @@ The current paths `src/main.ts`, `src/config.ts`, `src/crew/plugin.ts` and
 The O1 decision in [architecture review](architecture-review.md) is unchanged.
 
 The `transports/` directory groups IRC, Slack and Teams for navigation.
-They remain three separate slices with unchanged dependency rules.
+They remain three separate slices with unchanged dependency rules. The
+`automation/` directory groups cron and maintenance; their slice rules also
+stay separate.
 
 ### Dependency policy
 

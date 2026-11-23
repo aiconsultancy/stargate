@@ -10,8 +10,8 @@ import {
   cronEvaluationSchema,
   cronModelInputSchema,
   cronModelSchema,
-} from "../../cron/advanced";
-import { maintenanceDrainSchema } from "../../maintenance/maintenance-drain";
+} from "../../automation/cron/advanced";
+import { maintenanceDrainSchema } from "../../automation/maintenance/maintenance-drain";
 import {
   quotaInputSchema,
   quotaObservationSchema,
@@ -27,7 +27,7 @@ import {
   historySessionsSchema,
 } from "../../shared/session-history";
 import { settingsPattern, settingsStruct } from "../../config/settings-schema";
-import { updateSnapshotSchema } from "../../maintenance/update-notice";
+import { updateSnapshotSchema } from "../../automation/maintenance/update-notice";
 import {
   fleetCrewStatusInputSchema,
   fleetCrewStatusSchema,

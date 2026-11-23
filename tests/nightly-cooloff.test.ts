@@ -4,7 +4,7 @@ import {
   npmCandidate,
   selectGitHubRelease,
   selectNpmVersion,
-} from "../src/maintenance/nightly/update/cooloff";
+} from "../src/automation/maintenance/nightly/update/cooloff";
 
 const now = Date.parse("2026-11-12T00:10:00Z");
 

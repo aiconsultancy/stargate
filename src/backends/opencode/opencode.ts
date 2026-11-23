@@ -43,7 +43,10 @@ import {
   type CrewStatusInput,
   crewStatusSchema,
 } from "../../shared/crew-status";
-import { cronEvaluationSchema, cronModelSchema } from "../../cron/advanced";
+import {
+  cronEvaluationSchema,
+  cronModelSchema,
+} from "../../automation/cron/advanced";
 import type {
   FleetReviewBinding,
   FleetReviewEvidence,
@@ -62,8 +65,8 @@ import {
   MaintenanceRPC,
   type MaintenanceWatch,
   maintenanceNoticeSchema,
-} from "../../maintenance/maintenance";
-import type { MaintenanceDrain } from "../../maintenance/maintenance-drain";
+} from "../../automation/maintenance/maintenance";
+import type { MaintenanceDrain } from "../../automation/maintenance/maintenance-drain";
 import {
   type NativeQuestion,
   type PendingQuestion,
@@ -85,7 +88,7 @@ import type { TurnProgress, TurnStage } from "../../shared/turn-progress";
 import {
   type UpdateSnapshot,
   scopedUpdate,
-} from "../../maintenance/update-notice";
+} from "../../automation/maintenance/update-notice";
 import { OpenCodeHistory } from "./opencode-history";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;

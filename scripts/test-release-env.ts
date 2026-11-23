@@ -6,7 +6,7 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { isolatedEnvironment } from "../src/maintenance/nightly/update/release";
+import { isolatedEnvironment } from "../src/automation/maintenance/nightly/update/release";
 
 const configuredCache = process.env["XDG_CACHE_HOME"];
 

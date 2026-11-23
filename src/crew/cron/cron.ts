@@ -17,7 +17,7 @@ import {
   cronOperationBranches,
   cronOperationSchema,
   runCronOperation,
-} from "../../cron/control";
+} from "../../automation/cron/control";
 import type { CrewCaller } from "../execution/engine";
 import { CrewError } from "../execution/state";
 

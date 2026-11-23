@@ -8,8 +8,8 @@ import {
   CronScheduler,
   type ScheduledInput,
   type SchedulerGateway,
-} from "../src/cron/index";
-import { CronStore } from "../src/cron/store";
+} from "../src/automation/cron/index";
+import { CronStore } from "../src/automation/cron/store";
 import { botKey } from "../src/gateway/routing";
 import { bot, identity } from "./fixtures";
 
