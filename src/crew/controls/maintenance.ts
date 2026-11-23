@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { Result, Schema } from "effect";
 import {
   type MaintenanceNotice,
   maintenancePlanSchema,
@@ -7,6 +8,8 @@ import {
 } from "../../maintenance/maintenance";
 import type { CrewCaller } from "../execution/engine";
 import { CrewError } from "../execution/state";
+
+const decodePlan = Schema.decodeUnknownResult(maintenancePlanSchema);
 
 type Owner = { sessionID: string; id: string };
 
@@ -124,9 +127,10 @@ export class CrewMaintenance {
   }
 
   public async run(raw: unknown, caller: CrewCaller): Promise<Permit> {
-    const parsed = maintenancePlanSchema.safeParse(raw);
+    const parsed = decodePlan(raw);
 
-    if (!parsed.success) throw new CrewError("Invalid maintenance plan.");
+    if (Result.isFailure(parsed))
+      throw new CrewError("Invalid maintenance plan.");
     await this.authority.captain(caller);
     caller.signal.throwIfAborted();
     const turn = this.turns.get(caller.sessionID);
@@ -149,7 +153,7 @@ export class CrewMaintenance {
     ]);
 
     turn.pending = {
-      notice: { ...parsed.data, id: randomUUID() },
+      notice: { ...parsed.success, id: randomUUID() },
       release: permit.resolve,
     };
 

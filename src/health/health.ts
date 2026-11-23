@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import { z } from "zod";
 import type { AgentBackend } from "../backends/backend";
 import type { BotConfig, Config } from "../config";
@@ -21,7 +21,7 @@ import {
 } from "../maintenance/nightly/droid/droid-facts";
 import { type CommandRunner, processRunner } from "../maintenance/nightly/exec";
 import { readReady, readySchema } from "../maintenance/nightly/update/ready";
-import { reportSchema } from "../maintenance/nightly/reports/report";
+import { reportOutcomes } from "../maintenance/nightly/reports/report";
 import { quotaSnapshotSchema } from "../quota/quota";
 import { botStatusReport } from "../app/status-report";
 
@@ -379,7 +379,9 @@ export function createHealthReader(
             `⚠ drain ${identifier(work.taskID ?? "unknown-task")} ${identifier(work.sessionID ?? "unknown-session")}: ${identifier(work.reason)}`,
           );
       } else rows.stargate.push("⚠ restart drain inactive or unknown");
-      const r = parsed(readySchema, ready);
+      const r = Option.getOrNull(
+        Schema.decodeUnknownOption(readySchema)(ready),
+      );
       const valid = r && r.readyAt <= now;
       rows.stargate.push(
         `${mark(gatewayState ?? "unknown")} unit ${gatewayState ?? "unknown"}; version ${valid ? version(r.version) : "unknown"}; ready ${valid ? date(r.readyAt) : "unknown"}`,
@@ -401,7 +403,7 @@ export function createHealthReader(
             .array(
               z.object({
                 startedAt: z.iso.datetime({ offset: true }),
-                outcome: reportSchema.shape.outcome,
+                outcome: z.enum(reportOutcomes),
               }),
             )
             .max(1),

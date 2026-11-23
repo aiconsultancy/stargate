@@ -1,9 +1,8 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
-import { z } from "zod";
-import { legacySetting } from "../../../config/settings-legacy";
 import {
   settingsDefault,
+  settingsPattern,
   settingsRefine,
   settingsStruct,
 } from "../../../config/settings-schema";
@@ -14,7 +13,7 @@ const path = Schema.String.check(Schema.isMinCodePoints(1))
   .check(
     settingsRefine(
       (value) =>
-        ![...value].some(
+        !Array.from(value).some(
           (c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
         ),
       { message: "No control characters" },
@@ -38,9 +37,10 @@ export const cleanupSchema = settingsStruct({
     .check(Schema.isMaxLength(256))
     .pipe(settingsDefault([])),
 });
+
 export type CleanupSettings = typeof cleanupSchema.Type;
 
-export const cleanupReasonSchema = z.enum([
+export const cleanupReasonSchema = Schema.Literals([
   "stale",
   "merged",
   "pushed",
@@ -67,25 +67,38 @@ export const cleanupReasonSchema = z.enum([
   "audit-failed",
   "gate-failed",
 ]);
-export const cleanupItemSchema = z.strictObject({
-  kind: z.enum(["scratch", "branch", "worktree"]),
-  path: legacySetting(path),
-  status: z.enum(["planned", "removed", "skipped", "failed"]),
+
+const bytes = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
+
+export const cleanupItemSchema = settingsStruct({
+  kind: Schema.Literals(["scratch", "branch", "worktree"]),
+  path,
+  status: Schema.Literals(["planned", "removed", "skipped", "failed"]),
   reason: cleanupReasonSchema,
-  size: z.number().nonnegative().finite(),
+  size: bytes,
   /** Milliseconds since epoch; 0 means unavailable (never deletion evidence). */
-  newestMtime: z.number().nonnegative().finite(),
-  branch: z.string().min(1).max(1024).optional(),
-  tip: z
-    .string()
-    .regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/)
-    .optional(),
+  newestMtime: bytes,
+  branch: Schema.optional(
+    Schema.String.check(
+      Schema.isMinCodePoints(1),
+      Schema.isMaxCodePoints(1024),
+    ),
+  ),
+  tip: Schema.optional(
+    Schema.String.check(settingsPattern(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/)),
+  ),
 });
-export const cleanupResultSchema = z.strictObject({
-  items: z.array(cleanupItemSchema).max(500),
-  freedBytes: z.number().nonnegative().finite(),
-  plannedBytes: z.number().nonnegative().finite(),
+
+export const cleanupResultSchema = settingsStruct({
+  items: Schema.mutable(Schema.Array(cleanupItemSchema)).check(
+    Schema.isMaxLength(500),
+  ),
+  freedBytes: bytes,
+  plannedBytes: bytes,
 });
-export type CleanupReason = z.infer<typeof cleanupReasonSchema>;
-export type CleanupItem = z.infer<typeof cleanupItemSchema>;
-export type CleanupResult = z.infer<typeof cleanupResultSchema>;
+
+export type CleanupReason = typeof cleanupReasonSchema.Type;
+
+export type CleanupItem = typeof cleanupItemSchema.Type;
+
+export type CleanupResult = typeof cleanupResultSchema.Type;

@@ -1,7 +1,6 @@
 import { mkdir, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { z } from "zod";
 import { type Config, loadConfig } from "../../config";
 import { runCleanup } from "./cleanup/cleanup";
 import { cleanupProtection } from "./cleanup/cleanup-protection";
@@ -13,12 +12,12 @@ import { nightlyInstructions } from "./instructions";
 import { recoveryBudgetMs } from "./journal";
 import { packageDirectory } from "./update/ready";
 import { adoptRelease, layout } from "./update/release";
-import { reportSchema, summary } from "./reports/report";
+import { reportJsonSchema, summary } from "./reports/report";
 import {
+  UpdateRefused,
   acceptCurrent,
   recoverInterruptedRun,
   runMaintenance,
-  UpdateRefused,
 } from "./run";
 import {
   buildDroidUnits,
@@ -97,12 +96,14 @@ Tokens are never accepted as arguments; use environment references.`;
 
 function windowText(config: Config, configPath: string) {
   const m = config.maintenance;
+
   if (!m) throw new Error("No maintenance section in configuration.");
   const installID = m.installID ?? defaultInstallID(configPath);
   const jitter = stableJitter(installID, m.window.jitterMinutes);
   const now = Date.now();
   const current = currentWindow(now, m.window, jitter);
   const next = nextWindow(now, m.window, jitter);
+
   return {
     m,
     installID,
@@ -141,11 +142,13 @@ async function installUnits(
     throw new Error("User timers require Linux with systemd.");
   const directory = join(homedir(), ".config/systemd/user");
   await mkdir(directory, { recursive: true });
+
   for (const [suffix, contents] of [
     ["timer", units.timer],
     ["service", units.service],
   ] as const) {
     let file: Awaited<ReturnType<typeof open>>;
+
     try {
       file = await open(join(directory, `${name}.${suffix}`), "wx", 0o600);
     } catch {
@@ -153,18 +156,21 @@ async function installUnits(
         `${name}.${suffix} exists or cannot be created. Refusing to overwrite it.`,
       );
     }
+
     try {
       await file.writeFile(contents);
     } finally {
       await file.close();
     }
   }
+
   const reload = await processRunner.run(
     ["systemctl", "--user", "daemon-reload"],
     {
       timeoutMs: 30_000,
     },
   );
+
   if (reload.code !== 0)
     throw new Error(
       "systemctl --user daemon-reload failed. Check the user session bus.",
@@ -172,6 +178,7 @@ async function installUnits(
   console.log(
     `Installed ${name}.timer and ${name}.service (not enabled).\nReview, then: systemctl --user enable --now ${name}.timer`,
   );
+
   return 0;
 }
 
@@ -199,12 +206,15 @@ export async function maintenanceCli(
     operation !== "update"
   )
     throw new Error("--now and --retry-failed apply only to update.");
+
   if (operation === "cleanup" && !options.plan)
     throw new Error(
       "Use maintenance cleanup --plan; cleanup applies only through maintenance run.",
     );
+
   if (options.plan && operation !== "cleanup" && operation !== "update")
     throw new Error("--plan applies only to cleanup and update.");
+
   if (
     (options.acceptCurrent !== undefined || options.yes) &&
     (operation !== "recover" ||
@@ -214,18 +224,24 @@ export async function maintenanceCli(
     throw new Error(
       "--accept-current ENTRY [--yes] applies only to recover, without --after-run.",
     );
+
   if (operation === "schema") {
-    console.log(JSON.stringify(z.toJSONSchema(reportSchema), null, 2));
+    console.log(JSON.stringify(reportJsonSchema(), null, 2));
+
     return 0;
   }
+
   const { loadEnvironment } = await import("../../app/runtime");
   await loadEnvironment(options.configPath);
   const config = await loadConfig(options.configPath);
+
   if (operation === "cleanup") {
     const settings = config.maintenance?.cleanup;
+
     if (!settings)
       throw new Error("Configure maintenance.cleanup before planning cleanup.");
     const crews = await discoverCrews(config);
+
     const result = await runCleanup({
       settings,
       plan: true,
@@ -234,33 +250,44 @@ export async function maintenanceCli(
       signal: AbortSignal.timeout(120_000),
       protectedPaths: cleanupProtection(config, options.configPath, crews),
     });
+
     console.log(JSON.stringify(result, null, 2));
+
     return result.items.some((item) => item.status === "failed") ? 1 : 0;
   }
+
   if (operation === "update") {
     const m = config.maintenance;
+
     if (!m) throw new Error("No maintenance section in configuration.");
     process.umask(0o077);
     const controller = new AbortController();
-    const stop = () => controller.abort();
+
+    const stop = () => {
+      controller.abort();
+    };
+
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
+
     try {
       return await maintenanceUpdate(
         config,
         {
           configPath: resolve(options.configPath),
-          ...(options.version ? { version: options.version } : {}),
-          ...(options.plan ? { plan: true } : {}),
-          ...(options.now ? { now: true } : {}),
-          ...(options.foreground ? { foreground: true } : {}),
-          ...(options.retryFailed ? { retryFailed: true } : {}),
-          ...(options.json ? { json: true } : {}),
+          ...(options.version && { version: options.version }),
+          ...(options.plan && { plan: true }),
+          ...(options.now && { now: true }),
+          ...(options.foreground && { foreground: true }),
+          ...(options.retryFailed && { retryFailed: true }),
+          ...(options.json && { json: true }),
         },
         {
           unit: updateUnit(),
           launcher: processRunner,
-          print: (text) => console.log(text),
+          print: (text) => {
+            console.log(text);
+          },
           now: () => Date.now(),
           signal: controller.signal,
         },
@@ -269,12 +296,14 @@ export async function maintenanceCli(
       // A refusal is an answer, not a crash; its text is fixed and safe.
       if (!(error instanceof UpdateRefused)) throw error;
       console.log(error.message);
+
       return 1;
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
     }
   }
+
   if (operation === "recover") {
     const result =
       options.acceptCurrent !== undefined
@@ -284,34 +313,48 @@ export async function maintenanceCli(
             {},
             options.afterRun ? { afterRun: true } : {},
           );
+
     console.log(result.message);
+
     return result.ok ? 0 : 1;
   }
+
   if (operation === "window") {
     console.log(windowText(config, options.configPath).text);
+
     return 0;
   }
+
   if (operation === "instructions") {
     const { m } = windowText(config, options.configPath);
     console.log(nightlyInstructions(m.window));
+
     return 0;
   }
+
   if (operation === "adopt") {
     const root = config.maintenance?.stargate?.root;
+
     if (!root)
       throw new Error("maintenance.stargate.root is required for adopt.");
+
     if (!options.release) throw new Error("--release DIR is required.");
+
     const result = await adoptRelease(
       root,
       resolve(options.release),
       options.version ?? "0.0.0",
     );
+
     console.log(JSON.stringify({ root, ...result }, null, 2));
+
     return 0;
   }
+
   if (operation === "install-timer") {
     const { m, jitter } = windowText(config, options.configPath);
     const name = timerName(options.name);
+
     const units = buildMaintenanceUnits({
       name,
       ...unitCommand(m, options.configPath),
@@ -319,20 +362,26 @@ export async function maintenanceCli(
       jitter,
       recoveryMinutes: Math.ceil(recoveryBudgetMs(m) / 60_000) + 5,
     });
+
     if (options.print) {
       console.log(
         `# ${name}.timer\n${units.timer}\n# ${name}.service\n${units.service}`,
       );
+
       return 0;
     }
+
     return installUnits(name, units);
   }
+
   if (operation === "install-droid-timer") {
     const { m } = windowText(config, options.configPath);
     const droid = m.droid;
+
     if (!droid)
       throw new Error("No maintenance.droid section in configuration.");
     const name = timerName(options.name ?? "stargate-maintenance-droid");
+
     const units = buildDroidUnits({
       name,
       ...unitCommand(m, options.configPath),
@@ -343,55 +392,74 @@ export async function maintenanceCli(
       timeoutMinutes:
         droid.timeoutMinutes + 3 + Math.ceil(recoveryBudgetMs(m) / 60_000) + 5,
     });
+
     if (options.print) {
       console.log(
         `# ${name}.timer\n${units.timer}\n# ${name}.service\n${units.service}`,
       );
+
       return 0;
     }
+
     return installUnits(name, units);
   }
+
   if (operation === "droid") {
     process.umask(0o077);
     const controller = new AbortController();
-    const stop = () => controller.abort();
+
+    const stop = () => {
+      controller.abort();
+    };
+
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
+
     try {
       const result = await runDroid({
         config,
         configPath: options.configPath,
         signal: controller.signal,
-        ...(options.print ? { preview: true } : {}),
+        ...(options.print && { preview: true }),
       });
+
       if (result.text) console.log(result.text);
       console.log(
         result.skipped
           ? "Another droid check is running; nothing was done."
-          : `Droid ${result.trigger} check: ${result.findings.length ? result.findings.join(", ") : "all clear"}; ${result.posted ? `post queued (${result.model ? "model" : "deterministic"})` : "no post"}.`,
+          : `Droid ${result.trigger} check: ${result.findings.length > 0 ? result.findings.join(", ") : "all clear"}; ${result.posted ? `post queued (${result.model ? "model" : "deterministic"})` : "no post"}.`,
       );
+
       return 0;
     } finally {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
     }
   }
+
   if (operation === "plan" || operation === "run") {
     process.umask(0o077);
     const controller = new AbortController();
-    const stop = () => controller.abort();
+
+    const stop = () => {
+      controller.abort();
+    };
+
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
+
     try {
       const { report, reportPath, attention } = await runMaintenance({
         config,
         configPath: options.configPath,
         mode: operation,
-        ...(options.outsideWindow ? { outsideWindow: true } : {}),
+        ...(options.outsideWindow && { outsideWindow: true }),
         signal: controller.signal,
       });
+
       if (options.json) console.log(JSON.stringify(report, null, 2));
       else console.log(summary(report, reportPath ?? "not written (plan)"));
+
       // Non-zero makes the unit visibly failed when an operator must look.
       return report.outcome === "failed" || attention ? 1 : 0;
     } finally {
@@ -399,5 +467,6 @@ export async function maintenanceCli(
       process.off("SIGTERM", stop);
     }
   }
+
   throw new Error("Unknown maintenance command. Use maintenance --help.");
 }

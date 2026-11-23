@@ -185,7 +185,9 @@ test("unsafe scratch names and oversized branch names cannot invalidate the audi
   await mkdir(unsafe);
   await age(unsafe);
   const result = await cleanup(input([scratch]));
-  expect(cleanupResultSchema.safeParse(result).success).toBe(true);
+  expect(
+    Result.isSuccess(Schema.decodeUnknownResult(cleanupResultSchema)(result)),
+  ).toBe(true);
   expect(result.items.some((item) => item.reason === "unsafe-path")).toBe(true);
   expect(await exists(unsafe)).toBe(true);
   const { repo } = await repository();
@@ -205,7 +207,9 @@ test("unsafe scratch names and oversized branch names cannot invalidate the audi
     }),
   );
 
-  expect(cleanupResultSchema.safeParse(branches).success).toBe(true);
+  expect(
+    Result.isSuccess(Schema.decodeUnknownResult(cleanupResultSchema)(branches)),
+  ).toBe(true);
   expect(branches.items.some((item) => item.reason === "unsafe-path")).toBe(
     true,
   );
@@ -1228,7 +1232,9 @@ test("scratch evidence stays offline, including nested repositories", async () =
         (command) => command.includes("fetch") || command.includes("ls-remote"),
       ),
     ).toBe(false);
-    expect(cleanupResultSchema.safeParse(result).success).toBe(true);
+    expect(
+      Result.isSuccess(Schema.decodeUnknownResult(cleanupResultSchema)(result)),
+    ).toBe(true);
   }
 });
 

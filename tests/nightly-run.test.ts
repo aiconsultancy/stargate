@@ -29,6 +29,7 @@ import {
 import { probeModel } from "../src/maintenance/nightly/update/host";
 import {
   backupDirectory,
+  describeEntry,
   FileChanges,
   Journal,
   readJournalFile,
@@ -782,7 +783,7 @@ test("cleanup checkpoints intent and result privately before one final notice", 
       const directory = join(config.dataDirectory, "maintenance", "reports");
       const files = await readdir(directory);
 
-      const checkpoint = reportSchema.parse(
+      const checkpoint = Schema.decodeUnknownSync(reportSchema)(
         JSON.parse(
           await readFile(join(directory, files[0] ?? "missing"), "utf8"),
         ),
@@ -921,7 +922,9 @@ describe("nightly maintenance run", () => {
     expect(report.notes).toEqual([note]);
     const text = await readFile(reportPath ?? "", "utf8");
     expect(text).not.toContain("private task text");
-    expect(reportSchema.parse(JSON.parse(text)).notes).toEqual([note]);
+    expect(
+      Schema.decodeUnknownSync(reportSchema)(JSON.parse(text)).notes,
+    ).toEqual([note]);
 
     const [notice] = await readdir(
       join(fixture.dir, "data/maintenance/outbox"),
@@ -964,8 +967,9 @@ describe("nightly maintenance run", () => {
     expect(commands("systemctl --user stop")).toEqual([]);
     expect(commands("npm")).toEqual([]);
     expect(
-      reportSchema.parse(JSON.parse(await readFile(reportPath ?? "", "utf8")))
-        .outcome,
+      Schema.decodeUnknownSync(reportSchema)(
+        JSON.parse(await readFile(reportPath ?? "", "utf8")),
+      ).outcome,
     ).toBe("deferred");
     expect(
       await readdir(join(fixture.dir, "data/maintenance/outbox")),
@@ -3253,6 +3257,36 @@ describe("journal recovery", () => {
     await writeFile(teamPath(), "maintenance\n");
     expect((await recoverInterruptedRun(config, deps())).ok).toBe(true);
     expect(await readFile(teamPath(), "utf8")).toBe(before);
+  });
+
+  test("backup entries are read newest first by number, not by name", async () => {
+    const { config } = await install();
+    const runID = crypto.randomUUID();
+    const journal = Journal.create(config.dataDirectory, runID);
+    await journal.set("files", {});
+    const backup = backupDirectory(config.dataDirectory, runID);
+    await mkdir(backup, { recursive: true, mode: 0o700 });
+    const current = await readFile(teamPath(), "utf8");
+
+    const entry = (old: string, written: string) =>
+      `${JSON.stringify({ kind: "file", path: teamPath(), old, written: sha(new TextEncoder().encode(written)) })}\n`;
+
+    // Different widths and a leading zero: 10, then 007, then 2.
+    await writeFile(join(backup, "2.json"), entry("older\n", current), {
+      mode: 0o600,
+    });
+    await writeFile(join(backup, "10.json"), entry(current, "other\n"), {
+      mode: 0o600,
+    });
+    await writeFile(join(backup, "007.json"), entry("a\n", "b\n"), {
+      mode: 0o600,
+    });
+    expect(await describeEntry(config, journal, "files")).toEqual([
+      `backup ${backup}`,
+      `file ${teamPath()}: already restored`,
+      `file ${teamPath()}: changed by someone else; recovery keeps it`,
+      `file ${teamPath()}: holds what maintenance wrote; recovery restores it`,
+    ]);
   });
 
   test("a backup entry for an unmanaged path is refused", async () => {

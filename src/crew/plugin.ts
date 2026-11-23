@@ -682,7 +682,7 @@ const plugin = Plugin.define({
           name: "stargate_maintenance",
           description:
             "Captain-only opt-out gate for reversible self-maintenance. Inspect first, then provide the exact plan, impact and rollback before changing the installation or dispatching maintenance. Waits five full minutes after confirmed cancellable Slack delivery. Stop, lost delivery/gateway, timeout or restart grants no permission. Not explicit approval: destructive changes, credentials, access expansion and unrelated services always require a human approval; never submit those here. No shell sleep substitutes. Scope changes require a new notice.",
-          input: maintenancePlanSchema,
+          input: messagePortableSchema(maintenancePlanSchema),
           options: { codemode: false, permission: "stargate_crew" },
           execute: (input, context) =>
             guard(

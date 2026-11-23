@@ -214,7 +214,7 @@ export async function readReports(
 
   for (const name of names) {
     try {
-      const parsed = reportSchema.safeParse(
+      const parsed = Schema.decodeUnknownResult(reportSchema)(
         JSON.parse(
           await readFile(
             join(maintenanceDirectory(dataDirectory), "reports", name),
@@ -223,7 +223,8 @@ export async function readReports(
         ),
       );
 
-      if (parsed.success) reports.push(digestReport(name, parsed.data, scrub));
+      if (Result.isSuccess(parsed))
+        reports.push(digestReport(name, parsed.success, scrub));
       else unreadable++;
     } catch {
       unreadable++;

@@ -2379,9 +2379,9 @@ export class OpenCodeBackend implements AgentBackend {
 
     return {
       read: async (signal) =>
-        maintenanceNoticeSchema
-          .nullable()
-          .parse(await rpc.read(owner, options(signal))),
+        Schema.decodeUnknownSync(Schema.NullOr(maintenanceNoticeSchema))(
+          await rpc.read(owner, options(signal)),
+        ),
       delivered: async (noticeID, signal) => {
         if (!(await rpc.delivered({ ...owner, noticeID }, options(signal))))
           throw new Error("Maintenance delivery unconfirmed");

@@ -1027,6 +1027,7 @@
         "src/maintenance-delivery.ts",
         "src/maintenance-drain.ts",
         "src/maintenance.ts",
+        "src/maintenance/nightly/journal-records.ts",
         "src/nightly/archive.ts",
         "src/nightly/catalog.ts",
         "src/nightly/cleanup-config.ts",
