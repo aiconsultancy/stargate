@@ -400,15 +400,15 @@ export function codexFailureKind(
  */
 export class CodexTurn {
   private readonly messages = new Map<string, string>();
-  thread: string | undefined;
-  result: { ok: boolean } | undefined;
+  public thread: string | undefined;
+  public result: { ok: boolean } | undefined;
   /** A command, file change or tool call was seen. */
-  worked = false;
+  public worked = false;
   /** What the failure event named, without its text. */
-  failure: ReturnType<typeof codexFailureKind>;
+  public failure: ReturnType<typeof codexFailureKind>;
 
   /** Returns true when the visible text may have changed. */
-  add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
+  public add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
     if (
       stage &&
       Schema.is(Schema.Struct({ type: Schema.Literal("turn.started") }))(raw)
@@ -456,7 +456,7 @@ export class CodexTurn {
     return false;
   }
 
-  answer(): string {
+  public answer(): string {
     return [...this.messages.values()].filter(Boolean).join("\n\n");
   }
 }
@@ -501,7 +501,7 @@ export type CodexRuntime = {
 };
 
 export class CodexBackend implements AgentBackend {
-  readonly supportsAttachments = true;
+  public readonly supportsAttachments = true;
   private readonly runs = new Map<string, Run>();
   private closed = false;
 
@@ -526,7 +526,7 @@ export class CodexBackend implements AgentBackend {
     return this.runtime.graceMs ?? 5000;
   }
 
-  static async open(
+  public static async open(
     config: Config,
     context: BackendContext,
     runtime: CodexRuntime = {},
@@ -582,7 +582,7 @@ export class CodexBackend implements AgentBackend {
     );
   }
 
-  async createSession({
+  public async createSession({
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
     signal.throwIfAborted();
@@ -605,7 +605,7 @@ export class CodexBackend implements AgentBackend {
     }
   }
 
-  async prompt(
+  public async prompt(
     sessionId: string,
     text: string,
     signal: AbortSignal,
@@ -907,7 +907,7 @@ export class CodexBackend implements AgentBackend {
     await rm(path, { force: true });
   }
 
-  async interrupt(sessionId: string, signal: AbortSignal) {
+  public async interrupt(sessionId: string, signal: AbortSignal) {
     if (!isID(sessionId)) return;
     const run = this.runs.get(sessionId);
 
@@ -921,7 +921,7 @@ export class CodexBackend implements AgentBackend {
     await this.stopOrphan(sessionId, signal);
   }
 
-  async close() {
+  public async close() {
     this.closed = true;
     const runs = [...this.runs.values()];
 

@@ -11,7 +11,7 @@ import { maintenanceDirectory, noticeSchema } from "./report";
  * problem must not stop the gateway.
  */
 export class MaintenanceOutbox {
-  constructor(
+  public constructor(
     private readonly dataDirectory: string,
     private readonly channelAllowed: (channel: string) => boolean,
     private readonly announce: (
@@ -22,7 +22,7 @@ export class MaintenanceOutbox {
     private readonly log: Pick<Logger, "warn">,
   ) {}
 
-  async deliver(signal: AbortSignal) {
+  public async deliver(signal: AbortSignal) {
     const directory = join(maintenanceDirectory(this.dataDirectory), "outbox");
     let names: string[];
 
@@ -69,7 +69,7 @@ export class MaintenanceOutbox {
     return sent;
   }
 
-  async work(signal: AbortSignal) {
+  public async work(signal: AbortSignal) {
     while (!signal.aborted) {
       await this.deliver(signal);
       await delay(30_000, undefined, { signal }).catch(() => {});

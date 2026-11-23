@@ -587,19 +587,23 @@ type Built = { registration: IrcRegistration; lifetime: Lifetime };
  * join/invite path. Grants must stay captain-owned and auditable.
  */
 export class IrcShip {
-  sourceRecorder: ((source: FleetSource) => void) | undefined;
+  public sourceRecorder: ((source: FleetSource) => void) | undefined;
   /** Captain side of agent dispatch: an admitted offer for the answer tool. */
-  offerRecorder: ((offer: Omit<DispatchOffer, "account">) => void) | undefined;
+  public offerRecorder:
+    | ((offer: Omit<DispatchOffer, "account">) => void)
+    | undefined;
   /**
    * Rear admiral side of agent dispatch: each tagged chat message whose
    * sender and channel pass the registration's access rules; its marker,
    * account and reply are still unchecked.
    */
-  dispatchListener:
+  public dispatchListener:
     | ((message: IrcMessage, fold: (value: string) => string) => void)
     | undefined;
-  assignmentPrompt: ((dispatchID: string) => string | undefined) | undefined;
-  assignmentRecorder:
+  public assignmentPrompt:
+    | ((dispatchID: string) => string | undefined)
+    | undefined;
+  public assignmentRecorder:
     | ((
         input: {
           sender: string;
@@ -668,7 +672,7 @@ export class IrcShip {
   }
 
   /** Reads the CA and client credentials without logging them. */
-  static async create(
+  public static async create(
     config: IrcConfig,
     store: Store,
     log: Logger,
@@ -686,17 +690,17 @@ export class IrcShip {
   }
 
   /** Captain first, then crew in configuration order. */
-  get registrations(): readonly IrcRegistration[] {
+  public get registrations(): readonly IrcRegistration[] {
     return this.current;
   }
 
   /** Keys of the current roster: ship limits count all of them. */
-  get keys(): string[] {
+  public get keys(): string[] {
     return this.current.map((registration) => registration.key);
   }
 
   /** Start every connection; intake stores messages only while `open()`. */
-  start(open: () => boolean) {
+  public start(open: () => boolean) {
     if (this.started) return;
     this.started = true;
     this.open = open;
@@ -759,7 +763,7 @@ export class IrcShip {
    * QUIT every connection and wait for every connection loop to end,
    * including removed connections that are still closing. Repeatable.
    */
-  async close() {
+  public async close() {
     this.open = () => false;
     this.controller.abort();
     await Promise.allSettled([...this.loops]);
@@ -774,7 +778,7 @@ export class IrcShip {
    * (server, connection features, channels, or a member's account, nick, credential
    * reference, backend, display name or limits): those need a restart.
    */
-  async prepareReload(
+  public async prepareReload(
     next: IrcConfig,
     env: NodeJS.ProcessEnv,
   ): Promise<IrcReload> {

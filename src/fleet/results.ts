@@ -46,7 +46,7 @@ export function fleetResultSource(
 
 /** Trusted gateway recovery only. No IPC operation can manufacture completion. */
 export class FleetResults {
-  constructor(
+  public constructor(
     private readonly options: {
       control: FleetControl;
       store: Store;
@@ -57,7 +57,7 @@ export class FleetResults {
     },
   ) {}
 
-  async poll(signal: AbortSignal) {
+  public async poll(signal: AbortSignal) {
     const { control, store, botKey, sessionID, account, backend } =
       this.options;
 
@@ -199,7 +199,7 @@ export class FleetResults {
     await control.pollReviews(signal);
   }
 
-  async work(signal: AbortSignal) {
+  public async work(signal: AbortSignal) {
     while (!signal.aborted) {
       try {
         await this.poll(signal);

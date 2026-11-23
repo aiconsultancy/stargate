@@ -54,10 +54,10 @@ export function statusKind(status: number): BackendFailureKind {
  * or answer, so the request can be sent again.
  */
 export class BackendFailure extends Error {
-  readonly status: number | undefined;
-  readonly ran: boolean;
-  constructor(
-    readonly kind: BackendFailureKind,
+  public readonly status: number | undefined;
+  public readonly ran: boolean;
+  public constructor(
+    public readonly kind: BackendFailureKind,
     options: { status?: number | undefined; ran: boolean },
   ) {
     super(`Backend failure: ${kind}`);
@@ -72,7 +72,7 @@ export class BackendFailure extends Error {
   }
 
   /** The durable cause: category, status (0 when unknown) and work flag. */
-  get failure(): ProviderFailure {
+  public get failure(): ProviderFailure {
     return `provider:${this.kind}:${this.status ?? 0}:${this.ran ? "ran" : "idle"}`;
   }
 }

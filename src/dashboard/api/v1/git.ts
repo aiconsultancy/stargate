@@ -122,7 +122,8 @@ async function openStatusFile(source: string, roots: string[]) {
     return undefined;
 
   if (process.platform === "darwin") {
-    const noFollowAny = 0x20_00_00_00; // Darwin O_NOFOLLOW_ANY
+    // Darwin O_NOFOLLOW_ANY
+    const noFollowAny = 0x20_00_00_00;
 
     return open(path, constants.O_RDONLY | constants.O_NONBLOCK | noFollowAny);
   }
@@ -645,7 +646,8 @@ async function prepareStatus(
 async function readHeadRef(run: RunGit) {
   const ref = await run("symbolic-ref", "-q", "HEAD");
 
-  if (ref.code === 1) return "HEAD"; // Detached.
+  // Detached.
+  if (ref.code === 1) return "HEAD";
   const name = ref.stdout.trim();
 
   if (ref.code !== 0 || !name.startsWith("refs/"))

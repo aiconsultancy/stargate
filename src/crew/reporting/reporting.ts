@@ -74,9 +74,9 @@ type Capture = {
 /** Private tables share crew identity, transaction, and file permissions. */
 export class ReportingStore {
   private names = new Map<string, string>();
-  readonly journal: JournalStore;
+  public readonly journal: JournalStore;
 
-  constructor(
+  public constructor(
     private readonly db: Database,
     /** Journal context for a stored origin; pinned teams use their root. */
     private readonly captainRoute: (id: string) => string = (id) => id,
@@ -122,7 +122,7 @@ export class ReportingStore {
     }
   }
 
-  configureNames(members: { id: string; name?: string | undefined }[]) {
+  public configureNames(members: { id: string; name?: string | undefined }[]) {
     this.names = new Map(
       members.map(({ id, name }) => [
         id,
@@ -131,7 +131,7 @@ export class ReportingStore {
     );
   }
 
-  expire(now = Date.now()) {
+  public expire(now = Date.now()) {
     this.db
       .query(`UPDATE activity_captures SET status='unavailable',
       summary='Activity capture expired; unfinished work was not replayed.', revision=revision+1
@@ -149,7 +149,7 @@ export class ReportingStore {
       .run(now - 86_400_000);
   }
 
-  start(
+  public start(
     sessionID: string,
     requestID: string,
     reporterID: string,
@@ -213,7 +213,7 @@ export class ReportingStore {
       .immediate();
   }
 
-  owned(sessionID: string, id: string): Capture {
+  public owned(sessionID: string, id: string): Capture {
     const capture = this.db
       .query<Capture, [string, string]>(
         "SELECT * FROM activity_captures WHERE sessionID=? AND id=?",
@@ -226,7 +226,7 @@ export class ReportingStore {
     return capture;
   }
 
-  finish(capture: Capture) {
+  public finish(capture: Capture) {
     const now = Date.now();
     this.db
       .query(`UPDATE activity_captures SET status='summarizing', finished=1,
@@ -234,7 +234,7 @@ export class ReportingStore {
       .run(now + settleWindow, now + settleWindow + captureLease, capture.id);
   }
 
-  renew(capture: Capture) {
+  public renew(capture: Capture) {
     this.db
       .query(
         "UPDATE activity_captures SET expires=? WHERE id=? AND status IN ('collecting','summarizing')",
@@ -242,7 +242,7 @@ export class ReportingStore {
       .run(Date.now() + captureLease, capture.id);
   }
 
-  terminal(
+  public terminal(
     capture: Capture,
     status: "unavailable" | "cancelled" | "complete",
     summary: string,
@@ -253,13 +253,13 @@ export class ReportingStore {
       .run(status, redactCredentials(summary, 3000), capture.id);
   }
 
-  isReport(taskID: string): boolean {
+  public isReport(taskID: string): boolean {
     return Boolean(
       this.db.query(`SELECT 1 WHERE ${reportTask("?1")}`).get(taskID),
     );
   }
 
-  markReport(taskID: string, captureID: string) {
+  public markReport(taskID: string, captureID: string) {
     this.db
       .query("INSERT INTO activity_report_tasks VALUES (?,?)")
       .run(taskID, captureID);
@@ -270,7 +270,7 @@ export class ReportingStore {
       .run(taskID, this.journal.head(), captureID);
   }
 
-  reportTaskID(captureID: string): string | undefined {
+  public reportTaskID(captureID: string): string | undefined {
     return this.db
       .query<{ taskID: string }, [string]>(
         "SELECT taskID FROM activity_report_tasks WHERE captureID=?",
@@ -278,7 +278,7 @@ export class ReportingStore {
       .get(captureID)?.taskID;
   }
 
-  assignment<T extends ReportingTask>(task: T, text: string) {
+  public assignment<T extends ReportingTask>(task: T, text: string) {
     this.expire();
 
     if (this.isReport(task.id)) return;
@@ -326,7 +326,11 @@ export class ReportingStore {
       return;
   }
 
-  record<T extends ReportingTask>(task: T, kind: Entry["kind"], text: string) {
+  public record<T extends ReportingTask>(
+    task: T,
+    kind: Entry["kind"],
+    text: string,
+  ) {
     this.expire();
 
     if (this.isReport(task.id)) {
@@ -361,7 +365,7 @@ export class ReportingStore {
     );
   }
 
-  taskIDs(captureID: string): string[] {
+  public taskIDs(captureID: string): string[] {
     return this.db
       .query<{ taskID: string }, [string]>(
         "SELECT taskID FROM activity_tasks WHERE captureID=?",
@@ -370,7 +374,7 @@ export class ReportingStore {
       .map(({ taskID }) => taskID);
   }
 
-  entries(captureID: string, limit = 8): Entry[] {
+  public entries(captureID: string, limit = 8): Entry[] {
     const capture = this.db
       .query<Capture, [string]>("SELECT * FROM activity_captures WHERE id=?")
       .get(captureID);
@@ -394,7 +398,7 @@ export class ReportingStore {
       }));
   }
 
-  snapshot(capture: Capture): ActivitySnapshot {
+  public snapshot(capture: Capture): ActivitySnapshot {
     const entries = this.entries(capture.id, 9);
     const head = entries.at(-1)?.id ?? capture.startSeq;
     const stale = !!capture.reportTaskID && head > capture.summarySeq;
@@ -422,7 +426,7 @@ export class CrewReporter {
   >();
   private closed = false;
 
-  constructor(private readonly engine: ReportingHost) {}
+  public constructor(private readonly engine: ReportingHost) {}
 
   private get store() {
     return this.engine.state.reporting;
@@ -457,7 +461,7 @@ export class CrewReporter {
     }
   }
 
-  async start(
+  public async start(
     input: {
       sessionID: string;
       requestID: string;
@@ -485,7 +489,7 @@ export class CrewReporter {
     );
   }
 
-  async read(
+  public async read(
     input: { sessionID: string; id: string; passive?: boolean | undefined },
     signal: AbortSignal,
   ) {
@@ -501,7 +505,10 @@ export class CrewReporter {
     return this.store.snapshot(this.store.owned(input.sessionID, input.id));
   }
 
-  async finish(input: { sessionID: string; id: string }, signal: AbortSignal) {
+  public async finish(
+    input: { sessionID: string; id: string },
+    signal: AbortSignal,
+  ) {
     const caller = await this.verify(input.sessionID, signal);
     this.store.expire();
     this.store.finish(this.store.owned(input.sessionID, input.id));
@@ -510,7 +517,10 @@ export class CrewReporter {
     return this.store.snapshot(this.store.owned(input.sessionID, input.id));
   }
 
-  async cancel(input: { sessionID: string; id: string }, signal: AbortSignal) {
+  public async cancel(
+    input: { sessionID: string; id: string },
+    signal: AbortSignal,
+  ) {
     const caller = await this.verify(input.sessionID, signal);
     const capture = this.store.owned(input.sessionID, input.id);
     this.store.terminal(capture, "cancelled", "Activity capture cancelled.");
@@ -672,7 +682,7 @@ export class CrewReporter {
     this.jobs.set(capture.id, { controller, done: job });
   }
 
-  async close() {
+  public async close() {
     this.closed = true;
     const jobs = [...this.jobs.values()];
 

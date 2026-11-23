@@ -4,14 +4,14 @@ import { ircBurstMessageSchema } from "./burst";
 import type { IrcBurstMessage, IrcOperations } from "./store-contract";
 
 export class IrcRecords implements IrcOperations {
-  constructor(private readonly db: Database) {}
+  public constructor(private readonly db: Database) {}
 
   /**
    * Admitted messages of one sender kind received at or after `since` (ms),
    * in these registrations and in one conversation or channel. IRC only:
    * Slack rows carry no `received` time.
    */
-  turnsSince(input: {
+  public turnsSince(input: {
     botKeys: readonly string[];
     sender: "captain" | "crew";
     since: number;
@@ -36,7 +36,7 @@ export class IrcRecords implements IrcOperations {
   }
 
   /** Outbound IRC root of this registration's request; legacy rows stay plain. */
-  ircReplyParent(botKey: string, thread: string): string | undefined {
+  public ircReplyParent(botKey: string, thread: string): string | undefined {
     return (
       this.db
         .query<
@@ -52,7 +52,7 @@ export class IrcRecords implements IrcOperations {
   }
 
   /** Original accepted text and source labels, retained across restarts. */
-  ircBurstMessages(job: number): IrcBurstMessage[] {
+  public ircBurstMessages(job: number): IrcBurstMessage[] {
     return this.db
       .query<{ message: string }, [number]>(
         "SELECT message FROM irc_burst_messages WHERE job=? ORDER BY ordinal",
@@ -64,7 +64,7 @@ export class IrcRecords implements IrcOperations {
   }
 
   /** Stop can resolve a grouped member without changing ordinary thread state. */
-  ircBurstRequest(
+  public ircBurstRequest(
     botKey: string,
     channel: string,
     msgid: string,
@@ -77,7 +77,7 @@ export class IrcRecords implements IrcOperations {
       .get(botKey, `${channel}:${msgid}`, channel)?.thread;
   }
 
-  saveIrcBurstMessage(
+  public saveIrcBurstMessage(
     job: number,
     ordinal: number,
     botKey: string,
@@ -90,7 +90,7 @@ export class IrcRecords implements IrcOperations {
       .run(botKey, message.eventId, job, ordinal, JSON.stringify(message));
   }
 
-  ircThreadRoot(
+  public ircThreadRoot(
     botKey: string,
     channel: string,
     msgid: string,
@@ -102,7 +102,7 @@ export class IrcRecords implements IrcOperations {
       .get(botKey, channel, msgid)?.root;
   }
 
-  ircThreadParticipating(
+  public ircThreadParticipating(
     botKey: string,
     channel: string,
     root: string,
@@ -117,7 +117,7 @@ export class IrcRecords implements IrcOperations {
   }
 
   /** Exact original request of a locally correlated own echo, never its root. */
-  ircRequestAnchor(botKey: string, channel: string, msgid: string) {
+  public ircRequestAnchor(botKey: string, channel: string, msgid: string) {
     return (
       this.db
         .query<{ request: string | null }, [string, string, string]>(
@@ -127,7 +127,7 @@ export class IrcRecords implements IrcOperations {
     );
   }
 
-  ircThreadMessage(
+  public ircThreadMessage(
     botKey: string,
     channel: string,
     msgid: string,
@@ -145,7 +145,7 @@ export class IrcRecords implements IrcOperations {
       .run(botKey, channel, msgid, root, Date.now(), request ?? null);
   }
 
-  joinIrcThread(botKey: string, channel: string, root: string) {
+  public joinIrcThread(botKey: string, channel: string, root: string) {
     this.db
       .query(
         "INSERT INTO irc_thread_memberships(botKey,channel,root,recorded) VALUES (?,?,?,?) ON CONFLICT(botKey,channel,root) DO UPDATE SET recorded=excluded.recorded",
@@ -158,7 +158,7 @@ export class IrcRecords implements IrcOperations {
    * direct messages) of one registration: CHATHISTORY catch-up resumes
    * after it.
    */
-  ircCursor(botKey: string, target: string): string | undefined {
+  public ircCursor(botKey: string, target: string): string | undefined {
     return (
       this.db
         .query<{ time: string }, [string, string]>(
@@ -169,7 +169,12 @@ export class IrcRecords implements IrcOperations {
   }
 
   /** Moves forward only, unless `replace` (operator repair and tests). */
-  saveIrcCursor(botKey: string, target: string, time: string, replace = false) {
+  public saveIrcCursor(
+    botKey: string,
+    target: string,
+    time: string,
+    replace = false,
+  ) {
     this.db
       .query(`INSERT INTO irc_cursors (botKey,target,time) VALUES (?,?,?)
       ON CONFLICT(botKey,target) DO UPDATE SET time=excluded.time
@@ -182,7 +187,7 @@ export class IrcRecords implements IrcOperations {
    * the IRC copy is sent, so the recipient connection recognises it and
    * never admits it as a second turn. Kept 7 days.
    */
-  markStargateDmCopy(id: string, now = Date.now()) {
+  public markStargateDmCopy(id: string, now = Date.now()) {
     this.db.transaction(() => {
       this.db
         .query("INSERT OR IGNORE INTO irc_stargate_dm VALUES (?,?)")
@@ -193,14 +198,14 @@ export class IrcRecords implements IrcOperations {
     })();
   }
 
-  stargateDmCopy(id: string) {
+  public stargateDmCopy(id: string) {
     return (
       this.db.query("SELECT 1 FROM irc_stargate_dm WHERE id=?").get(id) !== null
     );
   }
 
   /** Last crew-plugin outbox sequence handled for one ship (its captain). */
-  stargateDmCursor(botKey: string): number | undefined {
+  public stargateDmCursor(botKey: string): number | undefined {
     return (
       this.db
         .query<{ sequence: number }, [string]>(
@@ -210,7 +215,7 @@ export class IrcRecords implements IrcOperations {
     );
   }
 
-  saveStargateDmCursor(botKey: string, sequence: number) {
+  public saveStargateDmCursor(botKey: string, sequence: number) {
     this.db
       .query(`INSERT INTO irc_stargate_dm_cursor VALUES (?,?)
       ON CONFLICT(botKey) DO UPDATE SET sequence=excluded.sequence`)

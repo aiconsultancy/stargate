@@ -148,8 +148,8 @@ function readClaim(row: StoredRow): Claim {
  */
 export class NotifyStore {
   private readonly db: Database;
-  readonly limits: Limits;
-  readonly counters: NotificationCounters = {
+  public readonly limits: Limits;
+  public readonly counters: NotificationCounters = {
     accepted: 0,
     duplicate: 0,
     sent: 0,
@@ -161,7 +161,7 @@ export class NotifyStore {
   private readonly gates = new Map<string, number>();
   private closed = false;
 
-  constructor(
+  public constructor(
     path: string,
     limits: Partial<Limits> = {},
     /** Narrow transaction fault/crash seam. Never used by the runtime. */
@@ -340,7 +340,7 @@ export class NotifyStore {
   }
 
   /** Resolver runs only for a new event, after dedup, inside the transaction. */
-  admit(
+  public admit(
     source: Source,
     input: NotificationInput,
     destinations: () => readonly Destination[],
@@ -466,7 +466,7 @@ export class NotifyStore {
   }
 
   /** Startup only, under sole ownership. Live leases are never reclaimed. */
-  recover(now: number) {
+  public recover(now: number) {
     checkTime(now);
 
     if (this.active.size) throw new StoreUnavailable();
@@ -493,7 +493,7 @@ export class NotifyStore {
     this.counters.replayed += recovered.replayed;
   }
 
-  claim(now: number): Claim | undefined {
+  public claim(now: number): Claim | undefined {
     checkTime(now);
 
     const result = this.transaction(() => {
@@ -555,7 +555,7 @@ export class NotifyStore {
     return result.claim;
   }
 
-  settle(claim: Claim, outcome: SinkOutcome, now: number) {
+  public settle(claim: Claim, outcome: SinkOutcome, now: number) {
     checkTime(now);
 
     if (this.active.get(claim.id) !== claim.destinationKey)
@@ -627,7 +627,7 @@ export class NotifyStore {
     }
   }
 
-  close() {
+  public close() {
     if (this.active.size) throw new StoreUnavailable();
 
     if (!this.closed) {

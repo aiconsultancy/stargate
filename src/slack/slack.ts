@@ -110,13 +110,13 @@ export async function handleSlackRequest(
 }
 
 export class SlackConnection implements TransportDelivery {
-  readonly files: SlackFiles;
+  public readonly files: SlackFiles;
   private readonly socket;
   private readonly web;
   private readonly historyWeb: (signal: AbortSignal) => WebClient;
   private handle?: (request: SocketRequest) => Promise<void>;
   private closing: Promise<void> | undefined;
-  constructor(
+  public constructor(
     appToken: string,
     botToken: string,
     log: Logger,
@@ -180,12 +180,12 @@ export class SlackConnection implements TransportDelivery {
   }
 
   /** Slack `users.info`; the caller parses the untrusted result. */
-  async userInfo(user: string, signal: AbortSignal): Promise<unknown> {
+  public async userInfo(user: string, signal: AbortSignal): Promise<unknown> {
     return this.historyWeb(signal).users.info({ user });
   }
 
   /** Exact message lookup only; the event's item_user is not authorship proof. */
-  async reactionThread({
+  public async reactionThread({
     channel,
     ts,
     appId,
@@ -213,7 +213,7 @@ export class SlackConnection implements TransportDelivery {
     return message.thread_ts ?? message.ts;
   }
 
-  async identity(signal?: AbortSignal): Promise<Identity> {
+  public async identity(signal?: AbortSignal): Promise<Identity> {
     const auth = await retrySlack(() => this.web.auth.test(), signal);
 
     if (!auth.team_id || !auth.user_id || !auth.bot_id)
@@ -222,13 +222,13 @@ export class SlackConnection implements TransportDelivery {
     return { team: auth.team_id, user: auth.user_id };
   }
 
-  async threadContext(input: ThreadContextRequest) {
+  public async threadContext(input: ThreadContextRequest) {
     return loadThreadContext(input, (args) =>
       this.historyWeb(input.signal).conversations.replies(args),
     );
   }
 
-  async start(
+  public async start(
     accept: (body: unknown) => boolean | Promise<boolean>,
     log: Logger,
     interactions?: SlackInteractions,
@@ -243,10 +243,10 @@ export class SlackConnection implements TransportDelivery {
     await this.socket.start(signal);
   }
 
-  get connectionState() {
+  public get connectionState() {
     return this.socket.state;
   }
-  watch() {
+  public watch() {
     return this.socket.watch();
   }
 
@@ -279,9 +279,9 @@ export class SlackConnection implements TransportDelivery {
     return result.ts;
   }
 
-  readonly prepareReply = prepareSlackReply;
+  public readonly prepareReply = prepareSlackReply;
 
-  async post(
+  public async post(
     channel: string,
     thread: string,
     text: string,
@@ -292,13 +292,13 @@ export class SlackConnection implements TransportDelivery {
     return this.send(channel, thread, text, "plain", stopJob, content);
   }
 
-  async announce(channel: string, text: string, signal?: AbortSignal) {
+  public async announce(channel: string, text: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
 
     return this.send(channel, "", text, "plain");
   }
 
-  async notification(
+  public async notification(
     channel: string,
     payload: DisplayPayload,
     signal: AbortSignal,
@@ -325,7 +325,12 @@ export class SlackConnection implements TransportDelivery {
     }
   }
 
-  async ephemeral(channel: string, user: string, thread: string, text: string) {
+  public async ephemeral(
+    channel: string,
+    user: string,
+    thread: string,
+    text: string,
+  ) {
     await this.web.chat.postEphemeral({
       channel,
       user,
@@ -335,7 +340,7 @@ export class SlackConnection implements TransportDelivery {
     });
   }
 
-  async failure(
+  public async failure(
     channel: string,
     thread: string,
     cause: RequestFailure,
@@ -373,7 +378,7 @@ export class SlackConnection implements TransportDelivery {
     }
   }
 
-  async activity(
+  public async activity(
     channel: string,
     thread: string,
     view: ActivityView,
@@ -409,7 +414,7 @@ export class SlackConnection implements TransportDelivery {
     return result.ts;
   }
 
-  readonly crewUI: CrewUIApi = {
+  public readonly crewUI: CrewUIApi = {
     open: async (triggerId, view) => {
       const result = await this.web.views.open({ trigger_id: triggerId, view });
 
@@ -422,7 +427,7 @@ export class SlackConnection implements TransportDelivery {
     },
   };
 
-  readonly cronUI: {
+  public readonly cronUI: {
     open(triggerId: string, view: ModalView): Promise<void>;
     push(triggerId: string, view: ModalView): Promise<void>;
     update(viewId: string, hash: string, view: ModalView): Promise<void>;
@@ -438,7 +443,7 @@ export class SlackConnection implements TransportDelivery {
     },
   };
 
-  async update(
+  public async update(
     channel: string,
     ts: string,
     text: string,
@@ -465,7 +470,7 @@ export class SlackConnection implements TransportDelivery {
     }
   }
 
-  async remove(channel: string, ts: string) {
+  public async remove(channel: string, ts: string) {
     try {
       await this.web.chat.delete({ channel, ts });
     } catch (error) {
@@ -474,7 +479,7 @@ export class SlackConnection implements TransportDelivery {
     }
   }
 
-  async react(channel: string, timestamp: string, name: ReactionName) {
+  public async react(channel: string, timestamp: string, name: ReactionName) {
     try {
       await this.web.reactions.add({ channel, timestamp, name });
     } catch (error) {
@@ -482,7 +487,11 @@ export class SlackConnection implements TransportDelivery {
     }
   }
 
-  async readReceipt(channel: string, timestamp: string, active: boolean) {
+  public async readReceipt(
+    channel: string,
+    timestamp: string,
+    active: boolean,
+  ) {
     const web = this.historyWeb(AbortSignal.timeout(1500));
     const args = { channel, timestamp, name: "eyes" };
 
@@ -496,7 +505,7 @@ export class SlackConnection implements TransportDelivery {
   }
 
   /** Idempotent: a repeated SDK disconnect can wait for an event that never comes. */
-  close() {
+  public close() {
     this.closing ??= this.socket.close();
 
     return this.closing;

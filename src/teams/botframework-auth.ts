@@ -36,8 +36,8 @@ export type SigningKey = {
 
 // Status is the HTTP status the bot returns for the rejected request.
 export class AuthError extends Error {
-  status: number;
-  constructor(message: string, status = 401) {
+  public status: number;
+  public constructor(message: string, status = 401) {
     super(message);
     this.name = "AuthError";
     this.status = status;
@@ -93,7 +93,7 @@ export class BotFrameworkKeyStore {
   readonly #missing = new Map<string, number>();
   #inflight: Promise<void> | undefined;
 
-  constructor(
+  public constructor(
     options: { fetch?: FetchFn; openIdUrl?: string; now?: () => number } = {},
   ) {
     this.#fetch = options.fetch ?? globalThis.fetch;
@@ -101,7 +101,7 @@ export class BotFrameworkKeyStore {
     this.#now = options.now ?? Date.now;
   }
 
-  get algorithms(): string[] {
+  public get algorithms(): string[] {
     return this.#algorithms;
   }
 
@@ -109,7 +109,7 @@ export class BotFrameworkKeyStore {
   // Each unknown key ID is looked up at most once an hour, and lookups are spaced at
   // Least 30 seconds apart. A new key that arrives inside that gap gets a retryable
   // Error rather than a rejection.
-  async getKey(kid: string): Promise<SigningKey | undefined> {
+  public async getKey(kid: string): Promise<SigningKey | undefined> {
     let refreshed = false;
 
     if (
@@ -149,7 +149,7 @@ export class BotFrameworkKeyStore {
     return key;
   }
 
-  refresh(): Promise<void> {
+  public refresh(): Promise<void> {
     this.#inflight ??= this.#load().finally(() => {
       this.#inflight = undefined;
     });

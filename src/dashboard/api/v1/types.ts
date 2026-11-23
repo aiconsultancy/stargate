@@ -14,6 +14,8 @@
  *   /api/v1/events                      -> text/event-stream of V1Event
  */
 import type { JobStatus } from "../../../gateway/store";
+import type { TurnStage } from "../../../shared/turn-progress";
+import type { RequestFailure } from "../../../shared/request-failure";
 
 export const API_V1_VERSION = 1 as const;
 
@@ -162,12 +164,12 @@ export type V1Backend =
 
 export type V1RequestProgress = {
   request: number;
-  stage: import("../../../shared/turn-progress").TurnStage;
+  stage: TurnStage;
   observedAt: number;
   disconnected: boolean;
   stale: boolean;
-  status: import("../../../gateway/store").JobStatus;
-  failure: import("../../../shared/request-failure").RequestFailure | null;
+  status: JobStatus;
+  failure: RequestFailure | null;
 };
 
 export type V1Captain = {

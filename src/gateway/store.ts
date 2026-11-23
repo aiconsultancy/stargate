@@ -124,9 +124,9 @@ export type CaptainTranscript = {
  * a stored reply is never replaced, and a queued job has no reply.
  */
 export class JobTransitionRefused extends Error {
-  constructor(
-    readonly job: number,
-    readonly status: JobStatus,
+  public constructor(
+    public readonly job: number,
+    public readonly status: JobStatus,
   ) {
     super(`Job ${job} is ${status}; a reply needs a running job`);
   }
@@ -134,23 +134,26 @@ export class JobTransitionRefused extends Error {
 
 /** Another writer moved the transcript cursor or its outbox rows. */
 export class TranscriptConflict extends Error {
-  constructor() {
+  public constructor() {
     super("Transcript cursor or delivery rows changed");
   }
 }
 
 export class Store {
-  readonly backgroundCases: BackgroundCases;
-  readonly questions: QuestionRecords;
-  readonly meta: MetaRecords;
-  readonly attachmentRecords: AttachmentRecords;
-  readonly activityRecords: ActivityRecords;
-  readonly fleet: FleetRecords<StoredJob, Job>;
-  readonly transcript: TranscriptRecords;
-  readonly irc: IrcOperations;
+  public readonly backgroundCases: BackgroundCases;
+  public readonly questions: QuestionRecords;
+  public readonly meta: MetaRecords;
+  public readonly attachmentRecords: AttachmentRecords;
+  public readonly activityRecords: ActivityRecords;
+  public readonly fleet: FleetRecords<StoredJob, Job>;
+  public readonly transcript: TranscriptRecords;
+  public readonly irc: IrcOperations;
   private readonly db: Database;
-  readonly updateNotices: UpdateNotices;
-  constructor(path: string, createIrcRecords: (db: Database) => IrcOperations) {
+  public readonly updateNotices: UpdateNotices;
+  public constructor(
+    path: string,
+    createIrcRecords: (db: Database) => IrcOperations,
+  ) {
     this.db = new Database(path, { create: true, strict: true });
     this.backgroundCases = new BackgroundCases(this.db);
     this.updateNotices = new UpdateNotices(this.db);
@@ -360,7 +363,7 @@ export class Store {
     this.irc = createIrcRecords(this.db);
   }
 
-  enqueue(input: Incoming): boolean {
+  public enqueue(input: Incoming): boolean {
     if (
       this.db
         .query(
@@ -418,7 +421,7 @@ export class Store {
   }
 
   /** Persist admission before transport ACK. Undefined keeps ordinary intake. */
-  admitFollowUp(
+  public admitFollowUp(
     input: Incoming,
     sessionID: string,
     transport: "slack" | "irc" = "slack",
@@ -505,7 +508,7 @@ export class Store {
     })();
   }
 
-  followUps(botKey: string, finalOwner?: number): ThreadFollowUp[] {
+  public followUps(botKey: string, finalOwner?: number): ThreadFollowUp[] {
     return this.db
       .query<
         ThreadFollowUp,
@@ -525,13 +528,13 @@ export class Store {
       );
   }
 
-  followUpInput(receipt: ThreadFollowUp): Incoming {
+  public followUpInput(receipt: ThreadFollowUp): Incoming {
     return Schema.decodeUnknownSync(followUpSchema)(
       JSON.parse(receipt.payload),
     );
   }
 
-  ownsFollowUp(receipt: ThreadFollowUp): boolean {
+  public ownsFollowUp(receipt: ThreadFollowUp): boolean {
     const input = this.followUpInput(receipt);
     const owner = this.jobByInput(receipt.botKey, receipt.inputID);
 
@@ -552,7 +555,7 @@ export class Store {
     );
   }
 
-  claimFollowUp(receipt: ThreadFollowUp): boolean {
+  public claimFollowUp(receipt: ThreadFollowUp): boolean {
     return (
       this.db
         .query(
@@ -562,7 +565,7 @@ export class Store {
     );
   }
 
-  settleFollowUp(
+  public settleFollowUp(
     receipt: ThreadFollowUp,
     state: "accepted" | "uncertain" | "queued",
   ) {
@@ -609,7 +612,7 @@ export class Store {
     })();
   }
 
-  notifiedFollowUp(receipt: ThreadFollowUp) {
+  public notifiedFollowUp(receipt: ThreadFollowUp) {
     this.db
       .query(
         "UPDATE thread_followups SET notified=1 WHERE botKey=? AND eventId=?",
@@ -617,7 +620,7 @@ export class Store {
       .run(receipt.botKey, receipt.eventId);
   }
 
-  followUpLinks(owner: number): string {
+  public followUpLinks(owner: number): string {
     return this.db
       .query<{ payload: string; transport: string }, [number]>(
         "SELECT payload,transport FROM thread_followups WHERE owner=? AND state='accepted' ORDER BY rowid LIMIT 20",
@@ -643,7 +646,7 @@ export class Store {
    * A held voice message that did not name the bot is deleted. Only its event
    * ID remains, in a separate table, so Slack redelivery is deduplicated.
    */
-  discard(id: number) {
+  public discard(id: number) {
     this.db.transaction(() => {
       this.db
         .query(`INSERT OR IGNORE INTO ignored_events (botKey,eventId)
@@ -658,7 +661,7 @@ export class Store {
   }
 
   /** A held voice message named the bot: it is now an ordinary request. */
-  admitSpoken(id: number) {
+  public admitSpoken(id: number) {
     return (
       this.db
         .query(
@@ -669,7 +672,7 @@ export class Store {
   }
 
   /** Peer captain messages in a conversation whose Slack time is after `since`. */
-  peerTurns(conversation: string, since: number): number {
+  public peerTurns(conversation: string, since: number): number {
     return this.db
       .query<{ eventId: string }, [string]>(
         "SELECT eventId FROM jobs WHERE conversation=? AND sender='captain' ORDER BY id DESC LIMIT 600",
@@ -682,7 +685,7 @@ export class Store {
       }).length;
   }
 
-  latestActivity(botKey: string, conversation: string): Job | null {
+  public latestActivity(botKey: string, conversation: string): Job | null {
     return decodeJob(
       this.db
         .query<StoredJob, [string, string]>(
@@ -692,7 +695,7 @@ export class Store {
     );
   }
 
-  latestBotActivity(botKey: string): Job | null {
+  public latestBotActivity(botKey: string): Job | null {
     return decodeJob(
       this.db
         .query<StoredJob, [string]>(
@@ -703,7 +706,12 @@ export class Store {
   }
 
   /** Persist admission correlation before the backend submits any native work. */
-  saveInput(botKey: string, id: number, input: string, sessionID?: string) {
+  public saveInput(
+    botKey: string,
+    id: number,
+    input: string,
+    sessionID?: string,
+  ) {
     this.db.transaction(() => {
       if (
         this.db
@@ -723,7 +731,7 @@ export class Store {
     })();
   }
 
-  jobByInput(botKey: string, input: string): Job | null {
+  public jobByInput(botKey: string, input: string): Job | null {
     return decodeJob(
       this.db
         .query<StoredJob, [string, string]>(
@@ -734,7 +742,7 @@ export class Store {
   }
 
   /** Native approval candidates are executing inputs, never queued chat text. */
-  permissionCandidates(botKey: string): Job[] {
+  public permissionCandidates(botKey: string): Job[] {
     return this.db
       .query<StoredJob, [string]>(
         "SELECT * FROM jobs WHERE botKey=? AND status='running' AND input IS NOT NULL ORDER BY id LIMIT 32",
@@ -744,7 +752,7 @@ export class Store {
   }
 
   /** One cursor per pin. Old thread mappings and all outbox rows stay intact. */
-  captainCursor(botKey: string, sessionID: string): CaptainCursor {
+  public captainCursor(botKey: string, sessionID: string): CaptainCursor {
     return this.db.transaction(() => {
       const legacy = this.db
         .query<
@@ -776,7 +784,7 @@ export class Store {
     })();
   }
 
-  captainBusy(botKey: string): boolean {
+  public captainBusy(botKey: string): boolean {
     return (
       this.db
         .query(`SELECT 1 FROM jobs WHERE botKey=?
@@ -785,7 +793,7 @@ export class Store {
     );
   }
 
-  baselineCaptain(
+  public baselineCaptain(
     botKey: string,
     sessionID: string,
     cursor: string,
@@ -798,7 +806,7 @@ export class Store {
     return this.captainCursor(botKey, sessionID);
   }
 
-  interruptedInput(botKey: string): string | undefined {
+  public interruptedInput(botKey: string): string | undefined {
     return this.db
       .query<{ input: string }, [string]>(
         "SELECT input FROM jobs WHERE botKey=? AND status='running' AND input IS NOT NULL ORDER BY id DESC LIMIT 1",
@@ -847,7 +855,7 @@ export class Store {
     }
   }
 
-  appendCaptainTranscript(input: CaptainTranscript): boolean {
+  public appendCaptainTranscript(input: CaptainTranscript): boolean {
     return this.db.transaction(() => {
       if (this.captainBusy(input.botKey)) return false;
       this.commitCaptain(input);
@@ -856,7 +864,7 @@ export class Store {
     })();
   }
 
-  follows(conversation: string): boolean {
+  public follows(conversation: string): boolean {
     return (
       this.db
         .query(
@@ -866,7 +874,7 @@ export class Store {
     );
   }
 
-  session(conversation: string): string | undefined {
+  public session(conversation: string): string | undefined {
     return this.db
       .query<{ session_id: string }, [string]>(
         "SELECT session_id FROM sessions WHERE conversation = ?",
@@ -874,7 +882,7 @@ export class Store {
       .get(conversation)?.session_id;
   }
 
-  saveSession(conversation: string, id: string, cursor?: string) {
+  public saveSession(conversation: string, id: string, cursor?: string) {
     this.db
       .query(
         "INSERT INTO sessions (conversation,session_id,cursor) VALUES (?,?,?)",
@@ -882,7 +890,7 @@ export class Store {
       .run(conversation, id, cursor ?? null);
   }
 
-  unfinished(conversation: string) {
+  public unfinished(conversation: string) {
     return (
       this.db
         .query(`SELECT 1 FROM jobs WHERE conversation=?
@@ -897,7 +905,7 @@ export class Store {
    * `requeue` retries failed rows of this thread with their stored text. Any
    * row that cannot be inserted or requeued rolls the whole change back.
    */
-  appendTranscript(input: {
+  public appendTranscript(input: {
     botKey: string;
     conversation: string;
     from: string | undefined;
@@ -968,7 +976,7 @@ export class Store {
     })();
   }
 
-  ready(
+  public ready(
     botKey: string,
     now: number,
     limit: number,
@@ -1001,7 +1009,7 @@ export class Store {
       .map(decodeStoredJob);
   }
 
-  running(id: number, expectedText?: string) {
+  public running(id: number, expectedText?: string) {
     return (
       this.db
         .query(
@@ -1013,13 +1021,13 @@ export class Store {
     );
   }
 
-  started(id: number) {
+  public started(id: number) {
     this.db
       .query("UPDATE jobs SET started=1 WHERE id=? AND status='running'")
       .run(id);
   }
 
-  cancel(
+  public cancel(
     botKey: string,
     target: {
       id: number;
@@ -1053,7 +1061,7 @@ export class Store {
    * one conversation; a queued one settles at once with the stop notice.
    * IRC Stop by reaction; Slack's button uses `cancel`.
    */
-  cancelTurn(
+  public cancelTurn(
     botKey: string,
     conversation: string,
     thread: string,
@@ -1075,7 +1083,7 @@ export class Store {
     })();
   }
 
-  queuedJob(botKey: string, eventId: string) {
+  public queuedJob(botKey: string, eventId: string) {
     return this.db
       .query<{ id: number; status: JobStatus }, [string, string]>(
         "SELECT id,status FROM jobs WHERE botKey=? AND eventId=?",
@@ -1083,7 +1091,7 @@ export class Store {
       .get(botKey, eventId);
   }
 
-  jobByEvent(botKey: string, eventId: string): Job | null {
+  public jobByEvent(botKey: string, eventId: string): Job | null {
     return decodeJob(
       this.db
         .query<StoredJob, [string, string, string, string]>(
@@ -1097,7 +1105,7 @@ export class Store {
   }
 
   /** New opt-in human intake: persist ancestry and explicit invitation atomically. */
-  enqueueIrcHuman(input: Incoming, invited: boolean): boolean {
+  public enqueueIrcHuman(input: Incoming, invited: boolean): boolean {
     const root = input.replyParent ?? input.thread;
 
     if (!validMsgid(input.thread) || !validMsgid(root))
@@ -1127,7 +1135,7 @@ export class Store {
    * Original sources remain durable; event aliases never invent a native input.
    * Host receive time owns the deadline, not sender-controlled server-time tags.
    */
-  enqueueIrcBurst(
+  public enqueueIrcBurst(
     input: Incoming,
     options: {
       quietMs: number;
@@ -1299,7 +1307,7 @@ export class Store {
   }
 
   /** Called only for an exact locally-correlated, SASL-account-confirmed own echo. */
-  ircPublished(
+  public ircPublished(
     botKey: string,
     channel: string,
     msgid: string,
@@ -1338,7 +1346,7 @@ export class Store {
     })();
   }
 
-  jobStatus(botKey: string, id: number): JobStatus | undefined {
+  public jobStatus(botKey: string, id: number): JobStatus | undefined {
     return this.db
       .query<{ status: JobStatus }, [string, number]>(
         "SELECT status FROM jobs WHERE botKey=? AND id=?",
@@ -1347,7 +1355,7 @@ export class Store {
   }
 
   /** Public outbox text only. Deferred runs also include their local catch-ups. */
-  scheduledResult(
+  public scheduledResult(
     botKey: string,
     id: number,
   ):
@@ -1400,7 +1408,7 @@ export class Store {
    * transcript cursor advances in the same transaction; if it moved, this
    * throws `TranscriptConflict` and nothing is written.
    */
-  respond(
+  public respond(
     id: number,
     chunks: ReplyChunk[],
     failure?: RequestFailure,
@@ -1463,7 +1471,7 @@ export class Store {
     })();
   }
 
-  failure(id: number): RequestFailure | undefined {
+  public failure(id: number): RequestFailure | undefined {
     return (
       this.db
         .query<{ failure: RequestFailure | null }, [number]>(
@@ -1474,7 +1482,7 @@ export class Store {
   }
 
   /** Chunks confirmed so far: forward only, within the stored reply. */
-  sent(id: number, count: number, slackTs?: string) {
+  public sent(id: number, count: number, slackTs?: string) {
     const advance = () =>
       this.db
         .query(`UPDATE jobs SET sent=? WHERE id=? AND status='responding'
@@ -1492,7 +1500,7 @@ export class Store {
   }
 
   /** Confirmed reply chunks (including previews) and crew activity posts. */
-  slackReplyThread(botKey: string, channel: string, ts: string) {
+  public slackReplyThread(botKey: string, channel: string, ts: string) {
     const matches = this.db
       .query<
         { thread: string },
@@ -1509,7 +1517,7 @@ export class Store {
     return matches.length === 1 ? matches[0]?.thread : undefined;
   }
 
-  previews(id: number): { part: number; ts: string }[] {
+  public previews(id: number): { part: number; ts: string }[] {
     return this.db
       .query<{ part: number; ts: string }, [number]>(
         "SELECT part,ts FROM previews WHERE job=? ORDER BY part",
@@ -1517,13 +1525,13 @@ export class Store {
       .all(id);
   }
 
-  savePreview(id: number, part: number, ts: string) {
+  public savePreview(id: number, part: number, ts: string) {
     this.db
       .query("INSERT INTO previews (job,part,ts) VALUES (?,?,?)")
       .run(id, part, ts);
   }
 
-  removePreview(id: number, part: number) {
+  public removePreview(id: number, part: number) {
     this.db.query("DELETE FROM previews WHERE job=? AND part=?").run(id, part);
   }
 
@@ -1531,7 +1539,7 @@ export class Store {
    * End a job whose reply is stored. A queued job has no reply, so it can
    * only fail (access was removed before its turn).
    */
-  finish(id: number, status: "done" | "failed" = "done") {
+  public finish(id: number, status: "done" | "failed" = "done") {
     return this.db.transaction(() => {
       const changed =
         this.db
@@ -1547,7 +1555,7 @@ export class Store {
   }
 
   /** Intentional notification suppression, never cancellation or reply delivery. */
-  suppressNotification(id: number) {
+  public suppressNotification(id: number) {
     return (
       this.db
         .query(`UPDATE jobs SET status='failed',failure='muted'
@@ -1558,7 +1566,7 @@ export class Store {
   }
 
   /** A preference-store fault backs off only chat; exempt native/cron work may pass. */
-  holdNotification(id: number, until: number) {
+  public holdNotification(id: number, until: number) {
     return (
       this.db
         .query(`UPDATE jobs SET notification_held=1,retry_at=?
@@ -1573,7 +1581,7 @@ export class Store {
    * plan wins, so a retry splits the chunk exactly as before and resends
    * only the units after `done`.
    */
-  deliveryPlan(job: number, part: number, plan: string) {
+  public deliveryPlan(job: number, part: number, plan: string) {
     this.db
       .query(
         "INSERT OR IGNORE INTO delivery_units (job,part,plan) VALUES (?,?,?)",
@@ -1596,20 +1604,20 @@ export class Store {
    * transport that must re-split the rest (IRC: multiline lost before a
    * retry). Progress stays.
    */
-  replaceDeliveryPlan(job: number, part: number, plan: string) {
+  public replaceDeliveryPlan(job: number, part: number, plan: string) {
     this.db
       .query("UPDATE delivery_units SET plan=? WHERE job=? AND part=?")
       .run(plan, job, part);
   }
 
-  deliveredUnits(job: number, part: number, done: number) {
+  public deliveredUnits(job: number, part: number, done: number) {
     this.db
       .query("UPDATE delivery_units SET done=? WHERE job=? AND part=?")
       .run(done, job, part);
   }
 
   /** Count a failed delivery attempt and delay the next one. */
-  retry(id: number, now: number) {
+  public retry(id: number, now: number) {
     return (
       this.db
         .query(
@@ -1619,7 +1627,10 @@ export class Store {
     );
   }
 
-  recover(botKey: string, retainedQuestionInputs: readonly string[] = []) {
+  public recover(
+    botKey: string,
+    retainedQuestionInputs: readonly string[] = [],
+  ) {
     // Greybeard: unknown tool outcomes are never retried automatically.
     // Reconciliation requires a backend-specific execution identifier.
     this.db
@@ -1634,7 +1645,7 @@ export class Store {
       );
   }
 
-  saveTurnProgress(id: number, progress: TurnProgress) {
+  public saveTurnProgress(id: number, progress: TurnProgress) {
     this.db
       .query(
         "UPDATE jobs SET progressStage=?,progressAt=?,progressDisconnected=? WHERE id=? AND status='running'",
@@ -1646,7 +1657,7 @@ export class Store {
         id,
       );
   }
-  requestProgress(ship: string, request?: number, at = Date.now()) {
+  public requestProgress(ship: string, request?: number, at = Date.now()) {
     return this.db
       .query<
         {
@@ -1672,7 +1683,7 @@ export class Store {
           at - row.observedAt > 60_000,
       }));
   }
-  offerQuestion(offer: QuestionOffer): QuestionOffer | undefined {
+  public offerQuestion(offer: QuestionOffer): QuestionOffer | undefined {
     return this.db.transaction(() => {
       this.db
         .query(
@@ -1719,7 +1730,7 @@ export class Store {
   }
 
   /** A deleted native session is unknown work, never a successful completion. */
-  failQuestionRecovery(offer: QuestionOffer) {
+  public failQuestionRecovery(offer: QuestionOffer) {
     this.db.transaction(() => {
       this.db
         .query(
@@ -1742,7 +1753,7 @@ export class Store {
   }
 
   /** Thirty days of settled history. Active native work and recovery holds survive. */
-  pruneIrcHistory(botKey: string, now: number) {
+  public pruneIrcHistory(botKey: string, now: number) {
     const cutoff = now - 30 * 86_400_000;
     this.db.transaction(() => {
       this.db
@@ -1766,7 +1777,7 @@ export class Store {
     })();
   }
 
-  finishQuestionRecovery(offer: QuestionOffer) {
+  public finishQuestionRecovery(offer: QuestionOffer) {
     this.db.transaction(() => {
       this.db
         .query(
@@ -1788,7 +1799,7 @@ export class Store {
   }
 
   /** Operator view: per-status totals for one bot namespace. */
-  queueCounts(botKey: string): Record<JobStatus, number> {
+  public queueCounts(botKey: string): Record<JobStatus, number> {
     const counts = { queued: 0, running: 0, responding: 0, done: 0, failed: 0 };
 
     for (const row of this.db
@@ -1802,7 +1813,7 @@ export class Store {
   }
 
   /** Operator view: newest requests without prompt or reply text. */
-  recentJobs(botKey: string, limit: number) {
+  public recentJobs(botKey: string, limit: number) {
     return this.db
       .query<
         {
@@ -1820,7 +1831,7 @@ export class Store {
       .all(botKey, limit);
   }
 
-  close() {
+  public close() {
     this.db.close();
   }
 }

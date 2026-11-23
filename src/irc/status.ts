@@ -51,7 +51,7 @@ export class IrcStatus {
   private shutdownPromise: Promise<void> | undefined;
   private finishShutdown: (() => void) | undefined;
 
-  constructor(
+  public constructor(
     name: string,
     private readonly publish: (
       value: string | undefined,
@@ -75,7 +75,7 @@ export class IrcStatus {
   }
 
   /** Call only after registration on a connection supporting status metadata. */
-  connected(maxValueBytes?: number): void {
+  public connected(maxValueBytes?: number): void {
     if (this.stopped) return;
     this.generation++;
     this.revision++;
@@ -91,7 +91,7 @@ export class IrcStatus {
     this.wake();
   }
 
-  disconnected(): void {
+  public disconnected(): void {
     if (this.closing) {
       this.stop();
 
@@ -104,7 +104,7 @@ export class IrcStatus {
     this.cancelWake();
   }
 
-  begin(): () => void {
+  public begin(): () => void {
     if (this.closing || this.stopped) return () => {};
 
     this.active++;
@@ -127,7 +127,7 @@ export class IrcStatus {
   }
 
   /** Best-effort acknowledged clear before QUIT, with a bounded deadline. */
-  shutdown(): Promise<void> {
+  public shutdown(): Promise<void> {
     if (this.shutdownPromise !== undefined) return this.shutdownPromise;
     this.closing = true;
     this.revision++;

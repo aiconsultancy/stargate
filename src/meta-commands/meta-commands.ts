@@ -102,7 +102,7 @@ export function metaCandidate(raw: unknown, identity: Identity): boolean {
 
 /** A proven pre-write admission change may retry; an I/O failure may not. */
 class MetaAdmissionChanged extends Error {
-  constructor() {
+  public constructor() {
     super("Command admission changed; retry delivery.");
   }
 }
@@ -434,13 +434,13 @@ export function configPanelRows(): readonly ConfigPanelRow[] {
 /** Per-registration serialisation is independent of the model worker queue. */
 export class MetaCommands {
   private tail = Promise.resolve();
-  constructor(
+  public constructor(
     private readonly store: MetaRecords,
     private readonly slack: MetaDelivery,
     private readonly options: MetaOptions = {},
   ) {}
 
-  receive(
+  public receive(
     raw: unknown,
     bot: BotConfig,
     identity: Identity,
@@ -454,7 +454,7 @@ export class MetaCommands {
   }
 
   /** ACK never waits behind a health read, directory lookup or Slack update. */
-  async interactive(
+  public async interactive(
     raw: unknown,
     bot: BotConfig,
     identity: Identity,

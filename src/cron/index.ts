@@ -78,7 +78,7 @@ export class CronScheduler {
   private definitionErrors: string[] = [];
   private quotaAfter = 0;
 
-  constructor(
+  public constructor(
     private config: BotConfig,
     private readonly identity: Identity,
     private readonly store: CronStore,
@@ -94,7 +94,7 @@ export class CronScheduler {
   }
 
   /** Access changes apply before the next operation or delivery. */
-  reconfigure(config: BotConfig) {
+  public reconfigure(config: BotConfig) {
     if (botKey(config, this.identity) !== this.key)
       throw new Error("Cron backend changes require a gateway restart.");
     this.config = config;
@@ -118,7 +118,7 @@ export class CronScheduler {
   }
 
   /** One bounded pass. Repeated or concurrent calls never create a backlog. */
-  async tick(now: number, signal: AbortSignal) {
+  public async tick(now: number, signal: AbortSignal) {
     if (signal.aborted || this.ticking) return;
     this.ticking = true;
 
@@ -423,7 +423,7 @@ export class CronScheduler {
     }
   }
 
-  async work(signal: AbortSignal) {
+  public async work(signal: AbortSignal) {
     try {
       while (!signal.aborted) {
         await this.tick(Date.now(), signal);

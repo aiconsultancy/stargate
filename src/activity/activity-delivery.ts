@@ -54,7 +54,7 @@ export class ActivityDelivery {
   private closed = false;
   private readonly wait: NonNullable<Options["wait"]>;
 
-  constructor(
+  public constructor(
     private readonly backend: AgentBackend,
     private readonly slack: TransportDelivery,
     private readonly settings: () => CrewActivitySettings,
@@ -66,7 +66,7 @@ export class ActivityDelivery {
       options.wait ?? ((ms, signal) => delay(ms, undefined, { signal }));
   }
 
-  async start(
+  public async start(
     job: Job,
     sessionID: string,
     requestSignal: AbortSignal,
@@ -369,7 +369,7 @@ export class ActivityDelivery {
     };
   }
 
-  async resume(job: Job, sessionID: string, shutdown: AbortSignal) {
+  public async resume(job: Job, sessionID: string, shutdown: AbortSignal) {
     if (!this.options.store?.activity(job.id) || !this.backend.resumeActivity)
       return;
     await this.start(
@@ -381,7 +381,7 @@ export class ActivityDelivery {
     );
   }
 
-  async close() {
+  public async close() {
     this.closed = true;
     const pending = [...this.pending];
 

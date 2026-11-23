@@ -428,7 +428,7 @@ export class OpenCodeBackend implements AgentBackend {
     throw new Error("Question ancestry exceeds history bound");
   }
 
-  async pinnedBackgroundQuestions(signal: AbortSignal) {
+  public async pinnedBackgroundQuestions(signal: AbortSignal) {
     if (!this.sessionID) return [];
 
     const session = await this.createSession({
@@ -459,7 +459,7 @@ export class OpenCodeBackend implements AgentBackend {
     return verified;
   }
 
-  async pendingQuestions(
+  public async pendingQuestions(
     sessionID: string,
     signal: AbortSignal,
   ): Promise<PendingQuestion[]> {
@@ -486,7 +486,7 @@ export class OpenCodeBackend implements AgentBackend {
     return questions;
   }
 
-  async questionState(
+  public async questionState(
     sessionID: string,
     formID: string,
     signal: AbortSignal,
@@ -512,7 +512,7 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async questionBelongsToInput(
+  public async questionBelongsToInput(
     sessionID: string,
     formID: string,
     inputID: string,
@@ -526,7 +526,7 @@ export class OpenCodeBackend implements AgentBackend {
     );
   }
 
-  async backgroundOutcome(
+  public async backgroundOutcome(
     sessionID: string,
     formID: string,
     fingerprint: string,
@@ -558,7 +558,7 @@ export class OpenCodeBackend implements AgentBackend {
     return;
   }
 
-  async replyQuestion(
+  public async replyQuestion(
     question: NativeQuestion,
     answer: QuestionAnswer | null,
     signal: AbortSignal,
@@ -586,7 +586,7 @@ export class OpenCodeBackend implements AgentBackend {
     else await this.client.session.form.reply({ ...input, answer }, { signal });
   }
 
-  async questionInputSettled(
+  public async questionInputSettled(
     sessionID: string,
     inputID: string,
     signal: AbortSignal,
@@ -621,7 +621,7 @@ export class OpenCodeBackend implements AgentBackend {
     );
   }
   /** One gateway-owned attempt; IDs/nonce were persisted before this call. */
-  async startReview(
+  public async startReview(
     binding: FleetReviewBinding,
     signal: AbortSignal,
   ): Promise<void> {
@@ -739,7 +739,7 @@ export class OpenCodeBackend implements AgentBackend {
   }
 
   /** Strict read-only evidence; never reads crew DBs, files, or inferred models. */
-  async readReview(
+  public async readReview(
     binding: FleetReviewBinding,
     signal: AbortSignal,
   ): Promise<FleetReviewEvidence | undefined> {
@@ -904,7 +904,7 @@ export class OpenCodeBackend implements AgentBackend {
     throw new Error("Native review history exceeds bounds");
   }
 
-  async toolBelongsToInput(
+  public async toolBelongsToInput(
     sessionID: string,
     messageID: string,
     inputID: string,
@@ -956,7 +956,7 @@ export class OpenCodeBackend implements AgentBackend {
     // The gateway's independent, root-controlled permission rules.
     return this.followsInput(sessionID, inputID, signal, messageID);
   }
-  async permissionBelongsToInput(
+  public async permissionBelongsToInput(
     sessionID: string,
     requestID: string,
     inputID: string,
@@ -976,14 +976,14 @@ export class OpenCodeBackend implements AgentBackend {
       this.followsInput(sessionID, inputID, signal, request.source.messageID)
     );
   }
-  async pendingPermissions(sessionID: string, signal: AbortSignal) {
+  public async pendingPermissions(sessionID: string, signal: AbortSignal) {
     if (sessionID !== this.sessionID)
       throw new Error("Permission session mismatch");
 
     return this.client.permission.list({ sessionID }, { signal });
   }
 
-  async replyPermission(
+  public async replyPermission(
     sessionID: string,
     requestID: string,
     decision: "once" | "reject",
@@ -1004,14 +1004,14 @@ export class OpenCodeBackend implements AgentBackend {
       { signal },
     );
   }
-  readonly supportsAttachments = true;
-  readonly history: OpenCodeHistory;
+  public readonly supportsAttachments = true;
+  public readonly history: OpenCodeHistory;
   private readonly client;
   private readonly waitForIdle;
   private readonly serverClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
   private readonly inputs = new Map<string, string>();
-  constructor(
+  public constructor(
     private readonly config: Config,
     verifiedClient?: OpenCodeClient,
   ) {
@@ -1048,11 +1048,11 @@ export class OpenCodeBackend implements AgentBackend {
     });
   }
 
-  async serverVersion(signal: AbortSignal) {
+  public async serverVersion(signal: AbortSignal) {
     return (await this.serverClient.server.info({ signal })).version;
   }
 
-  async pair(signal: AbortSignal) {
+  public async pair(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
 
@@ -1069,7 +1069,7 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async crewStatus(input: CrewStatusInput, signal: AbortSignal) {
+  public async crewStatus(input: CrewStatusInput, signal: AbortSignal) {
     try {
       signal.throwIfAborted();
 
@@ -1097,7 +1097,7 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+  public async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
     for (;;) {
       signal.throwIfAborted();
       const pending = this.fleetStatusRead.pending;
@@ -1189,7 +1189,7 @@ export class OpenCodeBackend implements AgentBackend {
     return { member: input.member, result, controller, waiters: 0 };
   }
 
-  async updateNoticeContext(
+  public async updateNoticeContext(
     sessionID: string,
     snapshot: UpdateSnapshot,
     signal: AbortSignal,
@@ -1217,7 +1217,7 @@ export class OpenCodeBackend implements AgentBackend {
     });
   }
 
-  async queueUpdateNotice(
+  public async queueUpdateNotice(
     sessionID: string,
     id: string,
     text: string,
@@ -1234,7 +1234,7 @@ export class OpenCodeBackend implements AgentBackend {
       throw new Error("Update notice identity changed");
   }
 
-  async crewUpdateNotice(snapshot: UpdateSnapshot, signal: AbortSignal) {
+  public async crewUpdateNotice(snapshot: UpdateSnapshot, signal: AbortSignal) {
     const receipts = await this.client
       .rpc(CrewReporting)
       .updateNotice(snapshot, {
@@ -1245,7 +1245,10 @@ export class OpenCodeBackend implements AgentBackend {
     return [...receipts];
   }
 
-  async maintenanceNotice(record: MaintenanceDrain, signal: AbortSignal) {
+  public async maintenanceNotice(
+    record: MaintenanceDrain,
+    signal: AbortSignal,
+  ) {
     const receipts = await this.client
       .rpc(CrewReporting)
       .maintenanceNotice(record, {
@@ -1256,7 +1259,7 @@ export class OpenCodeBackend implements AgentBackend {
     return [...receipts];
   }
 
-  async resumeMaintenance(signal: AbortSignal) {
+  public async resumeMaintenance(signal: AbortSignal) {
     return this.client
       .rpc(CrewReporting)
       .resumeMaintenance(
@@ -1265,7 +1268,7 @@ export class OpenCodeBackend implements AgentBackend {
       );
   }
 
-  async quota(signal: AbortSignal) {
+  public async quota(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
 
@@ -1289,7 +1292,7 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async cronQuota(signal: AbortSignal) {
+  public async cronQuota(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
 
@@ -1312,7 +1315,7 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async cronModel(
+  public async cronModel(
     input: Parameters<NonNullable<AgentBackend["cronModel"]>>[0],
     signal: AbortSignal,
   ) {
@@ -1334,7 +1337,7 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async cronEvaluate(
+  public async cronEvaluate(
     input: Parameters<NonNullable<AgentBackend["cronEvaluate"]>>[0],
     signal: AbortSignal,
   ) {
@@ -1360,7 +1363,9 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async createSession(input: Parameters<AgentBackend["createSession"]>[0]) {
+  public async createSession(
+    input: Parameters<AgentBackend["createSession"]>[0],
+  ) {
     try {
       return await this.openSession(input);
     } catch (error) {
@@ -1477,11 +1482,14 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  get sessionID(): string | undefined {
+  public get sessionID(): string | undefined {
     return this.config.sessionID;
   }
 
-  async steer(input: SteerInput, signal: AbortSignal): Promise<SteerResult> {
+  public async steer(
+    input: SteerInput,
+    signal: AbortSignal,
+  ): Promise<SteerResult> {
     const { sessionID, inputID, id } = input;
 
     if (sessionID !== this.sessionID || !input.allowed())
@@ -1564,7 +1572,7 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async reconcileSteer(
+  public async reconcileSteer(
     input: SteerInput,
     signal: AbortSignal,
   ): Promise<SteerResult> {
@@ -1639,7 +1647,7 @@ export class OpenCodeBackend implements AgentBackend {
     return false;
   }
 
-  async prompt(
+  public async prompt(
     sessionId: string,
     text: string,
     signal: AbortSignal,
@@ -2241,11 +2249,11 @@ export class OpenCodeBackend implements AgentBackend {
     return found ? resolveBoundaryContext(chain) === input : undefined;
   }
 
-  async close() {
+  public async close() {
     // Attached OpenCode service belongs to its operator, not Stargate.
   }
 
-  async executionMakers(
+  public async executionMakers(
     sessionID: string,
     inputID: string,
     signal: AbortSignal,
@@ -2331,7 +2339,7 @@ export class OpenCodeBackend implements AgentBackend {
     throw new Error("Native fleet input was not found");
   }
 
-  async interrupt(sessionId: string, signal: AbortSignal) {
+  public async interrupt(sessionId: string, signal: AbortSignal) {
     try {
       await this.client.session.interrupt({ sessionID: sessionId }, { signal });
     } catch (error) {
@@ -2341,7 +2349,7 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async interruptInput(
+  public async interruptInput(
     sessionId: string,
     inputId: string,
     signal: AbortSignal,
@@ -2358,7 +2366,7 @@ export class OpenCodeBackend implements AgentBackend {
       await this.interrupt(sessionId, signal);
   }
 
-  async startMaintenance(
+  public async startMaintenance(
     sessionID: string,
     requestID: string,
     signal: AbortSignal,
@@ -2389,7 +2397,7 @@ export class OpenCodeBackend implements AgentBackend {
     };
   }
 
-  async transcript(
+  public async transcript(
     sessionID: string,
     cursor: string | undefined,
     signal: AbortSignal,
@@ -2573,7 +2581,7 @@ export class OpenCodeBackend implements AgentBackend {
     };
   }
 
-  async watch(
+  public async watch(
     onSettled: (sessionId?: string) => void,
     signal: AbortSignal,
     onForm?: () => void,
@@ -2620,7 +2628,7 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
-  async startActivity(
+  public async startActivity(
     sessionID: string,
     requestID: string,
     reporter: string | undefined,
@@ -2643,7 +2651,7 @@ export class OpenCodeBackend implements AgentBackend {
     return this.resumeActivity(sessionID, capture.id);
   }
 
-  resumeActivity(sessionID: string, capture: string): ActivityWatch {
+  public resumeActivity(sessionID: string, capture: string): ActivityWatch {
     const rpc = this.client.rpc(CrewReporting);
 
     const options = (signal: AbortSignal) => ({

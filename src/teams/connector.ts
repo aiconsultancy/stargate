@@ -105,10 +105,10 @@ async function errorDetail(res: Response): Promise<string> {
 // Error code. afterServerError: an earlier try of the same send got a 5xx answer,
 // So the activity may have been delivered all the same.
 export class ConnectorError extends Error {
-  status: number;
-  code: string | undefined;
-  afterServerError: boolean;
-  constructor(
+  public status: number;
+  public code: string | undefined;
+  public afterServerError: boolean;
+  public constructor(
     message: string,
     status: number,
     code?: string,
@@ -153,7 +153,7 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
   #cached: { token: string; expiresAt: number } | undefined;
   #inflight: Promise<string> | undefined;
 
-  constructor(options: {
+  public constructor(options: {
     clientId: string;
     fetch?: FetchFn;
     now?: () => number;
@@ -167,7 +167,7 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
     this.#endpoint = options.endpoint ?? IMDS_TOKEN_ENDPOINT;
   }
 
-  async getToken(): Promise<string> {
+  public async getToken(): Promise<string> {
     const cached = this.#cached;
 
     if (cached && cached.expiresAt - TOKEN_REFRESH_MARGIN_MS > this.#now())
@@ -179,7 +179,7 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
     return this.#inflight;
   }
 
-  invalidate(): void {
+  public invalidate(): void {
     this.#cached = undefined;
   }
 
@@ -262,7 +262,7 @@ export class ConnectorClient {
   readonly #fetch: FetchFn;
   readonly #sleep: Sleep;
 
-  constructor(options: {
+  public constructor(options: {
     tokenProvider: TokenProvider;
     fetch?: FetchFn;
     sleep?: Sleep;
@@ -273,7 +273,7 @@ export class ConnectorClient {
   }
 
   // Options.signal bounds the whole send, token and retry included.
-  async sendToConversation(
+  public async sendToConversation(
     serviceUrl: string,
     conversationId: string,
     activity: OutgoingActivity,

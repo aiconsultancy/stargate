@@ -166,15 +166,15 @@ export class IrcAudit {
   private lastReport = 0;
   private failed = 0;
 
-  constructor(
+  public constructor(
     private readonly client: IrcClient,
-    readonly channel: string,
+    public readonly channel: string,
     private readonly log: Logger,
     private readonly limit = 256,
   ) {}
 
   /** Queue the audit line for one DM; false when skipped or dropped. */
-  record(event: DmEvent, msgid?: string) {
+  public record(event: DmEvent, msgid?: string) {
     try {
       if (msgid !== undefined) {
         const key = `${fold(event.agent)} ${msgid}`;
@@ -206,7 +206,7 @@ export class IrcAudit {
   }
 
   /** Post queued entries until `signal` aborts; then report what is left. */
-  async run(signal: AbortSignal) {
+  public async run(signal: AbortSignal) {
     let retries = 0;
 
     while (!signal.aborted) {

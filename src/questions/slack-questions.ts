@@ -286,7 +286,7 @@ type Settings = {
 /** Slack validates provenance; the gateway owns native revalidation and claims. */
 export class SlackQuestionControls {
   private tail = Promise.resolve();
-  constructor(
+  public constructor(
     private readonly store: Store,
     private readonly slack: QuestionDelivery,
     private readonly bot: () => BotConfig | undefined,
@@ -476,7 +476,7 @@ export class SlackQuestionControls {
     return matches(await this.settings());
   }
 
-  async publishQuestion(
+  public async publishQuestion(
     job: Job,
     offer: QuestionOffer,
     question: NativeQuestion,
@@ -516,7 +516,7 @@ export class SlackQuestionControls {
     this.store.questions.saveSlackQuestion(offer.token, ts, trusted);
   }
 
-  async interactive(
+  public async interactive(
     raw: unknown,
     ack: (payload?: Record<string, unknown>) => Promise<void>,
     open: () => boolean,
@@ -697,7 +697,7 @@ export class SlackQuestionControls {
     await this.advance(current, answer, body.user.id, open);
   }
 
-  receive(raw: unknown, open: () => boolean): Promise<boolean> | false {
+  public receive(raw: unknown, open: () => boolean): Promise<boolean> | false {
     const candidate = decodeTextCandidate(raw);
 
     if (candidate._tag === "None") return false;

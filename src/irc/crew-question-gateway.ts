@@ -15,7 +15,7 @@ type Config = Extract<BackendConfig, { type: "opencode" }>;
  * its fixed captain location. Worker commands contain no endpoint or credentials. */
 export class CrewQuestionGateway {
   private readonly client: OpenCodeClient;
-  constructor(
+  public constructor(
     private readonly captain: Config,
     env: NodeJS.ProcessEnv,
     client?: OpenCodeClient,
@@ -33,7 +33,7 @@ export class CrewQuestionGateway {
       });
   }
 
-  async execute(
+  public async execute(
     work: CrewQuestionWork,
     confirm: () => Promise<boolean>,
     signal: AbortSignal,
@@ -155,7 +155,7 @@ export class CrewQuestionGateway {
     return { status: "ok" };
   }
 
-  async run(stop: AbortSignal) {
+  public async run(stop: AbortSignal) {
     const captain = this.captain.sessionID;
 
     if (!captain) return;

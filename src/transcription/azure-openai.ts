@@ -42,7 +42,7 @@ async function boundedJSON(response: Response): Promise<unknown> {
  * is configured or stored. Errors carry no token, URL, body or spoken text.
  */
 export class AzureOpenAITranscriber implements Transcriber {
-  readonly label: string;
+  public readonly label: string;
   private readonly url: string;
   private readonly request: Fetch;
   private readonly identity: string;
@@ -50,7 +50,7 @@ export class AzureOpenAITranscriber implements Transcriber {
   private readonly wait: (ms: number, signal: AbortSignal) => Promise<void>;
   private token: { value: string; refreshAt: number } | undefined;
 
-  constructor(
+  public constructor(
     provider: TranscriptionConfig["provider"],
     options: {
       fetch?: Fetch;
@@ -101,7 +101,7 @@ export class AzureOpenAITranscriber implements Transcriber {
     }
   }
 
-  async transcribe(
+  public async transcribe(
     file: { data: Uint8Array; mime: string; extension: string },
     signal: AbortSignal,
   ): Promise<string> {

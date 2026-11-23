@@ -223,7 +223,7 @@ async function readBounded(
 
 /** SDK v8 calls need a request-scoped, no-retry client to honour cancellation. */
 export class SlackFiles {
-  constructor(
+  public constructor(
     private readonly web: (signal: AbortSignal) => WebClient,
     private readonly botToken: string,
     private readonly request: SlackFilesFetch = globalThis.fetch,
@@ -249,7 +249,7 @@ export class SlackFiles {
     }
   }
 
-  async download(
+  public async download(
     ids: readonly string[],
     channel: string,
     signal: AbortSignal,
@@ -356,7 +356,7 @@ export class SlackFiles {
     });
   }
 
-  async reserveUpload(
+  public async reserveUpload(
     name: string,
     length: number,
     signal: AbortSignal,
@@ -376,7 +376,7 @@ export class SlackFiles {
     });
   }
 
-  async putUpload(
+  public async putUpload(
     url: string,
     data: Uint8Array,
     signal: AbortSignal,
@@ -401,7 +401,7 @@ export class SlackFiles {
     });
   }
 
-  async completeUpload(
+  public async completeUpload(
     channel: string,
     thread: string,
     id: string,
@@ -428,7 +428,7 @@ export class SlackFiles {
     });
   }
 
-  async sharedIn(
+  public async sharedIn(
     id: string,
     channel: string,
     thread: string,

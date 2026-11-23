@@ -48,7 +48,7 @@ const hasControls = (value: string) =>
   [...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127);
 
 class Refusal extends Error {
-  constructor(readonly reason: CleanupReason) {
+  public constructor(public readonly reason: CleanupReason) {
     super(reason);
   }
 }
@@ -584,7 +584,8 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
         refuse("retained");
 
       if (name === ".git") {
-        if (!info.isDirectory()) refuse("git-unknown"); // Linked worktrees require `git worktree remove`.
+        // Linked worktrees require `git worktree remove`.
+        if (!info.isDirectory()) refuse("git-unknown");
         repositories.push(dirname(current));
       }
 

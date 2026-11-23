@@ -89,7 +89,7 @@ export type TrackedIssue = {
  */
 export class DispatchLedger {
   private readonly db: Database;
-  constructor(path: string) {
+  public constructor(path: string) {
     this.db = new Database(path, { create: true, strict: true });
     this.db.exec(
       "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;",
@@ -111,7 +111,7 @@ export class DispatchLedger {
     `);
   }
 
-  close() {
+  public close() {
     this.db.close();
   }
 
@@ -134,25 +134,25 @@ export class DispatchLedger {
   }
 
   /** Whether the first poll has recorded the existing assignments. */
-  get initialised() {
+  public get initialised() {
     return this.meta("initialised") === "1";
   }
 
-  markInitialised() {
+  public markInitialised() {
     this.setMeta("initialised", "1");
   }
 
   /** Server `updatedAt` of the newest assigned issue seen (behaviour 1). */
-  get cursor() {
+  public get cursor() {
     return this.meta("cursor");
   }
 
-  set cursor(value: string | undefined) {
+  public set cursor(value: string | undefined) {
     if (value !== undefined) this.setMeta("cursor", value);
   }
 
   /** An unfinished assignment listing; an unreadable value starts it again. */
-  get assignmentWalk(): AssignmentWalk | undefined {
+  public get assignmentWalk(): AssignmentWalk | undefined {
     const value = this.meta("assignmentWalk");
 
     if (value === undefined) return undefined;
@@ -164,7 +164,7 @@ export class DispatchLedger {
     return Result.isSuccess(parsed) ? parsed.success : undefined;
   }
 
-  set assignmentWalk(value: AssignmentWalk | undefined) {
+  public set assignmentWalk(value: AssignmentWalk | undefined) {
     if (value === undefined)
       this.db
         .query("DELETE FROM dispatch_meta WHERE key=?")
@@ -177,11 +177,11 @@ export class DispatchLedger {
   }
 
   /** One-time log flags, so a restart does not repeat a warning every poll. */
-  flag(name: string) {
+  public flag(name: string) {
     return this.meta(`flag:${name}`) === "1";
   }
 
-  setFlag(name: string, on: boolean) {
+  public setFlag(name: string, on: boolean) {
     if (on) this.setMeta(`flag:${name}`, "1");
     else
       this.db
@@ -190,7 +190,7 @@ export class DispatchLedger {
   }
 
   /** A strictly increasing counter: who is asked first moves on per issue. */
-  nextRotation(): number {
+  public nextRotation(): number {
     return this.db
       .transaction(() => {
         const value = Number(this.meta("rotation") ?? "0");
@@ -202,7 +202,7 @@ export class DispatchLedger {
       .immediate();
   }
 
-  notified(issue: string, assignee: string) {
+  public notified(issue: string, assignee: string) {
     return (
       this.db
         .query<{ sent: number }, [string, string]>(
@@ -212,7 +212,7 @@ export class DispatchLedger {
     );
   }
 
-  recordNotified(
+  public recordNotified(
     issue: string,
     assignee: string,
     identifier: string,
@@ -237,7 +237,7 @@ export class DispatchLedger {
     return { ...parsed.success, order: [...parsed.success.order] };
   }
 
-  tracked(issue: string): TrackedIssue | undefined {
+  public tracked(issue: string): TrackedIssue | undefined {
     const row = this.db
       .query<{ value: string }, [string]>(
         "SELECT value FROM dispatch_issues WHERE issue=?",
@@ -248,7 +248,7 @@ export class DispatchLedger {
   }
 
   /** Every issue that is not done, oldest change first. */
-  active(): TrackedIssue[] {
+  public active(): TrackedIssue[] {
     return this.db
       .query<{ value: string }, []>(
         "SELECT value FROM dispatch_issues WHERE state <> 'done'",
@@ -264,7 +264,7 @@ export class DispatchLedger {
       );
   }
 
-  byOffer(offerID: string): TrackedIssue | undefined {
+  public byOffer(offerID: string): TrackedIssue | undefined {
     const row = this.db
       .query<{ value: string }, [string]>(
         "SELECT value FROM dispatch_issues WHERE offerID=?",
@@ -274,7 +274,7 @@ export class DispatchLedger {
     return row ? this.decode(row.value) : undefined;
   }
 
-  save(value: TrackedIssue) {
+  public save(value: TrackedIssue) {
     const encoded = Schema.encodeUnknownSync(trackedSchema)(value);
     this.db
       .query(
@@ -289,7 +289,7 @@ export class DispatchLedger {
   }
 
   /** Bounded retention for finished work; open offers are never removed. */
-  prune(now: number, keepMs = 30 * 24 * 3_600_000) {
+  public prune(now: number, keepMs = 30 * 24 * 3_600_000) {
     for (const row of this.db
       .query<{ issue: string; value: string }, []>(
         "SELECT issue, value FROM dispatch_issues WHERE state='done'",

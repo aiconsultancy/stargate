@@ -310,8 +310,8 @@ export function piPartialText(view: ConversationView): string {
 }
 
 export class PiDurableBackend implements AgentBackend {
-  readonly supportsAttachments = true;
-  readonly history: SessionHistory;
+  public readonly supportsAttachments = true;
+  public readonly history: SessionHistory;
 
   private constructor(
     private readonly harness: Harness,
@@ -324,7 +324,7 @@ export class PiDurableBackend implements AgentBackend {
   }
 
   /** Receipt inspection never opens a scheduling runtime or resolves credentials. */
-  static async recover(
+  public static async recover(
     context: BackendContext,
     sessionId: string,
     requestId: string,
@@ -381,7 +381,7 @@ export class PiDurableBackend implements AgentBackend {
     }
   }
 
-  static async open(config: Config, context: BackendContext) {
+  public static async open(config: Config, context: BackendContext) {
     const models = piModels(config);
     const registry = createRegistry();
 
@@ -556,7 +556,7 @@ export class PiDurableBackend implements AgentBackend {
     }
   }
 
-  async createSession({
+  public async createSession({
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
     const separator = this.config.model.indexOf("/");
@@ -583,7 +583,7 @@ export class PiDurableBackend implements AgentBackend {
     return String(conversation.id);
   }
 
-  async prompt(
+  public async prompt(
     sessionId: string,
     text: string,
     signal: AbortSignal,
@@ -808,7 +808,7 @@ export class PiDurableBackend implements AgentBackend {
    * A fresh Pi conversation has no prior maintenance/report context. The same
    * worker slot/FIFO controls admission; the maintenance conversation is untouched.
    */
-  async promptReport(
+  public async promptReport(
     sessionId: string,
     text: string,
     signal: AbortSignal,
@@ -867,7 +867,7 @@ export class PiDurableBackend implements AgentBackend {
     }
   }
 
-  async interrupt(sessionId: string, signal: AbortSignal) {
+  public async interrupt(sessionId: string, signal: AbortSignal) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
 
     const conversation = await this.harness.conversation(
@@ -878,7 +878,7 @@ export class PiDurableBackend implements AgentBackend {
     if (conversation) await conversation.abort(context);
   }
 
-  async waitForIdle(sessionId: string, signal: AbortSignal) {
+  public async waitForIdle(sessionId: string, signal: AbortSignal) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
 
     const conversation = await this.harness.conversation(
@@ -890,7 +890,7 @@ export class PiDurableBackend implements AgentBackend {
     await conversation.waitForIdle(context);
   }
 
-  async notify(
+  public async notify(
     sessionId: string,
     id: string,
     text: string,
@@ -916,7 +916,7 @@ export class PiDurableBackend implements AgentBackend {
     );
   }
 
-  async close() {
+  public async close() {
     await this.harness.close(BACKGROUND_CONTEXT);
   }
 }

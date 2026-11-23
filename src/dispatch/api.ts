@@ -88,8 +88,8 @@ export interface DispatchApi {
 
 /** Status only: response bodies, headers and credentials are never kept. */
 export class DispatchApiError extends Error {
-  constructor(
-    readonly status: number | undefined,
+  public constructor(
+    public readonly status: number | undefined,
     message: string,
   ) {
     super(message);
@@ -234,7 +234,7 @@ export class SubspaceApi implements DispatchApi {
   private readonly base: string;
   private readonly env: NodeJS.ProcessEnv;
   private readonly fetcher: typeof fetch;
-  constructor(private readonly options: SubspaceApiOptions) {
+  public constructor(private readonly options: SubspaceApiOptions) {
     this.base = options.baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
     this.env = options.env ?? process.env;
     this.fetcher = options.fetch ?? fetch;
@@ -399,7 +399,7 @@ export class SubspaceApi implements DispatchApi {
     return { items: part.items.map(toDispatchIssue), next: part.next };
   }
 
-  async me(signal: AbortSignal): Promise<DispatchIdentity> {
+  public async me(signal: AbortSignal): Promise<DispatchIdentity> {
     const me = decode(
       meSchema,
       await this.get(dispatchRoutes.me(), signal),
@@ -414,7 +414,10 @@ export class SubspaceApi implements DispatchApi {
     };
   }
 
-  async fleet(reference: string, signal: AbortSignal): Promise<FleetRoster> {
+  public async fleet(
+    reference: string,
+    signal: AbortSignal,
+  ): Promise<FleetRoster> {
     const fleet = decode(
       fleetSchema,
       await this.get(dispatchRoutes.fleet(reference), signal),
@@ -433,7 +436,7 @@ export class SubspaceApi implements DispatchApi {
     };
   }
 
-  async fleetProjects(fleetId: string, signal: AbortSignal) {
+  public async fleetProjects(fleetId: string, signal: AbortSignal) {
     const initiatives = new Map(
       (await this.pages(dispatchRoutes.initiatives, signal)).map((item) => {
         const value = decode(initiativeSchema, item, "initiative");
@@ -468,7 +471,7 @@ export class SubspaceApi implements DispatchApi {
     return projects;
   }
 
-  async assignedIssues(
+  public async assignedIssues(
     assignees: readonly string[],
     updatedSince: string | undefined,
     cursor: string | undefined,
@@ -483,11 +486,11 @@ export class SubspaceApi implements DispatchApi {
     );
   }
 
-  readyIssues(cursor: string | undefined, signal: AbortSignal) {
+  public readyIssues(cursor: string | undefined, signal: AbortSignal) {
     return this.issueListing(dispatchRoutes.readyIssues, cursor, signal);
   }
 
-  async issue(reference: string, signal: AbortSignal) {
+  public async issue(reference: string, signal: AbortSignal) {
     const { status, text } = await this.request(
       "GET",
       dispatchRoutes.issue(reference),
@@ -531,7 +534,7 @@ export class SubspaceApi implements DispatchApi {
     };
   }
 
-  assign(
+  public assign(
     reference: string,
     version: number,
     assigneeId: string,
@@ -540,12 +543,12 @@ export class SubspaceApi implements DispatchApi {
     return this.edit(reference, issueEdit.assign(version, assigneeId), signal);
   }
 
-  clearReady(reference: string, version: number, signal: AbortSignal) {
+  public clearReady(reference: string, version: number, signal: AbortSignal) {
     return this.edit(reference, issueEdit.clearReady(version), signal);
   }
 
   /** A 2xx is a recorded comment; its body is not needed. */
-  async comment(reference: string, body: string, signal: AbortSignal) {
+  public async comment(reference: string, body: string, signal: AbortSignal) {
     const { status } = await this.request(
       "POST",
       dispatchRoutes.comments(reference),

@@ -250,7 +250,7 @@ function entry(
 }
 
 export class OpenCodeHistory implements SessionHistory {
-  constructor(
+  public constructor(
     private readonly client: OpenCodeHistoryClient,
     private readonly directory: string,
   ) {}
@@ -274,7 +274,7 @@ export class OpenCodeHistory implements SessionHistory {
     return { location: { directory: this.directory }, signal };
   }
 
-  roots(signal: AbortSignal): Promise<HistorySession[]> {
+  public roots(signal: AbortSignal): Promise<HistorySession[]> {
     return this.read(
       signal,
       async () =>
@@ -286,7 +286,7 @@ export class OpenCodeHistory implements SessionHistory {
     );
   }
 
-  describe(
+  public describe(
     ids: readonly string[],
     signal: AbortSignal,
   ): Promise<HistorySession[]> {
@@ -352,7 +352,7 @@ export class OpenCodeHistory implements SessionHistory {
     });
   }
 
-  children(input: HistoryChildrenInput, signal: AbortSignal) {
+  public children(input: HistoryChildrenInput, signal: AbortSignal) {
     return this.read(signal, async () => {
       const request = decodeChildren(input);
 
@@ -384,7 +384,7 @@ export class OpenCodeHistory implements SessionHistory {
     });
   }
 
-  entries(input: HistoryEntriesInput, signal: AbortSignal) {
+  public entries(input: HistoryEntriesInput, signal: AbortSignal) {
     return this.read(signal, async () => {
       const request = decodeEntries(input);
 

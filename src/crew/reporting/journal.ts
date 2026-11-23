@@ -40,7 +40,7 @@ export type JournalEntry = {
 
 /** Append-only milestones, independent of temporary Slack captures. */
 export class JournalStore {
-  constructor(private readonly db: Database) {
+  public constructor(private readonly db: Database) {
     db.exec(`CREATE TABLE IF NOT EXISTS journal (
       id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER NOT NULL,
       member TEXT NOT NULL, captainID TEXT NOT NULL, taskID TEXT,
@@ -50,7 +50,7 @@ export class JournalStore {
     CREATE INDEX IF NOT EXISTS journal_context ON journal(captainID,id);`);
   }
 
-  append(
+  public append(
     input: Omit<JournalEntry, "id" | "created">,
     replayKey: string,
   ): JournalEntry {
@@ -79,7 +79,7 @@ export class JournalStore {
     return entry;
   }
 
-  head(): number {
+  public head(): number {
     return (
       this.db
         .query<{ id: number }, []>(
@@ -90,7 +90,7 @@ export class JournalStore {
   }
 
   /** `null` reads every captain context of a pinned single-captain team. */
-  read(
+  public read(
     captainID: string | null,
     after: number,
     limit: number,
@@ -112,7 +112,7 @@ export class JournalStore {
     return { entries, nextAfter: entries.at(-1)?.id ?? after, truncated };
   }
 
-  window(
+  public window(
     captainID: string,
     after: number,
     end: number | null,

@@ -20,7 +20,7 @@ const errors = {
 export type MesijErrorCode = keyof typeof errors;
 
 export class MesijError extends Error {
-  constructor(readonly code: MesijErrorCode) {
+  public constructor(public readonly code: MesijErrorCode) {
     super(errors[code]);
     this.name = "MesijError";
   }
@@ -148,11 +148,11 @@ function receipt(event: MesijReceipt): MesijReceipt {
 export class MesijClient {
   private readonly options: typeof optionsSchema.Type;
 
-  constructor(options: MesijOptions) {
+  public constructor(options: MesijOptions) {
     this.options = parse(optionsSchema, options, "options");
   }
 
-  async register(
+  public async register(
     actor: string,
     sessionID: string,
     signal: AbortSignal,
@@ -176,7 +176,10 @@ export class MesijClient {
     return receipt(event);
   }
 
-  async send(input: MesijSend, signal: AbortSignal): Promise<MesijReceipt> {
+  public async send(
+    input: MesijSend,
+    signal: AbortSignal,
+  ): Promise<MesijReceipt> {
     const message = parse(sendSchema, input, "input");
 
     const output = await this.run(
@@ -209,7 +212,10 @@ export class MesijClient {
   }
 
   /** Includes sent messages and actor mentions, as defined by Mesij's inbox. */
-  async inbox(input: MesijInbox, signal: AbortSignal): Promise<MesijMessage[]> {
+  public async inbox(
+    input: MesijInbox,
+    signal: AbortSignal,
+  ): Promise<MesijMessage[]> {
     const query = parse(inboxSchema, input, "input");
 
     const output = await this.run(

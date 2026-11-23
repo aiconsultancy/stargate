@@ -47,7 +47,7 @@ export type IdleInput = {
 };
 
 class Busy extends Error {
-  constructor(readonly reason: Reason) {
+  public constructor(public readonly reason: Reason) {
     super(reason);
   }
 }

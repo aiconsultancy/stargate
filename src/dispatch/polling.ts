@@ -27,7 +27,7 @@ export type DispatchEvent = {
  * help: the dispatcher skips that notice or offer instead of holding it.
  */
 export class UndeliverableIssue extends Error {
-  constructor(message: string) {
+  public constructor(message: string) {
     super(message);
     this.name = "UndeliverableIssue";
   }
@@ -125,7 +125,7 @@ type PollingPort = {
 };
 
 export class DispatchPolling {
-  roster: Roster | undefined;
+  public roster: Roster | undefined;
   /** Fleet project membership and when it was read; see `fleetProjects`. */
   private membership: Membership | undefined;
   private readySupported: boolean | undefined;
@@ -141,7 +141,7 @@ export class DispatchPolling {
   private readonly now: PollingPort["now"];
   private readonly finish: PollingPort["finish"];
 
-  constructor({ options, now, finish }: PollingPort) {
+  public constructor({ options, now, finish }: PollingPort) {
     this.options = options;
     this.now = now;
     this.finish = finish;
@@ -152,13 +152,13 @@ export class DispatchPolling {
   }
 
   /** Log a problem once until it clears; never logs bodies or secrets. */
-  warnOnce(key: string, message: string, detail: object = {}) {
+  public warnOnce(key: string, message: string, detail: object = {}) {
     if (this.warned.has(key)) return;
     this.warned.add(key);
     this.options.log.warn(detail, message);
   }
 
-  cleared(key: string) {
+  public cleared(key: string) {
     this.warned.delete(key);
   }
 
@@ -168,7 +168,12 @@ export class DispatchPolling {
    * operator, and every later poll tries again at the usual interval.
    * Only the HTTP status is logged, never a header, token or body.
    */
-  apiFailed(key: string, message: string, error: unknown, detail: object = {}) {
+  public apiFailed(
+    key: string,
+    message: string,
+    error: unknown,
+    detail: object = {},
+  ) {
     const status = errorStatus(error);
 
     if (status === 401 || status === 403) {
@@ -185,11 +190,11 @@ export class DispatchPolling {
   }
 
   /** Behaviour 2 is unavailable when the API does not return the flag. */
-  get readyForAgentsAvailable() {
+  public get readyForAgentsAvailable() {
     return this.readySupported !== false;
   }
 
-  async poll(signal: AbortSignal) {
+  public async poll(signal: AbortSignal) {
     let roster: FleetRoster;
     let readAt: number;
 
@@ -272,7 +277,7 @@ export class DispatchPolling {
    * roster of another fleet than the confirmed identity's, throws, so the
    * write that needed it waits.
    */
-  async freshRoster(signal: AbortSignal) {
+  public async freshRoster(signal: AbortSignal) {
     const cached = this.roster;
     const age = cached ? this.now() - cached.at : undefined;
 
@@ -337,7 +342,7 @@ export class DispatchPolling {
    * when no poll has yet. Every API write waits for this: a ledger left by
    * an earlier process says nothing about the credential this one holds.
    */
-  async identityConfirmed(signal: AbortSignal) {
+  public async identityConfirmed(signal: AbortSignal) {
     if (this.verifiedFleet !== undefined) return true;
     let roster: FleetRoster;
 
@@ -594,7 +599,7 @@ export class DispatchPolling {
    * membership must be known and current (see `fleetProjects`); when it
    * cannot be read this throws, so the caller waits instead of permitting.
    */
-  async unqualified(
+  public async unqualified(
     issue: DispatchIssue | undefined,
     signal: AbortSignal,
   ): Promise<WithdrawReason | undefined> {

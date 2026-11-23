@@ -31,9 +31,12 @@ export interface ConfigPanelRecord {
 }
 
 export class MetaRecords {
-  constructor(private readonly db: Database) {}
+  public constructor(private readonly db: Database) {}
 
-  metaReceipt(registration: string, message: string): MetaReceipt | null {
+  public metaReceipt(
+    registration: string,
+    message: string,
+  ): MetaReceipt | null {
     return this.db
       .query<MetaReceipt, [string, string]>(
         "SELECT * FROM meta_receipts WHERE registration=? AND message=?",
@@ -41,7 +44,10 @@ export class MetaRecords {
       .get(registration, message);
   }
 
-  configPanel(registration: string, nonce: string): ConfigPanelRecord | null {
+  public configPanel(
+    registration: string,
+    nonce: string,
+  ): ConfigPanelRecord | null {
     return this.db
       .query<ConfigPanelRecord, [string, string]>(
         "SELECT * FROM config_panels WHERE registration=? AND nonce=?",
@@ -49,7 +55,7 @@ export class MetaRecords {
       .get(registration, nonce);
   }
 
-  configPanelForMessage(
+  public configPanelForMessage(
     registration: string,
     message: string,
   ): ConfigPanelRecord | null {
@@ -60,7 +66,7 @@ export class MetaRecords {
       .get(registration, message);
   }
 
-  createConfigPanel(panel: ConfigPanelRecord) {
+  public createConfigPanel(panel: ConfigPanelRecord) {
     this.db
       .query(`INSERT INTO config_panels
       (nonce,registration,message,channel,thread,ts,createdAt,revision,snapshot,user,at)
@@ -80,7 +86,7 @@ export class MetaRecords {
       );
   }
 
-  bindConfigPanel(registration: string, nonce: string, ts: string) {
+  public bindConfigPanel(registration: string, nonce: string, ts: string) {
     const changed = this.db
       .query(`UPDATE config_panels SET ts=?
       WHERE registration=? AND nonce=? AND ts IS NULL`)
@@ -89,7 +95,7 @@ export class MetaRecords {
     if (changed !== 1) throw new Error("Config panel binding unavailable");
   }
 
-  pendingConfigPanel(registration: string, nonce: string): boolean {
+  public pendingConfigPanel(registration: string, nonce: string): boolean {
     return (
       this.db
         .query(`SELECT 1 FROM meta_receipts
@@ -99,7 +105,7 @@ export class MetaRecords {
   }
 
   /** Applied receipt and next revision become durable together, before delivery. */
-  applyConfigPanel(
+  public applyConfigPanel(
     panel: ConfigPanelRecord,
     message: string,
     reply: string,
@@ -132,7 +138,7 @@ export class MetaRecords {
   }
 
   /** Claim before touching the shared waiting file; pending never replays. */
-  claimMeta(
+  public claimMeta(
     input: Pick<
       MetaReceipt,
       | "registration"
@@ -160,7 +166,7 @@ export class MetaRecords {
     );
   }
 
-  applyMeta(
+  public applyMeta(
     registration: string,
     message: string,
     reply: string,
@@ -175,7 +181,7 @@ export class MetaRecords {
     if (changed !== 1) throw new Error("Meta command claim unavailable");
   }
 
-  deliverMeta(registration: string, message: string) {
+  public deliverMeta(registration: string, message: string) {
     this.db
       .query(
         "UPDATE meta_receipts SET delivered=1 WHERE registration=? AND message=?",
@@ -184,7 +190,7 @@ export class MetaRecords {
   }
 
   /** Only a fresh claim proven to have made no write can be released. */
-  releaseMetaClaim(registration: string, message: string) {
+  public releaseMetaClaim(registration: string, message: string) {
     this.db
       .query(`DELETE FROM meta_receipts WHERE registration=? AND message=?
       AND state='pending' AND delivered=0 AND reply IS NULL`)

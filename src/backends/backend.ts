@@ -37,7 +37,7 @@ export function sourceLine({ source }: PromptSourceContext) {
  * longer exists. Transient read errors stay ordinary errors.
  */
 export class TranscriptUnavailable extends Error {
-  constructor(readonly reason: "session" | "cursor") {
+  public constructor(public readonly reason: "session" | "cursor") {
     super(
       reason === "session"
         ? "Mapped session no longer exists"

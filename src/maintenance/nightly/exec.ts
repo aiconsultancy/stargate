@@ -68,7 +68,7 @@ export const processRunner: CommandRunner = {
 
 /** A safe, fixed-reason failure. Messages never contain command output. */
 export class StepError extends Error {
-  constructor(readonly reason: Reason) {
+  public constructor(public readonly reason: Reason) {
     super(reason);
   }
 }

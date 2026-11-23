@@ -15,12 +15,12 @@ interface NotificationAuthority {
 }
 
 export class CrewNotifications {
-  constructor(
+  public constructor(
     private readonly authority: NotificationAuthority,
     private readonly runner: typeof runNotificationOperation = runNotificationOperation,
   ) {}
 
-  async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
+  public async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
     const parsed = notificationInputSchema.safeParse(raw);
 
     if (!parsed.success)

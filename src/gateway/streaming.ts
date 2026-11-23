@@ -30,7 +30,7 @@ export class LiveReply {
   private readonly intervalMs: number;
   private readonly allowed: () => boolean;
 
-  constructor(
+  public constructor(
     private readonly job: Job,
     private readonly store: Store,
     private readonly slack: TransportDelivery,
@@ -49,7 +49,7 @@ export class LiveReply {
     });
   }
 
-  readonly push = (text: string) => {
+  public readonly push = (text: string) => {
     if (!text.trim()) return;
     this.hasText = true;
     this.waitingStop.abort();
@@ -59,13 +59,13 @@ export class LiveReply {
   };
 
   /** Stop waiting feedback for a turn that posts nothing; later text still shows. */
-  quiet() {
+  public quiet() {
     this.hasText = true;
     this.waitingStop.abort();
   }
 
   /** Confirm a cancellable notice before its opt-out timer can start. */
-  async announce(text: string) {
+  public async announce(text: string) {
     this.held = true;
     this.hasText = true;
     this.waitingStop.abort();
@@ -107,7 +107,7 @@ export class LiveReply {
     this.shown.set(0, text);
   }
 
-  resume() {
+  public resume() {
     this.held = false;
   }
 
@@ -235,7 +235,7 @@ export class LiveReply {
     }
   }
 
-  async close() {
+  public async close() {
     this.stop.abort();
     this.waitingStop.abort();
     await this.task;

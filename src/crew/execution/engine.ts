@@ -396,18 +396,20 @@ export type CrewWaitOptions = {
 };
 
 export class CrewEngine {
-  readonly quotas: QuotaReader;
+  public readonly quotas: QuotaReader;
   private readonly pi: PiCrewWorkers;
-  readonly reporting: CrewReporter;
-  readonly history: CrewHistoryRPC;
+  public readonly reporting: CrewReporter;
+  public readonly history: CrewHistoryRPC;
   private closing?: Promise<void>;
   private readonly waitNow: () => number;
   private readonly waitPoll: NonNullable<CrewWaitOptions["wait"]>;
   private readonly waitWindowMs: number;
   private readonly drain: () => MaintenanceDrain | null;
   private constructor(
-    readonly options: CrewOptions & { team: NonNullable<CrewOptions["team"]> },
-    readonly state: CrewState,
+    public readonly options: CrewOptions & {
+      team: NonNullable<CrewOptions["team"]>;
+    },
+    public readonly state: CrewState,
     private readonly sessions: CrewSessions,
     private readonly mailer: Pick<MesijClient, "register" | "send" | "inbox">,
     private readonly agents?: CrewAgents,
@@ -481,12 +483,12 @@ export class CrewEngine {
   /** Location-authorized read surface. Unlike tool status, never reconciles,
    * promotes queued work, provisions peers, reads transcripts or invokes models.
    */
-  status(
+  public status(
     input: CrewStatusInput,
     options: { aggregate: true },
   ): CrewStatus & { busy: number };
-  status(input?: CrewStatusInput): CrewStatus;
-  status(
+  public status(input?: CrewStatusInput): CrewStatus;
+  public status(
     input: CrewStatusInput = {},
     options?: { aggregate: true },
   ): CrewStatus {
@@ -530,7 +532,7 @@ export class CrewEngine {
     };
   }
 
-  async quota(input: unknown, caller: CrewCaller) {
+  public async quota(input: unknown, caller: CrewCaller) {
     await this.authorize(caller);
 
     if (!quotaInputSchema.safeParse(input).success)
@@ -541,7 +543,7 @@ export class CrewEngine {
     return this.quotas.read(caller.signal);
   }
 
-  static async open(
+  public static async open(
     input: unknown,
     sessions: CrewSessions,
     mailer?: Pick<MesijClient, "register" | "send" | "inbox">,
@@ -660,12 +662,12 @@ export class CrewEngine {
     return `stargate:${namespace}:${role}`;
   }
 
-  mailActor(sessionID: string) {
+  public mailActor(sessionID: string) {
     return this.actor(sessionID);
   }
 
   /** Passive ready-state information only: never provision, promote or notify a worker. */
-  async updateNotice(
+  public async updateNotice(
     snapshot: UpdateSnapshot,
     tools: Record<string, string>,
     signal: AbortSignal,
@@ -760,7 +762,7 @@ export class CrewEngine {
   }
 
   /** Consume only for this roster's native worker, at an already-running model context boundary. */
-  updateNoticeContext(
+  public updateNoticeContext(
     sessionID: string,
     agent: string,
     system: { type: "text"; text: string }[],
@@ -800,7 +802,7 @@ export class CrewEngine {
     );
   }
 
-  async queueCaptainNotice(
+  public async queueCaptainNotice(
     input: { sessionID: string; id: string; text: string },
     signal: AbortSignal,
   ) {
@@ -841,7 +843,7 @@ export class CrewEngine {
    * OpenCode crew session, plain Mesij mail for Pi crew. It never provisions
    * a session, prompts, or touches a task. IDs are per run, phase and session.
    */
-  async maintenanceNotice(
+  public async maintenanceNotice(
     record: MaintenanceDrain,
     signal: AbortSignal,
   ): Promise<UpdateReceipt[]> {
@@ -958,7 +960,7 @@ export class CrewEngine {
    * through the ordinary promotion. Other queued tasks are never advanced and
    * active or uncertain work is never replayed: promotion refuses it.
    */
-  async resumeMaintenance(
+  public async resumeMaintenance(
     signal: AbortSignal,
   ): Promise<{ resumed: number; remaining: number }> {
     let resumed = 0;
@@ -993,7 +995,7 @@ export class CrewEngine {
   }
 
   /** Same captain context: equal IDs, or both lineage of the pinned root. */
-  sameCaptain(stored: string | undefined, captainID: string): boolean {
+  public sameCaptain(stored: string | undefined, captainID: string): boolean {
     return (
       stored === captainID ||
       (stored !== undefined &&
@@ -1019,7 +1021,7 @@ export class CrewEngine {
       : caller.sessionID;
   }
 
-  mailTask(
+  public mailTask(
     caller: CrewCaller,
     id?: string,
     historical = false,
@@ -1054,7 +1056,7 @@ export class CrewEngine {
   }
 
   /** Installed inspect receipts authorize only exact status replies, not work. */
-  statusRequestRoute(id: string): MailRoute | null {
+  public statusRequestRoute(id: string): MailRoute | null {
     const request = this.state.statusRequest(id);
     const task = request && this.state.task(request.taskID);
 
@@ -1077,7 +1079,7 @@ export class CrewEngine {
   }
 
   /** Read installed status envelopes without a second mail store or new aliases. */
-  legacyStatusRoute(event: MesijMessage): MailRoute | null {
+  public legacyStatusRoute(event: MesijMessage): MailRoute | null {
     let value: unknown;
 
     try {
@@ -1134,7 +1136,7 @@ export class CrewEngine {
     return null;
   }
 
-  async mail(raw: unknown, caller: CrewCaller) {
+  public async mail(raw: unknown, caller: CrewCaller) {
     caller = this.logicalCaller(caller);
     const input = Schema.decodeUnknownResult(mailInputSchema)(raw);
 
@@ -1166,7 +1168,7 @@ export class CrewEngine {
     };
   }
 
-  async dm(raw: unknown, caller: CrewCaller) {
+  public async dm(raw: unknown, caller: CrewCaller) {
     return this.message(raw, this.logicalCaller(caller), true);
   }
 
@@ -1185,7 +1187,7 @@ export class CrewEngine {
     }
   }
 
-  async notifyMail(
+  public async notifyMail(
     route: MailRoute,
     caller: CrewCaller,
     text: string,
@@ -1331,7 +1333,7 @@ export class CrewEngine {
     }
   }
 
-  roster() {
+  public roster() {
     return [this.options.team.captain, ...this.options.team.crew].map(
       (member) => {
         const worker = this.options.team.crew.find(
@@ -1354,7 +1356,7 @@ export class CrewEngine {
     );
   }
 
-  logicalCaller(caller: CrewCaller): CrewCaller {
+  public logicalCaller(caller: CrewCaller): CrewCaller {
     const captain = this.options.team.captain;
 
     if (caller.agent === (captain.agent ?? captain.id))
@@ -1367,7 +1369,7 @@ export class CrewEngine {
     return member ? { ...caller, agent: member.id } : caller;
   }
 
-  async journal(raw: unknown, caller: CrewCaller) {
+  public async journal(raw: unknown, caller: CrewCaller) {
     caller = this.logicalCaller(caller);
     const input = decodeJournalInput(raw);
 
@@ -1465,7 +1467,8 @@ export class CrewEngine {
       }[] = [];
 
       for (const event of events) {
-        if (event.to !== caller.sessionID) continue; // Mesij also returns sent/mentioned messages.
+        // Mesij also returns sent/mentioned messages.
+        if (event.to !== caller.sessionID) continue;
         let value: unknown;
 
         try {
@@ -1534,7 +1537,7 @@ export class CrewEngine {
     }
   }
 
-  async run(raw: unknown, caller: CrewCaller): Promise<CrewResult> {
+  public async run(raw: unknown, caller: CrewCaller): Promise<CrewResult> {
     caller = this.logicalCaller(caller);
     const parsed = Schema.decodeUnknownResult(crewInputSchema)(raw);
 
@@ -1675,7 +1678,7 @@ export class CrewEngine {
     }
   }
 
-  async captain(caller: CrewCaller): Promise<void> {
+  public async captain(caller: CrewCaller): Promise<void> {
     caller = this.logicalCaller(caller);
 
     if (
@@ -1713,12 +1716,12 @@ export class CrewEngine {
   }
 
   /** Stored stargate_dm sends for Stargate's IRC copies (CrewIrc outbox RPC). */
-  ircOutbox(input: { after?: number | undefined; limit: number }) {
+  public ircOutbox(input: { after?: number | undefined; limit: number }) {
     return this.state.ircSessions.outbox(input);
   }
 
   /** Crew member that a bound IRC session serves, if any. */
-  ircMember(sessionID: string): string | undefined {
+  public ircMember(sessionID: string): string | undefined {
     return this.state.ircSessions.crewID(sessionID);
   }
 
@@ -1728,7 +1731,7 @@ export class CrewEngine {
    * not the member's task session, and the team must pin its captain (IRC
    * mail uses that captain context). A binding never changes member.
    */
-  async bindIrcSession(
+  public async bindIrcSession(
     input: { sessionID: string; crewID: string },
     signal: AbortSignal,
   ): Promise<{ bound: true }> {
@@ -1783,7 +1786,7 @@ export class CrewEngine {
    * Stargate-bound IRC sessions, which act only as their member. The member
    * comes from the binding and must equal the host's agent for the call.
    */
-  async authorizeMail(caller: CrewCaller): Promise<CrewCaller> {
+  public async authorizeMail(caller: CrewCaller): Promise<CrewCaller> {
     caller = this.logicalCaller(caller);
     const bound = this.state.ircSessions.crewID(caller.sessionID);
 
@@ -1805,7 +1808,7 @@ export class CrewEngine {
     return { ...caller, [ircIdentity]: bound };
   }
 
-  async authorize(caller: CrewCaller): Promise<void> {
+  public async authorize(caller: CrewCaller): Promise<void> {
     caller = this.logicalCaller(caller);
 
     if (caller.agent === this.options.team.captain.id)
@@ -1846,7 +1849,7 @@ export class CrewEngine {
   }
 
   /** Read one existing own-roster model target, without ensure, prompt or control. */
-  async inspectWorkerModel(
+  public async inspectWorkerModel(
     crewID: string,
     caller: CrewCaller,
   ): Promise<WorkerModelPeer> {
@@ -1876,7 +1879,7 @@ export class CrewEngine {
     return { ...peer, ...(session.model ? { model: session.model } : {}) };
   }
 
-  async withWorkerControl<T>(
+  public async withWorkerControl<T>(
     crewID: string,
     caller: CrewCaller,
     operation: (peer: WorkerModelPeer) => Promise<T>,
@@ -3341,7 +3344,7 @@ export class CrewEngine {
   }
 
   /** Tools-off reports may pass queued work, never an occupied/uncertain slot. */
-  async reporterFree(id: string, signal: AbortSignal): Promise<boolean> {
+  public async reporterFree(id: string, signal: AbortSignal): Promise<boolean> {
     const member = this.options.team.crew.find((member) => member.id === id);
     const directory = this.options.worktrees[id];
 
@@ -3357,7 +3360,7 @@ export class CrewEngine {
     return !peer || (await this.idle(peer, signal));
   }
 
-  queueReport(
+  public queueReport(
     sessionID: string,
     reporter: string,
     captureID: string,
@@ -3386,7 +3389,7 @@ export class CrewEngine {
     );
   }
 
-  reportingTask(id: string): CrewTask | null {
+  public reportingTask(id: string): CrewTask | null {
     const task = this.state.task(id);
 
     return task && this.member(task.crewID).backend
@@ -3394,7 +3397,7 @@ export class CrewEngine {
       : task;
   }
 
-  async progressReport(id: string, caller: CrewCaller) {
+  public async progressReport(id: string, caller: CrewCaller) {
     if (!this.state.reporting.isReport(id))
       throw new CrewError("Not a reporting task.");
     const task = this.ownedCaptainTask(id, caller);
@@ -3432,7 +3435,7 @@ export class CrewEngine {
     } else await this.piRecover(task, caller.signal);
   }
 
-  async cancelReport(id: string, caller: CrewCaller) {
+  public async cancelReport(id: string, caller: CrewCaller) {
     if (!this.state.reporting.isReport(id))
       throw new CrewError("Not a reporting task.");
     await this.cancel(this.ownedCaptainTask(id, caller), caller);
@@ -3693,7 +3696,7 @@ export class CrewEngine {
     };
   }
 
-  close() {
+  public close() {
     this.closing ??= (async () => {
       try {
         await this.reporting.close();

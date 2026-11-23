@@ -59,13 +59,13 @@ type Compact = InputBoundaryRecord & {
 export class InputBoundaryReader {
   private origins: Promise<Map<string, string>> | undefined;
 
-  constructor(
+  public constructor(
     private readonly api: ResultAPI,
     private readonly sessionID: string,
     private readonly signal: AbortSignal,
   ) {}
 
-  async record(
+  public async record(
     message: Pick<
       ResultMessage,
       "id" | "type" | "metadata" | "text" | "description"

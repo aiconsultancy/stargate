@@ -44,8 +44,8 @@ function label(progress?: TurnProgress): Label {
 /** Short-lived UI state. The durable reply stays with the gateway. */
 export class TeamsPresence {
   private readonly slots = new Map<string, Slot>();
-  constructor(private readonly refreshMs = 3000) {}
-  async working(
+  public constructor(private readonly refreshMs = 3000) {}
+  public async working(
     channel: string,
     anchor: string,
     signal: AbortSignal,
@@ -171,7 +171,7 @@ export class TeamsPresence {
 
   /** The ordinary first text reply closes its own stream. A definite refusal
    * permits ordinary delivery. An uncertain send follows normal gateway recovery. */
-  async final(
+  public async final(
     channel: string,
     anchor: string,
     activity: OutgoingActivity,

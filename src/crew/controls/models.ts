@@ -228,7 +228,7 @@ function describeModel(
 }
 
 export class CrewModels {
-  constructor(
+  public constructor(
     private readonly authority: ModelAuthority,
     private readonly sessions: ModelSessions,
     private readonly models: Models,
@@ -238,7 +238,7 @@ export class CrewModels {
     ) => Promise<void>,
   ) {}
 
-  async run(raw: unknown, caller: CrewCaller) {
+  public async run(raw: unknown, caller: CrewCaller) {
     const parsed = Schema.decodeUnknownResult(modelInputSchema, {
       onExcessProperty: "error",
     })(raw);

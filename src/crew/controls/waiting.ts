@@ -20,9 +20,9 @@ interface WaitingAuthority {
 }
 
 export class CrewWaiting {
-  constructor(private readonly authority: WaitingAuthority) {}
+  public constructor(private readonly authority: WaitingAuthority) {}
 
-  async run(raw: unknown, caller: CrewCaller) {
+  public async run(raw: unknown, caller: CrewCaller) {
     const parsed = Schema.decodeUnknownResult(waitingInputSchema)(raw);
 
     if (Result.isFailure(parsed))

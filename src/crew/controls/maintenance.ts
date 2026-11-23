@@ -40,7 +40,7 @@ export class CrewMaintenance {
   private readonly now: () => number;
   private readonly wait: NonNullable<Options["wait"]>;
 
-  constructor(
+  public constructor(
     private readonly authority: Authority,
     options: Options = {},
   ) {
@@ -49,7 +49,7 @@ export class CrewMaintenance {
       options.wait ?? ((ms, signal) => delay(ms, undefined, { signal }));
   }
 
-  async open(owner: Owner, signal: AbortSignal) {
+  public async open(owner: Owner, signal: AbortSignal) {
     await this.authority.captain({
       sessionID: owner.sessionID,
       agent: this.authority.options.team.captain.id,
@@ -88,7 +88,7 @@ export class CrewMaintenance {
     return turn;
   }
 
-  read(owner: Owner): MaintenanceNotice | null {
+  public read(owner: Owner): MaintenanceNotice | null {
     const turn = this.owned(owner);
     turn.seenAt = this.now();
     const pending = turn.pending;
@@ -111,7 +111,7 @@ export class CrewMaintenance {
     return pending.notice;
   }
 
-  delivered(owner: Owner & { noticeID: string }) {
+  public delivered(owner: Owner & { noticeID: string }) {
     const pending = this.owned(owner).pending;
 
     if (!pending || pending.notice.id !== owner.noticeID)
@@ -123,7 +123,7 @@ export class CrewMaintenance {
     return true;
   }
 
-  async run(raw: unknown, caller: CrewCaller): Promise<Permit> {
+  public async run(raw: unknown, caller: CrewCaller): Promise<Permit> {
     const parsed = maintenancePlanSchema.safeParse(raw);
 
     if (!parsed.success) throw new CrewError("Invalid maintenance plan.");
@@ -172,7 +172,7 @@ export class CrewMaintenance {
     }
   }
 
-  close(owner: Owner) {
+  public close(owner: Owner) {
     const turn = this.turns.get(owner.sessionID);
 
     if (!turn) return true;
@@ -184,7 +184,7 @@ export class CrewMaintenance {
     return true;
   }
 
-  dispose() {
+  public dispose() {
     for (const turn of this.turns.values()) this.close(turn);
   }
 }

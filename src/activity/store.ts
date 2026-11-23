@@ -12,9 +12,9 @@ const activityProgress = settingsStruct({
 export type ActivityProgress = typeof activityProgress.Type;
 
 export class ActivityRecords {
-  constructor(private readonly db: Database) {}
+  public constructor(private readonly db: Database) {}
 
-  activity(id: number): ActivityProgress | undefined {
+  public activity(id: number): ActivityProgress | undefined {
     const raw = this.db
       .query<{ activity: string | null }, [number]>(
         "SELECT activity FROM jobs WHERE id=?",
@@ -26,7 +26,7 @@ export class ActivityRecords {
       : undefined;
   }
 
-  saveActivity(id: number, progress: ActivityProgress) {
+  public saveActivity(id: number, progress: ActivityProgress) {
     this.db
       .query("UPDATE jobs SET activity=? WHERE id=?")
       .run(

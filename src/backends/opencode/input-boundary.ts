@@ -93,7 +93,7 @@ export class InputBoundaryFold {
   private adjacent = false;
   private mixed = false;
 
-  next(message: InputBoundaryRecord): string | undefined {
+  public next(message: InputBoundaryRecord): string | undefined {
     if (message.type === "assistant") {
       this.adjacent = false;
       this.mixed = false;

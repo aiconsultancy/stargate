@@ -73,7 +73,7 @@ export class CrewQuestions {
   private readonly now: () => number;
   private readonly writing = new Set<string>();
   private offset = 0;
-  constructor(
+  public constructor(
     private readonly authority: Authority,
     private readonly connect: (
       task: CrewTask,
@@ -102,7 +102,7 @@ export class CrewQuestions {
         ));
   }
 
-  active(task: CrewTask) {
+  public active(task: CrewTask) {
     return this.owner({ taskID: task.id, ...task });
   }
 
@@ -141,7 +141,7 @@ export class CrewQuestions {
     return task;
   }
 
-  async poll(signal: AbortSignal, available = true) {
+  public async poll(signal: AbortSignal, available = true) {
     const settings = await this.settings();
 
     if (!settings.enabled) return;
@@ -301,7 +301,7 @@ export class CrewQuestions {
     }
   }
 
-  async run(raw: unknown, caller: CrewCaller) {
+  public async run(raw: unknown, caller: CrewCaller) {
     const input = decode(raw);
 
     if (Result.isFailure(input))

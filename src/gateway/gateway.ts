@@ -275,12 +275,12 @@ export class Gateway {
   private mutedAdmissions = 0;
   /** Every job a worker holds, with the transport rules of its start. */
   private readonly turnPolicies = new Map<number, GatewayTransport>();
-  readonly key: string;
+  public readonly key: string;
   private questions: Questions | undefined;
   private readonly supportsQuestions: boolean;
   private readonly slackQuestions: SlackQuestionControls | undefined;
   private readonly questionLifetime = new AbortController();
-  constructor(
+  public constructor(
     private config: GatewayConfig,
     private readonly identity: Identity,
     private readonly store: Store,
@@ -415,7 +415,7 @@ export class Gateway {
   }
 
   /** Replace future-turn settings; existing turns hold immutable references. */
-  reconfigure(
+  public reconfigure(
     config: GatewayConfig,
     transcriber?: Transcriber,
     transport?: GatewayTransport,
@@ -437,7 +437,7 @@ export class Gateway {
   }
 
   /** Stop taking new slots while an idle roster member is detached. */
-  pause(value = true) {
+  public pause(value = true) {
     this.paused = value;
   }
 
@@ -488,7 +488,7 @@ export class Gateway {
     return receipts;
   }
 
-  isIdle() {
+  public isIdle() {
     const counts = this.store.queueCounts(this.key);
 
     return (
@@ -516,7 +516,7 @@ export class Gateway {
     );
   }
 
-  accept(body: unknown, peer?: PeerSender, resumesThread = false) {
+  public accept(body: unknown, peer?: PeerSender, resumesThread = false) {
     if (metaCandidate(body, this.identity)) return false;
     const bot = this.bot;
 
@@ -573,7 +573,10 @@ export class Gateway {
   }
 
   /** Existing worker poll drains durable intake; no new turn or scheduler. */
-  async pollFollowUps(signal: AbortSignal, finalOwner?: number): Promise<void> {
+  public async pollFollowUps(
+    signal: AbortSignal,
+    finalOwner?: number,
+  ): Promise<void> {
     if (this.followUpTask !== undefined) return this.followUpTask;
     this.followUpTask = this.deliverFollowUps(signal, finalOwner);
 
@@ -821,7 +824,7 @@ export class Gateway {
   }
 
   /** Configuration buttons share the typed-command owner and intake binding. */
-  async configInteraction(
+  public async configInteraction(
     body: unknown,
     ack: (payload?: Record<string, unknown>) => Promise<void>,
     open: () => boolean = () => true,
@@ -853,7 +856,7 @@ export class Gateway {
    * proves a peer captain; a failed or slow lookup admits nothing. `open` is
    * checked again after the lookup, before anything is stored.
    */
-  async receive(body: unknown, open: () => boolean = () => true) {
+  public async receive(body: unknown, open: () => boolean = () => true) {
     const bot = this.bot;
 
     if (!bot || !open()) return false;
@@ -1029,7 +1032,7 @@ export class Gateway {
   }
 
   /** Commit the exact requester-authorized target before Socket Mode ACK. */
-  cancel(body: unknown) {
+  public cancel(body: unknown) {
     if (!this.bot) return false;
     const target = cancellationTarget(body, this.bot, this.identity);
 
@@ -1044,7 +1047,7 @@ export class Gateway {
    * one conversation, exactly like an accepted Slack Stop. The transport
    * has already checked who may stop it.
    */
-  stopTurn(conversation: string, thread: string) {
+  public stopTurn(conversation: string, thread: string) {
     const id = this.store.cancelTurn(this.key, conversation, thread);
 
     if (id === undefined) return false;
@@ -1070,7 +1073,7 @@ export class Gateway {
   }
 
   /** Only transport-verified controls reach this method; they never enter a model. */
-  async answerQuestion(
+  public async answerQuestion(
     input: Incoming,
     control: NonNullable<ReturnType<typeof questionControl>>,
   ) {
@@ -1085,7 +1088,7 @@ export class Gateway {
     );
   }
 
-  async operatorQuestion(
+  public async operatorQuestion(
     actor: string,
     text: string,
     connected: () => boolean,
@@ -1101,11 +1104,11 @@ export class Gateway {
     );
   }
 
-  async pollQuestions(signal: AbortSignal) {
+  public async pollQuestions(signal: AbortSignal) {
     await this.questions?.poll(signal);
   }
 
-  enqueueScheduled(input: {
+  public enqueueScheduled(input: {
     runId: string;
     channel: string;
     user: string;
@@ -1136,12 +1139,12 @@ export class Gateway {
     return this.store.queuedJob(this.key, eventId)?.id;
   }
 
-  scheduledStatus(jobId: number) {
+  public scheduledStatus(jobId: number) {
     return this.store.jobStatus(this.key, jobId);
   }
 
   /** At most 12,000 characters of durable public output; never starts work. */
-  scheduledResult(jobId: number):
+  public scheduledResult(jobId: number):
     | {
         text: string;
         status: JobStatus;
@@ -1157,7 +1160,7 @@ export class Gateway {
    * poll closes that scope, stops the watch and rejects, so the runtime can
    * restart Stargate instead of leaving a silent, half-stopped worker.
    */
-  async work(signal: AbortSignal) {
+  public async work(signal: AbortSignal) {
     const stopQuestions = () => this.questionLifetime.abort();
     signal.addEventListener("abort", stopQuestions, { once: true });
 
@@ -1367,7 +1370,7 @@ export class Gateway {
   }
 
   /** Queue catch-up for a settled session, or every mapped thread on connect. */
-  settle(session?: string) {
+  public settle(session?: string) {
     if (this.backend.sessionID) {
       if (
         (!session || session === this.backend.sessionID) &&
@@ -1398,7 +1401,7 @@ export class Gateway {
   }
 
   /** Start eligible catch-ups; resolves when they end. Public for tests. */
-  async catchUp(signal: AbortSignal) {
+  public async catchUp(signal: AbortSignal) {
     const gateway = this;
     await runAbortable(
       Effect.scoped(
@@ -1814,7 +1817,7 @@ export class Gateway {
   }
 
   /** Public for deterministic integration tests and single-step workers. */
-  async process(held: Job, shutdown: AbortSignal) {
+  public async process(held: Job, shutdown: AbortSignal) {
     const config = this.config;
     const bot = this.bot;
     const transcriber = this.transcriber;
@@ -2661,7 +2664,7 @@ export class Gateway {
     }
   }
 
-  async close() {
+  public async close() {
     await this.activity.close();
   }
 }
