@@ -24,10 +24,13 @@ import { UndeliverableIssue } from "../src/dispatch/dispatcher";
 import { DispatchLedger } from "../src/dispatch/ledger";
 import { dispatchTag, parseDispatchMarker } from "../src/dispatch/protocol";
 import { startAgentDispatch } from "../src/dispatch/start";
-import { fleetRequest } from "../src/fleet/client";
-import { FleetControl, type FleetControlOptions } from "../src/fleet/control";
-import type { DispatchOffer } from "../src/fleet/protocol";
-import { fleetPermissions } from "../src/fleet/fleet-policy";
+import { fleetRequest } from "../src/coordination/fleet/client";
+import {
+  FleetControl,
+  type FleetControlOptions,
+} from "../src/coordination/fleet/control";
+import type { DispatchOffer } from "../src/coordination/fleet/protocol";
+import { fleetPermissions } from "../src/coordination/fleet/fleet-policy";
 import { IrcUnavailable } from "../src/transports/irc/client";
 import { formatMessage, parseMessage } from "../src/transports/irc/protocol";
 import { ircResultJobAllowed } from "../src/transports/irc/routing";

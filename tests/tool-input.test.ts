@@ -2,32 +2,32 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
-import { postInputSchema } from "../src/captain-post/captain-post";
+import { postInputSchema } from "../src/coordination/captain/captain-post";
 import {
   crewOpenCodeInput,
   quotaToolInput,
-} from "../src/crew/input/crew-tool-input";
-import { crewInputSchema } from "../src/crew/execution/engine";
+} from "../src/coordination/crew/input/crew-tool-input";
+import { crewInputSchema } from "../src/coordination/crew/execution/engine";
 import {
   historyInputBranches,
   historyInputSchema,
-} from "../src/crew/history/history";
-import { journalInputSchema } from "../src/crew/reporting/journal";
+} from "../src/coordination/crew/history/history";
+import { journalInputSchema } from "../src/coordination/crew/reporting/journal";
 import {
   messageOpenCodeInput,
   messagePortableSchema,
-} from "../src/crew/messaging/message-tool-input";
+} from "../src/coordination/crew/messaging/message-tool-input";
 import {
   mailInputBranches,
   mailInputSchema,
-} from "../src/crew/messaging/messaging";
+} from "../src/coordination/crew/messaging/messaging";
 import {
   modelInputSchema,
   modelToolInputSchema,
-} from "../src/crew/controls/models";
-import * as toolInputs from "../src/crew/input/tool-input";
-import { cronToolInput } from "../src/crew/cron/cron";
-import { notificationToolInput } from "../src/crew/controls/notifications";
+} from "../src/coordination/crew/controls/models";
+import * as toolInputs from "../src/coordination/crew/input/tool-input";
+import { cronToolInput } from "../src/coordination/crew/cron/cron";
+import { notificationToolInput } from "../src/coordination/crew/controls/notifications";
 import { cronOperationSchema } from "../src/automation/cron/control";
 import { notificationInputSchema } from "../src/notifications/preferences/notification-store";
 

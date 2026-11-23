@@ -6,25 +6,25 @@ import type { BackendContext } from "../src/backends/backend";
 import {
   crewOpenCodeInput,
   crewPiParameters,
-} from "../src/crew/input/crew-tool-input";
+} from "../src/coordination/crew/input/crew-tool-input";
 import {
   crewInputSchema,
   crewOptionsSchema,
-} from "../src/crew/execution/engine";
-import { crewMessageMetadataKey } from "../src/crew/message-protocol";
-import { piCrewExtension } from "../src/crew/pi/pi-extension";
-import { projectsSchema } from "../src/crew/input/project-options";
+} from "../src/coordination/crew/execution/engine";
+import { crewMessageMetadataKey } from "../src/coordination/crew/message-protocol";
+import { piCrewExtension } from "../src/coordination/crew/pi/pi-extension";
+import { projectsSchema } from "../src/coordination/crew/input/project-options";
 import {
   CrewRecovery,
   recoveryRequestSchema,
-} from "../src/crew/execution/recovery-rpc";
+} from "../src/coordination/crew/execution/recovery-rpc";
 import {
   MissingTaskResult,
   type ResultAPI,
   type ResultMessage,
   readTaskResult,
-} from "../src/crew/execution/result";
-import type { CrewTask } from "../src/crew/execution/state";
+} from "../src/coordination/crew/execution/result";
+import type { CrewTask } from "../src/coordination/crew/execution/state";
 import { settingsIssues } from "../src/config/settings-schema";
 import { settingsCanonical } from "./settings-cases";
 

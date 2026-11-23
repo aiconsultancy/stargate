@@ -17,12 +17,12 @@ import {
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/execution/engine";
+} from "../src/coordination/crew/execution/engine";
 import type {
   PiWorkerBackend,
   PiWorkerFactory,
-} from "../src/crew/pi/pi-worker";
-import { defaultTeam, teamSchema } from "../src/crew/team";
+} from "../src/coordination/crew/pi/pi-worker";
+import { defaultTeam, teamSchema } from "../src/coordination/crew/team";
 import { openStore } from "../src/app/open-store";
 
 const diskIntegrationTimeoutMs = 30_000;

@@ -4,7 +4,7 @@ import pino from "pino";
 import type { SteerInput } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
-import { crewMessageMetadataKey } from "../src/crew/message-protocol";
+import { crewMessageMetadataKey } from "../src/coordination/crew/message-protocol";
 import { Gateway } from "../src/gateway/gateway";
 import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";

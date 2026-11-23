@@ -13,14 +13,14 @@ import {
   managedPrompt,
   piDefinitionPath,
   piMemberDefinition,
-} from "../crew/instructions";
-import { crewPermissions } from "../crew/execution/policy";
+} from "../coordination/crew/instructions";
+import { crewPermissions } from "../coordination/crew/execution/policy";
 import {
   defaultModelProviders,
   defaultTeam,
   profileTeam,
   teamSchema,
-} from "../crew/team";
+} from "../coordination/crew/team";
 import {
   ircCrewInstructions,
   ircInstructions,

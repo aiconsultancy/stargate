@@ -9,7 +9,7 @@ import {
   isSessionNotFoundError,
 } from "@opencode/client";
 import { Schema } from "effect";
-import { CrewReporting } from "../../crew/reporting/report-rpc";
+import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
 import {
   HISTORY_PARTS,
   type HistoryChildrenInput,

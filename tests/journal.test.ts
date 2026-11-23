@@ -4,7 +4,7 @@ import { Result, Schema } from "effect";
 import {
   JournalStore,
   journalInputSchema,
-} from "../src/crew/reporting/journal";
+} from "../src/coordination/crew/reporting/journal";
 
 test("journal input keeps strict branches, defaults, trim and Unicode bounds", () => {
   const parse = Schema.decodeUnknownSync(journalInputSchema, {

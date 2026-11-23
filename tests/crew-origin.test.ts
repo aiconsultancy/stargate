@@ -2,9 +2,12 @@ import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { readInputOrigin } from "../src/crew/execution/origin";
-import type { ResultAPI, ResultMessage } from "../src/crew/execution/result";
-import { CrewState } from "../src/crew/execution/state";
+import { readInputOrigin } from "../src/coordination/crew/execution/origin";
+import type {
+  ResultAPI,
+  ResultMessage,
+} from "../src/coordination/crew/execution/result";
+import { CrewState } from "../src/coordination/crew/execution/state";
 import { inputBoundary } from "../src/backends/opencode/input-boundary";
 import { fixtureRoot } from "./fixture-root";
 

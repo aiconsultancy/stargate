@@ -21,17 +21,20 @@ import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import { Tool } from "@opencode/schema/tool";
 import { Result, Schema } from "effect";
-import { fleetRequest } from "../src/fleet/client";
-import { FleetControl, type FleetControlOptions } from "../src/fleet/control";
-import { FleetLedger } from "../src/fleet/ledger";
+import { fleetRequest } from "../src/coordination/fleet/client";
+import {
+  FleetControl,
+  type FleetControlOptions,
+} from "../src/coordination/fleet/control";
+import { FleetLedger } from "../src/coordination/fleet/ledger";
 import { installFleetTools } from "../src/fleet/plugin";
 import {
   type FleetCaller,
   FleetError,
   type FleetSource,
   fleetControlSchema,
-} from "../src/fleet/protocol";
-import { sendFleetAssignment } from "../src/fleet/fleet-irc";
+} from "../src/coordination/fleet/protocol";
+import { sendFleetAssignment } from "../src/coordination/fleet/fleet-irc";
 import {
   authenticateActivityRequest,
   BotFrameworkKeyStore,

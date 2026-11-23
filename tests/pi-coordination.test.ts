@@ -6,8 +6,8 @@ import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Schema } from "effect";
 import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
-import { piCrewExtension } from "../src/crew/pi/pi-extension";
-import { CrewError } from "../src/crew/execution/state";
+import { piCrewExtension } from "../src/coordination/crew/pi/pi-extension";
+import { CrewError } from "../src/coordination/crew/execution/state";
 import { zodStringRecord } from "./fixtures/zod-string-record";
 
 const decodeMessages = Schema.decodeUnknownSync(

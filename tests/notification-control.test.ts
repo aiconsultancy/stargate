@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { configSchema } from "../src/config";
-import type { CrewCaller } from "../src/crew/execution/engine";
-import { CrewNotifications } from "../src/crew/controls/notifications";
-import { CrewError } from "../src/crew/execution/state";
+import type { CrewCaller } from "../src/coordination/crew/execution/engine";
+import { CrewNotifications } from "../src/coordination/crew/controls/notifications";
+import { CrewError } from "../src/coordination/crew/execution/state";
 import {
   type NotificationDependencies,
   runNotificationOperation,

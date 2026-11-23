@@ -75,8 +75,8 @@ removed adapters at their owning boundaries:
 - Batch 16 removes the cleanup-path bridge. The maintenance result record
   composes the native path setting directly.
 
-The `stargate_cron` tool input (`crew/cron/cron.ts`) derives its JSON
-advertisement from the native operation fields; the bytes equal the earlier Zod
+The `stargate_cron` tool input (`src/coordination/crew/cron/cron.ts`) derives its
+JSON advertisement from the native operation fields; the bytes equal the earlier Zod
 advertisement. A present field must match that field of one operation and an
 unknown field fails; only then the operation decoder reports its issues. The
 handler applies the branch defaults.

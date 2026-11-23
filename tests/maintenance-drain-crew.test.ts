@@ -7,13 +7,17 @@ import {
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/execution/engine";
+} from "../src/coordination/crew/execution/engine";
 import type {
   MesijInbox,
   MesijMessage,
   MesijSend,
-} from "../src/crew/messaging/mesij";
-import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
+} from "../src/coordination/crew/messaging/mesij";
+import {
+  defaultTeam,
+  type Team,
+  teamSchema,
+} from "../src/coordination/crew/team";
 import type { MaintenanceDrain } from "../src/automation/maintenance/maintenance-drain";
 import { fixtureRoot } from "./fixture-root";
 

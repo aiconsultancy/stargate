@@ -3,8 +3,8 @@ import {
   type CompactionEvents,
   compactAndWait,
   compactOnServer,
-} from "../src/crew/history/compaction";
-import { defaultTeam } from "../src/crew/team";
+} from "../src/coordination/crew/history/compaction";
+import { defaultTeam } from "../src/coordination/crew/team";
 
 test("worker compaction uses the verified global API stream and waits until connected", async () => {
   const worker = {

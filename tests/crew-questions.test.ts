@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { CrewCaller } from "../src/crew/execution/engine";
-import { CrewQuestions } from "../src/crew/questions/questions";
-import { CrewError, CrewState } from "../src/crew/execution/state";
-import { defaultTeam } from "../src/crew/team";
+import type { CrewCaller } from "../src/coordination/crew/execution/engine";
+import { CrewQuestions } from "../src/coordination/crew/questions/questions";
+import { CrewError, CrewState } from "../src/coordination/crew/execution/state";
+import { defaultTeam } from "../src/coordination/crew/team";
 import { saveQuestionSettings } from "../src/questions/question-settings";
 import type {
   NativeQuestion,

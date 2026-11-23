@@ -260,7 +260,7 @@ async function regenerate(): Promise<void> {
     const repeats = lint(duplicate);
 
     for (const { filename } of repeats) {
-      if (filename === "src/fleet/control.ts")
+      if (filename === "src/coordination/fleet/control.ts")
         replace(
           filename,
           "status?(): Promise<unknown> | unknown;",

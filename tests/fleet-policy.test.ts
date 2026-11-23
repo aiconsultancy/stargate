@@ -7,7 +7,7 @@ import {
   fleetInstructions,
   fleetPermissions,
   fleetPolicySchema,
-} from "../src/fleet/fleet-policy";
+} from "../src/coordination/fleet/fleet-policy";
 import { parseMessage } from "../src/transports/irc/protocol";
 import {
   type IrcMember,

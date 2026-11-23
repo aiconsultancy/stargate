@@ -6,7 +6,7 @@ import {
   type CrewQuestionReceipt,
   CrewQuestionRpc,
   type CrewQuestionWork,
-} from "../../crew/questions/question-handoff";
+} from "../../coordination/crew/questions/question-handoff";
 import { questionFingerprint } from "../../questions/questions";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;

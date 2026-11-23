@@ -8,7 +8,7 @@ import {
 import {
   fleetAuthority,
   ircPullRequestGuidance,
-} from "../../fleet/fleet-policy";
+} from "../../coordination/fleet/fleet-policy";
 import { findMention } from "../../shared/mentions";
 import { defaultIrcPeerTurnsPerHour, peerWindowMs } from "../../gateway/peers";
 import type { Incoming, Job } from "../../gateway/store";

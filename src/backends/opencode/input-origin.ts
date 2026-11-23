@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { Option, Schema } from "effect";
-import { crewMessageMetadataKey } from "../../crew/message-protocol";
-import type { ResultAPI, ResultMessage } from "../../crew/execution/result";
+import { crewMessageMetadataKey } from "../../coordination/crew/message-protocol";
+import type {
+  ResultAPI,
+  ResultMessage,
+} from "../../coordination/crew/execution/result";
 import {
   InputBoundaryFold,
   type InputBoundaryRecord,

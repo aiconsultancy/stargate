@@ -3,7 +3,7 @@ import { Semaphore } from "effect";
 import type { AgentBackend } from "../../../../backends/backend";
 import { ircFeedbackDefaults } from "../../../../config";
 import { redactCredentials } from "../../../../lib/credentials";
-import type { FleetCrewStatus } from "../../../../crew/reporting/fleet-status";
+import type { FleetCrewStatus } from "../../../../coordination/crew/reporting/fleet-status";
 import {
   type CrewStatus,
   type CrewStatusTask,

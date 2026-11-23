@@ -55,10 +55,10 @@ import {
 import { sendDispatchAnswer } from "../dispatch/irc";
 import { startAgentDispatch } from "../dispatch/start";
 import { abortable } from "../lib/effect";
-import { FleetControl } from "../fleet/control";
-import { fleetRequestAction } from "../fleet/permissions";
-import { FleetResults, fleetOrigin } from "../fleet/results";
-import { sendFleetAssignment } from "../fleet/fleet-irc";
+import { FleetControl } from "../coordination/fleet/control";
+import { fleetRequestAction } from "../coordination/fleet/permissions";
+import { FleetResults, fleetOrigin } from "../coordination/fleet/results";
+import { sendFleetAssignment } from "../coordination/fleet/fleet-irc";
 import { Gateway } from "../gateway/gateway";
 import type { TransportDelivery } from "../gateway/ports";
 import { createHealthReader } from "../observability/health/health";

@@ -9,7 +9,7 @@ import {
 } from "@opencode/plugin/promise/tool";
 import { Effect } from "effect";
 import { OpenCodeBackend } from "../backends/opencode/opencode";
-import { postInputSchema } from "../captain-post/captain-post";
+import { postInputSchema } from "../coordination/captain/captain-post";
 import { abortable, resourceScope } from "../lib/effect";
 import {
   MaintenanceRPC,
@@ -17,41 +17,65 @@ import {
 } from "../automation/maintenance/maintenance";
 import { activeMaintenanceDrain } from "../automation/maintenance/maintenance-drain";
 import { noticeTools } from "../automation/maintenance/update-notice";
-import { connectHistoryAPI, historyVisible } from "./history/api";
-import { compactOnServer } from "./history/compaction";
-import { crewOpenCodeInput, quotaToolInput } from "./input/crew-tool-input";
-import { CrewCron, cronToolInput } from "./cron/cron";
-import { CrewCronExecution } from "./cron/cron-execution";
-import { CrewEngine } from "./execution/engine";
-import { CrewHistory, historyInputBranches } from "./history/history";
-import { workingAgreementContext } from "./instructions";
-import { CrewIrc } from "./messaging/irc-rpc";
-import { journalInputSchema } from "./reporting/journal";
-import { CrewMaintenance } from "./controls/maintenance";
+import {
+  connectHistoryAPI,
+  historyVisible,
+} from "../coordination/crew/history/api";
+import { compactOnServer } from "../coordination/crew/history/compaction";
+import {
+  crewOpenCodeInput,
+  quotaToolInput,
+} from "../coordination/crew/input/crew-tool-input";
+import { CrewCron, cronToolInput } from "../coordination/crew/cron/cron";
+import { CrewCronExecution } from "../coordination/crew/cron/cron-execution";
+import { CrewEngine } from "../coordination/crew/execution/engine";
+import {
+  CrewHistory,
+  historyInputBranches,
+} from "../coordination/crew/history/history";
+import { workingAgreementContext } from "../coordination/crew/instructions";
+import { CrewIrc } from "../coordination/crew/messaging/irc-rpc";
+import { journalInputSchema } from "../coordination/crew/reporting/journal";
+import { CrewMaintenance } from "../coordination/crew/controls/maintenance";
 import {
   messageOpenCodeInput,
   messagePortableSchema,
-} from "./messaging/message-tool-input";
-import { dmInputSchema, mailInputBranches } from "./messaging/messaging";
-import { CrewModels, modelToolInputSchema } from "./controls/models";
-import { nativeWait } from "./execution/native-wait";
+} from "../coordination/crew/messaging/message-tool-input";
+import {
+  dmInputSchema,
+  mailInputBranches,
+} from "../coordination/crew/messaging/messaging";
+import {
+  CrewModels,
+  modelToolInputSchema,
+} from "../coordination/crew/controls/models";
+import { nativeWait } from "../coordination/crew/execution/native-wait";
 import {
   CrewNotifications,
   notificationToolInput,
-} from "./controls/notifications";
-import { CrewPost } from "./controls/post";
-import { effectProjectToolInput } from "./input/project-options";
-import { CrewProjects } from "./workspace/projects";
+} from "../coordination/crew/controls/notifications";
+import { CrewPost } from "../coordination/crew/controls/post";
+import { effectProjectToolInput } from "../coordination/crew/input/project-options";
+import { CrewProjects } from "../coordination/crew/workspace/projects";
 import {
   CrewQuestionHandoff,
   CrewQuestionRpc,
   crewQuestionConsumerLeaseMs,
-} from "./questions/question-handoff";
-import { CrewQuestions, crewQuestionInputSchema } from "./questions/questions";
-import { CrewRecovery, runRecoveryOperator } from "./execution/recovery-rpc";
-import { CrewReporting } from "./reporting/report-rpc";
-import { CrewError } from "./execution/state";
-import { CrewWaiting, waitingInputSchema } from "./controls/waiting";
+} from "../coordination/crew/questions/question-handoff";
+import {
+  CrewQuestions,
+  crewQuestionInputSchema,
+} from "../coordination/crew/questions/questions";
+import {
+  CrewRecovery,
+  runRecoveryOperator,
+} from "../coordination/crew/execution/recovery-rpc";
+import { CrewReporting } from "../coordination/crew/reporting/report-rpc";
+import { CrewError } from "../coordination/crew/execution/state";
+import {
+  CrewWaiting,
+  waitingInputSchema,
+} from "../coordination/crew/controls/waiting";
 
 // Greybeard: configured shared workers; only explicit DM wakes a captain.
 // Host tools and the general HTTP API are not an OS sandbox.

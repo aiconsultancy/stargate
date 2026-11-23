@@ -3,21 +3,24 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
-import { crewOpenCodeInput } from "../src/crew/input/crew-tool-input";
+import { crewOpenCodeInput } from "../src/coordination/crew/input/crew-tool-input";
 import {
   crewInputSchema,
   crewOptionsSchema,
-} from "../src/crew/execution/engine";
-import { canExpandCrew, crewFingerprint } from "../src/crew/execution/identity";
+} from "../src/coordination/crew/execution/engine";
+import {
+  canExpandCrew,
+  crewFingerprint,
+} from "../src/coordination/crew/execution/identity";
 import {
   modelInputSchema,
   modelToolInputSchema,
-} from "../src/crew/controls/models";
-import { projectsSchema } from "../src/crew/input/project-options";
-import { inspectInputSchema } from "../src/crew/execution/reconciliation";
-import { CrewState } from "../src/crew/execution/state";
-import { profileTeam, teamSchema } from "../src/crew/team";
-import { workspaceInputSchemas } from "../src/crew/workspace/workspace";
+} from "../src/coordination/crew/controls/models";
+import { projectsSchema } from "../src/coordination/crew/input/project-options";
+import { inspectInputSchema } from "../src/coordination/crew/execution/reconciliation";
+import { CrewState } from "../src/coordination/crew/execution/state";
+import { profileTeam, teamSchema } from "../src/coordination/crew/team";
+import { workspaceInputSchemas } from "../src/coordination/crew/workspace/workspace";
 import { renderProfile } from "../src/app/profile";
 import { decodeSettings } from "../src/config/settings-errors";
 import { fixtureRoot } from "./fixture-root";

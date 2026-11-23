@@ -17,19 +17,19 @@ import {
   type CrewResult,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/execution/engine";
-import { resumeMessageID } from "../src/crew/message-protocol";
+} from "../src/coordination/crew/execution/engine";
+import { resumeMessageID } from "../src/coordination/crew/message-protocol";
 import type {
   PiWorkerBackend,
   PiWorkerFactory,
-} from "../src/crew/pi/pi-worker";
+} from "../src/coordination/crew/pi/pi-worker";
 import type {
   CrewInspectionAPI,
   EvidenceMessage,
-} from "../src/crew/execution/reconciliation";
-import { runRecoveryOperator } from "../src/crew/execution/recovery-rpc";
-import type { CrewTask } from "../src/crew/execution/state";
-import { gitProcessOptions } from "../src/crew/workspace/workspace";
+} from "../src/coordination/crew/execution/reconciliation";
+import { runRecoveryOperator } from "../src/coordination/crew/execution/recovery-rpc";
+import type { CrewTask } from "../src/coordination/crew/execution/state";
+import { gitProcessOptions } from "../src/coordination/crew/workspace/workspace";
 import { crewStatusSchema } from "../src/shared/crew-status";
 
 const crew = ["bosun", "chief", "roslin"] as const;

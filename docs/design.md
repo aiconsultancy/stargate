@@ -106,15 +106,15 @@ references or a complete file inventory.
 | `activity/`                                           | activity, activity-delivery, activity-slack                                                                                                                         |
 | `attachments/`                                        | attachments, attachment-delivery                                                                                                                                    |
 | `meta-commands/`                                      | meta-commands, config-panel                                                                                                                                         |
-| `captain-post/`                                       | captain-post, config                                                                                                                                                |
+| `coordination/captain/`                               | captain-post, config                                                                                                                                                |
 | `automation/cron/`                                    | cron, cron-advanced, cron-control, cron-decision, cron-input, cron-store, cron-ui, config, cronjob-files, cronjob-manager                                           |
 | `notifications/preferences/`, `notifications/ingest/` | Notification preferences and ingestion                                                                                                                              |
 | `automation/maintenance/`                             | maintenance modules, update-notice, nightly/                                                                                                                        |
 | `backends/quota/`                                     | Provider quota reads and watches; a separate architecture slice                                                                                                     |
-| `fleet/`, `transcription/`                            | Their named domains                                                                                                                                                 |
+| `coordination/fleet/`, `transcription/`               | Their named domains                                                                                                                                                 |
 | `observability/dashboard/`, `observability/health/`   | Dashboard and health, as separate slices                                                                                                                            |
 | `backends/`                                           | Contract, factory, opencode/, pi/, claude, codex                                                                                                                    |
-| `crew/`                                               | Fixed plugin.ts, protocol/, engine, pi, messaging, reporting                                                                                                        |
+| `coordination/crew/`                                  | Crew protocol, execution, Pi, messaging and reporting                                                                                                               |
 
 The current paths `src/main.ts`, `src/config.ts`, `src/crew/plugin.ts` and
 `src/fleet/plugin.ts` are fixed and must never move. Tests stay flat in `tests/`.
@@ -124,7 +124,9 @@ The O1 decision in [architecture review](architecture-review.md) is unchanged.
 The `transports/` directory groups IRC, Slack and Teams for navigation.
 They remain three separate slices with unchanged dependency rules. The
 `automation/` directory groups cron and maintenance; their slice rules also
-stay separate.
+stay separate. The `coordination/` directory groups the crew, fleet and
+captain-post implementations. They keep separate slices. The fleet package
+manifest stays with its fixed plugin entry.
 
 ### Dependency policy
 

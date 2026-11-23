@@ -22,9 +22,15 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { Schema } from "effect";
 import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piCrewBackendSchema, piDurableBackendSchema } from "../src/config";
-import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi/pi-worker";
-import { CrewState, type CrewTask } from "../src/crew/execution/state";
-import { teamSchema } from "../src/crew/team";
+import {
+  PiCrewWorkers,
+  type PiWorkerFactory,
+} from "../src/coordination/crew/pi/pi-worker";
+import {
+  CrewState,
+  type CrewTask,
+} from "../src/coordination/crew/execution/state";
+import { teamSchema } from "../src/coordination/crew/team";
 import { BackendFailure } from "../src/shared/request-failure";
 import { fixtureRoot } from "./fixture-root";
 

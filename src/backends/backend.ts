@@ -1,13 +1,13 @@
 import type { ActivityWatch } from "../activity/activity";
 import type { Attachment } from "../attachments/attachments";
-import type { FleetCrewStatus } from "../crew/reporting/fleet-status";
+import type { FleetCrewStatus } from "../coordination/crew/reporting/fleet-status";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
 import type { CronAdvanced, CronEvaluation } from "../automation/cron/advanced";
 import type {
   FleetReviewBinding,
   FleetReviewEvidence,
   NativeMaker,
-} from "../fleet/protocol";
+} from "../coordination/fleet/protocol";
 import { validMsgid } from "../transports/irc/protocol";
 import type { MaintenanceWatch } from "../automation/maintenance/maintenance";
 import type { MaintenanceDrain } from "../automation/maintenance/maintenance-drain";

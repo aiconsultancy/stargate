@@ -17,11 +17,11 @@ import {
   type PostDependencies,
   postInputSchema,
   runCaptainPost,
-} from "../src/captain-post/captain-post";
+} from "../src/coordination/captain/captain-post";
 import { configSchema } from "../src/config";
-import type { CrewCaller } from "../src/crew/execution/engine";
-import { CrewPost } from "../src/crew/controls/post";
-import { CrewError } from "../src/crew/execution/state";
+import type { CrewCaller } from "../src/coordination/crew/execution/engine";
+import { CrewPost } from "../src/coordination/crew/controls/post";
+import { CrewError } from "../src/coordination/crew/execution/state";
 import { settingsIssues } from "../src/config/settings-schema";
 
 const directories: string[] = [];
@@ -736,7 +736,9 @@ test("concurrent same-key retries never upload one file twice", async () => {
 });
 
 test("an abandoned upload claim is reclaimed only after its lease expires", async () => {
-  const { CaptainPostStore } = await import("../src/captain-post/captain-post");
+  const { CaptainPostStore } =
+    await import("../src/coordination/captain/captain-post");
+
   const store = new CaptainPostStore(":memory:");
   store.admit(
     "bot",

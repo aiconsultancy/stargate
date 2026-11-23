@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
-import { messagePortableSchema } from "../src/crew/messaging/message-tool-input";
+import { messagePortableSchema } from "../src/coordination/crew/messaging/message-tool-input";
 import {
   maintenanceNoticeSchema,
   maintenancePlanSchema,

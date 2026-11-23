@@ -3,10 +3,17 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { CrewHistoryRPC } from "../src/crew/history/history-rpc";
-import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi/pi-worker";
-import { CrewError, CrewState, type Peer } from "../src/crew/execution/state";
-import { type CrewMember, teamSchema } from "../src/crew/team";
+import { CrewHistoryRPC } from "../src/coordination/crew/history/history-rpc";
+import {
+  PiCrewWorkers,
+  type PiWorkerFactory,
+} from "../src/coordination/crew/pi/pi-worker";
+import {
+  CrewError,
+  CrewState,
+  type Peer,
+} from "../src/coordination/crew/execution/state";
+import { type CrewMember, teamSchema } from "../src/coordination/crew/team";
 import {
   historySessionPageSchema,
   type SessionHistory,

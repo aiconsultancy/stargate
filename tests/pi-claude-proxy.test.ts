@@ -6,7 +6,7 @@ import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { Schema } from "effect";
 import { PiDurableBackend, piModels } from "../src/backends/pi/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
-import { teamSchema } from "../src/crew/team";
+import { teamSchema } from "../src/coordination/crew/team";
 
 const apiKeyEnv = "STARGATE_PI_CLAUDE_PROXY_TEST_KEY";
 const model = "anthropic/claude-haiku-5-5";

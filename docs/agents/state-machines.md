@@ -79,9 +79,11 @@ unavailable.
 | Profile initialization      | Validate → inspect or create worktrees → inspect config → write                                 | Reuse identical files. Refuse conflicts and tracked files. Retain partial setup after failure.                                       |
 | Crew waiting setting        | Authorize captain → persist delay or off → apply on next turn                                   | Workers cannot change captain settings.                                                                                              |
 
-Crew state belongs to `crew/execution/state.ts` and `crew/execution/engine.ts`. The other owners
-are `crew/messaging/mesij.ts`, `crew/compaction.ts`, `crew/controls/models.ts`, `crew/history.ts`,
-`crew/controls/waiting.ts`, and `profile.ts`.
+Crew state belongs to `src/coordination/crew/execution/state.ts` and
+`src/coordination/crew/execution/engine.ts`. The other crew owners are
+`messaging/mesij.ts`, `history/compaction.ts`, `controls/models.ts`,
+`history/history.ts`, and `controls/waiting.ts` in that crew directory.
+Profile initialization belongs to `src/app/profile.ts`.
 
 A dispatching reservation left after a process interruption does not prove SDK
 admission. An idle session alone cannot distinguish it from live admission.

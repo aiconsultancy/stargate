@@ -10,15 +10,18 @@ import type {
   PromptSourceContext,
 } from "../src/backends/backend";
 import { ircSchema, teamsSchema } from "../src/config";
-import { fleetRequest } from "../src/fleet/client";
-import { FleetControl, type FleetControlOptions } from "../src/fleet/control";
+import { fleetRequest } from "../src/coordination/fleet/client";
+import {
+  FleetControl,
+  type FleetControlOptions,
+} from "../src/coordination/fleet/control";
 import {
   type FleetRequest,
   type NativeMaker,
   requestSchema,
-} from "../src/fleet/protocol";
-import { FleetResults, fleetOrigin } from "../src/fleet/results";
-import { sendFleetAssignment } from "../src/fleet/fleet-irc";
+} from "../src/coordination/fleet/protocol";
+import { FleetResults, fleetOrigin } from "../src/coordination/fleet/results";
+import { sendFleetAssignment } from "../src/coordination/fleet/fleet-irc";
 import { Gateway } from "../src/gateway/gateway";
 import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";

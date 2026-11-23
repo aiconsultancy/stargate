@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   workingAgreementContext,
   workingAgreementNotice,
-} from "../src/crew/instructions";
+} from "../src/coordination/crew/instructions";
 
 test("agreement changes produce one path-only notice per member/session and survive read failure", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-agreement-"));

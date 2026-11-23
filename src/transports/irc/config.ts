@@ -1,6 +1,6 @@
 import { Result, Schema } from "effect";
-import { fleetPolicySchema } from "../../fleet/fleet-policy";
-import { fleetControlSchema } from "../../fleet/protocol";
+import { fleetPolicySchema } from "../../coordination/fleet/fleet-policy";
+import { fleetControlSchema } from "../../coordination/fleet/protocol";
 import { mentionNameSchema, mentionNamesSchema } from "../../shared/mentions";
 import { isLoopbackAddress } from "../../lib/loopback";
 import { fold, widestFold } from "./protocol";

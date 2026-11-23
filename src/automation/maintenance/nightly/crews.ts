@@ -7,7 +7,7 @@ import {
   settingsDefault,
   settingsPlainRecord,
 } from "../../../config/settings-schema";
-import { effectProjectKeySchema } from "../../../crew/input/project-options";
+import { effectProjectKeySchema } from "../../../coordination/crew/input/project-options";
 import { StepError } from "./exec";
 
 /**

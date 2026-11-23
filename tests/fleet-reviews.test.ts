@@ -16,8 +16,11 @@ import { Tool } from "@opencode/schema/tool";
 import { Result, Schema } from "effect";
 import pino from "pino";
 import { ircSchema } from "../src/config";
-import { fleetRequest } from "../src/fleet/client";
-import { FleetControl, type FleetControlOptions } from "../src/fleet/control";
+import { fleetRequest } from "../src/coordination/fleet/client";
+import {
+  FleetControl,
+  type FleetControlOptions,
+} from "../src/coordination/fleet/control";
 import { installFleetTools } from "../src/fleet/plugin";
 import {
   type FleetOrigin,
@@ -31,8 +34,8 @@ import {
   reviewAssignmentSchema,
   reviewContextSchema,
   reviewProofSchema,
-} from "../src/fleet/protocol";
-import { reviewContextPrompt } from "../src/fleet/reviews";
+} from "../src/coordination/fleet/protocol";
+import { reviewContextPrompt } from "../src/coordination/fleet/reviews";
 import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, until } from "./irc-fixture";

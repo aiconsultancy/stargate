@@ -6,10 +6,13 @@ import {
   type CrewSession,
   type CrewSessions,
   type ResultConnector,
-} from "../src/crew/execution/engine";
-import type { MesijMessage } from "../src/crew/messaging/mesij";
-import type { ResultAPI, ResultMessage } from "../src/crew/execution/result";
-import type { CrewTask } from "../src/crew/execution/state";
+} from "../src/coordination/crew/execution/engine";
+import type { MesijMessage } from "../src/coordination/crew/messaging/mesij";
+import type {
+  ResultAPI,
+  ResultMessage,
+} from "../src/coordination/crew/execution/result";
+import type { CrewTask } from "../src/coordination/crew/execution/state";
 import { tmpdir } from "node:os";
 import { fixtureRoot } from "./fixture-root";
 

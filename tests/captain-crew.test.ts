@@ -7,10 +7,13 @@ import {
   CrewEngine,
   type CrewOptions,
   type CrewSessions,
-} from "../src/crew/execution/engine";
-import type { MesijClient, MesijMessage } from "../src/crew/messaging/mesij";
-import { runRecoveryOperator } from "../src/crew/execution/recovery-rpc";
-import { teamSchema } from "../src/crew/team";
+} from "../src/coordination/crew/execution/engine";
+import type {
+  MesijClient,
+  MesijMessage,
+} from "../src/coordination/crew/messaging/mesij";
+import { runRecoveryOperator } from "../src/coordination/crew/execution/recovery-rpc";
+import { teamSchema } from "../src/coordination/crew/team";
 import { fixtureRoot } from "./fixture-root";
 
 const canonical = "ses_rootCanonical";

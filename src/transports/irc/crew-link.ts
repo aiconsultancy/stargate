@@ -5,7 +5,7 @@ import {
   CrewIrc,
   type OutboxPage,
   outboxPageSchema,
-} from "../../crew/messaging/irc-rpc";
+} from "../../coordination/crew/messaging/irc-rpc";
 
 /**
  * Stargate's IRC ship → its team's crew plugin, through the OpenCode server at

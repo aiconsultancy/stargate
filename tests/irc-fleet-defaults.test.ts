@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { effectiveIrcConfig, ircSchema } from "../src/config";
-import { fleetInstructions } from "../src/fleet/fleet-policy";
+import { fleetInstructions } from "../src/coordination/fleet/fleet-policy";
 import {
   fold,
   formatMessage,
