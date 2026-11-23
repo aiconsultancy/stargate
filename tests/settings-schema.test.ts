@@ -43,7 +43,7 @@ import {
   settingsIssues,
   settingsStruct,
 } from "../src/config/settings-schema";
-import { transcriptionSchema } from "../src/transcription/transcription";
+import { transcriptionSchema } from "../src/transcription/config";
 import { waitingSchema } from "../src/gateway/waiting";
 import {
   settingsCanonical,

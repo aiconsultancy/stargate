@@ -5,7 +5,6 @@ import { Result, Schema } from "effect";
 import type { Logger } from "pino";
 import type { ActivityView } from "../activity/activity";
 import { activityContent } from "../activity/activity-slack";
-import { stopBlock } from "../gateway/cancellation";
 import type { CrewUIApi } from "./crew-ui";
 import type {
   ReactionTargetRequest,
@@ -510,4 +509,19 @@ export class SlackConnection implements TransportDelivery {
 
     return this.closing;
   }
+}
+
+export function stopBlock(job: number) {
+  return {
+    type: "actions" as const,
+    elements: [
+      {
+        type: "button" as const,
+        action_id: "stargate_stop",
+        text: { type: "plain_text" as const, text: "Stop", emoji: false },
+        accessibility_label: "Stop this request (requester only)",
+        value: String(job),
+      },
+    ],
+  };
 }

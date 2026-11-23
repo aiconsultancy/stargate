@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { piCrewBackendSchema } from "../config";
+import { piCrewBackendSchema } from "../backends/pi/config";
 import { isLocalhost } from "../lib/loopback";
 import { decodeSettings } from "../config/settings-errors";
 import {

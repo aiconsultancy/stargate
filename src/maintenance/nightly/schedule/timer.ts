@@ -1,5 +1,4 @@
 import { dirname, isAbsolute } from "node:path";
-import { quote } from "../../../app/service";
 import {
   type WindowSpec,
   addClock,
@@ -8,6 +7,27 @@ import {
 } from "./window";
 
 const marker = "# Managed by Stargate CLI";
+
+/*
+ * Deliberate copy of `quote` in src/app/service.ts. Architecture rule five
+ * lets a second slice copy small code. Keep both copies byte-identical;
+ * tests/systemd-quote-copies.test.ts compares them.
+ */
+export function quote(value: string, command = false) {
+  if (
+    Array.from(value).some(
+      (character) =>
+        character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+    )
+  )
+    throw new Error("Service paths cannot contain control characters.");
+
+  return `"${value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("%", "%%")
+    .replaceAll("$", () => (command ? "$$" : "$"))}"`;
+}
 
 export function timerName(name = "stargate-maintenance") {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name))

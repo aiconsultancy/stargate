@@ -8,8 +8,8 @@ import {
   Recent,
 } from "./client";
 import { packBatches } from "./delivery";
-import { cleanText, fold } from "./protocol";
-import { ircLines, ircParts } from "./text";
+import { cleanText, fold, ircParts } from "./protocol";
+import { ircLines } from "./text";
 
 /** One direct message that a ship connection received or sent. */
 export type DmEvent = {

@@ -16,9 +16,9 @@ import {
 } from "../shared/turn-progress";
 import type { IrcClient } from "./client";
 import { type Filehost, safeFileURL } from "./filehost";
-import { cleanText, utf8Bytes } from "./protocol";
+import { cleanText, ircParts, utf8Bytes } from "./protocol";
 import { isIrcChannel, validMsgid } from "./routing";
-import { ircLines, ircParts, plainText } from "./text";
+import { ircLines, plainText } from "./text";
 
 /** IRCv3 `+draft/react` values for the gateway's reaction names. */
 const emoji: Record<ReactionName, string> = {

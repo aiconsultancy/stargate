@@ -1,4 +1,4 @@
-import { ircParts } from "../irc/text";
+import { ircParts } from "../irc/protocol";
 
 /** An assignment is one IRC message: never several independently actionable turns. */
 export async function sendFleetAssignment(
