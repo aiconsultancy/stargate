@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import {
@@ -12,13 +11,16 @@ import {
 import type { MesijClient, MesijMessage } from "../src/crew/messaging/mesij";
 import { runRecoveryOperator } from "../src/crew/execution/recovery-rpc";
 import { teamSchema } from "../src/crew/team";
+import { fixtureRoot } from "./fixture-root";
 
 const canonical = "ses_rootCanonical";
 const legacy = "ses_rootLegacy";
 
 /** Fake native roots, workers and Mesij; no OpenCode, provider or Slack. */
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-captain-crew-"));
+  const directory = await mkdtemp(
+    join(fixtureRoot(), "stargate-captain-crew-"),
+  );
 
   const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },

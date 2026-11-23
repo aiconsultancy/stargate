@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import {
@@ -16,6 +15,7 @@ import type {
 } from "../src/crew/messaging/mesij";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
 import type { MaintenanceDrain } from "../src/maintenance/maintenance-drain";
+import { fixtureRoot } from "./fixture-root";
 
 const cleanup: (() => unknown)[] = [];
 
@@ -55,7 +55,7 @@ const record = (extra: Partial<MaintenanceDrain> = {}): MaintenanceDrain => ({
 });
 
 async function fixture(team: Team = defaultTeam, pin = false) {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-drain-crew-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-drain-crew-"));
 
   const options: CrewOptions = {
     namespace: "bowser-one",
