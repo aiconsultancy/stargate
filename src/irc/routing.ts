@@ -346,7 +346,7 @@ export function ircResultJobAllowed(
           ({ channel }) =>
             job?.channel !== undefined &&
             caseFold(channel) === caseFold(job.channel),
-        )) ||
+        ) === true) ||
       !addressedToFleetPeer(config, member, currentNick, job.text, caseFold))
   );
 }
@@ -480,7 +480,7 @@ export function routeIrcMessage(
 
   let humanWake = false;
 
-  if (protectedHuman && rule) {
+  if (protectedHuman) {
     if (
       !validMsgid(tagged) ||
       !context.joined?.(target) ||
@@ -510,7 +510,7 @@ export function routeIrcMessage(
   )
     return;
 
-  if (strict && !direct && !mentioned && !humanWake) return;
+  if (strict && !direct && mentioned !== true && !humanWake) return;
   const replied = !strict && validMsgid(reply) && context.sent(reply);
 
   // Captain text mentions and all-calls; the matched word becomes the
@@ -521,7 +521,7 @@ export function routeIrcMessage(
   ];
 
   const named =
-    !direct && !mentioned && !replied && words.length
+    !direct && mentioned !== true && !replied && words.length
       ? findMention([body], words)
       : undefined;
 
@@ -531,7 +531,7 @@ export function routeIrcMessage(
 
   if (
     !direct &&
-    !mentioned &&
+    mentioned !== true &&
     !replied &&
     named === undefined &&
     !wake &&
@@ -830,12 +830,18 @@ export function ircNote(
 ) {
   const where = isIrcChannel(job.channel) ? job.channel : "a direct message";
 
-  const who =
-    job.sender === "crew"
-      ? `${job.user}, an account of this ship (captain or crew)`
-      : job.sender === "captain"
-        ? `${job.user}, another fleet captain's bot, not an operator`
-        : job.user;
+  let who: string;
+
+  switch (job.sender) {
+    case "crew":
+      who = `${job.user}, an account of this ship (captain or crew)`;
+      break;
+    case "captain":
+      who = `${job.user}, another fleet captain's bot, not an operator`;
+      break;
+    default:
+      who = job.user;
+  }
 
   const allCall =
     job.textMention !== undefined &&

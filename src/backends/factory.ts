@@ -52,9 +52,13 @@ export async function createBackend(
       if (
         typeof backend !== "object" ||
         !backend ||
-        !["createSession", "prompt", "close"].every(
-          (key) =>
-            key in backend && typeof Reflect.get(backend, key) === "function",
+        !(
+          "createSession" in backend &&
+          typeof backend.createSession === "function" &&
+          "prompt" in backend &&
+          typeof backend.prompt === "function" &&
+          "close" in backend &&
+          typeof backend.close === "function"
         )
       ) {
         throw new Error("Backend module returned an invalid AgentBackend");

@@ -100,7 +100,7 @@ export function connectionFailure(
   let current = error;
 
   for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
-    const code: unknown = Reflect.get(current, "code");
+    const code = "code" in current ? current.code : undefined;
 
     if (typeof code === "string") {
       if (unreachedCodes.has(code)) return "unreached";

@@ -243,7 +243,7 @@ export class OpenCodeBackend implements AgentBackend {
           (isFormNotFoundError(error) && error.id === formID) ||
           (isSessionNotFoundError(error) && error.sessionID === sessionID)
         )
-          return undefined;
+          return;
         throw error;
       });
 
@@ -1104,7 +1104,7 @@ export class OpenCodeBackend implements AgentBackend {
       let probe = pending ? this.fleetStatusProbe : undefined;
 
       if (!probe) {
-        if (performance.now() < this.fleetStatusRetryAt) return undefined;
+        if (performance.now() < this.fleetStatusRetryAt) return;
         probe = this.startFleetStatusProbe(input);
         this.fleetStatusProbe = probe;
       }
@@ -1122,7 +1122,7 @@ export class OpenCodeBackend implements AgentBackend {
 
         // A different filter needs its own probe once the slot is free.
         // A timed-out RPC can still hold the slot while it drains.
-        if (this.fleetStatusRead.pending === pending) return undefined;
+        if (this.fleetStatusRead.pending === pending) return;
       } finally {
         if (--probe.waiters === 0) probe.controller.abort();
       }
@@ -1152,15 +1152,15 @@ export class OpenCodeBackend implements AgentBackend {
     );
 
     const result = probe
-      .then((status) => {
-        if (controller.signal.aborted || failureCounted) return undefined;
+      .then((status): FleetCrewStatus | undefined => {
+        if (controller.signal.aborted || failureCounted) return;
         const result = fleetCrewStatusSchema.parse(status);
         this.fleetStatusFailures = 0;
 
         return result;
       })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted || failureCounted) return undefined;
+      .catch((error: unknown): undefined => {
+        if (controller.signal.aborted || failureCounted) return;
 
         const timedOut =
           error instanceof DOMException && error.name === "TimeoutError";
@@ -1183,7 +1183,7 @@ export class OpenCodeBackend implements AgentBackend {
         }
 
         // Ordinary status cannot verify which checkout is provisioned.
-        return undefined;
+        return;
       });
 
     return { member: input.member, result, controller, waiters: 0 };
@@ -1637,7 +1637,7 @@ export class OpenCodeBackend implements AgentBackend {
         sessionID,
         form.id,
         signal,
-      ).catch(() => undefined);
+      ).catch(() => {});
 
       signal.throwIfAborted();
 
@@ -1752,7 +1752,7 @@ export class OpenCodeBackend implements AgentBackend {
     };
 
     // Consume promptly: slow Slack writes must not block the shared event source.
-    const watch = onText || onProgress;
+    const watch = onText ?? onProgress;
     const eventSignal = AbortSignal.any([signal, stop.signal]);
 
     const consumeEvents = async () => {
@@ -1926,7 +1926,7 @@ export class OpenCodeBackend implements AgentBackend {
               current.input,
               readSignal,
               assistantMessageID,
-            ).catch(() => undefined);
+            ).catch(() => {});
 
           const check = readOwner()
             .then(async (owned) => {
@@ -2197,7 +2197,7 @@ export class OpenCodeBackend implements AgentBackend {
         { signal },
       );
 
-      if (inbox.some((item) => item.id === input)) return undefined;
+      if (inbox.some((item) => item.id === input)) return;
     }
 
     const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
@@ -2216,7 +2216,7 @@ export class OpenCodeBackend implements AgentBackend {
 
       for (const message of page.data) {
         if (!found) {
-          if (message.id === input) return undefined;
+          if (message.id === input) return;
 
           if (message.id === assistant && message.type === "assistant")
             found = true;

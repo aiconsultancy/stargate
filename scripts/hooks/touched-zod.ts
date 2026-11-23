@@ -131,10 +131,10 @@ function resolveRelative(
   specifier: string,
   files: Map<string, string>,
 ) {
-  if (!/^\.\.?\//.test(specifier)) return undefined;
+  if (!/^\.\.?\//.test(specifier)) return;
   const target = posix.normalize(posix.join(posix.dirname(path), specifier));
 
-  if (target.startsWith("../")) return undefined;
+  if (target.startsWith("../")) return;
 
   const candidates = posix.extname(target)
     ? [target]
@@ -296,8 +296,7 @@ function declarationTokens(source: SourceFile, node: Node, module: ModuleSpan) {
     for (;;) {
       const kind = scanner.scan();
 
-      if (scanner.isUnterminated() || kind === SyntaxKind.Unknown)
-        return undefined;
+      if (scanner.isUnterminated() || kind === SyntaxKind.Unknown) return;
 
       if (kind === SyntaxKind.EndOfFile) break;
 
@@ -306,7 +305,7 @@ function declarationTokens(source: SourceFile, node: Node, module: ModuleSpan) {
         kind === SyntaxKind.SingleLineCommentTrivia ||
         kind === SyntaxKind.MultiLineCommentTrivia
       )
-        return undefined;
+        return;
 
       if (
         kind === SyntaxKind.WhitespaceTrivia ||
@@ -334,7 +333,7 @@ function declarationTokens(source: SourceFile, node: Node, module: ModuleSpan) {
 
     return tokens.map(({ kind, text }) => [kind, text]);
   } catch {
-    return undefined;
+    return;
   }
 }
 

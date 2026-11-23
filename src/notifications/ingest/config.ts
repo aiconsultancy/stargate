@@ -115,7 +115,7 @@ export async function checkProducerCredentials(
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
   ).catch((error: unknown) => {
     if (error instanceof Error && "code" in error && error.code === "ENOENT")
-      return undefined;
+      return;
     throw new Error("Cannot check notification credential separation.");
   });
 

@@ -322,10 +322,7 @@ try {
       ) ?? {},
   });
 
-  await wait(
-    () => client.session.active().catch(() => undefined),
-    "native engine",
-  );
+  await wait(() => client.session.active().catch(() => {}), "native engine");
   await client.session.create({
     id: captainID,
     agent: "build",

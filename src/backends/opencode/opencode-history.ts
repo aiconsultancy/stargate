@@ -146,7 +146,7 @@ function toolPart(
     ...(typeof child === "string" && { sessionID: child }),
     ...(input && { input: input.text }),
     ...(output && { output: output.text }),
-    ...((input?.truncated || output?.truncated) && { truncated: true }),
+    ...((input?.truncated ?? output?.truncated) && { truncated: true }),
   };
 }
 
@@ -211,8 +211,8 @@ function entry(
                 : "error",
           ...(input && { input: input.text }),
           ...(output && { output: output.text }),
-          ...((input?.truncated ||
-            output?.truncated ||
+          ...((input?.truncated ??
+            output?.truncated ??
             (full && message.output?.truncated)) && { truncated: true }),
         },
       ];
@@ -331,7 +331,7 @@ export class OpenCodeHistory implements SessionHistory {
               } catch (error) {
                 signal.throwIfAborted();
 
-                if (isSessionNotFoundError(error)) return undefined;
+                if (isSessionNotFoundError(error)) return;
                 throw error;
               }
             }),

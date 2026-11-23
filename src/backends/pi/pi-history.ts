@@ -102,12 +102,7 @@ export function mapPiHistory(
       return entry;
     }
 
-    entry.role =
-      record.kind === "pi.user"
-        ? "user"
-        : record.kind === "pi.assistant"
-          ? "assistant"
-          : "tool";
+    entry.role = piRole(record.kind);
 
     for (const message of record.model ?? []) {
       if (Number.isSafeInteger(message.timestamp) && message.timestamp >= 0)
@@ -395,5 +390,16 @@ export async function readPiHistory<T>(
     }
   } catch {
     throw new Error(unavailable);
+  }
+}
+
+function piRole(kind: string) {
+  switch (kind) {
+    case "pi.user":
+      return "user";
+    case "pi.assistant":
+      return "assistant";
+    default:
+      return "tool";
   }
 }

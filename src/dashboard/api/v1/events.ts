@@ -310,7 +310,7 @@ export function createEventStreams(
         shutdown.signal.aborted || attempt.controller.signal.aborted;
 
       try {
-        const detail = await attempt.result.catch(() => undefined);
+        const detail = await attempt.result.catch((): undefined => {});
 
         if (cancelled()) return;
         syncIdentities();
@@ -383,7 +383,7 @@ export function createEventStreams(
             },
           );
 
-        const sample = await attempt.result.catch(() => undefined);
+        const sample = await attempt.result.catch(() => {});
 
         if (
           shutdown.signal.aborted ||
@@ -496,7 +496,7 @@ export function createEventStreams(
         signal.aborted ||
         (active?.clients.size ?? 0) >= maxClients
       )
-        return undefined;
+        return;
       active ??= startPolling();
       const session = active;
       let cleanup = () => {};

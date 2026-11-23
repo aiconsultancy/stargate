@@ -112,14 +112,14 @@ async function openStatusFile(source: string, roots: string[]) {
       const child = relative(root, path);
 
       return (
-        child &&
+        child !== "" &&
         child !== ".." &&
         !child.startsWith(`..${sep}`) &&
         !isAbsolute(child)
       );
     })
   )
-    return undefined;
+    return;
 
   if (process.platform === "darwin") {
     // Darwin O_NOFOLLOW_ANY
@@ -128,13 +128,13 @@ async function openStatusFile(source: string, roots: string[]) {
     return open(path, constants.O_RDONLY | constants.O_NONBLOCK | noFollowAny);
   }
 
-  if (process.platform !== "linux") return undefined;
+  if (process.platform !== "linux") return;
   // Linux exposes directory descriptors through procfs. Open each component
   // Relative to its pinned parent, forbidding symlinks at each step.
   const parts = path.split(sep).slice(1);
   const name = parts.pop();
 
-  if (!name) return undefined;
+  if (!name) return;
   const directoryFlags = constants.O_DIRECTORY | metadataFlags;
   let parent = await open(sep, directoryFlags);
 
@@ -187,7 +187,7 @@ async function copyStatusFile(
       kind === "pattern" ||
       (kind === "primary" && fileError(error) === "ENOENT")
     )
-      return undefined;
+      return;
     throw error;
   });
 
@@ -258,7 +258,7 @@ async function copyStatusFile(
 type RunGit = (...args: string[]) => Promise<{ code: number; stdout: string }>;
 
 async function privateStatusDirectory(path: string) {
-  const metadata = await lstat(path).catch(() => undefined);
+  const metadata = await lstat(path).catch(() => {});
 
   if (
     metadata?.isDirectory() &&
@@ -267,13 +267,13 @@ async function privateStatusDirectory(path: string) {
   )
     return metadata;
 
-  return undefined;
+  return;
 }
 
 async function trustedStatusRoot(path: string, serviceOwned = false) {
-  const canonical = await realpath(path).catch(() => undefined);
+  const canonical = await realpath(path).catch(() => {});
 
-  if (!canonical) return undefined;
+  if (!canonical) return;
   const uid = process.getuid?.();
   // Walk from the root so each directory entry is protected before use.
   // Sticky directories protect entries owned by root or the service user.
@@ -281,7 +281,7 @@ async function trustedStatusRoot(path: string, serviceOwned = false) {
 
   for (const part of canonical.split(sep)) {
     ancestor = join(ancestor, part);
-    const info = await lstat(ancestor).catch(() => undefined);
+    const info = await lstat(ancestor).catch(() => {});
 
     if (
       !info?.isDirectory() ||
@@ -289,7 +289,7 @@ async function trustedStatusRoot(path: string, serviceOwned = false) {
         (info.uid !== 0 || (serviceOwned && ancestor === canonical))) ||
       (info.mode & 0o022 && !(info.mode & 0o1000))
     )
-      return undefined;
+      return;
   }
 
   return canonical;
@@ -326,7 +326,7 @@ function retainTemporaryStatusRoot(directory: string) {
     async release() {
       if (--retained.readers !== 0) return;
       temporaryStatusRoots.delete(directory);
-      const path = await retained.path.catch(() => undefined);
+      const path = await retained.path.catch(() => {});
 
       if (path) await removeStatusDirectory(path);
     },
@@ -458,7 +458,7 @@ async function readSharedIndexName(
   if (result?.code !== 0) throw new Error("Invalid Git index");
   const name = result.stdout;
 
-  if (!name) return undefined;
+  if (!name) return;
 
   if (
     !/^sharedindex\.[a-f0-9]+$/.test(name) ||
@@ -615,7 +615,11 @@ async function prepareStatus(
     writeFile(join(gitDir, "objects", "info", "alternates"), `${objects}\n`),
     snapshotPattern(exclude, "info/exclude"),
     snapshotPattern(sparse, "info/sparse-checkout"),
-    configuredExcludes && snapshotPattern(configuredExcludes, copiedExcludes),
+    configuredExcludes !== false &&
+    configuredExcludes !== undefined &&
+    configuredExcludes !== ""
+      ? snapshotPattern(configuredExcludes, copiedExcludes)
+      : configuredExcludes,
   ]);
 
   for (const file of files) if (file.status === "rejected") throw file.reason;
@@ -659,7 +663,7 @@ async function readHeadRef(run: RunGit) {
 async function readCommit(run: RunGit, ref: string) {
   const revision = await run("rev-parse", "--verify", "--end-of-options", ref);
 
-  if (revision.code !== 0) return undefined;
+  if (revision.code !== 0) return;
   const oid = revision.stdout.trim();
 
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid))

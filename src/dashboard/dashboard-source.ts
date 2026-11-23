@@ -776,10 +776,9 @@ export function dashboardSource(
       const ship = find(id);
       const history = ship?.backend.history;
 
-      if (!ship || !history) return undefined;
+      if (!ship || !history) return;
 
-      if (!(await allowed(ship, history, input.parentID, signal)))
-        return undefined;
+      if (!(await allowed(ship, history, input.parentID, signal))) return;
 
       const page = await history.children(
         {
@@ -804,10 +803,9 @@ export function dashboardSource(
       const ship = find(id);
       const history = ship?.backend.history;
 
-      if (!ship || !history) return undefined;
+      if (!ship || !history) return;
 
-      if (!(await allowed(ship, history, input.sessionID, signal)))
-        return undefined;
+      if (!(await allowed(ship, history, input.sessionID, signal))) return;
 
       return history.entries(input, signal);
     },

@@ -603,7 +603,7 @@ export class Questions {
   public async stop(jobID: number, signal: AbortSignal): Promise<boolean> {
     const offer = this.store.questions
       .questionOffers(this.key)
-      .find((o) => o.jobID === jobID && o.recovering);
+      .find((o) => o.jobID === jobID && o.recovering !== 0);
 
     if (!offer || !this.backend.interruptInput) return false;
     const job = this.establishedWaiter(offer);
@@ -651,7 +651,7 @@ export class Questions {
 
       const outcome = await this.backend
         .backgroundOutcome?.(row.session, row.form, row.fingerprint, signal)
-        .catch(() => undefined);
+        .catch(() => {});
 
       if (outcome) this.store.backgroundCases.close(row.reference, outcome);
     }
@@ -844,7 +844,7 @@ export class Questions {
           found.fingerprint,
           AbortSignal.any([this.lifetime, AbortSignal.timeout(3000)]),
         )
-        .catch(() => undefined);
+        .catch(() => {});
 
       if (outcome) {
         this.store.backgroundCases.close(found.reference, outcome);
@@ -977,7 +977,8 @@ export class Questions {
         .questionOffers(this.key)
         .some(
           (o) =>
-            o.sessionID === session && (o.state !== "closed" || o.recovering),
+            o.sessionID === session &&
+            (o.state !== "closed" || o.recovering !== 0),
         )
     )
       return;

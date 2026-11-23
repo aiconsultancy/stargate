@@ -93,7 +93,7 @@ function routeId(encoded: string) {
 
     return id && !/[/\\\p{Cc}]/u.test(id) ? id : undefined;
   } catch {
-    return undefined;
+    return;
   }
 }
 
@@ -219,7 +219,7 @@ export async function startApiV1Server(options: Options) {
       abandonedReads.add(settled);
     }
 
-    if (httpReads.size >= maxFleetReads) return undefined;
+    if (httpReads.size >= maxFleetReads) return;
     const { result, settled } = readWithDeadline(signal, undefined, read);
     httpReads.set(settled, now + 3 * httpReadMs);
     void settled.then(() => {
@@ -393,9 +393,7 @@ export async function startApiV1Server(options: Options) {
     lifetime.abort();
     host.stop();
     events.stop();
-    stopping = Promise.all([server.stop(), source.stop?.()]).then(
-      () => undefined,
-    );
+    stopping = Promise.all([server.stop(), source.stop?.()]).then(() => {});
 
     return stopping;
   };

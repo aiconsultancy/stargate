@@ -109,7 +109,7 @@ export class QuestionRecords {
         .query(
           "SELECT 1 FROM jobs j JOIN irc_question_sources q ON q.botKey=j.botKey AND q.eventId=j.eventId WHERE j.botKey=? AND j.status='running' AND j.cancel_requested=0 AND j.failure IS NOT 'cancelled' AND j.input IS NOT NULL LIMIT 1",
         )
-        .get(botKey)
+        .get(botKey) !== null
     )
       sessions.push(pinned);
 

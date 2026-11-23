@@ -412,7 +412,7 @@ export class ClaudeTurn {
 
       const blocks = this.streaming && this.streamed.get(this.streaming);
 
-      if (!blocks) return false;
+      if (blocks === undefined || blocks === "") return false;
 
       if (event.value.type === "content_block_start") {
         const kind = event.value.content_block.type;

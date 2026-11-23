@@ -113,7 +113,7 @@ async function optionalFile(path: string, privateFile = false) {
 
     return await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw new Error(
       "Cannot read provisioning file; use a regular private file.",
     );

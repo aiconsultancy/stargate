@@ -480,7 +480,7 @@ function equal(a: Entry | undefined, b: Entry | undefined) {
 async function pathStat(path: string) {
   return lstat(path).catch((error: unknown) => {
     if (error instanceof Error && "code" in error && error.code === "ENOENT")
-      return undefined;
+      return;
     throw error;
   });
 }

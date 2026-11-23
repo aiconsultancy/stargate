@@ -23,7 +23,7 @@ export async function startMaintenanceDelivery(input: Input) {
       input.requestID,
       AbortSignal.any([input.signal, AbortSignal.timeout(2000)]),
     )
-    .catch(() => undefined);
+    .catch(() => {});
 
   // Ordinary bots may not have the Stargate plugin. The captain tool fails closed
   // Without this registration; failed setup never becomes a timed permit.

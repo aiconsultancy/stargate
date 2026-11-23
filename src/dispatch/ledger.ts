@@ -91,10 +91,10 @@ export class DispatchLedger {
   private readonly db: Database;
   public constructor(path: string) {
     this.db = new Database(path, { create: true, strict: true });
-    this.db.exec(
+    this.db.run(
       "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;",
     );
-    this.db.exec(`
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS dispatch_meta (
         key TEXT PRIMARY KEY, value TEXT NOT NULL
       );

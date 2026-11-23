@@ -8,7 +8,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { isolatedEnvironment } from "../src/maintenance/nightly/update/release";
 
-const cache = process.env["XDG_CACHE_HOME"] || join(homedir(), ".cache");
+const configuredCache = process.env["XDG_CACHE_HOME"];
+
+const cache =
+  configuredCache === undefined || configuredCache === ""
+    ? join(homedir(), ".cache")
+    : configuredCache;
 
 await mkdir(cache, { recursive: true });
 

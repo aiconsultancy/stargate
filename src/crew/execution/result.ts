@@ -68,13 +68,20 @@ const urgency = Schema.Struct({
 function matchesUrgency(message: ResultMessage, task: CrewTask): boolean {
   const metadata = message.metadata?.[crewMessageMetadataKey];
 
-  if (metadata && typeof metadata === "object" && "resumeIdleAt" in metadata)
+  if (
+    metadata !== null &&
+    typeof metadata === "object" &&
+    "resumeIdleAt" in metadata
+  )
     return isTaskResume(message, task);
   const notice = Schema.decodeUnknownResult(urgency)(metadata);
 
   return (
     Result.isSuccess(notice) &&
-    !!(notice.success.sourceTaskID || notice.success.messageID) &&
+    ((notice.success.sourceTaskID !== undefined &&
+      notice.success.sourceTaskID !== "") ||
+      (notice.success.messageID !== undefined &&
+        notice.success.messageID !== "")) &&
     notice.success.taskID === task.id &&
     notice.success.originCaptainID === task.originCaptainID
   );

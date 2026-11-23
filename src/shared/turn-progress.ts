@@ -29,5 +29,16 @@ export function turnProgressText(progress?: TurnProgress) {
     return "Stargate has no confirmed backend activity for this request.";
   const time = new Date(progress.observedAt).toISOString().slice(11, 16);
 
-  return `${progress.disconnected ? "OpenCode event stream disconnected. " : ""}${descriptions[progress.stage].replace("OpenCode", progress.backend === "claude" ? "Claude" : progress.backend === "codex" ? "Codex" : "OpenCode")} Observed at ${time} UTC.`;
+  return `${progress.disconnected ? "OpenCode event stream disconnected. " : ""}${descriptions[progress.stage].replace("OpenCode", backendName(progress.backend))} Observed at ${time} UTC.`;
+}
+
+function backendName(backend: string | undefined) {
+  switch (backend) {
+    case "claude":
+      return "Claude";
+    case "codex":
+      return "Codex";
+    default:
+      return "OpenCode";
+  }
 }

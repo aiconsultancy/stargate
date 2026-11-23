@@ -84,6 +84,57 @@ inside one import. `eslint/new-cap` sets `capIsNewExceptionPattern` to
 are functions with capital names. Other capitalised calls and `new` with a
 lower-case name are still reported.
 
+The gate applies these type-contract rules in `src`, `scripts` and
+`perf`, with these exceptions:
+
+- `typescript/no-unnecessary-boolean-literal-compare` is off for
+  `src/slack/slack.ts` only: `result.ok === true` checks an untrusted Slack
+  Web API response, whose declared `boolean` type is not proved at run time.
+- `anti-slop/no-chained-type-assertions` is off for
+  `src/maintenance/maintenance-drain.ts` only: one cast covers the gap between
+  `Schema.optional` fields of the participant schema and the exported
+  `DrainParticipant` type under `exactOptionalPropertyTypes`.
+- `anti-slop-effect/no-service-constructor-imports` is off for
+  `src/app/runtime.ts` only: it is the composition root that builds the
+  notification service.
+- `unicorn/no-useless-undefined` runs with `checkArguments: false`: an
+  explicit `undefined` argument stays, because removing it changes
+  `arguments.length` for dual APIs such as `Deferred.succeed`.
+- `typescript/strict-boolean-expressions` runs with `allowNullableBoolean`,
+  `allowNullableString` and `allowNullableNumber` beside the defaults. The
+  stricter form for nullable strings and numbers (867 places on 23 November 2026) is not done: a 100-place trial kept today's result by construction,
+  found no fault and was undecidable at one place in four. The rule is off for
+  six files where a condition tests SDK data or an `unknown` or generic value
+  whose run-time kind the type does not prove: `scripts/crew-question-smoke.ts`,
+  `scripts/irc-question-smoke.ts`, `src/backends/opencode/opencode-history.ts`,
+  `src/backends/opencode/opencode.ts`, `src/cron/index.ts` and
+  `src/gateway/gateway.ts`.
+
+These type-contract rules stay off, each for a reason:
+
+- `eslint/no-undefined`: the only repair writes `void 0` in place of
+  `undefined`.
+- `unicorn/no-null`: most `null` values go into JSON, SQLite or wire formats;
+  replacing them changes stored or sent data.
+- `typescript/consistent-return`: the compiler option `noImplicitReturns`
+  does this check; the rule also conflicts with `no-useless-undefined`.
+- `typescript/parameter-properties`: the repair changes the order in which
+  class fields are initialised.
+- `anti-slop/no-unknown-parameters`, `anti-slop/no-unknown-returns`,
+  `anti-slop/no-unsafe-dictionary-type`, `typescript/no-unsafe-type-assertion`
+  and `anti-slop/no-runtime-typeof`: the repair decodes values where they
+  enter the program, which adds validation errors that do not exist today.
+- `anti-slop/no-known-value-widening`: some bindings hold `unknown` on
+  purpose because they feed a decoder.
+- `typescript/no-unnecessary-condition`: most findings guard state that
+  changes across an `await`, SDK, HTTP, JSON or persisted data, or the
+  runtime, which the declared type does not prove.
+- `typescript/no-invalid-void-type`: Oxlint reports `void` as a type argument
+  of a call, such as `Promise.withResolvers<void>()`, under every option.
+- `eslint/class-methods-use-this`: Oxlint ignores the option for methods that
+  implement an interface; public contract methods and per-instance hooks
+  cannot change.
+
 `hooks-install` installs prek's
 pre-commit and pre-push hooks for this clone. `hooks` runs the pre-commit gate,
 including workflow validation, merge/case conflicts, broken symlinks, large

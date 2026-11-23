@@ -353,7 +353,7 @@ export class IrcDelivery implements TransportDelivery {
       progress?.stage === "completed" || progress?.stage === "failed";
 
     if (terminal && !this.client.hasCap("message-tags")) return;
-    const target = await this.target(channel).catch(() => undefined);
+    const target = await this.target(channel).catch(() => {});
 
     if (!target || !active()) return;
     const parent = progress?.request ?? this.replyParent?.(thread) ?? thread;

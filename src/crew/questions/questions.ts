@@ -185,7 +185,7 @@ export class CrewQuestions {
 
             const outcome = await backend
               .outcome(offer.formID, offer.fingerprint, signal)
-              .catch(() => undefined);
+              .catch(() => {});
 
             signal.throwIfAborted();
 

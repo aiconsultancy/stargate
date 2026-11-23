@@ -28,8 +28,8 @@ export function readWithDeadline<T>(
     .finally(() => signal.removeEventListener("abort", abort));
 
   const settled = reading.then(
-    () => undefined,
-    () => undefined,
+    () => {},
+    () => {},
   );
 
   return { result, settled };

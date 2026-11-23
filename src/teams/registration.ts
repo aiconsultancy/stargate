@@ -174,7 +174,7 @@ export class TeamsRegistration {
     ]);
     this.db = new Database(path, { create: true });
     chmodSync(path, 0o600);
-    this.db.exec(
+    this.db.run(
       "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS conversations(conversation TEXT PRIMARY KEY, service TEXT NOT NULL, recipient TEXT NOT NULL, user TEXT NOT NULL, personal INTEGER NOT NULL, scope TEXT NOT NULL); CREATE TABLE IF NOT EXISTS approvals(token TEXT PRIMARY KEY, request TEXT NOT NULL UNIQUE, session TEXT NOT NULL, conversation TEXT NOT NULL, user TEXT NOT NULL, input TEXT NOT NULL, expires INTEGER NOT NULL, fingerprint TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, notified INTEGER NOT NULL DEFAULT 0);",
     );
 
@@ -186,7 +186,7 @@ export class TeamsRegistration {
         .all()
         .some((column) => column.name === "notified")
     )
-      this.db.exec(
+      this.db.run(
         "ALTER TABLE approvals ADD COLUMN notified INTEGER NOT NULL DEFAULT 0",
       );
     this.connector =
@@ -237,7 +237,7 @@ export class TeamsRegistration {
           ...(config.fleetPolicy ? { authority: "human" as const } : {}),
         };
       },
-      note: () => undefined,
+      note: () => {},
       ...(config.fleetPolicy
         ? {
             instructions: () =>
@@ -270,7 +270,7 @@ export class TeamsRegistration {
                 thread,
                 AbortSignal.any([signal, this.abort.signal]),
                 active,
-                read ?? (() => undefined),
+                read ?? (() => {}),
                 async (activity, signal) => {
                   if (!active())
                     throw new Error("Teams presence no longer available");

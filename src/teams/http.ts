@@ -126,7 +126,11 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
         : sendJson(res, 400);
     }
 
-    if (!activity || typeof activity !== "object" || Array.isArray(activity))
+    if (
+      activity === null ||
+      typeof activity !== "object" ||
+      Array.isArray(activity)
+    )
       return sendJson(res, 400);
 
     // 2. The token's serviceUrl claim and channel endorsement must match the activity.

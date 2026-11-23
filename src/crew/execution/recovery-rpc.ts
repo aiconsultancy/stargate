@@ -26,14 +26,13 @@ const recoveryBranches = [
 // Known-branch decoding retains acknowledgement paths before union routing.
 const recoveryOperationSchema = Schema.Unknown.check(
   Schema.makeFilter((raw) => {
-    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string")
-      return undefined;
+    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string") return;
 
     const branch = recoveryBranches.find(
       (member) => member.fields.op.ast.literal === raw["op"],
     );
 
-    if (!branch) return undefined;
+    if (!branch) return;
     const parsed = Schema.decodeUnknownResult(branch, { errors: "all" })(raw);
 
     return Result.isFailure(parsed) ? parsed.failure.issue : undefined;

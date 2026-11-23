@@ -63,7 +63,7 @@ export function cronRisk(input: string, output: string, risks?: CronRisks) {
 }
 
 export function cronObservation(raw: string) {
-  if (raw.length > 100_000) return undefined;
+  if (raw.length > 100_000) return;
 
   try {
     const decoded = Schema.decodeUnknownResult(cronObservationSchema)(
@@ -75,7 +75,7 @@ export function cronObservation(raw: string) {
     // Malformed model output must not authorise a captain action.
   }
 
-  return undefined;
+  return;
 }
 
 export function cronDecision(raw: string, input: string, output: string) {

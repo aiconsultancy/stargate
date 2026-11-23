@@ -186,7 +186,7 @@ export class CrewState {
     const db = new Database(path, { create: true, strict: true });
 
     try {
-      db.exec(`
+      db.run(`
         PRAGMA busy_timeout=5000;
         PRAGMA foreign_keys=ON;
         CREATE TABLE IF NOT EXISTS identity (value TEXT PRIMARY KEY);
@@ -307,7 +307,7 @@ export class CrewState {
       );
 
       if ((allowCrewExpansion && legacyPeers) || legacyTasks)
-        db.exec("PRAGMA foreign_keys=OFF");
+        db.run("PRAGMA foreign_keys=OFF");
       db.transaction(() => {
         const identity = db
           .query<{ value: string }, []>("SELECT value FROM identity")
@@ -331,7 +331,7 @@ export class CrewState {
         if (expansion && legacyPeers) {
           // Rebuild only the obsolete fixed-roster constraint; child IDs and
           // Every existing row remain unchanged in this same transaction.
-          db.exec(`
+          db.run(`
             CREATE TABLE peers_expansion (
               crewID TEXT PRIMARY KEY,
               sessionID TEXT NOT NULL UNIQUE,
@@ -354,7 +354,7 @@ export class CrewState {
           const columns =
             "rowid,id,crewID,workerSessionID,originCaptainID,inputID,status,result,released,notifying";
 
-          db.exec(`
+          db.run(`
             CREATE TABLE ${tasksTable("tasks_terminal")};
             INSERT INTO tasks_terminal (${columns}) SELECT ${columns} FROM tasks;
             DROP TABLE tasks;
@@ -377,7 +377,7 @@ export class CrewState {
               .all()
               .some((column) => column.name === "originInputID")
           )
-            db.exec(`ALTER TABLE ${table} ADD COLUMN originInputID TEXT`);
+            db.run(`ALTER TABLE ${table} ADD COLUMN originInputID TEXT`);
         }
 
         if (identity && identity.value !== fingerprint)
@@ -389,7 +389,7 @@ export class CrewState {
         if (!identity)
           db.query("INSERT INTO identity VALUES (?)").run(fingerprint);
       }).immediate();
-      db.exec("PRAGMA foreign_keys=ON");
+      db.run("PRAGMA foreign_keys=ON");
 
       return new CrewState(path, db, captainSessionID);
     } catch (error) {
@@ -609,10 +609,10 @@ export class CrewState {
   public hasCrewQuestionConsumer(at: number, leaseMs: number) {
     return (
       !!this.captainSessionID &&
-      !!this.db
+      this.db
         .query(`SELECT 1 FROM crew_question_consumer
           WHERE slot=1 AND captain=? AND daemonPID=? AND seenAt>? AND seenAt<=?`)
-        .get(this.captainSessionID, process.pid, at - leaseMs, at)
+        .get(this.captainSessionID, process.pid, at - leaseMs, at) !== null
     );
   }
 

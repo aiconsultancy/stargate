@@ -31,7 +31,7 @@ function customIssues(
   }
 
   const check = (filter: SchemaAST.Check<unknown>): void => {
-    if (filter._tag === "FilterGroup") {
+    if (Predicate.isTagged(filter, "FilterGroup")) {
       for (const child of filter.checks) check(child);
     } else if (
       filter.annotations?.["settingsRawDiagnostic"] === true ||
@@ -68,59 +68,50 @@ function customIssues(
   for (const link of ast.encoding ?? [])
     customIssues(link.to, input, path, issues);
 
-  switch (ast._tag) {
-    case "Objects":
-      if (Predicate.isObject(input)) {
-        const fields = new Set(
-          ast.propertySignatures.map((property) => property.name),
+  if (Predicate.isTagged(ast, "Objects")) {
+    if (Predicate.isObject(input)) {
+      const fields = new Set(
+        ast.propertySignatures.map((property) => property.name),
+      );
+
+      for (const property of ast.propertySignatures)
+        customIssues(
+          property.type,
+          input[property.name],
+          [...path, property.name],
+          issues,
         );
 
-        for (const property of ast.propertySignatures)
-          customIssues(
-            property.type,
-            input[property.name],
-            [...path, property.name],
-            issues,
-          );
+      for (const key of Object.keys(input))
+        if (!fields.has(key))
+          for (const index of ast.indexSignatures)
+            customIssues(index.type, input[key], [...path, key], issues);
+    }
+  } else if (Predicate.isTagged(ast, "Arrays")) {
+    if (Array.isArray(input))
+      for (const [index, value] of input.entries()) {
+        const item = ast.elements[index] ?? ast.rest[0];
 
-        for (const key of Object.keys(input))
-          if (!fields.has(key))
-            for (const index of ast.indexSignatures)
-              customIssues(index.type, input[key], [...path, key], issues);
+        if (item) customIssues(item, value, [...path, index], issues);
       }
-
-      break;
-    case "Arrays":
-      if (Array.isArray(input))
-        for (const [index, value] of input.entries()) {
-          const item = ast.elements[index] ?? ast.rest[0];
-
-          if (item) customIssues(item, value, [...path, index], issues);
+  } else if (Predicate.isTagged(ast, "Union")) {
+    for (const member of ast.types) {
+      try {
+        if (
+          Result.isSuccess(
+            Schema.decodeUnknownResult(
+              Schema.make<Schema.Codec<unknown>>(member),
+              { disableChecks: true },
+            )(input),
+          )
+        ) {
+          customIssues(member, input, path, issues);
+          break;
         }
-
-      break;
-    case "Union":
-      for (const member of ast.types) {
-        try {
-          if (
-            Result.isSuccess(
-              Schema.decodeUnknownResult(
-                Schema.make<Schema.Codec<unknown>>(member),
-                { disableChecks: true },
-              )(input),
-            )
-          ) {
-            customIssues(member, input, path, issues);
-            break;
-          }
-        } catch {
-          /* A different branch can still be structurally valid. */
-        }
+      } catch {
+        /* A different branch can still be structurally valid. */
       }
-
-      break;
-    default:
-      break;
+    }
   }
 }
 

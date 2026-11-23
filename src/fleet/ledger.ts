@@ -107,10 +107,10 @@ export class FleetLedger {
 
     try {
       this.db = new Database(path, { create: true, strict: true });
-      this.db.exec(
+      this.db.run(
         "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
       );
-      this.db.exec(`
+      this.db.run(`
         CREATE TABLE IF NOT EXISTS fleet_sources (
           reference TEXT PRIMARY KEY, ownerSessionID TEXT NOT NULL, value TEXT NOT NULL
         );

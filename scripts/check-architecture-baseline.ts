@@ -210,7 +210,7 @@ const declarationPath = join(root, DECLARATION);
 const declarationStatus = await lstat(declarationPath).catch(
   (error: unknown) => {
     if (error instanceof Error && "code" in error && error.code === "ENOENT")
-      return undefined;
+      return;
     throw error;
   },
 );

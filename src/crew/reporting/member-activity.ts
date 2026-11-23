@@ -18,7 +18,7 @@ type ActivityTask = {
  */
 export class MemberActivityStore {
   public constructor(private readonly db: Database) {
-    db.exec(`
+    db.run(`
       CREATE TABLE IF NOT EXISTS member_activity (
         taskID TEXT PRIMARY KEY, crewID TEXT NOT NULL,
         kind TEXT NOT NULL, summary TEXT NOT NULL,

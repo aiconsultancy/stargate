@@ -138,7 +138,7 @@ function facts(stat: string, status: string) {
   const uids = /^Uid:[ \t]+(.+)$/m.exec(status)?.[1]?.trim().split(/\s+/);
 
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(group) || !uids)
-    return undefined;
+    return;
 
   return { start, group, uids };
 }
@@ -170,7 +170,7 @@ function inspect(table: ProcessTable, pid: number) {
 
     return known && { ...known, environ: readFileSync(join(base, "environ")) };
   } catch {
-    return undefined;
+    return;
   }
 }
 

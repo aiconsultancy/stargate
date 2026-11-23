@@ -58,7 +58,7 @@ function read<T>(path: string, query: (db: Database) => T, empty: T): T {
   const db = new Database(path, { readonly: true, strict: true });
 
   try {
-    db.exec("PRAGMA busy_timeout=5000");
+    db.run("PRAGMA busy_timeout=5000");
 
     return query(db);
   } finally {

@@ -244,7 +244,7 @@ async function present(path: string) {
   try {
     return await lstat(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw new Error("Cannot inspect profile destination.");
   }
 }

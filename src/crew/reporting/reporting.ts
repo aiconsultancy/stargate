@@ -82,7 +82,7 @@ export class ReportingStore {
     private readonly captainRoute: (id: string) => string = (id) => id,
   ) {
     this.journal = new JournalStore(db);
-    db.exec(`
+    db.run(`
       CREATE TABLE IF NOT EXISTS activity_captures (
         id TEXT PRIMARY KEY, sessionID TEXT NOT NULL, requestID TEXT NOT NULL,
         reporterID TEXT NOT NULL, reporter TEXT NOT NULL, status TEXT NOT NULL,
@@ -118,7 +118,7 @@ export class ReportingStore {
       ["summarySeq", "INTEGER NOT NULL DEFAULT 0"],
     ]) {
       if (!columns.some((column) => column.name === name))
-        db.exec(`ALTER TABLE activity_captures ADD COLUMN ${name} ${type}`);
+        db.run(`ALTER TABLE activity_captures ADD COLUMN ${name} ${type}`);
     }
   }
 

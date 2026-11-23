@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import { redactCredentials } from "../../../lib/credentials";
 import { readCommand } from "./command";
 import type { V1PullRequest } from "./types";
@@ -90,14 +90,7 @@ export function mapPullRequest(
       number: pr.number,
       url: url.href,
       title: redactCredentials(pr.title, 180),
-      state:
-        pr.state === "OPEN"
-          ? pr.isDraft
-            ? "draft"
-            : "open"
-          : pr.state === "MERGED"
-            ? "merged"
-            : "closed",
+      state: pullState(pr.state, pr.isDraft),
       checks: result,
     };
   } catch {
@@ -147,7 +140,7 @@ export function createPullReader(
       auth = { expiresAt: now() + ttl, executable: authenticate() };
     const executable = await auth.executable;
 
-    if (!executable) return undefined;
+    if (!executable) return;
     const owner = repository.slice(0, repository.indexOf("/"));
 
     const result = await run(
@@ -169,18 +162,18 @@ export function createPullReader(
       { env, timeout },
     );
 
-    if (result?.code !== 0) return undefined;
+    if (result?.code !== 0) return;
 
     try {
       const list: unknown = JSON.parse(result.stdout);
 
-      if (!Array.isArray(list)) return undefined;
+      if (!Array.isArray(list)) return;
       let incomplete = list.length >= candidateLimit;
 
       for (const entry of list) {
         const candidate = decodeCandidate(entry);
 
-        if (candidate._tag === "None") {
+        if (Option.isNone(candidate)) {
           incomplete = true;
           continue;
         }
@@ -203,7 +196,7 @@ export function createPullReader(
           { env, timeout },
         );
 
-        if (details?.code !== 0) return undefined;
+        if (details?.code !== 0) return;
         const input: unknown = JSON.parse(details.stdout);
 
         const { headRefName, headRepository, headRepositoryOwner } =
@@ -214,7 +207,7 @@ export function createPullReader(
           `${headRepositoryOwner.login}/${headRepository.name}`.toLowerCase() !==
             repository
         )
-          return undefined;
+          return;
         const pr = mapPullRequest(input, repository);
 
         return pr?.number === number ? pr : undefined;
@@ -222,7 +215,7 @@ export function createPullReader(
 
       return incomplete ? undefined : null;
     } catch {
-      return undefined;
+      return;
     }
   }
 
@@ -238,7 +231,7 @@ export function createPullReader(
     ) {
       pending.add(key);
       void refresh(target, branch)
-        .catch(() => undefined)
+        .catch(() => {})
         .then((value) => {
           // A failed refresh leaves the last settled lookup intact.
           cache.delete(key);
@@ -259,4 +252,15 @@ export function createPullReader(
 
     return saved?.value;
   };
+}
+
+function pullState(state: string, isDraft: boolean) {
+  switch (state) {
+    case "OPEN":
+      return isDraft ? "draft" : "open";
+    case "MERGED":
+      return "merged";
+    default:
+      return "closed";
+  }
 }

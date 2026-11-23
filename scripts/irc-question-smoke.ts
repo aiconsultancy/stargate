@@ -169,7 +169,7 @@ async function wait<T>(get: () => Promise<T | undefined>, label: string) {
 }
 
 try {
-  await wait(() => client.session.active().catch(() => undefined), "engine");
+  await wait(() => client.session.active().catch(() => {}), "engine");
 
   const session = await client.session.create({
     location: { directory: home },
@@ -270,7 +270,7 @@ try {
       undefined,
       (v) => stages.push(v.stage),
     )
-    .catch(() => undefined);
+    .catch(() => {});
 
   try {
     await wait(async () => stages.includes("queued"), "same-ID queued event");

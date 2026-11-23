@@ -79,20 +79,20 @@ export class CrewHistoryRPC {
   }
 
   private authorized(id: string) {
-    if (!id.startsWith(piHistoryPrefix)) return undefined;
+    if (!id.startsWith(piHistoryPrefix)) return;
 
     const [sessionID, childID, extra] = id
       .slice(piHistoryPrefix.length)
       .split("~");
 
-    if (!sessionID || extra !== undefined) return undefined;
+    if (!sessionID || extra !== undefined) return;
     const peer = this.state.peerBySession(sessionID);
 
     const member = this.team.crew.find(
-      (member) => member.id === peer?.crewID && member.backend,
+      (member) => member.id === peer?.crewID && member.backend !== undefined,
     );
 
-    if (!peer || !member) return undefined;
+    if (!peer || !member) return;
     const mainID = this.state.piPeer(sessionID)?.conversationID;
     const conversationID = childID ?? mainID;
 
@@ -101,7 +101,7 @@ export class CrewHistoryRPC {
       !/^(0|[1-9]\d*)$/.test(conversationID) ||
       !this.state.piOwnsConversation(sessionID, conversationID)
     )
-      return undefined;
+      return;
 
     return { member, sessionID, conversationID, child: childID !== undefined };
   }

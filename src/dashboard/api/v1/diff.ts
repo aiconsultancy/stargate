@@ -160,7 +160,7 @@ function contextEvents(
   const appeared =
     pr &&
     gitReadable &&
-    (previous.pullRequest ||
+    (previous.pullRequest !== null ||
       (previous.pullRequestKnown &&
         branch === priorGit.branch &&
         next.git?.repository === priorGit.repository)) &&

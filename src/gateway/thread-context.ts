@@ -105,11 +105,10 @@ export async function loadThreadContext(
 
     const result: ThreadContext = {
       messages: [],
-      truncated: Boolean(
-        page.has_more ||
-        page.response_metadata?.next_cursor?.trim() ||
+      truncated:
+        page.has_more === true ||
+        (page.response_metadata?.next_cursor?.trim() ?? "") !== "" ||
         page.messages.length > threadContextLimits.pageSize,
-      ),
     };
 
     const seen = new Set<string>();

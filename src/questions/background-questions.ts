@@ -21,7 +21,7 @@ export interface OperatorRoute {
 
 export class BackgroundCases {
   public constructor(private readonly db: Database) {
-    db.exec(`CREATE TABLE IF NOT EXISTS background_questions (
+    db.run(`CREATE TABLE IF NOT EXISTS background_questions (
       ship TEXT NOT NULL, session TEXT NOT NULL, form TEXT NOT NULL, input TEXT NOT NULL,
       fingerprint TEXT NOT NULL, owner TEXT NOT NULL, reference TEXT NOT NULL UNIQUE,
       state TEXT NOT NULL DEFAULT 'new', expires INTEGER NOT NULL DEFAULT 0,

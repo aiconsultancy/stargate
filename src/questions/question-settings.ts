@@ -82,7 +82,7 @@ export async function resolveQuestionSettings(
           missing(error) &&
           (await questionSettingsAbsent(backend.directory, path))
         )
-          return undefined;
+          return;
         throw error;
       });
 
