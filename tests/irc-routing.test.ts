@@ -30,6 +30,7 @@ import { type Store } from "../src/gateway/store";
 import { bot } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -68,6 +69,7 @@ function shipConfig(overrides: Record<string, unknown> = {}): IrcConfig {
 }
 
 const config = shipConfig();
+
 const captain: IrcMember = {
   id: "galactica-irc",
   role: "captain",
@@ -76,6 +78,7 @@ const captain: IrcMember = {
   channels: ["#galactica"],
   key: "captain-key",
 };
+
 const chief: IrcMember = {
   id: "galactica-irc-chief",
   role: "crew",
@@ -84,6 +87,7 @@ const chief: IrcMember = {
   channels: ["#galactica"],
   key: "chief-key",
 };
+
 const own = new Set(["own-1"]);
 
 function message(
@@ -99,7 +103,9 @@ function message(
       ...tags,
     })}`.replace(/^(@\S+ )/, "$1:someone!u@h "),
   );
+
   if (!parsed) throw new Error("bad fixture");
+
   return parsed;
 }
 
@@ -129,6 +135,7 @@ test("irc nick-mention access requires a live joined target, exact nick, and an 
       deniedAccounts: ["jac"],
     },
   });
+
   const context = {
     config: restricted,
     member: captain,
@@ -138,6 +145,7 @@ test("irc nick-mention access requires a live joined target, exact nick, and an 
     now: () => 0,
     fold: (value: string) => fold(value),
   };
+
   const admit = (m: ReturnType<typeof message>) => routeIrcMessage(m, context);
   expect(
     admit(message("#galactica", "Galactica-2: status?", { account: "JACK" })),
@@ -150,6 +158,7 @@ test("irc nick-mention access requires a live joined target, exact nick, and an 
   expect(
     admit(message("galactica-2", "status?", { account: "jack" })),
   ).toMatchObject({ channel: "jack", eventId: "jack:abc123" });
+
   for (const m of [
     message("#galactica", "galactica-2: status?", { account: "impostor" }),
     message("#galactica", "galactica-2: status?", { account: "jac" }),
@@ -184,6 +193,7 @@ test("irc config requires one credential and TLS for client PEM", () => {
     passwordEnv: undefined,
     clientPemFile: "/private/client.pem",
   };
+
   expect(
     Result.isSuccess(Schema.decodeUnknownResult(ircSchema)(certificate)),
   ).toBe(false);
@@ -231,9 +241,11 @@ test("irc routing: account tag is identity; own and denied accounts never admit"
   expect(
     route("#galactica", "galactica: hi", { account: "Mallory" }),
   ).toBeUndefined();
+
   const admitted = route("#Galactica", "galactica: status?", {
     account: "Jack",
   });
+
   expect(admitted).toEqual({
     eventId: "#galactica:abc123",
     botKey: "captain-key",
@@ -294,9 +306,11 @@ test("irc routing: direct messages are per account and captain-only", () => {
   expect(direct?.eventId).toBe("jack:abc123");
   expect(route("someone-else", "hello")).toBeUndefined();
   expect(route("galactica-chief", "hello", undefined, chief)).toBeUndefined();
+
   const closed = shipConfig({
     access: { deniedChannels: ["*"] },
   });
+
   expect(
     routeIrcMessage(message("galactica", "hi", { account: "jack" }), {
       config: closed,
@@ -309,7 +323,9 @@ test("irc routing: direct messages are per account and captain-only", () => {
   ).toBeUndefined();
   // A missing msgid gets a stable synthetic ID for deduplication.
   const parsed = parseMessage("@account=jack :jack!u@h PRIVMSG galactica :hi");
+
   if (!parsed) throw new Error("bad fixture");
+
   const context = {
     config,
     member: captain,
@@ -318,6 +334,7 @@ test("irc routing: direct messages are per account and captain-only", () => {
     now: () => 5,
     fold: (value: string) => fold(value),
   };
+
   const first = routeIrcMessage(parsed, context);
   expect(first?.thread).toMatch(/^stargate-[0-9a-f]{32}$/);
   expect(routeIrcMessage(parsed, context)?.eventId).toBe(first?.eventId);
@@ -325,17 +342,20 @@ test("irc routing: direct messages are per account and captain-only", () => {
 
 test("irc reply context preserves request identity and ignores invalid parents", () => {
   const root = "root;with\\slash=equals";
+
   for (const tag of ["+draft/reply", "+reply"]) {
     const admission = route("#galactica", "galactica: check", {
       account: "jack",
       [tag]: root,
     });
+
     expect(admission).toMatchObject({ thread: "abc123", replyParent: root });
     expect(admission?.eventId).toBe("#galactica:abc123");
     expect(admission?.conversation).toBe(
       JSON.stringify(["captain-key", "#galactica"]),
     );
   }
+
   for (const parent of ["", "has space", "bad\nline", "a".repeat(129)]) {
     expect(
       route("#galactica", "galactica: check", {
@@ -344,6 +364,7 @@ test("irc reply context preserves request identity and ignores invalid parents",
       })?.replyParent,
     ).toBeUndefined();
   }
+
   const source = {
     transport: "irc" as const,
     channel: "#galactica",
@@ -352,6 +373,7 @@ test("irc reply context preserves request identity and ignores invalid parents",
     user: "jack",
     replyParent: root,
   };
+
   expect(sourceLine({ source })).toBe(
     `s=irc;c=%23galactica;t=request;m=request;u=jack;r=${encodeURIComponent(root)}`,
   );
@@ -372,10 +394,12 @@ test("irc reply context flattens only known own answers, without changing admiss
     fold: (value: string) => fold(value),
     anchor: (id: string) => (id === "own-1" ? "root" : undefined),
   };
+
   const incoming = message("#galactica", "continue", {
     account: "jack",
     "+draft/reply": "own-1",
   });
+
   expect(routeIrcMessage(incoming, context)).toMatchObject({
     thread: "abc123",
     replyParent: "root",
@@ -444,11 +468,13 @@ test("irc limits: peers per conversation, ship messages per channel", async () =
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const limits = {
     shipKeys: ["captain-key", "chief-key"],
     count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
       store.irc.turnsSince(input),
   };
+
   const admit = (
     member: IrcMember,
     account: string,
@@ -468,20 +494,27 @@ test("irc limits: peers per conversation, ship messages per channel", async () =
         fold: (value) => fold(value),
       },
     );
+
     if (!admission) throw new Error("not routed");
+
     if (!withinLimits(admission, config, limits)) return false;
+
     return store.enqueue(admission);
   };
+
   const at = (minute: number) =>
     new Date(Date.UTC(2026, 10, 12, 10, minute)).toISOString();
+
   // Ship messages: 1 per agent × 2 agents per channel per hour.
   expect(admit(captain, "galactica-chief", "s1", at(0))).toBe(true);
   expect(admit(chief, "galactica", "s2", at(1))).toBe(true);
   expect(admit(captain, "galactica-chief", "s3", at(2))).toBe(false);
   expect(admit(captain, "galactica-chief", "s4", at(61))).toBe(true);
+
   // People are never limited.
   for (let i = 0; i < 6; i++)
     expect(admit(captain, "jack", `h${i}`, at(5))).toBe(true);
+
   // All peers share 30 turns per receiving connection and conversation.
   for (let i = 0; i < 30; i++)
     expect(admit(captain, "defiant", `p${i}`, at(10 + i))).toBe(true);
@@ -499,6 +532,7 @@ test("irc config: strict server, crew and pin rules", () => {
     Result.isSuccess(
       Schema.decodeUnknownResult(ircSchema)({ ...shipConfig(), ...overrides }),
     );
+
   expect(parse({})).toBe(true);
   expect(
     parse({ server: { host: "10.23.45.67", port: 6667, tls: false } }),
@@ -542,7 +576,7 @@ test("irc config: strict server, crew and pin rules", () => {
   // Configuration compares names under rfc1459: [ ] equal { }.
   expect(parse({ channels: ["#ship[1]", "#SHIP{1}"], crew: [] })).toBe(false);
   // Crew channels must be captain channels exactly, up to ASCII case: a
-  // name that differs under the ascii mapping (Ergo's default) is refused.
+  // Name that differs under the ascii mapping (Ergo's default) is refused.
   expect(
     parse({
       channels: ["#ship[1]"],
@@ -568,10 +602,12 @@ test("irc config: strict server, crew and pin rules", () => {
 
 test("irc config: IRC-only configs, shared Slack pins and unique IDs", () => {
   const irc = shipConfig();
+
   const slack = {
     ...bot("galactica"),
     backend: { ...backend, sessionID: "ses_captain" },
   };
+
   expect(
     Result.isSuccess(Schema.decodeUnknownResult(configSchema)({ irc: [irc] })),
   ).toBe(true);
@@ -631,19 +667,24 @@ test("irc config check: password references and caFile, values never printed", a
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.json");
   const irc = shipConfig();
+
   const env = {
     STARGATE_IRC_GALACTICA: "captain-secret",
     STARGATE_IRC_GALACTICA_CHIEF: "chief-secret",
   };
+
   await checkCredentials(path, [], env, [irc]);
+
   const missing = await checkCredentials(
     path,
     [],
     { STARGATE_IRC_GALACTICA: "captain-secret" },
     [irc],
   ).catch((error: unknown) => error);
+
   expect(String(missing)).toContain("Missing IRC password");
   expect(String(missing)).not.toContain("captain-secret");
+
   const withCa = shipConfig({
     server: {
       host: "10.23.45.67",
@@ -652,6 +693,7 @@ test("irc config check: password references and caFile, values never printed", a
       caFile: join(directory, "missing-ca.pem"),
     },
   });
+
   await expect(checkCredentials(path, [], env, [withCa])).rejects.toThrow(
     "caFile",
   );
@@ -685,14 +727,17 @@ test("irc casemapping: one folded channel key for caps, routing and denies", asy
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   // The crew spells the ship channel differently from the captain.
   const mixed = shipConfig({
     channels: ["#galactica", "#ship[1]"],
     crew: [{ ...shipConfig().crew[0], channels: ["#Galactica"] }],
   });
+
   const crewMember: IrcMember = { ...chief, channels: ["#Galactica"] };
   const captainMember: IrcMember = { ...captain, channels: mixed.channels };
   const rfc = (value: string) => fold(value, "rfc1459");
+
   const routeAs = (
     member: IrcMember,
     target: string,
@@ -716,15 +761,19 @@ test("irc casemapping: one folded channel key for caps, routing and denies", asy
         fold: caseFold,
       },
     );
+
   const limits = {
     shipKeys: [captainMember.key, crewMember.key],
     count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
       store.irc.turnsSince(input),
   };
+
   const admit = (admission: ReturnType<typeof routeAs>) => {
     if (!admission) throw new Error("not routed");
+
     return withinLimits(admission, mixed, limits) && store.enqueue(admission);
   };
+
   // 1 per agent × 2 agents: 2 for the whole ship channel, whatever its spelling.
   expect(
     admit(routeAs(captainMember, "#galactica", "galactica-chief", "a")),
@@ -736,7 +785,7 @@ test("irc casemapping: one folded channel key for caps, routing and denies", asy
     JSON.stringify([crewMember.key, "#galactica"]),
   );
   expect(admit(third)).toBe(false);
-  // rfc1459 treats [ ] as { }; ascii does not.
+  // Rfc1459 treats [ ] as { }; ascii does not.
   expect(routeAs(captainMember, "#SHIP{1}", "jack", "d")?.channel).toBe(
     "#ship{1}",
   );
@@ -745,11 +794,13 @@ test("irc casemapping: one folded channel key for caps, routing and denies", asy
       fold(v, "ascii"),
     ),
   ).toBeUndefined();
+
   const denied = shipConfig({
     channels: ["#ship[1]"],
     crew: [],
     access: { deniedChannels: ["#Ship{1}"], deniedAccounts: ["JACK[1]"] },
   });
+
   expect(
     routeAs(captainMember, "#ship[1]", "bob", "f", denied),
   ).toBeUndefined();
@@ -777,17 +828,21 @@ test("irc namespace: host, port and network name select a new namespace", async 
         },
       },
     );
+
     return ship.registrations.map((registration) => registration.key);
   };
+
   const local = { host: "127.0.0.1", port: 6667, tls: false };
   const base = await keys(local);
   expect(await keys({ ...local })).toEqual(base);
+
   const changed = [
     await keys({ ...local, port: 6668 }),
     await keys({ host: "::1", port: 6667, tls: false }),
     await keys({ ...local, network: "Fleet" }),
     await keys({ ...local, network: "Other" }),
   ];
+
   for (const other of changed)
     for (const [index, key] of other.entries())
       expect(key).not.toBe(base[index]);
@@ -801,11 +856,14 @@ test("irc crew confinement: runtime checks use the negotiated CASEMAPPING", () =
   // A config that bypassed the schema: crew #ship{1}, captain #ship[1].
   const base = shipConfig({ channels: ["#ship[1]"], crew: [] });
   const [crewConfig] = shipConfig().crew;
+
   if (!crewConfig) throw new Error("missing crew fixture");
+
   const loose: IrcConfig = {
     ...base,
     crew: [{ ...crewConfig, channels: ["#ship{1}"] }],
   };
+
   const member: IrcMember = { ...chief, channels: ["#ship{1}"] };
   const ascii = (value: string) => fold(value, "ascii");
   const rfc = (value: string) => fold(value, "rfc1459");
@@ -833,9 +891,11 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
   const [chiefConfig] = shipConfig().crew;
+
   if (!chiefConfig) throw new Error("missing crew fixture");
+
   // Captain in #galactica and #bridge; chief (spelled #Galactica) and
-  // tyrol in #galactica only. Default: 60 ship messages per agent an hour.
+  // Tyrol in #galactica only. Default: 60 ship messages per agent an hour.
   const ship = shipConfig({
     channels: ["#galactica", "#bridge"],
     access: {},
@@ -849,16 +909,21 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
       },
     ],
   });
+
   expect(ship.access.shipTurnsPerAgentPerHour).toBe(60);
   const two = shipConfig({ access: {} });
+
   const limits = {
     shipKeys: [captain.key, chief.key],
     count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
       store.irc.turnsSince(input),
   };
+
   let id = 0;
+
   const admitted = (config: IrcConfig, target: string, attempts: number) => {
     let count = 0;
+
     for (let i = 0; i < attempts; i++) {
       const admission = routeIrcMessage(
         message(target, "galactica: status", {
@@ -875,12 +940,16 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
           fold: (value) => fold(value, "ascii"),
         },
       );
+
       if (!admission) throw new Error("not routed");
+
       if (withinLimits(admission, config, limits, (v) => fold(v, "ascii")))
         count += store.enqueue(admission) ? 1 : 0;
     }
+
     return count;
   };
+
   // Two agents (captain + chief) in #galactica: 120 admitted, the 121st dropped.
   expect(admitted(two, "#galactica", 121)).toBe(120);
   // Three agents in #galactica (crew spelling folded): 180 in total.
@@ -888,11 +957,13 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
   expect(admitted(ship, "#galactica", 1)).toBe(0);
   // #bridge has only the captain: 60.
   expect(admitted(ship, "#bridge", 61)).toBe(60);
+
   // 0 turns ship messages off.
   const off = shipConfig({
     channels: ["#galactica", "#quiet"],
     access: { shipTurnsPerAgentPerHour: 0 },
   });
+
   expect(admitted(off, "#quiet", 1)).toBe(0);
   expect(
     Result.isSuccess(
@@ -917,11 +988,13 @@ test("irc ship cap: a crew → captain DM is capped at per agent × 2", async ()
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const limits = {
     shipKeys: [captain.key, chief.key],
     count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
       store.irc.turnsSince(input),
   };
+
   const dm = (config: IrcConfig, msgid: string) => {
     const admission = routeIrcMessage(
       message("galactica", "status of the build?", {
@@ -938,28 +1011,34 @@ test("irc ship cap: a crew → captain DM is capped at per agent × 2", async ()
         fold: (value) => fold(value, "ascii"),
       },
     );
+
     if (!admission) throw new Error("not routed");
     expect(admission.sender).toBe("crew");
     expect(admission.channel).toBe("galactica-chief");
+
     return (
       withinLimits(admission, config, limits, (v) => fold(v, "ascii")) &&
       store.enqueue(admission)
     );
   };
+
   // Default 60 per agent, two participants: 120 admitted, the 121st dropped.
   const ship = shipConfig({ access: {} });
   let admitted = 0;
+
   for (let i = 0; i < 121; i++) if (dm(ship, `dm${i}`)) admitted++;
   expect(admitted).toBe(120);
   // 0 still turns ship messages off, in direct messages too.
   const off = shipConfig({ access: { shipTurnsPerAgentPerHour: 0 } });
   const fresh = openStore(join(directory, "off.sqlite"));
   cleanup.push(() => fresh.close());
+
   const offLimits = {
     shipKeys: [captain.key],
     count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
       fresh.irc.turnsSince(input),
   };
+
   const admission = routeIrcMessage(
     message("galactica", "hello", { account: "galactica-chief", msgid: "x" }),
     {
@@ -971,13 +1050,16 @@ test("irc ship cap: a crew → captain DM is capped at per agent × 2", async ()
       fold: (value) => fold(value),
     },
   );
+
   if (!admission) throw new Error("not routed");
   expect(withinLimits(admission, off, offLimits)).toBe(false);
 });
 
 test("irc all-call: reaches every ship agent in the channel, word-bounded", async () => {
   const [chiefConfig] = shipConfig().crew;
+
   if (!chiefConfig) throw new Error("missing crew fixture");
+
   const ship = shipConfig({
     channels: ["#galactica", "#bridge"],
     access: {},
@@ -992,11 +1074,13 @@ test("irc all-call: reaches every ship agent in the channel, word-bounded", asyn
       },
     ],
   });
+
   expect(ship.access.allCallWords).toEqual([
     "all hands",
     "all crew",
     "everyone",
   ]);
+
   const tyrol: IrcMember = {
     ...chief,
     id: "galactica-irc-tyrol",
@@ -1005,11 +1089,13 @@ test("irc all-call: reaches every ship agent in the channel, word-bounded", asyn
     channels: ["#bridge"],
     key: "tyrol-key",
   };
+
   const members = {
     captain: { ...captain, channels: ship.channels },
     chief,
     tyrol,
   };
+
   const reach = (
     text: string,
     target = "#galactica",
@@ -1029,6 +1115,7 @@ test("irc all-call: reaches every ship agent in the channel, word-bounded", asyn
           }) !== undefined,
       )
       .map(([name]) => name);
+
   // Everyone in #galactica (captain, chief); tyrol is only in #bridge.
   expect(reach("Everyone, report fuel levels")).toEqual(["captain", "chief"]);
   expect(reach("ALL HANDS to stations")).toEqual(["captain", "chief"]);
@@ -1081,12 +1168,15 @@ test("irc all-call: ship senders count against the channel cap, people do not", 
   cleanup.push(() => store.close());
   // 1 per agent × 2 agents (captain + chief) = 2 ship messages an hour.
   const config = shipConfig({ access: { shipTurnsPerAgentPerHour: 1 } });
+
   const limits = {
     shipKeys: [captain.key, chief.key],
     count: (input: Parameters<Store["irc"]["turnsSince"]>[0]) =>
       store.irc.turnsSince(input),
   };
+
   let id = 0;
+
   const call = (member: IrcMember, account: string) => {
     const admission = routeIrcMessage(
       message("#galactica", "everyone: report", {
@@ -1103,13 +1193,16 @@ test("irc all-call: ship senders count against the channel cap, people do not", 
         fold: (value) => fold(value),
       },
     );
+
     if (!admission) throw new Error("not routed");
+
     return withinLimits(admission, config, limits) && store.enqueue(admission);
   };
+
   // People are never capped by the ship limit.
   for (let i = 0; i < 5; i++) expect(call(chief, "jack")).toBe(true);
   // Ship all-calls fan out and count: the captain's reaches chief (1),
-  // chief's reaches the captain (2), the next one is dropped.
+  // Chief's reaches the captain (2), the next one is dropped.
   expect(call(chief, "galactica")).toBe(true);
   expect(call(captain, "galactica-chief")).toBe(true);
   expect(call(chief, "galactica")).toBe(false);
@@ -1125,9 +1218,10 @@ test("irc instructions: response policy, all-calls and crew routing via the capt
     expect(text).toContain("acknowledgements");
     expect(text).toContain("one message");
   }
+
   // Crew speak to the captain. Crew-to-crew uses stargate_dm (reply needed now)
-  // or stargate_mail (otherwise); those refuse an IRC session, so there the
-  // crew member asks the captain to relay.
+  // Or stargate_mail (otherwise); those refuse an IRC session, so there the
+  // Crew member asks the captain to relay.
   expect(ircCrewInstructions).toContain("Speak to the captain");
   expect(ircCrewInstructions).toContain("stargate_dm");
   expect(ircCrewInstructions).toContain("stargate_mail");
@@ -1187,13 +1281,16 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
     assignedCheckout: "/workspace",
     capabilities: ["read_code", "dispatch"],
   };
+
   const access = {
     channelRequests: "nick-mention",
     allowedAccounts: ["jack", "defiant", "phoenix", "stranger"],
     peerCaptains: ["defiant", "stranger"],
     peerTurnsPerHour: 1,
   };
+
   const restricted = shipConfig({ fleetPolicy: fleet, access });
+
   const context = {
     config: restricted,
     member: captain,
@@ -1203,6 +1300,7 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
     now: () => 0,
     fold: (value: string) => fold(value),
   };
+
   for (const target of ["#galactica", "galactica"]) {
     const admitted = routeIrcMessage(
       message(target, "Galactica: verified peer context", {
@@ -1211,7 +1309,9 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
       }),
       context,
     );
+
     expect(admitted).toMatchObject({ user: "defiant", sender: "captain" });
+
     if (!admitted) throw new Error("Expected enrolled peer");
     expect(
       withinLimits(admitted, restricted, {
@@ -1220,6 +1320,7 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
       }),
     ).toBe(false);
   }
+
   for (const candidate of [
     message("#galactica", "galactica: spoof", { account: "stranger", bot: "" }),
     message("#galactica", "galactica: not an explicit peer", {
@@ -1253,10 +1354,12 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
     }),
   ])
     expect(routeIrcMessage(candidate, context)).toBeUndefined();
+
   const denied = shipConfig({
     fleetPolicy: fleet,
     access: { ...access, deniedAccounts: ["defiant"] },
   });
+
   expect(
     routeIrcMessage(
       message("#galactica", "galactica: denied", {
@@ -1278,6 +1381,7 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
   ).toBeUndefined();
   const store = openStore(":memory:");
   cleanup.push(() => store.close());
+
   const ship = await IrcShip.create(
     restricted,
     store,
@@ -1289,9 +1393,12 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
       },
     },
   );
+
   cleanup.push(() => ship.close());
   const primary = ship.registrations[0];
+
   if (!primary) throw new Error("Missing primary");
+
   const admitted = routeIrcMessage(
     message("#galactica", "galactica: context", {
       account: "defiant",
@@ -1299,6 +1406,7 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
     }),
     context,
   );
+
   if (!admitted) throw new Error("Expected peer context");
   expect(primary.transport.source(admitted)).toMatchObject({
     authority: "agent",
@@ -1335,6 +1443,7 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
       wakeChannels: ["#galactica"],
     },
   });
+
   const context = {
     config: restricted,
     member: captain,
@@ -1344,6 +1453,7 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
     now: () => 0,
     fold: (value: string) => fold(value),
   };
+
   for (const text of [
     "vance: ask galactica to report",
     " VANCE, ask galactica to report ",
@@ -1361,6 +1471,7 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
         context,
       ),
     ).toBeUndefined();
+
   for (const text of [
     "galactica_: ask vance to report",
     "galactica: ask vance to report",
@@ -1376,11 +1487,14 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
       ),
     ).toBeDefined();
   const fleetControl = restricted.fleetControl;
+
   if (!fleetControl) throw new Error("Missing fleet control fixture");
+
   const legacy = {
     ...restricted,
     fleetControl: { ...fleetControl, results: false },
   };
+
   expect(
     routeIrcMessage(
       message("#galactica", "vance: ask galactica to report", {
@@ -1389,6 +1503,7 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
       { ...context, config: legacy },
     ),
   ).toBeDefined();
+
   const strict = shipConfig({
     ...restricted,
     access: {
@@ -1397,6 +1512,7 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
       channelRequests: "nick-mention",
     },
   });
+
   expect(
     routeIrcMessage(
       message("#galactica", "vance: ask galactica_ to report", {
@@ -1424,10 +1540,12 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
     ircResultJobAllowed(legacy, captain, "galactica_", "vance", undefined),
   ).toBe(true);
   const nested = "galactica_: vance: this is addressed to galactica";
+
   const admitted = routeIrcMessage(
     message("#galactica", nested, { account: "jack" }),
     context,
   );
+
   expect(admitted?.text).toBe(nested);
   expect(
     ircResultJobAllowed(restricted, captain, "galactica_", "jack", admitted),
@@ -1445,8 +1563,10 @@ test("irc dispatch answers pass the same account and channel rules as messages, 
     channels: ["#galactica", "#closed"],
     access: { deniedAccounts: ["mallory"], deniedChannels: ["#closed"] },
   });
+
   const member = { ...captain, channels: ["#galactica", "#closed"] };
   const joined = new Set(["#galactica", "#closed"]);
+
   const allowed = (
     target: string,
     tags: Record<string, string>,
@@ -1458,6 +1578,7 @@ test("irc dispatch answers pass the same account and channel rules as messages, 
       fold: (value) => fold(value),
       joined: (channel) => joined.has(channel),
     });
+
   expect(allowed("#galactica", { account: "jack" })).toBe(true);
   expect(allowed("#galactica", { account: "MALLORY" })).toBe(false);
   expect(allowed("#closed", { account: "jack" })).toBe(false);

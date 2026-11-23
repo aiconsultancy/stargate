@@ -87,6 +87,7 @@ export async function handleSlackRequest(
   open: () => boolean = () => true,
 ) {
   if (!open()) return;
+
   try {
     if (request.type === "slash_commands" && interactions) {
       await interactions.command(request.body, request.ack);
@@ -95,10 +96,12 @@ export async function handleSlackRequest(
     } else {
       if (request.type === "events_api") {
         await accept(request.body);
+
         // Intake closed during an async check: Slack redelivers to the next
-        // connection; a stored copy is deduplicated by its event ID.
+        // Connection; a stored copy is deduplicated by its event ID.
         if (!open()) return;
       }
+
       await request.ack();
     }
   } catch {
@@ -136,15 +139,17 @@ export class SlackConnection implements TransportDelivery {
         return LogLevel.ERROR;
       },
     };
+
     const options = {
       logger,
       timeout: 15_000,
       retryConfig: { retries: 0 },
       rejectRateLimitedCalls: true,
     };
+
     this.web = new WebClient(botToken, { ...webOptions, ...options });
     // SDK v8 has no per-method signal. A request-scoped client uses the same
-    // token/options, without leaking cancellation through its shared queue.
+    // Token/options, without leaking cancellation through its shared queue.
     this.historyWeb = (signal) =>
       new WebClient(botToken, {
         ...webOptions,
@@ -165,9 +170,11 @@ export class SlackConnection implements TransportDelivery {
         clientOptions: options,
         autoReconnectEnabled: false,
       });
+
       socket.on("slack_event", (request: SocketRequest) => {
         void this.handle?.(request);
       });
+
       return socket;
     }, log);
   }
@@ -188,8 +195,10 @@ export class SlackConnection implements TransportDelivery {
     const result = Schema.decodeUnknownResult(reactionTargetSchema)(
       await this.historyWeb(signal).reactions.get({ channel, timestamp: ts }),
     );
+
     if (Result.isFailure(result) || result.success.channel !== channel) return;
     const message = result.success.message;
+
     if (
       message.ts !== ts ||
       message.user !== identity.user ||
@@ -200,13 +209,16 @@ export class SlackConnection implements TransportDelivery {
       (message.app_id !== undefined && message.app_id !== appId)
     )
       return;
+
     return message.thread_ts ?? message.ts;
   }
 
   async identity(signal?: AbortSignal): Promise<Identity> {
     const auth = await retrySlack(() => this.web.auth.test(), signal);
+
     if (!auth.team_id || !auth.user_id || !auth.bot_id)
       throw new Error("Slack requires a workspace bot token");
+
     return { team: auth.team_id, user: auth.user_id };
   }
 
@@ -224,9 +236,10 @@ export class SlackConnection implements TransportDelivery {
     signal?: AbortSignal,
   ) {
     this.handle = async (request: SocketRequest) => {
-      // handleSlackRequest catches errors without exposing SDK payloads.
+      // HandleSlackRequest catches errors without exposing SDK payloads.
       await handleSlackRequest(request, accept, log, interactions, open);
     };
+
     await this.socket.start(signal);
   }
 
@@ -246,6 +259,7 @@ export class SlackConnection implements TransportDelivery {
     prepared?: SlackContent,
   ) {
     const content = prepared ?? slackContent(text, format);
+
     const result = await this.web.chat.postMessage({
       channel,
       ...(thread ? { thread_ts: thread } : {}),
@@ -259,7 +273,9 @@ export class SlackConnection implements TransportDelivery {
       unfurl_links: false,
       unfurl_media: false,
     });
+
     if (!result.ts) throw new Error("Slack did not return a message timestamp");
+
     return result.ts;
   }
 
@@ -278,6 +294,7 @@ export class SlackConnection implements TransportDelivery {
 
   async announce(channel: string, text: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
+
     return this.send(channel, "", text, "plain");
   }
 
@@ -287,6 +304,7 @@ export class SlackConnection implements TransportDelivery {
     signal: AbortSignal,
   ): Promise<SinkOutcome> {
     if (signal.aborted) return { state: "refused", retryable: true };
+
     try {
       const result = await this.historyWeb(signal).chat.postMessage({
         channel,
@@ -296,6 +314,7 @@ export class SlackConnection implements TransportDelivery {
         unfurl_links: false,
         unfurl_media: false,
       });
+
       return result.ok === true &&
         typeof result.ts === "string" &&
         /^\d+\.\d+$/.test(result.ts)
@@ -330,17 +349,22 @@ export class SlackConnection implements TransportDelivery {
       unfurl_links: false,
       unfurl_media: false,
     };
+
     try {
       if (ts !== undefined) {
         await this.web.chat.update({ ...content, ts });
+
         return ts;
       }
+
       const result = await this.web.chat.postMessage({
         ...content,
         thread_ts: thread,
       });
+
       if (!result.ts)
         throw new Error("Slack did not return a message timestamp");
+
       return result.ts;
     } catch (error) {
       if (ts !== undefined && slackError(error, "message_not_found"))
@@ -358,6 +382,7 @@ export class SlackConnection implements TransportDelivery {
   ): Promise<string> {
     signal?.throwIfAborted();
     const web = signal ? this.historyWeb(signal) : this.web;
+
     const content = {
       channel,
       ...activityContent(view),
@@ -366,23 +391,30 @@ export class SlackConnection implements TransportDelivery {
       unfurl_links: false,
       unfurl_media: false,
     };
+
     if (ts !== undefined) {
       // Missing/ambiguous updates must not create duplicate activity messages.
       await web.chat.update({ ...content, ts });
+
       return ts;
     }
+
     const result = await web.chat.postMessage({
       ...content,
       thread_ts: thread,
     });
+
     if (!result.ts) throw new Error("Slack did not return a message timestamp");
+
     return result.ts;
   }
 
   readonly crewUI: CrewUIApi = {
     open: async (triggerId, view) => {
       const result = await this.web.views.open({ trigger_id: triggerId, view });
+
       if (!result.view?.id) throw new Error("Slack did not return a view ID");
+
       return result.view.id;
     },
     update: async (viewId, view) => {
@@ -425,6 +457,7 @@ export class SlackConnection implements TransportDelivery {
         ],
         parse: "none",
       });
+
       return true;
     } catch (error) {
       if (slackError(error, "message_not_found")) return false;
@@ -452,6 +485,7 @@ export class SlackConnection implements TransportDelivery {
   async readReceipt(channel: string, timestamp: string, active: boolean) {
     const web = this.historyWeb(AbortSignal.timeout(1500));
     const args = { channel, timestamp, name: "eyes" };
+
     try {
       if (active) await web.reactions.add(args);
       else await web.reactions.remove(args);
@@ -464,6 +498,7 @@ export class SlackConnection implements TransportDelivery {
   /** Idempotent: a repeated SDK disconnect can wait for an event that never comes. */
   close() {
     this.closing ??= this.socket.close();
+
     return this.closing;
   }
 }

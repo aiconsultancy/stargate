@@ -20,9 +20,11 @@ import { bot } from "./fixtures";
 import { FakeIrcServer } from "./irc-fixture";
 
 const cleanup: (() => Promise<unknown> | unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
 const lock = (path: string) => ({
   command: "python3",
   args: [
@@ -37,6 +39,7 @@ async function runtime(transports: "irc" | "teams" | "both") {
   const directory = await realpath(
     await mkdtemp(join(tmpdir(), "stargate-dashboard-transports-")),
   );
+
   await chmod(directory, 0o700);
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const irc = new FakeIrcServer({ accounts: { captain: "fixture" } });
@@ -44,6 +47,7 @@ async function runtime(transports: "irc" | "teams" | "both") {
   cleanup.push(() => irc.stop());
   setDefaultLockCommandForTests(lock);
   cleanup.push(() => setDefaultLockCommandForTests(flockCommand));
+
   const config = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: directory,
     dashboard: true,
@@ -89,11 +93,14 @@ async function runtime(transports: "irc" | "teams" | "both") {
             },
           ],
   });
+
   const built: string[] = [],
     closed: string[] = [],
     turns: string[] = [];
+
   const registrations: IrcRegistration[] = [];
   const ready = Promise.withResolvers<void>();
+
   const log = pino(
     { level: "info" },
     new Writable({
@@ -103,14 +110,17 @@ async function runtime(transports: "irc" | "teams" | "both") {
       },
     }),
   );
+
   const dependencies: RuntimeDependencies = {
     slack() {
       throw new Error("No Slack connection belongs to this configuration");
     },
     async backend(config) {
       const id = config.type === "opencode" ? config.sessionID : undefined;
+
       if (!id) throw new Error("Missing fixture pin");
       built.push(id);
+
       return {
         sessionID: id,
         async createSession() {
@@ -159,14 +169,19 @@ async function runtime(transports: "irc" | "teams" | "both") {
         readyMs: 1000,
         crewLink: null,
       });
+
       registrations.push(...ship.registrations);
+
       return ship;
     },
   };
+
   const abort = new AbortController();
+
   const work = Effect.runPromise(
     serve(config, log, abort.signal, dependencies),
   );
+
   cleanup.push(async () => {
     abort.abort();
     await work;
@@ -177,22 +192,26 @@ async function runtime(transports: "irc" | "teams" | "both") {
       throw new Error("Runtime stopped before readiness");
     }),
   ]);
+
   const get = async (path: string, method = "GET") =>
     fetch("http://dashboard" + path, {
       unix: join(directory, "dashboard.sock"),
       method,
     });
+
   return { config, directory, built, closed, turns, registrations, get };
 }
 
 for (const transport of ["irc", "teams", "both"] as const)
   test(`${transport} runtime dashboard uses real transports without extra backends, sessions or Slack`, async () => {
     const f = await runtime(transport);
+
     const data = z
       .object({
         ships: z.array(z.object({ id: z.string(), transport: z.string() })),
       })
       .parse(await (await f.get("/api/fleet")).json());
+
     expect(data.ships.map((s) => s.id).sort()).toEqual(
       transport === "both"
         ? ["captain", "captain-teams"]
@@ -201,6 +220,7 @@ for (const transport of ["irc", "teams", "both"] as const)
           : ["captain-teams"],
     );
     expect(f.built).toHaveLength(transport === "both" ? 2 : 1);
+
     for (const ship of data.ships) {
       const detail = z
         .object({
@@ -211,6 +231,7 @@ for (const transport of ["irc", "teams", "both"] as const)
           sessions: z.array(z.object({ id: z.string() })),
         })
         .parse(await (await f.get("/api/ships/" + ship.id)).json());
+
       expect(detail.bot.slack).toBeUndefined();
       expect(detail.bot.transport.kind).toBe(ship.transport);
       expect(detail.sessions[0]?.id).toBe(
@@ -229,16 +250,20 @@ for (const transport of ["irc", "teams", "both"] as const)
       ).toBe(404);
       expect((await f.get("/api/ships/" + ship.id, "POST")).status).toBe(405);
     }
+
     if (transport !== "teams") {
       const registration = f.registrations[0];
+
       if (!registration) throw new Error("Missing real IRC registration");
       const store = openStore(join(f.directory, "stargate.sqlite"));
+
       try {
         const conversation = conversationKey(
           registration.key,
           "#ship",
           "thread",
         );
+
         const job = store.enqueue({
           eventId: "dashboard-fixture",
           botKey: registration.key,
@@ -248,24 +273,29 @@ for (const transport of ["irc", "teams", "both"] as const)
           user: "human",
           text: "not shown in summary",
         });
+
         if (!job) throw new Error("Missing fixture job");
         const retained = store.queuedJob(registration.key, "dashboard-fixture");
+
         if (!retained) throw new Error("Missing retained job");
         store.finish(retained.id, "failed");
         store.saveSession(conversation, "ses_mapped_irc");
       } finally {
         store.close();
       }
+
       const own = z
         .object({
           queue: z.object({ counts: z.object({ failed: z.number() }) }),
         })
         .parse(await (await f.get("/api/ships/captain")).json());
+
       expect(own.queue.counts.failed).toBe(1);
       expect(
         (await f.get("/api/ships/captain/entries?session=ses_mapped_irc"))
           .status,
       ).toBe(200);
+
       if (transport === "both")
         expect(
           (
@@ -275,6 +305,7 @@ for (const transport of ["irc", "teams", "both"] as const)
           ).status,
         ).toBe(404);
     }
+
     expect(f.turns).toEqual([]);
   });
 
@@ -283,6 +314,7 @@ test("shared dashboard configuration is explicit, normalised and requires dashbo
   expect(
     Schema.decodeUnknownSync(configSchema)(base).dashboardSocket,
   ).toBeUndefined();
+
   for (const dashboardSocket of [
     { path: "relative.sock", groupAccess: true },
     { path: "/run/../dashboard.sock", groupAccess: true },
@@ -322,7 +354,9 @@ test("shared dashboard cannot expose its private gateway data directory", async 
   const directory = await realpath(
     await mkdtemp(join(tmpdir(), "stargate-dashboard-isolation-")),
   );
+
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
+
   const config = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: directory,
     dashboard: true,
@@ -332,6 +366,7 @@ test("shared dashboard cannot expose its private gateway data directory", async 
     },
     bots: [bot()],
   });
+
   const dependencies: RuntimeDependencies = {
     slack() {
       throw new Error("No transport may start");
@@ -340,6 +375,7 @@ test("shared dashboard cannot expose its private gateway data directory", async 
       throw new Error("No backend may start");
     },
   };
+
   await expect(
     Effect.runPromise(
       serve(

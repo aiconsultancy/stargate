@@ -23,30 +23,39 @@ import type { Ownership } from "../src/lib/unix-socket";
 
 const html =
   '<!doctype html><style>body { color: red; }</style><script>console.log("ok");</script>';
+
 const fleet = { generatedAt: 1, ships: [] };
+
 function fixture(overrides: Partial<DashboardSource> = {}, timeoutMs = 20_000) {
   const calls: unknown[] = [];
   const warnings: unknown[][] = [];
+
   const source: DashboardSource = {
     fleet: async (signal) => {
       calls.push(["fleet", signal]);
+
       return fleet;
     },
     ship: async (id, signal) => {
       calls.push(["ship", id, signal]);
+
       return undefined;
     },
     children: async (id, input, signal) => {
       calls.push(["sessions", id, input, signal]);
+
       return { sessions: [] };
     },
     entries: async (id, input, signal) => {
       calls.push(["entries", id, input, signal]);
+
       return { entries: [] };
     },
     ...overrides,
   };
+
   const controller = new AbortController();
+
   const log = pino(
     { level: "warn" },
     {
@@ -55,8 +64,10 @@ function fixture(overrides: Partial<DashboardSource> = {}, timeoutMs = 20_000) {
       },
     },
   );
+
   const options = { source, html, signal: controller.signal, log, timeoutMs };
   const handler = dashboardHandler(options);
+
   return {
     calls,
     warnings,
@@ -74,14 +85,17 @@ test("HTML and API routes set private response headers and exact CSP hashes", as
   expect(await page.text()).toBe(html);
   expect(page.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
   const policy = page.headers.get("Content-Security-Policy");
+
   for (const body of ["body { color: red; }", 'console.log("ok");']) {
     expect(policy).toContain(
       `'sha256-${createHash("sha256").update(body).digest("base64")}'`,
     );
   }
+
   expect(policy).toContain("default-src 'none'");
   expect(policy).toContain("connect-src 'self'");
   expect(policy).not.toContain("unsafe-inline");
+
   for (const path of [
     "/",
     "/api/fleet",
@@ -95,6 +109,7 @@ test("HTML and API routes set private response headers and exact CSP hashes", as
     expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(response.headers.get("X-Frame-Options")).toBe("DENY");
   }
+
   expect(await (await f.get("/api/fleet")).json()).toEqual(fleet);
   expect(
     await (
@@ -131,6 +146,7 @@ test("HTML and API routes set private response headers and exact CSP hashes", as
 
 test("HEAD has GET status and headers but no body; other methods return 405", async () => {
   const f = fixture();
+
   for (const path of [
     "/",
     "/api/fleet",
@@ -145,6 +161,7 @@ test("HEAD has GET status and headers but no body; other methods return 405", as
     expect([...head.headers]).toEqual([...get.headers]);
     expect(await head.text()).toBe("");
   }
+
   for (const method of ["POST", "PUT", "DELETE", "OPTIONS", "PATCH"]) {
     const response = await f.get("/api/fleet", method);
     expect(response.status).toBe(405);
@@ -157,6 +174,7 @@ test("unknown routes and undefined source results return safe 404", async () => 
     children: async () => undefined,
     entries: async () => undefined,
   });
+
   for (const path of [
     "/missing",
     "/prefix/",
@@ -207,6 +225,7 @@ test("ship route returns source view without mutation", async () => {
     sessions: [],
     sessionsMore: false,
   };
+
   const f = fixture({ ship: async () => ship });
   const response = await f.get("/api/ships/ship");
   expect(response.status).toBe(200);
@@ -215,6 +234,7 @@ test("ship route returns source view without mutation", async () => {
 
 test("invalid and repeated parameters fail before reading the source", async () => {
   const f = fixture();
+
   const paths = [
     "/?x=1",
     "/api/fleet?cursor=1",
@@ -239,23 +259,27 @@ test("invalid and repeated parameters fail before reading the source", async () 
     `/api/ships/a/entries?session=${"x".repeat(513)}`,
     `/api/ships/a/entries?session=a&cursor=${"x".repeat(4097)}`,
   ];
+
   for (const path of paths) {
     const response = await f.get(path);
     expect(response.status, path).toBe(400);
     expect(await response.json()).toEqual({ error: "Invalid request" });
   }
+
   expect(f.calls).toEqual([]);
 });
 
 test("history query bounds count Unicode code points", async () => {
   const f = fixture();
   const emoji = (count: number) => encodeURIComponent("😀".repeat(count));
+
   for (const path of [
     `/api/ships/a/sessions?parent=${emoji(512)}&cursor=${emoji(4096)}`,
     `/api/ships/a/entries?session=${emoji(512)}&cursor=${emoji(4096)}`,
   ])
     expect((await f.get(path)).status, path.slice(0, 40)).toBe(200);
   expect(f.calls).toHaveLength(2);
+
   for (const path of [
     `/api/ships/a/sessions?parent=${emoji(513)}`,
     `/api/ships/a/sessions?parent=a&cursor=${emoji(4097)}`,
@@ -266,11 +290,13 @@ test("history query bounds count Unicode code points", async () => {
     expect(response.status, path.slice(0, 40)).toBe(400);
     expect(await response.json()).toEqual({ error: "Invalid request" });
   }
+
   expect(f.calls).toHaveLength(2);
 });
 
 test("external assets and event handlers throw during handler creation", () => {
   const f = fixture();
+
   for (const asset of [
     '<script src="app.js"></script>',
     '<link rel="stylesheet" href="app.css">',
@@ -292,7 +318,9 @@ test("source exceptions produce one route-only warning and safe 502", async () =
   const fail = async () => {
     throw new Error("SECRET session-id private-url");
   };
+
   const f = fixture({ fleet: fail, ship: fail, children: fail, entries: fail });
+
   for (const path of [
     "/api/fleet",
     "/api/ships/id",
@@ -303,20 +331,24 @@ test("source exceptions produce one route-only warning and safe 502", async () =
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: "Bad gateway" });
   }
+
   expect(f.warnings).toHaveLength(4);
   expect(JSON.stringify(f.warnings)).not.toMatch(
     /SECRET|session-id|private-url|parent=|session=|\/api/,
   );
+
   for (const route of ["fleet", "ship", "sessions", "entries"])
     expect(JSON.stringify(f.warnings)).toContain(`"route":"${route}"`);
 });
 
 test("deadline aborts source and returns 504 without logging source failure", async () => {
   let received: AbortSignal | undefined;
+
   const f = fixture(
     {
       fleet: async (signal) => {
         received = signal;
+
         return await new Promise((_, reject) =>
           signal.addEventListener("abort", () => reject(signal.reason), {
             once: true,
@@ -326,6 +358,7 @@ test("deadline aborts source and returns 504 without logging source failure", as
     },
     1,
   );
+
   const response = await f.get("/api/fleet");
   expect(response.status).toBe(504);
   expect(received?.aborted).toBe(true);
@@ -334,9 +367,11 @@ test("deadline aborts source and returns 504 without logging source failure", as
 
 test("shutdown aborts active work and rejects new API requests with 503", async () => {
   const started = Promise.withResolvers<AbortSignal>();
+
   const f = fixture({
     fleet: async (signal) => {
       started.resolve(signal);
+
       return await new Promise((_, reject) =>
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
@@ -344,6 +379,7 @@ test("shutdown aborts active work and rejects new API requests with 503", async 
       );
     },
   });
+
   const response = f.get("/api/fleet");
   const signal = await started.promise;
   f.controller.abort();
@@ -386,11 +422,14 @@ test("Unix socket replaces stale socket, serves HTTP, has mode 0600 and cleans u
   );
   await rename(stalePath, socket);
   const server = await startDashboard({ ...fixture().options, socket });
+
   try {
     expect((await lstat(socket)).mode & 0o777).toBe(0o600);
+
     const response = await fetch("http://localhost/api/fleet", {
       unix: socket,
     });
+
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(fleet);
   } finally {
@@ -404,6 +443,7 @@ test("Unix socket replaces stale socket, serves HTTP, has mode 0600 and cleans u
 test("Unix socket refuses regular files and non-private parent directories", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dashboard-test-"));
   const socket = join(directory, "dashboard.sock");
+
   try {
     await chmod(directory, 0o700);
     await writeFile(socket, "keep");
@@ -427,20 +467,26 @@ test("stop waits for underlying source work and removes the socket", async () =>
   await chmod(directory, 0o700);
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<typeof fleet>();
+
   const f = fixture({
     fleet: () => {
       entered.resolve();
+
       return release.promise;
     },
   });
+
   const server = await startDashboard({ ...f.options, socket });
+
   try {
     const request = fetch("http://localhost/api/fleet", { unix: socket });
     await entered.promise;
     let stopped = false;
+
     const stopping = server.stop().then(() => {
       stopped = true;
     });
+
     expect((await request).status).toBe(503);
     expect(stopped).toBe(false);
     release.resolve(fleet);
@@ -456,10 +502,12 @@ test("stop waits for underlying source work and removes the socket", async () =>
 test("timed-out uncancellable work retains its concurrency slot", async () => {
   const release = Promise.withResolvers<typeof fleet>();
   const f = fixture({ fleet: () => release.promise }, 1);
+
   try {
     const responses = await Promise.all(
       Array.from({ length: 8 }, () => f.get("/api/fleet")),
     );
+
     expect(responses.every((response) => response.status === 504)).toBe(true);
     expect((await f.get("/api/fleet")).status).toBe(503);
   } finally {
@@ -476,24 +524,31 @@ const sharedLock: NonNullable<Ownership["lockCommand"]> = (path) => ({
     path,
   ],
 });
+
 test("opt-in shared Unix socket inherits the protected operator group and serves only reads", async () => {
   const directory = await realpath(
     await mkdtemp(join(tmpdir(), "dashboard-shared-")),
   );
+
   const socket = join(directory, "http.sock");
+
   if (!process.getuid || !process.getgid) throw new Error("POSIX IDs required");
   await chown(directory, process.getuid(), process.getgid());
   await chmod(directory, 0o2750);
+
   const options = {
     ...fixture().options,
     socket,
     groupAccess: true,
     ownership: { lockCommand: sharedLock },
   };
+
   const server = await startDashboard(options);
+
   try {
     const parent = await lstat(directory),
       file = await lstat(socket);
+
     expect(file.mode & 0o777).toBe(0o660);
     expect(file.gid).toBe(parent.gid);
     expect(file.uid === process.getuid?.()).toBe(true);
@@ -502,20 +557,25 @@ test("opt-in shared Unix socket inherits the protected operator group and serves
         await fetch("http://dashboard/api/fleet", { unix: socket })
       ).json(),
     ).toEqual(fleet);
+
     const head = await fetch("http://dashboard/api/fleet", {
       unix: socket,
       method: "HEAD",
     });
+
     expect(head.status).toBe(200);
     expect(await head.text()).toBe("");
+
     for (const method of ["POST", "PUT", "DELETE", "OPTIONS", "PATCH"]) {
       const response = await fetch("http://dashboard/api/fleet", {
         unix: socket,
         method,
       });
+
       expect(response.status).toBe(405);
       expect(response.headers.get("Allow")).toBe("GET, HEAD");
     }
+
     await expect(startDashboard(options)).rejects.toThrow();
     expect(
       (await fetch("http://dashboard/api/fleet", { unix: socket })).status,
@@ -531,21 +591,26 @@ test("shared dashboard refuses missing setgid, writable parents, symlinks and no
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "dashboard-shared-")),
   );
+
   const directory = join(root, "operator");
   await mkdir(directory, { mode: 0o700 });
+
   if (!process.getuid || !process.getgid) throw new Error("POSIX IDs required");
   await chown(directory, process.getuid(), process.getgid());
+
   const options = {
     ...fixture().options,
     socket: join(directory, "http.sock"),
     groupAccess: true,
     ownership: { lockCommand: sharedLock },
   };
+
   try {
     for (const mode of [0o700, 0o750, 0o2770, 0o2755]) {
       await chmod(directory, mode);
       await expect(startDashboard(options)).rejects.toThrow();
     }
+
     await chmod(directory, 0o2750);
     await chmod(root, 0o770);
     await expect(startDashboard(options)).rejects.toThrow();

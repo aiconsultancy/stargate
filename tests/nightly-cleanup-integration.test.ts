@@ -49,6 +49,7 @@ test("cleanup protects configuration, runtime and every permanent crew directory
       },
     ],
   });
+
   const crew: Crew = {
     namespace: "ship",
     captainDirectory: "/projects/captain",
@@ -64,6 +65,7 @@ test("cleanup protects configuration, runtime and every permanent crew directory
     ],
     worktreeDirectories: ["/projects/pi-worker", "/projects/code-worker"],
   };
+
   expect(cleanupProtection(config, "/config/stargate.json", [crew])).toEqual([
     "/config",
     "/runtime/stargate",

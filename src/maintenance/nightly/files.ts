@@ -21,14 +21,17 @@ export async function atomicWrite(
 ) {
   const real = await realpath(path).catch(() => path);
   const current = await stat(real).catch(() => null);
+
   const temp = join(
     dirname(real),
     `.${basename(real)}.stargate-${process.pid}`,
   );
+
   await writeFile(temp, content, {
     flag: "w",
     mode: mode ?? (current ? current.mode & 0o777 : 0o600),
   });
+
   try {
     await rename(temp, real);
   } catch (error) {
@@ -42,6 +45,7 @@ export async function replaceLink(path: string, target: string) {
   const temp = `${path}.new-${process.pid}`;
   await unlink(temp).catch(() => {});
   await symlink(target, temp);
+
   try {
     await rename(temp, path);
   } catch (error) {

@@ -39,12 +39,16 @@ import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, until } from "./irc-fixture";
 
 const close: (() => Promise<unknown> | unknown)[] = [];
+
 afterEach(async () => {
   for (const f of close.splice(0).reverse()) await f();
 });
+
 const signal = () => new AbortController().signal;
+
 const diff =
   "diff --git a/index.ts b/index.ts\nindex 1111111..2222222 100644\n--- a/index.ts\n+++ b/index.ts\n@@ -1 +1 @@\n-old\n+new\n";
+
 const target = {
   repository: "example/project",
   pullRequest: 7,
@@ -52,6 +56,7 @@ const target = {
   baseSHA: "b".repeat(40),
   mergeBaseSHA: "c".repeat(40),
 };
+
 const lockCommand: NonNullable<
   NonNullable<FleetControlOptions["ownership"]>["lockCommand"]
 > = (path) => ({
@@ -63,6 +68,7 @@ const lockCommand: NonNullable<
     path,
   ],
 });
+
 class Native implements FleetReviewNative {
   starts: FleetReviewBinding[] = [];
   reads: FleetReviewBinding[] = [];
@@ -70,10 +76,12 @@ class Native implements FleetReviewNative {
   failAdmission = false;
   async startReview(binding: FleetReviewBinding) {
     this.starts.push(binding);
+
     if (this.failAdmission) throw new Error("uncertain transport");
   }
   async readReview(binding: FleetReviewBinding) {
     this.reads.push(binding);
+
     return this.answers.get(binding.id);
   }
   finish(
@@ -94,6 +102,7 @@ class Native implements FleetReviewNative {
       dispatchID: _dispatch,
       ...context
     } = binding.context;
+
     const resultText = JSON.stringify({
       ...context,
       headSHA: options.head ?? context.headSHA,
@@ -102,6 +111,7 @@ class Native implements FleetReviewNative {
       summary: "Reviewed the exact supplied code changes",
       findings: [],
     });
+
     this.answers.set(binding.id, {
       resultText,
       makers: [
@@ -116,6 +126,7 @@ class Native implements FleetReviewNative {
     });
   }
 }
+
 function raw(
   socketPath: string,
   method: string,
@@ -132,10 +143,12 @@ function raw(
         resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) }),
       );
     });
+
     r.on("error", reject);
     r.end(body === undefined ? undefined : JSON.stringify(body));
   });
 }
+
 const reviewers = [
   {
     agent: "gpt",
@@ -162,6 +175,7 @@ const reviewers = [
     permissions: [],
   },
 ];
+
 async function world(
   enabled = true,
   coordinatorAccount = "peer",
@@ -173,18 +187,22 @@ async function world(
   const directory = await realpath(
     await mkdtemp(join(tmpdir(), "stargate-review-")),
   );
+
   await chmod(directory, 0o700);
   close.push(() => rm(directory, { recursive: true, force: true }));
   const native = new Native();
+
   let current: FleetOrigin = {
     botKey: "peer-bot",
     eventId: "peer-event-1",
     sessionID: "ses_peer",
     inputID: "peer-input-1",
   };
+
   const sent: string[] = [];
   let serial = 0;
   const controls: FleetControl[] = [];
+
   const options = (ship: string): FleetControlOptions => ({
     config: {
       socketPath: join(directory, ship + ".sock"),
@@ -208,6 +226,7 @@ async function world(
     authorize: async (caller) => {
       if (caller.messageID !== "msg_live_assistant")
         throw new Error("not live");
+
       return ship === "peer"
         ? current
         : {
@@ -228,6 +247,7 @@ async function world(
     },
     ownership: { lockCommand },
   });
+
   const author = await FleetControl.open(options("author"));
   controls.push(author);
   let peer = await FleetControl.open(options("peer"));
@@ -248,6 +268,7 @@ async function world(
     receivedAt: new Date().toISOString(),
     origin: { botKey: "author-bot", eventId: "author-event" },
   });
+
   const call = (
     ship: string,
     operation: FleetRequest["operation"],
@@ -267,6 +288,7 @@ async function world(
       }),
       signal(),
     );
+
   async function begin(overrides: Record<string, unknown> = {}, admit = true) {
     const result = Schema.decodeUnknownSync(
       Schema.Struct({ dispatchID: Schema.String, review: reviewContextSchema }),
@@ -278,14 +300,17 @@ async function world(
         review: { ...target, context: diff, ...overrides },
       }),
     );
+
     current = {
       ...current,
       eventId: `peer-event-${serial}`,
       inputID: `peer-input-${serial}`,
     };
     const packet = sent.at(-1);
+
     if (!packet) throw new Error("No dispatch");
     expect(packet).not.toContain("--- a/index.ts");
+
     if (admit)
       expect(
         peer.assignment(
@@ -302,8 +327,10 @@ async function world(
     const prompt = peer.reviewAssignmentPrompt(result.dispatchID);
     expect(prompt).toContain(diff);
     expect(prompt).toContain(result.review.contextDigest);
+
     return result.review;
   }
+
   async function start(reviewID: string, agent = "gpt") {
     return z
       .object({
@@ -320,19 +347,23 @@ async function world(
         }),
       );
   }
+
   async function proofs(ship = "author", head = target.headSHA) {
     const r = await raw(
       join(directory, ship + ".sock"),
       "GET",
       `/reviews?repository=${target.repository}&pullRequest=7&headSHA=${head}`,
     );
+
     expect(r.status).toBe(200);
+
     return Schema.decodeUnknownSync(
       Schema.Struct({
         proofs: Schema.mutable(Schema.Array(reviewProofSchema)),
       }),
     )(r.body).proofs;
   }
+
   return {
     directory,
     native,
@@ -365,11 +396,14 @@ async function world(
 test("two attested native-family proofs share an independent reviewer ship and preserve exact immutable context", async () => {
   const w = await world();
   const context = await w.begin();
+
   const a = await w.start(context.id),
     b = await w.start(context.id, "claude");
+
   expect(a.id).not.toBe(b.id);
   expect(a.sessionID).not.toBe(b.sessionID);
   expect(a.inputID).not.toBe(b.inputID);
+
   for (const binding of w.native.starts) w.native.finish(binding);
   await w.peer.pollReviews(signal());
   const proofs = await w.proofs();
@@ -377,6 +411,7 @@ test("two attested native-family proofs share an independent reviewer ship and p
   expect(new Set(proofs.map((p) => p.family))).toEqual(
     new Set(["codex", "claude"]),
   );
+
   for (const proof of proofs) {
     expect(proof).toMatchObject({
       ...target,
@@ -395,13 +430,16 @@ test("two attested native-family proofs share an independent reviewer ship and p
       createHash("sha256").update(proof.resultText).digest("hex"),
     );
   }
+
   expect(await w.proofs("stranger")).toEqual([]);
   expect(await w.proofs("author", "d".repeat(40))).toEqual([]);
+
   const found = await raw(
     join(w.directory, "peer.sock"),
     "GET",
     "/reviews/" + a.id,
   );
+
   expect(found.status).toBe(200);
   expect(
     Schema.decodeUnknownSync(Schema.Struct({ proof: reviewProofSchema }))(
@@ -416,6 +454,7 @@ test("two attested native-family proofs share an independent reviewer ship and p
 
 test("native crew review opens the protected directory for the assigned repository", async () => {
   const repository = "example/another";
+
   const reviewConfig = {
     repositories: [target.repository, repository],
     reviewers,
@@ -424,6 +463,7 @@ test("native crew review opens the protected directory for the assigned reposito
       [repository]: { gpt: "/another/gpt", claude: "/another/claude" },
     },
   };
+
   const w = await world(true, "peer", reviewConfig);
   const context = await w.begin({ repository });
   await w.start(context.id);
@@ -439,6 +479,7 @@ test("native crew review opens the protected directory for the assigned reposito
 
 test("review configuration requires exactly the configured repositories and crew reviewers", () => {
   const crew = { gpt: "/project/gpt", claude: "/project/claude" };
+
   const config = {
     socketPath: "/tmp/x",
     statePath: "/tmp/state",
@@ -452,6 +493,7 @@ test("review configuration requires exactly the configured repositories and crew
       crewDirectories: { [target.repository]: crew },
     },
   };
+
   expect(
     Result.isSuccess(Schema.decodeUnknownResult(fleetControlSchema)(config)),
   ).toBe(true);
@@ -464,6 +506,7 @@ test("review configuration requires exactly the configured repositories and crew
       },
     }).reviews?.crewDirectories,
   ).toEqual({ [target.repository]: crew });
+
   for (const crewDirectories of [
     {},
     { [target.repository]: { gpt: crew.gpt } },
@@ -481,6 +524,7 @@ test("review configuration requires exactly the configured repositories and crew
       "Review directories must bind each permitted repository to every configured crew reviewer",
     );
   }
+
   expect(() =>
     Schema.decodeUnknownSync(fleetControlSchema)({
       ...config,
@@ -540,13 +584,14 @@ test("review evidence stays off by default and does not admit completion claims"
 
 test("missing, binary, malformed, oversized and disallowed review context fails before any native admission", async () => {
   const w = await world();
+
   for (const context of [
     "",
     diff.replace("+new\n", ""),
     diff + "\nGIT binary patch\n",
     diff + "\u0000",
     diff + "\ud800",
-    "diff --git " + "x".repeat(256000),
+    "diff --git " + "x".repeat(256_000),
   ])
     expect(
       Result.isSuccess(
@@ -574,6 +619,7 @@ test("wrong family, native agent, head, digest or verdict never becomes approvin
     const c = await w.begin();
     await w.start(c.id);
     const binding = w.native.starts[0];
+
     if (!binding) throw new Error("No native review");
     w.native.finish(binding, change);
     await w.peer.pollReviews(signal());
@@ -588,6 +634,7 @@ test("duplicate start and gateway restart recover the same proof without resubmi
   expect((await w.start(c.id)).id).toBe(first.id);
   expect(w.native.starts).toHaveLength(1);
   const binding = w.native.starts[0];
+
   if (!binding) throw new Error("No native binding");
   await w.reopen();
   expect((await w.start(c.id)).id).toBe(first.id);
@@ -628,6 +675,7 @@ test("captain substitution binds only the original review input, never an interv
   expect(w.native.starts).toEqual([]);
   await w.peer.pollReviews(signal());
   const binding = w.native.reads.at(-1);
+
   if (!binding) throw new Error("No read");
   w.native.finish(binding);
   await w.peer.pollReviews(signal());
@@ -637,6 +685,7 @@ test("captain substitution binds only the original review input, never an interv
 test("proof reads are strict and cannot write arbitrary proof/verdict/family claims", async () => {
   const w = await world();
   const c = await w.begin();
+
   for (const path of [
     "/reviews?repository=example/project&pullRequest=7&headSHA=" +
       target.headSHA +
@@ -648,17 +697,20 @@ test("proof reads are strict and cannot write arbitrary proof/verdict/family cla
     expect(
       (await raw(join(w.directory, "peer.sock"), "GET", path)).status,
     ).toBe(400);
+
   for (const pullRequest of ["07", "0", "-1", "1e2", "9007199254740992"]) {
     const response = await raw(
       join(w.directory, "peer.sock"),
       "GET",
       `/reviews?repository=example/project&pullRequest=${pullRequest}&headSHA=${target.headSHA}`,
     );
+
     expect(response).toEqual({
       status: 400,
       body: { error: "Fleet operation unavailable; raw details withheld." },
     });
   }
+
   const bad = {
     operation: "review",
     caller: {
@@ -677,6 +729,7 @@ test("proof reads are strict and cannot write arbitrary proof/verdict/family cla
       inputID: "old-input",
     },
   };
+
   expect(
     (await raw(join(w.directory, "peer.sock"), "POST", "/fleet", bad)).status,
   ).toBe(400);
@@ -693,6 +746,7 @@ test("review context framing refuses digest substitution or ambiguous end marker
     dispatchID: "dispatch",
     contextDigest: createHash("sha256").update(diff).digest("hex"),
   });
+
   expect(() => reviewContextPrompt(context, diff + "changed")).toThrow(
     "changed",
   );
@@ -717,13 +771,16 @@ test("same-ship coordination is refused before review work is sent", async () =>
 
 test("authenticated IRC intake injects exact private context before retaining the coordinator job", async () => {
   const w = await world();
+
   const server = new FakeIrcServer({
     accounts: { peer: "fixture-password" },
   }).start();
+
   close.push(() => server.stop());
   server.caps.push("draft/multiline=max-bytes=4096,max-lines=100");
   const store = openStore(join(w.directory, "irc.sqlite"));
   close.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "peer",
     account: "peer",
@@ -766,29 +823,36 @@ test("authenticated IRC intake injects exact private context before retaining th
     },
     features: { catchUp: false },
   });
+
   const ship = await IrcShip.create(config, store, pino({ enabled: false }), {
     env: { IRC_PASSWORD: "fixture-password" },
     timing: { intervalMs: 1, burst: 100 },
     readyMs: 2000,
   });
+
   close.push(() => ship.close());
   ship.assignmentRecorder = (input, fold) => w.peer.assignment(input, fold);
   ship.assignmentPrompt = (id) => w.peer.reviewAssignmentPrompt(id);
   ship.start(() => true);
   const registration = ship.registrations[0];
+
   if (!registration) throw new Error("No IRC registration");
   await until(() => registration.client.inChannel("#peer"), 3000, "join");
   const c = await w.begin({}, false);
+
   const lines = w.packet.split("\n").flatMap((line) => {
     if (!line) return [{ text: "" }];
     const chunks: { text: string; concat?: boolean }[] = [];
+
     for (let offset = 0; offset < line.length; offset += 300)
       chunks.push({
         text: line.slice(offset, offset + 300),
         ...(offset ? { concat: true } : {}),
       });
+
     return chunks;
   });
+
   server.sayLines({ nick: "author", account: "author" }, "#peer", lines);
   await until(
     () =>
@@ -797,6 +861,7 @@ test("authenticated IRC intake injects exact private context before retaining th
     "review intake",
   );
   const job = store.ready(registration.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
   if (!job) throw new Error("No retained review");
   expect(job.text.endsWith(reviewContextPrompt(c, diff))).toBe(true);
   expect(job.fleet).toEqual({ kind: "assignment", dispatchID: c.id });
@@ -815,6 +880,7 @@ test("opt-in native review tool preserves permission source and immutable assign
   const c = await w.begin();
   const tools: Info[] = [];
   const permission: unknown[] = [];
+
   const editor: ToolEditor = {
     list: () => [],
     get: () => undefined,
@@ -825,11 +891,13 @@ test("opt-in native review tool preserves permission source and immutable assign
     update() {},
     remove() {},
   };
+
   const dispose = await installFleetTools({
     options: { socketPath: join(w.directory, "peer.sock"), reviews: true },
     tool: {
       async transform(callback) {
         callback(editor);
+
         return { async dispose() {} };
       },
     },
@@ -839,9 +907,12 @@ test("opt-in native review tool preserves permission source and immutable assign
       },
     },
   });
+
   try {
     const review = tools.find((t) => t.name === "fleet_review");
+
     if (!review) throw new Error("Review tool not enabled");
+
     const ctx: ToolContext = {
       sessionID: Session.ID.make("ses_peer"),
       agent: Agent.ID.make("captain-peer"),
@@ -850,10 +921,12 @@ test("opt-in native review tool preserves permission source and immutable assign
       signal: signal(),
       async progress() {},
     };
+
     const output = await review.execute(
       { op: "start", reviewID: c.id, reviewerAgent: "gpt" },
       ctx,
     );
+
     expect(JSON.parse(String(output?.content))).toMatchObject({
       reviewID: c.id,
       state: "admitted",
@@ -886,6 +959,7 @@ test("review workers cannot opt into mutating, wildcard or interactive permissio
     directory: "/project/worker",
     models: [{ provider: "unit", model: "gpt" }],
   };
+
   for (const action of ["edit", "bash", "*", "stargate_crew"])
     expect(
       Result.isSuccess(
@@ -922,6 +996,7 @@ test("read-only recovery can recognise a late exact native completion after unce
   const started = await w.start(c.id);
   expect(started.state).toBe("uncertain");
   const binding = w.native.starts[0];
+
   if (!binding) throw new Error("No binding");
   await w.reopen();
   w.native.finish(binding);
@@ -952,6 +1027,7 @@ test("a completed native captain input cannot be rebound to a different structur
   const first = await w.start(firstContext.id, "captain-peer");
   await w.peer.pollReviews(signal());
   const binding = w.native.reads.find((b) => b.id === first.id);
+
   if (!binding) throw new Error("Missing first binding");
   w.native.finish(binding);
   await w.peer.pollReviews(signal());
@@ -968,12 +1044,15 @@ test("a completed native captain input cannot be rebound to a different structur
 test("bounded review recovery rotates past 100 stuck uncertain inputs and preserves its cursor across restart", async () => {
   const w = await world();
   w.native.failAdmission = true;
+
   for (let i = 0; i < 101; i++) {
     const context = await w.begin();
     expect((await w.start(context.id)).state).toBe("uncertain");
   }
+
   expect(w.native.starts).toHaveLength(101);
   const last = w.native.starts[100];
+
   if (!last) throw new Error("Missing late native input");
   await w.peer.pollReviews(signal());
   expect(w.native.reads).toHaveLength(100);

@@ -15,6 +15,7 @@ test("unit uses private user service configuration and absolute commands", () =>
     "/usr/bin/bun",
     "/app/src/main.ts",
   );
+
   expect(unit).toContain(
     'ExecStart="/usr/bin/bun" "/app/src/main.ts" start --config "/work/stargate.json"',
   );
@@ -24,12 +25,14 @@ test("unit uses private user service configuration and absolute commands", () =>
   expect(unit).toContain("Restart=on-failure");
   expect(unit).toContain("WantedBy=default.target");
 });
+
 test("systemd quoting prevents expansion and line injection", () => {
   const unit = buildUnit(
     '/work space/%h/$HOME/"stargate.json',
     "/usr/bin/bun",
     "/app/main.ts",
   );
+
   expect(unit).toContain(
     'EnvironmentFile=-/work space/%%h/$HOME/"stargate.json.env',
   );

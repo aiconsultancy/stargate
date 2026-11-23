@@ -28,13 +28,16 @@ test("disabled HTTP config validates without enabling the API", () => {
     bots: [bot()],
     notify: notificationConfig(),
   });
+
   expect(Result.isSuccess(result)).toBe(true);
+
   if (Result.isSuccess(result)) expect(result.success.api).toBeUndefined();
 });
 
 test("disabled adapters still reject unknown types, fields, mounts, destinations, grants and echo", () => {
   const input = () => ({ bots: [bot()], notify: notificationConfig() });
   const bad: unknown[] = [];
+
   for (const delta of [
     { type: "github-release-poller" },
     { type: "http", intervalSeconds: 1 },
@@ -51,11 +54,13 @@ test("disabled adapters still reject unknown types, fields, mounts, destinations
       },
     });
   }
+
   for (const channel of ["*", "D123", "#channel"]) {
     const value = input();
     value.notify.destinations.log.slack.channel = channel;
     bad.push(value);
   }
+
   const unknown = input();
   unknown.notify.destinations.log.slack.bot = "missing";
   bad.push(unknown);
@@ -73,6 +78,7 @@ test("disabled adapters still reject unknown types, fields, mounts, destinations
   const audience = input();
   audience.notify.destinations.log.audience = "public";
   bad.push(audience);
+
   const receiver = {
     ...bot("receiver"),
     slack: {
@@ -82,7 +88,9 @@ test("disabled adapters still reject unknown types, fields, mounts, destinations
     },
     access: { ...bot().access, peerCaptains: true },
   };
+
   bad.push({ ...input(), bots: [bot(), receiver] });
+
   for (const value of bad)
     expect(
       Result.isFailure(Schema.decodeUnknownResult(configSchema)(value)),
@@ -115,6 +123,7 @@ test("credentials use effective environment without mutation, reject ambiguity a
     { mode: 0o600 },
   );
   const original = { ...process.env };
+
   const env = await checkCredentials(
     path,
     config.bots,
@@ -123,6 +132,7 @@ test("credentials use effective environment without mutation, reject ambiguity a
     config.notify,
     data,
   );
+
   expect(env["NOTIFY_CI"]).toBe(producerToken);
   expect(process.env).toEqual(original);
   expect(existsSync(join(data, "api-token"))).toBe(false);
@@ -132,7 +142,9 @@ test("credentials use effective environment without mutation, reject ambiguity a
   const disabled = runtimeConfig(data, false);
   expect(producerCredentials(disabled.notify, {})).toEqual([]);
   const notify = config.notify;
+
   if (!notify?.adapters["local"]) throw new Error("Missing config fixture");
+
   const ambiguous = {
     ...notify,
     adapters: {
@@ -153,6 +165,7 @@ test("credentials use effective environment without mutation, reject ambiguity a
       },
     },
   };
+
   expect(() =>
     producerCredentials(ambiguous, {
       NOTIFY_CI: producerToken,
@@ -178,11 +191,14 @@ test("credentials use effective environment without mutation, reject ambiguity a
 test("aliases deduplicate only identical physical bindings and notify remains restart-only on failed reload", async () => {
   const config = runtimeConfig(await temporary());
   const notify = config.notify;
+
   if (!notify?.destinations["log"]) throw new Error("Missing config fixture");
+
   const aliases = {
     ...notify,
     destinations: { ...notify.destinations, alias: notify.destinations["log"] },
   };
+
   expect(
     resolveDestinations(aliases, [
       { bot: bot(), identity: { team: "T123", user: "UHELPER" } },
@@ -193,17 +209,21 @@ test("aliases deduplicate only identical physical bindings and notify remains re
     ])["log"],
   );
   const initial = { config, environment: {} };
+
   const next = {
     config: { ...config, notify: { ...notify, limits: { outboxRows: 1 } } },
     environment: {},
   };
+
   expect(restartRequired(initial, next)).toContain("notify.limits");
   let applied = 0;
+
   const reload = new ConfigReload(
     initial,
     async () => next,
     pino({ enabled: false }),
   );
+
   reload.listen(async () => {
     applied++;
   });

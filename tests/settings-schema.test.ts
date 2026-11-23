@@ -86,8 +86,10 @@ const codecs = {
 
 test("review: configuration records preserve legacy shallow key handling", () => {
   const first = settingsSeeds["botSchema"]?.[0] as object;
+
   for (const options of settingsRecordCases) {
     const expected = z.record(z.string(), z.unknown()).parse(options);
+
     const result = Schema.decodeUnknownSync(configSchema)({
       bots: [
         {
@@ -96,6 +98,7 @@ test("review: configuration records preserve legacy shallow key handling", () =>
         },
       ],
     });
+
     expect(JSON.stringify(result.bots[0]?.backend)).toBe(
       JSON.stringify({
         type: "module",
@@ -104,10 +107,12 @@ test("review: configuration records preserve legacy shallow key handling", () =>
       }),
     );
     const backend = result.bots[0]?.backend;
+
     if (backend?.type !== "module") throw new Error("Unexpected backend");
     expect(backend.options["nested"]).toBe(expected["nested"]);
     expect(Object.hasOwn(options as object, "__proto__")).toBe(true);
   }
+
   for (const backend of [
     {
       ...(settingsSeeds["backendSchema"]?.[0] as object),
@@ -123,6 +128,7 @@ test("review: configuration records preserve legacy shallow key handling", () =>
     const decoded = Schema.decodeUnknownSync(backendSchema)(backend);
     expect(JSON.stringify(decoded)).not.toContain('"__proto__"');
   }
+
   expect(
     Schema.decodeUnknownResult(backendSchema)({
       ...(settingsSeeds["backendSchema"]?.[0] as object),
@@ -141,6 +147,7 @@ test("review: configuration records preserve legacy shallow key handling", () =>
 
 test("record validation retains independent key and value diagnostics", () => {
   let message = "";
+
   try {
     decodeSettings(claudeBackendSchema, {
       type: "claude",
@@ -164,6 +171,7 @@ test("record validation retains independent key and value diagnostics", () => {
     expect(error).toBeInstanceOf(Error);
     message = (error as Error).message;
   }
+
   expect(message).toContain('["mcpServers","bad name"]');
   expect(message).toContain('["mcpServers","remote","headersHelper"]');
   expect(message).toContain(
@@ -177,17 +185,20 @@ test("record validation retains independent key and value diagnostics", () => {
 test("review: raw unknown keys survive structural child failures safely", () => {
   let parentCalls = 0;
   const child = settingsStruct({ value: Schema.String });
+
   const schema = settingsStruct({ child, sibling: child }).check(
     settingsCheck(() => {
       parentCalls++;
     }),
   );
+
   expect(() =>
     decodeSettings(child, {
       value: 0,
       unknownOption: "SENSITIVE_CONFIG_VALUE",
     }),
   ).toThrow('Unrecognized key: "unknownOption"');
+
   try {
     decodeSettings(schema, {
       child: { value: 0, unknownOption: "SENSITIVE_CONFIG_VALUE" },
@@ -203,15 +214,18 @@ test("review: raw unknown keys survive structural child failures safely", () => 
     expect(message).toContain('Unrecognized key: "anotherOption"');
     expect(message).not.toContain("SENSITIVE_CONFIG_VALUE");
   }
+
   expect(parentCalls).toBe(0);
 });
 
 function withoutInboundReactions(value: unknown): unknown {
   if (!Predicate.isObject(value) || !Predicate.isObject(value["slack"]))
     return value;
+
   const { inboundReactions: _inboundReactions, ...slack } = value[
     "slack"
   ] as Record<string, unknown>;
+
   return { ...value, slack };
 }
 
@@ -220,37 +234,53 @@ function withoutInboundReactions(value: unknown): unknown {
 for (const [name, codec] of Object.entries(codecs))
   test(`settings legacy acceptance, values and wire order: ${name}`, () => {
     // Keep the legacy oracle independent. New flags are covered separately
-    // by their configuration and behaviour tests.
+    // By their configuration and behaviour tests.
     const legacy = (value: unknown): unknown => {
       if (!Predicate.isObject(value) || Array.isArray(value)) return value;
+
       if (name === "botSchema") return withoutInboundReactions(value);
+
       if (name === "maintenanceSchema") {
         const { drain: _drain, ...rest } = value as Record<string, unknown>;
+
         return rest;
       }
+
       if (name === "configSchema") {
         const config = Array.isArray(value["bots"])
           ? { ...value, bots: value["bots"].map(withoutInboundReactions) }
           : value;
+
         if (!Predicate.isObject(config["maintenance"])) return config;
+
         const { drain: _drain, ...maintenance } = config[
           "maintenance"
         ] as Record<string, unknown>;
+
         return { ...config, maintenance };
       }
+
       return value;
     };
+
     const seeds = settingsSeeds[name];
+
     if (!seeds) throw new Error(`Missing seeds: ${name}`);
     const decode = Schema.decodeUnknownResult(codec, { errors: "all" });
+
     const decoded = seeds.map((input) => {
       const result = decode(input);
+
       if (Result.isFailure(result)) throw new Error(`Invalid seed for ${name}`);
+
       return legacy(result.success);
     });
+
     const cases = settingsCases(seeds, decoded);
+
     const outcomes = cases.map(({ label, input }) => {
       const result = decode(input);
+
       return Result.isSuccess(result)
         ? {
             label,
@@ -260,6 +290,7 @@ for (const [name, codec] of Object.entries(codecs))
           }
         : { label, accepted: false };
     });
+
     expect({
       count: cases.length,
       hash: createHash("sha256")
@@ -267,7 +298,7 @@ for (const [name, codec] of Object.entries(codecs))
         .digest("hex"),
     }).toEqual(settingsGolden[name as keyof typeof settingsGolden]);
     // The legacy oracle sweep is CPU-bound and can exceed the default 5s
-    // under a full-suite load; it is a deliberate golden comparison.
+    // Under a full-suite load; it is a deliberate golden comparison.
   }, 60_000);
 
 test("settings preserve Unicode bounds, URL cleanup and explicit undefined keys", () => {
@@ -282,15 +313,19 @@ test("settings preserve Unicode bounds, URL cleanup and explicit undefined keys"
       apiKeyEnv: "TEST_KEY",
     }),
   ).toEqual({ baseURL: "https://example.test/v1", apiKeyEnv: "TEST_KEY" });
+
   const waiting = Schema.decodeUnknownSync(waitingSchema)({
     delayMs: null,
     intervalMs: undefined,
   });
-  expect(waiting).toEqual({ delayMs: null, intervalMs: 10000 });
+
+  expect(waiting).toEqual({ delayMs: null, intervalMs: 10_000 });
+
   const bot = Schema.decodeUnknownSync(botSchema)({
     ...(settingsSeeds["botSchema"]?.[0] as object),
     displayName: undefined,
   });
+
   expect(Object.hasOwn(bot, "displayName")).toBe(true);
 });
 
@@ -331,9 +366,11 @@ test("otherwise-valid configuration failures retain actionable paths and safe me
       message: "Window start and end must differ",
     },
   ];
+
   for (const { codec, input, path, message } of cases) {
     const result = Schema.decodeUnknownResult(codec, { errors: "all" })(input);
     expect(Result.isFailure(result)).toBe(true);
+
     if (Result.isFailure(result))
       expect(settingsIssues(result.failure.issue).issues).toContainEqual({
         path,
@@ -370,6 +407,7 @@ test("temporary mixed-schema bridges delegate defaults and reject invalid settin
 
 test("legacy defaults bypass input transforms and shallow-copy only their containers", () => {
   const fallback = [{ value: "original" }];
+
   const codec = settingsStruct({
     entries: Schema.mutable(
       Schema.Array(settingsStruct({ value: Schema.String })),
@@ -378,6 +416,7 @@ test("legacy defaults bypass input transforms and shallow-copy only their contai
       settingsDefault("  "),
     ),
   });
+
   const decode = Schema.decodeUnknownSync(codec);
   const first = decode({});
   const second = decode({ text: undefined });
@@ -432,6 +471,7 @@ test("public config errors retain dependent custom diagnostics and independent f
   const directory = await mkdtemp(join(tmpdir(), "settings-errors-"));
   const file = join(directory, "config.json");
   const first = settingsSeeds["botSchema"]?.[0] as object;
+
   const cases = [
     {
       input: {
@@ -520,15 +560,19 @@ test("public config errors retain dependent custom diagnostics and independent f
       paths: ["unknownOption"],
     },
   ];
+
   try {
     for (const { input, messages, paths } of cases) {
       await writeFile(file, JSON.stringify(input));
       const error = await loadConfig(file).catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(Error);
+
       if (!(error instanceof Error))
         throw new Error("Invalid config was accepted");
       expect(error.message).not.toContain("SENSITIVE_CONFIG_VALUE");
+
       for (const message of messages) expect(error.message).toContain(message);
+
       for (const path of paths) expect(error.message).toContain(path);
     }
   } finally {

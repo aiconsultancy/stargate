@@ -20,24 +20,31 @@ import {
 const now = Date.parse("2026-11-17T12:00:00Z");
 const until = "2026-11-17T13:00:00.000Z";
 const deadline = Date.parse(until);
+
 const thread = {
   scope: "thread",
   channel: "C123",
   thread_ts: "1794922711.668079",
 } as const;
+
 const channel = { scope: "channel", channel: "C123" } as const;
 const stores: NotificationStore[] = [];
 const directories: string[] = [];
+
 function open(path = ":memory:") {
   const store = new NotificationStore(path);
   stores.push(store);
+
   return store;
 }
+
 function databasePath() {
   const directory = mkdtempSync(join(tmpdir(), "stargate-notifications-"));
   directories.push(directory);
+
   return join(directory, "private", "notifications.sqlite");
 }
+
 function operate(
   store: NotificationStore,
   input: NotificationInput,
@@ -51,8 +58,10 @@ function operate(
     now: time,
   });
 }
+
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
+
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
@@ -77,6 +86,7 @@ describe("notificationInputSchema", () => {
         notificationInputSchema.safeParse({ op: "unmute", ...target }).success,
       ).toBe(true);
     }
+
     expect(notificationInputSchema.parse({ op: "list" })).toEqual({
       op: "list",
     });
@@ -136,6 +146,7 @@ describe("notificationInputSchema", () => {
           mute_until: value,
         }).success,
       ).toBe(false);
+
     for (const input of [
       { op: "unmute", ...channel },
       { op: "status", ...thread },
@@ -171,6 +182,7 @@ describe("NotificationStore", () => {
     expect(store.status("captain-a", "C123", thread.thread_ts, now).mode).toBe(
       "addressed-only",
     );
+
     for (const [registration, targetChannel, targetThread] of [
       ["captain-b", "C123", thread.thread_ts],
       ["captain-a", "G123", thread.thread_ts],
@@ -200,6 +212,7 @@ describe("NotificationStore", () => {
       mode: "addressed-only",
       thread: { state: "active", mute_until: until },
     });
+
     for (const time of [deadline, deadline + 1])
       expect(
         store.status("captain-a", "C123", thread.thread_ts, time),
@@ -225,11 +238,13 @@ describe("NotificationStore", () => {
 
   test("rejects elapsed deadline at commit rather than schema parse", () => {
     const store = open();
+
     const input = notificationInputSchema.parse({
       op: "mute",
       ...thread,
       mute_until: until,
     });
+
     for (const time of [deadline, deadline + 1])
       expect(() => operate(store, input, "expired", time)).toThrow(
         "Notification mute expiry has elapsed.",
@@ -298,20 +313,26 @@ describe("NotificationStore", () => {
     probe.exec("PRAGMA busy_timeout = 0");
     let time = deadline - 1;
     let calls = 0;
+
     const clock = () => {
       calls++;
       let locked = false;
+
       try {
         probe.exec("BEGIN IMMEDIATE");
         probe.exec("ROLLBACK");
       } catch {
         locked = true;
       }
+
       expect(locked).toBe(true);
+
       return time;
     };
+
     const input = { op: "mute", ...thread, mute_until: until } as const;
     const context = { id: "timed", caller: "captain-session-a", now: clock };
+
     try {
       const first = store.operate("captain-a", input, context);
       expect(calls).toBe(1);
@@ -354,14 +375,17 @@ describe("NotificationStore", () => {
     const store = open();
     operate(store, { op: "mute", ...thread, mute_until: until });
     let calls = 0;
+
     const context = {
       id: "read",
       caller: "captain-session-a",
       now: () => {
         calls++;
+
         return deadline;
       },
     };
+
     expect(
       store.operate("captain-a", { op: "status", ...thread }, context),
     ).toMatchObject({
@@ -376,12 +400,14 @@ describe("NotificationStore", () => {
 
   test("old mute retry returns original receipt plus current absent state", () => {
     const store = open();
+
     const input = {
       op: "mute",
       ...thread,
       mute_until: until,
       reason: "handoff",
     } as const;
+
     const first = operate(store, input);
     operate(store, { op: "unmute", ...thread }, "unmute");
     const replay = operate(store, input, "op-1", deadline + 1);
@@ -414,6 +440,7 @@ describe("NotificationStore", () => {
   test("same-ID mismatches fail safely and IDs remain registration scoped", () => {
     const store = open();
     operate(store, { op: "mute", ...thread });
+
     for (const input of [
       { op: "unmute", ...thread },
       { op: "mute", ...channel },
@@ -492,12 +519,14 @@ describe("NotificationStore", () => {
   test("persists preferences and audit receipts through close/reopen", () => {
     const path = databasePath();
     const first = open(path);
+
     const input = {
       op: "mute",
       ...thread,
       mute_until: until,
       reason: "handoff",
     } as const;
+
     const result = operate(first, input);
     first.close();
     stores.splice(stores.indexOf(first), 1);
@@ -511,6 +540,7 @@ describe("NotificationStore", () => {
       Reflect.get(result, "receipt"),
     );
     const db = new Database(path);
+
     try {
       expect(
         db
@@ -531,6 +561,7 @@ describe("NotificationStore", () => {
     const path = databasePath();
     open(path);
     expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
+
     for (const file of [path, `${path}-wal`, `${path}-shm`])
       expect(statSync(file).mode & 0o777).toBe(0o600);
     chmodSync(path, 0o644);
@@ -554,6 +585,7 @@ describe("NotificationStore", () => {
 
   test("validates mutation identities, registrations, times and read targets", () => {
     const store = open();
+
     for (const change of [
       { id: "" },
       { id: " " },
@@ -577,6 +609,7 @@ describe("NotificationStore", () => {
           },
         ),
       ).toThrow("Invalid notification request.");
+
     for (const registration of ["", " ", "x".repeat(2049)])
       expect(() => store.status(registration, "C123", undefined, now)).toThrow(
         "Invalid notification request.",
@@ -592,6 +625,7 @@ describe("NotificationStore", () => {
 
   test("lists bounded keyset pages and rejects invalid/cross-registration cursor", () => {
     const store = open();
+
     for (let index = 0; index < 52; index++)
       operate(
         store,
@@ -603,6 +637,7 @@ describe("NotificationStore", () => {
         `mute-${index}`,
       );
     const first = operate(store, { op: "list" });
+
     if (first.op !== "list" || first.cursor === null)
       throw new Error("Missing list cursor");
     expect(first.settings).toHaveLength(50);
@@ -619,6 +654,7 @@ describe("NotificationStore", () => {
       ],
       cursor: null,
     });
+
     for (const cursor of ["invalid", "e30", "a".repeat(1025)])
       expect(() => operate(store, { op: "list", cursor })).toThrow(
         "Invalid notification request.",
@@ -643,6 +679,7 @@ describe("NotificationStore", () => {
     operate(store, { op: "mute", ...channel }, "channel");
     operate(store, { op: "mute", ...thread }, "thread");
     const db = new Database(path);
+
     try {
       db.exec(`CREATE TRIGGER fail_receipt BEFORE INSERT ON notification_receipts
         BEGIN SELECT RAISE(ABORT, 'secret sqlite failure'); END;`);

@@ -8,11 +8,13 @@ import { Audience, Id, type Limits, Subscription, TopicPattern } from "./model";
 
 const positive = (max: number) =>
   Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(max));
+
 const record = <S extends Schema.Constraint>(value: S, max: number) =>
   Schema.Record(Schema.String, value).check(
     Schema.isPropertyNames(Id),
     Schema.makeFilter((values) => Object.keys(values).length <= max),
   );
+
 const source = settingsStruct({
   id: Id,
   tokenEnv: Schema.String.check(
@@ -26,6 +28,7 @@ const source = settingsStruct({
   audience: Audience,
   perMinute: positive(60_000).pipe(settingsDefault(60)),
 });
+
 export const notifySchema = settingsStruct({
   adapters: record(
     settingsStruct({
@@ -68,16 +71,20 @@ export const notifySchema = settingsStruct({
     }),
   ),
 });
+
 export type NotifyConfig = typeof notifySchema.Type;
+
 export const notifyEnabled = (config: NotifyConfig | undefined) =>
   Object.values(config?.adapters ?? {}).some((adapter) => adapter.enabled);
 
 export function coreLimits(config: NotifyConfig) {
   const { maxAgeHours, dedupDays, ...limits } = config.limits ?? {};
+
   const result: Partial<Limits> = {
     ...(maxAgeHours === undefined ? {} : { maxAgeMs: maxAgeHours * 3_600_000 }),
     ...(dedupDays === undefined ? {} : { dedupMs: dedupDays * 86_400_000 }),
   };
+
   for (const key of [
     "admissionQueue",
     "outboxRows",
@@ -86,8 +93,10 @@ export function coreLimits(config: NotifyConfig) {
     "dedupRecords",
   ] as const) {
     const value = limits[key];
+
     if (value !== undefined) result[key] = value;
   }
+
   return result;
 }
 
@@ -98,7 +107,9 @@ export async function checkProducerCredentials(
   dataDirectory: string,
 ) {
   producerCredentials(config, environment);
+
   if (!notifyEnabled(config)) return;
+
   const file = await open(
     join(dataDirectory, "api-token"),
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
@@ -107,10 +118,13 @@ export async function checkProducerCredentials(
       return undefined;
     throw new Error("Cannot check notification credential separation.");
   });
+
   if (!file) return;
   let operatorToken: string;
+
   try {
     const info = await file.stat();
+
     if (
       !info.isFile() ||
       info.uid !== process.getuid?.() ||
@@ -122,6 +136,7 @@ export async function checkProducerCredentials(
     const bytes = Buffer.alloc(45);
     const { bytesRead } = await file.read(bytes);
     const token = bytes.subarray(0, bytesRead).toString("utf8");
+
     if (!/^[A-Za-z0-9_-]{43}\n?$/.test(token))
       throw new Error("Cannot check notification credential separation.");
     operatorToken = token.trim();
@@ -132,14 +147,17 @@ export async function checkProducerCredentials(
       throw new Error("Cannot check notification credential separation.");
     });
   }
+
   producerCredentials(config, environment, operatorToken);
 }
 
 // Fixed-length digests keep timingSafeEqual safe for every input length.
 export function equalCredential(left: string, right: string) {
   const digest = (value: string) => createHash("sha256").update(value).digest();
+
   return timingSafeEqual(digest(left), digest(right));
 }
+
 export function producerCredentials(
   config: NotifyConfig | undefined,
   env: NodeJS.ProcessEnv,
@@ -150,12 +168,16 @@ export function producerCredentials(
     source: typeof source.Type;
     token: string;
   }[] = [];
+
   for (const [name, adapter] of Object.entries(config?.adapters ?? {})) {
     if (!adapter.enabled) continue;
+
     for (const source of adapter.sources) {
       const token = env[source.tokenEnv];
+
       if (!token || !/^[A-Za-z0-9_-]{32,256}$/.test(token))
         throw new Error("Missing or invalid notification producer credential.");
+
       if (
         (operatorToken !== undefined &&
           equalCredential(token, operatorToken)) ||
@@ -165,5 +187,6 @@ export function producerCredentials(
       resolved.push({ adapter: name, source, token });
     }
   }
+
   return resolved;
 }

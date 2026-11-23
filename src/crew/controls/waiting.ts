@@ -24,12 +24,15 @@ export class CrewWaiting {
 
   async run(raw: unknown, caller: CrewCaller) {
     const parsed = Schema.decodeUnknownResult(waitingInputSchema)(raw);
+
     if (Result.isFailure(parsed))
       throw new CrewError("Invalid waiting settings.");
     caller.signal.throwIfAborted();
     await this.authority.captain(caller);
+
     const delayMs =
       parsed.success.seconds === "off" ? null : parsed.success.seconds * 1000;
+
     try {
       await saveWaitingDelay(
         this.authority.options.captainDirectory,
@@ -42,6 +45,7 @@ export class CrewWaiting {
         "Waiting setting change unconfirmed; check private workspace access.",
       );
     }
+
     return { delayMs, effect: "subsequent-turns" as const };
   }
 }

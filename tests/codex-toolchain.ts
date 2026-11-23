@@ -28,10 +28,13 @@ const programs = [
 /** Creates the toolchain directory; `remove` deletes it again. */
 export async function toolchain() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-codex-toolchain-"));
+
   for (const name of programs) {
     const path = Bun.which(name);
+
     if (path) await symlink(path, join(directory, name));
   }
+
   return {
     directory,
     remove: () => rm(directory, { recursive: true, force: true }),

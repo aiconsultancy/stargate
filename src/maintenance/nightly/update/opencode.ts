@@ -57,7 +57,9 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
     Service.discover().catch(() => undefined),
     Bun.sleep(openCodeCallMs).then(() => undefined),
   ]);
+
   if (!endpoint) throw new StepError("health-failed");
+
   const client = OpenCode.make({
     baseUrl: endpoint.url,
     headers: Service.headers({
@@ -65,10 +67,13 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
       ...(endpoint.auth ? { auth: endpoint.auth } : {}),
     }),
   });
+
   const bounded = (signal: AbortSignal) =>
     AbortSignal.any([signal, AbortSignal.timeout(openCodeCallMs)]);
+
   const at = (directory: string | undefined) =>
     directory ? { location: { directory } } : {};
+
   const guard = async <T>(work: () => Promise<T>): Promise<T> => {
     try {
       return await work();
@@ -77,6 +82,7 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
       throw new StepError("health-failed");
     }
   };
+
   const ref = (model: ModelRef | undefined) =>
     model
       ? {
@@ -85,19 +91,23 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
           ...(model.variant ? { variant: model.variant } : {}),
         }
       : null;
+
   return {
     maintenanceNotice: (notice, signal) =>
       guard(async () => {
         const locations = await client.debug.location.list({
           signal: bounded(signal),
         });
+
         const receipts: UpdateReceipt[] = [];
+
         for (const directory of new Set(
           locations.map((location) => location.directory),
         )) {
           signal.throwIfAborted();
+
           // Most locations do not load Stargate's plugin. Never create one or
-          // start a model request merely to deliver a maintenance notice.
+          // Start a model request merely to deliver a maintenance notice.
           const result = await client
             .rpc(CrewReporting)
             .maintenanceNotice(notice, {
@@ -105,8 +115,10 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
               signal: bounded(signal),
             })
             .catch(() => []);
+
           receipts.push(...result);
         }
+
         return [
           ...new Map(
             receipts.map((receipt) => [receipt.sessionID, receipt]),
@@ -122,11 +134,14 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
         const locations = await client.debug.location.list({
           signal: bounded(signal),
         });
+
         const directories = new Set<string | undefined>([
           undefined,
           ...locations.map((location) => location.directory),
         ]);
+
         const waiting = new Set<string>();
+
         for (const directory of directories) {
           const [forms, permissions] = await Promise.all([
             client.form.list(at(directory), { signal: bounded(signal) }),
@@ -134,9 +149,11 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
               signal: bounded(signal),
             }),
           ]);
+
           for (const request of [...forms.data, ...permissions.data])
             waiting.add(request.sessionID);
         }
+
         return [...waiting];
       }),
     parent: (sessionID, signal) =>

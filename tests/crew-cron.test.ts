@@ -10,7 +10,9 @@ function fixture() {
     binding: Parameters<typeof runCronOperation>[1];
     signal: AbortSignal;
   }[] = [];
+
   const checks: CrewCaller[] = [];
+
   const authority = {
     options: {
       captainDirectory: "/captain",
@@ -18,25 +20,31 @@ function fixture() {
     },
     async captain(caller: CrewCaller) {
       checks.push(caller);
+
       if (caller.agent !== "captain") throw new CrewError("Captain only.");
     },
   };
+
   const runner: typeof runCronOperation = async (raw, binding, signal) => {
     calls.push({ raw, binding, signal });
+
     return { status: "queued", effect: "durably-admitted-not-completed" };
   };
+
   const caller: CrewCaller = {
     agent: "captain",
     sessionID: "ses_captain",
     id: "call_retry",
     signal: new AbortController().signal,
   };
+
   return { calls, checks, authority, runner, caller };
 }
 
 test("cron requires captain verification even for reads", async () => {
   const f = fixture();
   const cron = new CrewCron(f.authority, f.runner);
+
   for (const op of ["list", "report"])
     await expect(
       cron.run({ op }, { ...f.caller, agent: "worker" }),
@@ -63,6 +71,7 @@ test("cron uses only configured binding and forwards cancellation signal", async
       signal: f.caller.signal,
     },
   ]);
+
   for (const injected of [
     { configPath: "/other/stargate.json" },
     { bot: "other" },
@@ -76,10 +85,12 @@ test("cron uses only configured binding and forwards cancellation signal", async
 
 test("cron missing configuration fails explicitly without running", async () => {
   const f = fixture();
+
   const cron = new CrewCron(
     { ...f.authority, options: { captainDirectory: "/captain" } },
     f.runner,
   );
+
   await expect(cron.run({ op: "list" }, f.caller)).rejects.toThrow(
     "Cronjobs unavailable",
   );
@@ -108,6 +119,7 @@ test("cron cancellation prevents admission before and after authorization", asyn
   const f = fixture();
   const stop = new AbortController();
   const caller = { ...f.caller, signal: stop.signal };
+
   const cron = new CrewCron(
     {
       ...f.authority,
@@ -118,6 +130,7 @@ test("cron cancellation prevents admission before and after authorization", asyn
     },
     f.runner,
   );
+
   await expect(cron.run({ op: "list" }, caller)).rejects.toThrow(
     "cancelled; inspect retained status",
   );
@@ -129,11 +142,13 @@ test("cron cancellation prevents admission before and after authorization", asyn
 test("cron in-flight cancellation reaches runner without exposing abort reason", async () => {
   const f = fixture();
   const stop = new AbortController();
+
   const cron = new CrewCron(f.authority, async (_raw, _binding, signal) => {
     expect(signal).toBe(stop.signal);
     stop.abort(new Error("private abort detail"));
     signal.throwIfAborted();
   });
+
   await expect(
     cron.run(
       { op: "run", name: "nightly" },
@@ -144,20 +159,25 @@ test("cron in-flight cancellation reaches runner without exposing abort reason",
 
 test("cron exposes only declared safe control failures", async () => {
   const f = fixture();
+
   const safe = new CrewCron(f.authority, async () => {
     throw new CronControlError("Cronjob user or channel is not allowed.");
   });
+
   await expect(safe.run({ op: "list" }, f.caller)).rejects.toThrow(
     "Cronjob user or channel is not allowed.",
   );
+
   for (const error of [new Error("secret"), new CrewError("secret")]) {
     const unsafe = new CrewCron(f.authority, async () => {
       throw error;
     });
+
     await expect(unsafe.run({ op: "list" }, f.caller)).rejects.toThrow(
       "raw details withheld",
     );
   }
+
   const unsafeAuthority = new CrewCron(
     {
       ...f.authority,
@@ -167,6 +187,7 @@ test("cron exposes only declared safe control failures", async () => {
     },
     f.runner,
   );
+
   await expect(unsafeAuthority.run({ op: "list" }, f.caller)).rejects.toThrow(
     "Captain verification unavailable; raw details withheld.",
   );

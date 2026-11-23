@@ -16,20 +16,26 @@ type Assistant = {
 function openCode(messages: Assistant[]) {
   let input = "";
   let prompts = 0;
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const url = new URL(request.url);
+
       if (url.pathname === "/api/session")
         return Response.json({ data: { id: "session-1" } });
+
       if (url.pathname.endsWith("/prompt")) {
         prompts++;
         input = ((await request.json()) as { id: string }).id;
+
         return Response.json({ data: { id: input } });
       }
+
       if (url.pathname.endsWith("/wait"))
         return new Response(null, { status: 204 });
+
       if (url.pathname.endsWith("/message"))
         return Response.json({
           data: [
@@ -45,15 +51,19 @@ function openCode(messages: Assistant[]) {
           ],
           cursor: {},
         });
+
       return new Response(null, { status: 404 });
     },
   });
+
   const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
   });
+
   if (config.type !== "opencode") throw new Error("Invalid fixture");
+
   return {
     server,
     backend: new OpenCodeBackend(config),
@@ -77,6 +87,7 @@ const streamFailure: Assistant = {
   finish: "error",
   error: { type: "provider.internal", message: body, status: 200 },
 };
+
 const successfulReply: Assistant = {
   time: { created: 4, completed: 5 },
   finish: "stop",
@@ -89,14 +100,16 @@ test("OpenCode reconciles an earlier error with same-input completed success wit
     { ...streamFailure, content: [{ type: "text", text: "Partial answer" }] },
     successfulReply,
   ]);
+
   try {
     const answer = await backend.prompt(
       "session-1",
       "hello",
       AbortSignal.timeout(5000),
     );
+
     // Keep the existing chronological public-text contract, not a second
-    // copy of the final answer substituted for an earlier failed attempt.
+    // Copy of the final answer substituted for an earlier failed attempt.
     expect(answer).toBe("Progress\n\nPartial answer\n\nFinal answer");
     expect(submissions()).toBe(1);
   } finally {
@@ -120,6 +133,7 @@ test.each([
   "OpenCode does not recover a %s",
   async (_name, messages) => {
     const { server, backend } = openCode(messages);
+
     try {
       expect(
         await failureOf(
@@ -139,6 +153,7 @@ test("OpenCode retains work evidence before a recovered error and later terminal
     successfulReply,
     { error: { type: "APIError", message: body, status: 429 } },
   ]);
+
   try {
     expect(
       await failureOf(
@@ -152,6 +167,7 @@ test("OpenCode retains work evidence before a recovered error and later terminal
 
 test("OpenCode maps a failed generation to one shared failure category", async () => {
   const tool = { content: [{ type: "tool" }] };
+
   const cases: [messages: Assistant[], cause: string][] = [
     [
       [{ error: { type: "APIError", message: body, status: 429 } }],
@@ -209,15 +225,19 @@ test("OpenCode maps a failed generation to one shared failure category", async (
       "Error: OpenCode generation failed",
     ],
   ];
+
   for (const [messages, cause] of cases) {
     const { server, backend } = openCode(messages);
+
     try {
       const signal = AbortSignal.timeout(5000);
+
       const session = await backend.createSession({
         key: "thread",
         title: "Slack",
         signal,
       });
+
       expect([
         messages,
         await failureOf(backend.prompt(session, "hello", signal)),
@@ -231,11 +251,13 @@ test("OpenCode maps a failed generation to one shared failure category", async (
 test("an OpenCode server that cannot be reached is a network failure; nothing ran", async () => {
   const { server, backend } = openCode([]);
   const signal = AbortSignal.timeout(5000);
+
   const session = await backend.createSession({
     key: "thread",
     title: "Slack",
     signal,
   });
+
   await server.stop(true);
   expect(
     await failureOf(
@@ -249,28 +271,36 @@ test("an OpenCode server that cannot be reached is a network failure; nothing ra
 
 test("a lost history read after the turn ran never says that nothing ran", async () => {
   // The prompt is accepted and the turn settles; then the server goes away
-  // on the first or on a further history page.
+  // On the first or on a further history page.
   for (const failAt of [1, 2]) {
     let input = "";
     let reads = 0;
+
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       async fetch(request) {
         const url = new URL(request.url);
+
         if (url.pathname === "/api/session")
           return Response.json({ data: { id: "session-1" } });
+
         if (url.pathname.endsWith("/prompt")) {
           input = ((await request.json()) as { id: string }).id;
+
           return Response.json({ data: { id: input } });
         }
+
         if (url.pathname.endsWith("/wait"))
           return new Response(null, { status: 204 });
+
         if (url.pathname.endsWith("/message")) {
           if (++reads === failAt) {
             await server.stop(true);
+
             return new Response(null, { status: 500 });
           }
+
           return Response.json({
             data: [
               {
@@ -282,23 +312,29 @@ test("a lost history read after the turn ran never says that nothing ran", async
             cursor: { next: "page2" },
           });
         }
+
         return new Response(null, { status: 404 });
       },
     });
+
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/workspace",
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     const backend = new OpenCodeBackend(config);
+
     try {
       const signal = AbortSignal.timeout(5000);
+
       const session = await backend.createSession({
         key: "thread",
         title: "Slack",
         signal,
       });
+
       const failure = await failureOf(backend.prompt(session, "hello", signal));
       expect(input).not.toBe("");
       expect(reads).toBe(failAt);

@@ -6,6 +6,7 @@ import { runCli } from "../src/app/cli";
 
 test("maintenance cleanup requires a dry-run flag and documents its scope", async () => {
   const output = spyOn(console, "log").mockImplementation(() => {});
+
   try {
     await runCli(["maintenance", "--help"]);
     expect(output.mock.calls.flat().join(" ")).toContain("cleanup --plan");
@@ -29,11 +30,13 @@ test("maintenance cleanup requires a dry-run flag and documents its scope", asyn
 
 test("maintenance update parses its flags and keeps them off other commands", async () => {
   const output = spyOn(console, "log").mockImplementation(() => {});
+
   try {
     await runCli(["maintenance", "--help"]);
     expect(output.mock.calls.flat().join(" ")).toContain(
       "update          --version X.Y.Z with --plan or --now",
     );
+
     // The flags parse; the command then fails on the missing configuration.
     for (const flags of [
       ["--plan"],
@@ -52,6 +55,7 @@ test("maintenance update parses its flags and keeps them off other commands", as
           "/missing/config",
         ]),
       ).rejects.toThrow(/config/i);
+
     for (const args of [
       ["maintenance", "run", "--now"],
       ["maintenance", "recover", "--retry-failed"],
@@ -87,6 +91,7 @@ test("crew cron binding requires both explicit options and documents them", asyn
       "must be supplied together",
     );
   const output = spyOn(console, "log").mockImplementation(() => {});
+
   try {
     await runCli(["crew", "init", "--help"]);
     expect(output.mock.calls.flat().join(" ")).toContain("--cron-config");
@@ -115,8 +120,10 @@ test("cron rejects unsupported options and selectors before configuration or Sla
 
 test("cron add bounds JSON input and never exposes file contents", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-cron-cli-"));
+
   try {
     const path = join(directory, "input.json");
+
     for (const text of [
       "private invalid JSON",
       "x".repeat(65_537),
@@ -126,11 +133,13 @@ test("cron add bounds JSON input and never exposes file contents", async () => {
     ]) {
       await Bun.write(path, text);
       let message = "";
+
       try {
         await runCli(["cron", "add", "--bot", "helper", "--input", path]);
       } catch (error) {
         message = error instanceof Error ? error.message : "";
       }
+
       expect(message).not.toBe("");
       expect(message).not.toContain("private");
     }

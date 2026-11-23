@@ -22,12 +22,16 @@ import { join } from "node:path";
 
 const home = process.env["CODEX_HOME"] ?? "";
 const args = process.argv.slice(2);
+
 const log = (entry: object) =>
   appendFileSync(join(home, "fixture.jsonl"), `${JSON.stringify(entry)}\n`);
+
 const write = (event: object) =>
   process.stdout.write(`${JSON.stringify(event)}\n`);
+
 const resumeAt = args.indexOf("resume");
 const resumed = resumeAt >= 0 ? args[resumeAt + 1] : undefined;
+
 const images = args.flatMap((argument, index) =>
   argument === "--image" ? [args[index + 1] ?? ""] : [],
 );
@@ -41,20 +45,25 @@ async function stubborn(detached: boolean) {
     ],
     { stdio: ["ignore", "pipe", "ignore"], detached },
   );
+
   await new Promise((resolve) => child.stdout.once("data", resolve));
   log({ grandchild: child.pid });
 }
 
 let prompt = "";
 let deaf = false;
+
 // Decided before any input: the CLI's own SIGTERM handling.
 process.on("SIGTERM", () => {
   if (!deaf) process.exit(143);
 });
+
 process.stdin.setEncoding("utf8");
+
 process.stdin.on("data", (chunk: string) => {
   prompt += chunk;
 });
+
 process.stdin.on("end", () => {
   void (async () => {
     deaf = prompt.includes("deaf");
@@ -62,24 +71,30 @@ process.stdin.on("end", () => {
     log({ prompt, images: images.map((path) => existsSync(path)) });
     const sessions = join(home, "sessions");
     mkdirSync(sessions, { recursive: true });
+
     if (resumed && !existsSync(join(sessions, resumed))) {
       process.stderr.write("raw stderr detail: no such thread\n");
       process.exit(1);
     }
+
     const thread = prompt.includes("rethread")
       ? crypto.randomUUID()
       : (resumed ?? crypto.randomUUID());
+
     writeFileSync(join(sessions, thread), prompt);
     write({ type: "thread.started", thread_id: thread });
     write({ type: "turn.started" });
+
     if (prompt.includes("stubborn"))
       await stubborn(prompt.includes("detached"));
+
     if (prompt.includes("swap")) {
       const link = process.env["STARGATE_TEST_LINK"] ?? "";
       rmSync(link);
       symlinkSync(process.env["STARGATE_TEST_TARGET"] ?? "", link);
       spawnSync("git", ["--version"], { stdio: "ignore" });
     }
+
     if (prompt.includes("hold")) {
       // Absolute interpreter: the CLI's PATH depends on the host.
       const holder = spawn(
@@ -90,27 +105,34 @@ process.stdin.on("end", () => {
           env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
         },
       );
+
       log({ grandchild: holder.pid });
     }
+
     if (prompt.includes("hang")) {
       const child = spawn(
         process.execPath,
         ["-e", "setInterval(() => {}, 1000)"],
         { stdio: "ignore" },
       );
+
       log({ grandchild: child.pid });
       setInterval(() => {}, 1000);
+
       return;
     }
+
     if (prompt.includes("crash")) {
       process.stderr.write("raw stderr detail: upstream said no\n");
       process.exit(3);
     }
+
     // "fail", or "fail=<provider message>;". "tool" runs a command first;
     // "fatal" reports through the stream's `error` event instead.
     if (prompt.includes("fail")) {
       const message =
         /fail=([^;]*);/.exec(prompt)?.[1] ?? "raw upstream detail";
+
       if (prompt.includes("tool"))
         write({
           type: "item.completed",
@@ -133,11 +155,13 @@ process.stdin.on("end", () => {
       process.stderr.write("raw stderr detail\n");
       process.exit(1);
     }
+
     const item = (body: object) =>
       write({
         type: "item.completed",
         item: { id: crypto.randomUUID(), ...body },
       });
+
     item({ type: "reasoning", text: "private reasoning" });
     item({
       type: "command_execution",
@@ -165,6 +189,7 @@ process.stdin.on("end", () => {
         reasoning_output_tokens: 0,
       },
     });
+
     if (prompt.includes("linger")) setInterval(() => {}, 1000);
   })();
 });

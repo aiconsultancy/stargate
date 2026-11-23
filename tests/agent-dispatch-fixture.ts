@@ -35,6 +35,7 @@ export const CREW_A = "00000000-0000-4000-8000-000000000021";
 export const HUMAN = "00000000-0000-4000-8000-000000000031";
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
+
 /** Fake credential values: tests assert they never reach a log line. */
 export const TOKEN = "synthetic-dispatch-token-0f9e";
 export const ACCESS = "synthetic-access-secret-7c1d";
@@ -46,6 +47,7 @@ type Person = {
   rank?: string;
   fleetId?: string;
 };
+
 export const person: Record<string, Person> = {
   [CAPTAIN_A]: {
     userId: CAPTAIN_A,
@@ -151,10 +153,12 @@ export class FakeApi implements DispatchApi {
     cursor: string | undefined,
   ): ListingPart<DispatchIssue> {
     const start = cursor === undefined ? 0 : Number(cursor);
+
     const end =
       this.listingLimit === undefined
         ? issues.length
         : start + this.listingLimit;
+
     return {
       items: issues.slice(start, end).map((issue) => this.view(issue)),
       next: end < issues.length ? String(end) : undefined,
@@ -178,22 +182,27 @@ export class FakeApi implements DispatchApi {
   /** A change made by someone else, as the server would record it. */
   change(id: string, patch: Partial<StoredIssue>) {
     const issue = this.issues.get(id);
+
     if (!issue) throw new Error("unknown issue");
     Object.assign(issue, patch, {
       version: issue.version + 1,
       updatedAt: new Date(this.clock.now()).toISOString(),
     });
+
     if (issue.assigneeId) issue.readyForAgents = false;
   }
 
   agent(userId: string) {
     const agent = this.agents.find((entry) => entry.userId === userId);
+
     if (!agent) throw new Error("unknown agent");
+
     return agent;
   }
 
   view(issue: StoredIssue): DispatchIssue {
     const assignee = issue.assigneeId ? person[issue.assigneeId] : undefined;
+
     return {
       id: issue.id,
       identifier: issue.identifier,
@@ -218,6 +227,7 @@ export class FakeApi implements DispatchApi {
   /** The issue as the HTTP API serialises it (a subset of IssueFields). */
   wire(issue: StoredIssue) {
     const assignee = issue.assigneeId ? person[issue.assigneeId] : undefined;
+
     return {
       id: issue.id,
       identifier: issue.identifier,
@@ -252,11 +262,13 @@ export class FakeApi implements DispatchApi {
 
   async me() {
     this.calls.push("me");
+
     return this.identity;
   }
   async fleet(reference: string, signal: AbortSignal): Promise<FleetRoster> {
     this.calls.push(`fleet ${reference}`);
     await this.beforeFleet?.(signal);
+
     return {
       id: FLEET,
       slug: "example-fleet",
@@ -265,10 +277,12 @@ export class FakeApi implements DispatchApi {
   }
   async fleetProjects(fleetId: string) {
     this.calls.push("projects");
+
     if (this.failProjects > 0) {
       this.failProjects--;
       throw new Error("API unavailable");
     }
+
     return new Set(fleetId === FLEET ? this.fleetProjectIDs : []);
   }
   assignedRaw(assignees: readonly string[], since: string | undefined) {
@@ -288,6 +302,7 @@ export class FakeApi implements DispatchApi {
     this.calls.push(
       `assigned since=${since ?? "-"}${cursor === undefined ? "" : ` from=${cursor}`}`,
     );
+
     return this.part(this.assignedRaw(assignees, since), cursor);
   }
   readyRaw() {
@@ -300,11 +315,13 @@ export class FakeApi implements DispatchApi {
   }
   async readyIssues(cursor: string | undefined) {
     this.calls.push(cursor === undefined ? "ready" : `ready from=${cursor}`);
+
     return this.part(this.readyRaw(), cursor);
   }
   async issue(reference: string) {
     this.calls.push(`issue ${reference}`);
     const issue = this.issues.get(reference);
+
     return issue ? this.view(issue) : undefined;
   }
   async assign(
@@ -316,29 +333,37 @@ export class FakeApi implements DispatchApi {
       this.failAssign--;
       throw new Error("API unavailable");
     }
+
     const issue = this.issues.get(reference);
+
     if (!issue) throw new Error("missing");
     this.beforeAssign?.(issue);
     this.beforeAssign = undefined;
+
     if (issue.version !== version) return { conflict: true };
     this.edits.push({ issue: reference, body: { version, assigneeId } });
     this.change(reference, { assigneeId });
+
     return { conflict: false, version: issue.version };
   }
   async clearReady(reference: string, version: number): Promise<EditResult> {
     const issue = this.issues.get(reference);
+
     if (!issue) throw new Error("missing");
+
     if (issue.version !== version) return { conflict: true };
     this.edits.push({
       issue: reference,
       body: { version, readyForAgents: false },
     });
     this.change(reference, { readyForAgents: false });
+
     return { conflict: false, version: issue.version };
   }
   async comment(reference: string, body: string) {
     this.comments.push({ issue: reference, body });
     const issue = this.issues.get(reference);
+
     if (issue) issue.updatedAt = new Date(this.clock.now()).toISOString();
   }
 }
@@ -370,18 +395,23 @@ export class FakeChat implements DispatchMessenger {
   }
   async assigned(captain: CaptainRef, issue: IssueLabel) {
     this.carried("assigned", issue);
+
     if (this.down) throw new Error("IRC unavailable");
+
     if (this.offline.has(captain.account)) return false;
     this.lines.push({
       kind: "assigned",
       account: captain.account,
       issue: issue.identifier,
     });
+
     return true;
   }
   async offer(captain: CaptainRef, offer: { id: string; issue: IssueLabel }) {
     this.carried("offer", offer.issue);
+
     if (this.down) throw new Error("IRC unavailable");
+
     if (this.offline.has(captain.account)) return undefined;
     const messageID = `msg-${++this.sequence}`;
     this.lines.push({
@@ -391,6 +421,7 @@ export class FakeChat implements DispatchMessenger {
       offerID: offer.id,
       messageID,
     });
+
     return { messageID };
   }
   async announce(event: DispatchEvent) {
@@ -402,7 +433,9 @@ export class FakeChat implements DispatchMessenger {
   }
   lastOffer() {
     const offer = this.offers().at(-1);
+
     if (!offer) throw new Error("no offer");
+
     return offer;
   }
   statuses() {
@@ -433,6 +466,7 @@ export type RouteKind =
   | "assign"
   | "clear"
   | "comment";
+
 /**
  * `refused`: no connection. `timeout`: no answer until the client gives up.
  * `5xx`: a server error. `malformed`: a 200 whose body is not the JSON shape;
@@ -472,6 +506,7 @@ export class FakeSubspaceHttp {
           ? input.href
           : input.url,
     );
+
     const method = init.method ?? "GET";
     const headers = new Headers(init.headers);
     this.requests.push({
@@ -482,49 +517,67 @@ export class FakeSubspaceHttp {
     });
     const route = this.route(method, url, String(init.body ?? ""));
     const failure = route ? this.failures.get(route) : undefined;
+
     if (failure === "refused") throw new TypeError("fetch failed");
+
     if (failure === "timeout")
       return await new Promise<Response>((_, reject) => {
         const signal = init.signal;
+
         if (!signal) return;
+
         if (signal.aborted) reject(signal.reason);
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         });
       });
+
     if (failure === "5xx")
       return new Response('{"title":"Unavailable"}', { status: 503 });
+
     if (this.credentialStatus)
       return new Response('{"title":"Refused"}', {
         status: this.credentialStatus,
       });
+
     if (
       headers.get("authorization") !== `Bearer ${TOKEN}` ||
       headers.get("x-access-id") !== ACCESS
     )
       return new Response("{}", { status: 401 });
     const response = await this.answer(route, url, String(init.body ?? ""));
+
     if (failure === "lost") throw new TypeError("connection reset");
+
     if (failure === "malformed")
       return new Response("{not json", { status: 200 });
+
     return response;
   }) as typeof fetch;
 
   private route(method: string, url: URL, body: string): RouteKind | undefined {
     const path = url.pathname;
+
     if (path === "/api/v1/me") return "me";
+
     if (path.startsWith("/api/v1/fleets/")) return "fleet";
+
     if (path === "/api/v1/initiatives") return "initiatives";
+
     if (path === "/api/v1/projects") return "projects";
+
     if (path === "/api/v1/issues")
       return url.searchParams.has("readyForAgents") ? "ready" : "assigned";
+
     if (path.endsWith("/comments")) return "comment";
+
     if (path.startsWith("/api/v1/issues/"))
       return method === "PATCH"
         ? body.includes('"assigneeId"')
           ? "assign"
           : "clear"
         : "issue";
+
     return;
   }
 
@@ -534,20 +587,25 @@ export class FakeSubspaceHttp {
     body: string,
   ): Promise<Response> {
     const api = this.api;
+
     const json = (value: unknown, status = 200) =>
       new Response(JSON.stringify(value), {
         status,
         headers: { "content-type": "application/json" },
       });
+
     const page = (items: unknown[]) => {
       const start = Number(url.searchParams.get("cursor") ?? "0");
+
       const end =
         this.pageSize === undefined ? items.length : start + this.pageSize;
+
       return json({
         items: items.slice(start, end),
         nextCursor: end < items.length ? String(end) : null,
       });
     };
+
     switch (route) {
       case "me":
         return json({
@@ -584,20 +642,26 @@ export class FakeSubspaceHttp {
       case "ready":
         if (this.rejectReadyFilter)
           return json({ title: "Unknown filter" }, 400);
+
         return page(api.readyRaw().map((issue) => api.wire(issue)));
       case "issue": {
         const issue = api.issues.get(lastSegment(url));
+
         return issue ? json(api.wire(issue)) : json({}, 404);
       }
+
       case "assign":
       case "clear": {
         const issue = api.issues.get(lastSegment(url));
+
         if (!issue) return json({}, 404);
+
         const edit = JSON.parse(body) as {
           version: number;
           assigneeId?: string;
           readyForAgents?: boolean;
         };
+
         if (edit.version !== issue.version) return json({}, 409);
         api.edits.push({ issue: issue.id, body: edit });
         api.change(
@@ -606,14 +670,18 @@ export class FakeSubspaceHttp {
             ? { assigneeId: edit.assigneeId }
             : { readyForAgents: false },
         );
+
         return json(api.wire(issue));
       }
+
       case "comment": {
         const id = url.pathname.split("/").at(-2) ?? "";
         const { body: text } = JSON.parse(body) as { body: string };
         await api.comment(id, text);
+
         return json({ id: "comment-1" }, 201);
       }
+
       default:
         return json({}, 404);
     }
@@ -627,6 +695,7 @@ function lastSegment(url: URL) {
 /** A pino logger that keeps every line, so tests can look for secrets. */
 export function capturedLog(): { log: Logger; lines: string[] } {
   const lines: string[] = [];
+
   const log = pino(
     { level: "debug" },
     {
@@ -635,12 +704,14 @@ export function capturedLog(): { log: Logger; lines: string[] } {
       },
     },
   );
+
   return { log, lines };
 }
 
 export const silent = pino({ level: "silent" });
 
 const directories: string[] = [];
+
 export async function removeDirectories() {
   for (const directory of directories.splice(0))
     await rm(directory, { recursive: true, force: true });
@@ -649,6 +720,7 @@ export async function removeDirectories() {
 export async function tempDirectory() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-dispatch-"));
   directories.push(directory);
+
   return directory;
 }
 
@@ -669,6 +741,7 @@ export async function fixture(options: FixtureOptions = {}) {
   const http = new FakeSubspaceHttp(api);
   const chat = new FakeChat();
   const path = options.path ?? join(directory, "agent-dispatch.sqlite");
+
   const enrolled = new Set(
     options.enrolled ?? [
       "example-captain-a",
@@ -677,6 +750,7 @@ export async function fixture(options: FixtureOptions = {}) {
       "example-rear-admiral",
     ],
   );
+
   const client = options.http
     ? new SubspaceApi({
         baseUrl: "https://subspace.example.test/api",
@@ -687,6 +761,7 @@ export async function fixture(options: FixtureOptions = {}) {
         timeoutMs: 20,
       })
     : api;
+
   const open = (ledger = new DispatchLedger(path)) =>
     new AgentDispatcher({
       settings: {
@@ -704,10 +779,13 @@ export async function fixture(options: FixtureOptions = {}) {
       log: options.log ?? silent,
       ...(options.wait ? { wait: options.wait } : {}),
     });
+
   const ledger = new DispatchLedger(path);
   const dispatcher = open(ledger);
+
   return { clock, api, http, chat, ledger, dispatcher, open, path, directory };
 }
+
 export type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 export const signal = new AbortController().signal;
@@ -723,6 +801,7 @@ export function answer(
   }> = {},
 ) {
   const offer = f.chat.lastOffer();
+
   return f.dispatcher.answer(
     {
       account: offer.account,

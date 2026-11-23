@@ -45,6 +45,7 @@ async function git(directory: string, ...args: string[]) {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
   );
+
   const child = Bun.spawn(
     [
       "git",
@@ -58,12 +59,15 @@ async function git(directory: string, ...args: string[]) {
     ],
     { env, stdout: "pipe", stderr: "pipe" },
   );
+
   const [text, error, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
     child.exited,
   ]);
+
   if (code) throw new Error(`Local Git fixture failed: ${error}`);
+
   return text.trim();
 }
 
@@ -71,8 +75,10 @@ async function fixture(crewCount = 1) {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "stargate-projects-")),
   );
+
   const captainDirectory = join(root, "captain");
   await mkdir(captainDirectory);
+
   const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain", agent: "build", model: "fixture/captain" },
     crew: Array.from({ length: crewCount }, (_, index) => ({
@@ -84,10 +90,12 @@ async function fixture(crewCount = 1) {
       model: "fixture/worker",
     })),
   });
+
   const locations = new Map<
     string,
     { projectDirectory: string; worktrees: Record<string, string> }
   >();
+
   for (const project of ["default", "stargate"]) {
     const directory = join(root, project);
     await mkdir(directory);
@@ -104,6 +112,7 @@ async function fixture(crewCount = 1) {
       "fixture",
     );
     const worktrees: Record<string, string> = {};
+
     for (const member of team.crew) {
       const worker = join(root, `${member.id}-${project}`);
       await git(
@@ -117,11 +126,13 @@ async function fixture(crewCount = 1) {
       );
       worktrees[member.id] = worker;
     }
+
     locations.set(project, {
       projectDirectory: directory,
       worktrees,
     });
   }
+
   const base: CrewOptions = {
     namespace: "project-test",
     stateDirectory: join(root, "state"),
@@ -132,10 +143,14 @@ async function fixture(crewCount = 1) {
     team,
     mesijCommand: "/not-executed",
   };
+
   const extra = locations.get("stargate");
+
   if (!extra) throw new Error("Missing project fixture");
   const options: CrewOptions = { ...base, projects: { stargate: extra } };
+
   type Native = CrewSession & { model?: unknown; permissions?: unknown };
+
   const rootSession: Native = {
     id: "ses_captain",
     agent: "build",
@@ -144,19 +159,24 @@ async function fixture(crewCount = 1) {
     model: { providerID: "fixture", id: "captain" },
     permissions: [{ action: "stargate_crew", resource: "*", effect: "allow" }],
   };
+
   const native = new Map<string, Native>([[rootSession.id, rootSession]]);
   const creations: Parameters<CrewSessions["create"]>[0][] = [];
   const prompts: Parameters<CrewSessions["prompt"]>[0][] = [];
+
   const client: CrewSessions = {
     async get({ sessionID }) {
       const value = native.get(sessionID);
+
       if (!value) throw { _tag: "Session.NotFoundError" };
+
       return value;
     },
     async create(input) {
       if (!input.id || !input.agent || !input.location || !input.metadata)
         throw new Error("Exact native identity required");
       creations.push(structuredClone(input));
+
       const value: Native = {
         id: input.id,
         agent: input.agent,
@@ -165,11 +185,14 @@ async function fixture(crewCount = 1) {
         ...(input.model ? { model: input.model } : {}),
         permissions: input.permissions,
       };
+
       native.set(value.id, value);
+
       return value;
     },
     async prompt(input) {
       prompts.push(input);
+
       return { id: input.id ?? "msg_fixture", sessionID: input.sessionID };
     },
     async wait() {},
@@ -177,17 +200,21 @@ async function fixture(crewCount = 1) {
     async synthetic() {},
     async compact() {},
   };
+
   const mail = new Map<string, MesijMessage[]>();
+
   const factory = async (config: CrewOptions) => {
     const messages = mail.get(config.namespace) ?? [];
     mail.set(config.namespace, messages);
     const keys = new Map<string, MesijMessage>();
+
     const mailer: Pick<MesijClient, "register" | "send" | "inbox"> = {
       async register() {
         return { id: "0".repeat(32), sequence: 0 };
       },
       async send(input) {
         let message = keys.get(input.key);
+
         if (!message) {
           message = {
             id: (messages.length + 1).toString(16).padStart(32, "0"),
@@ -201,6 +228,7 @@ async function fixture(crewCount = 1) {
           messages.push(message);
           keys.set(input.key, message);
         }
+
         return { id: message.id, sequence: message.sequence };
       },
       async inbox(input) {
@@ -211,6 +239,7 @@ async function fixture(crewCount = 1) {
         );
       },
     };
+
     return CrewEngine.open(config, client, mailer, {
       async get() {
         return {
@@ -222,13 +251,16 @@ async function fixture(crewCount = 1) {
       },
     });
   };
+
   let sequence = 0;
+
   const captain = () => ({
     sessionID: "ses_captain",
     agent: "build",
     signal: new AbortController().signal,
     id: `call-${++sequence}`,
   });
+
   return {
     root,
     base,
@@ -249,6 +281,7 @@ async function fixture(crewCount = 1) {
 
 function identity(engine: CrewEngine) {
   const db = new Database(engine.state.path, { readonly: true });
+
   try {
     return db.query<{ value: string }, []>("SELECT value FROM identity").get()
       ?.value;
@@ -262,24 +295,30 @@ test(
   async () => {
     const f = await fixture();
     let projects: CrewProjects | undefined;
+
     try {
       const legacy = await f.factory(f.base);
+
       const oldPeer = (
         await legacy.run({ op: "ensure", crew: "worker" }, f.captain())
       ).peers?.[0];
+
       const oldIdentity = identity(legacy);
       const rootBefore = structuredClone(f.rootSession);
       await legacy.close();
       projects = await CrewProjects.open(f.options, f.factory);
       expect(identity(projects.default)).toBe(oldIdentity);
+
       const existing = await projects.run(
         { op: "ensure", crew: "worker" },
         f.captain(),
       );
+
       const extra = await projects.run(
         { op: "ensure", crew: "worker", project: "stargate" },
         f.captain(),
       );
+
       expect(existing.peers?.[0]?.sessionID).toBe(oldPeer?.sessionID);
       expect(extra.peers?.[0]?.sessionID).not.toBe(oldPeer?.sessionID);
       expect(projects.get("stargate").options.captainDirectory).toBe(
@@ -300,10 +339,12 @@ test(
             input.location?.directory !== f.base.captainDirectory,
         ),
       ).toBe(true);
+
       const ids = [...projects.contexts].map(([key, e]) => [
         key,
         e.state.peer("worker")?.sessionID,
       ]);
+
       await projects.close();
       projects = await CrewProjects.open(f.options, f.factory);
       expect(
@@ -324,6 +365,7 @@ test(
 test("dispatch selects only protected paths; worker omission binds native context and cannot spoof mail/DM/project", async () => {
   const f = await fixture();
   const projects = await CrewProjects.open(f.options, f.factory);
+
   try {
     const result = await projects.run(
       {
@@ -334,14 +376,18 @@ test("dispatch selects only protected paths; worker omission binds native contex
       },
       f.captain(),
     );
+
     const peer = projects.get("stargate").state.peer("worker");
+
     if (!peer || !result.task) throw new Error("Missing native task");
+
     const worker = {
       sessionID: peer.sessionID,
       agent: "crew-worker",
       signal: new AbortController().signal,
       id: "worker-call",
     };
+
     expect((await projects.select({}, worker)).project).toBe("stargate");
     expect(f.prompts[0]?.text).toContain(
       f.options.projects?.["stargate"]?.worktrees["worker"] ?? "missing",
@@ -353,15 +399,18 @@ test("dispatch selects only protected paths; worker omission binds native contex
         .members.find((member) => member.project === "stargate")?.current
         ?.summary,
     ).toBe("Read the assigned repository");
+
     for (const mail of [false, true])
       await expect(
         projects.select({ project: "default" }, worker, mail),
       ).rejects.toThrow("another project");
+
     const selected = await projects.select(
       { op: "send", to: "captain", text: "Actual worker result" },
       worker,
       true,
     );
+
     await selected.engine.mail(selected.input, worker);
     expect(
       f.mail
@@ -382,6 +431,7 @@ test("dispatch selects only protected paths; worker omission binds native contex
     );
     expect(projects.default.state.task(result.task.id)).toBeNull();
     const original = f.native.get(peer.sessionID);
+
     if (!original) throw new Error("Missing peer");
     f.native.set(peer.sessionID, {
       ...original,
@@ -398,6 +448,7 @@ test("dispatch selects only protected paths; worker omission binds native contex
 
 test("project validation rejects path/repository aliases and foreign worktrees before state/native admission", async () => {
   const f = await fixture();
+
   try {
     const invalid = [
       {
@@ -430,11 +481,14 @@ test("project validation rejects path/repository aliases and foreign worktrees b
         },
       },
     ];
+
     let opened = 0;
+
     for (const value of invalid)
       await expect(
         CrewProjects.open(value, async (options) => {
           opened++;
+
           return f.factory(options);
         }),
       ).rejects.toThrow();
@@ -489,12 +543,14 @@ test("tool schema accepts keys only and original strict operation constraints re
       project: "stargate",
     }),
   ).toHaveProperty("value");
+
   for (const value of [
     { op: "dispatch", crew: "worker", text: "task", directory: "/tmp/other" },
     { op: "dispatch", crew: "worker", text: "task", project: "../other" },
     { op: "dispatch", project: "stargate" },
   ])
     expect(await tool.validate(value)).toHaveProperty("issues");
+
   for (const key of [
     "default",
     "constructor",
@@ -529,6 +585,7 @@ test("Effect project envelope separates selection from strict operation decoding
     project: "stargate",
     text: "  note  ",
   });
+
   for (const input of [
     { op: "read", text: "wrong branch", project: "stargate" },
     { op: "append", project: "stargate" },
@@ -537,6 +594,7 @@ test("Effect project envelope separates selection from strict operation decoding
     { op: "read", project: null },
   ])
     expect(() => decode(input)).toThrow();
+
   for (const [key, accepted] of [
     ["default", true],
     ["a", true],
@@ -556,9 +614,11 @@ test("Effect project envelope separates selection from strict operation decoding
     ).toBe(accepted);
     expect(projectKeySchema.safeParse(key).success).toBe(accepted);
   }
+
   const json = Schema.toJsonSchemaDocument(tool, {
     onExcessProperty: "error",
   }).schema;
+
   expect(json["type"]).toBe("object");
   expect(json["required"]).toEqual(["op"]);
   expect(json["properties"]).toHaveProperty("project", {
@@ -572,6 +632,7 @@ test("Effect project envelope separates selection from strict operation decoding
 test("status and history identify all project contexts while legacy output stays unchanged", async () => {
   const f = await fixture();
   const projects = await CrewProjects.open(f.options, f.factory);
+
   try {
     for (const project of ["default", "stargate"])
       await projects.run(
@@ -585,9 +646,11 @@ test("status and history identify all project contexts while legacy output stays
       "default",
       "stargate",
     ]);
+
     const fleet = fleetCrewStatusSchema.parse(
       projects.fleetStatus({ member: "worker" }),
     );
+
     expect(fleet.status).toEqual(status);
     expect(fleet.metadata).toEqual({
       projectDirectory: f.base.projectDirectory,
@@ -627,6 +690,7 @@ test("status and history identify all project contexts while legacy output stays
 test("aggregate activity includes busy workers after the twenty-row project page", async () => {
   const f = await fixture(18);
   const projects = await CrewProjects.open(f.options, f.factory);
+
   try {
     await projects.run(
       {
@@ -660,6 +724,7 @@ test("engine aggregate counts member twenty-one before its own page limit and re
   const projects = await CrewProjects.open(f.options, f.factory);
   const store = openStore(":memory:");
   const cron = new CronStore(":memory:");
+
   try {
     await projects.run(
       {
@@ -687,6 +752,7 @@ test("engine aggregate counts member twenty-one before its own page limit and re
     expect(status.busy).toBe(1);
     expect(projects.status({ member: "worker21" }).busy).toBe(1);
     const calls = f.creations.length;
+
     const source = dashboardSource(
       [
         {
@@ -710,6 +776,7 @@ test("engine aggregate counts member twenty-one before its own page limit and re
       store,
       cron,
     );
+
     const fleet = await source.fleet(new AbortController().signal);
     expect(fleet.ships[0]?.crew).toEqual({
       total: 42,
@@ -728,6 +795,7 @@ test("engine aggregate counts member twenty-one before its own page limit and re
 test("changing a registered worktree cannot rebind persisted project workers or replay tasks", async () => {
   const f = await fixture();
   let projects: CrewProjects | undefined;
+
   try {
     projects = await CrewProjects.open(f.options, f.factory);
     await projects.run(
@@ -739,6 +807,7 @@ test("changing a registered worktree cannot rebind persisted project workers or 
     await projects.close();
     projects = undefined;
     const directory = f.options.projects?.["stargate"]?.projectDirectory;
+
     if (!directory) throw new Error("Missing project");
     const moved = join(f.root, "new-worker-location");
     await git(directory, "worktree", "add", "-b", "task/moved", moved, "main");
@@ -772,6 +841,7 @@ test("changing a registered worktree cannot rebind persisted project workers or 
 test("actual OpenCode V2 plugin routes the configured project and retains native permission/source checks", async () => {
   const f = await fixture();
   const scope = Effect.runSync(Scope.make());
+
   type Registered = {
     name: string;
     input: Tool.ValueSchema;
@@ -780,14 +850,17 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
       context: Tool.Context,
     ) => Effect.Effect<Tool.Result<undefined>, Tool.Error>;
   };
+
   const tools = new Map<string, Registered>();
   const assertions: unknown[] = [];
   const unexpected: string[] = [];
   let deny = false;
+
   const registration = {
     dispose: Effect.void,
     events: { emit: () => Effect.void },
   };
+
   const methods = new Map<string, unknown>([
     ["location", { directory: f.base.captainDirectory }],
     ["options", f.options],
@@ -797,6 +870,7 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
       "permission.assert",
       (request: unknown) => {
         assertions.push(request);
+
         return deny
           ? Effect.fail(new Tool.Error({ message: "Denied" }))
           : Effect.void;
@@ -836,10 +910,12 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
       },
     ],
   ]);
+
   function stub(path: string): object {
     return new Proxy(() => {}, {
       get(_target, key) {
         const next = path ? `${path}.${String(key)}` : String(key);
+
         return methods.get(next) ?? stub(next);
       },
       apply() {
@@ -848,6 +924,7 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
       },
     });
   }
+
   try {
     await Effect.runPromise(
       plugin
@@ -855,7 +932,9 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
         .pipe(Scope.provide(scope)),
     );
     const tool = tools.get("stargate_crew");
+
     if (!tool) throw new Error("Missing registered native tool");
+
     const context: Tool.Context = {
       sessionID: Session.ID.make("ses_captain"),
       agent: Agent.ID.make("build"),
@@ -863,9 +942,11 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
       id: Tool.CallID.make("call_project"),
       progress: () => Effect.void,
     };
+
     const result = await Effect.runPromise(
       tool.execute({ op: "roster", project: "stargate" }, context),
     );
+
     expect(typeof result.content).toBe("string");
     expect(JSON.parse(String(result.content))).toMatchObject({
       status: "roster",
@@ -879,27 +960,34 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
       source: { type: "tool", messageID: "msg_project", id: "call_project" },
     });
     const journal = tools.get("stargate_journal");
+
     if (!journal || !Schema.isSchema(journal.input))
       throw new Error("Journal requires a native Effect input codec");
     const parseJournal = Schema.decodeUnknownSync(journal.input);
+
     const note = {
       op: "append",
       project: "stargate",
       text: "  Project note  ",
     };
+
     expect(parseJournal(note)).toEqual(note);
+
     const appended = await Effect.runPromise(
       journal.execute(parseJournal(note), context),
     );
+
     expect(JSON.parse(String(appended.content))).toMatchObject({
       entry: { text: "Project note", member: "captain" },
     });
+
     const page = await Effect.runPromise(
       journal.execute(
         parseJournal({ op: "read", project: "stargate" }),
         context,
       ),
     );
+
     expect(JSON.parse(String(page.content))).toMatchObject({
       entries: [{ text: "Project note" }],
     });

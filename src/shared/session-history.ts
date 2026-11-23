@@ -16,18 +16,22 @@ export function exactStruct<const Fields extends Schema.Struct.Fields>(
   fields: Fields,
 ) {
   const keys = new Set(Object.keys(fields));
+
   const exact = Schema.makeFilter<unknown>((input, ast) => {
     if (!Predicate.isObject(input)) return "Expected an object";
-    // for...in, as Zod 4 strict objects did: inherited enumerable keys count.
+    // For...in, as Zod 4 strict objects did: inherited enumerable keys count.
     const issues: Schema.FilterIssue[] = [];
+
     for (const key in input)
       if (!keys.has(key))
         issues.push({
           path: [key],
           issue: new SchemaIssue.UnexpectedKey(ast, input[key]),
         });
+
     return issues.length ? issues : undefined;
   });
+
   return Schema.flip(
     Schema.flip(Schema.Struct(fields).check(exact)).check(exact),
   );
@@ -36,6 +40,7 @@ export function exactStruct<const Fields extends Schema.Struct.Fields>(
 // Zod's string bounds counted code points; keep that unit at every boundary.
 const codePoints = (minimum: number, maximum: number) =>
   Schema.String.check(Schema.isBetweenCodePoints(minimum, maximum));
+
 const id = codePoints(1, 512);
 const time = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const body = codePoints(0, HISTORY_TEXT);
@@ -57,6 +62,7 @@ export const historySessionSchema = exactStruct({
   createdAt: Schema.optional(time),
   updatedAt: Schema.optional(time),
 });
+
 export type HistorySession = typeof historySessionSchema.Type;
 
 /**
@@ -85,6 +91,7 @@ export const historyPartSchema = Schema.Union([
   /** Non-message events: compaction, model or agent switches, shell runs. */
   exactStruct({ type: Schema.Literal("notice"), label: codePoints(0, 300) }),
 ]);
+
 export type HistoryPart = typeof historyPartSchema.Type;
 
 // Mapping fills role, time and model while reading a record; keep them mutable.
@@ -101,9 +108,11 @@ export const historyEntrySchema = exactStruct({
   /** Parts beyond HISTORY_PARTS; they are counted, never silently dropped. */
   omittedParts: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
 });
+
 export type HistoryEntry = typeof historyEntrySchema.Type;
 
 const cursor = Schema.optional(codePoints(1, 4096));
+
 const limit = (fallback: number) =>
   Schema.Int.check(
     Schema.isBetween({ minimum: 1, maximum: HISTORY_PAGE }),
@@ -112,11 +121,14 @@ const limit = (fallback: number) =>
 export const historyDescribeInputSchema = exactStruct({
   ids: Schema.Array(id).check(Schema.isBetweenLength(1, HISTORY_PAGE)),
 });
+
 // Callers collect and return these lists as mutable arrays.
 const sessions = Schema.mutable(Schema.Array(historySessionSchema)).check(
   Schema.isMaxLength(HISTORY_PAGE),
 );
+
 export const historySessionsSchema = exactStruct({ sessions });
+
 export const historyChildrenInputSchema = exactStruct({
   parentID: id,
   cursor,
@@ -124,8 +136,11 @@ export const historyChildrenInputSchema = exactStruct({
   /** Internal recent-child lookup for the Fleet API. */
   updatedSince: Schema.optional(time),
 });
+
 export type HistoryChildrenInput = typeof historyChildrenInputSchema.Type;
+
 export const historySessionPageSchema = exactStruct({ sessions, cursor });
+
 export type HistorySessionPage = typeof historySessionPageSchema.Type;
 
 export const historyEntriesInputSchema = exactStruct({
@@ -140,13 +155,16 @@ export const historyEntriesInputSchema = exactStruct({
     Schema.withDecodingDefault(Effect.succeed("summary" as const)),
   ),
 });
+
 export type HistoryEntriesInput = typeof historyEntriesInputSchema.Type;
+
 export const historyEntryPageSchema = exactStruct({
   entries: Schema.Array(historyEntrySchema).check(
     Schema.isMaxLength(HISTORY_PAGE),
   ),
   cursor,
 });
+
 export type HistoryEntryPage = typeof historyEntryPageSchema.Type;
 
 /**
@@ -178,6 +196,7 @@ export function clipHistory(text: string): {
   truncated?: true;
 } {
   const characters = Array.from(text);
+
   return characters.length > HISTORY_TEXT
     ? { text: characters.slice(0, HISTORY_TEXT).join(""), truncated: true }
     : { text };

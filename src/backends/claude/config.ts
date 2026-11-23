@@ -30,6 +30,7 @@ export const claudeToolNames = [
   "WebSearch",
   "Write",
 ] as const;
+
 /**
  * Bare tool names only. A scoped rule such as `Read(./src/**)` is refused:
  * Claude Code permits reads anywhere in its working directory regardless of

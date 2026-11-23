@@ -8,6 +8,7 @@ export default bench({
       metrics: ["cpu.work", "memory.peak"],
       run: async (ctx) => {
         const { output } = await ctx.exec();
+
         if (!output.includes("Usage: stargate"))
           throw new Error("Stargate CLI help was not printed");
       },

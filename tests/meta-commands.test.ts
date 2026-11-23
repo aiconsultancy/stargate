@@ -20,14 +20,17 @@ import { resolveWaiting, waitingSettingsPath } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 
 const cleanups: (() => Promise<void>)[] = [];
+
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
 const now = Date.parse("2026-11-17T12:00:00Z");
+
 async function fixture(options: MetaOptions = {}) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-meta-"));
   const config = bot();
+
   if (config.backend.type !== "opencode") throw new Error("Expected OpenCode");
   config.backend.directory = directory;
   config.backend.agent = "adama";
@@ -38,6 +41,7 @@ async function fixture(options: MetaOptions = {}) {
     await rm(directory, { recursive: true, force: true });
   });
   const calls: string[] = [];
+
   const backend: AgentBackend = {
     async createSession() {
       calls.push("createSession");
@@ -49,12 +53,15 @@ async function fixture(options: MetaOptions = {}) {
     },
     async close() {},
   };
+
   const delivered: { channel: string; thread: string; text: string }[] = [];
+
   const slack: TransportDelivery = {
     async post(channel, thread, text) {
       delivered.push({ channel, thread, text });
     },
   };
+
   const peers = new PeerDirectory(
     async (user) => ({
       ok: true,
@@ -69,6 +76,7 @@ async function fixture(options: MetaOptions = {}) {
     }),
     identity.team,
   );
+
   const createGateway = (queue = store) =>
     new Gateway(
       config,
@@ -83,7 +91,9 @@ async function fixture(options: MetaOptions = {}) {
       undefined,
       { now: () => now, ...options },
     );
+
   const gateway = createGateway();
+
   const authority = {
     options: {
       captainDirectory: directory,
@@ -93,12 +103,15 @@ async function fixture(options: MetaOptions = {}) {
       if (caller.agent !== "adama") throw new Error("Not captain");
     },
   };
+
   const waiting = new CrewWaiting(authority);
+
   const caller = {
     agent: "adama",
     sessionID: "ses_existing_captain",
     signal: new AbortController().signal,
   };
+
   return {
     config,
     directory,
@@ -124,6 +137,7 @@ function noCaptainWork(f: Fixture) {
 
 function reply(f: Fixture) {
   expect(f.delivered).toHaveLength(1);
+
   return f.delivered[0]?.text ?? "";
 }
 
@@ -134,8 +148,10 @@ test("addressed /help replies locally despite backend outage; Socket Mode ACK fo
   // Observe real delivery and ACK, not an invented command-handler API.
   f.delivered.push = (...messages) => {
     order.push("reply");
+
     return post(...messages);
   };
+
   await handleSlackRequest(
     {
       type: "events_api",
@@ -269,12 +285,15 @@ for (const section of [
 ]) {
   test(`/health ${section ?? "summary"} reads locally without a captain turn`, async () => {
     const reads: (string | undefined)[] = [];
+
     const f = await fixture({
       health: async (requested) => {
         reads.push(requested);
+
         return `⚠ ${requested ?? "summary"}: unknown`;
       },
     });
+
     await f.gateway.receive(
       event(`<@UBOT> /health${section ? ` ${section}` : ""}`),
     );
@@ -290,6 +309,7 @@ test("/health source failure is unknown without raw errors or a captain turn", a
       throw new Error("secret-health-source");
     },
   });
+
   await f.gateway.receive(event("<@UBOT> /health"));
   expect(reply(f)).toContain("unknown");
   expect(reply(f)).not.toContain("secret-health-source");
@@ -298,12 +318,15 @@ test("/health source failure is unknown without raw errors or a captain turn", a
 
 test("/health refuses peer bots before reading any health source", async () => {
   let reads = 0;
+
   const f = await fixture({
     health: async () => {
       reads++;
+
       return "unexpected";
     },
   });
+
   f.config.access.peerCaptains = true;
   await f.gateway.receive({
     ...event("<@UBOT> /health"),
@@ -592,6 +615,7 @@ for (const changes of [
       ...request,
       event: { ...request.event, ...changes },
     });
+
     if ("blocks" in changes) {
       const queued = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10);
       expect(queued).toHaveLength(1);
@@ -639,6 +663,7 @@ test("Slack delivery failure retries the stored reply, never the applied write",
   f.slack.post = async () => {
     throw new Error("Slack down");
   };
+
   const request = event("<@UBOT> /config waiting 3");
   await expect(f.gateway.receive(request)).rejects.toThrow("Slack down");
   expect((await resolveWaiting(f.config)).delayMs).toBe(3000);
@@ -684,6 +709,7 @@ test("retained pending claim reports uncertainty after reopen, never reapplies",
 
 test("failed waiting write remains pending and cannot later overwrite a tool change", async () => {
   const f = await fixture();
+
   if (f.config.backend.type !== "opencode")
     throw new Error("Expected OpenCode");
   const blocker = join(f.directory, "not-a-directory");
@@ -730,11 +756,13 @@ for (const backend of [
 ] as const) {
   test(`${backend.type} without workspace agent reports local waiting unavailability`, async () => {
     const f = await fixture();
+
     // Parse through the repository boundary, rather than weakening config types.
     const config = Schema.decodeUnknownSync(botSchema)({
       ...f.config,
       backend,
     });
+
     // A backend identity change needs a new gateway, not live reconfiguration.
     const local = new Gateway(
       config,
@@ -752,6 +780,7 @@ for (const backend of [
       f.slack,
       pino({ enabled: false }),
     );
+
     await local.receive(event("<@UBOT> /config waiting 3"));
     expect(reply(f)).toContain("unavailable");
     expect(f.store.ready(local.key, Number.MAX_SAFE_INTEGER, 10)).toEqual([]);
@@ -763,6 +792,7 @@ test("mute listing is bounded, current-registration-only, and does not mutate pr
   const readTime = now + 2000;
   cleanups.push(async () => preferences.close());
   let registration = "";
+
   const f = await fixture({
     listMutes: () => {
       const result = preferences.operate(
@@ -770,11 +800,15 @@ test("mute listing is bounded, current-registration-only, and does not mutate pr
         { op: "list" },
         { id: "list", caller: "gateway", now: readTime },
       );
+
       if (result.op !== "list") throw new Error("Expected list");
+
       return result;
     },
   });
+
   registration = notificationKey(f.config, identity);
+
   for (let index = 0; index < 51; index++) {
     preferences.operate(
       registration,
@@ -791,16 +825,19 @@ test("mute listing is bounded, current-registration-only, and does not mutate pr
       { id: `mute-${index}`, caller: "captain", now },
     );
   }
+
   preferences.operate(
     "other-registration",
     { op: "mute", scope: "channel", channel: "CSECRET" },
     { id: "other", caller: "other", now },
   );
+
   const before = preferences.operate(
     registration,
     { op: "list" },
     { id: "list", caller: "gateway", now: readTime },
   );
+
   await f.gateway.receive(event("<@UBOT> /config mutes"));
   noCaptainWork(f);
   const text = reply(f);
@@ -829,6 +866,7 @@ test("unavailable mute storage gives a fixed local error", async () => {
       throw new Error("private path");
     },
   });
+
   await f.gateway.receive(event("<@UBOT> /config mutes"));
   noCaptainWork(f);
   expect(reply(f)).toBe("Mute preferences unavailable for this registration.");
@@ -872,15 +910,19 @@ for (const text of [
 test("binding change before queued admission withholds ACK and permits fresh-binding retry", async () => {
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
+
   const f = await fixture({
     listMutes: async () => {
       entered.resolve();
       await release.promise;
+
       return { settings: [], cursor: null, counts: { channel: 0, thread: 0 } };
     },
   });
+
   let acks = 0;
   const failures: unknown[] = [];
+
   const deliver = (body: unknown) =>
     handleSlackRequest(
       {
@@ -900,6 +942,7 @@ test("binding change before queued admission withholds ACK and permits fresh-bin
       },
       pino({ enabled: false }),
     );
+
   const first = deliver(event("<@UBOT> /config"));
   await entered.promise;
   const waiting = deliver(event("<@UBOT> /config waiting 3", "2.000"));
@@ -922,6 +965,7 @@ test("binding change before queued admission withholds ACK and permits fresh-bin
 test("binding invalidation during waiting read releases only the proven-unwritten claim", async () => {
   let invalidate = () => {};
   let invalidated = false;
+
   const f = await fixture({
     now: () => {
       if (!invalidated)
@@ -929,9 +973,11 @@ test("binding invalidation during waiting read releases only the proven-unwritte
           invalidated = true;
           invalidate();
         });
+
       return now;
     },
   });
+
   invalidate = () => f.gateway.reconfigure({ ...f.config });
   const request = event("<@UBOT> /config waiting 3");
   await expect(f.gateway.receive(request)).rejects.toThrow();
@@ -952,11 +998,13 @@ test("binding invalidation after apply retains the receipt and retries only its 
   let changed = false;
   f.store.meta.applyMeta = (...args: Parameters<MetaRecords["applyMeta"]>) => {
     apply(...args);
+
     if (!changed) {
       changed = true;
       f.gateway.reconfigure({ ...f.config });
     }
   };
+
   const request = event("<@UBOT> /config waiting 3");
   await expect(f.gateway.receive(request)).rejects.toThrow();
   expect((await resolveWaiting(f.config)).delayMs).toBe(3000);
@@ -1016,6 +1064,7 @@ test("failed uncertainty delivery retries the reply once, never the pending muta
   f.slack.post = async () => {
     throw new Error("Slack unavailable");
   };
+
   const request = event("<@UBOT> /config waiting 3");
   await expect(f.gateway.receive(request)).rejects.toThrow("Slack unavailable");
   expect(f.store.meta.metaReceipt(registration, "C123:1.000")).toMatchObject({

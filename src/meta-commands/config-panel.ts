@@ -32,10 +32,13 @@ export type MutePage = {
 };
 
 export const configActionPrefix = "stargate_config_";
+
 export const configPanelStale =
   "This config panel is stale; run /config again.";
+
 export const configPanelRefused =
   "Config action refused; run /config in an allowed channel.";
+
 export const configPanelUnavailable =
   "Config panel unavailable; use the typed /config commands.";
 
@@ -49,6 +52,7 @@ export const configSnapshotSchema = settingsStruct({
     (value): value is QuestionSettings => {
       try {
         decodeQuestionSettings(value);
+
         return true;
       } catch {
         return false;
@@ -59,13 +63,16 @@ export const configSnapshotSchema = settingsStruct({
   mutes: Schema.String,
   mutesFingerprint: Schema.String,
 });
+
 export type ConfigPanelSnapshot = typeof configSnapshotSchema.Type;
+
 export type ConfigPanelRow = {
   id: string;
   title: string;
   value(snapshot: ConfigPanelSnapshot): string;
   actions: readonly { id: string; label: string; command: string }[];
 };
+
 export type ConfigPanelView = {
   nonce: string;
   revision: number;
@@ -82,6 +89,7 @@ export function buildConfigPanel(
   const audit = `Updated by ${panel.user} at ${new Date(panel.at).toISOString()}.`;
   const lines = rows.map((row) => `${row.title}: ${row.value(panel.snapshot)}`);
   const blocks: SlackPanelContent["blocks"] = [];
+
   for (const [index, row] of rows.entries()) {
     const block = `${panel.nonce}:${panel.revision}:${row.id}`;
     blocks.push({
@@ -93,6 +101,7 @@ export function buildConfigPanel(
         emoji: false,
       },
     });
+
     if (row.actions.length) {
       blocks.push({
         type: "actions",
@@ -107,6 +116,7 @@ export function buildConfigPanel(
       });
     }
   }
+
   return { text: `${lines.join("\n")}\n${audit}`, blocks };
 }
 
@@ -122,27 +132,34 @@ async function settingsFingerprint(
   if (bot.backend.type !== "opencode" || !bot.backend.agent)
     return "unsupported";
   const path = settingsPath(bot.backend.directory, bot.backend.agent);
+
   try {
     const file = await open(
       path,
       constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
     );
+
     try {
       const before = await file.stat({ bigint: true });
+
       if (!before.isFile() || before.size > 4096n)
         throw new Error(configPanelUnavailable);
       const bytes = Buffer.alloc(4097);
       const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+
       if (bytesRead > 4096) throw new Error(configPanelUnavailable);
       const after = await file.stat({ bigint: true });
       const current = await lstat(path, { bigint: true });
+
       const identity = (info: typeof before) =>
         `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+
       if (
         identity(before) !== identity(after) ||
         identity(after) !== identity(current)
       )
         throw new Error(configPanelStale);
+
       return hash(`${identity(after)}:${hash(bytes.subarray(0, bytesRead))}`);
     } finally {
       await file.close();
@@ -170,12 +187,15 @@ export async function readConfigSnapshot(
   const questions = await resolveQuestionSettings(bot);
   const after = await settingsFingerprint(bot, waitingSettingsPath);
   const questionsAfter = await settingsFingerprint(bot, questionSettingsPath);
+
   if (before !== after || questionsBefore !== questionsAfter)
     throw new Error(configPanelStale);
+
   // Only the current registration's safe status projection is retained, not reasons.
   const mutes = page
     ? `${page.counts.channel} channels, ${page.counts.thread} threads`
     : "unavailable";
+
   const safePage = page
     ? {
         counts: page.counts,
@@ -187,6 +207,7 @@ export async function readConfigSnapshot(
         })),
       }
     : null;
+
   return {
     delayMs: waiting.delayMs,
     waitingFingerprint: after,
@@ -213,6 +234,7 @@ export function sameConfigSnapshot(
 }
 
 const timestamp = Schema.String.check(settingsPattern(/^\d{1,16}\.\d{1,6}$/));
+
 export const configActionSchema = Schema.Struct({
   type: Schema.Literal("block_actions"),
   api_app_id: Schema.String,
@@ -259,12 +281,14 @@ export function configActionCandidate(raw: unknown): boolean {
   const parsed = Schema.decodeUnknownResult(
     Schema.Struct({ actions: Schema.mutable(Schema.Array(Schema.Unknown)) }),
   )(raw);
+
   return (
     Result.isSuccess(parsed) &&
     parsed.success.actions.some((entry) => {
       const action = Schema.decodeUnknownResult(
         Schema.Struct({ action_id: Schema.String }),
       )(entry);
+
       return (
         Result.isSuccess(action) &&
         action.success.action_id.startsWith(configActionPrefix)
@@ -288,5 +312,6 @@ export function configReplyTarget(raw: unknown, bot: BotConfig, team: string) {
       message: Schema.Struct({ thread_ts: timestamp }),
     }),
   )(raw);
+
   return Result.isSuccess(parsed) ? parsed.success : undefined;
 }

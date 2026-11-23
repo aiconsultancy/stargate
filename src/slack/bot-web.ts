@@ -14,11 +14,13 @@ export async function botToken(
   configPath: string,
 ): Promise<string> {
   let companion: NodeJS.ProcessEnv = {};
+
   try {
     companion = parseEnv(await readFile(`${configPath}.env`, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+
   return secret(bot.slack.botTokenEnv, { ...companion, ...process.env });
 }
 
@@ -42,7 +44,7 @@ export function botWebClient(
   request: BotFetch = globalThis.fetch,
 ): WebClient {
   return new WebClient(token, {
-    timeout: 10000,
+    timeout: 10_000,
     retryConfig: { retries: 0 },
     rejectRateLimitedCalls: true,
     logger: silent,

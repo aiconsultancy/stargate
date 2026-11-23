@@ -75,12 +75,15 @@ export function parseReactionReply(text: string, complete = true) {
   let rest = text;
   let reaction: ReactionName | undefined;
   let silent = false;
+
   for (;;) {
     const open = [
       ...(reaction ? [] : directives.map(({ line }) => line)),
       ...(silent ? [] : [silentDirective]),
     ];
+
     const current = rest;
+
     if (
       !complete &&
       open.some((line) => line.startsWith(current) || current === `${line}\r`)
@@ -88,11 +91,15 @@ export function parseReactionReply(text: string, complete = true) {
       return { text: "", pending: true, reaction, silent };
     const newline = rest.indexOf("\n");
     const line = newline < 0 ? rest : rest.slice(0, newline).replace(/\r$/, "");
+
     if (!open.includes(line)) break;
+
     if (line === silentDirective) silent = true;
     else reaction = directives.find((item) => item.line === line)?.name;
     rest = newline < 0 ? "" : rest.slice(newline + 1);
+
     if (newline < 0) break;
   }
+
   return { text: silent ? "" : rest, pending: false, reaction, silent };
 }

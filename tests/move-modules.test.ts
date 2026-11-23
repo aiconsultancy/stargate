@@ -34,7 +34,9 @@ function git(root: string, ...args: string[]) {
       GIT_COMMITTER_EMAIL: "fixture@example.invalid",
     },
   });
+
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+
   return result.stdout.toString();
 }
 
@@ -52,9 +54,11 @@ async function fixture(files: Record<string, string>) {
   git(root, "config", "tag.gpgSign", "false");
   git(root, "config", "core.fsmonitor", "false");
   git(root, "config", "gc.auto", "0");
+
   for (const [path, text] of Object.entries(files)) await put(root, path, text);
   git(root, "add", ".");
   git(root, "commit", "--quiet", "-m", "fixture");
+
   return root;
 }
 
@@ -68,7 +72,9 @@ async function expectFailure(work: Promise<void>, message?: string) {
     () => undefined,
     (caught: unknown) => caught,
   );
+
   expect(error).toBeInstanceOf(Error);
+
   if (message && error instanceof Error)
     expect(error.message).toContain(message);
 }
@@ -85,6 +91,7 @@ test("moves modules and updates all four code roots without changing other strin
     String.raw`const pattern = /import\("..\/src\/item"\)/;`,
     "",
   ].join("\n");
+
   const root = await fixture({
     "src/item.ts":
       'import { helper } from "./helper";\nexport const value = helper;\n',
@@ -94,10 +101,12 @@ test("moves modules and updates all four code roots without changing other strin
     "scripts/use.ts": consumer,
     "perf/use.ts": consumer,
   });
+
   await moveModules(root, [["src/item.ts", "src/domain/item.ts"]]);
   expect(await text(root, "src/domain/item.ts")).toBe(
     'import { helper } from "../helper";\nexport const value = helper;\n',
   );
+
   for (const path of ["tests/use.ts", "scripts/use.ts", "perf/use.ts"]) {
     expect(await text(root, path)).toBe(
       [
@@ -113,6 +122,7 @@ test("moves modules and updates all four code roots without changing other strin
       ].join("\n"),
     );
   }
+
   expect(await text(root, "src/use.ts")).toContain('from "./domain/item"');
   expect(git(root, "diff", "--cached", "--name-status")).toContain(
     "src/domain/item.ts",
@@ -137,11 +147,13 @@ test("batch moves preserve index shorthand, extension spelling and moved depende
       "",
     ].join("\n"),
   });
+
   const moves = [
     ["src/lib/index.ts", "src/domain/index.ts"],
     ["src/helper.ts", "src/domain/.helper.ts"],
     ["src/foo.test.ts", "src/domain/bar.test.ts"],
   ] as const;
+
   await moveModules(root, moves);
   expect(await text(root, "src/domain/index.ts")).toBe(
     'export { helper } from "./.helper";\n',
@@ -170,6 +182,7 @@ test.each([
       "src/item.ts": "export const value = 1;\n",
       "src/use.ts": 'import { value } from "./item";\n',
     });
+
     const moves = [["src/use.ts", destination]] as const;
     await moveModules(root, moves);
     expect(await text(root, destination)).toBe(
@@ -184,6 +197,7 @@ test("updates a root importer when its dependency moves into the same-named fold
     "src/item.ts": 'export { value } from "./use";\n',
     "src/use.ts": "export const value = 1;\n",
   });
+
   const moves = [["src/use.ts", "src/item/use.ts"]] as const;
   await moveModules(root, moves);
   expect(await text(root, "src/item.ts")).toBe(
@@ -197,6 +211,7 @@ test("names the index file when a directly imported file moves to index.ts", asy
     "src/item.ts": "export const value = 1;\n",
     "src/use.ts": 'import { value } from "./item";\n',
   });
+
   const moves = [["src/item.ts", "src/item/index.ts"]] as const;
   await moveModules(root, moves);
   expect(await text(root, "src/use.ts")).toBe(
@@ -210,6 +225,7 @@ test("preserves directory shorthand when an index module moves to index.ts", asy
     "src/old/index.ts": "export const value = 1;\n",
     "src/use.ts": 'import { value } from "./old";\n',
   });
+
   const moves = [["src/old/index.ts", "src/item/index.ts"]] as const;
   await moveModules(root, moves);
   expect(await text(root, "src/use.ts")).toBe(
@@ -227,6 +243,7 @@ test("rewrites exact documentation paths once, not lookalikes or other files", a
     "src/next.ts",
     "",
   ].join("\n");
+
   const root = await fixture({
     "src/item.ts": "export const value = 1;\n",
     "src/next.ts": "export const value = 2;\n",
@@ -236,16 +253,19 @@ test("rewrites exact documentation paths once, not lookalikes or other files", a
     "CONTRIBUTING.md": original,
     "other.md": original,
   });
+
   await moveModules(root, [
     ["src/item.ts", "src/new/item.ts"],
     ["src/next.ts", "src/new/next.ts"],
   ]);
+
   const expected = original
     .replace(
       "`src/item.ts` [module](src/item.ts) src/item.ts:14 src/item.ts.",
       "`src/new/item.ts` [module](src/new/item.ts) src/new/item.ts:14 src/new/item.ts.",
     )
     .replace("\nsrc/next.ts\n", "\nsrc/new/next.ts\n");
+
   for (const path of [
     "docs/nested/readme.md",
     "AGENTS.md",
@@ -268,6 +288,7 @@ test("rewrites canonical document-relative paths with fragments, leaving URLs an
     "../../src/item.tsλ ../../src/item.ts/child",
     "",
   ].join("\n");
+
   const root = await fixture({
     "src/item.ts": "export const value = 1;\n",
     "docs/guide.md": '[module](../src/item.ts#L2 "Module")\n',
@@ -276,6 +297,7 @@ test("rewrites canonical document-relative paths with fragments, leaving URLs an
     "docs/nested/deep/guide.md": "`../../../src/item.ts`\n",
     "README.md": "[outside](../src/item.ts)\n",
   });
+
   const moves = [["src/item.ts", "src/domain/item.ts"]] as const;
   await moveModules(root, moves);
   expect(await text(root, "docs/guide.md")).toBe(
@@ -297,6 +319,7 @@ test("preserves unrelated staged, unstaged, untracked and ignored content", asyn
     "notes.txt": "base\n",
     ".gitignore": "ignored/\n",
   });
+
   await put(root, "notes.txt", "staged\n");
   git(root, "add", "notes.txt");
   await put(root, "notes.txt", "unstaged\n");
@@ -334,6 +357,7 @@ test.each([
       "src/crew/plugin.ts": "export {};\n",
       "src/fleet/plugin.ts": "export {};\n",
     });
+
     const index = git(root, "ls-files", "--stage");
     await expectFailure(
       moveModules(root, [[oldPath ?? "", newPath ?? ""]]),
@@ -349,6 +373,7 @@ test("rejects duplicate, colliding, overlapping and partially invalid batches", 
     "src/item.ts": "export {};\n",
     "src/other.ts": "export {};\n",
   });
+
   for (const moves of [
     [
       ["src/item.ts", "src/a.ts"],
@@ -377,6 +402,7 @@ test("rejects source and destination symlinks, including escaping parents", asyn
     "src/item.ts": "export {};\n",
     "src/other.ts": "export {};\n",
   });
+
   const outside = await mkdtemp(join(tmpdir(), "stargate-module-outside-"));
   roots.push(outside);
   await put(outside, "keep.txt", "outside\n");
@@ -385,6 +411,7 @@ test("rejects source and destination symlinks, including escaping parents", asyn
   git(root, "add", "src/link.ts");
   git(root, "commit", "--quiet", "-m", "link fixture");
   const status = git(root, "status", "--porcelain");
+
   for (const moves of [
     [["src/link.ts", "src/new.ts"]],
     [["src/item.ts", "src/escape/item.ts"]],
@@ -407,8 +434,10 @@ test.each([
     "tests/use.ts": 'import "../src/item";\n',
     ".gitignore": "src/domain/\n",
   });
+
   if (kind === "staged" || kind === "unstaged") {
     await put(root, "tests/use.ts", 'import "../src/item"; // local change\n');
+
     if (kind === "staged") git(root, "add", "tests/use.ts");
   } else
     await put(
@@ -446,6 +475,7 @@ test("rejects a move that shadows an existing index import without mutation", as
     "src/lib/index.ts": "export const value = 2;\n",
     "tests/use.ts": 'import "../src/lib";\n',
   });
+
   await expectFailure(
     moveModules(root, [["src/item.ts", "src/lib.ts"]]),
     "resolution",
@@ -470,6 +500,7 @@ test.each(["directory package", "source/runtime ambiguity"])(
             "tests/use.ts": 'import "../src/lib/entry.js";\n',
           },
     );
+
     await expectFailure(
       moveModules(root, [["src/lib/entry.ts", "src/new.ts"]]),
       "resolution",
@@ -485,13 +516,16 @@ test("preserves BOM, CRLF and executable modes while moving across code roots", 
     "src/lib/index.ts": "export {};\r\n",
     "tests/use.ts": 'import "../scripts/item.ts";\r\n',
   });
+
   await chmod(join(root, "scripts/item.ts"), 0o755);
   git(root, "add", ".");
   git(root, "commit", "--quiet", "-m", "mode fixture");
+
   const moves = [
     ["scripts/item.ts", "perf/nested/item.ts"],
     ["src/lib/index.ts", "src/helper.ts"],
   ] as const;
+
   await moveModules(root, moves);
   expect(await text(root, "perf/nested/item.ts")).toBe(
     '\uFEFFimport "../../src/helper";\r\nexport const value = 1;\r\n',
@@ -513,12 +547,14 @@ test.each(["before", "after"])(
       "src/other.ts": "export const second = 2;\n",
       "notes.txt": "base\n",
     });
+
     await put(root, "notes.txt", "staged\n");
     git(root, "add", "notes.txt");
     await put(root, "notes.txt", "unstaged\n");
     const wrapper = await mkdtemp(join(tmpdir(), "stargate-module-git-"));
     roots.push(wrapper);
     const realGit = Bun.which("git");
+
     if (!realGit) throw new Error("Git is required for module-move tests");
     const quotedGit = `'${realGit.replaceAll("'", "'\\''")}'`;
     await put(
@@ -529,6 +565,7 @@ test.each(["before", "after"])(
     await chmod(join(wrapper, "git"), 0o755);
     const status = git(root, "status", "--porcelain");
     const index = await readFile(join(root, ".git/index"));
+
     const result = Bun.spawnSync(
       [
         process.execPath,
@@ -546,6 +583,7 @@ test.each(["before", "after"])(
         },
       },
     );
+
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain("fixture move failure");
     expect(git(root, "status", "--porcelain")).toBe(status);
@@ -571,36 +609,45 @@ test.each([
     "src/item.ts": 'export const value = "original"; // comment\n',
     "notes.txt": "base\n",
   });
+
   const moves = [["src/item.ts", "src/domain/item.ts"]] as const;
   await moveModules(root, moves);
+
   if (kind === "statement")
     await put(
       root,
       "src/domain/item.ts",
       'export const changed = "original"; // comment\n',
     );
+
   if (kind === "string")
     await put(
       root,
       "src/domain/item.ts",
       'export const value = "changed"; // comment\n',
     );
+
   if (kind === "comment")
     await put(
       root,
       "src/domain/item.ts",
       'export const value = "original"; // changed\n',
     );
+
   if (kind === "unrelated") await put(root, "notes.txt", "changed\n");
+
   if (kind === "untracked") await put(root, "extra.txt", "new\n");
+
   if (kind === "staged") {
     await put(root, "notes.txt", "staged\n");
     git(root, "add", "notes.txt");
     await put(root, "notes.txt", "base\n");
   }
+
   if (kind === "staged deletion") {
     git(root, "rm", "--cached", "notes.txt");
   }
+
   if (kind === "mode") await chmod(join(root, "src/domain/item.ts"), 0o755);
   const status = git(root, "status", "--porcelain");
   const index = git(root, "ls-files", "--stage");
@@ -614,6 +661,7 @@ test("check reconstructs mappings from an explicit base, without rename detectio
     "src/item.ts": "export const value = 1;\n",
     "tests/use.ts": 'import "../src/item";\n',
   });
+
   const base = git(root, "rev-parse", "HEAD").trim();
   const moves = [["src/item.ts", "src/domain/item.ts"]] as const;
   await moveModules(root, moves);
@@ -627,11 +675,14 @@ test("check reconstructs mappings from an explicit base, without rename detectio
 test("CLI exposes help and rejects invalid options without touching a fixture", async () => {
   const root = await fixture({ "src/item.ts": "export {};\n" });
   const script = join(import.meta.dir, "../scripts/move-modules.ts");
+
   const help = Bun.spawnSync([process.execPath, script, "--help"], {
     cwd: root,
   });
+
   expect(help.exitCode).toBe(0);
   expect(help.stdout.toString()).toContain("--check");
+
   for (const args of [
     ["--unknown"],
     ["--check", "src/item.ts"],
@@ -641,6 +692,7 @@ test("CLI exposes help and rejects invalid options without touching a fixture", 
     const result = Bun.spawnSync([process.execPath, script, ...args], {
       cwd: root,
     });
+
     expect(result.exitCode).toBe(1);
     expect(git(root, "status", "--porcelain")).toBe("");
   }

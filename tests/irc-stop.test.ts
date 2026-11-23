@@ -14,6 +14,7 @@ import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -53,11 +54,13 @@ async function setup(extra: Record<string, unknown> = {}, answer = "Done.") {
   const fake = new FakeIrcServer({
     accounts: { galactica: "captain-pass", "galactica-chief": "chief-pass" },
   }).start();
+
   cleanup.push(() => fake.stop());
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-stop-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const ship = await IrcShip.create(
     config(fake.port, extra),
     store,
@@ -71,8 +74,10 @@ async function setup(extra: Record<string, unknown> = {}, answer = "Done.") {
       readyMs: 2000,
     },
   );
+
   const aborted: string[] = [];
   let release = Promise.withResolvers<void>();
+
   const backend: AgentBackend = {
     sessionID: "ses_captain",
     async createSession() {
@@ -82,17 +87,22 @@ async function setup(extra: Record<string, unknown> = {}, answer = "Done.") {
       const abort = Promise.withResolvers<void>();
       signal.addEventListener("abort", () => abort.resolve(), { once: true });
       await Promise.race([release.promise, abort.promise]);
+
       if (signal.aborted) {
         aborted.push(text);
         throw new Error("aborted");
       }
+
       return answer;
     },
     async close() {},
   };
+
   const [captain] = ship.registrations;
+
   if (!captain) throw new Error("missing captain");
   const controller = new AbortController();
+
   const gateway = new Gateway(
     captain.settings,
     captain.identity,
@@ -104,6 +114,7 @@ async function setup(extra: Record<string, unknown> = {}, answer = "Done.") {
     undefined,
     captain.transport,
   );
+
   captain.stopTurn = (conversation, thread) =>
     gateway.stopTurn(conversation, thread);
   const worker = gateway.work(controller.signal);
@@ -115,6 +126,7 @@ async function setup(extra: Record<string, unknown> = {}, answer = "Done.") {
     await ship.close();
   });
   await until(() => captain.client.inChannel("#galactica"), 5000, "joined");
+
   return {
     fake,
     store,
@@ -136,17 +148,20 @@ function react(
   key = "+draft/react",
 ) {
   const line = `@${from.account ? `account=${from.account};` : ""}${key}=${emoji};+draft/reply=${msgid} :${from.nick}!u@outside TAGMSG ${target}`;
+
   for (const client of fake.clients)
     if (client.registered) client.socket.write(`${line}\r\n`);
 }
 
 test("irc stop: a ✋ reaction on the request cancels the running turn", async () => {
   const { fake, store, captain, aborted } = await setup();
+
   const request = fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "galactica: long job",
   );
+
   await until(
     () => store.queueCounts(captain.key).running === 1,
     5000,
@@ -155,20 +170,24 @@ test("irc stop: a ✋ reaction on the request cancels the running turn", async (
   react(fake, { nick: "jack", account: "jack" }, "#galactica", request, "✋");
   await until(() => aborted.length === 1, 5000, "backend aborted");
   await until(() => store.queueCounts(captain.key).done === 1, 5000, "settled");
+
   const replies = lineOf(fake.received("galactica"), "PRIVMSG").map(
     (m) => m.params[1],
   );
+
   expect(replies.some((text) => /stop/i.test(text ?? ""))).toBe(true);
   expect(replies).not.toContain("Done.");
 });
 
 test("irc stop: emoji variants count; other reactions, ship, peer, denied and unreact do not", async () => {
   const { fake, store, captain, aborted, finish } = await setup();
+
   const request = fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "galactica: long job",
   );
+
   await until(
     () => store.queueCounts(captain.key).running === 1,
     5000,
@@ -218,11 +237,13 @@ test("irc stop: emoji variants count; other reactions, ship, peer, denied and un
   react(fake, { nick: "jack", account: "jack" }, "#galactica", request, "✋🏽");
   await until(() => aborted.length === 1, 5000, "aborted");
   finish();
+
   const second = fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "galactica: another",
   );
+
   await until(
     () => store.queueCounts(captain.key).running === 1,
     5000,
@@ -240,11 +261,13 @@ test("irc stop: emoji variants count; other reactions, ship, peer, denied and un
 
 test("irc stop: configurable reactions; features.reactions off disables Stop", async () => {
   const custom = await setup({ stopReactions: ["❌"] });
+
   const request = custom.fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "galactica: job",
   );
+
   await until(
     () => custom.store.queueCounts(custom.captain.key).running === 1,
     5000,
@@ -269,11 +292,13 @@ test("irc stop: configurable reactions; features.reactions off disables Stop", a
   await until(() => custom.aborted.length === 1, 5000, "aborted");
 
   const off = await setup({ features: { reactions: false } });
+
   const job = off.fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "galactica: job",
   );
+
   await until(
     () => off.store.queueCounts(off.captain.key).running === 1,
     5000,
@@ -289,7 +314,9 @@ test("irc stop: a reaction on a bot message stops the turn that message answers"
   const parsed = parseMessage(
     "@account=jack;+draft/react=🛑;+draft/reply=bot-1 :jack!u@h TAGMSG #galactica",
   );
+
   if (!parsed) throw new Error("fixture");
+
   const stop = routeIrcStop(parsed, {
     config: config(6667),
     member: {
@@ -304,6 +331,7 @@ test("irc stop: a reaction on a bot message stops the turn that message answers"
     fold: (value) => fold(value),
     anchor: (msgid) => (msgid === "bot-1" ? "request-1" : undefined),
   });
+
   expect(stop).toEqual({
     conversation: JSON.stringify(["k", "#galactica"]),
     thread: "request-1",

@@ -27,6 +27,7 @@ export function decodeStoredJob(row: StoredJob): Job {
     slack_reaction,
     ...job
   } = row;
+
   return {
     ...job,
     deferDelivery: row.deferDelivery === 1,

@@ -27,6 +27,7 @@ import {
 import { occurrence } from "../src/maintenance/nightly/schedule/window";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-report-"));
+
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 const report: Report = {
@@ -140,6 +141,7 @@ describe("maintenance report", () => {
 describe("gateway delivery of summaries", () => {
   test("posts each notice once, refuses other channels, never repeats", async () => {
     const data = await mkdtemp(join(root, "outbox-"));
+
     const notice = (name: string, channel: string) =>
       queueNotice(data, {
         schema: "stargate.maintenance.notice.v1",
@@ -147,11 +149,13 @@ describe("gateway delivery of summaries", () => {
         text: `summary ${name}`,
         report: `${name}.json`,
       });
+
     await notice("a", "C123");
     await notice("b", "C999");
     await notice("c", "C123");
     const posted: string[] = [];
     let fail = true;
+
     const outbox = new MaintenanceOutbox(
       data,
       (channel) => channel === "C123",
@@ -160,10 +164,12 @@ describe("gateway delivery of summaries", () => {
           fail = false;
           throw new Error("slack timeout");
         }
+
         posted.push(text);
       },
       { warn: () => {} },
     );
+
     const signal = AbortSignal.timeout(5000);
     expect(await outbox.deliver(signal)).toBe(1);
     expect(await outbox.deliver(signal)).toBe(0);
@@ -187,6 +193,7 @@ describe("systemd units", () => {
       runMinutes: 100,
       recoveryMinutes: 50,
     };
+
     const command = buildUpdateCommand(input);
     // Waits until the command has started, so a failed start is an error.
     expect(command.slice(0, 4)).toEqual([
@@ -210,6 +217,7 @@ describe("systemd units", () => {
       "--config",
       "/home/me/.config/stargate/stargate.json",
     ]);
+
     for (const bad of [
       { configPath: "stargate.json" },
       { configPath: "/home/me/100%/stargate.json" },
@@ -238,6 +246,7 @@ describe("systemd units", () => {
       jitter: 9,
       recoveryMinutes: 50,
     });
+
     expect(units.timer).toContain("OnCalendar=*-*-* 00:09:00 Europe/London");
     expect(units.timer).toContain("Persistent=false");
     expect(units.timer).toContain("Unit=stargate-maintenance.service");
@@ -288,13 +297,16 @@ describe("kill timer and daylight saving time", () => {
         jitterMinutes: 15,
         reserveMinutes: 10,
       };
+
       for (const jitter of [0, 15]) {
         let longest = 0;
         let day = Temporal.PlainDate.from("2026-01-01");
+
         for (let i = 0; i < 366; i++, day = day.add({ days: 1 })) {
           const night = occurrence(day, window, jitter);
           longest = Math.max(longest, night.closes - night.start);
         }
+
         const recoveryMinutes = 30;
         const minutes = startTimeoutMinutes(spec, jitter, recoveryMinutes);
         expect(minutes * 60_000).toBeGreaterThanOrEqual(
@@ -302,6 +314,7 @@ describe("kill timer and daylight saving time", () => {
         );
       }
     }
+
     // The 01:00-02:00 window is 120 minutes on the fall-back night.
     const fallBack = occurrence(
       Temporal.PlainDate.from("2026-10-25"),
@@ -314,6 +327,7 @@ describe("kill timer and daylight saving time", () => {
       },
       0,
     );
+
     expect((fallBack.closes - fallBack.opens) / 60_000).toBe(120);
   });
 });
@@ -323,9 +337,11 @@ describe("undo budget", () => {
     const one = Schema.decodeUnknownSync(maintenanceSchema)({
       agentClis: { prefix: "/p", packages: [{ name: "a", command: "a" }] },
     });
+
     const four = Schema.decodeUnknownSync(maintenanceSchema)({
       agentClis: { prefix: "/p" },
     });
+
     const extra = recoveryBudgetMs(four) - recoveryBudgetMs(one);
     expect(extra).toBe(3 * undoBounds.npmPerPackage);
     expect(recoveryBudgetMs(one)).toBeGreaterThanOrEqual(
@@ -334,6 +350,7 @@ describe("undo budget", () => {
         undoBounds.openCode +
         undoBounds.gateway,
     );
+
     const units = buildMaintenanceUnits({
       name: "stargate-maintenance",
       configPath: "/c/stargate.json",
@@ -350,6 +367,7 @@ describe("undo budget", () => {
       jitter: 0,
       recoveryMinutes: Math.ceil(recoveryBudgetMs(four) / 60_000),
     });
+
     expect(units.service).toContain(
       `TimeoutStopSec=${Math.ceil(recoveryBudgetMs(four) / 60_000)}min`,
     );
@@ -359,6 +377,7 @@ describe("undo budget", () => {
 describe("bounded reports", () => {
   test("oversized arrays and fields are truncated and counted, never rejected", async () => {
     const data = await mkdtemp(join(root, "bounded-"));
+
     const many = Array.from({ length: limits.models + 5 }, (_, i) => ({
       scope: "crew-session" as const,
       target: `ses_${i}`,
@@ -366,10 +385,13 @@ describe("bounded reports", () => {
       to: "openai-proxy/gpt-6.2-sol",
       status: "applied" as const,
     }));
+
     const written = await writeReport(data, { ...report, models: many });
+
     const saved = reportSchema.parse(
       JSON.parse(await readFile(written.path, "utf8")),
     );
+
     expect(saved.models).toHaveLength(limits.models);
     expect(saved.truncated).toEqual({ models: 5 });
     expect(saved.models[0]?.from.length).toBeLessThanOrEqual(300);
@@ -388,6 +410,7 @@ describe("configuration boundary", () => {
       directory: "/w",
     },
   };
+
   test("report channel must be allowed for an existing bot", () => {
     const parse = (report: unknown) =>
       Result.isSuccess(
@@ -396,6 +419,7 @@ describe("configuration boundary", () => {
           maintenance: { report },
         }),
       );
+
     expect(parse({ bot: "helper", channel: "C1" })).toBe(true);
     expect(parse({ bot: "helper", channel: "C0EXAMPLE05" })).toBe(false);
     expect(parse({ bot: "other", channel: "C1" })).toBe(false);

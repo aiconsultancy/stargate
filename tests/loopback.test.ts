@@ -24,6 +24,7 @@ test("the three loopback policies accept exactly their hosts", () => {
     ["http://10.0.0.1:8317/v1", false, false, false],
     ["http://[::ffff:127.0.0.1]:8317/v1", false, false, false],
   ];
+
   for (const [url, address, local, host] of cases) {
     const name = hostname(url);
     expect([url, isLoopbackAddress(name)]).toEqual([url, address]);

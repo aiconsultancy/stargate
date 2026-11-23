@@ -36,6 +36,7 @@ export function ctcp(text: string) {
   if (!text.startsWith("\u0001")) return;
   const body = text.endsWith("\u0001") ? text.slice(1, -1) : text.slice(1);
   const space = body.indexOf(" ");
+
   return {
     verb: (space < 0 ? body : body.slice(0, space)).toUpperCase(),
     text: space < 0 ? "" : body.slice(space + 1),
@@ -75,6 +76,7 @@ function checkedLines(text: string) {
       .flatMap((part) => {
         const body = cleanText(part).trimStart();
         const verb = /^[A-Za-z]+(?:\s+|$)/.exec(body)?.[0];
+
         return verb ? [body, body.slice(verb.length)] : [body];
       }),
   ]);
@@ -87,6 +89,7 @@ function checkedLines(text: string) {
  */
 export function sensitive(text: string) {
   const lines = checkedLines(text);
+
   return (
     containsCredential(text) ||
     containsCredential(lines.join("\n")) ||
@@ -96,9 +99,12 @@ export function sensitive(text: string) {
 
 function name(peer: DmEvent["peer"]) {
   const nick = cleanText(peer.nick);
+
   if (peer.account === null) return `${nick} (no account)`;
+
   if (peer.account === undefined || fold(peer.account) === fold(peer.nick))
     return nick;
+
   return `${nick} (${cleanText(peer.account)})`;
 }
 
@@ -112,19 +118,23 @@ function name(peer: DmEvent["peer"]) {
 export function auditLine(event: DmEvent): string | undefined {
   if (serviceNick(event.peer.nick)) return;
   const command = ctcp(event.text);
+
   if (command && command.verb !== "ACTION") return;
   const action = command !== undefined;
   const text = command ? command.text : event.text;
   const clean = text.split("\n").map(cleanText).join("\n").trim();
+
   if (!clean) return;
   const shown = sensitive(event.text) || sensitive(clean) ? withheld : clean;
   const peer = name(event.peer);
   const agent = cleanText(event.agent);
   const [from, to] = event.direction === "in" ? [peer, agent] : [agent, peer];
   const at = event.replayed === undefined ? NaN : Date.parse(event.replayed);
+
   const tag = Number.isFinite(at)
     ? `[dm ${new Date(at).toISOString().slice(0, 16)}Z]`
     : "[dm]";
+
   return action
     ? `${tag} * ${from} ${shown} (→ ${to})`
     : `${tag} ${from} → ${to}: ${shown}`;
@@ -132,6 +142,7 @@ export function auditLine(event: DmEvent): string | undefined {
 
 /** Drop reports at most this often; a final one comes at shutdown. */
 const reportMs = 10_000;
+
 /** A lost connection retries the same line this often before dropping it. */
 const reconnectRetries = 3;
 
@@ -167,21 +178,29 @@ export class IrcAudit {
     try {
       if (msgid !== undefined) {
         const key = `${fold(event.agent)} ${msgid}`;
+
         if (this.seen.has(key)) return false;
         this.seen.set(key, true);
       }
+
       const line = auditLine(event);
+
       if (line === undefined) return false;
+
       if (this.queue.length >= this.limit) {
         this.dropped++;
         this.report(false);
+
         return false;
       }
+
       this.queue.push(line);
       this.wake?.();
+
       return true;
     } catch {
       this.log.warn("IRC DM audit entry failed");
+
       return false;
     }
   }
@@ -189,12 +208,15 @@ export class IrcAudit {
   /** Post queued entries until `signal` aborts; then report what is left. */
   async run(signal: AbortSignal) {
     let retries = 0;
+
     while (!signal.aborted) {
       const line = this.queue[0];
+
       if (line === undefined) {
         await this.idle(signal);
         continue;
       }
+
       try {
         await this.ready(signal);
         await this.post(line);
@@ -202,23 +224,28 @@ export class IrcAudit {
         retries = 0;
       } catch (error) {
         if (signal.aborted) break;
+
         // Lost before the write: post the same entry after the reconnect.
         if (error instanceof IrcUnavailable && ++retries <= reconnectRetries)
           continue;
         this.queue.shift();
         retries = 0;
+
         // Expired in the send queue behind other traffic: never written, so
-        // it counts as dropped, like an entry the full queue refused.
+        // It counts as dropped, like an entry the full queue refused.
         if (error instanceof IrcSendExpired) {
           this.dropped++;
           this.report(false);
           continue;
         }
+
         this.failed++;
         this.log.warn({ failed: this.failed }, "IRC DM audit line not posted");
       }
     }
+
     this.report(true);
+
     if (this.queue.length)
       this.log.warn(
         { pending: this.queue.length },
@@ -230,6 +257,7 @@ export class IrcAudit {
   private report(force: boolean) {
     if (this.dropped === this.reported) return;
     const now = Date.now();
+
     if (!force && now - this.lastReport < reportMs) return;
     this.lastReport = now;
     this.reported = this.dropped;
@@ -246,6 +274,7 @@ export class IrcAudit {
         signal.removeEventListener("abort", done);
         resolve();
       };
+
       this.wake = done;
       signal.addEventListener("abort", done, { once: true });
     });
@@ -267,6 +296,7 @@ export class IrcAudit {
   private async post(line: string) {
     const { client, channel } = this;
     const limits = client.multiline;
+
     if (limits) {
       const budget = Math.min(
         limits.maxBytes,
@@ -275,6 +305,7 @@ export class IrcAudit {
           "draft/multiline-concat": "",
         }),
       );
+
       const parts = line
         .split("\n")
         .map((text) => text.trimEnd())
@@ -285,12 +316,15 @@ export class IrcAudit {
             concat: index > 0,
           })),
         );
+
       if (parts.length > 1) {
         for (const unit of packBatches(parts, limits))
           await client.sendBatch(channel, unit.lines, {}, undefined, "low");
+
         return;
       }
     }
+
     for (const text of ircLines(line, client.budget("PRIVMSG", channel, {})))
       await client.privmsg(channel, text, {}, undefined, "low");
   }

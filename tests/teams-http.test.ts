@@ -11,6 +11,7 @@ import {
 import { close } from "../src/lib/http-util";
 
 const token: VerifiedToken = { claims: {}, endorsements: ["msteams"] };
+
 const headers = {
   "content-type": "application/json",
   authorization: "Bearer good",
@@ -18,9 +19,11 @@ const headers = {
 
 async function serve(overrides: Partial<TeamsListenerOptions> = {}) {
   const activities: Record<string, unknown>[] = [];
+
   const server = createTeamsListener({
     verifyToken: async (authorization) => {
       if (authorization !== "Bearer good") throw new AuthError("bad token");
+
       return token;
     },
     checkActivity: () => {},
@@ -30,10 +33,12 @@ async function serve(overrides: Partial<TeamsListenerOptions> = {}) {
     log: () => {},
     ...overrides,
   });
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
+
   return { server, activities };
 }
 
@@ -47,9 +52,11 @@ function post(
   } = {},
 ): Promise<{ status: number; closed: boolean; body: string }> {
   const address = server.address();
+
   if (!address || typeof address === "string")
     throw new Error("Missing local listener");
   const body = options.body ?? "{}";
+
   return new Promise((resolve, reject) => {
     const req = request(
       {
@@ -74,6 +81,7 @@ function post(
         );
       },
     );
+
     req.on("error", reject);
     req.end(body);
   });
@@ -87,6 +95,7 @@ describe("Teams HTTP authentication boundary", () => {
       onActivity: async () => {},
       log: () => {},
     });
+
     expect(server.requestTimeout).toBe(REQUEST_TIMEOUT_MS);
     expect(server.headersTimeout).toBe(HEADERS_TIMEOUT_MS);
     expect(MAX_ACTIVITY_BYTES).toBe(512 * 1024);
@@ -95,19 +104,23 @@ describe("Teams HTTP authentication boundary", () => {
   test("acknowledges only after authenticated activity handling completes", async () => {
     const entered = Promise.withResolvers<void>();
     const persisted = Promise.withResolvers<void>();
+
     const f = await serve({
       onActivity: async () => {
         entered.resolve();
         await persisted.promise;
       },
     });
+
     try {
       const response = post(f.server, { headers, body: '{"type":"message"}' });
       await entered.promise;
+
       const early = await Promise.race([
         response.then(() => true),
         new Promise<false>((resolve) => setTimeout(() => resolve(false), 10)),
       ]);
+
       expect(early).toBe(false);
       persisted.resolve();
       expect((await response).status).toBe(200);
@@ -119,12 +132,15 @@ describe("Teams HTTP authentication boundary", () => {
 
   test("refuses non-callback paths and methods before token checks", async () => {
     let checks = 0;
+
     const f = await serve({
       verifyToken: async () => {
         checks++;
+
         return token;
       },
     });
+
     try {
       for (const path of [
         "/",
@@ -134,9 +150,11 @@ describe("Teams HTTP authentication boundary", () => {
       ]) {
         expect((await post(f.server, { path, headers })).status).toBe(404);
       }
+
       for (const method of ["GET", "PUT", "DELETE"]) {
         expect((await post(f.server, { method, headers })).status).toBe(405);
       }
+
       expect(checks).toBe(0);
       expect(f.activities).toEqual([]);
     } finally {
@@ -146,11 +164,13 @@ describe("Teams HTTP authentication boundary", () => {
 
   test("rejects missing auth before oversized or malformed body parsing", async () => {
     const f = await serve({ maxActivityBytes: 10 });
+
     try {
       const result = await post(f.server, {
         headers: { "content-type": "application/json" },
         body: "malformed".repeat(100),
       });
+
       expect(result.status).toBe(401);
       expect(result.closed).toBe(true);
       expect(f.activities).toEqual([]);
@@ -161,6 +181,7 @@ describe("Teams HTTP authentication boundary", () => {
 
   test("rejects wrong media type, malformed/non-object JSON and oversized activities", async () => {
     const f = await serve({ maxActivityBytes: 128 });
+
     try {
       expect(
         (
@@ -169,13 +190,16 @@ describe("Teams HTTP authentication boundary", () => {
           })
         ).status,
       ).toBe(415);
+
       for (const body of ["{invalid", "null", "[]", '"text"']) {
         expect((await post(f.server, { headers, body })).status).toBe(400);
       }
+
       const large = await post(f.server, {
         headers,
         body: JSON.stringify({ text: "x".repeat(256) }),
       });
+
       expect(large.status).toBe(413);
       expect(large.closed).toBe(true);
       expect(f.activities).toEqual([]);
@@ -190,6 +214,7 @@ describe("Teams HTTP authentication boundary", () => {
         throw new AuthError("wrong channel endorsement", 403);
       },
     });
+
     try {
       expect((await post(f.server, { headers })).status).toBe(403);
       expect(f.activities).toEqual([]);
@@ -204,6 +229,7 @@ describe("Teams HTTP authentication boundary", () => {
         throw new Error("keys unavailable");
       },
     });
+
     try {
       const result = await post(unavailable.server, { headers });
       expect(result.status).toBe(503);
@@ -212,11 +238,13 @@ describe("Teams HTTP authentication boundary", () => {
     } finally {
       await close(unavailable.server);
     }
+
     const persistence = await serve({
       onActivity: async () => {
         throw new Error("disk unavailable");
       },
     });
+
     try {
       expect((await post(persistence.server, { headers })).status).toBe(500);
     } finally {

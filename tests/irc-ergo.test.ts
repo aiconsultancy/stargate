@@ -33,12 +33,15 @@ import { until } from "./irc-fixture";
 const binary =
   process.env["STARGATE_ERGO_BIN"] ??
   join(homedir(), ".local/share/ergo/current/ergo");
+
 const available =
   existsSync(binary) &&
   spawnSync("openssl", ["version"], { stdio: "ignore" }).status === 0;
+
 const rateProof = process.env["STARGATE_ERGO_RATE_TEST"] === "1";
 
 const cleanup: (() => unknown)[] = [];
+
 afterAll(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -49,8 +52,10 @@ async function freePort() {
     port: 0,
     socket: { data() {} },
   });
+
   const port = listener.port;
   listener.stop(true);
+
   return port;
 }
 
@@ -61,7 +66,9 @@ async function listening(port: number) {
       port,
       socket: { data() {} },
     });
+
     socket.end();
+
     return true;
   } catch {
     return false;
@@ -73,6 +80,7 @@ function openssl(directory: string, ...args: string[]) {
     cwd: directory,
     stdio: "ignore",
   });
+
   if (result.status !== 0) throw new Error("openssl failed");
 }
 
@@ -80,6 +88,7 @@ function openssl(directory: string, ...args: string[]) {
 async function raw(port: number) {
   const lines: IrcMessage[] = [];
   let buffer = "";
+
   const socket = await Bun.connect({
     hostname: "127.0.0.1",
     port,
@@ -87,10 +96,12 @@ async function raw(port: number) {
       data(socket, data) {
         buffer += data.toString();
         let index = buffer.indexOf("\r\n");
+
         while (index >= 0) {
           const line = buffer.slice(0, index);
           buffer = buffer.slice(index + 2);
           const message = parseMessage(line);
+
           if (message?.command === "PING")
             socket.write(`PONG :${message.params[0] ?? ""}\r\n`);
           else if (message) lines.push(message);
@@ -99,9 +110,12 @@ async function raw(port: number) {
       },
     },
   });
+
   const send = (line: string) => socket.write(`${line}\r\n`);
+
   const wait = (match: (m: IrcMessage) => boolean, what: string) =>
     until(() => lines.some(match), 5000, what);
+
   return {
     lines,
     send,
@@ -110,6 +124,7 @@ async function raw(port: number) {
       if (caps) send("CAP REQ :message-tags server-time account-tag");
       send(`NICK ${nick}`);
       send(`USER ${nick} 0 * :test`);
+
       if (caps) send("CAP END");
       await wait((m) => m.command === "001", "welcome");
       send(`PRIVMSG NickServ :REGISTER ${password}`);
@@ -187,9 +202,11 @@ test.skipIf(!available)(
     );
     const plain = await freePort();
     const secure = await freePort();
+
     const defaults = await Bun.file(
       join(dirname(realpathSync(binary)), "default.yaml"),
     ).text();
+
     const config = defaults
       .replace(/"127\.0\.0\.1:6667":.*\n/, `"127.0.0.1:${plain}":\n`)
       .replace(/ +"\[::1\]:6667":.*\n/, "")
@@ -201,15 +218,19 @@ test.skipIf(!available)(
         "languages:\n    # whether to load languages\n    enabled: true",
         "languages:\n    # whether to load languages\n    enabled: false",
       );
+
     await writeFile(join(directory, "ircd.yaml"), config);
+
     const server = spawn(binary, ["run", "--conf", "ircd.yaml"], {
       cwd: directory,
       stdio: "ignore",
     });
+
     cleanup.push(() => {
       server.kill("SIGTERM");
     });
     const deadline = Date.now() + 10_000;
+
     while (!(await listening(secure)) || !(await listening(plain))) {
       if (Date.now() > deadline) throw new Error("Ergo did not start");
       await delay(50);
@@ -220,6 +241,7 @@ test.skipIf(!available)(
       STARGATE_IRC_GALACTICA: "captain-password-1",
       STARGATE_IRC_GALACTICA_CHIEF: "chief-password-1",
     };
+
     const founder = await raw(plain);
     await founder.register("galactica", passwords.STARGATE_IRC_GALACTICA);
     founder.send("JOIN #galactica");
@@ -245,6 +267,7 @@ test.skipIf(!available)(
 
     const store = openStore(join(directory, "stargate.sqlite"));
     cleanup.push(() => store.close());
+
     const ship = await IrcShip.create(
       Schema.decodeUnknownSync(ircSchema)({
         id: "galactica-irc",
@@ -288,10 +311,12 @@ test.skipIf(!available)(
       pino({ level: "silent" }),
       { env: passwords, timing: { reclaimMs: 500 } },
     );
+
     const prompts: string[] = [];
     const contexts: (PromptSourceContext | undefined)[] = [];
     const firstReply = Promise.withResolvers<void>();
     cleanup.push(() => firstReply.resolve());
+
     const backend: AgentBackend = {
       sessionID: "ses_captain",
       async createSession() {
@@ -308,14 +333,19 @@ test.skipIf(!available)(
       ) {
         prompts.push(text);
         contexts.push(context);
+
         if (prompts.length === 1) await firstReply.promise;
+
         return `## Status\n\nAll **green**. ${"Details follow. ".repeat(40)}`;
       },
       async close() {},
     };
+
     const controller = new AbortController();
     const [captain, chief] = ship.registrations;
+
     if (!captain || !chief) throw new Error("missing registration");
+
     const worker = new Gateway(
       captain.settings,
       captain.identity,
@@ -327,6 +357,7 @@ test.skipIf(!available)(
       undefined,
       captain.transport,
     ).work(controller.signal);
+
     ship.start(() => true);
     cleanup.push(async () => {
       firstReply.resolve();
@@ -340,6 +371,7 @@ test.skipIf(!available)(
       "captain joined over TLS",
     );
     expect(captain.client.hasCap("labeled-response")).toBe(true);
+
     // Without the private CA the certificate is refused.
     const untrusted = new IrcClient({
       host: "127.0.0.1",
@@ -352,6 +384,7 @@ test.skipIf(!available)(
       log: pino({ level: "silent" }),
       timing: { reconnectMinMs: 50, reconnectMaxMs: 100 },
     });
+
     const refused = new AbortController();
     const attempts = untrusted.run(refused.signal);
     await expect(untrusted.waitReady(1500)).rejects.toThrow("unavailable");
@@ -417,9 +450,11 @@ test.skipIf(!available)(
       "captain reply",
     );
     expect(prompts).toEqual(["status?"]);
+
     const reply = jack.lines.filter(
       (m) => m.command === "PRIVMSG" && m.source?.startsWith("galactica!"),
     );
+
     expect(reply[0]?.params[1]).toBe("Status");
     expect(reply[0]?.tags.get("account")).toBe("galactica");
     expect(reply.every((message) => !message.tags.has("+draft/reply"))).toBe(
@@ -456,11 +491,13 @@ test.skipIf(!available)(
         m.params[2] === "status",
       "crew status cleared",
     );
+
     if (rateProof) {
       // Real wall-clock proof against the unchanged ten-SET/two-minute limiter.
       const setupRate = await raw(plain);
       await setupRate.register("status-rate", "synthetic-rate-password");
       setupRate.close();
+
       const rateClient = new IrcClient({
         host: "127.0.0.1",
         port: plain,
@@ -472,6 +509,7 @@ test.skipIf(!available)(
         statusName: "Rate bot",
         log: pino({ level: "silent" }),
       });
+
       const rateConnection = new AbortController();
       const rateRunning = rateClient.run(rateConnection.signal);
       cleanup.push(async () => {
@@ -488,11 +526,13 @@ test.skipIf(!available)(
       );
       const boundary = jack.lines.length;
       const active = new AbortController();
+
       const working = new IrcDelivery(rateClient).working(
         "#galactica",
         "synthetic-request",
         active.signal,
       );
+
       cleanup.push(async () => {
         active.abort();
         await working;
@@ -508,9 +548,11 @@ test.skipIf(!available)(
         (m) => m.command === "766" && m.params[1] === "status-rate",
         "long-turn terminal clear retains quota",
       );
+
       const values = jack.lines
         .slice(boundary)
         .filter((m) => m.command === "761" && m.params[1] === "status-rate");
+
       expect(values.length).toBeGreaterThanOrEqual(7);
       expect(
         values.every(
@@ -519,12 +561,14 @@ test.skipIf(!available)(
         ),
       ).toBe(true);
     }
+
     // A real earlier message is the root; every relayed answer line stays
-    // in that one-level thread, not in a thread under the new request.
+    // In that one-level thread, not in a thread under the new request.
     const root = reply[0]?.tags.get("msgid");
+
     if (!root) throw new Error("captain root has no server msgid");
     // The delivery ACK is on another socket. A round trip on Jack's socket
-    // consumes all earlier lines before the second request's boundary.
+    // Consumes all earlier lines before the second request's boundary.
     jack.send("PING :thread-boundary");
     await jack.wait(
       (message) =>
@@ -543,6 +587,7 @@ test.skipIf(!available)(
       15_000,
       "thread delivery confirmed",
     );
+
     const threaded = jack.lines
       .slice(offset)
       .filter(
@@ -550,12 +595,14 @@ test.skipIf(!available)(
           message.command === "PRIVMSG" &&
           message.source?.startsWith("galactica!"),
       );
+
     expect(threaded.length).toBeGreaterThanOrEqual(2);
     expect(threaded.map((message) => message.tags.get("+draft/reply"))).toEqual(
       threaded.map(() => root),
     );
     expect(contexts[1]?.source.replyParent).toBe(root);
     const answerID = threaded[0]?.tags.get("msgid");
+
     if (!answerID) throw new Error("thread answer has no server msgid");
     expect(captain.client.anchor(answerID)).toBe(root);
     expect(captain.client.requestAnchor(answerID)).toBe(

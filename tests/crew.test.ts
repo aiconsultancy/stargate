@@ -59,6 +59,7 @@ const diskIntegrationTimeoutMs = 30_000;
 
 async function boundedOutcome<T>(work: Promise<T>): Promise<T> {
   const stop = new AbortController();
+
   try {
     return await Promise.race([
       work,
@@ -74,6 +75,7 @@ async function boundedOutcome<T>(work: Promise<T>): Promise<T> {
 function waitClock() {
   let now = 0;
   let poll = async () => {};
+
   return {
     options: {
       windowMs: 50,
@@ -97,14 +99,17 @@ function waitClock() {
 
 test("conversation eval: exported plugin wires cancellable native wait through its registered crew tool", async () => {
   const historyRequests: string[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       historyRequests.push(new URL(request.url).pathname);
+
       return new Response("Unexpected history request", { status: 500 });
     },
   });
+
   const scope = Effect.runSync(Scope.make());
   const release = Effect.runSync(Deferred.make<void>());
   const started = Promise.withResolvers<void>();
@@ -113,6 +118,7 @@ test("conversation eval: exported plugin wires cancellable native wait through i
   let finalizers = 0;
   let disposed = 0;
   let f: Awaited<ReturnType<typeof fixture>> | undefined;
+
   type RegisteredTool = {
     name: string;
     execute: (
@@ -120,13 +126,16 @@ test("conversation eval: exported plugin wires cancellable native wait through i
       context: Tool.Context,
     ) => Effect.Effect<Tool.Result<undefined>, Tool.Error>;
   };
+
   let crewTool: RegisteredTool | undefined;
+
   let work:
     | Promise<
         | { type: "success"; value: Tool.Result<undefined> }
         | { type: "failure"; error: unknown }
       >
     | undefined;
+
   try {
     const seed = await fixture(
       Schema.decodeUnknownSync(teamSchema)({
@@ -134,24 +143,30 @@ test("conversation eval: exported plugin wires cancellable native wait through i
         historyAPI: { url: server.url.href },
       }),
     );
+
     f = seed;
+
     const task = (
       await seed.engine.run(
         { op: "dispatch", crew: "mario", text: "Retain this result" },
         seed.captain(),
       )
     ).task;
+
     if (!task) throw new Error("Missing fixture task");
+
     const registration = {
       dispose: Effect.sync(() => {
         disposed++;
       }),
       events: { emit: () => Effect.void },
     };
+
     const scopedRegistration = Effect.acquireRelease(
       Effect.succeed(registration),
       (owned) => owned.dispose,
     );
+
     const methods = new Map<string, unknown>([
       ["location", { directory: seed.options.captainDirectory }],
       ["options", seed.options],
@@ -209,12 +224,14 @@ test("conversation eval: exported plugin wires cancellable native wait through i
         },
       ],
     ]);
+
     // The installed adapter eagerly reads unused API paths. Only approved
-    // invocations exist; every other invocation throws and remains counted.
+    // Invocations exist; every other invocation throws and remains counted.
     function readStub(path: string): object {
       return new Proxy(() => {}, {
         get(_target, key) {
           const child = path ? `${path}.${String(key)}` : String(key);
+
           return methods.get(child) ?? readStub(child);
         },
         apply() {
@@ -223,9 +240,11 @@ test("conversation eval: exported plugin wires cancellable native wait through i
         },
       });
     }
+
     // One fake-host boundary; production export and SDK adapter remain real.
     const host = readStub("") as EffectPlugin.Context;
     await Effect.runPromise(plugin.effect(host).pipe(Scope.provide(scope)));
+
     if (!crewTool) throw new Error("Crew tool was not registered");
     work = Effect.runPromise(
       crewTool.execute(
@@ -248,13 +267,16 @@ test("conversation eval: exported plugin wires cancellable native wait through i
       { op: "complete", taskID: task.id, result: "Original retained answer" },
       seed.worker(task.workerSessionID),
     );
+
     const result = await boundedOutcome(work).catch((cause: unknown) => {
       throw new Error(
         `Registered plugin wait remained pending with ${observers} native observer(s)`,
         { cause },
       );
     });
+
     if (result.type === "failure") throw result.error;
+
     if (typeof result.value.content !== "string")
       throw new Error("Crew tool did not return JSON text");
     expect(JSON.parse(result.value.content)).toMatchObject({
@@ -275,8 +297,9 @@ test("conversation eval: exported plugin wires cancellable native wait through i
     expect(seed.inputs.map(({ id }) => id)).toEqual([task.inputID]);
   } finally {
     // Also joins the unbridged mutant: releasing only this observation does
-    // not abort a tool, mark a worker idle, or trigger cancellation discovery.
+    // Not abort a tool, mark a worker idle, or trigger cancellation discovery.
     Effect.runSync(Deferred.succeed(release, undefined));
+
     try {
       await work;
     } finally {
@@ -305,17 +328,20 @@ test("conversation eval: bounded wait yields without cancelling the worker and l
   let observers = 0;
   const stop = new AbortController();
   let waiting: Promise<unknown> | undefined;
+
   try {
     f.history.set("ses_captain_a", [
       { id: "tool", type: "assistant", time: { created: 2 } },
       { id: "private-input", type: "user", time: { created: 1 } },
     ]);
+
     const task = (
       await f.engine.run(
         { op: "dispatch", crew: "mario", text: "Original" },
         { ...f.captain(), messageID: "tool" },
       )
     ).task;
+
     if (!task) throw new Error("Missing task");
     f.engine.state.notice(task.id, "Already read");
     const after = f.engine.state.notices(task.id, 0).at(-1)?.id ?? 0;
@@ -334,10 +360,12 @@ test("conversation eval: bounded wait yields without cancelling the worker and l
         ),
       Context.empty(),
     );
+
     const observation = f.engine.run(
       { op: "wait", taskID: task.id, afterNoticeID: after },
       f.captain("ses_captain_a", stop.signal),
     );
+
     waiting = observation;
     expect(await boundedOutcome(observation)).toMatchObject({
       status: "running",
@@ -394,6 +422,7 @@ test("conversation eval: bounded wait yields without cancelling the worker and l
 test("bounded queued wait preserves FIFO and origins without admitting or replaying work", async () => {
   const clock = waitClock();
   const f = await fixture(undefined, clock.options);
+
   try {
     const first = (
       await f.engine.run(
@@ -401,22 +430,26 @@ test("bounded queued wait preserves FIFO and origins without admitting or replay
         f.captain(),
       )
     ).task;
+
     if (!first) throw new Error("Missing task");
     f.history.set("ses_captain_a", [
       { id: "queue-tool", type: "assistant", time: { created: 2 } },
       { id: "queue-origin", type: "user", time: { created: 1 } },
     ]);
     const caller = { ...f.captain(), messageID: "queue-tool" };
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "mario", text: "Second", queue: true },
         caller,
       )
     ).task;
+
     await f.engine.run(
       { op: "dispatch", crew: "mario", text: "Third", queue: true },
       caller,
     );
+
     if (!queued) throw new Error("Missing queued task");
     const fifo = f.engine.state.queuedTasks("mario");
     const before = f.engine.state.task(first.id);
@@ -444,6 +477,7 @@ test("bounded queued wait preserves FIFO and origins without admitting or replay
 test("bounded wait shares one deadline across queued promotion and running observation", async () => {
   const clock = waitClock();
   const f = await fixture(undefined, clock.options);
+
   try {
     const first = (
       await f.engine.run(
@@ -451,12 +485,14 @@ test("bounded wait shares one deadline across queued promotion and running obser
         f.captain(),
       )
     ).task;
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "mario", text: "Second", queue: true },
         f.captain(),
       )
     ).task;
+
     if (!first || !queued) throw new Error("Missing tasks");
     let polls = 0;
     clock.onPoll(async () => {
@@ -495,6 +531,7 @@ test("bounded wait shares one deadline across queued promotion and running obser
 test("bounded wait counts initial promotion and authorization time without restarting its window", async () => {
   const clock = waitClock();
   const f = await fixture(undefined, clock.options);
+
   try {
     const first = (
       await f.engine.run(
@@ -502,12 +539,14 @@ test("bounded wait counts initial promotion and authorization time without resta
         f.captain(),
       )
     ).task;
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "mario", text: "Second", queue: true },
         f.captain(),
       )
     ).task;
+
     if (!first || !queued) throw new Error("Missing tasks");
     await f.engine.run(
       { op: "complete", taskID: first.id, result: "Done" },
@@ -522,12 +561,15 @@ test("bounded wait counts initial promotion and authorization time without resta
         authorization = true;
         clock.advance(25);
       }
+
       if (input.sessionID === queued.workerSessionID && !promotion) {
         promotion = true;
         clock.advance(25);
       }
+
       return get(input, request);
     };
+
     let polls = 0;
     clock.onPoll(async () => {
       polls++;
@@ -561,6 +603,7 @@ test("bounded wait preserves completion, notices, idle failure and caller abort 
     const f = await fixture(undefined, clock.options, false, true);
     const idle = Effect.runSync(Deferred.make<void>());
     const stop = new AbortController();
+
     try {
       const task = (
         await f.engine.run(
@@ -568,12 +611,14 @@ test("bounded wait preserves completion, notices, idle failure and caller abort 
           f.captain(),
         )
       ).task;
+
       if (!task) throw new Error("Missing task");
       f.client.wait = nativeWait(
         () =>
           Effect.gen(function* () {
             if (!f.busy.has(task.workerSessionID)) return;
             yield* Deferred.await(idle);
+
             if (outcome === "failure")
               return yield* Effect.fail(new Error("Native observation failed"));
           }),
@@ -581,29 +626,34 @@ test("bounded wait preserves completion, notices, idle failure and caller abort 
       );
       clock.onPoll(async () => {
         if (clock.now() < 50) return;
+
         if (outcome === "complete" || outcome === "complete-abort") {
           await f.engine.run(
             { op: "complete", taskID: task.id, result: "Done" },
             f.worker(task.workerSessionID),
           );
+
           if (outcome === "complete-abort") stop.abort();
         } else if (outcome === "notice")
           f.engine.state.notice(task.id, "Need approval");
         else if (outcome === "abort") stop.abort();
         else Effect.runSync(Deferred.succeed(idle, undefined));
       });
+
       const waiting = boundedOutcome(
         f.engine.run(
           { op: "wait", taskID: task.id },
           f.captain("ses_captain_a", stop.signal),
         ),
       );
+
       if (outcome === "complete" || outcome === "notice") {
         const result = await waiting;
         expect(result.diagnostic).toBeUndefined();
         expect(result.status).toBe(
           outcome === "complete" ? "completed" : "running",
         );
+
         if (outcome === "complete") expect(result.task?.result).toBe("Done");
         else expect(result.notices?.[0]?.text).toBe("Need approval");
       } else {
@@ -619,6 +669,7 @@ test("bounded wait preserves completion, notices, idle failure and caller abort 
           f.calls.filter(({ method }) => method === "interrupt"),
         ).toHaveLength(outcome === "abort" ? 1 : 0);
       }
+
       expect(f.inputs).toHaveLength(1);
     } finally {
       stop.abort();
@@ -638,18 +689,21 @@ test("conversation eval: bounded wait lets a SQLite-queued Slack source enter af
   const prompts: string[] = [];
   const stop = new AbortController();
   let work: Promise<void> | undefined;
+
   const task = (
     await f.engine.run(
       { op: "dispatch", crew: "mario", text: "Original A" },
       f.captain(),
     )
   ).task;
+
   if (!task) throw new Error("Missing task");
   const before = f.engine.state.task(task.id);
   clock.onPoll(async () => {
     entered.resolve();
     await release.promise;
   });
+
   const gateway = new Gateway(
     bot(),
     identity,
@@ -661,17 +715,21 @@ test("conversation eval: bounded wait lets a SQLite-queued Slack source enter af
       },
       async prompt(_session, text, signal) {
         prompts.push(text);
+
         if (text === "Track A") {
           const result = await f.engine.run(
             { op: "wait", taskID: task.id },
             f.captain("ses_captain_a", signal),
           );
+
           expect(result).toMatchObject({
             status: "running",
             diagnostic: expect.stringContaining("End this turn"),
           });
+
           return "A keeps running; I will collect it later.";
         }
+
         return "B can proceed.";
       },
       async close() {},
@@ -683,6 +741,7 @@ test("conversation eval: bounded wait lets a SQLite-queued Slack source enter af
     },
     pino({ enabled: false }),
   );
+
   try {
     gateway.accept(event("<@UBOT> Track A", "1.000"));
     const second = event("<@UBOT> Plan B", "2.000");
@@ -691,6 +750,7 @@ test("conversation eval: bounded wait lets a SQLite-queued Slack source enter af
       event: { ...second.event, channel: "D123", channel_type: "im" },
     });
     const first = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
+
     if (!first) throw new Error("Missing first job");
     work = gateway.process(first, stop.signal);
     await entered.promise;
@@ -701,6 +761,7 @@ test("conversation eval: bounded wait lets a SQLite-queued Slack source enter af
     release.resolve();
     await boundedOutcome(work);
     const next = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
+
     if (!next) throw new Error("Missing second job");
     await gateway.process(next, stop.signal);
     expect(prompts).toEqual(["Track A", "Plan B"]);
@@ -723,6 +784,7 @@ test("conversation eval: bounded wait lets a SQLite-queued Slack source enter af
 
 test("dispatch binds the exact open assistant origin before later inputs and preserves queued ancestry", async () => {
   const f = await fixture();
+
   try {
     f.history.set("ses_captain_a", [
       { id: "later", type: "user", time: { created: 3 } },
@@ -730,18 +792,21 @@ test("dispatch binds the exact open assistant origin before later inputs and pre
       { id: "original", type: "user", time: { created: 1 } },
     ]);
     const caller = { ...f.captain(), messageID: "dispatch-tool" };
+
     const first = (
       await f.engine.run(
         { op: "dispatch", crew: "mario", text: "First" },
         caller,
       )
     ).task;
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "mario", text: "Second", queue: true },
         caller,
       )
     ).task;
+
     if (!first || !queued) throw new Error("Missing tasks");
     expect(first.originInputID).toBe("original");
     expect(queued).toMatchObject({
@@ -753,10 +818,12 @@ test("dispatch binds the exact open assistant origin before later inputs and pre
       f.worker(first.workerSessionID),
     );
     f.busy.delete(first.workerSessionID);
+
     const promoted = await f.engine.run(
       { op: "status", taskID: queued.id },
       { ...f.captain(), messageID: "unrelated-later-tool" },
     );
+
     expect(promoted.task).toMatchObject({
       id: queued.id,
       inputID: queued.inputID,
@@ -781,26 +848,32 @@ test("dispatch leaves origin unknown when ancestry is absent, unreadable or unav
     "missing-api",
   ] as const) {
     const f = await fixture();
+
     const engine =
       mode === "missing-api"
         ? await CrewEngine.open(f.options, f.client, f.mailer, f.agents)
         : f.engine;
+
     try {
       f.history.set("ses_captain_a", [
         { id: "unrelated", type: "user", time: { created: 1 } },
       ]);
+
       if (mode === "api-error")
         f.inspectionAPI.message.list = async () => {
           throw new Error("Private API failure");
         };
+
       const caller =
         mode === "missing-context"
           ? f.captain()
           : { ...f.captain(), messageID: "absent" };
+
       const result = await engine.run(
         { op: "dispatch", crew: "mario", text: "Work" },
         caller,
       );
+
       expect(result.task).toMatchObject({
         status: "running",
         originInputID: null,
@@ -816,21 +889,26 @@ test("dispatch leaves origin unknown when ancestry is absent, unreadable or unav
 test("dispatch origin deadline cancels a stalled history read without replay or task failure", async () => {
   const f = await fixture();
   let observed: AbortSignal | undefined;
+
   try {
     f.inspectionAPI.message.list = async (_input, request) => {
       const signal = request?.signal;
+
       if (!signal) throw new Error("Missing history signal");
       observed = signal;
+
       return new Promise<never>((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         });
       });
     };
+
     const result = await f.engine.run(
       { op: "dispatch", crew: "mario", text: "Work" },
       { ...f.captain(), messageID: "open-tool" },
     );
+
     expect(result.task).toMatchObject({
       status: "running",
       originInputID: null,
@@ -844,17 +922,20 @@ test("dispatch origin deadline cancels a stalled history read without replay or 
 
 test("captain wakes queue with exact task origin while worker steer and wait notices remain intact", async () => {
   const f = await fixture();
+
   try {
     f.history.set("ses_captain_a", [
       { id: "tool", type: "assistant", time: { created: 2 } },
       { id: "private-input", type: "user", time: { created: 1 } },
     ]);
+
     const task = (
       await f.engine.run(
         { op: "dispatch", crew: "mario", text: "Private work" },
         { ...f.captain(), messageID: "tool" },
       )
     ).task;
+
     if (!task) throw new Error("Missing task");
     await f.engine.dm(
       { op: "send", to: "mario", text: "Continue" },
@@ -902,23 +983,28 @@ test("captain wakes queue with exact task origin while worker steer and wait not
 
 test("task-free and legacy-lineage captain wakes never invent a pinned input origin", async () => {
   const f = await fixture();
+
   const pinned = await CrewEngine.open(
     { ...f.options, captainSessionID: "ses_pinned" },
     f.client,
     f.mailer,
     f.agents,
   );
+
   try {
     const peer = (
       await f.engine.run({ op: "ensure", crew: "mario" }, f.captain())
     ).peers?.[0];
+
     if (!peer) throw new Error("Missing peer");
+
     const old = f.engine.state.reserveTask(
       peer,
       "ses_captain_a",
       "Old work",
       "old-private-input",
     );
+
     if (!old) throw new Error("Missing task");
     f.engine.state.running(old.id);
     await pinned.notifyMail(
@@ -973,6 +1059,7 @@ test("conversation eval: busy status lets a second source progress without repla
   const idle = Effect.runSync(Deferred.make<void>());
   let observers = 0;
   let probes = 0;
+
   const wait = nativeWait(
     () =>
       Effect.gen(function* () {
@@ -988,6 +1075,7 @@ test("conversation eval: busy status lets a second source progress without repla
       ),
     Context.empty(),
   );
+
   const engine = await CrewEngine.open(
     f.options,
     { ...f.client, wait },
@@ -999,17 +1087,21 @@ test("conversation eval: busy status lets a second source progress without repla
       throw new Error("Busy status must not read a final result");
     },
   );
+
   const store = openStore(":memory:");
   const posts: { channel: string; thread: string; text: string }[] = [];
   const sessions: string[] = [];
+
   const task = (
     await f.engine.run(
       { op: "dispatch", crew: "mario", text: "Synthetic project task" },
       f.captain(),
     )
   ).task;
+
   if (!task) throw new Error("Missing task");
   const before = f.engine.state.task(task.id);
+
   const gateway = new Gateway(
     bot(),
     identity,
@@ -1025,6 +1117,7 @@ test("conversation eval: busy status lets a second source progress without repla
           (await engine.run({ op: "status", taskID: task.id }, f.captain()))
             .status,
         ).toBe("running");
+
         return text === "Track project A"
           ? "Project A is running."
           : "Project B has its independent plan.";
@@ -1038,6 +1131,7 @@ test("conversation eval: busy status lets a second source progress without repla
     },
     pino({ enabled: false }),
   );
+
   try {
     gateway.accept(event("<@UBOT> Track project A", "1.000"));
     const other = event("<@UBOT> Plan project B", "2.000");
@@ -1045,6 +1139,7 @@ test("conversation eval: busy status lets a second source progress without repla
       ...other,
       event: { ...other.event, channel: "D123", channel_type: "im" },
     });
+
     for (const job of store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 2))
       await gateway.process(job, new AbortController().signal);
     expect(posts).toEqual([
@@ -1076,12 +1171,14 @@ test("conversation eval: explicit completion releases wait before native worker 
   const idle = Effect.runSync(Deferred.make<void>());
   const started = Promise.withResolvers<void>();
   let observing = false;
+
   const task = (
     await f.engine.run(
       { op: "dispatch", crew: "mario", text: "Synthetic completion task" },
       f.captain(),
     )
   ).task;
+
   if (!task) throw new Error("Missing task");
   f.client.wait = nativeWait(
     () =>
@@ -1099,6 +1196,7 @@ test("conversation eval: explicit completion releases wait before native worker 
     Context.empty(),
   );
   const waiting = f.engine.run({ op: "wait", taskID: task.id }, f.captain());
+
   try {
     await started.promise;
     await f.engine.run(
@@ -1122,12 +1220,15 @@ test("conversation eval: explicit completion releases wait before native worker 
 
 test("host-bound journal notes work without a task and isolate captain roots", async () => {
   const f = await fixture();
+
   try {
     const caller = { ...f.captain(), id: "journal-call" };
+
     const first = await f.engine.journal(
       { op: "append", text: "  Checks passed  \n" },
       caller,
     );
+
     expect(
       await f.engine.journal({ op: "append", text: "Checks passed" }, caller),
     ).toEqual(first);
@@ -1143,6 +1244,7 @@ test("host-bound journal notes work without a task and isolate captain roots", a
       kind: "note",
       text: "Checks passed",
     });
+
     for (const input of [
       { op: "read", text: "secret wrong-branch value" },
       { op: "read", after: -1 },
@@ -1165,15 +1267,19 @@ test("host-bound journal notes work without a task and isolate captain roots", a
 
 test("idle mail, aliases, correlated captain reply and broadcast share one inbox", async () => {
   const f = await fixture();
+
   try {
     const peer = (
       await f.engine.run({ op: "ensure", crew: "mario" }, f.captain())
     ).peers?.[0];
+
     if (!peer) throw new Error("Missing peer");
+
     const sent = await f.engine.mail(
       { op: "send", to: "mario", text: "Question" },
       f.captain(),
     );
+
     expect(sent).toMatchObject({ stored: true, notification: "not_requested" });
     expect(f.synthetics).toEqual([]);
     expect(
@@ -1181,10 +1287,12 @@ test("idle mail, aliases, correlated captain reply and broadcast share one inbox
         .messages?.[0]?.text,
     ).toBe("Question");
     const replyTo = "id" in sent ? sent.id : undefined;
+
     const reply = await f.engine.dm(
       { op: "send", to: "bowser", text: "Answer", replyTo },
       f.worker(peer.sessionID),
     );
+
     expect(reply).toMatchObject({ stored: true, notification: "accepted" });
     expect(f.synthetics.at(-1)).toMatchObject({
       sessionID: "ses_captain_a",
@@ -1203,10 +1311,12 @@ test("idle mail, aliases, correlated captain reply and broadcast share one inbox
         f.captain("ses_captain_b"),
       ),
     ).rejects.toThrow("addressed");
+
     const broadcast = await f.engine.mail(
       { op: "send", to: "all", text: "FYI" },
       f.captain(),
     );
+
     expect(broadcast).toMatchObject({
       receipts: defaultTeam.crew.map(({ id }) => ({ to: id, stored: true })),
     });
@@ -1221,6 +1331,7 @@ test("idle mail, aliases, correlated captain reply and broadcast share one inbox
 
 test("DM stored first, busy steer never resumes, native failure preserves task state", async () => {
   const f = await fixture();
+
   try {
     const task = (
       await f.engine.run(
@@ -1228,12 +1339,15 @@ test("DM stored first, busy steer never resumes, native failure preserves task s
         f.captain(),
       )
     ).task;
+
     if (!task) throw new Error("Missing task");
     const caller = f.captain();
+
     const receipt = await f.engine.dm(
       { op: "send", to: "mario", text: "Check interface" },
       caller,
     );
+
     expect(receipt).toMatchObject({ notification: "accepted", stored: true });
     expect(f.synthetics[0]).toMatchObject({
       resume: false,
@@ -1261,6 +1375,7 @@ test("DM stored first, busy steer never resumes, native failure preserves task s
     f.client.synthetic = async () => {
       throw new Error("raw secret");
     };
+
     expect(
       await f.engine.dm(
         { op: "send", to: "mario", text: "Another" },
@@ -1285,6 +1400,7 @@ test("DM stored first, busy steer never resumes, native failure preserves task s
     f.client.synthetic = async (input) => {
       f.synthetics.push(input);
     };
+
     expect(
       await f.engine.dm(
         { op: "send", to: "mario", text: "Free wake", delivery: "queue" },
@@ -1302,6 +1418,7 @@ test("DM stored first, busy steer never resumes, native failure preserves task s
 
 test("busy crew receives correlated captain steer with queued work without promoting FIFO", async () => {
   const f = await fixture();
+
   try {
     const task = (
       await f.engine.run(
@@ -1309,19 +1426,23 @@ test("busy crew receives correlated captain steer with queued work without promo
         f.captain(),
       )
     ).task;
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "mario", text: "Next work", queue: true },
         f.captain(),
       )
     ).task;
+
     if (!task || !queued) throw new Error("Missing tasks");
     const beforeCurrent = f.engine.state.task(task.id);
     const beforeQueued = f.engine.state.task(queued.id);
+
     const receipt = await f.engine.dm(
       { op: "send", to: "mario", text: "Status at your next safe point?" },
       f.captain(),
     );
+
     expect(receipt).toMatchObject({ stored: true, notification: "accepted" });
     expect(f.synthetics.at(-1)).toMatchObject({
       sessionID: task.workerSessionID,
@@ -1374,6 +1495,7 @@ test("busy crew receives correlated captain steer with queued work without promo
 
 test("namespaced native definitions keep short crew, mail, journal and task identities", async () => {
   const f = await fixture(profileTeam(defaultTeam, "galactica"));
+
   try {
     const task = (
       await f.engine.run(
@@ -1381,6 +1503,7 @@ test("namespaced native definitions keep short crew, mail, journal and task iden
         f.captain(),
       )
     ).task;
+
     if (!task) throw new Error("Missing task");
     expect(f.creations[0]?.agent).toBe("galactica-crew-mario");
     expect(task.crewID).toBe("mario");
@@ -1390,10 +1513,12 @@ test("namespaced native definitions keep short crew, mail, journal and task iden
       (await f.engine.journal({ op: "append", text: "Verified" }, worker)).entry
         ?.member,
     ).toBe("mario");
+
     const dm = await f.engine.dm(
       { op: "send", to: "captain", text: "Question" },
       worker,
     );
+
     expect(dm).toMatchObject({ to: "bowser", notification: "accepted" });
     await f.engine.dm({ op: "send", to: "bowser", text: "Question" }, worker);
     expect(f.engine.state.notices(task.id, 0)).toHaveLength(1);
@@ -1423,6 +1548,7 @@ test("namespaced native definitions keep short crew, mail, journal and task iden
 
 test("a correlated reply routes exactly but cannot steer another captain's work", async () => {
   const f = await fixture();
+
   try {
     const mario = (
       await f.engine.run(
@@ -1430,17 +1556,21 @@ test("a correlated reply routes exactly but cannot steer another captain's work"
         f.captain(),
       )
     ).task;
+
     const luigi = (
       await f.engine.run(
         { op: "dispatch", crew: "luigi", text: "A peer" },
         f.captain(),
       )
     ).task;
+
     if (!mario || !luigi) throw new Error("Missing tasks");
+
     const incoming = await f.engine.mail(
       { op: "send", to: "mario", text: "Question" },
       f.worker(luigi.workerSessionID, "luigi"),
     );
+
     const replyTo = "id" in incoming ? incoming.id : undefined;
     await f.engine.run(
       { op: "complete", taskID: mario.id, result: "A done" },
@@ -1451,16 +1581,20 @@ test("a correlated reply routes exactly but cannot steer another captain's work"
       { op: "dispatch", crew: "mario", text: "B work" },
       f.captain("ses_captain_b"),
     );
+
     const reply = await f.engine.dm(
       { op: "send", to: "luigi", text: "Late answer", replyTo },
       f.worker(mario.workerSessionID),
     );
+
     expect(reply).toMatchObject({ stored: true, notification: "deferred" });
     expect(f.synthetics).toEqual([]);
+
     const inbox = await f.engine.mail(
       { op: "inbox" },
       f.worker(luigi.workerSessionID, "luigi"),
     );
+
     expect(inbox.messages?.[0]).toMatchObject({ text: "Late answer" });
     expect(inbox.messages?.[0]).not.toHaveProperty("sourceTaskID");
     await expect(
@@ -1476,6 +1610,7 @@ test("a correlated reply routes exactly but cannot steer another captain's work"
 
 test("finished worker has no stale captain context for inbox, new mail or journal", async () => {
   const f = await fixture();
+
   try {
     const task = (
       await f.engine.run(
@@ -1483,16 +1618,19 @@ test("finished worker has no stale captain context for inbox, new mail or journa
         f.captain(),
       )
     ).task;
+
     if (!task) throw new Error("Missing task");
     await f.engine.run(
       { op: "complete", taskID: task.id, result: "Done" },
       f.worker(task.workerSessionID),
     );
     f.busy.delete(task.workerSessionID);
+
     const incoming = await f.engine.dm(
       { op: "send", to: "mario", text: "B question" },
       f.captain("ses_captain_b"),
     );
+
     const worker = f.worker(task.workerSessionID);
     await expect(
       f.engine.dm({ op: "send", to: "captain", text: "Ambiguous" }, worker),
@@ -1541,6 +1679,7 @@ test("finished worker has no stale captain context for inbox, new mail or journa
 
 test("notification bookkeeping failure keeps the successful durable mail receipt", async () => {
   const f = await fixture();
+
   try {
     const task = (
       await f.engine.run(
@@ -1548,10 +1687,12 @@ test("notification bookkeeping failure keeps the successful durable mail receipt
         f.captain(),
       )
     ).task;
+
     if (!task) throw new Error("Missing task");
     f.engine.state.beginNotify = () => {
       throw new Error("private database details");
     };
+
     expect(
       await f.engine.dm(
         { op: "send", to: "mario", text: "Stored first" },
@@ -1561,6 +1702,7 @@ test("notification bookkeeping failure keeps the successful durable mail receipt
     f.engine.state.noticeOnce = () => {
       throw new Error("private database details");
     };
+
     expect(
       await f.engine.dm(
         { op: "send", to: "captain", text: "Stored peer reply" },
@@ -1591,11 +1733,13 @@ test("broadcast returns partial receipts and Pi tools-none stores no unreadable 
       ],
     }),
   );
+
   try {
     const register = f.mailer.register;
     f.mailer.register = async () => {
       throw new Error("Unsupported mail must not touch Mesij");
     };
+
     expect(
       await f.engine.mail(
         { op: "send", to: "silent", text: "Unreadable" },
@@ -1607,12 +1751,15 @@ test("broadcast returns partial receipts and Pi tools-none stores no unreadable 
     f.mailer.send = async (input, signal) => {
       if (input.to === f.engine.state.peer("luigi")?.sessionID)
         throw new Error("private transport failure");
+
       return send(input, signal);
     };
+
     const result = await f.engine.mail(
       { op: "send", to: "all", text: "Notice" },
       f.captain(),
     );
+
     expect(result).toMatchObject({
       receipts: [
         { to: "mario", stored: true },
@@ -1632,6 +1779,7 @@ test("broadcast returns partial receipts and Pi tools-none stores no unreadable 
 
 test("update notices queue once behind busy OpenCode crew without interrupting, creating or promoting work", async () => {
   const f = await fixture(undefined, undefined, true);
+
   try {
     const task = (
       await f.engine.run(
@@ -1639,19 +1787,23 @@ test("update notices queue once behind busy OpenCode crew without interrupting, 
         f.captain(),
       )
     ).task;
+
     if (!task) throw new Error("Missing task");
     const before = f.calls.length;
     const nativeHistory = structuredClone(f.history.get(task.workerSessionID));
+
     const snapshot = buildUpdateSnapshot(
       "0.37.0",
       { notifications: { updateNotice: true } },
       "- New notices",
     );
+
     const first = await f.engine.updateNotice(
       snapshot,
       noticeTools([{ id: "stargate_crew", description: "Current tools" }]),
       new AbortController().signal,
     );
+
     expect(first).toEqual([
       { sessionID: task.workerSessionID, status: "queued" },
     ]);
@@ -1662,11 +1814,13 @@ test("update notices queue once behind busy OpenCode crew without interrupting, 
     expect(system[0]?.text).toContain("Stargate update notice");
     expect(f.history.get(task.workerSessionID)).toEqual(nativeHistory);
     expect(f.engine.state.task(task.id)?.status).toBe("running");
+
     const repeat = await f.engine.updateNotice(
       snapshot,
       noticeTools([{ id: "stargate_crew", description: "Current tools" }]),
       new AbortController().signal,
     );
+
     expect(repeat[0]?.status).toBe("unchanged");
     expect(f.calls.slice(before)).toHaveLength(0);
     f.engine.updateNoticeContext(task.workerSessionID, "mario", system);
@@ -1678,6 +1832,7 @@ test("update notices queue once behind busy OpenCode crew without interrupting, 
 
 test("passive notices preserve uncertain reconciliation and later legitimate dispatch", async () => {
   const f = await fixture(undefined, undefined, true);
+
   try {
     const task = (
       await f.engine.run(
@@ -1685,6 +1840,7 @@ test("passive notices preserve uncertain reconciliation and later legitimate dis
         f.captain(),
       )
     ).task;
+
     if (!task) throw new Error("Missing task");
     const input = uncertainResult(f, task);
     await f.engine.updateNotice(
@@ -1710,12 +1866,14 @@ test("passive notices preserve uncertain reconciliation and later legitimate dis
 
 test("captain context admission verifies native identity and leaves native history unchanged", async () => {
   const f = await fixture(undefined, undefined, true);
+
   try {
     const input = {
       sessionID: "ses_captaina",
       id: "msg_update",
       text: "Stargate update notice: passive only",
     };
+
     expect(
       await f.engine.queueCaptainNotice(input, new AbortController().signal),
     ).toEqual({ id: input.id, sessionID: input.sessionID });
@@ -1754,20 +1912,25 @@ test("Pi update notices use durable plain mail only, and failed mail is not repo
       },
     ],
   });
+
   const f = await fixture(team, undefined, true);
+
   try {
     const peer = f.engine.state.reservePeer("twiki");
     f.engine.state.readyPeer("twiki");
+
     const snapshot = buildUpdateSnapshot(
       "0.37.0",
       { notifications: { updateNotice: true } },
       "- New tools",
     );
+
     const receipts = await f.engine.updateNotice(
       snapshot,
       {},
       new AbortController().signal,
     );
+
     expect(receipts).toEqual([{ sessionID: peer.sessionID, status: "mail" }]);
     expect(f.messages).toHaveLength(1);
     expect(f.synthetics).toEqual([]);
@@ -1783,6 +1946,7 @@ test("Pi update notices use durable plain mail only, and failed mail is not repo
     f.mailer.send = async () => {
       throw new Error("secret transport failure");
     };
+
     expect(
       (
         await f.engine.updateNotice(
@@ -1805,6 +1969,7 @@ async function fixture(
 ) {
   const definition = team ?? defaultTeam;
   const directory = await mkdtemp(join(tmpdir(), "stargate-crew-"));
+
   const options: CrewOptions = {
     namespace: "bowser-one",
     stateDirectory: directory,
@@ -1817,7 +1982,9 @@ async function fixture(
     ...(pin ? { captainSessionID: "ses_captaina" } : {}),
     ...(team ? { team } : {}),
   };
+
   const sessions = new Map<string, CrewSession>();
+
   for (const id of pin
     ? ["ses_captaina"]
     : ["ses_captain_a", "ses_captain_b"]) {
@@ -1827,6 +1994,7 @@ async function fixture(
       location: { directory: options.captainDirectory },
     });
   }
+
   const calls: { method: string; sessionID: string; text?: string }[] = [];
   const creations: SessionCreateInput[] = [];
   const inputs: SessionPromptInput[] = [];
@@ -1835,20 +2003,25 @@ async function fixture(
   const pendingForms = new Set<string>();
   const pendingPermissions = new Set<string>();
   const messages: MesijMessage[] = [];
+
   const sentKeys = new Map<
     string,
     { text: string; id: string; sequence: number }
   >();
+
   const synthetics: SessionSyntheticInput[] = [];
   let promptHook = () => {};
   let createFailure = false;
   let promptFailure = false;
   let interruptFailure = false;
   const busy = new Set<string>();
+
   const client: CrewSessions = {
     async get({ sessionID }) {
       const session = sessions.get(sessionID);
+
       if (!session) throw { _tag: "Session.NotFoundError" };
+
       return session;
     },
     async create(input) {
@@ -1856,6 +2029,7 @@ async function fixture(
         throw new Error("Invalid fixture create");
       calls.push({ method: "create", sessionID: input.id });
       creations.push(input);
+
       const session = {
         id: input.id,
         agent: input.agent,
@@ -1864,8 +2038,11 @@ async function fixture(
         outcome: "succeeded" as const,
         ...(input.metadata ? { metadata: input.metadata } : {}),
       };
+
       sessions.set(input.id, session);
+
       if (createFailure) throw new Error("secret raw SDK error");
+
       return session;
     },
     async prompt(input) {
@@ -1877,6 +2054,7 @@ async function fixture(
       });
       busy.add(input.sessionID);
       promptHook();
+
       if (promptFailure) throw new Error("secret raw SDK error");
       // Accepted input is placed in the busy worker's native history.
       history.set(input.sessionID, [
@@ -1889,12 +2067,14 @@ async function fixture(
         },
         ...(history.get(input.sessionID) ?? []),
       ]);
+
       return { id: input.id ?? "msg_fixture", sessionID: input.sessionID };
     },
     async wait({ sessionID }, request) {
       if (!busy.has(sessionID)) return;
       await new Promise<void>((_, reject) => {
         const signal = request?.signal;
+
         if (signal?.aborted) return reject(signal.reason);
         signal?.addEventListener("abort", () => reject(signal.reason), {
           once: true,
@@ -1905,7 +2085,9 @@ async function fixture(
       expect(request?.signal?.aborted).toBe(false);
       calls.push({ method: "interrupt", sessionID });
       busy.delete(sessionID);
+
       if (interruptFailure) throw new Error("secret raw SDK error");
+
       return { interrupted: true };
     },
     async compact({ sessionID }) {
@@ -1915,20 +2097,25 @@ async function fixture(
       const { sessionID, text } = input;
       synthetics.push(input);
       calls.push({ method: "synthetic", sessionID, text });
+
       return { id: input.id, sessionID };
     },
   };
+
   const mailer: Pick<MesijClient, "register" | "send" | "inbox"> = {
     async register() {
       return { id: "0".repeat(32), sequence: 0 };
     },
     async send(input) {
       const previous = sentKeys.get(input.key);
+
       if (previous) {
         if (previous.text !== input.text)
           throw new Error("Conflicting Mesij replay key");
+
         return { id: previous.id, sequence: previous.sequence };
       }
+
       const event = {
         id: String(messages.length + 1).padStart(32, "0"),
         sequence: messages.length + 1,
@@ -1939,8 +2126,10 @@ async function fixture(
         text: input.text,
         ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       };
+
       messages.push(event);
       sentKeys.set(input.key, event);
+
       return { id: event.id, sequence: event.sequence };
     },
     async inbox(input) {
@@ -1949,6 +2138,7 @@ async function fixture(
         .slice(0, input.limit ?? 20);
     },
   };
+
   const agents: CrewAgents = {
     async get({ agentID }) {
       return {
@@ -1959,6 +2149,7 @@ async function fixture(
       };
     },
   };
+
   const inspectionAPI: CrewInspectionAPI = {
     session: {
       get: (input, request) => client.get(input, request),
@@ -1991,7 +2182,9 @@ async function fixture(
       },
     },
   };
+
   if (seededSchema) await copyCrewDatabase(directory, options.namespace);
+
   const engine = await CrewEngine.open(
     options,
     client,
@@ -2002,7 +2195,9 @@ async function fixture(
     undefined,
     waitOptions,
   );
+
   let toolCall = 0;
+
   const captain = (
     id = pin ? "ses_captaina" : "ses_captain_a",
     signal = new AbortController().signal,
@@ -2012,12 +2207,14 @@ async function fixture(
     signal,
     id: `captain-tool-call-${++toolCall}`,
   });
+
   const worker = (sessionID: string, agent = definition.crew[0]?.id ?? "") => ({
     sessionID,
     agent: definition.crew.find(({ id }) => id === agent)?.agent ?? agent,
     signal: new AbortController().signal,
     id: `worker-tool-call-${++toolCall}`,
   });
+
   return {
     options,
     engine,
@@ -2064,7 +2261,9 @@ async function assignedTask(f: Awaited<ReturnType<typeof fixture>>) {
       f.captain(),
     )
   ).task;
+
   if (!task) throw new Error("Missing assigned fixture task");
+
   return task;
 }
 
@@ -2074,6 +2273,7 @@ function uncertainResult(
   result = "Verified original result",
 ) {
   const admitted = f.inputs.find((input) => input.id === task.inputID);
+
   if (!admitted) throw new Error("Missing admitted input");
   f.history.set(task.workerSessionID, [
     {
@@ -2097,6 +2297,7 @@ function uncertainResult(
   ]);
   f.busy.delete(task.workerSessionID);
   f.engine.state.uncertain(task.id);
+
   return {
     op: "reconcile" as const,
     taskID: task.id,
@@ -2114,11 +2315,13 @@ function uncertainResult(
 
 test("cutover reconciles immutable historical pogoCrew evidence with its original text hash", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
     const messages = f.history.get(task.workerSessionID);
     const admitted = messages?.find((message) => message.id === task.inputID);
+
     if (!admitted?.text) throw new Error("Missing retained input");
     admitted.text = admitted.text.replace(
       "Stargate task envelope: ",
@@ -2127,14 +2330,18 @@ test("cutover reconciles immutable historical pogoCrew evidence with its origina
     admitted.metadata = {
       pogoCrew: { taskID: task.id, originCaptainID: task.originCaptainID },
     };
+
     const originalHash = createHash("sha256")
       .update(admitted.text)
       .digest("hex");
+
     const history = JSON.stringify(messages);
+
     const nativeWrites = () =>
       f.calls.filter(({ method }) =>
         ["prompt", "synthetic", "create"].includes(method),
       ).length;
+
     const before = nativeWrites();
     expect(await f.engine.run(input, f.captain())).toMatchObject({
       status: "reconciled",
@@ -2151,18 +2358,23 @@ test("cutover reconciles immutable historical pogoCrew evidence with its origina
 
 test("worker reads its own task status without captain mediation or execution", async () => {
   const f = await fixture({ ...defaultTeam, toolAccess: "direct" });
+
   try {
     const task = await f.engine.run(
       { op: "dispatch", crew: "mario", text: "Read status independently" },
       f.captain(),
     );
+
     const peer = f.engine.state.peer("mario");
+
     if (!peer || !task.task) throw new Error("Missing task fixture");
     const before = f.calls.length;
+
     const status = await f.engine.run(
       { op: "status", taskID: task.task.id },
       f.worker(peer.sessionID),
     );
+
     expect(status.status).toBe("running");
     expect(f.calls.length).toBe(before);
     expect(f.creations[0]?.permissions?.[0]).toEqual({
@@ -2183,10 +2395,12 @@ test("worker reads its own task status without captain mediation or execution", 
 
 test("waiting changes reject children, foreign roots and worker impersonation", async () => {
   const f = await fixture();
+
   try {
     const waiting = new CrewWaiting(f.engine);
     const path = waitingSettingsPath(f.options.captainDirectory, "bowser");
     const captain = f.sessions.get("ses_captain_a");
+
     if (!captain) throw new Error("missing captain fixture");
     f.sessions.set("ses_child", {
       ...captain,
@@ -2198,11 +2412,13 @@ test("waiting changes reject children, foreign roots and worker impersonation", 
       id: "ses_foreign",
       location: { directory: "/foreign" },
     });
+
     for (const sessionID of ["ses_child", "ses_foreign"]) {
       await expect(
         waiting.run({ seconds: 3 }, f.captain(sessionID)),
       ).rejects.toThrow("root configured captain");
     }
+
     const peers = (await f.engine.run({ op: "ensure" }, f.captain())).peers;
     const workerID = peers?.[0]?.sessionID ?? "missing";
     await expect(
@@ -2221,18 +2437,22 @@ test("waiting changes reject children, foreign roots and worker impersonation", 
 
 test("crew reuses four bot-wide roots across captains and reopening", async () => {
   const f = await fixture();
+
   try {
     const first = await f.engine.run({ op: "ensure" }, f.captain());
+
     const second = await f.engine.run(
       { op: "ensure" },
       f.captain("ses_captain_b"),
     );
+
     expect(second.peers).toEqual(first.peers);
     expect(first.peers).toHaveLength(4);
     expect(f.calls.filter((call) => call.method === "create")).toHaveLength(4);
     expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(0);
     expect((await stat(f.engine.state.path)).mode & 0o777).toBe(0o600);
     const reopened = await CrewEngine.open(f.options, f.client);
+
     try {
       expect((await reopened.run({ op: "ensure" }, f.captain())).peers).toEqual(
         first.peers,
@@ -2255,6 +2475,7 @@ const customTeam: Team = {
 
 test("custom roster authorizes real sessions and applies permission profiles", async () => {
   const f = await fixture(customTeam);
+
   try {
     const peers = (await f.engine.run({ op: "ensure" }, f.captain())).peers;
     expect(peers?.map((peer) => peer.crewID)).toEqual(["builder", "reader"]);
@@ -2273,6 +2494,7 @@ test("custom roster authorizes real sessions and applies permission profiles", a
       f.engine.run({ op: "ensure", crew: "mario" }, f.captain()),
     ).rejects.toThrow("configured");
     const worker = f.sessions.get(peers?.[0]?.sessionID ?? "");
+
     if (!worker) throw new Error("Missing worker");
     worker.location.directory = "/wrong";
     await expect(f.engine.authorize(f.worker(worker.id))).rejects.toThrow(
@@ -2285,12 +2507,14 @@ test("custom roster authorizes real sessions and applies permission profiles", a
 
 test("captain selects queued order after completion plus idle, preserving unselected work", async () => {
   const f = await fixture(customTeam);
+
   const reopened = await CrewEngine.open(
     f.options,
     f.client,
     f.mailer,
     f.agents,
   );
+
   try {
     const first = (
       await f.engine.run(
@@ -2298,18 +2522,21 @@ test("captain selects queued order after completion plus idle, preserving unsele
         f.captain(),
       )
     ).task;
+
     const second = (
       await f.engine.run(
         { op: "dispatch", crew: "builder", text: "Two", queue: true },
         f.captain(),
       )
     ).task;
+
     const third = (
       await f.engine.run(
         { op: "dispatch", crew: "builder", text: "Three", queue: true },
         f.captain(),
       )
     ).task;
+
     expect(second?.status).toBe("queued");
     expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(1);
     await f.engine.run(
@@ -2349,6 +2576,7 @@ test("captain selects queued order after completion plus idle, preserving unsele
 
 test("cancelling queued wait never interrupts another captain's running task", async () => {
   const f = await fixture(customTeam);
+
   try {
     const running = (
       await f.engine.run(
@@ -2356,12 +2584,14 @@ test("cancelling queued wait never interrupts another captain's running task", a
         f.captain(),
       )
     ).task;
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "builder", text: "Two", queue: true },
         f.captain("ses_captain_b"),
       )
     ).task;
+
     const controller = new AbortController();
     controller.abort();
     await expect(
@@ -2381,6 +2611,7 @@ test("cancelling queued wait never interrupts another captain's running task", a
 test("worker control reserves across instances without blocking other slots", async () => {
   const f = await fixture(customTeam);
   const second = await CrewEngine.open(f.options, f.client, f.mailer, f.agents);
+
   try {
     await f.engine.withWorkerControl("builder", f.captain(), async (peer) => {
       expect(peer.crewID).toBe("builder");
@@ -2427,18 +2658,21 @@ test(
     const a = await fixture(customTeam);
     const b = await fixture(customTeam);
     const otherOptions = { ...b.options, namespace: "other-team" };
+
     const other = await CrewEngine.open(
       otherOptions,
       a.client,
       a.mailer,
       a.agents,
     );
+
     const otherCaller = { ...b.captain(), sessionID: "ses_other_captain" };
     a.sessions.set(otherCaller.sessionID, {
       id: otherCaller.sessionID,
       agent: customTeam.captain.id,
       location: { directory: otherOptions.captainDirectory },
     });
+
     try {
       const first = (
         await a.engine.run(
@@ -2446,12 +2680,14 @@ test(
           a.captain(),
         )
       ).task;
+
       const second = (
         await other.run(
           { op: "dispatch", crew: "builder", text: "Team B" },
           otherCaller,
         )
       ).task;
+
       expect(second?.workerSessionID).not.toBe(first?.workerSessionID);
       await expect(
         other.run({ op: "status", taskID: first?.id }, otherCaller),
@@ -2522,6 +2758,7 @@ test(
 
 test("identity changes refuse rebinding; invalid and overlapping worktrees fail", async () => {
   const f = await fixture(customTeam);
+
   try {
     const changed: Team = { ...customTeam, captain: { id: "different-lead" } };
     await expect(
@@ -2561,6 +2798,7 @@ test("identity changes refuse rebinding; invalid and overlapping worktrees fail"
 
 test("queued prompt uncertainty never replays and preserves later FIFO work", async () => {
   const f = await fixture(customTeam);
+
   try {
     const first = (
       await f.engine.run(
@@ -2568,18 +2806,21 @@ test("queued prompt uncertainty never replays and preserves later FIFO work", as
         f.captain(),
       )
     ).task;
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "builder", text: "Ambiguous", queue: true },
         f.captain(),
       )
     ).task;
+
     const later = (
       await f.engine.run(
         { op: "dispatch", crew: "builder", text: "Later", queue: true },
         f.captain(),
       )
     ).task;
+
     await f.engine.run(
       { op: "complete", taskID: first?.id, result: "Done" },
       f.worker(first?.workerSessionID ?? ""),
@@ -2606,6 +2847,7 @@ test("queued prompt uncertainty never replays and preserves later FIFO work", as
 test("default Bowser legacy fingerprint reopens with the same task and worker IDs", async () => {
   // Keep first-create setup on the constructor path for this migration case.
   const f = await fixture(undefined, undefined, false, false);
+
   try {
     const task = (
       await f.engine.run(
@@ -2613,11 +2855,13 @@ test("default Bowser legacy fingerprint reopens with the same task and worker ID
         f.captain(),
       )
     ).task;
+
     await f.engine.run(
       { op: "complete", taskID: task?.id, result: "Legacy result" },
       f.worker(task?.workerSessionID ?? ""),
     );
     const db = new Database(f.engine.state.path);
+
     const oldFingerprint = JSON.stringify([
       f.options.namespace,
       resolve(f.options.projectDirectory),
@@ -2626,8 +2870,10 @@ test("default Bowser legacy fingerprint reopens with the same task and worker ID
         resolve(f.options.worktrees[id] ?? ""),
       ),
     ]);
+
     db.query("UPDATE identity SET value=?").run(oldFingerprint);
     db.close();
+
     const changed: Team = {
       ...defaultTeam,
       crew: defaultTeam.crew.map((member) => ({
@@ -2635,20 +2881,24 @@ test("default Bowser legacy fingerprint reopens with the same task and worker ID
         permissionProfile: "coding",
       })),
     };
+
     await expect(
       CrewEngine.open({ ...f.options, team: changed }, f.client),
     ).rejects.toThrow("configuration changed");
+
     const reopened = await CrewEngine.open(
       f.options,
       f.client,
       f.mailer,
       f.agents,
     );
+
     try {
       const saved = await reopened.run(
         { op: "status", taskID: task?.id },
         f.captain(),
       );
+
       expect(saved.task?.workerSessionID).toBe(task?.workerSessionID);
       expect(saved.task?.result).toBe("Legacy result");
       expect(
@@ -2666,6 +2916,7 @@ test("default Bowser legacy fingerprint reopens with the same task and worker ID
 test("queued wait promotes once under contention and returns the owned result", async () => {
   const f = await fixture(customTeam);
   const second = await CrewEngine.open(f.options, f.client, f.mailer, f.agents);
+
   try {
     const running = (
       await f.engine.run(
@@ -2673,12 +2924,14 @@ test("queued wait promotes once under contention and returns the owned result", 
         f.captain(),
       )
     ).task;
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "builder", text: "Second", queue: true },
         f.captain(),
       )
     ).task;
+
     await f.engine.run(
       { op: "complete", taskID: running?.id, result: "Done" },
       f.worker(running?.workerSessionID ?? ""),
@@ -2686,6 +2939,7 @@ test("queued wait promotes once under contention and returns the owned result", 
     f.busy.delete(running?.workerSessionID ?? "");
     f.onPrompt(() => {
       const current = f.engine.state.activeTask("builder");
+
       if (!current) throw new Error("Missing task");
       f.engine.state.complete(
         current.id,
@@ -2694,10 +2948,12 @@ test("queued wait promotes once under contention and returns the owned result", 
       );
       f.busy.delete(current.workerSessionID);
     });
+
     const results = await Promise.all([
       f.engine.run({ op: "wait", taskID: queued?.id }, f.captain()),
       second.run({ op: "status", taskID: queued?.id }, f.captain()),
     ]);
+
     expect(results[0]?.task?.result).toBe("Queued result");
     expect(results[0]?.status).toBe("completed");
     expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(2);
@@ -2717,6 +2973,7 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
   const runningObserved = Promise.withResolvers<void>();
   const controller = new AbortController();
   const waits: Promise<unknown>[] = [];
+
   try {
     const first = (
       await f.engine.run(
@@ -2724,12 +2981,14 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
         f.captain(),
       )
     ).task;
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "builder", text: "Second", queue: true },
         f.captain(),
       )
     ).task;
+
     if (!first || !queued) throw new Error("Missing task fixture");
     await f.engine.run(
       { op: "complete", taskID: first.id, result: "First done" },
@@ -2742,8 +3001,10 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
       await allowAdmission.promise;
       const result = await prompt(input, request);
       admitted.resolve();
+
       return result;
     };
+
     const notices = second.state.notices.bind(second.state);
     let dispatchingPolls = 0;
     second.state.notices = (id, after) => {
@@ -2753,14 +3014,18 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
         ++dispatchingPolls === 2
       )
         dispatchingObserved.resolve();
+
       return notices(id, after);
     };
+
     const wait = f.client.wait.bind(f.client);
     f.client.wait = async (input, request) => {
       if (second.state.task(queued.id)?.status === "running")
         runningObserved.resolve();
+
       return wait(input, request);
     };
+
     const collect = (engine: CrewEngine) =>
       engine
         .run(
@@ -2771,6 +3036,7 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
           (result) => ({ result }),
           (error: unknown) => ({ error }),
         );
+
     const promoting = collect(f.engine);
     waits.push(promoting);
     await admissionStarted.promise;
@@ -2787,6 +3053,7 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
       f.worker(queued.workerSessionID),
     );
     f.busy.delete(queued.workerSessionID);
+
     for (const result of await Promise.all([promoting, observing]))
       expect(result).toMatchObject({
         result: { status: "completed", task: { result: "Second done" } },
@@ -2802,6 +3069,7 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
 
 test("admitted worker exit without completion stays uncertain and is not replayed", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = (
       await f.engine.run(
@@ -2809,6 +3077,7 @@ test("admitted worker exit without completion stays uncertain and is not replaye
         f.captain(),
       )
     ).task;
+
     if (!task) throw new Error("Missing task fixture");
     expect(task.status).toBe("running");
     f.busy.delete(task.workerSessionID);
@@ -2830,6 +3099,7 @@ test("admitted worker exit without completion stays uncertain and is not replaye
 
 test("captain inspection reads cross-origin ownership without promoting queued work", async () => {
   const f = await fixture(customTeam);
+
   try {
     const active = (
       await f.engine.run(
@@ -2837,16 +3107,19 @@ test("captain inspection reads cross-origin ownership without promoting queued w
         f.captain(),
       )
     ).task;
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "builder", text: "Next", queue: true },
         f.captain("ses_captain_b"),
       )
     ).task;
+
     const result = await f.engine.run(
       { op: "inspect", crew: "builder" },
       f.captain("ses_captain_b"),
     );
+
     expect(result).toMatchObject({
       status: "inspected",
       active: { id: active?.id, originCaptainID: "ses_captain_a" },
@@ -2860,9 +3133,11 @@ test("captain inspection reads cross-origin ownership without promoting queued w
 
 test("cross-origin captain reconciles exact evidence, retains audit and selects own queued work", async () => {
   const f = await fixture(customTeam);
+
   try {
     const original = await assignedTask(f);
     const queued: CrewTask[] = [];
+
     for (const text of ["Next", "Later"]) {
       const task = (
         await f.engine.run(
@@ -2870,9 +3145,11 @@ test("cross-origin captain reconciles exact evidence, retains audit and selects 
           f.captain("ses_captain_b"),
         )
       ).task;
+
       if (!task) throw new Error("Missing queue fixture");
       queued.push(task);
     }
+
     f.engine.state.notice(original.id, "Saved notice");
     f.engine.state.mailCursor(original.originCaptainID, original.id, 42);
     const input = uncertainResult(f, original);
@@ -2913,18 +3190,21 @@ test("cross-origin captain reconciles exact evidence, retains audit and selects 
     expect(f.engine.state.peer("builder")?.sessionID).toBe(
       original.workerSessionID,
     );
+
     const reopened = await CrewEngine.open(
       f.options,
       f.client,
       f.mailer,
       f.agents,
     );
+
     try {
       expect(reopened.state.reconciliation(original.id)).toEqual(
         reconciled.reconciliation ?? null,
       );
       const later = queued[1];
       const next = queued[0];
+
       if (!next || !later) throw new Error("Missing queue head");
       expect(
         (
@@ -2955,15 +3235,18 @@ test("cross-origin captain reconciles exact evidence, retains audit and selects 
           f.captain("ses_captain_b"),
         ),
       ).rejects.toThrow("does not own");
+
       const inspection = await f.engine.run(
         { op: "inspect", crew: "builder", taskID: original.id },
         f.captain("ses_captain_b"),
       );
+
       expect(inspection.reconciliation).toEqual(reconciled.reconciliation);
       expect(inspection.inspectedTask?.id).toBe(original.id);
     } finally {
       await reopened.close();
     }
+
     expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(2);
     expect(f.calls.some((call) => call.method === "interrupt")).toBe(false);
   } finally {
@@ -2973,24 +3256,31 @@ test("cross-origin captain reconciles exact evidence, retains audit and selects 
 
 test("Mesij cross-origin status requests and replies preserve original task lineage and never wake workers", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     uncertainResult(f, task);
+
     const request = await f.engine.run(
       { op: "inspect", crew: "builder", requestStatus: { key: "status-one" } },
       f.captain("ses_captain_b"),
     );
+
     expect(request.statusRequest?.id).toBeDefined();
+
     const retried = await f.engine.run(
       { op: "inspect", crew: "builder", requestStatus: { key: "status-one" } },
       f.captain("ses_captain_b"),
     );
+
     expect(retried.statusRequest).toEqual(request.statusRequest);
     expect(f.messages).toHaveLength(1);
+
     const inbox = await f.engine.mail(
       { op: "inbox" },
       f.worker(task.workerSessionID),
     );
+
     expect(inbox.messages?.[0]?.text).toContain("Status request");
     const receiptID = inbox.messages?.[0]?.id;
     await f.engine.mail(
@@ -3004,10 +3294,12 @@ test("Mesij cross-origin status requests and replies preserve original task line
       },
       f.worker(task.workerSessionID),
     );
+
     const replies = await f.engine.mail(
       { op: "inbox", taskID: task.id },
       f.captain("ses_captain_b"),
     );
+
     expect(replies.messages?.map((message) => message.text)).toEqual([
       "Finished; retained final message available.",
     ]);
@@ -3048,22 +3340,29 @@ test("Mesij cross-origin status requests and replies preserve original task line
 for (const state of ["running", "uncertain", "completed"] as const) {
   test(`installed status requests remain visible and reply-scoped for ${state} workers`, async () => {
     const f = await fixture(profileTeam(customTeam, "ship"));
+
     try {
       const task = await assignedTask(f);
+
       if (state === "uncertain") uncertainResult(f, task);
+
       const requested = await f.engine.run(
         { op: "inspect", crew: "builder", requestStatus: { key: "interop" } },
         f.captain("ses_captain_b"),
       );
+
       const receiptID = requested.statusRequest?.id;
+
       if (!receiptID) throw new Error("Missing status request receipt");
       // Simulate an installed request predating mail_routes, then a restart.
       const db = new Database(f.engine.state.path);
+
       try {
         db.query("DELETE FROM mail_routes WHERE id=?").run(receiptID);
       } finally {
         db.close();
       }
+
       if (state === "completed") {
         await f.engine.run(
           { op: "complete", taskID: task.id, result: "Done" },
@@ -3071,6 +3370,7 @@ for (const state of ["running", "uncertain", "completed"] as const) {
         );
         f.busy.delete(task.workerSessionID);
       }
+
       const reopened = await CrewEngine.open(
         f.options,
         f.client,
@@ -3079,6 +3379,7 @@ for (const state of ["running", "uncertain", "completed"] as const) {
         undefined,
         async () => f.inspectionAPI,
       );
+
       try {
         const worker = f.worker(task.workerSessionID);
         expect(
@@ -3086,6 +3387,7 @@ for (const state of ["running", "uncertain", "completed"] as const) {
             ({ id }) => id,
           ),
         ).toEqual([receiptID]);
+
         for (const to of ["captain", "all", "builder"]) {
           await expect(
             reopened.mail(
@@ -3101,6 +3403,7 @@ for (const state of ["running", "uncertain", "completed"] as const) {
             ),
           ).rejects.toThrow("validated message");
         }
+
         await expect(
           reopened.mail(
             {
@@ -3114,6 +3417,7 @@ for (const state of ["running", "uncertain", "completed"] as const) {
             worker,
           ),
         ).rejects.toThrow();
+
         if (state !== "running")
           await expect(
             reopened.mail(
@@ -3141,13 +3445,16 @@ for (const state of ["running", "uncertain", "completed"] as const) {
           ),
         ).toMatchObject({ stored: true, notification: "not_requested" });
         const reply = f.messages.at(-1);
+
         if (!reply) throw new Error("Missing status reply");
         const oldReply = new Database(reopened.state.path);
+
         try {
           oldReply.query("DELETE FROM mail_routes WHERE id=?").run(reply.id);
         } finally {
           oldReply.close();
         }
+
         expect(
           (
             await reopened.mail({ op: "inbox" }, f.captain("ses_captain_b"))
@@ -3196,12 +3503,15 @@ for (const state of ["running", "uncertain", "completed"] as const) {
 for (const native of ["builder", "ship-crew-builder", "foreign"]) {
   test(`installed reconciliation validates mapped or historical native result: ${native}`, async () => {
     const f = await fixture(profileTeam(customTeam, "ship"));
+
     try {
       const task = await assignedTask(f);
       const input = uncertainResult(f, task);
       const final = f.history.get(task.workerSessionID)?.[0];
+
       if (!final) throw new Error("Missing final answer");
       final.agent = native;
+
       if (native === "foreign") {
         await expect(
           f.engine.run(input, f.captain("ses_captain_b")),
@@ -3215,6 +3525,7 @@ for (const native of ["builder", "ship-crew-builder", "foreign"]) {
             f.captain().signal,
           ),
         );
+
         expect(result.status).toBe("reconciled");
         expect(f.engine.state.task(task.id)).toMatchObject({
           status: "completed",
@@ -3230,6 +3541,7 @@ for (const native of ["builder", "ship-crew-builder", "foreign"]) {
 test("installed maintenance uses mapped captain authorization and rejects foreign roots", async () => {
   const f = await fixture(profileTeam(customTeam, "ship"));
   const gate = new CrewMaintenance(f.engine);
+
   try {
     await gate.open(
       { sessionID: "ses_captain_a", id: "mapped" },
@@ -3237,6 +3549,7 @@ test("installed maintenance uses mapped captain authorization and rejects foreig
     );
     gate.close({ sessionID: "ses_captain_a", id: "mapped" });
     const root = f.sessions.get("ses_captain_b");
+
     if (!root) throw new Error("Missing root");
     root.agent = "lead";
     await gate.open(
@@ -3256,16 +3569,21 @@ test("installed maintenance uses mapped captain authorization and rejects foreig
 
 test("installed status inbox rejects forged legacy request/reply lineage", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
+
     const request = await f.engine.run(
       { op: "inspect", crew: "builder", requestStatus: { key: "status" } },
       f.captain("ses_captain_b"),
     );
+
     if (!request.statusRequest) throw new Error("Missing request");
     const original = f.messages[0];
+
     if (!original) throw new Error("Missing event");
     const envelope = JSON.parse(original.text);
+
     const reply = {
       ...original,
       id: "f".repeat(32),
@@ -3281,6 +3599,7 @@ test("installed status inbox rejects forged legacy request/reply lineage", async
         text: "Retained status",
       }),
     };
+
     f.messages.push(reply);
     expect(
       (
@@ -3288,6 +3607,7 @@ test("installed status inbox rejects forged legacy request/reply lineage", async
       ).messages?.map(({ text }) => text),
     ).toEqual(["Retained status"]);
     const retainedReply = JSON.parse(reply.text);
+
     for (const changes of [
       { namespace: "foreign" },
       { sourceTaskID: "task_foreign" },
@@ -3309,9 +3629,11 @@ test("installed status inbox rejects forged legacy request/reply lineage", async
 test("inspection/reconciliation reject workers, child/foreign roots and tasks from another team", async () => {
   const f = await fixture(customTeam);
   const other = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
+
     for (const operation of [{ op: "inspect", crew: "builder" }, input]) {
       await expect(
         f.engine.run(operation, f.worker(task.workerSessionID)),
@@ -3330,11 +3652,13 @@ test("inspection/reconciliation reject workers, child/foreign roots and tasks fr
         agent: "lead",
         location: { directory: other.options.captainDirectory },
       });
+
       for (const id of ["ses_child", "ses_foreign"])
         await expect(f.engine.run(operation, f.captain(id))).rejects.toThrow(
           "root configured captain",
         );
     }
+
     const foreign = await assignedTask(other);
     await expect(
       f.engine.run({ ...input, taskID: foreign.id }, f.captain()),
@@ -3357,6 +3681,7 @@ test.each(["workerSessionID", "originCaptainID", "inputID"] as const)(
   "reconciliation rejects stale expected %s",
   async (field) => {
     const f = await fixture(customTeam);
+
     try {
       const task = await assignedTask(f);
       const input = uncertainResult(f, task);
@@ -3376,15 +3701,18 @@ test.each(["dispatching", "running", "completed", "cancelling"])(
   "reconciliation rejects non-uncertain status %s",
   async (status) => {
     const f = await fixture(customTeam);
+
     try {
       const task = await assignedTask(f);
       const input = uncertainResult(f, task);
       const db = new Database(f.engine.state.path);
+
       try {
         db.query("UPDATE tasks SET status=? WHERE id=?").run(status, task.id);
       } finally {
         db.close();
       }
+
       await expect(f.engine.run(input, f.captain())).rejects.toThrow(
         "ownership or state changed",
       );
@@ -3405,6 +3733,7 @@ test.each([
   "reconciliation rejects live or blocked execution: %s",
   async (field) => {
     const f = await fixture(customTeam);
+
     try {
       const task = await assignedTask(f);
       const input = uncertainResult(f, task);
@@ -3434,12 +3763,14 @@ test.each([
   "reconciliation CAS rejects %s changed during verification",
   async (field) => {
     const f = await fixture(customTeam);
+
     try {
       const task = await assignedTask(f);
       const input = uncertainResult(f, task);
       const list = f.inspectionAPI.message.list;
       f.inspectionAPI.message.list = async (...args) => {
         const db = new Database(f.engine.state.path);
+
         try {
           if (field === "peer")
             db.query(
@@ -3455,8 +3786,10 @@ test.each([
         } finally {
           db.close();
         }
+
         return list(...args);
       };
+
       await expect(
         f.engine.run(input, f.captain("ses_captain_b")),
       ).rejects.toThrow("changed during verification");
@@ -3471,14 +3804,17 @@ test.each([
 
 test("reconciliation rechecks live state after proof and refuses new activity", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
     const list = f.inspectionAPI.message.list;
     f.inspectionAPI.message.list = async (...args) => {
       f.pendingInputs.add(task.workerSessionID);
+
       return list(...args);
     };
+
     await expect(f.engine.run(input, f.captain())).rejects.toThrow(
       "reconciliation refused",
     );
@@ -3500,18 +3836,25 @@ test.each([
   "missing",
 ])("reconciliation refuses invalid retained evidence: %s", async (failure) => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
     const messages = f.history.get(task.workerSessionID);
     const final = messages?.[0];
     const admitted = messages?.[1];
+
     if (!messages || !final || !admitted)
       throw new Error("Missing evidence fixture");
+
     if (failure === "hash") input.resultSha256 = "0".repeat(64);
+
     if (failure === "message") input.resultMessageID = "msg_other_result";
+
     if (failure === "input") admitted.metadata = {};
+
     if (failure === "envelope") admitted.text = "Stargate task envelope: {}";
+
     if (failure === "interleaved")
       messages.splice(1, 0, {
         id: "msg_other_input",
@@ -3519,8 +3862,11 @@ test.each([
         time: { created: 65 },
         text: "Unrelated private prompt",
       });
+
     if (failure === "finish") final.finish = "tool-calls";
+
     if (failure === "agent") final.agent = "reader";
+
     if (failure === "missing") messages.pop();
     await expect(f.engine.run(input, f.captain())).rejects.toThrow(
       /evidence|input|envelope/,
@@ -3535,18 +3881,22 @@ test.each([
 
 test("reconciliation evidence paginates and rejects conflicting idempotent retries", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
     const messages = f.history.get(task.workerSessionID);
+
     if (!messages?.[0] || !messages[1]) throw new Error("Missing evidence");
     const [final, admitted] = messages;
     f.inspectionAPI.message.list = async ({ cursor, sessionID }) => {
       expect(sessionID).toBe(task.workerSessionID);
+
       return cursor
         ? { data: [admitted], cursor: {} }
         : { data: [final], cursor: { next: "second-page" } };
     };
+
     await f.engine.run(input, f.captain());
     await expect(
       f.engine.run({ ...input, resultSha256: "0".repeat(64) }, f.captain()),
@@ -3561,6 +3911,7 @@ test("reconciliation evidence paginates and rejects conflicting idempotent retri
 
 test("operator RPC uses the same engine checks and accepts no other crew operations", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
@@ -3589,6 +3940,7 @@ test("operator RPC uses the same engine checks and accepts no other crew operati
         signal,
       ),
     ).rejects.toThrow();
+
     const inspected = JSON.parse(
       await runRecoveryOperator(
         f.engine,
@@ -3599,7 +3951,9 @@ test("operator RPC uses the same engine checks and accepts no other crew operati
         signal,
       ),
     );
+
     expect(inspected.active.id).toBe(task.id);
+
     const reconciled = JSON.parse(
       await runRecoveryOperator(
         f.engine,
@@ -3607,6 +3961,7 @@ test("operator RPC uses the same engine checks and accepts no other crew operati
         signal,
       ),
     );
+
     expect(reconciled.status).toBe("reconciled");
     expect(f.engine.state.task(task.id)?.originCaptainID).toBe("ses_captain_a");
   } finally {
@@ -3616,21 +3971,26 @@ test("operator RPC uses the same engine checks and accepts no other crew operati
 
 test("reconciliation rejects queued/cancelled work and conflicting retained results", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
+
     const queued = (
       await f.engine.run(
         { op: "dispatch", crew: "builder", text: "Pending", queue: true },
         f.captain(),
       )
     ).task;
+
     if (!queued) throw new Error("Missing queue fixture");
+
     const queuedInput = {
       ...input,
       taskID: queued.id,
       expected: { ...input.expected, inputID: queued.inputID },
     };
+
     await expect(f.engine.run(queuedInput, f.captain())).rejects.toThrow(
       "ownership or state changed",
     );
@@ -3639,6 +3999,7 @@ test("reconciliation rejects queued/cancelled work and conflicting retained resu
       "ownership or state changed",
     );
     const db = new Database(f.engine.state.path);
+
     try {
       db.query("UPDATE tasks SET result='Existing evidence' WHERE id=?").run(
         task.id,
@@ -3646,6 +4007,7 @@ test("reconciliation rejects queued/cancelled work and conflicting retained resu
     } finally {
       db.close();
     }
+
     await expect(f.engine.run(input, f.captain())).rejects.toThrow(
       "result conflicts",
     );
@@ -3659,12 +4021,14 @@ test("reconciliation rejects queued/cancelled work and conflicting retained resu
 
 test("reconciliation failures/cancellation release only their own control and never interrupt", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
     f.inspectionAPI.message.list = async () => {
       throw new Error("private raw API failure");
     };
+
     await expect(f.engine.run(input, f.captain())).rejects.toThrow(
       "raw SDK details withheld",
     );
@@ -3672,17 +4036,21 @@ test("reconciliation failures/cancellation release only their own control and ne
     const controller = new AbortController();
     f.inspectionAPI.message.list = async () => {
       controller.abort();
+
       return { data: [], cursor: {} };
     };
+
     await expect(
       f.engine.run(input, f.captain("ses_captain_b", controller.signal)),
     ).rejects.toThrow("raw SDK details withheld");
     expect(f.engine.state.controlled("builder")).toBe(false);
     expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
     expect(f.calls.some((call) => call.method === "interrupt")).toBe(false);
+
     const token = f.engine.state.reserveReconciliation(
       f.engine.state.task(task.id) ?? task,
     );
+
     await expect(f.engine.run(input, f.captain())).rejects.toThrow(
       "control is reserved",
     );
@@ -3695,12 +4063,14 @@ test("reconciliation failures/cancellation release only their own control and ne
 
 test("reconciliation never clears a control token changed during verification", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
     const list = f.inspectionAPI.message.list;
     f.inspectionAPI.message.list = async (...args) => {
       const db = new Database(f.engine.state.path);
+
       try {
         db.query(
           "UPDATE worker_controls SET token='replacement-control' WHERE crewID='builder'",
@@ -3708,8 +4078,10 @@ test("reconciliation never clears a control token changed during verification", 
       } finally {
         db.close();
       }
+
       return list(...args);
     };
+
     await expect(f.engine.run(input, f.captain())).rejects.toThrow(
       "changed during verification",
     );
@@ -3723,10 +4095,12 @@ test("reconciliation never clears a control token changed during verification", 
 
 test("inspection/reconciliation fail closed on foreign peer metadata and changed idle boundary", async () => {
   const f = await fixture(customTeam);
+
   try {
     const task = await assignedTask(f);
     const input = uncertainResult(f, task);
     const session = f.sessions.get(task.workerSessionID);
+
     if (!session) throw new Error("Missing peer fixture");
     const metadata = session.metadata;
     session.metadata = {
@@ -3738,12 +4112,15 @@ test("inspection/reconciliation fail closed on foreign peer metadata and changed
     await expect(f.engine.run(input, f.captain())).rejects.toThrow(
       "identity changed",
     );
+
     if (metadata) session.metadata = metadata;
     const list = f.inspectionAPI.message.list;
     f.inspectionAPI.message.list = async (...args) => {
       session.time = { updated: 200, busy: 150, idle: 200 };
+
       return list(...args);
     };
+
     await expect(f.engine.run(input, f.captain())).rejects.toThrow(
       "execution changed",
     );
@@ -3758,6 +4135,7 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
   const f = await fixture(customTeam);
   const task = await assignedTask(f);
   const input = uncertainResult(f, task);
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -3770,11 +4148,14 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
         f.options.captainDirectory,
       );
       const body = await request.json();
+
       const decoded = await CrewRecovery.methods.run.input[
         "~standard"
       ].validate(body.input);
+
       if (decoded.issues)
         return Response.json({ _tag: "BadRequestError" }, { status: 400 });
+
       return Response.json({
         output: await runRecoveryOperator(
           f.engine,
@@ -3784,15 +4165,18 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
       });
     },
   });
+
   try {
     const client = OpenCode.make({
       baseUrl: server.url.href,
       headers: { authorization: "Bearer fixture-only" },
     });
+
     const rpc = client.rpc(CrewRecovery);
     const options = { location: { directory: f.options.captainDirectory } };
+
     // Portable SDK defaults must not strip nested recovery acknowledgements
-    // or expected identities before the authoritative strict decoder sees them.
+    // Or expected identities before the authoritative strict decoder sees them.
     for (const malformed of [
       {
         sessionID: "ses_captain_b",
@@ -3809,6 +4193,7 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
       },
     ])
       await expect(rpc.run(malformed, options)).rejects.toBeDefined();
+
     const inspected = JSON.parse(
       await rpc.run(
         {
@@ -3818,11 +4203,14 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
         options,
       ),
     );
+
     expect(inspected.active.id).toBe(task.id);
     expect(inspected.execution.state).toBe("idle");
+
     const recovered = JSON.parse(
       await rpc.run({ sessionID: "ses_captain_b", request: input }, options),
     );
+
     expect(recovered.status).toBe("reconciled");
     await expect(
       OpenCode.make({ baseUrl: server.url.href })
@@ -3845,16 +4233,20 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
 
 test("external worker activity blocks admission and controls always release", async () => {
   const f = await fixture(customTeam);
+
   try {
     const peer = (
       await f.engine.run({ op: "ensure", crew: "builder" }, f.captain())
     ).peers?.[0];
+
     if (!peer) throw new Error("Missing peer");
     f.busy.add(peer.sessionID);
+
     const queued = await f.engine.run(
       { op: "dispatch", crew: "builder", text: "Wait for idle", queue: true },
       f.captain(),
     );
+
     expect(queued.status).toBe("queued");
     expect(f.calls.filter((call) => call.method === "prompt")).toHaveLength(0);
     await expect(
@@ -3885,6 +4277,7 @@ test("root plugin metadata resolves to the installed V2 definition", () => {
 
 test("worker urgency cannot create an idle colleague's root session", async () => {
   const f = await fixture();
+
   try {
     const task = (
       await f.engine.run(
@@ -3892,6 +4285,7 @@ test("worker urgency cannot create an idle colleague's root session", async () =
         f.captain(),
       )
     ).task;
+
     if (!task) throw new Error("Missing task");
     expect(
       await f.engine.run(
@@ -3908,10 +4302,12 @@ test("worker urgency cannot create an idle colleague's root session", async () =
 
 test("Daisy receives broad session tools but workers cannot ensure", async () => {
   const f = await fixture();
+
   try {
     const peer = (
       await f.engine.run({ op: "ensure", crew: "daisy" }, f.captain())
     ).peers?.[0];
+
     const rules = f.creations[0]?.permissions;
     expect(rules).toContainEqual({
       action: "*",
@@ -3932,6 +4328,7 @@ test("Daisy receives broad session tools but workers cannot ensure", async () =>
       f.engine.run({ op: "ensure" }, f.worker(peer?.sessionID ?? "", "daisy")),
     ).rejects.toThrow("Only Bowser");
     const captain = f.sessions.get("ses_captain_a");
+
     if (!captain) throw new Error("Missing fixture captain");
     captain.location.directory = "/different-workspace";
     await expect(f.engine.run({ op: "ensure" }, f.captain())).rejects.toThrow(
@@ -3945,6 +4342,7 @@ test("Daisy receives broad session tools but workers cannot ensure", async () =>
 test("independent plugin instances atomically reserve the same worker", async () => {
   const f = await fixture();
   const second = await CrewEngine.open(f.options, f.client, f.mailer);
+
   try {
     const results = await Promise.all([
       f.engine.run(
@@ -3956,6 +4354,7 @@ test("independent plugin instances atomically reserve the same worker", async ()
         f.captain("ses_captain_b"),
       ),
     ]);
+
     expect(results.map((result) => result.status).sort()).toEqual([
       "busy",
       "running",
@@ -3971,10 +4370,12 @@ test("independent plugin instances atomically reserve the same worker", async ()
 for (const placed of [true, false])
   test(`aborted admission interrupts only proven own placement: ${placed}`, async () => {
     const f = await fixture();
+
     try {
       const controller = new AbortController();
       f.onPrompt(() => {
         const input = f.inputs.at(-1);
+
         if (placed && input)
           f.history.set(input.sessionID, [
             {
@@ -4005,6 +4406,7 @@ for (const placed of [true, false])
 
 test("same-captain colleague urgency includes the recipient's exact task ID", async () => {
   const f = await fixture();
+
   try {
     const mario = (
       await f.engine.run(
@@ -4012,12 +4414,14 @@ test("same-captain colleague urgency includes the recipient's exact task ID", as
         f.captain(),
       )
     ).task;
+
     const luigi = (
       await f.engine.run(
         { op: "dispatch", crew: "luigi", text: "B" },
         f.captain(),
       )
     ).task;
+
     await f.engine.run(
       {
         op: "urgent",
@@ -4050,6 +4454,7 @@ test("same-captain colleague urgency includes the recipient's exact task ID", as
 
 test("Mesij inbox filters sent/unrelated mail and acknowledges pages explicitly", async () => {
   const f = await fixture();
+
   try {
     const task = (
       await f.engine.run(
@@ -4057,6 +4462,7 @@ test("Mesij inbox filters sent/unrelated mail and acknowledges pages explicitly"
         f.captain(),
       )
     ).task;
+
     const worker = f.worker(task?.workerSessionID ?? "");
     await f.engine.mail(
       {
@@ -4068,12 +4474,14 @@ test("Mesij inbox filters sent/unrelated mail and acknowledges pages explicitly"
       },
       worker,
     );
+
     const other = (
       await f.engine.run(
         { op: "dispatch", crew: "luigi", text: "Other thread" },
         f.captain("ses_captain_b"),
       )
     ).task;
+
     await f.engine.mail(
       {
         op: "send",
@@ -4084,15 +4492,19 @@ test("Mesij inbox filters sent/unrelated mail and acknowledges pages explicitly"
       },
       f.worker(other?.workerSessionID ?? "", "luigi"),
     );
+
     const ownInbox = await f.engine.mail(
       { op: "inbox", taskID: task?.id },
       worker,
     );
+
     expect(ownInbox.messages).toEqual([]);
+
     const captainInbox = await f.engine.mail(
       { op: "inbox", taskID: task?.id },
       f.captain(),
     );
+
     expect(captainInbox.messages?.[0]?.text).toBe("Private result");
     expect(captainInbox.messages).toHaveLength(1);
     expect(
@@ -4121,15 +4533,18 @@ test("Mesij inbox filters sent/unrelated mail and acknowledges pages explicitly"
 
 test("uncertain create adopts stable ID; missing ready session is not recreated", async () => {
   const f = await fixture();
+
   try {
     f.failCreate();
     await expect(
       f.engine.run({ op: "ensure", crew: "mario" }, f.captain()),
     ).rejects.toThrow("not confirmed");
+
     const result = await f.engine.run(
       { op: "ensure", crew: "mario" },
       f.captain(),
     );
+
     const peer = result.peers?.[0];
     expect(peer).toBeDefined();
     expect(f.calls).toHaveLength(1);
@@ -4145,6 +4560,7 @@ test("uncertain create adopts stable ID; missing ready session is not recreated"
 
 test("busy assignments stay bounded and task results belong to their captain", async () => {
   const f = await fixture();
+
   try {
     const task = (
       await f.engine.run(
@@ -4152,12 +4568,15 @@ test("busy assignments stay bounded and task results belong to their captain", a
         f.captain(),
       )
     ).task;
+
     expect(task?.inputID).toMatch(/^msg_/);
     expect(task?.originCaptainID).toBe("ses_captain_a");
+
     const busy = await f.engine.run(
       { op: "dispatch", crew: "mario", text: "Different thread" },
       f.captain("ses_captain_b"),
     );
+
     expect(busy.status).toBe("busy");
     expect(busy.task).toBeUndefined();
     await expect(
@@ -4176,17 +4595,21 @@ test("busy assignments stay bounded and task results belong to their captain", a
       { op: "complete", taskID: task?.id, result: "Verified result" },
       f.worker(task?.workerSessionID ?? ""),
     );
+
     const result = await f.engine.run(
       { op: "wait", taskID: task?.id },
       f.captain(),
     );
+
     expect(result.task?.result).toBe("Verified result");
+
     const reopened = await CrewEngine.open(
       f.options,
       f.client,
       f.mailer,
       f.agents,
     );
+
     try {
       expect(
         (await reopened.run({ op: "status", taskID: task?.id }, f.captain()))
@@ -4195,6 +4618,7 @@ test("busy assignments stay bounded and task results belong to their captain", a
     } finally {
       await reopened.close();
     }
+
     expect(f.calls.some((call) => call.sessionID === "ses_captain_a")).toBe(
       false,
     );
@@ -4205,6 +4629,7 @@ test("busy assignments stay bounded and task results belong to their captain", a
 
 test("cancelling an old completed wait cannot interrupt a replacement task", async () => {
   const f = await fixture();
+
   try {
     const first = (
       await f.engine.run(
@@ -4212,15 +4637,18 @@ test("cancelling an old completed wait cannot interrupt a replacement task", asy
         f.captain(),
       )
     ).task;
+
     await f.engine.run(
       { op: "complete", taskID: first?.id, result: "Done" },
       f.worker(first?.workerSessionID ?? ""),
     );
     f.busy.delete(first?.workerSessionID ?? "");
+
     const replacement = await f.engine.run(
       { op: "dispatch", crew: "mario", text: "Second" },
       f.captain("ses_captain_b"),
     );
+
     expect(replacement.status).toBe("running");
     const controller = new AbortController();
     controller.abort();
@@ -4241,6 +4669,7 @@ test("cancelling an old completed wait cannot interrupt a replacement task", asy
 
 test("prompt ambiguity is retained and never replayed", async () => {
   const f = await fixture();
+
   try {
     f.failPrompt();
     await expect(
@@ -4265,6 +4694,7 @@ test("prompt ambiguity is retained and never replayed", async () => {
 
 test("cancelled wait interrupts only its own task and preserves uncertain state", async () => {
   const f = await fixture();
+
   try {
     const task = (
       await f.engine.run(
@@ -4272,12 +4702,15 @@ test("cancelled wait interrupts only its own task and preserves uncertain state"
         f.captain(),
       )
     ).task;
+
     f.failInterrupt();
     const controller = new AbortController();
+
     const pending = f.engine.run(
       { op: "wait", taskID: task?.id },
       f.captain("ses_captain_a", controller.signal),
     );
+
     controller.abort();
     await expect(pending).rejects.toThrow("uncertain");
     expect(f.engine.state.task(task?.id ?? "")?.status).toBe("uncertain");
@@ -4291,6 +4724,7 @@ test("cancelled wait interrupts only its own task and preserves uncertain state"
 
 test("urgent captain mail stays durable and cross-captain colleague input is rejected", async () => {
   const f = await fixture();
+
   try {
     const mario = (
       await f.engine.run(
@@ -4298,6 +4732,7 @@ test("urgent captain mail stays durable and cross-captain colleague input is rej
         f.captain(),
       )
     ).task;
+
     await f.engine.run(
       { op: "dispatch", crew: "luigi", text: "Task B" },
       f.captain("ses_captain_b"),
@@ -4311,10 +4746,12 @@ test("urgent captain mail stays durable and cross-captain colleague input is rej
       },
       f.worker(mario?.workerSessionID ?? ""),
     );
+
     const notice = await f.engine.run(
       { op: "wait", taskID: mario?.id },
       f.captain(),
     );
+
     expect(notice.notices?.[0]?.text).toContain("Approval needed");
     expect(f.synthetics[0]).toMatchObject({
       sessionID: "ses_captain_a",
@@ -4339,11 +4776,13 @@ test("urgent captain mail stays durable and cross-captain colleague input is rej
 test("unrelated lookup failures preserve the pending reservation without creating a session", async () => {
   const f = await fixture();
   const get = f.client.get;
+
   try {
     f.client.get = async (input, request) => {
       if (input.sessionID === "ses_captain_a") return get(input, request);
       throw { _tag: "Location.NotFoundError", message: "secret raw SDK error" };
     };
+
     await expect(
       f.engine.run({ op: "ensure", crew: "mario" }, f.captain()),
     ).rejects.toThrow(
@@ -4352,12 +4791,15 @@ test("unrelated lookup failures preserve the pending reservation without creatin
     const pending = f.engine.state.peer("mario");
     expect(pending?.status).toBe("pending");
     expect(f.creations).toHaveLength(0);
+
     if (!pending) throw new Error("Missing fixture reservation");
     f.client.get = get;
+
     const result = await f.engine.run(
       { op: "ensure", crew: "mario" },
       f.captain(),
     );
+
     expect(result.peers?.[0]?.sessionID).toBe(pending.sessionID);
     expect(f.creations).toHaveLength(1);
     expect(f.creations[0]?.id).toBe(pending.sessionID);
@@ -4369,6 +4811,7 @@ test("unrelated lookup failures preserve the pending reservation without creatin
 
 test("ready-only model inspection/control never reserve or create an unprovisioned or pending peer", async () => {
   const f = await fixture(customTeam);
+
   try {
     for (const pending of [false, true]) {
       if (pending) f.engine.state.reservePeer("builder");
@@ -4398,11 +4841,14 @@ test("ready-only model inspection/control never reserve or create an unprovision
 
 test("ready-only inspection validates one existing native snapshot and refuses changed worker identity", async () => {
   const f = await fixture(customTeam);
+
   try {
     await f.engine.run({ op: "ensure", crew: "builder" }, f.captain());
     const peer = f.engine.state.peer("builder");
+
     if (!peer) throw new Error("Missing peer");
     const native = f.sessions.get(peer.sessionID);
+
     if (!native) throw new Error("Missing native worker");
     native.model = { providerID: "fixture", id: "builder", variant: "high" };
     const original = structuredClone(native);
@@ -4410,11 +4856,14 @@ test("ready-only inspection validates one existing native snapshot and refuses c
     const get = f.client.get.bind(f.client);
     f.client.get = async (input, options) => {
       reads.push(input.sessionID);
+
       return get(input, options);
     };
+
     const inspected = await f.engine.inspectWorkerModel("builder", f.captain());
     expect(inspected).toEqual({ ...peer, model: native.model });
     expect(reads).toEqual(["ses_captain_a", peer.sessionID]);
+
     for (const changed of [
       { ...original, agent: "foreign" },
       { ...original, location: { directory: "/foreign" } },
@@ -4436,6 +4885,7 @@ test("ready-only inspection validates one existing native snapshot and refuses c
       expect(f.engine.state.controlled("builder")).toBe(false);
       expect(f.engine.state.peer("builder")).toEqual(peer);
     }
+
     expect(f.creations).toHaveLength(1);
     expect(f.inputs).toHaveLength(0);
   } finally {
@@ -4461,15 +4911,19 @@ test("ready-only model operations refuse Pi, unknown crew and foreign native cap
       ),
     }),
   );
+
   const captain = f.sessions.get("ses_captain_a");
+
   if (!captain) throw new Error("Missing captain fixture");
   f.sessions.set("ses_captaina", { ...captain, id: "ses_captaina" });
+
   const pinned = await CrewEngine.open(
     { ...f.options, captainSessionID: "ses_captaina" },
     f.client,
     f.mailer,
     f.agents,
   );
+
   try {
     for (const op of [
       () => f.engine.inspectWorkerModel("builder", f.captain()),
@@ -4514,10 +4968,12 @@ function effortModels(f: Awaited<ReturnType<typeof fixture>>) {
   let writes = 0;
   let catalogues = 0;
   let whileListing = async () => {};
+
   const sessions: ModelSessions = {
     get: (input, options) => f.client.get(input, options),
     async switchModel({ sessionID, model }) {
       const current = f.sessions.get(sessionID);
+
       if (!current) throw new Error("Missing worker");
       writes++;
       current.model = model;
@@ -4525,6 +4981,7 @@ function effortModels(f: Awaited<ReturnType<typeof fixture>>) {
     compact: (input, options) => f.client.compact(input, options),
     interrupt: (input, options) => f.client.interrupt(input, options),
   };
+
   const tool = new CrewModels(
     f.engine,
     sessions,
@@ -4532,6 +4989,7 @@ function effortModels(f: Awaited<ReturnType<typeof fixture>>) {
       async list() {
         catalogues++;
         await whileListing();
+
         return {
           data: [
             {
@@ -4548,6 +5006,7 @@ function effortModels(f: Awaited<ReturnType<typeof fixture>>) {
       throw new Error("Compaction forbidden");
     },
   );
+
   return {
     tool,
     writes: () => writes,
@@ -4560,18 +5019,22 @@ function effortModels(f: Awaited<ReturnType<typeof fixture>>) {
 
 test("effort real engine refuses held/running/uncertain/native-busy work including no-op without catalogue or queued requests", async () => {
   const f = await fixture(customTeam);
+
   try {
     await f.engine.run({ op: "ensure", crew: "builder" }, f.captain());
     const peer = f.engine.state.peer("builder");
     const native = peer && f.sessions.get(peer.sessionID);
+
     if (!peer || !native) throw new Error("Missing worker");
     native.model = { providerID: "openai-proxy", id: "model", variant: "high" };
     const models = effortModels(f);
+
     const request = () =>
       models.tool.run(
         { op: "effort", target: "builder", variant: "high" },
         f.captain(),
       );
+
     const control = f.engine.state.reserveControl("builder");
     await expect(request()).rejects.toThrow("control already reserved");
     expect(
@@ -4581,11 +5044,13 @@ test("effort real engine refuses held/running/uncertain/native-busy work includi
     f.busy.add(peer.sessionID);
     await expect(request()).rejects.toThrow("not idle");
     f.busy.delete(peer.sessionID);
+
     const task = f.engine.state.reserveTask(
       peer,
       "ses_captain_a",
       "Retained original work",
     );
+
     if (!task) throw new Error("Missing task");
     f.engine.state.running(task.id);
     const running = f.engine.state.task(task.id);
@@ -4602,6 +5067,7 @@ test("effort real engine refuses held/running/uncertain/native-busy work includi
     expect(f.inputs).toHaveLength(0);
     expect(f.creations).toHaveLength(1);
     const db = new Database(f.engine.state.path, { readonly: true });
+
     try {
       expect(
         db
@@ -4620,10 +5086,12 @@ test("effort real engine refuses held/running/uncertain/native-busy work includi
 
 test("effort ready-only control excludes competing dispatch and retains session/model/metadata", async () => {
   const f = await fixture(customTeam);
+
   try {
     await f.engine.run({ op: "ensure", crew: "builder" }, f.captain());
     const peer = f.engine.state.peer("builder");
     const native = peer && f.sessions.get(peer.sessionID);
+
     if (!peer || !native) throw new Error("Missing worker");
     native.model = { providerID: "openai-proxy", id: "model", variant: "low" };
     const before = structuredClone(native);
@@ -4667,13 +5135,16 @@ test("effort ready-only control excludes competing dispatch and retains session/
 
 test("effort can update an idle provisioned worker with queued-only work without starting that work", async () => {
   const f = await fixture(customTeam);
+
   try {
     await f.engine.run({ op: "ensure", crew: "builder" }, f.captain());
     const peer = f.engine.state.peer("builder");
     const native = peer && f.sessions.get(peer.sessionID);
+
     if (!peer || !native) throw new Error("Missing worker");
     native.model = { providerID: "openai-proxy", id: "model", variant: "low" };
     f.busy.add(peer.sessionID);
+
     const queued = await f.engine.run(
       {
         op: "dispatch",
@@ -4683,7 +5154,9 @@ test("effort can update an idle provisioned worker with queued-only work without
       },
       f.captain(),
     );
+
     expect(queued.status).toBe("queued");
+
     if (!queued.task) throw new Error("Missing queued task");
     f.busy.delete(peer.sessionID);
     const models = effortModels(f);

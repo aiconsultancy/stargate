@@ -11,6 +11,7 @@ import {
 } from "./settings-schema-golden";
 
 const directories: string[] = [];
+
 afterEach(async () => {
   await Promise.all(
     directories
@@ -48,10 +49,12 @@ async function fixture(bots: unknown[] = [bot()]) {
     planPath,
     JSON.stringify({ version: 1, teamId: "T123", bots }),
   );
+
   return { planPath, configPath, journalPath, apply: false };
 }
 
 const credentials = { SLACK_APP_CONFIG_TOKEN: "private-config-token" };
+
 const noNetwork = async () => {
   throw new Error("Unexpected network access");
 };
@@ -61,17 +64,21 @@ test.each([false, true])(
   async (moduleOptions) => {
     const input = structuredClone(legacyProvisionInput);
     const decoded = structuredClone(legacyProvisionDecoded);
+
     const raw = JSON.parse(
       '{"__proto__":{"fixture":true},"ordinary":1,"nested":{"__proto__":{"keep":true}}}',
     );
+
     const backend = {
       type: "module",
       module: "/workspace/module.ts",
       options: raw,
     };
+
     const bots = moduleOptions
       ? input.bots.map((bot) => ({ ...bot, backend }))
       : input.bots;
+
     const plan = moduleOptions
       ? {
           ...decoded,
@@ -84,7 +91,9 @@ test.each([false, true])(
           })),
         }
       : decoded;
+
     const options = await fixture([...bots]);
+
     const planHash = createHash("sha256")
       .update(
         JSON.stringify({
@@ -93,6 +102,7 @@ test.each([false, true])(
         }),
       )
       .digest("hex");
+
     await writeFile(
       options.journalPath,
       JSON.stringify({
@@ -102,10 +112,12 @@ test.each([false, true])(
       }),
       { mode: 0o600 },
     );
+
     const result = await provisionBots(options, {
       fetch: noNetwork,
       environment: {},
     });
+
     expect(result.bots[0]?.app).toBe("planned");
   },
 );
@@ -119,12 +131,14 @@ test.each([
   "legacy provisioning identity ignores disabled Slack flags but rejects enabling %s (%s)",
   async (flag, enabled) => {
     const input = structuredClone(legacyProvisionInput);
+
     const options = await fixture(
       input.bots.map((entry) => ({
         ...entry,
         slack: { ...entry.slack, [flag]: enabled },
       })),
     );
+
     await writeFile(
       options.journalPath,
       JSON.stringify({
@@ -141,10 +155,12 @@ test.each([
       }),
       { mode: 0o600 },
     );
+
     const result = provisionBots(options, {
       fetch: noNetwork,
       environment: {},
     });
+
     if (enabled)
       await expect(result).rejects.toThrow(
         "does not match the original plan/config",
@@ -155,10 +171,12 @@ test.each([
 
 test("offline planning returns manifests and links without creating files", async () => {
   const options = await fixture();
+
   const result = await provisionBots(options, {
     fetch: noNetwork,
     environment: {},
   });
+
   expect(result.bots[0]?.app).toBe("planned");
   expect(result.bots[0]?.url).toContain("manifest_json=");
   expect(result.bots[0]?.manifest.settings.socket_mode_enabled).toBe(true);
@@ -175,11 +193,12 @@ test("provisioning preserves all runtime settings and repeats without changes", 
     app: { mode: "reuse", appId: "APEGASUS" },
     displayName: "Cain",
     threadContext: true,
-    waiting: { delayMs: 3000, intervalMs: 15000 },
+    waiting: { delayMs: 3000, intervalMs: 15_000 },
     crewActivity: { detail: "summary", reporter: "twiki" },
     concurrency: 2,
-    turnTimeoutMs: 60000,
+    turnTimeoutMs: 60_000,
   };
+
   const options = { ...(await fixture([entry])), apply: true };
   const dependencies = { fetch: noNetwork, environment: {} };
   await provisionBots(options, dependencies);
@@ -247,6 +266,7 @@ test("existing registration conflicts block the whole batch before creation", as
 test("apply checkpoints and creates sequentially, resumes without duplication", async () => {
   const options = await fixture([bot(), bot("other")]);
   const requested: string[] = [];
+
   const create = async (_url: string, init: RequestInit) => {
     const journal = JSON.parse(await readFile(options.journalPath, "utf8"));
     const current = requested.length === 0 ? "crew" : "other";
@@ -260,25 +280,30 @@ test("apply checkpoints and creates sequentially, resumes without duplication", 
     requested.push(
       JSON.parse(body.get("manifest") ?? "{}").display_information.name,
     );
+
     return Response.json({
       ok: true,
       app_id: requested.length === 1 ? "ACREW" : "AOTHER",
       credentials: { client_secret: "xoxb-FAKE-SECRET" },
     });
   };
+
   const first = await provisionBots(
     { ...options, apply: true },
     { fetch: create, environment: credentials },
   );
+
   expect(requested).toEqual(["Stargate crew", "Stargate other"]);
   expect(first.bots.map((entry) => entry.registration)).toEqual([
     "added",
     "added",
   ]);
+
   const second = await provisionBots(
     { ...options, apply: true },
     { fetch: noNetwork, environment: credentials },
   );
+
   expect(second.bots.map((entry) => entry.registration)).toEqual([
     "unchanged",
     "unchanged",
@@ -294,6 +319,7 @@ test("apply checkpoints and creates sequentially, resumes without duplication", 
 
 test("uncertain creates never retry until exact bot app ID is recorded", async () => {
   const options = await fixture();
+
   const first = await provisionBots(
     { ...options, apply: true },
     {
@@ -303,20 +329,25 @@ test("uncertain creates never retry until exact bot app ID is recorded", async (
       },
     },
   );
+
   expect(first.bots[0]?.app).toBe("outcome_unknown");
+
   const blocked = await provisionBots(
     { ...options, apply: true },
     { fetch: noNetwork, environment: credentials },
   );
+
   expect(blocked.bots[0]?.app).toBe("outcome_unknown");
   expect(blocked.bots[0]?.url).toBe("https://api.slack.com/apps");
   await expect(
     provisionBots({ ...options, recordApp: "missing=ACREW" }),
   ).rejects.toThrow("record-app");
+
   const recorded = await provisionBots(
     { ...options, apply: true, recordApp: "crew=ACREW" },
     { fetch: noNetwork, environment: {} },
   );
+
   expect(recorded.bots[0]?.appId).toBe("ACREW");
   expect(recorded.bots[0]?.registration).toBe("added");
   expect(JSON.stringify(first)).not.toContain("PRIVATE-EXCEPTION");
@@ -333,10 +364,12 @@ test("malformed and partial-error API responses remain uncertain and sanitized",
     new Response("xoxb-FAKE-SECRET", { status: 502 }),
   ]) {
     const options = await fixture();
+
     const result = await provisionBots(
       { ...options, apply: true },
       { fetch: async () => response, environment: credentials },
     );
+
     expect(result.bots[0]?.app).toBe("outcome_unknown");
     expect(JSON.stringify(result)).not.toMatch(/FAKE-SECRET|PRIVATE/);
     await provisionBots(
@@ -348,6 +381,7 @@ test("malformed and partial-error API responses remain uncertain and sanitized",
 
 test("a definite authentication rejection can retry on a later apply", async () => {
   const options = await fixture();
+
   const rejected = await provisionBots(
     { ...options, apply: true },
     {
@@ -360,8 +394,10 @@ test("a definite authentication rejection can retry on a later apply", async () 
         }),
     },
   );
+
   expect(rejected.bots[0]?.app).toBe("failed");
   expect(JSON.stringify(rejected)).not.toContain("SECRET");
+
   const retried = await provisionBots(
     { ...options, apply: true },
     {
@@ -369,19 +405,22 @@ test("a definite authentication rejection can retry on a later apply", async () 
       fetch: async () => Response.json({ ok: true, app_id: "ACREW" }),
     },
   );
+
   expect(retried.bots[0]?.registration).toBe("added");
 });
 
 test("429 persists Retry-After and prevents an early retry", async () => {
   const options = await fixture([bot(), bot("other")]);
   let requests = 0;
+
   const result = await provisionBots(
     { ...options, apply: true },
     {
       environment: credentials,
-      now: () => 1_000,
+      now: () => 1000,
       fetch: async () => {
         requests++;
+
         return new Response("private body", {
           status: 429,
           headers: { "retry-after": "120" },
@@ -389,23 +428,28 @@ test("429 persists Retry-After and prevents an early retry", async () => {
       },
     },
   );
+
   expect(result.bots[0]?.app).toBe("rate_limited");
   expect(result.bots[0]?.retryAfterSeconds).toBe(120);
   expect(result.bots[1]?.app).toBe("planned");
   expect(requests).toBe(1);
+
   const early = await provisionBots(
     { ...options, apply: true },
     {
       environment: credentials,
-      now: () => 2_000,
+      now: () => 2000,
       fetch: async () => {
         requests++;
+
         return Response.json({ ok: true, app_id: "ATOOSOON" });
       },
     },
   );
+
   expect(requests).toBe(1);
   expect(early.bots[1]?.app).toBe("planned");
+
   const retried = await provisionBots(
     { ...options, apply: true },
     {
@@ -418,6 +462,7 @@ test("429 persists Retry-After and prevents an early retry", async () => {
         }),
     },
   );
+
   expect(retried.bots[0]?.registration).toBe("added");
 });
 
@@ -429,10 +474,12 @@ test("interrupted checkpoints become unknown, and changed plans are rejected", a
   await writeFile(options.journalPath, JSON.stringify(journal), {
     mode: 0o600,
   });
+
   const result = await provisionBots(
     { ...options, apply: true },
     { environment: credentials, fetch: noNetwork },
   );
+
   expect(result.bots[0]?.app).toBe("outcome_unknown");
   const changed = bot();
   changed.name = "Different";
@@ -448,6 +495,7 @@ test("recorded App ID conflicts fail before a checkpoint is written", async () =
     bot(),
     { ...bot("other"), app: { mode: "reuse", appId: "AOTHER" } },
   ]);
+
   await expect(
     provisionBots({ ...options, recordApp: "crew=AOTHER" }),
   ).rejects.toThrow("App ID conflict");
@@ -458,6 +506,7 @@ test("reuse never creates or modifies an app and registers references only", asy
   const options = await fixture([
     { ...bot("bowser"), app: { mode: "reuse", appId: "ABOWSER" } },
   ]);
+
   const result = await provisionBots(
     { ...options, apply: true },
     {
@@ -465,6 +514,7 @@ test("reuse never creates or modifies an app and registers references only", asy
       environment: { BOWSER_APP: "xapp-private", BOWSER_BOT: "xoxb-private" },
     },
   );
+
   expect(result.bots[0]?.app).toBe("reused");
   expect(result.bots[0]?.url).toBe("https://api.slack.com/apps/ABOWSER");
   expect(result.bots[0]?.credentials).toBe("present");
@@ -474,10 +524,12 @@ test("reuse never creates or modifies an app and registers references only", asy
 
 test("recording UI-created apps does not require configuration tokens", async () => {
   const options = await fixture();
+
   const result = await provisionBots(
     { ...options, recordApp: "crew=ACREW" },
     { fetch: noNetwork, environment: {} },
   );
+
   expect(result.bots[0]?.app).toBe("recorded");
   expect(await Bun.file(options.configPath).exists()).toBe(false);
   await expect(

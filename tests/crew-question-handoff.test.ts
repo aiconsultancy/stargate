@@ -41,6 +41,7 @@ test("a gateway write has one delivery and one final ownership check on the capt
     released: 0,
     notifying: 0,
   };
+
   const q: NativeQuestion = {
     id: "frm_1",
     sessionID: task.workerSessionID,
@@ -51,17 +52,21 @@ test("a gateway write has one delivery and one final ownership check on the capt
     title: "Colour?",
     fields: [{ type: "string", key: "q0" }],
   };
+
   const box = new CrewQuestionHandoff(task.originCaptainID);
   let current = true;
+
   const backend = box.backend(
     task,
     { agent: "worker", directory: "/fixture", namespace: "fixture" },
     () => current,
   );
+
   const stop = new AbortController();
   const promise = backend.replyQuestion(q, { q0: "blue" }, stop.signal);
   expect(box.take("ses_other").work).toBeNull();
   const work = box.take(task.originCaptainID).work;
+
   if (!work) throw new Error("Expected claimed command");
   expect(work.owner.task).toBe(task.id);
   expect(box.take(task.originCaptainID).work).toBeNull();
@@ -76,6 +81,7 @@ test("a gateway write has one delivery and one final ownership check on the capt
   current = true;
   const retry = backend.replyQuestion(q, { q0: "blue" }, stop.signal);
   const other = box.take(task.originCaptainID).work;
+
   if (!other) throw new Error("Expected second fixture command");
   expect(box.confirm(task.originCaptainID, other.id).approved).toBe(true);
   expect(box.confirm(task.originCaptainID, other.id).approved).toBe(false);

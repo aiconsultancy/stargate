@@ -143,6 +143,7 @@ describe("strict architecture baseline", () => {
   test("a self-loop exceeds a zero largest-cycle cap", () => {
     const self = "src/other/self.ts";
     const current: SourceGraph = new Map([[self, new Set([self])]]);
+
     const recorded: StrictBaseline = {
       rootFiles: [],
       cyclicEdges: ["src/other/self.ts -> src/other/self.ts"],
@@ -150,6 +151,7 @@ describe("strict architecture baseline", () => {
       cycleComponents: [[self]],
       crewPlugin: { entry: self, members: [self] },
     };
+
     expect(failures(current, recorded, [])).toEqual(["largest-cycle:1 > 0"]);
   });
 
@@ -157,6 +159,7 @@ describe("strict architecture baseline", () => {
     const current = fixture();
     current.set("src/other/new.ts", new Set(["src/other/leaf.ts"]));
     current.set("src/other/leaf.ts", new Set());
+
     const recorded = {
       ...baseline(),
       sourceFiles: 3,
@@ -164,6 +167,7 @@ describe("strict architecture baseline", () => {
       sourceCommit: "recorded-commit",
       measurementStatus: "recorded",
     };
+
     expect(failures(current, recorded)).toEqual([]);
   });
 });

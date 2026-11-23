@@ -12,6 +12,7 @@ const notice = {
 
 function fixture(watch: MaintenanceWatch) {
   const stop = new AbortController();
+
   const backend: AgentBackend = {
     async createSession() {
       return "session";
@@ -24,6 +25,7 @@ function fixture(watch: MaintenanceWatch) {
       return watch;
     },
   };
+
   const input = {
     backend,
     sessionID: "captain",
@@ -35,6 +37,7 @@ function fixture(watch: MaintenanceWatch) {
       stop.abort();
     },
   };
+
   return { input, stop };
 }
 
@@ -43,6 +46,7 @@ test("gate acknowledges only after cancellable Slack publication completes", asy
   const delivered = Promise.withResolvers<void>();
   const released = Promise.withResolvers<void>();
   const order: string[] = [];
+
   const f = fixture({
     async read() {
       return notice;
@@ -56,11 +60,13 @@ test("gate acknowledges only after cancellable Slack publication completes", asy
       order.push("closed");
     },
   });
+
   f.input.publish = async () => {
     order.push("publish");
     publishing.resolve();
     await released.promise;
   };
+
   const handle = await startMaintenanceDelivery(f.input);
   await publishing.promise;
   expect(order).toEqual(["publish"]);
@@ -75,9 +81,11 @@ test("publication failure, transport failure and cancellation never acknowledge 
   for (const failure of ["publish", "read", "stop"] as const) {
     let acknowledged = false;
     const cancelled = Promise.withResolvers<void>();
+
     const f = fixture({
       async read() {
         if (failure === "read") throw new Error("Transport failed");
+
         return notice;
       },
       async delivered() {
@@ -85,15 +93,18 @@ test("publication failure, transport failure and cancellation never acknowledge 
       },
       async close() {},
     });
+
     f.input.publish = async () => {
       if (failure === "publish") throw new Error("Slack unavailable");
       f.stop.abort();
       cancelled.resolve();
     };
+
     f.input.cancel = () => {
       f.stop.abort();
       cancelled.resolve();
     };
+
     const handle = await startMaintenanceDelivery(f.input);
     await cancelled.promise;
     await handle?.close();
@@ -110,27 +121,34 @@ test("missing plugin is compatible with ordinary bots but creates no maintenance
     async delivered() {},
     async close() {},
   });
+
   f.input.backend.startMaintenance = async () => {
     throw new Error("RPC absent");
   };
+
   expect(await startMaintenanceDelivery(f.input)).toBeUndefined();
   expect(f.stop.signal.aborted).toBe(false);
 });
 
 test("delivery acknowledgement gets a fresh deadline after slow publication", async () => {
   const deadlines: { ms: number; controller: AbortController }[] = [];
+
   const timeout = spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
     const controller = new AbortController();
     deadlines.push({ ms, controller });
+
     return controller.signal;
   });
+
   const publishing = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const acknowledged = Promise.withResolvers<AbortSignal>();
   let readSignal: AbortSignal | undefined;
+
   const f = fixture({
     async read(signal) {
       readSignal = signal;
+
       return notice;
     },
     async delivered(_id, signal) {
@@ -138,11 +156,14 @@ test("delivery acknowledgement gets a fresh deadline after slow publication", as
     },
     async close() {},
   });
+
   f.input.publish = async () => {
     publishing.resolve();
     await release.promise;
   };
+
   let handle: Awaited<ReturnType<typeof startMaintenanceDelivery>>;
+
   try {
     handle = await startMaintenanceDelivery(f.input);
     await publishing.promise;
@@ -167,6 +188,7 @@ test("owner cancellation during publication never acknowledges or restores autho
   const publishing = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const order: string[] = [];
+
   const f = fixture({
     async read() {
       return notice;
@@ -176,16 +198,20 @@ test("owner cancellation during publication never acknowledges or restores autho
     },
     async close() {},
   });
+
   f.input.publish = async () => {
     publishing.resolve();
     await release.promise;
     order.push("published");
   };
+
   f.input.resume = () => {
     expect(f.stop.signal.aborted).toBe(true);
     order.push("resume-cancelled");
   };
+
   const handle = await startMaintenanceDelivery(f.input);
+
   try {
     await publishing.promise;
     f.stop.abort();

@@ -30,18 +30,22 @@ import type { TurnProgress } from "../shared/turn-progress";
 import { UpdateNotices } from "../maintenance/update-notice";
 
 export { jobStatuses } from "./store-types";
+
 export type { Incoming, Job, JobStatus };
 
 const sqlList = (statuses: readonly JobStatus[]) =>
   statuses.map((status) => `'${status}'`).join(",");
+
 /** SQL list: no reply is stored yet; the backend may still run this job. */
 export const pendingJobs = sqlList(["queued", "running"]);
+
 /** SQL list: not delivered or failed yet; later jobs of the thread wait. */
 export const unfinishedJobs = sqlList(["queued", "running", "responding"]);
 
 /** Status of a stored reply: a deferred source needs no delivery. */
 const storedReplyStatus =
   "CASE WHEN deferDelivery=1 THEN 'done' ELSE 'responding' END";
+
 /**
  * An accepted Stop. A queued job settles at once with the notice (the one
  * parameter); a running job keeps its status and its worker sees the flag.
@@ -80,6 +84,7 @@ const followUpSchema = Schema.Struct({
     }),
   ),
 });
+
 export type ThreadFollowUp = {
   botKey: string;
   eventId: string;
@@ -251,6 +256,7 @@ export class Store {
         PRIMARY KEY(botKey,eventId)
       );
     `);
+
     const column = (table: string, name: string, type: string) => {
       if (
         !this.db
@@ -259,10 +265,13 @@ export class Store {
           .some((column) => column.name === name)
       ) {
         this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+
         return true;
       }
+
       return false;
     };
+
     column("slack_questions", "progress", "TEXT NOT NULL DEFAULT '{}'");
     column("slack_questions", "revision", "INTEGER NOT NULL DEFAULT 0");
     column("jobs", "progressStage", "TEXT");
@@ -289,6 +298,7 @@ export class Store {
     column("jobs", "makers", "TEXT");
     column("native_questions", "outcome", "TEXT");
     column("native_questions", "outcomeNotified", "INTEGER NOT NULL DEFAULT 0");
+
     if (
       column(
         "native_questions",
@@ -297,9 +307,10 @@ export class Store {
       )
     )
       // Existing offers may have been seen despite a lost ACK. Preserve their
-      // original expiry rather than restarting their window on this migration.
+      // Original expiry rather than restarting their window on this migration.
       this.db.exec("UPDATE native_questions SET publicationStarted=1");
     column("irc_thread_messages", "request", "TEXT");
+
     for (const table of [
       "native_questions",
       "irc_question_sources",
@@ -312,6 +323,7 @@ export class Store {
         `CREATE INDEX IF NOT EXISTS ${table}_retention ON ${table}(botKey,recorded)`,
       );
     }
+
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS jobs_irc_root ON jobs(botKey,channel,CAST(COALESCE(replyParent,thread) AS TEXT),status)",
     );
@@ -326,6 +338,7 @@ export class Store {
     );
     this.db.exec(`CREATE INDEX IF NOT EXISTS jobs_activity_ts
       ON jobs(botKey,channel,json_extract(activity,'$.ts')) WHERE activity IS NOT NULL`);
+
     // Preserve source-first context and legacy ownership; keep statuses intact.
     if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
       this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
@@ -365,6 +378,7 @@ export class Store {
         ) !== null
     )
       return false;
+
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
@@ -418,16 +432,20 @@ export class Store {
         this.jobByEvent(input.botKey, input.eventId)
       )
         return false;
+
       const owner = this.db
         .query<StoredJob, [string]>(
           "SELECT * FROM jobs WHERE botKey=? AND status='running' ORDER BY id DESC LIMIT 1",
         )
         .get(input.botKey);
+
       if (!owner) return undefined;
+
       const root = (message: Pick<Incoming, "thread" | "replyParent">) =>
         transport === "irc"
           ? (message.replyParent ?? message.thread)
           : message.thread;
+
       const eligible =
         owner.conversation === input.conversation &&
         owner.channel === input.channel &&
@@ -438,7 +456,9 @@ export class Store {
         !input.gate &&
         !input.deferDelivery &&
         !input.files?.length;
+
       if (!eligible && !this.enqueue(input)) return false;
+
       if (transport === "irc") {
         this.irc.ircThreadMessage(
           input.botKey,
@@ -446,12 +466,14 @@ export class Store {
           input.thread,
           root(input),
         );
+
         if (eligible)
           this.db
             .query(
               "UPDATE jobs SET replyParent=COALESCE(replyParent,thread) WHERE id=? AND status='running'",
             )
             .run(owner.id);
+
         if (
           invited ||
           this.irc.ircThreadParticipating(
@@ -462,6 +484,7 @@ export class Store {
         )
           this.irc.joinIrcThread(input.botKey, input.channel, root(input));
       }
+
       this.db
         .query(`INSERT INTO thread_followups
         (botKey,eventId,owner,sessionID,inputID,nativeID,state,payload,transport)
@@ -477,6 +500,7 @@ export class Store {
           JSON.stringify(input),
           transport,
         );
+
       return true;
     })();
   }
@@ -510,10 +534,12 @@ export class Store {
   ownsFollowUp(receipt: ThreadFollowUp): boolean {
     const input = this.followUpInput(receipt);
     const owner = this.jobByInput(receipt.botKey, receipt.inputID);
+
     const root = (message: Incoming) =>
       receipt.transport === "irc"
         ? (message.replyParent ?? message.thread)
         : message.thread;
+
     return (
       owner?.id === receipt.owner &&
       owner.status === "running" &&
@@ -542,7 +568,7 @@ export class Store {
   ) {
     this.db.transaction(() => {
       // A definite refusal alone permits normal queue admission. Remove the
-      // receipt temporarily inside this transaction to reuse enqueue's guards.
+      // Receipt temporarily inside this transaction to reuse enqueue's guards.
       if (state === "queued") {
         this.db
           .query("DELETE FROM thread_followups WHERE botKey=? AND eventId=?")
@@ -601,9 +627,11 @@ export class Store {
         const input = Schema.decodeUnknownSync(followUpSchema)(
           JSON.parse(row.payload),
         );
+
         const message =
           input.slackReaction?.ts ??
           input.eventId.slice(input.channel.length + 1);
+
         return row.transport === "slack"
           ? `https://slack.com/archives/${input.channel}/p${message.replace(".", "")}`
           : `irc follow-up ${message}`;
@@ -649,6 +677,7 @@ export class Store {
       .all(conversation)
       .filter(({ eventId }) => {
         const ts = Number(eventId.slice(eventId.lastIndexOf(":") + 1));
+
         return Number.isFinite(ts) && ts * 1000 >= since;
       }).length;
   }
@@ -684,6 +713,7 @@ export class Store {
           .run(input, botKey, id).changes !== 1
       )
         throw new Error("Native input could not be recorded");
+
       // Failed initial baselines still have a durable, owned lower bound.
       if (sessionID)
         this.db
@@ -725,10 +755,12 @@ export class Store {
         WHERE j.botKey=? AND s.session_id=? AND j.started=1 AND j.failure IS NOT 'context'
         ORDER BY j.id DESC LIMIT 1`)
         .get(botKey, sessionID);
+
       this.db
         .query(`INSERT OR IGNORE INTO captain_cursors
         (botKey,session_id,cursor,owner) VALUES (?,?,?,?)`)
         .run(botKey, sessionID, legacy?.cursor ?? null, legacy?.owner ?? null);
+
       const row = this.db
         .query<
           { cursor: string | null; owner: number | null },
@@ -737,7 +769,9 @@ export class Store {
           "SELECT cursor,owner FROM captain_cursors WHERE botKey=? AND session_id=?",
         )
         .get(botKey, sessionID);
+
       if (!row) throw new Error("Captain cursor not found");
+
       return { cursor: row.cursor ?? undefined, owner: row.owner };
     })();
   }
@@ -760,6 +794,7 @@ export class Store {
       .query(`UPDATE captain_cursors SET cursor=?
       WHERE botKey=? AND session_id=? AND cursor IS NULL`)
       .run(cursor, botKey, sessionID);
+
     return this.captainCursor(botKey, sessionID);
   }
 
@@ -787,8 +822,9 @@ export class Store {
         ).changes !== 1
     )
       throw new TranscriptConflict();
+
     // Native ownership selects both source and delivery mode. Digest catch-ups
-    // commit as locally delivered rows, never as pending Slack work.
+    // Commit as locally delivered rows, never as pending Slack work.
     for (const reply of input.replies) {
       if (
         this.db
@@ -815,6 +851,7 @@ export class Store {
     return this.db.transaction(() => {
       if (this.captainBusy(input.botKey)) return false;
       this.commitCaptain(input);
+
       return true;
     })();
   }
@@ -877,6 +914,7 @@ export class Store {
         input.botKey,
         input.conversation,
       );
+
       if (
         !target ||
         this.db
@@ -892,6 +930,7 @@ export class Store {
       )
         return;
       let queued = 0;
+
       for (const eventId of input.requeue ?? [])
         queued += this.db
           .query(`UPDATE jobs SET status=${storedReplyStatus},
@@ -899,6 +938,7 @@ export class Store {
           attempts=0,retry_at=0
           WHERE botKey=? AND conversation=? AND eventId=? AND status='failed' AND failure IS NOT 'muted'`)
           .run(input.botKey, input.conversation, eventId).changes;
+
       for (const reply of input.replies) {
         queued += this.db
           .query(`INSERT OR IGNORE INTO jobs
@@ -919,9 +959,11 @@ export class Store {
             target.deferDelivery ? reply.chunks.length : 0,
           ).changes;
       }
+
       // An existing row would be skipped silently; never advance past it.
       if (queued !== input.replies.length + (input.requeue?.length ?? 0))
         throw new TranscriptConflict();
+
       return queued;
     })();
   }
@@ -1022,11 +1064,13 @@ export class Store {
         WHERE botKey=? AND conversation=? AND thread=?
         AND status IN (${pendingJobs}) ORDER BY id DESC LIMIT 1`)
         .get(botKey, conversation, thread);
+
       if (!row) return;
       this.db
         .query(`${stopJob}
         WHERE id=? AND status IN (${pendingJobs})`)
         .run(JSON.stringify([cancellationNotice]), row.id);
+
       return row.id;
     })();
   }
@@ -1055,8 +1099,10 @@ export class Store {
   /** New opt-in human intake: persist ancestry and explicit invitation atomically. */
   enqueueIrcHuman(input: Incoming, invited: boolean): boolean {
     const root = input.replyParent ?? input.thread;
+
     if (!validMsgid(input.thread) || !validMsgid(root))
       throw new Error("IRC human thread identity is invalid");
+
     return this.db.transaction(() => {
       if (!this.enqueue(input)) return false;
       this.irc.ircThreadMessage(
@@ -1065,11 +1111,13 @@ export class Store {
         input.thread,
         root,
       );
+
       if (
         invited ||
         this.irc.ircThreadParticipating(input.botKey, input.channel, root)
       )
         this.irc.joinIrcThread(input.botKey, input.channel, root);
+
       return true;
     })();
   }
@@ -1096,6 +1144,7 @@ export class Store {
       options.trackThreads
         ? this.enqueueIrcHuman(job, options.invited)
         : this.enqueue(job);
+
     if (
       !Number.isInteger(options.quietMs) ||
       options.quietMs < 1 ||
@@ -1104,6 +1153,7 @@ export class Store {
     )
       return ordinary(input);
     const now = options.now ?? Date.now();
+
     const message: IrcBurstMessage = {
       eventId: input.eventId,
       thread: input.thread,
@@ -1113,18 +1163,21 @@ export class Store {
       received: input.received ?? now,
       files: [...(input.files ?? [])],
     };
+
     // An individually large message still follows ordinary admission intact.
     if (
       message.files.length > ircBurstLimits.files ||
       Buffer.byteLength(JSON.stringify(message)) > ircBurstLimits.bytes
     )
       return ordinary(input);
+
     if (
       Result.isFailure(
         Schema.decodeUnknownResult(ircBurstMessageSchema)(message),
       )
     )
       return ordinary(input);
+
     return this.db.transaction(() => {
       if (
         this.jobByEvent(input.botKey, input.eventId) ||
@@ -1135,6 +1188,7 @@ export class Store {
           null
       )
         return false;
+
       const latest = this.db
         .query<StoredJob, [string]>(
           `SELECT * FROM jobs WHERE botKey=? AND text!=''
@@ -1142,6 +1196,7 @@ export class Store {
            ORDER BY id DESC LIMIT 1`,
         )
         .get(input.botKey);
+
       const burst = latest
         ? this.db
             .query<
@@ -1150,6 +1205,7 @@ export class Store {
             >("SELECT policy,deadline,maximum FROM irc_bursts WHERE job=?")
             .get(latest.id)
         : null;
+
       if (
         latest &&
         burst &&
@@ -1168,6 +1224,7 @@ export class Store {
         const combined = [...messages, message];
         const files = [...new Set(combined.flatMap((item) => item.files))];
         const text = ircBurstText(combined);
+
         if (
           combined.length <= ircBurstLimits.messages &&
           files.length <= ircBurstLimits.files &&
@@ -1175,6 +1232,7 @@ export class Store {
           Buffer.byteLength(text) <= ircBurstLimits.bytes
         ) {
           const deadline = Math.min(now + options.quietMs, burst.maximum);
+
           const changed = this.db
             .query(
               `UPDATE jobs SET text=?,input_files=?,retry_at=MAX(retry_at,?)
@@ -1186,6 +1244,7 @@ export class Store {
               Math.max(deadline, input.notBefore ?? 0),
               latest.id,
             ).changes;
+
           if (changed) {
             this.db
               .query("UPDATE irc_bursts SET deadline=? WHERE job=?")
@@ -1196,6 +1255,7 @@ export class Store {
               input.botKey,
               message,
             );
+
             if (options.trackThreads) {
               const root = latest.replyParent ?? latest.thread;
               this.irc.ircThreadMessage(
@@ -1205,14 +1265,18 @@ export class Store {
                 root,
                 latest.thread,
               );
+
               if (options.invited)
                 this.irc.joinIrcThread(input.botKey, input.channel, root);
             }
+
             return true;
           }
         }
       }
+
       const deadline = now + options.quietMs;
+
       if (
         !ordinary({
           ...input,
@@ -1221,6 +1285,7 @@ export class Store {
       )
         return false;
       const job = this.jobByEvent(input.botKey, input.eventId);
+
       if (!job) throw new Error("IRC burst job was not persisted");
       this.db
         .query(
@@ -1228,6 +1293,7 @@ export class Store {
         )
         .run(job.id, options.policy, deadline, now + ircBurstLimits.waitMs);
       this.irc.saveIrcBurstMessage(job.id, 0, input.botKey, message);
+
       return true;
     })();
   }
@@ -1246,6 +1312,7 @@ export class Store {
       (wireRoot !== undefined && !validMsgid(wireRoot))
     )
       return false;
+
     return this.db.transaction(() => {
       const job = this.db
         .query<
@@ -1255,14 +1322,18 @@ export class Store {
           "SELECT thread,replyParent FROM jobs WHERE botKey=? AND channel=? AND thread=? ORDER BY id LIMIT 1",
         )
         .get(botKey, channel, request);
+
       if (!job) return false;
       const root = job.replyParent ?? job.thread;
+
       if (!validMsgid(root) || (wireRoot !== undefined && wireRoot !== root))
         return false;
       const prior = this.irc.ircRequestAnchor(botKey, channel, msgid);
+
       if (prior !== undefined && prior !== request) return false;
       this.irc.ircThreadMessage(botKey, channel, msgid, root, request);
       this.irc.joinIrcThread(botKey, channel, root);
+
       return true;
     })();
   }
@@ -1299,7 +1370,9 @@ export class Store {
         "SELECT status,failure,conversation,deferDelivery FROM jobs WHERE botKey=? AND id=?",
       )
       .get(botKey, id);
+
     if (!job) return;
+
     // Iterate bounded public chunks; never select prompts, inputs or file metadata.
     const parts = this.db
       .query<{ text: string }, [string, number, number, string, number]>(
@@ -1309,11 +1382,15 @@ export class Store {
       ORDER BY j.id,CAST(p.key AS INTEGER)`,
       )
       .iterate(botKey, id, job.deferDelivery, job.conversation, id);
+
     let text = "";
+
     for (const part of parts) {
       text = `${text}${text ? "\n\n" : ""}${part.text}`.slice(0, 12_000);
+
       if (text.length === 12_000) break;
     }
+
     return { text, status: job.status, failure: job.failure };
   }
 
@@ -1341,13 +1418,17 @@ export class Store {
           [number]
         >("SELECT cancel_requested, conversation, status FROM jobs WHERE id=?")
         .get(id);
+
       if (!job) throw new Error("Response job not found");
+
       if (job.status !== "running")
         throw new JobTransitionRefused(id, job.status);
       const cancelled = job.cancel_requested === 1;
+
       const response = cancelled
         ? [...chunks.slice(0, options.keep ?? 0), cancellationNotice]
         : chunks;
+
       this.db
         .query(
           "UPDATE jobs SET started=1,status='responding',response=?,failure=?,sent=0,output_files=? WHERE id=? AND status='running'",
@@ -1360,6 +1441,7 @@ export class Store {
             : null,
           id,
         );
+
       // A moved cursor means another writer queued some of this text.
       if (
         options.transcript &&
@@ -1374,7 +1456,9 @@ export class Store {
           ).changes === 0
       )
         throw new TranscriptConflict();
+
       if (options.captain) this.commitCaptain(options.captain);
+
       return response;
     })();
   }
@@ -1396,10 +1480,13 @@ export class Store {
         .query(`UPDATE jobs SET sent=? WHERE id=? AND status='responding'
         AND ?>=sent AND ?<=json_array_length(response)`)
         .run(count, id, count, count).changes > 0;
+
     if (!slackTs) return advance();
+
     return this.db.transaction(() => {
       if (!advance()) return false;
       this.savePreview(id, count - 1, slackTs);
+
       return true;
     })();
   }
@@ -1418,6 +1505,7 @@ export class Store {
          AND activity IS NOT NULL AND json_extract(activity,'$.ts')=$ts LIMIT 2`,
       )
       .all({ $ts: ts, $botKey: botKey, $channel: channel });
+
     return matches.length === 1 ? matches[0]?.thread : undefined;
   }
 
@@ -1450,8 +1538,10 @@ export class Store {
           .query(`UPDATE jobs SET status=? WHERE id=?
           AND (status='responding' OR (status='queued' AND ?='failed'))`)
           .run(status, id, status).changes > 0;
+
       if (changed)
         this.db.query("DELETE FROM delivery_units WHERE job=?").run(id);
+
       return changed;
     })();
   }
@@ -1489,12 +1579,15 @@ export class Store {
         "INSERT OR IGNORE INTO delivery_units (job,part,plan) VALUES (?,?,?)",
       )
       .run(job, part, plan);
+
     const row = this.db
       .query<{ plan: string; done: number }, [number, number]>(
         "SELECT plan,done FROM delivery_units WHERE job=? AND part=?",
       )
       .get(job, part);
+
     if (!row) throw new Error("Delivery plan not found");
+
     return row;
   }
 
@@ -1527,7 +1620,7 @@ export class Store {
   }
 
   recover(botKey: string, retainedQuestionInputs: readonly string[] = []) {
-    // greybeard: unknown tool outcomes are never retried automatically.
+    // Greybeard: unknown tool outcomes are never retried automatically.
     // Reconciliation requires a backend-specific execution identifier.
     this.db
       .query(`UPDATE jobs SET status='responding',response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,sent=0,
@@ -1600,11 +1693,13 @@ export class Store {
           Date.now(),
           offer.publicationStarted ?? 0,
         );
+
       const existing = this.db
         .query<QuestionOffer, [string, string, string]>(
           "SELECT * FROM native_questions WHERE botKey=? AND sessionID=? AND formID=?",
         )
         .get(offer.botKey, offer.sessionID, offer.formID);
+
       if (
         !existing ||
         existing.inputID !== offer.inputID ||
@@ -1618,6 +1713,7 @@ export class Store {
           "UPDATE jobs SET replyParent=COALESCE(replyParent,thread) WHERE id=? AND botKey=? AND input=? AND status='running'",
         )
         .run(offer.jobID, offer.botKey, offer.inputID);
+
       return existing;
     })();
   }
@@ -1658,6 +1754,7 @@ export class Store {
         AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.botKey=irc_question_sources.botKey AND j.eventId=irc_question_sources.eventId AND j.status NOT IN ('done','failed'))
         AND NOT EXISTS(SELECT 1 FROM native_questions q WHERE q.botKey=irc_question_sources.botKey AND q.jobID IN (SELECT id FROM jobs WHERE botKey=irc_question_sources.botKey AND eventId=irc_question_sources.eventId)) ORDER BY recorded LIMIT 256)`)
         .run(botKey, cutoff);
+
       for (const table of ["irc_thread_messages", "irc_thread_memberships"]) {
         this.db
           .query(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE botKey=? AND recorded<?
@@ -1693,12 +1790,14 @@ export class Store {
   /** Operator view: per-status totals for one bot namespace. */
   queueCounts(botKey: string): Record<JobStatus, number> {
     const counts = { queued: 0, running: 0, responding: 0, done: 0, failed: 0 };
+
     for (const row of this.db
       .query<{ status: JobStatus; n: number }, [string]>(
         "SELECT status,COUNT(*) AS n FROM jobs WHERE botKey=? GROUP BY status",
       )
       .all(botKey))
       if (Object.hasOwn(counts, row.status)) counts[row.status] = row.n;
+
     return counts;
   }
 

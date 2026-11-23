@@ -25,14 +25,17 @@ const log = pino({ enabled: false });
 
 test("production start preserves companion credentials overlapping disabled sources without exporting active producer-only secrets", async () => {
   const environmentBefore = { ...process.env };
+
   for (const activeProducer of [false, true]) {
     const directory = await temporary();
     const config = runtimeConfig(directory, false);
     const adapter = config.notify?.adapters["local"];
     const source = adapter?.sources[0];
+
     if (!source || !config.notify || !adapter)
       throw new Error("Missing credential fixture");
     source.tokenEnv = "BOT_TOKEN";
+
     if (activeProducer)
       config.notify = {
         ...config.notify,
@@ -54,6 +57,7 @@ test("production start preserves companion credentials overlapping disabled sour
       `APP_TOKEN=xapp-companion-fixture\nBOT_TOKEN=xoxb-companion-fixture\n${activeProducer ? `NOTIFY_CI=${producerToken}\n` : ""}`,
       { mode: 0o600 },
     );
+
     const child = Bun.spawn(
       [
         process.execPath,
@@ -75,11 +79,13 @@ test("production start preserves companion credentials overlapping disabled sour
         stderr: "pipe",
       },
     );
+
     const [output, errors, exit] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
     ]);
+
     expect(exit).toBe(0);
     expect(errors).toBe("");
     expect(JSON.parse(output.trim().split("\n").at(-1) ?? "null")).toEqual({
@@ -93,6 +99,7 @@ test("production start preserves companion credentials overlapping disabled sour
       refused: true,
     });
   }
+
   expect(process.env).toEqual(environmentBefore);
 });
 
@@ -108,6 +115,7 @@ for (const reference of [
     const adapter = config.notify?.adapters["local"];
     const source = adapter?.sources[0];
     const backend = config.bots[0]?.backend;
+
     if (!source || !config.notify || !adapter || backend?.type !== "opencode")
       throw new Error("Missing shared credential fixture");
     source.tokenEnv = reference;
@@ -134,6 +142,7 @@ for (const reference of [
       { mode: 0o600 },
     );
     const environment: NodeJS.ProcessEnv = { PATH: process.env["PATH"] };
+
     for (const name of [
       "HOME",
       "TMPDIR",
@@ -146,6 +155,7 @@ for (const reference of [
       await mkdir(path, { mode: 0o700 });
       environment[name] = path;
     }
+
     const child = Bun.spawn(
       [
         process.execPath,
@@ -155,11 +165,13 @@ for (const reference of [
       ],
       { env: environment, stdout: "pipe", stderr: "pipe" },
     );
+
     const [output, errors, exit] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
     ]);
+
     expect(exit).toBe(0);
     expect(errors).toBe("");
     expect(JSON.parse(output.trim().split("\n").at(-1) ?? "null")).toEqual({
@@ -180,28 +192,35 @@ for (const reference of [
 test("runtime composes Unix producer/core/fake Slack without any notification-origin agent input", async () => {
   const directory = await temporary();
   const delivered = Promise.withResolvers<URLSearchParams>();
+
   const fake = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       delivered.resolve(new URLSearchParams(await request.text()));
+
       return Response.json({ ok: true, ts: "1.000" });
     },
   });
+
   const f = runtimeDependencies(fake.url.href);
   const controller = new AbortController();
+
   const running = Effect.runPromise(
     serve(runtimeConfig(directory), log, controller.signal, f.dependencies),
   );
+
   try {
     await until(async () => (await readReady(directory)) !== null);
     const response = await unixRequest(join(directory, "api.sock"));
     expect(response.status).toBe(202);
     expect((await delivered.promise).get("text")).toBe("Released");
     expect(f.calls).toEqual([]);
+
     const operator = (
       await readFile(join(directory, "api-token"), "utf8")
     ).trim();
+
     expect(
       (
         await unixRequest(join(directory, "api.sock"), undefined, {
@@ -209,6 +228,7 @@ test("runtime composes Unix producer/core/fake Slack without any notification-or
         })
       ).status,
     ).toBe(401);
+
     for (const path of [
       "/api/v1/fleet",
       "/api/v1/ships/helper",
@@ -237,6 +257,7 @@ test("runtime composes Unix producer/core/fake Slack without any notification-or
     await running;
     await fake.stop(true);
   }
+
   const lock = lockInstance(join(directory, "instance.sqlite"));
   lock.close();
 });
@@ -244,16 +265,20 @@ test("runtime composes Unix producer/core/fake Slack without any notification-or
 test("disabled notify leaves no store, mount, worker or Slack call; Fleet remains active", async () => {
   const directory = await temporary();
   let sends = 0;
+
   const fake = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch() {
       sends++;
+
       return Response.json({ ok: true, ts: "1.000" });
     },
   });
+
   const f = runtimeDependencies(fake.url.href);
   const controller = new AbortController();
+
   const running = Effect.runPromise(
     serve(
       runtimeConfig(directory, false),
@@ -262,13 +287,16 @@ test("disabled notify leaves no store, mount, worker or Slack call; Fleet remain
       f.dependencies,
     ),
   );
+
   try {
     await until(async () => (await readReady(directory)) !== null);
     expect(existsSync(join(directory, "notify.sqlite"))).toBe(false);
     expect((await unixRequest(join(directory, "api.sock"))).status).toBe(404);
+
     const operator = (
       await readFile(join(directory, "api-token"), "utf8")
     ).trim();
+
     expect(
       (
         await unixRequest(join(directory, "api.sock"), "/api/v1/fleet", {
@@ -310,12 +338,14 @@ test("core failure is supervised into runtime shutdown, not a detached log", asy
   const directory = await temporary();
   const f = runtimeDependencies("http://127.0.0.1:1/");
   const controller = new AbortController();
+
   const running = Effect.runPromise(
     serve(runtimeConfig(directory), log, controller.signal, f.dependencies),
   ).then(
     () => "resolved",
     () => "failed",
   );
+
   try {
     await until(async () => (await readReady(directory)) !== null);
     const disk = new Database(join(directory, "notify.sqlite"));
@@ -336,30 +366,38 @@ test("live reload revokes a retained row; failed candidate cannot advance CURREN
   const config = runtimeConfig(directory);
   const first = Promise.withResolvers<void>();
   let sends = 0;
+
   const fake = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch() {
       sends++;
       first.resolve();
+
       return new Response("unknown", { status: 500 });
     },
   });
+
   const f = runtimeDependencies(fake.url.href);
+
   const environment = {
     APP_TOKEN: "xapp-fixture",
     BOT_TOKEN: "xoxb-fixture",
     NOTIFY_CI: producerToken,
   };
+
   const reload = new ConfigReload(
     { config, environment },
     () => readReloadCandidate(path, environment, true),
     log,
   );
+
   const controller = new AbortController();
+
   const running = Effect.runPromise(
     serve(config, log, controller.signal, f.dependencies, reload),
   );
+
   try {
     await until(async () => (await readReady(directory)) !== null);
     expect((await unixRequest(join(directory, "api.sock"))).status).toBe(202);
@@ -375,6 +413,7 @@ test("live reload revokes a retained row; failed candidate cannot advance CURREN
     expect(reload.current.config).toBe(config);
     const denied = structuredClone(config);
     const sender = denied.bots[0];
+
     if (!sender) throw new Error("Missing fixture bot");
     sender.access.deniedChannels = ["C123"];
     await writeFile(path, JSON.stringify(denied));
@@ -383,6 +422,7 @@ test("live reload revokes a retained row; failed candidate cannot advance CURREN
       const disk = new Database(join(directory, "notify.sqlite"), {
         readonly: true,
       });
+
       try {
         return (
           disk
@@ -408,16 +448,20 @@ test("shutdown aborts underlying Slack HTTP and retains store/lock until actual 
   const aborted = Promise.withResolvers<void>();
   const disconnected = Promise.withResolvers<void>();
   const settle = Promise.withResolvers<void>();
+
   const fake = createServer((request, response) => {
     request.resume();
     request.on("end", () => started.resolve());
     response.on("close", () => disconnected.resolve());
   });
+
   await new Promise<void>((resolve) => fake.listen(0, "127.0.0.1", resolve));
   const address = fake.address();
+
   if (!address || typeof address === "string")
     throw new Error("Missing fixture port");
   const url = `http://127.0.0.1:${address.port}/`;
+
   const real = new SlackConnection("fixture-app", "fixture-bot", log, {
     slackApiUrl: url,
     fetch: async (url, init) => {
@@ -430,8 +474,10 @@ test("shutdown aborts underlying Slack HTTP and retains store/lock until actual 
       }
     },
   });
+
   const f = runtimeDependencies(url);
   let backendClosed = false;
+
   const dependencies = {
     ...f.dependencies,
     slack: (
@@ -446,6 +492,7 @@ test("shutdown aborts underlying Slack HTTP and retains store/lock until actual 
       context: Parameters<typeof f.dependencies.backend>[1],
     ) => {
       const backend = await f.dependencies.backend(config, context);
+
       return {
         ...backend,
         close: async () => {
@@ -455,10 +502,13 @@ test("shutdown aborts underlying Slack HTTP and retains store/lock until actual 
       };
     },
   };
+
   const controller = new AbortController();
+
   const running = Effect.runPromise(
     serve(runtimeConfig(directory), log, controller.signal, dependencies),
   );
+
   try {
     await until(async () => (await readReady(directory)) !== null);
     expect((await unixRequest(join(directory, "api.sock"))).status).toBe(202);
@@ -470,9 +520,11 @@ test("shutdown aborts underlying Slack HTTP and retains store/lock until actual 
       "already using",
     );
     expect(backendClosed).toBe(false);
+
     const disk = new Database(join(directory, "notify.sqlite"), {
       readonly: true,
     });
+
     expect(
       disk.query<{ state: string }, []>("SELECT state FROM notify_outbox").get()
         ?.state,
@@ -483,9 +535,11 @@ test("shutdown aborts underlying Slack HTTP and retains store/lock until actual 
     expect(backendClosed).toBe(true);
     const lock = lockInstance(join(directory, "instance.sqlite"));
     lock.close();
+
     const retained = new Database(join(directory, "notify.sqlite"), {
       readonly: true,
     });
+
     expect(
       retained
         .query<{ attempts: number; state: string }, []>(
@@ -505,6 +559,7 @@ test("shutdown aborts underlying Slack HTTP and retains store/lock until actual 
 
 test("nonsettling real child holds instance lock until referenced hard exit; retained attempt reopens", async () => {
   const directory = await temporary();
+
   const child = Bun.spawn(
     [process.execPath, "tests/notify-runtime-fixture.ts", directory],
     {
@@ -521,11 +576,14 @@ test("nonsettling real child holds instance lock until referenced hard exit; ret
       stderr: "pipe",
     },
   );
+
   const messages: string[] = [];
+
   const output = (async () => {
     for await (const bytes of child.stdout)
       messages.push(new TextDecoder().decode(bytes));
   })();
+
   try {
     await until(() => messages.join("").includes("ready"));
     expect(
@@ -549,9 +607,11 @@ test("nonsettling real child holds instance lock until referenced hard exit; ret
     await output;
     const lock = lockInstance(join(directory, "instance.sqlite"));
     lock.close();
+
     const disk = new Database(join(directory, "notify.sqlite"), {
       readonly: true,
     });
+
     expect(
       disk
         .query<{ state: string; attempts: number }, []>(
@@ -559,17 +619,21 @@ test("nonsettling real child holds instance lock until referenced hard exit; ret
         )
         .all(),
     ).toEqual([{ state: "leased", attempts: 1 }]);
+
     const admittedAt = disk
       .query<{ admittedAt: number }, []>("SELECT admittedAt FROM notify_outbox")
       .get()?.admittedAt;
+
     disk.close();
     const recovered = new NotifyStore(join(directory, "notify.sqlite"));
+
     try {
       recovered.recover(Date.now());
       const claim = recovered.claim(Date.now());
       expect(claim?.attempts).toBe(2);
       expect(claim?.admittedAt).toBe(admittedAt);
       expect(claim?.payload.title).toBe("Retained");
+
       if (claim) recovered.settle(claim, { state: "unknown" }, Date.now());
     } finally {
       recovered.close();

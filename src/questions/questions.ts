@@ -28,6 +28,7 @@ const option = settingsStruct({
     Schema.String.check(Schema.isMaxCodePoints(1500)),
   ),
 });
+
 const fieldBase = {
   key: Schema.String.check(settingsPattern(/^q[0-9]{1,2}$/)),
   title: Schema.optional(Schema.String.check(Schema.isMaxCodePoints(300))),
@@ -38,6 +39,7 @@ const fieldBase = {
   hidden: Schema.optional(Schema.Literal(false)),
   custom: Schema.optional(Schema.Boolean),
 };
+
 const field = settingsDiscriminatedUnion("type", [
   settingsStruct({
     ...fieldBase,
@@ -97,6 +99,7 @@ export const nativeQuestionSchema = settingsStruct({
         code: "custom",
         message: "Duplicate question fields",
       });
+
     if (
       value.fields.some(
         (f) =>
@@ -108,8 +111,10 @@ export const nativeQuestionSchema = settingsStruct({
         code: "custom",
         message: "Ambiguous question options",
       });
+
     if (value.fields.some((f) => f.options?.length === 0 && !f.custom))
       context.addIssue({ code: "custom", message: "Empty closed question" });
+
     const text = [
       value.title,
       ...value.fields.flatMap((f) => [
@@ -122,6 +127,7 @@ export const nativeQuestionSchema = settingsStruct({
         ]),
       ]),
     ].join("\n");
+
     if (
       Buffer.byteLength(text) > 12_000 ||
       containsCredential(text) ||
@@ -135,7 +141,9 @@ export const nativeQuestionSchema = settingsStruct({
       });
   }),
 );
+
 export type NativeQuestion = typeof nativeQuestionSchema.Type;
+
 /** Verified question-tool ownership, with unsafe/unsupported content omitted. */
 export type UnsupportedQuestion = Pick<
   NativeQuestion,
@@ -146,8 +154,11 @@ export type UnsupportedQuestion = Pick<
   | "toolCallID"
   | "fingerprint"
 > & { unsupported: true };
+
 export type PendingQuestion = NativeQuestion | UnsupportedQuestion;
+
 export type QuestionAnswer = Record<string, string | string[]>;
+
 export type QuestionOffer = {
   token: string;
   botKey: string;
@@ -169,14 +180,17 @@ export type QuestionOffer = {
 export function questionFingerprint(value: unknown): string {
   const canonical = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(canonical);
+
     if (v !== null && typeof v === "object")
       return Object.fromEntries(
         Object.entries(v)
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([k, item]) => [k, canonical(item)]),
       );
+
     return v;
   };
+
   return createHash("sha256")
     .update(JSON.stringify(canonical(value)))
     .digest("hex");
@@ -196,12 +210,15 @@ export function questionControl(text: string): QuestionControl | undefined {
     /^([^\s:,]{1,64})[:,]\s+(answer|cancel-question|renew-question)\s+([a-f0-9]{32})(?:\s+([^\r\n]{1,4000}))?\s*$/i.exec(
       text,
     );
+
   if (!match) {
     const malformed =
       /^([^\s:,]{1,64})[:,]\s+(?:answer|cancel-question|renew-question)\s+(\S+)/i.exec(
         text,
       );
+
     const candidate = malformed?.[2];
+
     if (
       malformed &&
       candidate &&
@@ -213,8 +230,10 @@ export function questionControl(text: string): QuestionControl | undefined {
         answer: undefined,
         invalid: true,
       };
+
     return;
   }
+
   return {
     target: (match[1] ?? "").replace(/^@/, ""),
     token: match[3]?.toLowerCase() ?? "",
@@ -232,13 +251,17 @@ export function questionAnswer(
   if (text.length > 4000 || containsCredential(text))
     throw new Error("Unsafe question answer");
   let input: unknown;
+
   if (question.fields.length === 1 && !text.trimStart().startsWith("{")) {
     const f = question.fields[0];
+
     if (!f) throw new Error("Missing question field");
     const choices = text.split(",").map((v) => v.trim());
+
     const selected = choices.map((v) =>
       /^\d+$/.test(v) ? f.options?.[Number(v) - 1]?.value : undefined,
     );
+
     const value = selected.every((v) => v !== undefined)
       ? f.type === "multiselect"
         ? selected
@@ -248,8 +271,10 @@ export function questionAnswer(
       : f.type === "string"
         ? text
         : choices;
+
     input = { [f.key]: value };
   } else input = JSON.parse(text);
+
   const parsed = Schema.decodeUnknownSync(
     settingsRecord(
       Schema.String,
@@ -261,39 +286,47 @@ export function questionAnswer(
       ]),
     ),
   )(input);
+
   if (
     Object.keys(parsed).some(
       (key) => !question.fields.some((f) => f.key === key),
     )
   )
     throw new Error("Unknown answer field");
+
   for (const f of question.fields) {
     const value = parsed[f.key];
+
     if (value === undefined) {
       if (f.required !== false) throw new Error("Missing answer field");
       continue;
     }
+
     if (f.type === "string" ? typeof value !== "string" : !Array.isArray(value))
       throw new Error("Wrong answer type");
     const values = typeof value === "string" ? [value] : value;
+
     if (
       new Set(values).size !== values.length ||
       values.some((v) => !v.trim() || containsCredential(v))
     )
       throw new Error("Invalid answer");
     const options = f.options;
+
     if (
       options &&
       !f.custom &&
       values.some((v) => !options.some((o) => o.value === v))
     )
       throw new Error("Unknown answer choice");
+
     if (
       f.type === "multiselect" &&
       (values.length < (f.minItems ?? 1) || values.length > (f.maxItems ?? 20))
     )
       throw new Error("Wrong selection count");
   }
+
   return parsed;
 }
 
@@ -302,6 +335,7 @@ function questionFields(question: NativeQuestion) {
     "OpenCode needs clarification (not a permission approval):",
     question.title,
   ];
+
   for (const f of question.fields) {
     lines.push(
       `${f.key}: ${[f.title, f.description].filter(Boolean).join(" — ")}`,
@@ -312,6 +346,7 @@ function questionFields(question: NativeQuestion) {
       );
     });
   }
+
   return lines;
 }
 
@@ -324,6 +359,7 @@ export function questionText(
   lines.push(
     `Only the original requester may reply in this thread: ${account}: answer ${token} ${question.fields.length === 1 ? "<choice number or answer>" : '<JSON object, for example {"q0":"choice"}>'}`,
   );
+
   if (question.fields.some((f) => f.type === "multiselect"))
     lines.push(
       "For multiple choices use comma-separated numbers; a JSON answer uses native option values.",
@@ -334,8 +370,10 @@ export function questionText(
   );
   lines.push("Valid for 30 minutes. Never send credentials.");
   const text = lines.join("\n");
+
   if (Buffer.byteLength(text) > 16_000)
     throw new Error("Question is too large for IRC");
+
   return text;
 }
 
@@ -486,6 +524,7 @@ export class Questions {
     offer: Pick<QuestionOffer, "jobID" | "inputID" | "sessionID">,
   ): Job | undefined {
     const job = this.store.jobByInput(this.key, offer.inputID);
+
     if (
       !job ||
       job.id !== offer.jobID ||
@@ -499,6 +538,7 @@ export class Questions {
         offer.sessionID
     )
       return;
+
     return job;
   }
 
@@ -507,6 +547,7 @@ export class Questions {
     if (!offer.recovering && offer.state !== "attempted" && !offer.outcome)
       return;
     const job = this.store.jobByInput(this.key, offer.inputID);
+
     if (
       !job ||
       job.id !== offer.jobID ||
@@ -519,23 +560,28 @@ export class Questions {
         offer.sessionID
     )
       return;
+
     return job;
   }
 
   /** New holds need pending forms; established holds preserve their exact input. */
   async recover(signal: AbortSignal): Promise<string[]> {
     const retained: string[] = [];
+
     for (const offer of this.store.questions.questionOffers(this.key, true)) {
       // A form may disappear while its original input still runs. Preserve an
-      // established hold through that unknown interval without restoring any
-      // permission to answer or notify the original requester.
+      // Established hold through that unknown interval without restoring any
+      // Permission to answer or notify the original requester.
       if (this.establishedWaiter(offer)) {
         this.store.questions.questionRecovering(offer.token);
         retained.push(offer.inputID);
         continue;
       }
+
       const job = this.owner(offer);
+
       if (job?.status !== "running" || offer.state === "closed") continue;
+
       if (
         await this.backend.questionBelongsToInput?.(
           offer.sessionID,
@@ -549,6 +595,7 @@ export class Questions {
         retained.push(offer.inputID);
       }
     }
+
     return retained;
   }
 
@@ -557,9 +604,11 @@ export class Questions {
     const offer = this.store.questions
       .questionOffers(this.key)
       .find((o) => o.jobID === jobID && o.recovering);
+
     if (!offer || !this.backend.interruptInput) return false;
     const job = this.establishedWaiter(offer);
     const port = this.port();
+
     if (
       !job ||
       !this.store.questions.questionSourceCancelled(offer) ||
@@ -568,10 +617,12 @@ export class Questions {
     )
       return false;
     signal.throwIfAborted();
+
     if (!this.store.questions.claimQuestionStop(offer)) return false;
     // The adapter revalidates exact input ownership. Never fall back to a
-    // whole-session interruption, and never replay an uncertain Stop on boot.
+    // Whole-session interruption, and never replay an uncertain Stop on boot.
     await this.backend.interruptInput(offer.sessionID, offer.inputID, signal);
+
     return true;
   }
 
@@ -582,6 +633,7 @@ export class Questions {
 
   private async checkBackground(signal: AbortSignal) {
     const route = this.port()?.operator;
+
     if (
       !route ||
       !this.backend.pinnedBackgroundQuestions ||
@@ -590,22 +642,29 @@ export class Questions {
       return;
     this.nextBackgroundPoll = Date.now() + 10_000;
     const pending = await this.backend.pinnedBackgroundQuestions(signal);
+
     for (const row of this.store.backgroundCases.unsettled(this.key)) {
       this.store.backgroundCases.checked(row.reference);
+
       if (pending.some((q) => q.id === row.form && q.sessionID === row.session))
         continue;
+
       const outcome = await this.backend
         .backgroundOutcome?.(row.session, row.form, row.fingerprint, signal)
         .catch(() => undefined);
+
       if (outcome) this.store.backgroundCases.close(row.reference, outcome);
     }
+
     for (const q of pending) {
       if (this.store.jobByInput(this.key, q.inputID)) continue;
+
       const found = this.store.backgroundCases.remember(
         this.key,
         route.account,
         q,
       );
+
       if (
         !found ||
         found.owner !== route.account ||
@@ -614,12 +673,15 @@ export class Questions {
         !route.ready()
       )
         continue;
+
       const allowed = () =>
         !signal.aborted && this.port()?.operator === route && route.ready();
+
       await route.send(
         `An earlier task has a question. Send show ${found.reference} here to answer it.`,
         allowed,
       );
+
       if (allowed()) this.store.backgroundCases.alerted(found.reference);
     }
   }
@@ -632,10 +694,13 @@ export class Questions {
   ) {
     const control = operatorControl(text);
     const route = this.port()?.operator;
+
     if (!control || !route || actor !== route.account || !route.ready()) return;
     const key = control[2]?.toLowerCase() ?? "";
+
     if (this.inFlight.has(key)) return;
     this.inFlight.add(key);
+
     try {
       await this.operatorControl(actor, control, route, signal, connected);
     } finally {
@@ -653,6 +718,7 @@ export class Questions {
     const answering = control[1]?.toLowerCase() === "answer";
     const value = control[2] ?? "";
     const found = this.store.backgroundCases.find(this.key, value, answering);
+
     if (
       !found ||
       found.owner !== actor ||
@@ -667,14 +733,17 @@ export class Questions {
             this.port()?.operator === route &&
             route.ready(),
         );
+
       return;
     }
+
     const allowed = () =>
       connected() &&
       !this.lifetime.aborted &&
       this.port()?.operator === route &&
       route.ready() &&
       !this.store.jobByInput(this.key, found.input);
+
     const q = (await this.backend.pinnedBackgroundQuestions?.(signal))?.find(
       (v) =>
         v.id === found.form &&
@@ -682,7 +751,9 @@ export class Questions {
         v.inputID === found.input &&
         v.fingerprint === found.fingerprint,
     );
+
     if (!allowed()) return;
+
     if (
       !q ||
       found.state === "attempted" ||
@@ -693,12 +764,16 @@ export class Questions {
         "This question is no longer available for an IRC answer.",
         allowed,
       );
+
       return;
     }
+
     if (!answering) {
       const token = this.store.backgroundCases.show(found.reference);
+
       if (token) {
         const lines = questionFields(q);
+
         if (q.fields.some((field) => field.type === "multiselect"))
           lines.push("Use comma-separated numbers for multiple choices.");
         lines.push(
@@ -712,9 +787,12 @@ export class Questions {
           allowed,
         );
       }
+
       return;
     }
+
     let answer: QuestionAnswer;
+
     try {
       answer = questionAnswer(q, control[3] ?? "");
     } catch {
@@ -722,23 +800,30 @@ export class Questions {
         "Use a displayed choice or a supported field value.",
         allowed,
       );
+
       return;
     }
+
     if (!this.backend.replyQuestion || !allowed()) return;
+
     if (found.expires <= Date.now()) {
       await route.send(
         `Use show ${found.reference} to get a fresh answer token.`,
         allowed,
       );
+
       return;
     }
+
     let claimed = false;
+
     try {
       await this.backend.replyQuestion(q, answer, signal, () => {
         claimed =
           !signal.aborted &&
           allowed() &&
           this.store.backgroundCases.attempt(value);
+
         return claimed;
       });
     } catch {
@@ -748,8 +833,10 @@ export class Questions {
             "The answer was not submitted. Show the current question before answering.",
             allowed,
           );
+
         return;
       }
+
       const outcome = await this.backend
         .backgroundOutcome?.(
           found.session,
@@ -758,20 +845,25 @@ export class Questions {
           AbortSignal.any([this.lifetime, AbortSignal.timeout(3000)]),
         )
         .catch(() => undefined);
+
       if (outcome) {
         this.store.backgroundCases.close(found.reference, outcome);
         await route.send(
           `OpenCode reports the question was ${outcome}.`,
           allowed,
         );
+
         return;
       }
+
       await route.send(
         "Answer delivery is unconfirmed. Check OpenCode before taking further action.",
         allowed,
       );
+
       return;
     }
+
     this.store.backgroundCases.close(found.reference, "answered");
     await route.send("OpenCode accepted your answer.", allowed);
   }
@@ -786,8 +878,10 @@ export class Questions {
   private async pollOwned(signal: AbortSignal) {
     const offers = this.store.questions.questionOffers(this.key);
     const tokens = new Set(offers.map((o) => o.token));
+
     for (const token of this.noticeFailures.keys())
       if (!tokens.has(token)) this.noticeFailures.delete(token);
+
     const sessions = [
       ...new Set([
         ...this.store.questions.activeQuestionSessions(
@@ -797,25 +891,33 @@ export class Questions {
         ...offers.map((o) => o.sessionID),
       ]),
     ].sort();
+
     for (const session of this.failures.keys())
       if (!sessions.includes(session)) this.failures.delete(session);
+
     for (const session of this.missing.keys())
       if (!sessions.includes(session)) this.missing.delete(session);
+
     if (!sessions.length) return;
+
     const selected = Array.from(
       { length: Math.min(16, sessions.length) },
       (_, i) => sessions[(this.offset + i) % sessions.length],
     ).filter((s): s is string => s !== undefined);
+
     let failed = false;
+
     for (const session of selected) {
       // Advance before awaiting: even a session exhausting the whole poll's
-      // deadline cannot monopolise the first position after every timeout.
+      // Deadline cannot monopolise the first position after every timeout.
       this.offset = (sessions.indexOf(session) + 1) % sessions.length;
+
       if (
         (this.missing.get(session) ?? 0) > Date.now() ||
         (this.failures.get(session)?.until ?? 0) > Date.now()
       )
         continue;
+
       try {
         await this.pollSession(session, signal);
         this.failures.delete(session);
@@ -829,15 +931,19 @@ export class Questions {
         failed = true;
       }
     }
+
     for (const session of this.failures.keys())
       if (!sessions.includes(session)) this.failures.delete(session);
+
     for (const session of this.missing.keys())
       if (!sessions.includes(session)) this.missing.delete(session);
+
     if (failed) throw new Error("Native clarification session unavailable");
   }
 
   private async pollSession(session: string, signal: AbortSignal) {
     let missingSession = false;
+
     for (const offer of this.store.questions
       .questionOffers(this.key)
       .filter((o) => o.sessionID === session)) {
@@ -848,8 +954,10 @@ export class Questions {
           this.store.questions.questionOutcomeNotified(offer.token);
           this.store.questions.retireQuestion(offer.token);
         }
+
         continue;
       }
+
       if (
         offer.state === "attempted" &&
         !offer.outcome &&
@@ -860,6 +968,7 @@ export class Questions {
         this.store.questions.questionByToken(this.key, offer.token) ?? offer,
       );
     }
+
     if (
       !this.store.questions
         .activeQuestionSessions(this.key, this.backend.sessionID)
@@ -873,21 +982,26 @@ export class Questions {
     )
       return;
     const settings = await this.port()?.settings?.();
+
     // Disabling controls revokes publication and writes, not settlement reads.
     // Recovered inputs have no live prompt worker to release their queue hold.
     const pending =
       settings && !settings.enabled
         ? []
         : ((await this.backend.pendingQuestions?.(session, signal)) ?? []);
+
     if (pending.length > 16)
       throw new Error("Too many native clarification questions");
+
     for (const raw of pending) {
       const question =
         "unsupported" in raw
           ? raw
           : Schema.decodeUnknownSync(nativeQuestionSchema)(raw);
+
       if (question.sessionID !== session) continue;
       const job = this.store.jobByInput(this.key, question.inputID);
+
       if (
         job?.status !== "running" ||
         !this.owner({
@@ -897,6 +1011,7 @@ export class Questions {
         })
       )
         continue;
+
       const offer = this.store.offerQuestion({
         token: randomBytes(16).toString("hex"),
         botKey: this.key,
@@ -910,6 +1025,7 @@ export class Questions {
         notified: 0,
         recovering: 0,
       });
+
       if (
         settings &&
         offer?.state === "offered" &&
@@ -920,12 +1036,14 @@ export class Questions {
         await this.expire(job, offer, question, signal);
         continue;
       }
+
       if (
         offer?.state !== "offered" ||
         offer.notified ||
         ((offer.publicationStarted ?? 0) !== 0 && offer.expires <= Date.now())
       )
         continue;
+
       if (
         !(await this.backend.questionBelongsToInput?.(
           session,
@@ -938,28 +1056,35 @@ export class Questions {
         continue;
       await this.publishOffer(job, offer, question, signal);
     }
+
     for (const offer of this.store.questions
       .questionOffers(this.key)
       .filter((o) => o.sessionID === session)) {
       if (pending.some((q) => q.id === offer.formID)) continue;
+
       // A filtered list is not proof of absence. Only the native form API can
-      // authoritatively report settlement; transient/unsupported forms stay live.
+      // Authoritatively report settlement; transient/unsupported forms stay live.
       const state = await this.backend.questionState?.(
         session,
         offer.formID,
         signal,
       );
+
       if (state !== "resolved" && state !== "missing-session") continue;
+
       // The form may settle before its reply request returns. Keep the durable
-      // attempt writable until that request records its success/uncertainty.
+      // Attempt writable until that request records its success/uncertainty.
       // Check after the awaited state read: an answer may start during it.
       if (this.inFlight.has(offer.token)) continue;
       this.store.questions.closeQuestion(offer.token);
+
       if (state === "missing-session") {
         missingSession = true;
+
         if (offer.recovering) this.store.failQuestionRecovery(offer);
         continue;
       }
+
       if (
         offer.recovering &&
         (await this.backend.questionInputSettled?.(
@@ -972,9 +1097,10 @@ export class Questions {
         this.settled(session);
       }
     }
+
     // Commit terminal session caching only after the entire pass succeeds and
-    // every offer/outcome is handled. An in-flight reply or later read failure
-    // must still get another pass, even after an earlier missing-session result.
+    // Every offer/outcome is handled. An in-flight reply or later read failure
+    // Must still get another pass, even after an earlier missing-session result.
     if (
       missingSession &&
       pending.length === 0 &&
@@ -994,6 +1120,7 @@ export class Questions {
   ) {
     const port = this.port();
     let current = this.store.questions.questionByToken(this.key, offer.token);
+
     if (
       !port ||
       this.offering.has(offer.token) ||
@@ -1005,17 +1132,21 @@ export class Questions {
     )
       return;
     this.offering.add(offer.token);
+
     try {
       // Start the reply window only when a first publication can be attempted.
       // Persist before sending: an ACK loss must not silently renew a seen token.
       const settings = await port.settings?.();
+
       if (settings && !settings.enabled) return;
       current = this.store.questions.startQuestionPublication(
         this.key,
         offer.token,
         settings?.timeoutMs,
       );
+
       if (!current) return;
+
       if (port.publishQuestion && !("unsupported" in question)) {
         await port.publishQuestion(
           job,
@@ -1055,6 +1186,7 @@ export class Questions {
       return;
     const settings = await this.port()?.settings?.();
     signal.throwIfAborted();
+
     if (
       (settings && !settings.enabled) ||
       !this.owner(offer) ||
@@ -1062,6 +1194,7 @@ export class Questions {
     )
       return;
     this.inFlight.add(offer.token);
+
     try {
       await this.backend.replyQuestion?.(question, null, signal);
       this.store.questions.questionOutcome(offer.token, "cancelled");
@@ -1070,6 +1203,7 @@ export class Questions {
     } finally {
       this.inFlight.delete(offer.token);
     }
+
     await this.port()?.publish(
       job,
       "Clarification timed out; cancellation submitted to OpenCode. Check the native form if its outcome is uncertain.",
@@ -1090,21 +1224,26 @@ export class Questions {
       return;
     const job = this.owner(offer);
     const port = this.port();
+
     if (!job || !port) {
       // Policy loss is a delivery denial, not permission to retain an unusable
-      // notice in every poll. Preserve the outcome and any native recovery hold.
+      // Notice in every poll. Preserve the outcome and any native recovery hold.
       this.store.questions.questionOutcomeNotified(offer.token);
       this.noticeFailures.delete(offer.token);
+
       if (!this.inFlight.has(offer.token))
         this.store.questions.retireQuestion(offer.token);
+
       return;
     }
+
     if (
       port.ready?.(job) === false ||
       (this.noticeFailures.get(offer.token)?.until ?? 0) > Date.now()
     )
       return;
     this.notifying.add(offer.token);
+
     try {
       await port.publish(
         job,
@@ -1117,11 +1256,12 @@ export class Questions {
       this.noticeFailures.delete(offer.token);
     } catch {
       // A lost ACK may repeat a notice, but never flood each poll or replay the
-      // native answer. Retry delivery with the same bounded session backoff.
+      // Native answer. Retry delivery with the same bounded session backoff.
       const count = Math.min(
         6,
         (this.noticeFailures.get(offer.token)?.count ?? 0) + 1,
       );
+
       this.noticeFailures.set(offer.token, {
         count,
         until: Date.now() + Math.min(60_000, 1000 * 2 ** count),
@@ -1137,8 +1277,10 @@ export class Questions {
     signal: AbortSignal,
   ) {
     const settings = await this.port()?.settings?.();
+
     if (settings && !settings.enabled) return;
     const offer = this.store.questions.questionByToken(this.key, control.token);
+
     if (
       control.invalid ||
       offer?.state !== "offered" ||
@@ -1146,6 +1288,7 @@ export class Questions {
     )
       return;
     const job = this.owner(offer);
+
     if (
       job?.status !== "running" ||
       !(
@@ -1165,6 +1308,7 @@ export class Questions {
       !this.port()?.human(input.user)
     )
       return;
+
     const question = (
       await this.backend.pendingQuestions?.(offer.sessionID, signal)
     )?.find(
@@ -1174,6 +1318,7 @@ export class Questions {
         q.inputID === offer.inputID &&
         q.fingerprint === offer.fingerprint,
     );
+
     if (
       !question ||
       "unsupported" in question ||
@@ -1186,16 +1331,20 @@ export class Questions {
       ))
     )
       return;
+
     if (control.renew) {
       if (offer.expires > Date.now()) return;
       const port = this.port();
+
       if (!port || !this.owner(offer)) return;
       signal.throwIfAborted();
+
       const fresh = this.store.questions.renewQuestion(
         offer.token,
         randomBytes(16).toString("hex"),
         Date.now(),
       );
+
       if (!fresh) return;
       await this.publishOffer(
         job,
@@ -1204,9 +1353,12 @@ export class Questions {
         signal,
         "Previous clarification token expired; use this new token.\n",
       );
+
       return;
     }
+
     let answer: QuestionAnswer | null;
+
     try {
       answer =
         control.answer === null
@@ -1221,14 +1373,19 @@ export class Questions {
         "Invalid clarification answer. Use the displayed choices or JSON field values; no credentials.",
         () => !signal.aborted && !!this.owner(offer),
       );
+
       return;
     }
+
     const currentSettings = await this.port()?.settings?.();
+
     const actorAllowed =
       input.user === job.user ||
       (currentSettings?.answer === "allowed" &&
         (await this.port()?.answerAllowed?.(input.user, job)));
+
     signal.throwIfAborted();
+
     if (
       (currentSettings && !currentSettings.enabled) ||
       !actorAllowed ||
@@ -1237,6 +1394,7 @@ export class Questions {
     )
       return;
     this.inFlight.add(offer.token);
+
     try {
       if (!this.backend.replyQuestion)
         throw new Error("Question reply unavailable");
@@ -1250,6 +1408,7 @@ export class Questions {
     } finally {
       this.inFlight.delete(offer.token);
     }
+
     await this.notifyOutcome(
       this.store.questions.questionByToken(this.key, offer.token) ?? offer,
     );

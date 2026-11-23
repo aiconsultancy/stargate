@@ -16,9 +16,10 @@ import {
 } from "../config/settings-schema";
 
 // IRC names are matched without case. Accounts and nicks stay within the
-// common RFC 2812 nick alphabet; channels use `#` or `&`, no spaces/commas.
+// Common RFC 2812 nick alphabet; channels use `#` or `&`, no spaces/commas.
 const ircNickPattern = /^[A-Za-z[\]\\`_^{|}][A-Za-z0-9[\]\\`_^{|}-]{0,31}$/;
 export const ircAccount = Schema.String.check(settingsPattern(ircNickPattern));
+
 // At most 50 bytes (a common CHANNELLEN); JOIN lines are batched to 512.
 export const ircChannel = Schema.String.check(
   settingsPattern(/^[#&][^\s,:]{1,49}$/),
@@ -34,6 +35,7 @@ export const ircChannel = Schema.String.check(
       { message: "IRC channel names cannot contain control characters" },
     ),
   );
+
 const loopbackHosts = new Set(["127.0.0.1", "::1"]);
 
 export const defaultAllCallWords = ["all hands", "all crew", "everyone"];
@@ -64,6 +66,7 @@ const ircServerSchema = settingsStruct({
       settingsRefine(
         (value) => {
           const url = new URL(value);
+
           return (
             !url.username &&
             !url.password &&
@@ -122,13 +125,14 @@ const ircFeaturesSchema = settingsStruct({
 
   /** CHATHISTORY catch-up of missed messages (persisted cursor). */
   catchUp: Schema.Boolean.pipe(settingsDefault(true)),
-  /** draft/persistence: ask the server to keep the account always-on. */
+  /** Draft/persistence: ask the server to keep the account always-on. */
   alwaysOn: Schema.Boolean.pipe(settingsDefault(true)),
   /** Set the ISUPPORT BOT user mode (for example +B). */
   botMode: Schema.Boolean.pipe(settingsDefault(true)),
-  /** draft/read-marker: MARKREAD after each accepted message. */
+  /** Draft/read-marker: MARKREAD after each accepted message. */
   readMarker: Schema.Boolean.pipe(settingsDefault(true)),
 });
+
 export const ircFeatureDefaults = {
   steerThreadFollowUps: false,
   filesIn: true,
@@ -148,6 +152,7 @@ type FleetPermission = {
   resource: string;
   effect: "allow" | "deny" | "ask";
 };
+
 type IrcBackend =
   | {
       type: "opencode";
@@ -155,6 +160,7 @@ type IrcBackend =
       permissions: FleetPermission[];
     }
   | { type: "pi-durable" | "claude" | "codex" | "module" };
+
 type RequiredCodec<T, E> = Schema.Codec<T, E> & {
   readonly "~type.optionality": "required";
 };
@@ -400,8 +406,10 @@ export function createIrcConfig<
 
   /** Persisted operator configuration: fleet-derived fields remain absent. */
   type IrcConfig = typeof ircConfiguredSchema.Type;
+
   function ircFeedbackDefaults(config: IrcConfig) {
     const native = config.backend.type === "opencode";
+
     return {
       questions: native && !!config.fleetPolicy?.humanAccounts.length,
       crewQuestionHandoff:
@@ -423,9 +431,11 @@ export function createIrcConfig<
         (account) => fold(account),
       ),
     );
+
     const enrolled = new Set(
       config.fleetPolicy?.agentAccounts.map((account) => fold(account)) ?? [],
     );
+
     return (
       config.fleetControl?.targets.filter(
         (target) =>
@@ -442,7 +452,9 @@ export function createIrcConfig<
       ...config.access,
       peerCaptains: config.access.peerCaptains ?? [],
     };
+
     const defaults = ircFeedbackDefaults(config);
+
     const features = {
       ...config.features,
       questions: config.features.questions ?? defaults.questions,
@@ -451,7 +463,9 @@ export function createIrcConfig<
       liveProgress: config.features.liveProgress ?? defaults.liveProgress,
       fleetTyping: config.features.fleetTyping ?? defaults.fleetTyping,
     };
+
     const metadata = config.fleetChannels;
+
     if (
       !metadata ||
       !config.fleetPolicy ||
@@ -460,12 +474,14 @@ export function createIrcConfig<
     )
       return { ...config, access, features };
     const roster = fleetRoster(config);
+
     // Explicit legacy wake configuration retains its complete admission policy.
     if (
       access.channelRequests === undefined &&
       access.wakeChannels === undefined
     )
       access.channelRequests = "nick-mention";
+
     if (
       access.humanWakeChannels === undefined &&
       access.wakeChannels === undefined
@@ -477,16 +493,21 @@ export function createIrcConfig<
               { channel: metadata.home, replies: "all" },
               { channel: metadata.command, replies: "participating" },
             ];
+
     if (config.access.peerCaptains === undefined) {
       const seen = new Set<string>();
       access.peerCaptains = roster.flatMap((target) => {
         const key = fold(target.account);
+
         if (seen.has(key)) return [];
         seen.add(key);
+
         return [target.account];
       });
     }
+
     const seen = new Set<string>();
+
     const channels = [
       ...config.channels,
       metadata.home,
@@ -496,16 +517,20 @@ export function createIrcConfig<
         .map((target) => target.channel),
     ].filter((channel) => {
       const key = fold(channel);
+
       if (seen.has(key)) return false;
       seen.add(key);
+
       return true;
     });
+
     return { ...config, access, channels, features };
   }
 
   const ircSchema = ircConfiguredSchema.check(
     settingsCheck((configured, context) => {
       const irc = effectiveIrcConfig(configured);
+
       if (irc.fleetChannels) {
         if (
           !irc.fleetPolicy ||
@@ -537,6 +562,7 @@ export function createIrcConfig<
                 message:
                   "Derived fleet membership requires a valid IRC channel",
               });
+
           if (
             !Result.isSuccess(
               Schema.decodeUnknownResult(
@@ -552,6 +578,7 @@ export function createIrcConfig<
               message:
                 "Fleet IRC peer defaults must be at most 50 valid SASL accounts; configure an explicit peer list to narrow them",
             });
+
           if (irc.channels.length > 20)
             context.addIssue({
               code: "custom",
@@ -560,6 +587,7 @@ export function createIrcConfig<
             });
         }
       }
+
       if (irc.fleetControl && irc.backend.type === "opencode") {
         try {
           validateFleetPermissions(irc.backend.permissions);
@@ -572,6 +600,7 @@ export function createIrcConfig<
           });
         }
       }
+
       if (
         irc.fleetControl &&
         (!irc.fleetPolicy ||
@@ -583,6 +612,7 @@ export function createIrcConfig<
           message:
             "Fleet control needs an explicit policy and pinned OpenCode root",
         });
+
       if (
         irc.features.crewQuestionHandoff &&
         (irc.backend.type !== "opencode" || !irc.backend.sessionID)
@@ -602,6 +632,7 @@ export function createIrcConfig<
           code: "custom",
           message: "Wake channels must be joined channels",
         });
+
       if (
         irc.access.wakeChannels?.length &&
         irc.access.channelRequests === "nick-mention"
@@ -610,6 +641,7 @@ export function createIrcConfig<
           code: "custom",
           message: "Wake channels conflict with nick-mention-only admission",
         });
+
       if (
         irc.questionOperator &&
         (!irc.features.questions ||
@@ -636,6 +668,7 @@ export function createIrcConfig<
             "questionOperator requires native questions, a pinned OpenCode session and an enrolled human account",
         });
       }
+
       if (
         configured.features.questions &&
         !irc.fleetPolicy?.humanAccounts.length
@@ -645,15 +678,18 @@ export function createIrcConfig<
           message:
             "Native IRC questions require a fleet policy with explicit humanAccounts",
         });
+
       if (irc.access.humanWakeChannels?.length) {
         const keys = irc.access.humanWakeChannels.map(({ channel }) =>
           fold(channel),
         );
+
         if (!irc.fleetPolicy)
           context.addIssue({
             code: "custom",
             message: "Human wake channels require an explicit fleet policy",
           });
+
         if (
           new Set(keys).size !== keys.length ||
           keys.some(
@@ -664,61 +700,77 @@ export function createIrcConfig<
             code: "custom",
             message: "Human wake channels must be unique joined channels",
           });
+
         if (irc.audit && keys.includes(fold(irc.audit.channel)))
           context.addIssue({
             code: "custom",
             message: "The audit channel cannot be a human wake channel",
           });
       }
+
       const issue = (message: string) =>
         context.addIssue({ code: "custom", message });
+
       // Collisions fold with rfc1459, the widest classic CASEMAPPING, so names
-      // any server treats as equal are refused. Grants (crew ⊆ captain) only
+      // Any server treats as equal are refused. Grants (crew ⊆ captain) only
       // ASCII-lower-case, the narrowest: a name that differs under any
-      // mapping is not the captain's channel.
+      // Mapping is not the captain's channel.
       const lower = (value: string) => fold(value);
       const exact = (value: string) => fold(value, "ascii");
+
       const accounts = [
         irc.account,
         ...irc.crew.map((member) => member.account),
       ];
+
       if (new Set(accounts.map(lower)).size !== accounts.length)
         issue("Captain and crew need distinct IRC accounts");
+
       const nicks = [
         irc.nick ?? irc.account,
         ...irc.crew.map((member) => member.nick ?? member.account),
       ];
+
       if (new Set(nicks.map(lower)).size !== nicks.length)
         issue("Captain and crew need distinct IRC nicks");
+
       for (const member of [irc, ...irc.crew]) {
         if (Boolean(member.passwordEnv) === Boolean(member.clientPemFile))
           issue(
             "Set exactly one of passwordEnv (PLAIN) or clientPemFile (EXTERNAL)",
           );
+
         if (member.clientPemFile && !irc.server.tls)
           issue("IRC clientPemFile requires TLS");
       }
+
       const secrets = [
         ...(irc.passwordEnv ? [irc.passwordEnv] : []),
         ...irc.crew.flatMap((m) => (m.passwordEnv ? [m.passwordEnv] : [])),
       ];
+
       if (new Set(secrets).size !== secrets.length)
         issue("Captain and crew need separate passwordEnv variables");
+
       if (new Set(irc.crew.map((member) => member.id)).size !== irc.crew.length)
         issue("Duplicate IRC crew id");
+
       if (
         new Set(configured.channels.map(lower)).size !==
         configured.channels.length
       )
         issue("Duplicate IRC channel");
       const granted = new Set(irc.channels.map(exact));
+
       for (const member of irc.crew)
         if (!member.channels.every((channel) => granted.has(exact(channel))))
           issue(`IRC crew ${member.id} may only join captain channels`);
       const ship = new Set(accounts.map(lower));
+
       if (irc.access.peerCaptains.some((account) => ship.has(lower(account))))
         issue("peerCaptains must not list this ship's own accounts");
       const audit = irc.audit?.channel;
+
       if (
         audit !== undefined &&
         [

@@ -13,17 +13,23 @@ async function checkoutTagVersion(directory: string): Promise<string | null> {
       ["git", "-C", directory, "tag", "--points-at", "HEAD"],
       { stdout: "pipe", stderr: "ignore", stdin: "ignore" },
     );
+
     const timer = setTimeout(() => child.kill(), 2000);
+
     const [output, code] = await Promise.all([
       new Response(child.stdout).text(),
       child.exited,
     ]);
+
     clearTimeout(timer);
+
     if (code !== 0) return null;
+
     const versions = output
       .split("\n")
       .map((tag) => releaseTag.exec(tag.trim())?.[1])
       .filter((version): version is string => version !== undefined);
+
     return versions.length === 1 ? (versions[0] ?? null) : null;
   } catch {
     return null;
@@ -58,14 +64,17 @@ export function cacheOpenCodeVersion(
 ) {
   let cached: Promise<string | null> | undefined;
   let expiresAt = 0;
+
   return () => {
     if (shutdown.aborted) return Promise.resolve(null);
+
     if (!cached || performance.now() >= expiresAt) {
       expiresAt = Infinity;
       cached = probeVersion(lookup, shutdown).finally(() => {
         expiresAt = performance.now() + versionCacheMs;
       });
     }
+
     return cached;
   };
 }
@@ -78,19 +87,24 @@ async function probeVersion(
     shutdown,
     AbortSignal.timeout(versionDeadlineMs),
   ]);
+
   let abort = () => {};
+
   try {
     const deadline = new Promise<null>((resolve) => {
       abort = () => resolve(null);
       signal.addEventListener("abort", abort, { once: true });
     });
+
     const version = await Promise.race([
       deadline,
       Promise.resolve().then(() => {
         signal.throwIfAborted();
+
         return lookup(signal);
       }),
     ]);
+
     return version && /^[0-9][0-9A-Za-z.+-]{0,79}$/.test(version)
       ? version
       : null;

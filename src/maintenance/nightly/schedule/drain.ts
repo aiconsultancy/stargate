@@ -20,12 +20,15 @@ export async function waitForMaintenanceDrain(input: {
   for (;;) {
     input.signal.throwIfAborted();
     let idle = true;
+
     // Do not short circuit: every installation must be observed.
     for (const target of input.targets())
       if (!(await (input.observe ?? checkIdle)(target)).idle) idle = false;
     input.signal.throwIfAborted();
+
     if (idle && input.announced())
       return { outcome: "idle" as const, stragglers: [] };
+
     if (input.clock.now() >= input.deadlineAt)
       return {
         outcome: "deadline" as const,

@@ -14,6 +14,7 @@ import {
 export const agentIDSchema = Schema.String.check(
   settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/),
 );
+
 export function agentIDForName(name: string): string {
   return name
     .trim()
@@ -21,6 +22,7 @@ export function agentIDForName(name: string): string {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
+
 const agentFields = {
   id: agentIDSchema,
   agent: Schema.optional(agentIDSchema),
@@ -35,15 +37,21 @@ const agentFields = {
     Schema.String.check(settingsPattern(/^[^/\s#]+\/[^\s#]+(?:#[^\s#]+)?$/)),
   ),
   instructions: Schema.optional(
-    Schema.Trim.check(Schema.isMinCodePoints(1), Schema.isMaxCodePoints(64000)),
+    Schema.Trim.check(
+      Schema.isMinCodePoints(1),
+      Schema.isMaxCodePoints(64_000),
+    ),
   ),
 };
+
 const agentSchema = settingsStruct(agentFields);
+
 const historyAPISchema = settingsStruct({
   url: settingsURL.check(
     settingsRefine(
       (value) => {
         const url = new URL(value);
+
         return (
           !url.username &&
           !url.password &&
@@ -63,6 +71,7 @@ const historyAPISchema = settingsStruct({
     ),
   ),
 });
+
 export const teamSchema = settingsStruct({
   captain: agentSchema,
   historyScope: Schema.optional(Schema.Literals(["team", "project", "server"])),
@@ -103,6 +112,7 @@ export const teamSchema = settingsStruct({
             "Agent IDs must match assigned names; hidden legacy aliases are not allowed.",
         });
     }
+
     if (team.captain.id === "all")
       context.addIssue({
         code: "custom",
@@ -110,14 +120,17 @@ export const teamSchema = settingsStruct({
         message: "Captain ID collides with a reserved alias.",
       });
     const ids = new Set([team.captain.id, "captain", "all"]);
+
     const agents = [team.captain, ...team.crew].map(
       (member) => member.agent ?? member.id,
     );
+
     if (new Set(agents).size !== agents.length)
       context.addIssue({
         code: "custom",
         message: "Native agent definitions must be distinct within a team.",
       });
+
     for (const [index, member] of team.crew.entries()) {
       if (ids.has(member.id)) {
         context.addIssue({
@@ -126,6 +139,7 @@ export const teamSchema = settingsStruct({
           message: "Crew IDs must be unique and distinct from the captain.",
         });
       }
+
       if (member.backend) {
         if (member.model)
           context.addIssue({
@@ -134,12 +148,16 @@ export const teamSchema = settingsStruct({
             message: "Pi workers select their model in backend.model.",
           });
       }
+
       ids.add(member.id);
     }
   }),
 );
+
 export type Team = typeof teamSchema.Type;
+
 export type CrewMember = Team["crew"][number];
+
 export type PermissionProfile = "captain" | CrewMember["permissionProfile"];
 
 /** Definition IDs and filenames are ship-role-name; no runtime alias registry. */
@@ -155,12 +173,14 @@ export function profileTeam(team: Team, ship: string): Team {
         decodeSettings(agentIDSchema, `${ship}-${role}-${agent.id}`),
     };
   };
+
   return decodeSettings(teamSchema, {
     ...team,
     captain: qualify(team.captain, "captain"),
     crew: team.crew.map((member) => qualify(member, "crew")),
   });
 }
+
 export const defaultModelProviders = [
   "openai-proxy",
   "claude-proxy",

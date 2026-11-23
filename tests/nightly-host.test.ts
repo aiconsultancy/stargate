@@ -26,19 +26,23 @@ import { tarball } from "./tar";
 const root = await mkdtemp(join(tmpdir(), "stargate-host-"));
 const now = Date.parse("2026-11-12T00:10:00Z");
 const old = new Date(now - 72 * 3_600_000).toISOString();
+
 const sha = (data: Uint8Array) =>
   createHash("sha256").update(data).digest("hex");
 
 let asset = tarball([
   { path: "cli-proxy-api", data: "new-binary", mode: 0o755 },
 ]);
+
 let digest = sha(asset);
 let port = 0;
+
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   fetch(request): Response {
     const path = new URL(request.url).pathname;
+
     if (path === "/repos/router-for-me/CLIProxyAPI/releases")
       return Response.json([
         {
@@ -62,11 +66,15 @@ const server = Bun.serve({
           ],
         },
       ]);
+
     if (path === "/download") return new Response(asset);
+
     return new Response("missing", { status: 404 });
   },
 });
+
 port = server.port ?? 0;
+
 afterAll(async () => {
   void server.stop(true);
   await rm(root, { recursive: true, force: true });
@@ -81,18 +89,22 @@ const settings = (dir: string) => {
     },
     agentClis: { prefix: "/home/me/.local" },
   });
+
   if (!parsed.cliproxyapi || !parsed.agentClis) throw new Error("config");
+
   return { cpa: parsed.cliproxyapi, clis: parsed.agentClis };
 };
 
 describe("agent CLI installs", () => {
   test("unlisted install scripts fail the install; an empty list runs none", () => {
     const { clis } = settings(root);
+
     const command = npmInstallCommand(
       clis,
       [{ name: "@openai/codex", version: "1.0.0" }],
       old,
     );
+
     expect(command).toContain(
       "--allow-scripts=@opencode/cli,@anthropic-ai/claude-code,protobufjs,koffi",
     );
@@ -109,6 +121,7 @@ describe("agent CLI installs", () => {
       before: "2.2.7",
       beforePublished: "2026-10-01T00:00:00.000Z",
     };
+
     expect(
       restoreCutoff(plan, {
         version: "2.2.7",
@@ -132,7 +145,9 @@ describe("CLIProxyAPI asset pinning", () => {
   const prepare = async (dir: string) => {
     const { cpa } = settings(dir);
     const candidate = await cliProxyCandidate(cpa, now);
+
     if (!candidate) throw new Error("no candidate");
+
     return cliProxyPrepare(
       cpa,
       candidate,

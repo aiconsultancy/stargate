@@ -61,7 +61,9 @@ export type ApiV1Deps = {
 };
 
 type Context = CrewStatus["members"][number];
+
 type Metadata = FleetCrewStatus["metadata"];
+
 type Timing = {
   activity: V1Activity;
   since: number | null;
@@ -75,6 +77,7 @@ const activityOrder: readonly V1Activity[] = [
   "uncertain",
   "unprovisioned",
 ];
+
 const hour = 3_600_000;
 const subagentLimit = 3;
 
@@ -89,15 +92,20 @@ function runningTask(task: V1Task | null): boolean {
 
 function contextActivity(context: Context): V1Activity {
   const { current, lastOutcome } = context;
+
   if (runningTask(current)) return "running";
+
   if (lastOutcome?.status === "uncertain") return "uncertain";
+
   if (current?.status === "uncertain") {
     const since =
       current.updatedAt ??
       current.finishedAt ??
       current.startedAt ??
       current.createdAt;
+
     const later = lastOutcome?.finishedAt ?? lastOutcome?.updatedAt ?? null;
+
     if (
       !lastOutcome ||
       lastOutcome.id === current.id ||
@@ -107,7 +115,9 @@ function contextActivity(context: Context): V1Activity {
     )
       return "uncertain";
   }
+
   if (!current && context.queuedCount > 0) return "queued";
+
   return context.provisioned === "ready" ? "idle" : "unprovisioned";
 }
 
@@ -120,14 +130,18 @@ function knownTime(
     .flatMap((context) => {
       if (activity === "queued")
         return context.queued.map((task) => task.createdAt);
+
       if (activity === "running")
         return [
           context.current?.startedAt ?? context.current?.createdAt ?? null,
         ];
+
       if (activity === "idle") return [context.lastOutcome?.finishedAt ?? null];
+
       return [];
     })
     .filter((time) => time !== null);
+
   return times.length === 0
     ? null
     : activity === "idle"
@@ -140,11 +154,13 @@ function checkoutText(metadata?: Metadata) {
     metadata?.projectDirectory,
     ...(metadata?.contexts.map(({ directory }) => directory) ?? []),
   ].filter((path): path is string => path !== undefined && path.length > 1);
+
   const spellings = [
     ...new Set(
       paths.flatMap((path) => [path, JSON.stringify(path).slice(1, -1)]),
     ),
   ].sort((a, b) => b.length - a.length);
+
   return (text: string, limit: number) =>
     redactCredentials(
       spellings.reduce(
@@ -174,6 +190,7 @@ function safeTask(task: CrewStatusTask, text: CrewText): V1Task {
 
 function projectContext(context: Context, text: CrewText): V1CrewContext {
   const task = (value: CrewStatusTask) => safeTask(value, text);
+
   return {
     project: context.project === "default" ? null : (context.project ?? null),
     activity: contextActivity(context),
@@ -192,17 +209,22 @@ function projectContext(context: Context, text: CrewText): V1CrewContext {
 
 function registrations(config: ApiV1Config) {
   const result = new Map<string, Registration>();
+
   for (const bot of config.bots)
     result.set(bot.id, { kind: "slack", config: bot });
+
   for (const irc of config.irc ?? [])
     result.set(irc.id, { kind: "irc", config: irc });
+
   for (const team of config.teams ?? [])
     result.set(team.id, { kind: "teams", config: team });
+
   return result;
 }
 
 function localCheckout({ config }: Registration) {
   const backend = config.backend;
+
   return (
     backend.type !== "module" &&
     (backend.type !== "opencode" ||
@@ -218,12 +240,14 @@ const role = (registration: Registration) =>
 
 function model({ config }: Registration) {
   const backend = config.backend;
+
   const id =
     backend.type === "opencode"
       ? backend.model && `${backend.model.providerID}/${backend.model.id}`
       : backend.type === "module"
         ? undefined
         : backend.model;
+
   return id ? redactCredentials(id, 200) : null;
 }
 
@@ -235,6 +259,7 @@ function timeState(
   known: number | null,
 ) {
   const previous = states.get(key);
+
   const since =
     known ??
     (previous?.activity === activity
@@ -242,8 +267,10 @@ function timeState(
       : previous
         ? observedAt
         : null);
+
   if (!previous || observedAt >= previous.observedAt)
     states.set(key, { activity, since, observedAt });
+
   return since;
 }
 
@@ -265,11 +292,13 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     at: number,
   ): V1Captain {
     const { id, backend } = registration.config;
+
     const activity = queue.running
       ? "running"
       : queue.queued
         ? "queued"
         : "idle";
+
     return {
       id,
       name: redactCredentials(name, 100),
@@ -298,23 +327,30 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     sessions?: HistorySession[],
   ): V1CrewMember[] {
     const first = person.contexts[0];
+
     if (!first) return [];
+
     const configured = metadata?.contexts.find(
       (entry) => entry.member === person.id,
     );
+
     const contexts = person.contexts.map((context) =>
       projectContext(context, text),
     );
+
     const activity =
       activityOrder.find((state) =>
         contexts.some((context) => context.activity === state),
       ) ?? "unprovisioned";
+
     const known = knownTime(contexts, activity);
+
     const configuredModel =
       configured?.model ??
       sessions?.find(
         (session) => session.kind === "crew" && session.member === person.id,
       )?.model;
+
     return [
       {
         id: person.id,
@@ -347,19 +383,24 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     metadata?: Metadata,
   ): Promise<V1Ship> {
     const backend = registration.config.backend;
+
     const policyCheckout =
       registration.kind === "slack"
         ? undefined
         : registration.config.fleetPolicy?.assignedCheckout;
+
     const directory =
       localCheckout(registration) && backend.type !== "module"
         ? (metadata?.projectDirectory ?? policyCheckout ?? backend.directory)
         : undefined;
+
     const [project, features] = await Promise.all([
       git(directory, signal),
       registrationFeatures(registration),
     ]);
+
     signal.throwIfAborted();
+
     return {
       id: officer.id,
       name: officer.name,
@@ -409,6 +450,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
                 );
               } catch {
                 reading.throwIfAborted();
+
                 return undefined;
               }
             }),
@@ -417,7 +459,9 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         ),
       ),
     );
+
     const recent = new Map<string, HistorySession>();
+
     for (const child of pages.flatMap((page) => page?.sessions ?? [])) {
       if (
         child.updatedAt !== undefined &&
@@ -426,6 +470,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       )
         recent.set(child.id, child);
     }
+
     return [...recent.values()]
       .sort(
         (a, b) =>
@@ -442,6 +487,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   function configuredShip(id: string, signal: AbortSignal) {
     signal.throwIfAborted();
     const registration = registrations(deps.config()).get(id);
+
     return registration && role(registration) !== "rear_admiral"
       ? registration
       : undefined;
@@ -458,6 +504,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     only?: string,
   ) {
     signal.throwIfAborted();
+
     if (!snapshot) return undefined;
     const { id } = registration.config;
     const repositories = deps.config().api?.pullRequestRepositories;
@@ -465,17 +512,22 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     const at = view.generatedAt;
     const text = checkoutText(metadata);
     const officer = captain(registration, view.name, view.queue.counts, at);
+
     const people = (view.crewMembers ?? []).filter(
       (member) => !only || member.id === only,
     );
+
     const crewMembers = people.flatMap((person) =>
       crewMember(id, person, at, text, metadata, view.sessions),
     );
+
     if (only && !crewMembers.length) return undefined;
+
     // Every emitted child belongs to one of this ship's dashboard-owned crew roots.
     const roots = view.sessions
       .filter((session) => session.kind === "crew")
       .slice(0, HISTORY_PAGE);
+
     const enriched = await Promise.all(
       crewMembers.map(async (member) => {
         const [contexts, children] = await Promise.all([
@@ -489,12 +541,15 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
                         entry.project === context.project,
                     )?.directory
                   : undefined;
+
               const state = await git(path, signal);
               const repository = path && repositories?.[path];
+
               const pr =
                 repository && state?.branch && state.head && !state.error
                   ? pullRequest(repository, state.branch)
                   : undefined;
+
               return {
                 ...context,
                 git: state,
@@ -513,9 +568,11 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
             signal,
           ),
         ]);
+
         return { ...member, contexts, subagents: children };
       }),
     );
+
     return { officer, view, metadata, crewMembers: enriched };
   }
 
@@ -525,8 +582,10 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     signal: AbortSignal,
   ) {
     const result = await detail(registration, snapshot, signal);
+
     if (!result) return undefined;
     const { officer, view, metadata, crewMembers } = result;
+
     const summary = await shipSummary(
       registration,
       officer,
@@ -536,6 +595,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       view.crewError,
       metadata,
     );
+
     return {
       ...summary,
       crewMembers,
@@ -551,15 +611,18 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     },
     shipIdentities() {
       const identities = new Map<string, string>();
+
       for (const [id, registration] of registrations(deps.config())) {
         if (role(registration) === "rear_admiral") continue;
         const { backend } = registration.config;
         const instance = dashboard.fleetBackend(id);
         let identity = instance && backendIdentities.get(instance);
+
         if (instance && identity === undefined) {
           identity = ++nextBackendIdentity;
           backendIdentities.set(instance, identity);
         }
+
         identities.set(
           id,
           JSON.stringify([
@@ -570,46 +633,57 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
           ]),
         );
       }
+
       return identities;
     },
     async fleet(signal, captureShipRead, crewDeadline) {
       signal.throwIfAborted();
       const config = deps.config();
       const configured = registrations(config);
+
       const fleet = await dashboard.fleetWithCrew(
         signal,
         new Set(configured.keys()),
         crewDeadline,
       );
+
       signal.throwIfAborted();
       let admiral: V1Captain | null = null;
       let longestIdle: V1Fleet["longestIdle"] = null;
       const pending: Promise<V1Ship>[] = [];
+
       for (const row of [...fleet.ships].sort((a, b) =>
         a.summary.id.localeCompare(b.summary.id),
       )) {
         const { summary, metadata, error } = row;
         const registration = configured.get(summary.id);
+
         if (!registration) continue;
+
         const officer = captain(
           registration,
           summary.name,
           summary.queue,
           fleet.generatedAt,
         );
+
         if (officer.role === "rear_admiral") {
           admiral ??= officer;
           continue;
         }
+
         const { readDetail } = row;
+
         if (captureShipRead && readDetail)
           captureShipRead(summary.id, async (reading) =>
             shipDetail(registration, await readDetail(reading), reading),
           );
         const text = checkoutText(metadata);
+
         const people = (row.members ?? []).flatMap((person) =>
           crewMember(summary.id, person, fleet.generatedAt, text, metadata),
         );
+
         for (const member of people) {
           if (
             member.idleSince !== null &&
@@ -625,6 +699,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
               since: member.idleSince,
             };
         }
+
         pending.push(
           shipSummary(
             registration,
@@ -637,6 +712,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
           ),
         );
       }
+
       return {
         apiVersion: API_V1_VERSION,
         generatedAt: fleet.generatedAt,
@@ -648,7 +724,9 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     },
     async ship(id, signal) {
       const registration = configuredShip(id, signal);
+
       if (!registration) return undefined;
+
       return shipDetail(
         registration,
         await dashboard.shipWithCrew(id, signal),
@@ -658,14 +736,18 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     async crew(ship, member, signal) {
       if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(member)) return undefined;
       const registration = configuredShip(ship, signal);
+
       if (!registration) return undefined;
+
       const result = await detail(
         registration,
         await dashboard.shipWithCrew(ship, signal, { member }),
         signal,
         member,
       );
+
       const person = result?.crewMembers[0];
+
       return person ? { ship, member: person } : undefined;
     },
     gatewayFeatures: () => gatewayFeatures(deps.config()),

@@ -28,15 +28,19 @@ export type DrainCrewParity<
 > = T;
 
 const cleanup: string[] = [];
+
 afterEach(async () => {
   for (const path of cleanup.splice(0))
     await rm(path, { recursive: true, force: true });
 });
+
 const directory = async () => {
   const path = await mkdtemp(join(tmpdir(), "stargate-drain-"));
   cleanup.push(path);
+
   return join(path, "drain");
 };
+
 const record = (extra: Partial<MaintenanceDrain> = {}): MaintenanceDrain => ({
   schema: "stargate.maintenance.drain.v1",
   runID: "run-1",
@@ -63,6 +67,7 @@ test("the host control lock excludes another owner and releases without stale-fi
   const dir = await directory();
   await mkdir(dir, { recursive: true });
   const lock = new Database(join(dir, "drain.lock.sqlite"), { create: true });
+
   try {
     lock.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE;");
     await expect(claimMaintenanceDrain(record(), dir)).rejects.toThrow();
@@ -70,6 +75,7 @@ test("the host control lock excludes another owner and releases without stale-fi
   } finally {
     lock.close();
   }
+
   await claimMaintenanceDrain(record(), dir);
   expect(maintenanceDraining(dir)).toBe(true);
 });
@@ -77,6 +83,7 @@ test("the host control lock excludes another owner and releases without stale-fi
 test("a newly claimed barrier takes effect even inside the same gateway poll tick", async () => {
   const dir = await directory();
   const now = Date.now();
+
   const control = new DrainRuntime({
     dataDirectory: "/data/race",
     pinnedSessions: () => [],
@@ -85,6 +92,7 @@ test("a newly claimed barrier takes effect even inside the same gateway poll tic
     directory: dir,
     now: () => now,
   });
+
   expect(control.held()).toBe(false);
   await claimMaintenanceDrain(record({ startedAt: now }), dir);
   expect(control.held()).toBe(true);
@@ -93,13 +101,16 @@ test("a newly claimed barrier takes effect even inside the same gateway poll tic
 
 test("a restarted gateway holds queued work until its completion notice is queued", async () => {
   const dir = await directory();
+
   const notice = record({
     startedAt: Date.now(),
     deadlineAt: Date.now() + 60_000,
   });
+
   await claimMaintenanceDrain(notice, dir);
   await writeMaintenanceDrain({ ...notice, phase: "completed" }, dir);
   const sent = Promise.withResolvers<void>();
+
   const control = new DrainRuntime({
     dataDirectory: "/data/restarted",
     pinnedSessions: () => [],
@@ -107,9 +118,11 @@ test("a restarted gateway holds queued work until its completion notice is queue
     warn: () => {},
     directory: dir,
   });
+
   control.attach({
     broadcast: async () => {
       await sent.promise;
+
       return [];
     },
   });
@@ -127,6 +140,7 @@ test("restart resumption remains eligible beyond a five-minute occupied worker",
   const dir = await directory();
   let clock = Date.now();
   let resumes = 0;
+
   const control = new DrainRuntime({
     dataDirectory: "/data/long",
     pinnedSessions: () => [],
@@ -135,26 +149,32 @@ test("restart resumption remains eligible beyond a five-minute occupied worker",
     directory: dir,
     now: () => clock,
   });
+
   control.attach({
     broadcast: async () => [],
     resume: async () => {
       resumes++;
+
       return { remaining: 1 };
     },
   });
   await control.start();
+
   for (let i = 0; i < 65; i++) {
     clock += 6000;
     control.tick();
     await (control as unknown as { running?: Promise<void> }).running;
   }
+
   expect(resumes).toBe(65);
   await control.close();
 });
+
 /** A pid that has exited: never reused within the test. */
 async function deadPid() {
   const child = Bun.spawn(["true"]);
   await child.exited;
+
   return child.pid;
 }
 
@@ -202,6 +222,7 @@ test("a malformed marker neither freezes the host nor breaks claiming", async ()
 
 test("participants: live only, deduplicated, own entry visible before acknowledgement", async () => {
   const dir = await directory();
+
   const crews = [
     {
       namespace: "ns",
@@ -211,10 +232,12 @@ test("participants: live only, deduplicated, own entry visible before acknowledg
       piMembers: [],
     },
   ];
+
   const handle = await registerDrainParticipant(
     { dataDirectory: "/data/a", crews, pinnedSessions: ["ses_a"] },
     dir,
   );
+
   expect(readDrainParticipants(dir)).toHaveLength(1);
   expect(readDrainParticipants(dir)[0]?.noticeStatus).toBeUndefined();
   await handle.update({
@@ -254,6 +277,7 @@ test("runtime holds starts until the end notice is queued, then pumps resume", a
   let clock = Date.now();
   const broadcasts: string[] = [];
   let resumed = 0;
+
   const control = new DrainRuntime({
     dataDirectory: "/data/a",
     pinnedSessions: () => [],
@@ -262,22 +286,27 @@ test("runtime holds starts until the end notice is queued, then pumps resume", a
     directory: dir,
     now: () => clock,
   });
+
   control.attach({
     async broadcast(record) {
       broadcasts.push(record.phase);
+
       return [{ sessionID: "ses_a", status: "queued" }];
     },
     async resume() {
       resumed++;
+
       return { remaining: 0 };
     },
   });
   await control.start();
+
   const step = async () => {
     clock += 6000;
     control.tick();
     await (control as unknown as { running?: Promise<void> }).running;
   };
+
   await claimMaintenanceDrain(record({ startedAt: clock }), dir);
   expect(control.held()).toBe(true);
   await step();
@@ -288,7 +317,7 @@ test("runtime holds starts until the end notice is queued, then pumps resume", a
     noticeStatus: "queued",
   });
   await step();
-  expect(broadcasts).toEqual(["draining"]); // once only
+  expect(broadcasts).toEqual(["draining"]); // Once only
   await writeMaintenanceDrain(
     record({ startedAt: clock, phase: "completed" }),
     dir,
@@ -308,6 +337,7 @@ test("a dead owner is announced as aborted and releases the runtime", async () =
   const dir = await directory();
   let clock = Date.now();
   const phases: string[] = [];
+
   const control = new DrainRuntime({
     dataDirectory: "/data/a",
     pinnedSessions: () => [],
@@ -316,9 +346,11 @@ test("a dead owner is announced as aborted and releases the runtime", async () =
     directory: dir,
     now: () => clock,
   });
+
   control.attach({
     async broadcast(record) {
       phases.push(record.phase);
+
       return [];
     },
   });

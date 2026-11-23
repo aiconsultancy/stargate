@@ -30,11 +30,13 @@ async function setup() {
   const unendorsed = await makeSigningKey("key-2", ["webchat"]);
   const http = mockFetch(botFrameworkKeys([key.jwk, unendorsed.jwk]));
   const keyStore = new BotFrameworkKeyStore({ fetch: http.fetch });
+
   const check = (token: string, target: Record<string, unknown> = activity) =>
     authenticateActivityRequest(`Bearer ${token}`, target, {
       keyStore,
       appId: APP_ID,
     });
+
   return { key, outsider, unendorsed, http, keyStore, check };
 }
 
@@ -50,6 +52,7 @@ async function rejects(
     );
     assert.equal(err.status, status);
     assert.match(err.message, pattern);
+
     return true;
   });
 }
@@ -57,6 +60,7 @@ async function rejects(
 // Re-signs nothing: swaps the header of a valid RS256 token, as an attacker would.
 function withHeader(token: string, header: Record<string, unknown>): string {
   const [, payload, signature] = token.split(".");
+
   return `${Buffer.from(JSON.stringify(header)).toString("base64url")}.${payload}.${signature}`;
 }
 
@@ -79,10 +83,12 @@ describe("Bot Framework token validation", () => {
 
   test("rejects an Entra token such as one IMDS issues, because of its issuer", async () => {
     const { key, check } = await setup();
+
     const entra = await signToken(key, {
       iss: "https://sts.windows.net/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/",
       aud: APP_ID,
     });
+
     await rejects(check(entra), 401, /iss/);
   });
 
@@ -130,10 +136,12 @@ describe("Bot Framework token validation", () => {
 
   test("jose's algorithm allow-list rejects a non-RS256 header before any key lookup", async () => {
     const { key, http, check } = await setup();
+
     const token = withHeader(await signToken(key), {
       alg: "PS256",
       kid: "key-1",
     });
+
     await rejects(
       check(token),
       401,
@@ -145,6 +153,7 @@ describe("Bot Framework token validation", () => {
   test("the key resolver rejects a non-RS256 algorithm on its own", async () => {
     const { keyStore } = await setup();
     const resolve = signingKeyResolver(keyStore);
+
     for (const alg of ["HS256", "PS256", "none"]) {
       await rejects(
         resolve({ alg, kid: "key-1" }),
@@ -152,6 +161,7 @@ describe("Bot Framework token validation", () => {
         new RegExp(`token algorithm ${alg} is not allowed`),
       );
     }
+
     await rejects(resolve({ alg: "RS256" }), 401, /no key ID/);
   });
 
@@ -159,12 +169,15 @@ describe("Bot Framework token validation", () => {
     let now = 1_000_000;
     const key = await makeSigningKey("key-1");
     const http = mockFetch(botFrameworkKeys([key.jwk]));
+
     const keyStore = new BotFrameworkKeyStore({
       fetch: http.fetch,
       now: () => now,
     });
+
     const keyFetches = () =>
       http.calls.filter((call) => call.url.endsWith("/keys")).length;
+
     const verify = async (kid: string) =>
       verifyBotFrameworkToken(`Bearer ${await signToken(key, {}, { kid })}`, {
         keyStore,
@@ -187,13 +200,16 @@ describe("Bot Framework token validation", () => {
     const key = await makeSigningKey("key-1");
     const rotated = await makeSigningKey("key-new");
     const published = [key.jwk];
+
     const http = mockFetch((url) =>
       botFrameworkKeys(published)(url, { url: url.href }),
     );
+
     const keyStore = new BotFrameworkKeyStore({
       fetch: http.fetch,
       now: () => now,
     });
+
     const verify = async (signer: typeof key, kid: string) =>
       verifyBotFrameworkToken(
         `Bearer ${await signToken(signer, {}, { kid })}`,
@@ -201,10 +217,12 @@ describe("Bot Framework token validation", () => {
       );
 
     await verify(key, "key-1");
+
     // An attacker sprays fresh key IDs straight after the fetch: each is deferred, not cached.
     for (const kid of ["r1", "r2", "r3"]) {
       await assert.rejects(verify(key, kid), KeyRefreshDeferredError);
     }
+
     published.push(rotated.jwk);
     // Microsoft rotates; the first token with the new key is deferred (a 503), then accepted.
     await assert.rejects(verify(rotated, "key-new"), KeyRefreshDeferredError);
@@ -217,12 +235,15 @@ describe("Bot Framework token validation", () => {
     let now = 1_000_000;
     const key = await makeSigningKey("key-1");
     const http = mockFetch(botFrameworkKeys([key.jwk]));
+
     const keyStore = new BotFrameworkKeyStore({
       fetch: http.fetch,
       now: () => now,
     });
+
     const keyFetches = () =>
       http.calls.filter((call) => call.url.endsWith("/keys")).length;
+
     await verifyBotFrameworkToken(`Bearer ${await signToken(key)}`, {
       keyStore,
       appId: APP_ID,
@@ -292,12 +313,14 @@ describe("Bot Framework token validation", () => {
 
   test("ignores keys that are not for signatures", async () => {
     const encryption = await makeSigningKey("enc-key");
+
     const http = mockFetch(
       botFrameworkKeys([
         { ...encryption.jwk, use: "enc" },
         (await makeSigningKey("key-1")).jwk,
       ]),
     );
+
     const keyStore = new BotFrameworkKeyStore({ fetch: http.fetch });
     await rejects(
       verifyBotFrameworkToken(`Bearer ${await signToken(encryption)}`, {
@@ -320,10 +343,13 @@ describe("Bot Framework token validation", () => {
 describe("Bot Framework OpenID metadata", () => {
   async function refuses(metadata: Record<string, unknown>, pattern: RegExp) {
     const key = await makeSigningKey("key-1");
+
     const http = mockFetch((url) => {
       if (url.href === BOT_FRAMEWORK_OPENID_URL) return json(metadata);
+
       return json({ keys: [key.jwk] });
     });
+
     const keyStore = new BotFrameworkKeyStore({ fetch: http.fetch });
     await assert.rejects(
       verifyBotFrameworkToken(`Bearer ${await signToken(key)}`, {
@@ -334,6 +360,7 @@ describe("Bot Framework OpenID metadata", () => {
         !(err instanceof AuthError) && pattern.test(String(err)),
     );
   }
+
   const good = {
     issuer: BOT_FRAMEWORK_ISSUER,
     jwks_uri: "https://login.botframework.com/v1/.well-known/keys",

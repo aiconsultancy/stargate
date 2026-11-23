@@ -50,6 +50,7 @@ const maxClients = 8;
 const bufferBytes = 256 * 1024;
 const encoder = new TextEncoder();
 const streamTiming = { pollMs: 3000, hostMs: 10_000, heartbeatMs: 15_000 };
+
 // Leave time for overview projection after a cold 20-second crew read.
 export const fleetOverviewReadMs = 25_000;
 
@@ -65,6 +66,7 @@ function encodeEvents(events: V1Event[]) {
 
 function holdRead<T>(readMs: number) {
   const slot = createReadSlot<T>(readMs);
+
   return (parent: AbortSignal, read: (signal: AbortSignal) => Promise<T>) =>
     (slot.pending ?? slot.start(parent, read)).result;
 }
@@ -76,20 +78,24 @@ export function createEventStreams(
   const lifetime = new AbortController();
   const readMs = timing.readMs ?? 20_000;
   const overviewReadMs = timing.readMs ?? fleetOverviewReadMs;
+
   const overviewReads = createReadSlot<{
     generation: number;
     overview: V1Snapshot["fleet"];
     reads: Map<string, V1ShipRead>;
   }>(overviewReadMs);
+
   const enrich = holdRead<V1Fleet>(readMs);
   const shipReads = new Map<string, ShipReadSlot>();
   const cachedShips = new Map<string, V1ShipDetail>();
   let identities: ReadonlyMap<string, string> | undefined;
   let rosterGeneration = 0;
   let rosterRead = new AbortController();
+
   let cachedOverview:
     | { overview: V1Snapshot["fleet"]; expiresAt: number }
     | undefined;
+
   let active: ReturnType<typeof startPolling> | undefined;
 
   function shipKey(id: string, identity = identities?.get(id)) {
@@ -99,6 +105,7 @@ export function createEventStreams(
   function expireOverview() {
     if (!cachedOverview || cachedOverview.expiresAt > performance.now()) return;
     cachedOverview = undefined;
+
     if (active) for (const client of active.clients) client.close();
   }
 
@@ -117,50 +124,62 @@ export function createEventStreams(
     function broadcast(events: V1Event[]) {
       if (events.length === 0) return;
       const bytes = encodeEvents(events);
+
       for (const client of clients) client.send(bytes);
     }
 
     function newestHost(host: V1Host) {
       if (!latestHost) {
         latestHost = host;
+
         return latestHost;
       }
+
       // Samples from the host sampler are ordered by when they were taken;
       // `sampledAt` is only a fallback, because a wall-clock step backwards
-      // would make every later sample look older.
+      // Would make every later sample look older.
       const next = hostSampleOrder(host);
       const kept = hostSampleOrder(latestHost);
+
       const newer =
         next !== undefined && kept !== undefined
           ? next >= kept
           : host.sampledAt >= latestHost.sampledAt;
+
       if (newer) latestHost = host;
+
       return latestHost;
     }
 
     function publishHostSample(host: V1Host) {
       if (newestHost(host) !== host) return;
+
       if (fleet) fleet = { ...fleet, host };
       broadcast([{ type: "host", data: host }]);
     }
 
     function syncIdentities() {
       const current = options.shipIdentities?.();
+
       if (!current || isDeepStrictEqual(current, identities))
         return rosterGeneration;
+
       for (const [id, identity] of identities ?? []) {
         if (current.get(id) === identity) continue;
         shipReads.get(shipKey(id, identity))?.attempt?.controller.abort();
         cachedShips.delete(id);
       }
+
       rosterRead.abort();
       overviewReads.abandon();
       rosterRead = new AbortController();
       cachedOverview = undefined;
+
       if (fleet) for (const client of clients) client.close();
       fleet = undefined;
       ships.clear();
       identities = current;
+
       return ++rosterGeneration;
     }
 
@@ -170,10 +189,13 @@ export function createEventStreams(
       fleet = next;
       const prior = summaries;
       summaries = new Map(next.ships.map((ship) => [ship.id, ship]));
+
       for (const [id, previous] of prior)
         if (summaries.get(id)?.available !== previous.available)
           shipReads.get(shipKey(id))?.attempt?.controller.abort();
+
       for (const id of ships.keys()) if (!summaries.has(id)) ships.delete(id);
+
       for (const id of cachedShips.keys())
         if (!summaries.has(id)) cachedShips.delete(id);
       broadcast(
@@ -185,6 +207,7 @@ export function createEventStreams(
             )
           : [{ type: "fleet", data: next }],
       );
+
       for (const { id, available } of next.ships)
         if (
           !available &&
@@ -196,12 +219,16 @@ export function createEventStreams(
 
     function publishShip(id: string, readAt: number, result?: V1ShipDetail) {
       const summary = summaries.get(id);
+
       if (!fleet || !summary) return;
+
       const detail =
         !summary.available && result?.available ? undefined : result;
+
       const previous = ships.get(id);
       const prior = cachedShips.get(id);
       const error = detail?.error ?? summary.error;
+
       const next: V1ShipDetail = detail?.available
         ? { ...detail, detailUpdatedAt: detail.detailUpdatedAt ?? readAt }
         : prior
@@ -219,6 +246,7 @@ export function createEventStreams(
               detailUpdatedAt:
                 detail?.detailUpdatedAt ?? previous?.detailUpdatedAt ?? readAt,
             };
+
       const changes: V1Event[] = previous
         ? options.diff(
             { fleet, ships: { [id]: previous } },
@@ -226,7 +254,9 @@ export function createEventStreams(
             Date.now(),
           )
         : [{ type: "ship", data: next }];
+
       ships.set(id, next);
+
       if (next.available && !next.detailStale) cachedShips.set(id, next);
       broadcast(changes);
     }
@@ -235,22 +265,29 @@ export function createEventStreams(
       if (shutdown.signal.aborted || pending.has(id)) return;
       const readAt = Date.now();
       const key = shipKey(id);
+
       const shared = shipReads.get(key) ?? {
         slot: createReadSlot<V1ShipDetail | undefined>(readMs, () =>
           shipReads.delete(key),
         ),
       };
+
       let attempt = shared.slot.pending ? shared.attempt : undefined;
+
       if (attempt && attempt.available !== available)
         attempt.controller.abort();
+
       if (attempt && (attempt.failed || attempt.controller.signal.aborted)) {
         if (!available || cachedShips.has(id)) publishShip(id, readAt);
+
         return;
       }
+
       if (!attempt) {
         const controller = new AbortController();
         const parent = AbortSignal.any([lifetime.signal, controller.signal]);
         const { result } = shared.slot.start(parent, read);
+
         const current = {
           controller,
           available,
@@ -258,6 +295,7 @@ export function createEventStreams(
           result,
           failed: false,
         };
+
         void result.catch(() => {
           current.failed = true;
         });
@@ -265,13 +303,18 @@ export function createEventStreams(
         shared.attempt = attempt;
         shipReads.set(key, shared);
       }
+
       pending.add(id);
+
       const cancelled = () =>
         shutdown.signal.aborted || attempt.controller.signal.aborted;
+
       try {
         const detail = await attempt.result.catch(() => undefined);
+
         if (cancelled()) return;
         syncIdentities();
+
         if (!cancelled()) publishShip(id, attempt.readAt, detail);
       } finally {
         pending.delete(id);
@@ -288,11 +331,14 @@ export function createEventStreams(
           if (shutdown.signal.aborted || syncIdentities() !== generation)
             return;
           expireOverview();
+
           if (!cachedOverview || !fleet) return;
           const next = { ...fleet, host: newestHost(host), gateway };
           const hostChanged = !isDeepStrictEqual(fleet.host, next.host);
+
           if (isDeepStrictEqual(fleet.gateway, gateway)) fleet = next;
           else publishFleet(next);
+
           if (hostChanged) publishHostSample(next.host);
         })
         .catch(() => {
@@ -305,9 +351,12 @@ export function createEventStreams(
 
     async function poll() {
       expireOverview();
+
       if (shutdown.signal.aborted) return;
+
       try {
         const generation = syncIdentities();
+
         if (publishing !== generation && !shutdown.signal.aborted)
           await refreshOverview(generation);
       } catch {
@@ -317,6 +366,7 @@ export function createEventStreams(
 
     async function refreshOverview(generation: number) {
       publishing = generation;
+
       try {
         const attempt =
           overviewReads.pending ??
@@ -324,36 +374,46 @@ export function createEventStreams(
             AbortSignal.any([lifetime.signal, rosterRead.signal]),
             async (signal) => {
               const reads = new Map<string, V1ShipRead>();
+
               const overview = await options.fleet(signal, (id, read) =>
                 reads.set(id, read),
               );
+
               return { generation, overview, reads };
             },
           );
+
         const sample = await attempt.result.catch(() => undefined);
+
         if (
           shutdown.signal.aborted ||
           syncIdentities() !== generation ||
           (sample && sample.generation !== generation)
         )
           return;
+
         if (sample)
           cachedOverview = {
             overview: sample.overview,
             expiresAt: performance.now() + 3 * overviewReadMs,
           };
         expireOverview();
+
         if (!cachedOverview) return;
+
         const overview = sample
           ? sample.overview
           : { ...cachedOverview.overview, overviewStale: true as const };
+
         const next = options.fallbackFleet(overview);
         publishFleet(next);
+
         for (const ship of next.ships) {
           if (!sample) {
             publishShip(ship.id, Date.now());
             continue;
           }
+
           void refreshShip(
             ship,
             sample.reads.get(ship.id) ??
@@ -362,6 +422,7 @@ export function createEventStreams(
             // A later poll can publish this ship if its projection fails.
           });
         }
+
         refreshMetrics(overview, generation);
       } finally {
         if (publishing === generation) publishing = undefined;
@@ -370,23 +431,30 @@ export function createEventStreams(
 
     async function publishHost() {
       if (shutdown.signal.aborted) return;
+
       if (readingHost) {
         publishHostSample(options.snapshotHost());
+
         return;
       }
+
       readingHost = true;
+
       const { result, settled } = readWithDeadline(shutdown.signal, 1000, () =>
         options.readHost(),
       );
+
       void settled.then(() => {
         readingHost = false;
       });
       const data = await result.catch(() => options.snapshotHost());
+
       if (!shutdown.signal.aborted) publishHostSample(data);
     }
 
     const pollTimer = setInterval(() => void poll(), timing.pollMs);
     const hostTimer = setInterval(() => void publishHost(), timing.hostMs);
+
     const heartbeatTimer = setInterval(() => {
       broadcast([{ type: "heartbeat", data: { at: Date.now() } }]);
     }, timing.heartbeatMs);
@@ -396,6 +464,7 @@ export function createEventStreams(
       syncIdentities,
       add(client: Client) {
         clients.add(client);
+
         if (fleet) {
           client.send(
             encodeEvents([
@@ -421,6 +490,7 @@ export function createEventStreams(
     open(signal: AbortSignal) {
       expireOverview();
       active?.syncIdentities();
+
       if (
         lifetime.signal.aborted ||
         signal.aborted ||
@@ -430,6 +500,7 @@ export function createEventStreams(
       active ??= startPolling();
       const session = active;
       let cleanup = () => {};
+
       return new ReadableStream<Uint8Array>(
         {
           start(controller) {
@@ -437,14 +508,17 @@ export function createEventStreams(
             cleanup = () => {
               if (!session.clients.delete(client)) return;
               signal.removeEventListener("abort", aborted);
+
               if (!session.clients.size) {
                 active = undefined;
                 session.stop();
               }
             };
+
             const client: Client = {
               send(bytes) {
                 const available = controller.desiredSize;
+
                 // An empty queue can carry one full snapshot, even for a large fleet.
                 if (
                   available !== null &&
@@ -457,10 +531,12 @@ export function createEventStreams(
               close(error) {
                 if (!session.clients.has(client)) return;
                 cleanup();
+
                 if (error) controller.error(error);
                 else controller.close();
               },
             };
+
             signal.addEventListener("abort", aborted, { once: true });
             session.add(client);
           },
@@ -471,6 +547,7 @@ export function createEventStreams(
     },
     stop() {
       lifetime.abort();
+
       if (active) for (const client of active.clients) client.close();
     },
   };

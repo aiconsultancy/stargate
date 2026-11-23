@@ -36,6 +36,7 @@ function test(
     name,
     () => {
       activeTest = Promise.resolve().then(body);
+
       return activeTest;
     },
     timeout,
@@ -47,8 +48,10 @@ afterEach(async () => {
   // Keep the database alive until that callback has stopped using it.
   await activeTest?.catch(() => {});
   activeTest = undefined;
+
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 }, diskIntegrationTimeoutMs);
+
 const now = Date.parse("2026-11-18T12:00:00Z");
 
 test("question buttons persist, repaint and do not replay after restart", async () => {
@@ -86,6 +89,7 @@ test(
   "same-value question replacement invalidates panels including waiting actions",
   async () => {
     const f = await fixture();
+
     if (f.config.backend.type !== "opencode")
       throw new Error("Expected OpenCode");
     const settings = await resolveQuestionSettings(f.config);
@@ -112,6 +116,7 @@ test(
 test("typed question commands preserve other settings and reject invalid values", async () => {
   const f = await fixture();
   let sequence = 10;
+
   for (const command of [
     "on",
     "timeout 5m",
@@ -128,12 +133,15 @@ test("typed question commands preserve other settings and reject invalid values"
       () => true,
     );
   }
+
   const expected = {
     enabled: false,
     timeoutMs: 3_600_000,
     answer: "requester",
   } as const;
+
   expect(await resolveQuestionSettings(f.config)).toEqual(expected);
+
   for (const command of ["yes", "timeout 0", "timeout 2h", "answer everyone"]) {
     await f.meta.receive(
       event(`<@UBOT> /config questions ${command}`, `${sequence++}.000`),
@@ -151,10 +159,12 @@ test("question update failure resumes persisted receipt without a second write",
   await f.publish();
   const raw = f.press("stargate_config_questions_on");
   const update = f.slack.update;
+
   if (!update) throw new Error("Expected update");
   f.slack.update = async () => {
     throw new Error("private failure");
   };
+
   await expect(f.click(raw)).rejects.toThrow();
   expect((await resolveQuestionSettings(f.config)).enabled).toBe(true);
   const snapshot = await readConfigSnapshot(f.config, undefined);
@@ -169,6 +179,7 @@ test("question update failure resumes persisted receipt without a second write",
 
 test("panel snapshot refuses symbolic or oversized waiting files without following arbitrary content", async () => {
   const f = await fixture();
+
   if (f.config.backend.type !== "opencode") throw new Error("Invalid fixture");
   const path = waitingSettingsPath(f.config.backend.directory, "adama");
   await f.tool(5);
@@ -185,12 +196,14 @@ test("panel snapshot refuses symbolic or oversized waiting files without followi
   );
   await expect(readConfigSnapshot(f.config, undefined)).rejects.toThrow();
 });
+
 const plain = (max: number) =>
   z.strictObject({
     type: z.literal("plain_text"),
     text: z.string().min(1).max(max),
     emoji: z.boolean().optional(),
   });
+
 const buttonSchema = z.strictObject({
   type: z.literal("button"),
   action_id: z.string().min(1).max(255),
@@ -198,6 +211,7 @@ const buttonSchema = z.strictObject({
   value: z.string().min(1).max(2000),
   accessibility_label: z.string().max(75).optional(),
 });
+
 const panelSchema = z.strictObject({
   text: z.string().min(1),
   blocks: z
@@ -222,6 +236,7 @@ const panelSchema = z.strictObject({
 async function fixture(options: MetaOptions = {}) {
   const directory = await mkdtemp(join(tmpdir(), "config-panel-"));
   const config = Object.assign(bot(), { configPanelEnabled: true });
+
   if (config.backend.type !== "opencode") throw new Error("Expected OpenCode");
   config.backend.directory = directory;
   config.backend.agent = "adama";
@@ -230,37 +245,45 @@ async function fixture(options: MetaOptions = {}) {
     store.close();
     await rm(directory, { recursive: true, force: true });
   });
+
   const posts: {
     channel: string;
     thread: string;
     text: string;
     content: unknown;
   }[] = [];
+
   const updates: {
     channel: string;
     ts: string;
     text: string;
     content: unknown;
   }[] = [];
+
   const acks: (Record<string, unknown> | undefined)[] = [];
   const replies: string[] = [];
   const order: string[] = [];
+
   const slack: TransportDelivery = {
     async post(channel, thread, text, _stop, _unit, content) {
       order.push("post");
       posts.push({ channel, thread, text, content });
+
       return "100.001";
     },
     async update(channel, ts, text, _stop, content) {
       order.push("update");
       updates.push({ channel, ts, text, content });
+
       return true;
     },
     async ephemeral(_channel, _user, _thread, text) {
       replies.push(text);
     },
   };
+
   let clock = now;
+
   const metaOptions: MetaOptions = {
     now: () => clock,
     listMutes: () => ({
@@ -271,7 +294,9 @@ async function fixture(options: MetaOptions = {}) {
     isHuman: async () => true,
     ...options,
   };
+
   let meta = new MetaCommands(store.meta, slack, metaOptions);
+
   const waiting = new CrewWaiting({
     options: {
       captainDirectory: directory,
@@ -281,20 +306,25 @@ async function fixture(options: MetaOptions = {}) {
       if (caller.agent !== "adama") throw new Error("Not captain");
     },
   });
+
   const caller = {
     agent: "adama",
     sessionID: "ses_existing",
     signal: new AbortController().signal,
   };
+
   const ack = async (payload?: Record<string, unknown>) => {
     order.push("ack");
     acks.push(payload);
   };
+
   const panel = () => {
     const result = updates.at(-1)?.content ?? posts.at(-1)?.content;
     expect(result).toBeDefined();
+
     return panelSchema.parse(result);
   };
+
   const press = (
     actionId = "stargate_config_waiting_3",
     source = panel(),
@@ -303,7 +333,9 @@ async function fixture(options: MetaOptions = {}) {
     const button = source.blocks
       .flatMap((block) => (block.type === "actions" ? block.elements : []))
       .find((item) => item.action_id === actionId);
+
     if (!button) throw new Error(`Missing ${actionId}`);
+
     return {
       type: "block_actions",
       api_app_id: config.slack.appId,
@@ -322,6 +354,7 @@ async function fixture(options: MetaOptions = {}) {
       ],
     };
   };
+
   return {
     config,
     slack,
@@ -350,6 +383,7 @@ async function fixture(options: MetaOptions = {}) {
         identity,
         () => true,
       );
+
       return panel();
     },
     async tool(seconds: number | "off") {
@@ -402,9 +436,11 @@ test("enabled panel has six table-derived rows and bounded plain controls", asyn
   expect(new Set(panel.blocks.map((block) => block.block_id)).size).toBe(
     panel.blocks.length,
   );
+
   const buttons = panel.blocks.flatMap((block) =>
     block.type === "actions" ? block.elements : [],
   );
+
   expect(buttons.map((button) => button.text.text)).toEqual([
     "Off",
     "3s",
@@ -419,12 +455,14 @@ test("enabled panel has six table-derived rows and bounded plain controls", asyn
     "On",
     "Off",
   ]);
+
   for (const block of panel.blocks) {
     if (block.type === "actions")
       expect(
         new Set(block.elements.map((button) => button.action_id)).size,
       ).toBe(block.elements.length);
   }
+
   expect(f.posts[0]).toMatchObject({ channel: "C123", thread: "1.000" });
   expect(configPanelRows().map((row) => row.title)).toEqual([
     "waiting",
@@ -453,6 +491,7 @@ test("pure builder accepts only table-derived controls and produces a valid synt
       },
     }),
   );
+
   expect(panel.text).toContain("waiting: off");
   expect(panel.blocks.filter((block) => block.type === "section")).toHaveLength(
     6,
@@ -490,7 +529,7 @@ for (const id of [
     const f = await fixture();
     await f.publish();
     await f.click(f.press(id));
-    expect(await f.delay()).toBe(id.endsWith("off") ? null : 10000);
+    expect(await f.delay()).toBe(id.endsWith("off") ? null : 10_000);
   });
 }
 
@@ -511,11 +550,15 @@ for (const id of [
 }
 
 type Press = ReturnType<Awaited<ReturnType<typeof fixture>>["press"]>;
+
 function firstAction(raw: Press) {
   const action = raw.actions[0];
+
   if (!action) throw new Error("Expected config action");
+
   return action;
 }
+
 const invalidPresses: [string, (raw: Press) => unknown][] = [
   ["wrong app", (raw) => ({ ...raw, api_app_id: "AOTHER" })],
   ["wrong team", (raw) => ({ ...raw, team: { id: "TOTHER" } })],
@@ -592,6 +635,7 @@ const invalidPresses: [string, (raw: Press) => unknown][] = [
     }),
   ],
 ];
+
 for (const [name, alter] of invalidPresses) {
   test(
     `${name} is refused locally without a write`,
@@ -621,6 +665,7 @@ for (const lookup of [
     const f = await fixture();
     f.config.access.users = ["*"];
     f.config.access.peerCaptains = true;
+
     if (lookup) f.options.isHuman = lookup;
     else delete f.options.isHuman;
     await f.publish();
@@ -658,8 +703,10 @@ for (const delta of [-1, 86_400_001]) {
 test("typed and tool writes, including ABA, invalidate the posted snapshot", async () => {
   for (const kind of ["tool", "typed", "ABA"]) {
     const f = await fixture();
+
     if (kind === "ABA") await f.tool(5);
     await f.publish();
+
     if (kind === "typed")
       await f.meta.receive(
         event("<@UBOT> /config waiting 8", "2.000"),
@@ -669,8 +716,10 @@ test("typed and tool writes, including ABA, invalidate the posted snapshot", asy
       );
     else {
       await f.tool(3);
+
       if (kind === "ABA") await f.tool(5);
     }
+
     const before = await f.delay();
     await f.click();
     expect(await f.delay()).toBe(before);
@@ -697,11 +746,13 @@ test(
     const f = await fixture();
     const panel = await f.publish();
     const first = f.press("stargate_config_waiting_3", panel);
+
     const second = f.press(
       "stargate_config_waiting_10",
       panel,
       "1795003200.002",
     );
+
     await Promise.all([f.click(first), f.click(second)]);
     expect(await f.delay()).toBe(3000);
     expect(f.replies.some((reply) => reply.includes("stale"))).toBe(true);
@@ -723,10 +774,12 @@ test("unknown own action is consumed; Stop, cron and pairing are not", async () 
   };
   expect(await f.click(raw)).toBe(true);
   expect(f.replies[0]).toContain("/config");
+
   for (const id of ["stargate_stop", "stargate_cron_save", "stargate_pair"]) {
     raw.actions[0] = { ...firstAction(raw), action_id: id };
     expect(await f.click(raw)).toBe(false);
   }
+
   expect(f.acks).toHaveLength(1);
   expect(await f.delay()).toBe(5000);
 });
@@ -776,19 +829,23 @@ for (const external of [false, true]) {
     await f.publish();
     const raw = f.press();
     const update = f.slack.update;
+
     if (!update) throw new Error("Expected update");
     f.slack.update = async () => {
       throw new Error("private Slack error");
     };
+
     await expect(f.click(raw)).rejects.toThrow();
     expect(f.acks).toHaveLength(1);
     expect(await f.delay()).toBe(3000);
     f.reopen();
+
     if (external) await f.tool(8);
     f.slack.update = update;
     const before = f.updates.length;
     await f.click(raw);
     expect(await f.delay()).toBe(external ? 8000 : 3000);
+
     if (external) {
       expect(f.updates).toHaveLength(before);
       expect(f.replies.at(-1)).toContain("stale");
@@ -820,13 +877,16 @@ test("a pending button claim survives restart without applying or replaying", as
 test("closed intake withholds ACK; later binding changes prevent writes and replies", async () => {
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
+
   const f = await fixture({
     isHuman: async () => {
       entered.resolve();
       await release.promise;
+
       return true;
     },
   });
+
   await f.publish();
   const count = f.updates.length;
   await expect(f.click(f.press(), () => false)).rejects.toThrow();
@@ -860,6 +920,7 @@ test("disabled flag and independent registration refuse retained panels", async 
 test("transports without update or returned ts never advertise mutable controls", async () => {
   for (const missing of ["update", "ts"]) {
     const f = await fixture();
+
     if (missing === "update") delete f.slack.update;
     else {
       const post = f.slack.post;
@@ -867,6 +928,7 @@ test("transports without update or returned ts never advertise mutable controls"
         await post(...args);
       };
     }
+
     await f.meta.receive(
       event("<@UBOT> /config"),
       f.config,
@@ -887,6 +949,7 @@ test("ambiguous initial post cannot publish a new nonce on event retry", async (
     posts++;
     throw new Error("post uncertain");
   };
+
   await expect(
     f.meta.receive(event("<@UBOT> /config"), f.config, identity, () => true),
   ).rejects.toThrow();
@@ -929,25 +992,31 @@ test("ACK precedes both an existing shared-tail health read and human lookup", a
   const healthRelease = Promise.withResolvers<void>();
   const humanEntered = Promise.withResolvers<void>();
   const humanRelease = Promise.withResolvers<void>();
+
   const f = await fixture({
     health: async () => {
       healthEntered.resolve();
       await healthRelease.promise;
+
       return "local health";
     },
     isHuman: async () => {
       humanEntered.resolve();
       await humanRelease.promise;
+
       return true;
     },
   });
+
   await f.publish();
+
   const health = f.meta.receive(
     event("<@UBOT> /health", "2.000"),
     f.config,
     identity,
     () => true,
   );
+
   await healthEntered.promise;
   const press = f.click();
   expect(f.acks).toEqual([undefined]);
@@ -983,6 +1052,7 @@ test("binding invalidation after durable apply retains the outcome without updat
     apply(...args);
     open = false;
   };
+
   const count = f.updates.length;
   await expect(f.click(raw, () => open)).rejects.toThrow();
   expect(await f.delay()).toBe(3000);
@@ -1001,8 +1071,10 @@ test("a tool write between apply and snapshot cannot be painted as the button's 
   let reads = 0;
   f.options.listMutes = async () => {
     if (++reads === 3) await f.tool(8);
+
     return { settings: [], cursor: null, counts: { channel: 0, thread: 0 } };
   };
+
   const count = f.updates.length;
   await f.click(raw);
   expect(await f.delay()).toBe(8000);

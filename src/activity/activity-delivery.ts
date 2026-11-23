@@ -11,6 +11,7 @@ import type { Job } from "../gateway/store";
 import type { ActivityRecords } from "./store";
 
 export type ActivityHandle = { finish(): void; cancel(): void };
+
 type Pending = {
   controller: AbortController;
   wake: AbortController;
@@ -20,6 +21,7 @@ type Pending = {
   cancelled: boolean;
   grace?: ReturnType<typeof setTimeout>;
 };
+
 type Options = {
   intervalMs?: number;
   startupTimeoutMs?: number;
@@ -32,6 +34,7 @@ type Options = {
 async function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
   let abort = () => {};
+
   try {
     return await Promise.race([
       work,
@@ -72,14 +75,17 @@ export class ActivityDelivery {
   ): Promise<ActivityHandle | undefined> {
     const settings = this.settings();
     const saved = this.options.store?.activity(job.id);
+
     const start =
       typeof this.backend.startActivity === "function"
         ? this.backend.startActivity.bind(this.backend)
         : undefined;
+
     const publish =
       typeof this.slack.activity === "function"
         ? this.slack.activity.bind(this.slack)
         : undefined;
+
     if (
       this.closed ||
       settings.detail === "off" ||
@@ -93,6 +99,7 @@ export class ActivityDelivery {
     )
       return;
     const ready = Promise.withResolvers<boolean>();
+
     const entry: Pending = {
       controller: new AbortController(),
       wake: new AbortController(),
@@ -101,15 +108,20 @@ export class ActivityDelivery {
       job: job.id,
       cancelled: false,
     };
+
     const signal = AbortSignal.any([shutdown, entry.controller.signal]);
     let settled = false;
+
     const finish = () => {
       if (settled || (entry.finished && entry.grace)) return;
       entry.finished = true;
+
       if ([...this.pending].filter((pending) => pending.finished).length > 32) {
         entry.controller.abort();
+
         return;
       }
+
       entry.grace = setTimeout(
         () => entry.controller.abort(),
         this.options.finalizeTimeoutMs ?? 615_000,
@@ -118,18 +130,21 @@ export class ActivityDelivery {
       entry.wake = new AbortController();
       wake.abort();
     };
+
     this.pending.add(entry);
     entry.done = (async () => {
       let watch: ActivityWatch | undefined;
       let terminal = false;
       let ts = saved?.ts;
       let latest: ActivitySnapshot | undefined;
+
       try {
         const setupSignal = AbortSignal.any([
           signal,
           requestSignal,
           AbortSignal.timeout(this.options.startupTimeoutMs ?? 1000),
         ]);
+
         const opened =
           resume && saved && this.backend.resumeActivity
             ? this.backend.resumeActivity(sessionID, saved.capture)
@@ -142,8 +157,10 @@ export class ActivityDelivery {
                 ) ?? Promise.reject(new Error("Activity start unavailable")),
                 setupSignal,
               );
+
         watch = opened;
         const capture = opened.id ?? saved?.capture;
+
         if (capture && !saved)
           this.options.store?.saveActivity(job.id, {
             capture,
@@ -151,18 +168,22 @@ export class ActivityDelivery {
             done: false,
           });
         ready.resolve(true);
+
         if (resume) finish();
         let revision = saved?.revision ?? -1;
         let finished = false;
+
         while (!signal.aborted) {
           if (!this.allowed(job) || this.settings().detail === "off") {
             entry.cancelled = true;
             break;
           }
+
           const finishNow = entry.finished && !finished;
           const wake = entry.wake;
           const readSignal = AbortSignal.any([signal, wake.signal]);
           let snapshot: ActivitySnapshot;
+
           try {
             snapshot = await abortable(
               finishNow && !saved?.done
@@ -174,8 +195,9 @@ export class ActivityDelivery {
             if (wake.signal.aborted && !signal.aborted) continue;
             throw error;
           }
+
           // A durable Stop is not permission to finish an unconfirmed capture
-          // after restart. Refresh its facts once, without another report.
+          // After restart. Refresh its facts once, without another report.
           if (
             saved?.done &&
             ["collecting", "summarizing"].includes(snapshot.status)
@@ -188,13 +210,18 @@ export class ActivityDelivery {
                 "Activity collection stopped; later facts remain in the journal.",
             };
           latest = snapshot;
+
           if (finishNow) finished = true;
+
           const isTerminal = ["complete", "unavailable", "cancelled"].includes(
             snapshot.status,
           );
+
           signal.throwIfAborted();
+
           if (!this.allowed(job) || this.settings().detail === "off") break;
           const detail = this.settings().detail;
+
           if (
             detail !== "off" &&
             snapshot.revision !== revision &&
@@ -211,6 +238,7 @@ export class ActivityDelivery {
               signal,
             );
             revision = snapshot.revision;
+
             if (capture)
               this.options.store?.saveActivity(job.id, {
                 capture,
@@ -219,7 +247,9 @@ export class ActivityDelivery {
                 done: isTerminal,
               });
           }
+
           terminal = isTerminal;
+
           if (terminal && capture)
             this.options.store?.saveActivity(job.id, {
               capture,
@@ -227,7 +257,9 @@ export class ActivityDelivery {
               revision,
               done: true,
             });
+
           if (terminal) break;
+
           try {
             await this.wait(
               entry.finished
@@ -241,12 +273,14 @@ export class ActivityDelivery {
         }
       } catch (error) {
         const progress = this.options.store?.activity(job.id);
+
         if (
           progress &&
           error instanceof Error &&
           /does not own|expired|capture.*missing/i.test(error.message)
         )
           this.options.store?.saveActivity(job.id, { ...progress, done: true });
+
         if (!signal.aborted)
           this.log.warn(
             { job: job.id },
@@ -254,18 +288,23 @@ export class ActivityDelivery {
           );
       } finally {
         settled = true;
+
         if (entry.grace) clearTimeout(entry.grace);
         ready.resolve(false);
+
         if (!this.allowed(job) || this.settings().detail === "off")
           entry.cancelled = true;
+
         if (entry.cancelled) {
           const progress = this.options.store?.activity(job.id);
+
           if (progress)
             this.options.store?.saveActivity(job.id, {
               ...progress,
               done: true,
             });
         }
+
         if (
           watch &&
           !terminal &&
@@ -274,11 +313,14 @@ export class ActivityDelivery {
           !this.closed
         ) {
           const cleanup = AbortSignal.timeout(2000);
+
           if (entry.cancelled)
             await abortable(watch.cancel(cleanup), cleanup).catch(() => {});
           else await abortable(watch.finish(cleanup), cleanup).catch(() => {});
         }
+
         const detail = this.settings().detail;
+
         if (
           !terminal &&
           !shutdown.aborted &&
@@ -310,10 +352,13 @@ export class ActivityDelivery {
             cleanup,
           ).catch(() => {});
         }
+
         this.pending.delete(entry);
       }
     })();
+
     if (!(await ready.promise)) return;
+
     return {
       finish,
       cancel: () => {
@@ -339,6 +384,7 @@ export class ActivityDelivery {
   async close() {
     this.closed = true;
     const pending = [...this.pending];
+
     for (const entry of pending) entry.controller.abort();
     await Promise.all(pending.map(({ done }) => done));
   }

@@ -29,6 +29,7 @@ export type CrewUIAckCompatibility<
 
 async function fixture(history = false) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-member-status-"));
+
   const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "adama" },
     crew: [
@@ -43,6 +44,7 @@ async function fixture(history = false) {
       { id: "new", role: "Not provisioned", permissionProfile: "coding" },
     ],
   });
+
   const options: CrewOptions = {
     namespace: "status",
     stateDirectory: directory,
@@ -54,11 +56,14 @@ async function fixture(history = false) {
     ),
     mesijCommand: "/usr/bin/mesij",
   };
+
   let calls = 0;
+
   const forbidden = async (): Promise<never> => {
     calls++;
     throw new Error("Status must not call an agent API");
   };
+
   const sessions: CrewSessions = {
     get: forbidden,
     create: forbidden,
@@ -68,8 +73,10 @@ async function fixture(history = false) {
     synthetic: forbidden,
     compact: forbidden,
   };
+
   if (history)
     await copyCrewDatabase(directory, options.namespace, statusHistoryFixture);
+
   const engine = await CrewEngine.open(
     options,
     sessions,
@@ -77,6 +84,7 @@ async function fixture(history = false) {
     undefined,
     forbidden,
   );
+
   return {
     directory,
     engine,
@@ -94,26 +102,32 @@ async function fixture(history = false) {
 
 test("read-only roster shows Pi/OpenCode/unprovisioned, stale running and bounded FIFO without reconciliation", async () => {
   const f = await fixture();
+
   try {
     const chief = f.engine.state.reservePeer("chief");
     const twiki = f.engine.state.reservePeer("twiki");
     f.engine.state.readyPeer("twiki");
+
     const native = f.engine.state.reserveTask(
       chief,
       "captain",
       "Review engineering",
     );
+
     const maintenance = f.engine.state.reserveTask(
       twiki,
       "captain",
       "Twiki cleanup token=topsecret",
     );
+
     if (!native || !maintenance) throw new Error("Missing task");
     f.engine.state.running(native.id);
     f.engine.state.running(maintenance.id);
+
     for (let i = 0; i < 7; i++)
       f.engine.state.enqueue(twiki, "captain", `Queued cleanup ${i}`);
     const db = new Database(f.engine.state.path, { readonly: true });
+
     try {
       const before = db.serialize();
       const roster = crewStatusSchema.parse(f.engine.status());
@@ -165,6 +179,7 @@ test("read-only roster shows Pi/OpenCode/unprovisioned, stale running and bounde
 
 test("legacy uncertain task stays uncertain with unknown times and no raw result or session IDs", async () => {
   const f = await fixture();
+
   try {
     const peer = f.engine.state.reservePeer("twiki");
     f.engine.state.readyPeer("twiki");
@@ -177,6 +192,7 @@ test("legacy uncertain task stays uncertain with unknown times and no raw result
     db.close();
     await f.engine.close();
     const reopened = await CrewEngine.open(f.options, f.sessions);
+
     try {
       const inspect = new Database(reopened.state.path, { readonly: true });
       const before = inspect.serialize();
@@ -216,12 +232,14 @@ test("legacy uncertain task stays uncertain with unknown times and no raw result
 test("large rosters are explicitly truncated while direct member queries remain available", async () => {
   const f = await fixture();
   let large: CrewEngine | undefined;
+
   try {
     const crew = Array.from({ length: 24 }, (_, index) => ({
       id: `worker-${index}`,
       role: "Engineering",
       permissionProfile: "coding" as const,
     }));
+
     large = await CrewEngine.open(
       {
         ...f.options,
@@ -255,25 +273,34 @@ test("large rosters are explicitly truncated while direct member queries remain 
 
 test("durable status bounds recent metadata, retains outcomes and never returns raw results/notices", async () => {
   const f = await fixture(true);
+
   try {
     const peer = f.engine.state.reservePeer("chief");
+
     const tasks = Array.from({ length: 24 }, (_, i) => {
       const task = f.engine.state.task(historyTaskID(i));
+
       if (!task) throw new Error("Missing saved task");
+
       return task;
     });
+
     // Historical task/results/notices are saved. Exercise real metadata writes,
-    // redaction and trimming on one owned setup connection, not the engine's.
+    // Redaction and trimming on one owned setup connection, not the engine's.
     const setup = new Database(f.engine.state.path, { strict: true });
+
     try {
       const activity = new MemberActivityStore(setup);
+
       const phase = setup.query(
         "UPDATE tasks SET status=?,released=? WHERE id=?",
       );
+
       setup
         .transaction(() => {
           for (let i = 0; i < 24; i++) {
             const task = tasks[i];
+
             if (!task) throw new Error("Missing saved task");
             phase.run("dispatching", 0, task.id);
             activity.assignment(
@@ -298,6 +325,7 @@ test("durable status bounds recent metadata, retains outcomes and never returns 
     } finally {
       setup.close();
     }
+
     const status = f.engine.status({ member: "chief" });
     expect(status.members[0]).toMatchObject({
       current: null,
@@ -306,6 +334,7 @@ test("durable status bounds recent metadata, retains outcomes and never returns 
     });
     expect(status.members[0]?.recent).toHaveLength(8);
     const serialized = JSON.stringify(status);
+
     for (const secret of [
       "secretauth",
       "hunter2",
@@ -354,13 +383,16 @@ function command(text = "crew twiki") {
 
 test("crew modal ACKs and opens before slow reads, shows literal progress, needs no pairing operator", async () => {
   const f = await fixture();
+
   try {
     const peer = f.engine.state.reservePeer("twiki");
+
     const task = f.engine.state.reserveTask(
       peer,
       "captain",
       "Review <@UOTHER> & <!channel>",
     );
+
     if (!task) throw new Error("Missing task");
     f.engine.state.running(task.id);
     f.engine.state.activity.progress(
@@ -370,13 +402,16 @@ test("crew modal ACKs and opens before slow reads, shows literal progress, needs
     const order: string[] = [];
     const views: CronView[] = [];
     const read = Promise.withResolvers<void>();
+
     const backend: Pick<AgentBackend, "crewStatus"> = {
       async crewStatus(input) {
         order.push("read");
         await read.promise;
+
         return f.engine.status(input);
       },
     };
+
     const ui = new CrewUI(
       bot(),
       identity,
@@ -385,6 +420,7 @@ test("crew modal ACKs and opens before slow reads, shows literal progress, needs
         async open(_trigger, view) {
           order.push("open");
           views.push(view);
+
           return "V123";
         },
         async update(_viewID, view) {
@@ -395,9 +431,11 @@ test("crew modal ACKs and opens before slow reads, shows literal progress, needs
       pino({ enabled: false }),
       new AbortController().signal,
     );
+
     const running = ui.command(command(), async () => {
       order.push("ack");
     });
+
     // Both continuations run through microtasks, without a wall-clock sleep.
     await Promise.resolve();
     await Promise.resolve();
@@ -411,6 +449,7 @@ test("crew modal ACKs and opens before slow reads, shows literal progress, needs
     expect(text).toContain("Review <@UOTHER> & <!channel>");
     expect(text).toContain("Visible <https://example.test|link>");
     expect(text).not.toContain("xoxb-secret-token");
+
     for (const block of view?.blocks ?? [])
       expect(block).toMatchObject({
         type: "section",
@@ -423,6 +462,7 @@ test("crew modal ACKs and opens before slow reads, shows literal progress, needs
 
 test("crew status fails closed across app/workspace/user/channel/bots and unsupported backends", async () => {
   const f = await fixture();
+
   try {
     const config = bot();
     config.access.users = ["*"];
@@ -431,19 +471,24 @@ test("crew status fails closed across app/workspace/user/channel/bots and unsupp
     config.access.deniedChannels = ["CDENIED"];
     let reads = 0;
     let opens = 0;
+
     const api = {
       async open() {
         opens++;
+
         return "V123";
       },
       async update() {},
     };
+
     const backend = {
       async crewStatus() {
         reads++;
+
         return f.engine.status();
       },
     };
+
     const ui = new CrewUI(
       config,
       identity,
@@ -452,10 +497,13 @@ test("crew status fails closed across app/workspace/user/channel/bots and unsupp
       pino({ enabled: false }),
       new AbortController().signal,
     );
+
     const acks: (Record<string, unknown> | undefined)[] = [];
+
     const ack = async (value?: Record<string, unknown>) => {
       acks.push(value);
     };
+
     for (const changes of [
       { api_app_id: "AOTHER" },
       { team_id: "TOTHER" },
@@ -473,12 +521,14 @@ test("crew status fails closed across app/workspace/user/channel/bots and unsupp
     expect(opens).toBe(0);
     expect(reads).toBe(0);
     expect(acks).toHaveLength(11);
+
     for (const payload of acks)
       expect(payload).toMatchObject({ response_type: "ephemeral" });
     config.access.users = ["U123"];
     config.access.channels = ["C123"];
     await ui.command({ ...command(), user_id: "UOTHER" }, ack);
     await ui.command({ ...command(), channel_id: "COTHER" }, ack);
+
     const unsupported = new CrewUI(
       config,
       identity,
@@ -487,6 +537,7 @@ test("crew status fails closed across app/workspace/user/channel/bots and unsupp
       pino({ enabled: false }),
       new AbortController().signal,
     );
+
     await unsupported.command(command(), ack);
     expect(opens).toBe(0);
     expect(reads).toBe(0);
@@ -500,6 +551,7 @@ test("crew UI hides backend errors, checks deadlines and rechecks access before 
   const views: CronView[] = [];
   const logs: string[] = [];
   const log = pino({ level: "error" }, { write: (line) => logs.push(line) });
+
   const api = {
     async open() {
       return "V123";
@@ -508,6 +560,7 @@ test("crew UI hides backend errors, checks deadlines and rechecks access before 
       views.push(view);
     },
   };
+
   const failed = new CrewUI(
     config,
     identity,
@@ -520,10 +573,13 @@ test("crew UI hides backend errors, checks deadlines and rechecks access before 
     log,
     new AbortController().signal,
   );
+
   let acknowledgements = 0;
+
   const ack = async () => {
     acknowledgements++;
   };
+
   await failed.command(command(), ack);
   expect(JSON.stringify(views)).toContain(
     "Crew status unavailable or timed out",
@@ -532,6 +588,7 @@ test("crew UI hides backend errors, checks deadlines and rechecks access before 
   const deadline = new AbortController();
   deadline.abort();
   let reads = 0;
+
   const timed = new CrewUI(
     config,
     identity,
@@ -546,14 +603,17 @@ test("crew UI hides backend errors, checks deadlines and rechecks access before 
     new AbortController().signal,
     () => deadline.signal,
   );
+
   await timed.command(command(), ack);
   expect(reads).toBe(0);
+
   const revoked = new CrewUI(
     config,
     identity,
     {
       async crewStatus() {
         config.access.deniedUsers.push("U123");
+
         return { members: [], total: 0, truncated: false };
       },
     },
@@ -561,6 +621,7 @@ test("crew UI hides backend errors, checks deadlines and rechecks access before 
     log,
     new AbortController().signal,
   );
+
   const count = views.length;
   await revoked.command(command(), ack);
   expect(views).toHaveLength(count);

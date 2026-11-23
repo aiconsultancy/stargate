@@ -48,9 +48,11 @@ test("native post SDK input keeps defaults, raw text and its input advertisement
       reply_broadcast: false,
     },
   });
+
   const advertisement: Record<string, unknown> = standard.jsonSchema.input({
     target: "draft-2020-12",
   });
+
   expect(advertisement).toEqual({
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -78,12 +80,15 @@ test("native post SDK input keeps defaults, raw text and its input advertisement
     "reply_broadcast",
     "key",
   ]);
+
   const invalid = await standard.validate({
     channel: "C123",
     text: "note",
     reply_broadcast: true,
   });
+
   expect(invalid).toHaveProperty("issues");
+
   if (!invalid.issues) throw new Error("Broadcast without thread accepted");
   expect(invalid.issues).toContainEqual(
     expect.objectContaining({
@@ -98,14 +103,19 @@ test("native post SDK input keeps defaults, raw text and its input advertisement
 
 test("post compound constraints retain broadcast diagnostics but structural failures abort them", async () => {
   const standard = messagePortableSchema(postInputSchema)["~standard"];
+
   for (const text of ["", 123]) {
     const input = { channel: "C123", text, reply_broadcast: true };
+
     const direct = Schema.decodeUnknownResult(postInputSchema, {
       errors: "all",
     })(input);
+
     if (Result.isSuccess(direct)) throw new Error("Invalid post accepted");
     const sdk = await standard.validate(input);
+
     if (!sdk.issues) throw new Error("Invalid SDK post accepted");
+
     for (const issues of [
       SchemaIssue.makeFormatterStandardSchemaV1()(direct.failure.issue).issues,
       sdk.issues,
@@ -113,6 +123,7 @@ test("post compound constraints retain broadcast diagnostics but structural fail
       expect(issues).toContainEqual(
         expect.objectContaining({ path: ["text"] }),
       );
+
       if (text === "") {
         expect(issues).toContainEqual(
           expect.objectContaining({
@@ -141,18 +152,23 @@ test("Effect envelope advertises encoded fields and validates without injecting 
       limit: Schema.Int.pipe(Schema.withDecodingDefault(Effect.succeed(20))),
     }),
   ]);
+
   const envelope = toolInputs.effectObjectToolInput(original);
+
   const json = Schema.toJsonSchemaDocument(envelope, {
     onExcessProperty: "error",
   }).schema;
+
   expect(json["type"]).toBe("object");
   expect(json["required"]).toEqual(["op"]);
+
   for (const key of ["anyOf", "oneOf", "allOf"])
     expect(json).not.toHaveProperty(key);
   const decode = Schema.decodeUnknownSync(envelope);
   expect(decode({ op: "read" })).toEqual({ op: "read" });
   const append = { op: "append", text: "  note  ", nested: { value: "ok" } };
   expect(decode(append)).toEqual(append);
+
   for (const input of [
     { op: "read", text: "another branch" },
     { op: "read", extra: true },
@@ -162,11 +178,13 @@ test("Effect envelope advertises encoded fields and validates without injecting 
     expect(Result.isFailure(Schema.decodeUnknownResult(envelope)(input))).toBe(
       true,
     );
+
   const invalid = Schema.decodeUnknownResult(envelope)({
     op: "append",
     text: "note",
     nested: { value: 1 },
   });
+
   if (!Result.isFailure(invalid)) throw new Error("Expected nested rejection");
   expect(
     SchemaIssue.makeFormatterStandardSchemaV1()(invalid.failure.issue).issues,
@@ -177,6 +195,7 @@ test("Effect journal envelope leaves defaults and trim to its handler", () => {
   const decode = Schema.decodeUnknownSync(
     toolInputs.effectObjectToolInput(journalInputSchema),
   );
+
   expect(decode({ op: "read" })).toEqual({ op: "read" });
   expect(decode({ op: "append", text: "  note  " })).toEqual({
     op: "append",
@@ -189,28 +208,36 @@ test("Effect struct advertisements keep required fields and resolvable definitio
   const nested = Schema.Struct({ value: Schema.String }).annotate({
     identifier: "NestedToolInput",
   });
+
   const original = Schema.Struct({
     nested,
     label: Schema.optional(Schema.String),
   });
+
   const envelope = toolInputs.effectObjectToolInput(original);
+
   const document = Schema.toJsonSchemaDocument(envelope, {
     onExcessProperty: "error",
   });
+
   expect(document.schema["required"]).toEqual(["nested"]);
   expect(document.definitions).toHaveProperty("NestedToolInput");
+
   const tool = {
     name: "fixture",
     description: "Local schema reference fixture",
     parameters: { ...document.schema, $defs: document.definitions },
   };
+
   const input = { nested: { value: "kept" }, label: null };
+
   const coerced = validateToolArguments(tool, {
     type: "toolCall",
     id: "fixture-call",
     name: "fixture",
     arguments: input,
   });
+
   expect(Schema.decodeUnknownSync(envelope)(coerced)).toEqual({
     nested: { value: "kept" },
   });
@@ -225,9 +252,11 @@ test("all Stargate union tools advertise an object root with their fields", () =
   for (const schema of Object.values(schemas)) {
     const json = z.toJSONSchema(objectToolInput(schema));
     expect(json.type).toBe("object");
+
     for (const key of ["oneOf", "anyOf", "allOf"])
       expect(json).not.toHaveProperty(key);
     expect(json.required).toContain("op");
+
     for (const option of schema.options)
       for (const name of Object.keys(option.shape))
         expect(json.properties).toHaveProperty(name);
@@ -236,6 +265,7 @@ test("all Stargate union tools advertise an object root with their fields", () =
 
 test("notification union keeps explicit scoped requirements and input expiry representation", () => {
   const schema = objectToolInput(notificationInputSchema);
+
   for (const input of [
     { op: "mute", scope: "thread", channel: "C123" },
     { op: "unmute", scope: "channel", channel: "D123" },
@@ -248,6 +278,7 @@ test("notification union keeps explicit scoped requirements and input expiry rep
     },
   ])
     expect(schema.safeParse(input).success).toBe(false);
+
   const input = {
     op: "mute",
     scope: "thread",
@@ -255,6 +286,7 @@ test("notification union keeps explicit scoped requirements and input expiry rep
     thread_ts: "1.000",
     mute_until: "2026-11-18T12:00:00+02:00",
   };
+
   expect(notificationInputSchema.parse(schema.parse(input))).toMatchObject({
     mute_until: "2026-11-18T10:00:00.000Z",
   });
@@ -262,6 +294,7 @@ test("notification union keeps explicit scoped requirements and input expiry rep
 
 test("original branch requirements, strictness and bounds remain enforced", async () => {
   const schema = crewOpenCodeInput()["~standard"];
+
   for (const input of [
     {},
     { op: "unknown" },
@@ -276,6 +309,7 @@ test("original branch requirements, strictness and bounds remain enforced", asyn
     ).toBe(false);
     expect(await schema.validate(input)).toHaveProperty("issues");
   }
+
   expect(await schema.validate({ op: "roster" })).toHaveProperty("value");
   expect(
     await schema.validate({ op: "dispatch", crew: "apollo", text: "check" }),
@@ -286,11 +320,13 @@ test("native mail project envelope retains branch requirements and field paths",
   const schema = messageOpenCodeInput(mailInputBranches)["~standard"];
   const inbox = { op: "inbox", project: "stargate" };
   expect(await schema.validate(inbox)).toEqual({ value: inbox });
+
   const invalid = await schema.validate({
     op: "send",
     text: "note",
     project: "stargate",
   });
+
   if (!invalid.issues) throw new Error("Missing mail recipient accepted");
   expect(invalid.issues).toContainEqual(
     expect.objectContaining({ path: ["to"] }),
@@ -304,6 +340,7 @@ test("Zod project helper preserves required operation fields after separating pr
     project: "stargate",
   });
   const missing = schema.safeParse({ op: "run", project: "stargate" });
+
   if (missing.success) throw new Error("Missing operation name accepted");
   expect(missing.error.issues).toContainEqual(
     expect.objectContaining({ path: ["name"] }),
@@ -317,6 +354,7 @@ test("remaining quota Zod project helper stays strict and validates project keys
   expect(schema.parse({ project: "stargate" })).toEqual({
     project: "stargate",
   });
+
   for (const raw of [
     null,
     [],
@@ -333,25 +371,31 @@ test("optional envelope fields do not inject another operation's defaults", asyn
   expect(
     cronOperationSchema.parse(objectToolInput(cronOperationSchema).parse(cron)),
   ).toEqual(cronOperationSchema.parse(cron));
+
   for (const [branches, original, input] of [
     [mailInputBranches, mailInputSchema, { op: "inbox" }],
     [historyInputBranches, historyInputSchema, { op: "sessions" }],
   ] as const) {
     const adapted =
       await messageOpenCodeInput(branches)["~standard"].validate(input);
+
     expect(adapted).toEqual({ value: input });
+
     if (adapted.issues) throw new Error("Native operation rejected");
     expect(Schema.decodeUnknownSync(original)(adapted.value)).toEqual(
       Schema.decodeUnknownSync(original)(input),
     );
   }
+
   const crew = await crewOpenCodeInput()["~standard"].validate({
     op: "ensure",
   });
+
   expect(crew).toEqual({ value: { op: "ensure" } });
   const input = { op: "get" };
   const adapted = await modelToolInputSchema["~standard"].validate(input);
   expect(adapted).toEqual({ value: input });
+
   if (adapted.issues) throw new Error("Unexpected model validation failure");
   expect(Schema.decodeUnknownSync(modelInputSchema)(adapted.value)).toEqual({
     op: "get",

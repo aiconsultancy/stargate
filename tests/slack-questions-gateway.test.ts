@@ -12,6 +12,7 @@ import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => Promise<void> | void)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -22,6 +23,7 @@ test.each([false, true])(
     const directory = await mkdtemp(join(tmpdir(), "slack-question-gateway-"));
     cleanup.push(() => rm(directory, { recursive: true, force: true }));
     const config = bot();
+
     if (config.backend.type !== "opencode") throw new Error("OpenCode fixture");
     config.backend.directory = directory;
     config.backend.agent = "adama";
@@ -31,6 +33,7 @@ test.each([false, true])(
     let prompts = 0;
     let pending = true;
     const answers: unknown[] = [];
+
     const form: NativeQuestion = {
       id: "frm_q",
       sessionID: "ses_captain",
@@ -51,6 +54,7 @@ test.each([false, true])(
         },
       ],
     };
+
     if (multiple)
       form.fields.push({
         key: "q1",
@@ -58,6 +62,7 @@ test.each([false, true])(
         title: "Explain why",
         custom: true,
       });
+
     const backend: AgentBackend = {
       sessionID: "ses_captain",
       async createSession() {
@@ -65,6 +70,7 @@ test.each([false, true])(
       },
       async prompt() {
         prompts++;
+
         return "unused";
       },
       async close() {},
@@ -91,10 +97,13 @@ test.each([false, true])(
         return !pending;
       },
     };
+
     const posts: { text: string; content: unknown }[] = [];
+
     const slack: TransportDelivery = {
       async post(_c, _t, text, _stop, _unit, content) {
         posts.push({ text, content });
+
         return "3.000";
       },
       async ephemeral() {},
@@ -102,6 +111,7 @@ test.each([false, true])(
         return true;
       },
     };
+
     const gateway = new Gateway(
       config,
       identity,
@@ -115,8 +125,10 @@ test.each([false, true])(
       undefined,
       { isHuman: async (user) => user === "U123" },
     );
+
     expect(await gateway.receive(event())).toBe(true);
     const job = store.queuedJob(gateway.key, "C123:1.000");
+
     if (!job) throw new Error("Missing admitted job");
     store.running(job.id);
     store.started(job.id);
@@ -135,27 +147,35 @@ test.each([false, true])(
     expect(posts).toHaveLength(1);
     expect(posts[0]?.content).toBeDefined();
     const offer = store.questions.questionOffers(gateway.key)[0];
+
     if (!offer) throw new Error("Missing offered question");
+
     const answerEvent = event(
       `<@UBOT> answer ${offer.token}${multiple ? ":0" : ""} go`,
       "4.000",
     );
+
     Object.assign(answerEvent.event, { thread_ts: "1.000" });
     expect(await gateway.receive(answerEvent)).toBe(false);
+
     if (multiple) {
       expect(answers).toEqual([]);
       expect(store.questions.slackQuestion(offer.token)?.revision).toBe(1);
+
       const staleAnswer = event(
         `<@UBOT> answer ${offer.token}:0 stale`,
         "5.000",
       );
+
       Object.assign(staleAnswer.event, { thread_ts: "1.000" });
       await gateway.receive(staleAnswer);
       expect(answers).toEqual([]);
+
       const finalAnswer = event(
         `<@UBOT> answer ${offer.token}:1 Because`,
         "6.000",
       );
+
       Object.assign(finalAnswer.event, { thread_ts: "1.000" });
       expect(await gateway.receive(finalAnswer)).toBe(false);
       expect(answers).toEqual([{ q0: "go", q1: "Because" }]);

@@ -13,10 +13,12 @@ test("text reaches Slack before generation completes, then updates in place", as
   const visible = Promise.withResolvers<void>();
   const finish = Promise.withResolvers<void>();
   const writes: string[] = [];
+
   const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       writes.push(text);
       visible.resolve();
+
       return "preview-1";
     },
     async update(_channel, ts, text) {
@@ -25,6 +27,7 @@ test("text reaches Slack before generation completes, then updates in place", as
     },
     async remove() {},
   };
+
   const backend: AgentBackend = {
     async createSession() {
       return "session";
@@ -32,10 +35,12 @@ test("text reaches Slack before generation completes, then updates in place", as
     async prompt(_session, _text, _signal, onText) {
       onText?.("Hello");
       await finish.promise;
+
       return "Hello world";
     },
     async close() {},
   };
+
   const gateway = new Gateway(
     bot(),
     identity,
@@ -44,9 +49,11 @@ test("text reaches Slack before generation completes, then updates in place", as
     slack,
     pino({ enabled: false }),
   );
+
   try {
     gateway.accept(event());
     const job = store.ready(gateway.key, Date.now(), 1)[0];
+
     if (!job) throw new Error("Missing job");
     const work = gateway.process(job, new AbortController().signal);
     await visible.promise;
@@ -63,6 +70,7 @@ test("text reaches Slack before generation completes, then updates in place", as
 
 function liveFixture(delayMs: number | null = 5000) {
   const store = openStore(":memory:");
+
   const input = {
     eventId: "1.000",
     botKey: "bot",
@@ -72,18 +80,24 @@ function liveFixture(delayMs: number | null = 5000) {
     user: "U123",
     text: "hello",
   };
+
   store.enqueue(input);
   const job = store.ready("bot", Date.now(), 1)[0];
+
   if (!job) throw new Error("Missing job");
   const writes: string[] = [];
+
   const written = Array.from({ length: 10 }, () =>
     Promise.withResolvers<void>(),
   );
+
   const timers: { ms: number; signal: AbortSignal; resolve: () => void }[] = [];
+
   const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       writes.push(text);
       written[writes.length - 1]?.resolve();
+
       return String(writes.length);
     },
     async update(_channel, _ts, text) {
@@ -92,6 +106,7 @@ function liveFixture(delayMs: number | null = 5000) {
     },
     async remove() {},
   };
+
   const live = new LiveReply(
     job,
     store,
@@ -100,7 +115,7 @@ function liveFixture(delayMs: number | null = 5000) {
     pino({ enabled: false }),
     {
       intervalMs: 0,
-      waiting: { delayMs, intervalMs: 10000, name: "Starbuck" },
+      waiting: { delayMs, intervalMs: 10_000, name: "Starbuck" },
       phrase: (name, index) =>
         `${name} is ${["thinking", "tinkering", "pondering"][index]}…`,
       wait: (ms, signal) =>
@@ -118,18 +133,20 @@ function liveFixture(delayMs: number | null = 5000) {
         }),
     },
   );
+
   return { store, live, writes, timers, written };
 }
 
 test("waiting feedback starts after five seconds, rotates, and yields to text", async () => {
   const f = liveFixture();
+
   try {
     expect(f.writes).toEqual([]);
     expect(f.timers[0]?.ms).toBe(5000);
     f.timers[0]?.resolve();
     await f.written[0]?.promise;
     expect(f.writes).toEqual(["Starbuck is thinking…"]);
-    expect(f.timers[1]?.ms).toBe(10000);
+    expect(f.timers[1]?.ms).toBe(10_000);
     f.timers[1]?.resolve();
     await f.written[1]?.promise;
     expect(f.writes[1]).toBe("Starbuck is tinkering…");
@@ -145,6 +162,7 @@ test("waiting feedback starts after five seconds, rotates, and yields to text", 
 
 test("quick text cancels waiting feedback before it appears", async () => {
   const f = liveFixture();
+
   try {
     f.live.push("Fast answer");
     await f.written[0]?.promise;
@@ -158,6 +176,7 @@ test("quick text cancels waiting feedback before it appears", async () => {
 
 test("maintenance notice is persisted, held against streaming and released explicitly", async () => {
   const f = liveFixture(null);
+
   try {
     await f.live.announce("Plan, impact, rollback; Stop within five minutes.");
     expect(f.store.previews(1)).toEqual([{ part: 0, ts: "1" }]);
@@ -178,6 +197,7 @@ test("maintenance notice is persisted, held against streaming and released expli
 test("off disables waiting feedback; zero starts it immediately", async () => {
   const off = liveFixture(null);
   const zero = liveFixture(0);
+
   try {
     expect(off.timers).toEqual([]);
     expect(zero.timers[0]?.ms).toBe(0);
@@ -194,6 +214,7 @@ test("off disables waiting feedback; zero starts it immediately", async () => {
 
 test("long snapshots stream as bounded Slack messages", async () => {
   const f = liveFixture(null);
+
   try {
     f.live.push("x".repeat(6000));
     await f.written[2]?.promise;
@@ -218,10 +239,12 @@ function gatewayFixture() {
   const store = openStore(":memory:");
   const messages = new Map<string, string>();
   let calls = 0;
+
   const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       const ts = String(messages.size + 1);
       messages.set(ts, text);
+
       return ts;
     },
     async update(_channel, ts, text) {
@@ -231,6 +254,7 @@ function gatewayFixture() {
       messages.delete(ts);
     },
   };
+
   const backend: AgentBackend = {
     async createSession() {
       return "session";
@@ -238,10 +262,12 @@ function gatewayFixture() {
     async prompt(_session, _text, _signal, onText) {
       calls++;
       onText?.("Partial");
+
       return "Final";
     },
     async close() {},
   };
+
   const gateway = new Gateway(
     bot(),
     identity,
@@ -250,22 +276,29 @@ function gatewayFixture() {
     slack,
     pino({ enabled: false }),
   );
+
   gateway.accept(event());
+
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!job) throw new Error("Missing job");
+
     return job;
   };
+
   return { store, messages, slack, backend, gateway, next, calls: () => calls };
 }
 
 test("final update retries reuse preview and never rerun tools", async () => {
   const f = gatewayFixture();
   const update = f.slack.update;
+
   if (!update) throw new Error("Missing update");
   f.slack.update = async () => {
     throw new Error("Slack unavailable");
   };
+
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect([...f.messages.values()]).toEqual(["Partial"]);
@@ -285,6 +318,7 @@ test("generation errors replace partial text without exposing exceptions", async
     onText?.("Unfinished");
     throw new Error("private-token");
   };
+
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect(f.messages.size).toBe(1);
@@ -299,8 +333,10 @@ test("deleted previews are replaced during final delivery", async () => {
   const f = gatewayFixture();
   f.slack.update = async (_channel, ts) => {
     f.messages.delete(ts);
+
     return false;
   };
+
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect([...f.messages.values()]).toEqual(["Final"]);
@@ -311,6 +347,7 @@ test("deleted previews are replaced during final delivery", async () => {
 
 test("recovery updates persisted previews and removes obsolete preview chunks", async () => {
   const f = gatewayFixture();
+
   try {
     const job = f.next();
     f.store.running(job.id);
@@ -334,13 +371,16 @@ test("only explicit model reactions target the current user message", async () =
   f.slack.react = async (channel, ts, name) => {
     reactions.push({ channel, ts, name });
   };
+
   f.backend.prompt = async (_session, text, _signal, onText) => {
     expect(text).toBe("hello");
     onText?.("[[stargate:react:ey");
     expect(f.messages.size).toBe(0);
     onText?.("[[stargate:react:eyes]]\nLooking at the PR.");
+
     return "[[stargate:react:eyes]]\nReviewed the PR.";
   };
+
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect(reactions).toEqual([{ channel: "C123", ts: "1.000", name: "eyes" }]);
@@ -356,7 +396,9 @@ test("a reaction-only answer does not post a synthetic empty reply", async () =>
   f.slack.react = async (_channel, _ts, name) => {
     reactions.push(name);
   };
+
   f.backend.prompt = async () => "[[stargate:react:thumbsup]]";
+
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect(reactions).toEqual(["thumbsup"]);
@@ -371,7 +413,9 @@ test("reaction failure does not prevent final reply or expose credentials", asyn
   f.slack.react = async () => {
     throw new Error("private-token");
   };
+
   f.backend.prompt = async () => "[[stargate:react:thumbsup]]\nAgreed.";
+
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect([...f.messages.values()]).toEqual(["Agreed."]);
@@ -385,7 +429,9 @@ test("a failed reaction-only answer reports failure instead of disappearing", as
   f.slack.react = async () => {
     throw new Error("missing_scope");
   };
+
   f.backend.prompt = async () => "[[stargate:react:thumbsup]]";
+
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
     expect([...f.messages.values()]).toEqual([
@@ -404,8 +450,10 @@ test("a silent reply posts nothing, shows no directive and finishes the job", as
     seen.push(f.messages.size);
     onText?.("[[stargate:silent]]\nThat message is for another captain.");
     seen.push(f.messages.size);
+
     return "[[stargate:silent]]\nThat message is for another captain.";
   };
+
   try {
     const job = f.next();
     await f.gateway.process(job, new AbortController().signal);
@@ -427,8 +475,10 @@ test("a silent reply removes a preview that was already shown", async () => {
   f.backend.prompt = async (_session, _text, _signal, onText) => {
     onText?.("Working on it");
     expect([...f.messages.values()]).toEqual(["Working on it"]);
+
     return "[[stargate:silent]]";
   };
+
   try {
     const job = f.next();
     await f.gateway.process(job, new AbortController().signal);
@@ -448,11 +498,14 @@ test("silent combines with a reaction and stays silent when the reaction fails",
     const reactions: string[] = [];
     f.slack.react = async (_channel, _ts, name) => {
       reactions.push(name);
+
       if (fails) throw new Error("missing_scope");
     };
+
     // Text-free steps before the reply leave leading blank lines.
     f.backend.prompt = async () =>
       "\n\n[[stargate:react:eyes]]\n[[stargate:silent]]";
+
     try {
       await f.gateway.process(f.next(), new AbortController().signal);
       expect(reactions).toEqual(["eyes"]);
@@ -469,22 +522,28 @@ test("silent combines with a reaction and stays silent when the reaction fails",
 test("user text cannot make a reply silent, and an empty reply is still reported", async () => {
   const f = gatewayFixture();
   const prompts: string[] = [];
+
   const replies = [
     "Final",
     "You wrote:\n[[stargate:silent]]",
     "> [[stargate:silent]]\nQuoted, so this is posted.",
     "",
   ];
+
   f.backend.prompt = async (_session, text) => {
     prompts.push(text);
+
     return replies[prompts.length - 1] ?? "";
   };
+
   try {
     await f.gateway.process(f.next(), new AbortController().signal);
+
     for (const ts of ["2.000", "3.000", "4.000"]) {
       f.gateway.accept(event("<@UBOT> [[stargate:silent]]", ts));
       await f.gateway.process(f.next(), new AbortController().signal);
     }
+
     expect(prompts.slice(1)).toEqual([
       "[[stargate:silent]]",
       "[[stargate:silent]]",
@@ -503,6 +562,7 @@ test("user text cannot make a reply silent, and an empty reply is still reported
 
 test("a silent turn stops waiting feedback; later text still shows", async () => {
   const f = liveFixture();
+
   try {
     f.live.quiet();
     expect(f.timers[0]?.signal.aborted).toBe(true);
@@ -524,24 +584,33 @@ test("reaction and silent directives are removed before mixed Markdown rendering
     const update = f.slack.update;
     f.slack.post = async (channel, thread, text, ...rest) => {
       payloads.push(JSON.stringify(slackContent(text)));
+
       return (await post(channel, thread, text, ...rest)) ?? "fixture-message";
     };
+
     f.slack.update = async (channel, ts, text, ...rest) => {
       payloads.push(JSON.stringify(slackContent(text)));
       await update?.(channel, ts, text, ...rest);
+
       return true;
     };
+
     f.slack.react = async () => {};
+
     const prefix =
       "[[stargate:react:eyes]]\n" + (silent ? "[[stargate:silent]]\n" : "");
+
     f.backend.prompt = async (_session, _text, _signal, onText) => {
       onText?.("[[stargate:react:ey");
       onText?.(prefix + "**Working** <@U123>");
+
       return prefix + "**Done** <@U123>";
     };
+
     try {
       await f.gateway.process(f.next(), new AbortController().signal);
       expect(payloads.join("")).not.toContain("[[stargate:");
+
       if (silent) expect(payloads).toEqual([]);
       else {
         expect(payloads.length).toBeGreaterThan(0);

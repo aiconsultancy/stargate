@@ -12,6 +12,7 @@ import {
 } from "../src/app/setup";
 
 const temporary: string[] = [];
+
 afterEach(async () => {
   await Promise.all(
     temporary
@@ -19,11 +20,14 @@ afterEach(async () => {
       .map((path) => rm(path, { recursive: true, force: true })),
   );
 });
+
 async function path() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-setup-"));
   temporary.push(directory);
+
   return join(directory, "stargate.json");
 }
+
 function bot(id = "one") {
   return {
     id,
@@ -40,6 +44,7 @@ function bot(id = "one") {
     },
   };
 }
+
 test("manifest prefill round-trips and grants only intended scopes/events", () => {
   const manifest = buildManifest("Test app");
   expect(
@@ -85,6 +90,7 @@ test("manifest prefill round-trips and grants only intended scopes/events", () =
     "message.im",
   ]);
 });
+
 test("append preserves bots and credentials with private files", async () => {
   const config = await path();
   await addBot(config, bot(), { app: "xapp-first", bot: "xoxb-first" });
@@ -101,6 +107,7 @@ test("append preserves bots and credentials with private files", async () => {
   await expect(addBot(config, bot())).rejects.toThrow("duplicate");
   expect(await readFile(config, "utf8")).toBe(before);
 });
+
 test("existing credentials and invalid input are never overwritten", async () => {
   const config = await path();
   await writeFile(`${config}.env`, "ONE_APP=existing\n");
@@ -133,6 +140,7 @@ test("credential check loads companion, respects environment, and rejects missin
     ONE_BOT: "xoxb-env",
   });
 });
+
 test("scripted add stores references, validates without secrets, rejects token arguments", async () => {
   const config = await path();
   expect(
@@ -188,6 +196,7 @@ test("scripted add stores references, validates without secrets, rejects token a
   await expect(
     runCli(["bot", "add", "--app-token", "secret-value"]),
   ).rejects.toThrow("Invalid CLI arguments");
+
   for (const backend of ["claude", "codex"])
     await expect(
       runCli([

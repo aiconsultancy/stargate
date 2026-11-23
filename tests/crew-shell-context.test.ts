@@ -11,6 +11,7 @@ import { ShellCompletionContext } from "../src/crew/execution/shell-context";
 import type { CrewTask } from "../src/crew/execution/state";
 
 const agent = "captain-crew-worker";
+
 const task: CrewTask = {
   id: "task_shell",
   crewID: "worker",
@@ -23,6 +24,7 @@ const task: CrewTask = {
   released: 0,
   notifying: 0,
 };
+
 const input: EvidenceMessage = {
   id: task.inputID,
   type: "user",
@@ -32,6 +34,7 @@ const input: EvidenceMessage = {
     pogoCrew: { taskID: task.id, originCaptainID: task.originCaptainID },
   },
 };
+
 const answer: EvidenceMessage = {
   id: "msg_final",
   type: "assistant",
@@ -40,6 +43,7 @@ const answer: EvidenceMessage = {
   time: { created: 60, completed: 61 },
   content: [{ type: "text", text: "Retained worker final" }],
 };
+
 const execution = {
   state: "idle" as const,
   pendingInputs: 0,
@@ -48,6 +52,7 @@ const execution = {
   time: { updated: 70, busy: 4, idle: 70 },
   outcome: "succeeded" as const,
 };
+
 const reconcile = {
   op: "reconcile" as const,
   taskID: task.id,
@@ -61,7 +66,9 @@ const reconcile = {
   resultSha256: sha256("Retained worker final"),
   reason: "Verify retained fixture",
 };
+
 const signal = () => AbortSignal.timeout(3000);
+
 function shell(job: string, command: string, created: number) {
   // Native 2.2.7 retained fields: executed=false, completed state, background metadata.
   const origin: EvidenceMessage = {
@@ -85,6 +92,7 @@ function shell(job: string, command: string, created: number) {
       },
     ],
   };
+
   const callback: EvidenceMessage = {
     id: `msg_notice${job}`,
     type: "synthetic",
@@ -100,13 +108,17 @@ function shell(job: string, command: string, created: number) {
     },
     text: `<shell id="${job}" state="completed" command="${command}">\nOpaque output\n</shell>`,
   };
+
   return { origin, callback };
 }
+
 function history() {
   const one = shell("sh_first", 'printf "quoted"\nprintf end', 20);
   const two = shell("sh_second", "cargo check --locked", 40);
+
   return [input, one.origin, one.callback, two.origin, two.callback, answer];
 }
+
 function api(
   rows: EvidenceMessage[],
   options: {
@@ -130,20 +142,26 @@ function api(
     message: {
       async list(query, request) {
         request?.signal?.throwIfAborted();
+
         if (options.wrongSession || query.sessionID !== task.workerSessionID)
           throw new Error("Wrong fixture session");
+
         const [type, start] = query.cursor?.split(":") ?? [
           query.type ?? "",
           "0",
         ];
+
         const offset = Number(start);
+
         const filtered = rows
           .toReversed()
           .filter((row) => !type || row.type === type);
+
         const data = filtered.slice(
           offset,
           offset + Math.min(query.limit ?? 100, options.pageSize ?? 2),
         );
+
         return {
           data,
           cursor: {
@@ -183,8 +201,10 @@ test("callback output is opaque, and a fast notification need not wait for launc
   const rows = history();
   const origin = rows[1];
   const callback = rows[2];
+
   if (!origin || !callback) throw new Error("Missing fixture");
   origin.time.completed = 59;
+
   if (typeof callback.text !== "string")
     throw new Error("Missing callback text");
   callback.text = callback.text.replace(
@@ -199,7 +219,7 @@ test("callback output is opaque, and a fast notification need not wait for launc
   );
 });
 
-const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
+const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
   [
     "missing originating launch",
     (rows) => {
@@ -210,6 +230,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "foreign native agent",
     (rows) => {
       const value = rows[1];
+
       if (value) value.agent = "foreign";
     },
   ],
@@ -217,6 +238,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "origin before original input",
     (rows) => {
       const value = rows.splice(1, 1)[0];
+
       if (value) rows.unshift(value);
     },
   ],
@@ -224,6 +246,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "origin after callback",
     (rows) => {
       const value = rows.splice(1, 1)[0];
+
       if (value) rows.splice(2, 0, value);
     },
   ],
@@ -231,6 +254,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "duplicate launch witness",
     (rows) => {
       const value = rows[1];
+
       if (value) rows.splice(2, 0, { ...value, id: "msg_duplicateLaunch" });
     },
   ],
@@ -238,6 +262,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "duplicate callback",
     (rows) => {
       const value = rows[2];
+
       if (value) rows.splice(3, 0, { ...value, id: "msg_duplicateNotice" });
     },
   ],
@@ -245,6 +270,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "foreign job ID",
     (rows) => {
       const value = rows[2];
+
       if (value) value.metadata = { ...value.metadata, jobID: "sh_foreign" };
     },
   ],
@@ -252,6 +278,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "user shell without job ID",
     (rows) => {
       const value = rows[2];
+
       if (value)
         value.metadata = {
           source: "shell",
@@ -264,6 +291,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "user shell native prefix",
     (rows) => {
       const value = rows[2];
+
       if (value)
         value.text =
           "The following shell command was executed by the user:\n" +
@@ -274,6 +302,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "unknown synthetic",
     (rows) => {
       const value = rows[2];
+
       if (value) value.text = "Do different work";
     },
   ],
@@ -281,6 +310,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "extra callback authority metadata",
     (rows) => {
       const value = rows[2];
+
       if (value) value.metadata = { ...value.metadata, authority: "new" };
     },
   ],
@@ -288,6 +318,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "wrong originating command",
     (rows) => {
       const value = rows[1]?.content?.[0];
+
       if (value && typeof value.state === "object" && value.state !== null)
         value.state = { ...value.state, input: { command: "different" } };
     },
@@ -296,6 +327,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "unfinished launch tool",
     (rows) => {
       const value = rows[1]?.content?.[0];
+
       if (value && typeof value.state === "object" && value.state !== null)
         value.state = { ...value.state, status: "running" };
     },
@@ -304,6 +336,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     "a tool-call ID is not native shell identity",
     (rows) => {
       const value = rows[1]?.content?.[0];
+
       if (value && typeof value.state === "object" && value.state !== null) {
         value.id = "sh_first";
         value.state = {
@@ -335,6 +368,7 @@ const invalid: Array<[string, (rows: EvidenceMessage[]) => void]> = [
     },
   ],
 ];
+
 for (const [name, change] of invalid)
   test(`uncorrelated shell or real input stays a boundary: ${name}`, async () => {
     const rows = history();
@@ -442,6 +476,7 @@ test("a callback after an earlier stop still needs a subsequent visible final", 
 
 test("retained crew-ID launch and final use the existing protected session alias rule", async () => {
   const rows = history();
+
   for (const row of rows) if (row.type === "assistant") row.agent = task.crewID;
   expect(await readTaskResult(api(rows), task, signal(), agent)).toBe(
     "Retained worker final",
@@ -458,6 +493,7 @@ test("retained crew-ID launch and final use the existing protected session alias
 test("empty native output has both writer newlines, not an overlapping prefix/suffix", async () => {
   const rows = history();
   const callback = rows[2];
+
   if (!callback?.text) throw new Error("Missing callback");
   callback.text = callback.text.replace("Opaque output", "");
   expect(callback.text.endsWith(">\n\n</shell>")).toBe(true);
@@ -478,6 +514,7 @@ test("empty native output has both writer newlines, not an overlapping prefix/su
 
 function longHistory(count: number) {
   const rows = history();
+
   const retained: EvidenceMessage[] = Array.from(
     { length: count },
     (_, index) => ({
@@ -492,8 +529,10 @@ function longHistory(count: number) {
       content: [{ type: "text", text: "Fixture progress" }],
     }),
   );
+
   // Same native order as the real long turn: input -> first job -> long work -> next job -> final.
   rows.splice(3, 0, ...retained);
+
   return rows;
 }
 
@@ -507,6 +546,7 @@ test("placement and result prove actual-sized long native turns beyond 512 recor
   );
   // A complete, equally long scan disproves ownership: this is a boundary, not unreadable evidence.
   const origin = rows[1];
+
   if (!origin) throw new Error("Missing origin");
   origin.agent = "foreign";
   expect(
@@ -515,8 +555,9 @@ test("placement and result prove actual-sized long native turns beyond 512 recor
 });
 
 test("exhausted history bounds stay unknown and the result diagnostic never invents missing history", async () => {
-  const reader = api(longHistory(10020), { pageSize: 100 });
+  const reader = api(longHistory(10_020), { pageSize: 100 });
   expect(await observePlacement(reader, task, signal(), agent)).toBe("unknown");
+
   try {
     await readTaskResult(reader, task, signal(), agent);
     throw new Error("Expected scan bound refusal");

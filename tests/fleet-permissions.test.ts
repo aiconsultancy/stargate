@@ -14,11 +14,13 @@ const caller = {
   messageID: "msg_assistant",
   id: "call_dispatch",
 };
+
 const verify: FleetRequest = {
   operation: "verify",
   caller,
   input: { reference: "teams-original" },
 };
+
 const dispatch: FleetRequest = {
   operation: "dispatch",
   caller,
@@ -28,7 +30,9 @@ const dispatch: FleetRequest = {
     sourceReference: "teams-original",
   },
 };
+
 const status: FleetRequest = { operation: "status", caller, input: {} };
+
 const rule = (
   action: string,
   resource: string,
@@ -97,11 +101,13 @@ test("ask rules cannot be bypassed through direct IPC or a later allow", () => {
     expect(() => validateFleetPermissions([rule(action, "*", "ask")])).toThrow(
       "does not support ask",
     );
+
   const rules = [
     rule("*", "*", "deny"),
     rule("fleet_dispatch", "captain", "ask"),
     rule("fleet_dispatch", "captain"),
   ];
+
   expect(fleetRequestAllowed(rules, dispatch)).toBe(false);
 });
 
@@ -120,6 +126,7 @@ test("unsupported potentially matching action/resource patterns fail closed", ()
     expect(() => validateFleetPermissions([rule(action, "*")])).toThrow(
       "only exact literals",
     );
+
   for (const resource of [
     "cap?ain",
     "[ct]*",
@@ -147,6 +154,7 @@ test("provably separate native tools keep their own ask and resource patterns", 
     rule("read", "*.env", "deny"),
     rule("fleet_dispatch", "captain"),
   ];
+
   expect(() => validateFleetPermissions(rules)).not.toThrow();
   expect(fleetRequestAllowed(rules, dispatch)).toBe(true);
   expect(fleetRequestAllowed(rules, verify)).toBe(false);
@@ -160,9 +168,12 @@ test("the selected fleet profile's root policy works without broadening its allo
     assignedCheckout: "/workspace/coordinator",
     capabilities: ["read_code", "subspace", "dispatch"],
   });
+
   expect(() => validateFleetPermissions(rules)).not.toThrow();
+
   for (const request of [verify, dispatch, status])
     expect(fleetRequestAllowed(rules, request)).toBe(true);
+
   const restricted = fleetPermissions({
     role: "captain",
     humanAccounts: ["human"],
@@ -170,6 +181,7 @@ test("the selected fleet profile's root policy works without broadening its allo
     assignedCheckout: "/workspace/captain",
     capabilities: ["read_code", "subspace", "implement"],
   });
+
   for (const request of [verify, status])
     expect(fleetRequestAllowed(restricted, request)).toBe(true);
   expect(fleetRequestAllowed(restricted, dispatch)).toBe(false);

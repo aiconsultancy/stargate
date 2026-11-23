@@ -11,9 +11,11 @@ test("gateway and Slack features reflect parsed defaults and explicit overrides"
   const defaultConfig = Schema.decodeUnknownSync(configSchema)({
     bots: [bot()],
   });
+
   const byKey = Object.fromEntries(
     gatewayFeatures(defaultConfig).map((feature) => [feature.key, feature]),
   );
+
   expect(byKey["dashboard"]).toMatchObject({
     enabled: false,
     defaultEnabled: false,
@@ -24,6 +26,7 @@ test("gateway and Slack features reflect parsed defaults and explicit overrides"
     defaultEnabled: true,
   });
   const base = bot();
+
   const configured = Schema.decodeUnknownSync(configSchema)({
     dashboard: true,
     dashboardSocket: { path: "/run/example/dashboard.sock", groupAccess: true },
@@ -44,11 +47,14 @@ test("gateway and Slack features reflect parsed defaults and explicit overrides"
       },
     ],
   });
+
   const gateway = gatewayFeatures({
     ...configured,
     api: { listen: "127.0.0.1:7781" },
   });
+
   const slack = configured.bots[0];
+
   if (!slack) throw new Error("Missing test registration");
   const ship = await registrationFeatures({ kind: "slack", config: slack });
   expect(gateway).toEqual(
@@ -142,6 +148,7 @@ test("every IRC switch has its schema default and roster-aware features exclude 
     },
     fleetChannels: { home: "#private-room", command: "#private-command" },
   };
+
   const config = Schema.decodeUnknownSync(configSchema)({
     irc: [
       {
@@ -152,22 +159,27 @@ test("every IRC switch has its schema default and roster-aware features exclude 
       },
     ],
   }).irc[0];
+
   if (!config) throw new Error("Missing test registration");
   const features = await registrationFeatures({ kind: "irc", config });
+
   const byKey = Object.fromEntries(
     features.map((feature) => [feature.key, feature]),
   );
+
   for (const [key, value] of Object.entries(ircFeatureDefaults))
     expect(byKey[`irc.${key}`]).toMatchObject({
       defaultEnabled: value,
       enabled: key === "typing" ? false : value,
     });
+
   const feedbackKeys = [
     "questions",
     "crewQuestionHandoff",
     "liveProgress",
     "fleetTyping",
   ] as const;
+
   for (const key of feedbackKeys)
     expect(byKey[`irc.${key}`]).toMatchObject({
       enabled: true,
@@ -190,6 +202,7 @@ test("every IRC switch has its schema default and roster-aware features exclude 
   expect(JSON.stringify(features)).not.toMatch(
     /#private|\/private|example-human|IRC_EXAMPLE_PASSWORD/,
   );
+
   const disabled = await registrationFeatures({
     kind: "irc",
     config:
@@ -207,6 +220,7 @@ test("every IRC switch has its schema default and roster-aware features exclude 
         ],
       }).irc[0] ?? config,
   });
+
   for (const key of feedbackKeys)
     expect(
       disabled.find((feature) => feature.key === `irc.${key}`),

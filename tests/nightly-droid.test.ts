@@ -45,6 +45,7 @@ import { openStore } from "../src/app/open-store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-droid-"));
+
 afterAll(async () => {
   void server.stop(true);
   await rm(base, { recursive: true, force: true });
@@ -58,16 +59,19 @@ const secrets = {
   botToken: "xoxb-fixture-bot-token-77",
   appToken: "xapp-fixture-app-token-55",
 };
+
 const env = {
   STARGATE_DROID_TEST_KEY: secrets.providerKey,
   STARGATE_RELEASE_TOKEN: secrets.releaseToken,
   BOT_TOKEN: secrets.botToken,
   APP_TOKEN: secrets.appToken,
 };
+
 process.env["STARGATE_DROID_TEST_KEY"] = secrets.providerKey;
 
 // ---- Local proxy fixture: health and a scripted chat model ---------------
 type Chat = { headers: Headers; body: string };
+
 const proxy = {
   down: false,
   chats: [] as Chat[],
@@ -78,6 +82,7 @@ const proxy = {
     | "fail"
   )[],
 };
+
 const chunk = (delta: object, finish: string | null = null) =>
   `data: ${JSON.stringify({
     id: "fixture",
@@ -86,27 +91,33 @@ const chunk = (delta: object, finish: string | null = null) =>
     model: "opencode-go/deepseek-v4.1-flash",
     choices: [{ index: 0, delta, finish_reason: finish }],
   })}\n\n`;
+
 const server = Bun.serve({
   port: 0,
   hostname: "127.0.0.1",
   async fetch(request) {
     const path = new URL(request.url).pathname;
+
     if (path === "/v1/models") {
       if (
         proxy.down ||
         request.headers.get("authorization") !== `Bearer ${secrets.clientKey}`
       )
         return new Response("down", { status: 503 });
+
       return Response.json({ data: [{ id: "gpt-6.1-sol" }] });
     }
+
     const body = await request.text();
     proxy.chats.push({ headers: request.headers, body });
     const next = proxy.script.shift() ?? { text: "Nothing to add." };
+
     if (next === "fail")
       return Response.json(
         { error: { message: "denied", type: "authentication_error" } },
         { status: 401 },
       );
+
     const stream =
       "tools" in next
         ? chunk({
@@ -122,22 +133,28 @@ const server = Bun.serve({
             })),
           }) + chunk({}, "tool_calls")
         : chunk({ role: "assistant", content: next.text }) + chunk({}, "stop");
+
     return new Response(`${stream}data: [DONE]\n\n`, {
       headers: { "content-type": "text/event-stream" },
     });
   },
 });
+
 const url = `http://127.0.0.1:${server.port}`;
 
 // ---- Host fixture: systemd units, gateway readiness, OpenCode ------------
 const now = Date.parse("2026-11-12T12:00:00Z");
+
 /** This install's planned start last night (00:00 Europe/London + jitter). */
 const plannedStart = new Date(
   Date.parse("2026-11-12T00:00:00Z") +
     stableJitter("test-install", 15) * 60_000,
 ).toISOString();
+
 const at = (iso: string) => `@${Math.floor(Date.parse(iso) / 1000)}`;
+
 type Units = Record<string, Record<string, string>>;
+
 const host = {
   dir: "",
   units: {} as Units,
@@ -151,32 +168,42 @@ const host = {
 };
 
 const ok = (stdout = ""): CommandResult => ({ code: 0, stdout, stderr: "" });
+
 const runner: CommandRunner = {
   async run(command) {
     const text = command.join(" ");
     host.commands.push(text);
     const [tool, scope, action, unit = ""] = command;
+
     if (tool !== "systemctl" || scope !== "--user")
       return { code: 127, stdout: "", stderr: "" };
+
     const values = host.units[unit] ?? {
       LoadState: "not-found",
       ActiveState: "inactive",
     };
+
     if (action === "show")
       return ok(
         Object.entries(values)
           .map(([key, value]) => `${key}=${value}`)
           .join("\n"),
       );
+
     if (action === "is-active") return ok(`${values["ActiveState"]}\n`);
+
     if (action === "restart" || action === "start") {
       host.units[unit] = { ...values, ActiveState: "active" };
+
       if (unit === "stargate.service") await ready();
+
       return ok();
     }
+
     return { code: 1, stdout: "", stderr: "" };
   },
 };
+
 const ready = () =>
   writeFile(
     join(host.dir, "data", "ready.json"),
@@ -187,9 +214,11 @@ const ready = () =>
       version: "0.2.0",
     }),
   );
+
 const opencode = {
   active: async () => {
     host.activeCalls++;
+
     return host.arrive?.(host.activeCalls) ?? host.busy;
   },
   pendingInput: async () => [],
@@ -197,6 +226,7 @@ const opencode = {
 } as unknown as OpenCodeControl;
 
 let agentPrompts: string[] = [];
+
 /** A model stand-in that calls the given tools, then answers. */
 function scripted(
   run: (tools: DroidTools) => Promise<string>,
@@ -204,12 +234,15 @@ function scripted(
   return async (): Promise<DroidAgent> => ({
     async ask({ prompt, tools }) {
       agentPrompts.push(prompt);
+
       return run(tools);
     },
     async close() {},
   });
 }
+
 let opened = 0;
+
 const deps = (
   openAgent: DroidDependencies["openAgent"] = scripted(
     async () => "Everything looks fine.",
@@ -227,6 +260,7 @@ const deps = (
   uuid: () => crypto.randomUUID(),
   openAgent: async (settings, directory) => {
     opened++;
+
     return openAgent(settings, directory);
   },
 });
@@ -273,6 +307,7 @@ async function install(
   await writeFile(join(dir, "client.key"), `${secrets.clientKey}\n`, {
     mode: 0o600,
   });
+
   const raw = {
     dataDirectory: join(dir, "data"),
     bots: [
@@ -326,14 +361,18 @@ async function install(
       },
     },
   };
+
   const config: Config = Schema.decodeUnknownSync(configSchema)(raw);
   await ready();
   // One Stargate-owned OpenCode session: the gateway's mapping of a thread.
   const storePath = join(config.dataDirectory, "stargate.sqlite");
+
   if (seededStore) await copyFile(nightlyStoreFixture, storePath);
   const store = openStore(storePath);
+
   if (!seededStore) store.saveSession('["k","C123","1.0"]', "ses_captain");
   store.close();
+
   return { config, path: join(dir, "stargate.json") };
 }
 
@@ -390,9 +429,11 @@ const journal = (config: Config, fields: object) =>
 
 async function posts(config: Config) {
   const directory = join(config.dataDirectory, "maintenance", "outbox");
+
   const names = (await readdir(directory).catch(() => [] as string[])).filter(
     (name) => name.startsWith("droid-"),
   );
+
   return Promise.all(
     names.map(
       async (name) =>
@@ -403,6 +444,7 @@ async function posts(config: Config) {
     ),
   );
 }
+
 async function auditLog(config: Config) {
   return (
     (await readFile(
@@ -415,6 +457,7 @@ async function auditLog(config: Config) {
     .filter(Boolean)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
+
 const check = (config: Config, path: string, d = deps()) =>
   runDroid(
     { config, configPath: path, signal: AbortSignal.timeout(30_000) },
@@ -432,6 +475,7 @@ describe("maintenance droid", () => {
       config.dataDirectory,
       report("completed", "2026-11-12T00:05:00.000Z"),
     );
+
     const first = await check(
       config,
       path,
@@ -441,6 +485,7 @@ describe("maintenance droid", () => {
         ),
       ),
     );
+
     expect(first).toMatchObject({
       trigger: "after-run",
       posted: true,
@@ -560,9 +605,11 @@ describe("maintenance droid", () => {
           await mkdir(droidDirectory(config.dataDirectory), {
             recursive: true,
           });
+
           const names = await readdir(
             join(config.dataDirectory, "maintenance", "reports"),
           );
+
           await writeFile(
             join(droidDirectory(config.dataDirectory), "state.json"),
             JSON.stringify({
@@ -583,6 +630,7 @@ describe("maintenance droid", () => {
           }),
       ],
     ];
+
     for (const [code, setup] of cases) {
       const { config, path } = await install({}, true);
       await setup(config);
@@ -600,9 +648,11 @@ describe("maintenance droid", () => {
       LoadState: "loaded",
       ActiveState: "failed",
     };
+
     const failing = scripted(async () => {
       throw new Error(`upstream said ${secrets.providerKey}`);
     });
+
     const result = await check(config, path, deps(failing));
     expect(result).toMatchObject({ posted: true, model: false });
     const [post] = await posts(config);
@@ -619,9 +669,11 @@ describe("maintenance droid", () => {
       LoadState: "loaded",
       ActiveState: "failed",
     };
+
     const broken: DroidDependencies["openAgent"] = async () => {
       throw new Error("Missing environment variable");
     };
+
     expect(await check(second.config, second.path, deps(broken))).toMatchObject(
       {
         posted: true,
@@ -634,8 +686,10 @@ describe("maintenance droid", () => {
     const recoverTwice = scripted(async (tools) => {
       const first = await tools.recover();
       const second = await tools.recover();
+
       return `${first}\n${second}`;
     });
+
     // No journal and a running gateway: nothing to recover.
     const quiet = await install();
     proxy.down = true;
@@ -647,7 +701,7 @@ describe("maintenance droid", () => {
     );
 
     // A stopped gateway without a journal: allowed, but recover has no
-    // journal to finish; it never starts a gateway someone stopped.
+    // Journal to finish; it never starts a gateway someone stopped.
     const stopped = await install();
     host.units["stargate.service"] = {
       LoadState: "loaded",
@@ -693,12 +747,15 @@ describe("maintenance droid", () => {
         report("failed", "2026-11-12T00:05:00.000Z"),
       );
       let held: Database | undefined;
+
       if (block === "busy") host.busy = ["ses_captain"];
+
       if (block === "run")
         host.units["stargate-maintenance.service"] = {
           LoadState: "loaded",
           ActiveState: "active",
         };
+
       if (block === "lock") {
         held = new Database(
           join(config.dataDirectory, "maintenance", "run.sqlite"),
@@ -706,11 +763,13 @@ describe("maintenance droid", () => {
         );
         held.exec("BEGIN EXCLUSIVE;");
       }
+
       try {
         await check(config, path, deps(recoverTwice));
       } finally {
         held?.close();
       }
+
       expect(host.commands.filter((c) => c.includes(" restart "))).toEqual([]);
       [post] = await posts(config);
       expect(post?.text).toContain(
@@ -726,10 +785,12 @@ describe("maintenance droid", () => {
   test("recover is limited per day across checks", async () => {
     const { config, path } = await install({ maxRecoversPerDay: 2 });
     const recover = scripted(async (tools) => tools.recover());
+
     for (let i = 0; i < 3; i++) {
       await journal(config, { gateway: { restartPending: true } });
       await check(config, path, deps(recover));
     }
+
     expect(
       host.commands.filter(
         (c) => c === "systemctl --user restart stargate.service",
@@ -761,6 +822,7 @@ describe("maintenance droid", () => {
       deps(
         scripted(async (tools) => {
           seen = await tools.plan();
+
           return `${await tools.plan()}`;
         }),
       ),
@@ -803,6 +865,7 @@ describe("maintenance droid", () => {
         scripted(async (tools) => {
           seen.push(JSON.stringify(await tools.status()));
           seen.push(JSON.stringify(await tools.reports(5)));
+
           // A model that echoes a secret it guessed is redacted.
           return `Done. token=${secrets.releaseToken} ${secrets.botToken} ${secrets.providerKey}`;
         }),
@@ -810,6 +873,7 @@ describe("maintenance droid", () => {
     );
     const [post] = await posts(config);
     const everything = [...agentPrompts, ...seen, post?.text ?? ""].join("\n");
+
     for (const value of Object.values(secrets))
       expect(everything).not.toContain(value);
     expect(seen[0]).toContain('"entries":["gateway"]');
@@ -823,6 +887,7 @@ describe("maintenance droid previews and timeouts", () => {
       LoadState: "loaded",
       ActiveState: "inactive",
     };
+
     const result = await runDroid(
       {
         config,
@@ -832,6 +897,7 @@ describe("maintenance droid previews and timeouts", () => {
       },
       deps(),
     );
+
     expect(result).toMatchObject({ posted: false, findings: ["gateway-down"] });
     expect(result.text).toContain("Checks: gateway-down.");
     expect(opened).toBe(0);
@@ -845,16 +911,20 @@ describe("maintenance droid previews and timeouts", () => {
     const { config, path } = await install({ timeoutMinutes: 1 });
     await journal(config, { gateway: { restartPending: true } });
     let release = () => {};
+
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     const slow: CommandRunner = {
       async run(command, options) {
         if (command.join(" ") === "systemctl --user restart stargate.service")
           await gate;
+
         return runner.run(command, options);
       },
     };
+
     const d = deps(
       scripted(async (tools) => {
         // The model gives up while the recover still runs.
@@ -863,6 +933,7 @@ describe("maintenance droid previews and timeouts", () => {
         throw new Error("model timeout");
       }),
     );
+
     d.runner = slow;
     const done = check(config, path, d);
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -885,6 +956,7 @@ describe("maintenance droid on Pi Durable", () => {
       { tools: [{ name: "maintenance_recover", arguments: {} }] },
       { text: "Finished the leftover journal; the gateway is back." },
     ];
+
     const result = await check(
       config,
       path,
@@ -894,6 +966,7 @@ describe("maintenance droid on Pi Durable", () => {
         }),
       ),
     );
+
     expect(result).toMatchObject({ posted: true, model: true });
     expect(proxy.chats).toHaveLength(4);
     // Only Stargate's own commands ran: unit reads and the one gateway restart.
@@ -907,22 +980,27 @@ describe("maintenance droid on Pi Durable", () => {
       "Finished the leftover journal; the gateway is back.",
     );
     expect(post?.text).toContain("Droid actions: recover finished.");
+
     const tools = JSON.parse(proxy.chats[0]?.body ?? "{}").tools as {
       function: { name: string };
     }[];
+
     expect(tools.map((t) => t.function.name).sort()).toEqual([
       "maintenance_plan",
       "maintenance_recover",
       "maintenance_reports",
       "maintenance_status",
     ]);
+
     for (const chat of proxy.chats) {
       expect(chat.headers.get("authorization")).toBe(
         `Bearer ${secrets.providerKey}`,
       );
+
       for (const value of Object.values(secrets))
         expect(chat.body).not.toContain(value);
     }
+
     // The status tool result reached the model.
     expect(proxy.chats[2]?.body).toContain("gateway");
   });
@@ -934,6 +1012,7 @@ describe("maintenance droid on Pi Durable", () => {
       ActiveState: "failed",
     };
     proxy.script = ["fail", "fail", "fail", "fail"];
+
     const result = await check(
       config,
       path,
@@ -943,6 +1022,7 @@ describe("maintenance droid on Pi Durable", () => {
         }),
       ),
     );
+
     expect(result).toMatchObject({ posted: true, model: false });
     const [post] = await posts(config);
     expect(post?.text).toContain("deterministic summary");
@@ -968,6 +1048,7 @@ describe("droid configuration and units", () => {
       healthCheck: "12:00",
       maxRecoversPerDay: 2,
     });
+
     for (const droid of [
       // The default model goes through the proxy: a provider is required.
       { enabled: true },
@@ -1033,6 +1114,7 @@ describe("droid configuration and units", () => {
       healthCheck: "12:00",
       timeoutMinutes: 40,
     });
+
     expect(units.timer).toContain("OnCalendar=*-*-* 01:15:00 Europe/London");
     expect(units.timer).toContain("OnCalendar=*-*-* 12:00:00 Europe/London");
     expect(units.timer).toContain("Persistent=false");
@@ -1054,11 +1136,14 @@ describe("droid recover safety", () => {
       config.dataDirectory,
       report("failed", "2026-11-12T00:05:00.000Z"),
     );
+
     const held = new Database(
       join(config.dataDirectory, "maintenance", "run.sqlite"),
       { create: true },
     );
+
     held.exec("BEGIN EXCLUSIVE;");
+
     try {
       await check(
         config,
@@ -1068,6 +1153,7 @@ describe("droid recover safety", () => {
     } finally {
       held.close();
     }
+
     // No idle check, no undo: the lock decides first.
     expect(host.activeCalls).toBe(0);
     expect(host.commands.filter((c) => c.includes(" restart "))).toEqual([]);
@@ -1089,12 +1175,14 @@ describe("droid recover safety", () => {
     host.arrive = (call) => (call >= 2 ? ["ses_captain"] : []);
     await check(config, path, deps(scripted(async (tools) => tools.recover())));
     expect(host.commands.filter((c) => c.includes(" restart "))).toEqual([]);
+
     const left = JSON.parse(
       await readFile(
         join(config.dataDirectory, "maintenance", "journal.json"),
         "utf8",
       ),
     );
+
     expect(left.openCode).toEqual({ restarted: true, restartPending: true });
     expect(left.gateway).toEqual({ restartPending: true });
     const [post] = await posts(config);
@@ -1106,10 +1194,12 @@ describe("droid recover safety", () => {
   test("the daily recover count survives audit log rotation", async () => {
     const { config, path } = await install({ maxRecoversPerDay: 2 });
     const recover = scripted(async (tools) => tools.recover());
+
     for (let i = 0; i < 2; i++) {
       await journal(config, { gateway: { restartPending: true } });
       await check(config, path, deps(recover));
     }
+
     // A flood of refused requests rotates today's recover entries out.
     const flood = JSON.stringify({
       at: new Date(now).toISOString(),
@@ -1120,6 +1210,7 @@ describe("droid recover safety", () => {
       status: "refused",
       detail: "x".repeat(400),
     });
+
     await writeFile(
       join(droidDirectory(config.dataDirectory), "audit.jsonl"),
       `${Array.from({ length: 2000 }, () => flood).join("\n")}\n`,
@@ -1139,12 +1230,14 @@ describe("droid recover safety", () => {
         ),
       ),
     ).toHaveLength(1);
+
     const state = JSON.parse(
       await readFile(
         join(droidDirectory(config.dataDirectory), "state.json"),
         "utf8",
       ),
     );
+
     expect(state.recovers).toEqual({ "2026-11-12": 2 });
   });
 
@@ -1166,12 +1259,14 @@ describe("droid recover safety", () => {
     expect(post?.text).toContain(
       "recover refused (the droid state is unreadable)",
     );
+
     const state = JSON.parse(
       await readFile(
         join(droidDirectory(config.dataDirectory), "state.json"),
         "utf8",
       ),
     );
+
     expect(state.recovers).toEqual({ "2026-11-12": 2 });
   });
 
@@ -1234,6 +1329,7 @@ describe("droid recover safety", () => {
         scripted(async (tools) => {
           seen.push(JSON.stringify(await tools.status()));
           seen.push(JSON.stringify(await tools.reports(7)));
+
           return "Summary.";
         }),
       ),
@@ -1241,6 +1337,7 @@ describe("droid recover safety", () => {
     const [post] = await posts(config);
     expect(seen[1]).toContain("[REDACTED");
     const everything = [...agentPrompts, ...seen, post?.text ?? ""].join("\n");
+
     for (const value of Object.values(secrets))
       expect(everything).not.toContain(value);
   });
@@ -1250,17 +1347,22 @@ describe("droid scrubbing and dates", () => {
   // A configured secret without any credential-looking pattern.
   const long = `fixture-long-release-${"7c3f9a1e".repeat(6)}-end`.slice(0, 64);
   const longEnv = { ...env, STARGATE_RELEASE_TOKEN: long };
+
   const capture = async (config: Config, path: string) => {
     const seen: string[] = [];
+
     const d = deps(
       scripted(async (tools) => {
         seen.push(JSON.stringify(await tools.status()));
         seen.push(JSON.stringify(await tools.reports(7)));
+
         return "Summary.";
       }),
     );
+
     await check(config, path, { ...d, env: longEnv });
     const [post] = await posts(config);
+
     return [...agentPrompts, ...seen, post?.text ?? ""].join("\n");
   };
 
@@ -1285,6 +1387,7 @@ describe("droid scrubbing and dates", () => {
     const everything = await capture(config, path);
     expect(everything).not.toContain(long.slice(0, 40));
     expect(everything).not.toContain(long.slice(0, 12));
+
     // The order itself, without the cut-boundary defence: scrub, then cut.
     const digest = digestReport(
       "r.json",
@@ -1301,6 +1404,7 @@ describe("droid scrubbing and dates", () => {
       }),
       (text) => text.replaceAll(long, "[REDACTED]"),
     );
+
     expect(digest.changed[0]?.before).toBe("[REDACTED]");
   });
 
@@ -1310,7 +1414,7 @@ describe("droid scrubbing and dates", () => {
       config.dataDirectory,
       report("failed", "2026-11-12T00:05:00.000Z", {
         // The report writer marks its own cuts with "…"; a field can also
-        // simply end inside a secret.
+        // Simply end inside a secret.
         components: [
           {
             id: `npm:${long.slice(0, 30)}…`,
@@ -1340,7 +1444,7 @@ describe("droid scrubbing and dates", () => {
     const { config, path } = await install({ maxRecoversPerDay: 1 });
     await journal(config, { gateway: { restartPending: true } });
     // Yesterday's recover is spent; the check starts a few seconds before
-    // midnight (Europe/London is UTC in November).
+    // Midnight (Europe/London is UTC in November).
     await mkdir(droidDirectory(config.dataDirectory), { recursive: true });
     await writeFile(
       join(droidDirectory(config.dataDirectory), "state.json"),
@@ -1358,6 +1462,7 @@ describe("droid scrubbing and dates", () => {
       deps(
         scripted(async (tools) => {
           host.time = Date.parse("2026-11-13T00:00:10Z");
+
           return tools.recover();
         }),
       ),
@@ -1367,12 +1472,14 @@ describe("droid scrubbing and dates", () => {
         (c) => c === "systemctl --user restart stargate.service",
       ),
     ).toHaveLength(1);
+
     const state = JSON.parse(
       await readFile(
         join(droidDirectory(config.dataDirectory), "state.json"),
         "utf8",
       ),
     );
+
     expect(state.recovers).toEqual({ "2026-11-12": 1, "2026-11-13": 1 });
   });
 });
@@ -1402,12 +1509,14 @@ describe("droid crew queue notes", () => {
     );
     const state = await CrewState.open(stateDirectory, "ship", "fingerprint");
     let id = "";
+
     try {
       const chief = state.reservePeer("chief");
       id = state.enqueue(chief, "ses_e49d787old", "private task text").id;
     } finally {
       state.close();
     }
+
     await writeReport(
       config.dataDirectory,
       report("deferred", "2026-11-12T00:05:00.000Z", { reason: "busy-crew" }),
@@ -1419,6 +1528,7 @@ describe("droid crew queue notes", () => {
       deps(
         scripted(async (tools) => {
           status = JSON.stringify(await tools.status());
+
           return "The run deferred on a queued crew task.";
         }),
       ),

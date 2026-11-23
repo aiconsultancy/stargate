@@ -22,6 +22,7 @@ export class CrewNotifications {
 
   async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
     const parsed = notificationInputSchema.safeParse(raw);
+
     if (!parsed.success)
       throw new CrewError(
         "Invalid notification operation; targets must be explicit.",
@@ -30,10 +31,12 @@ export class CrewNotifications {
     await this.authority.captain(caller);
     caller.signal.throwIfAborted();
     const binding = this.authority.options.cron;
+
     if (!binding)
       throw new CrewError(
         "stargate_notifications unavailable: bind the captain's cron configPath and bot first.",
       );
+
     try {
       return await this.runner(
         parsed.data,

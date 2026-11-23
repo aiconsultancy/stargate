@@ -12,10 +12,12 @@ import type {
   QuestionAnswer,
 } from "../src/questions/questions";
 
-const cleanup: Array<() => Promise<void>> = [];
+const cleanup: (() => Promise<void>)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
 const signal = new AbortController().signal;
 
 async function fixture() {
@@ -24,12 +26,15 @@ async function fixture() {
   let state = await CrewState.open(directory, "questions", "identity");
   cleanup.push(async () => state.close());
   const member = defaultTeam.crew[0];
+
   if (!member) throw new Error("Missing worker");
   const peer = state.reservePeer(member.id);
   state.readyPeer(peer.crewID);
   const task = state.reserveTask(peer, "ses_captain");
+
   if (!task) throw new Error("Missing task");
   state.running(task.id);
+
   const question: NativeQuestion = {
     id: "frm_question",
     sessionID: peer.sessionID,
@@ -49,8 +54,9 @@ async function fixture() {
       },
     ],
   };
-  const notices: Array<{ input: unknown; caller: CrewCaller }> = [];
-  const replies: Array<QuestionAnswer | null> = [];
+
+  const notices: { input: unknown; caller: CrewCaller }[] = [];
+  const replies: (QuestionAnswer | null)[] = [];
   let enabled = true;
   let now = 1000;
   let pending = [question];
@@ -59,6 +65,7 @@ async function fixture() {
   let failNotice = false;
   let reads = 0;
   let onRead = () => {};
+
   const authority = {
     options: {
       captainDirectory: directory,
@@ -76,9 +83,11 @@ async function fixture() {
     },
     async dm(input: unknown, caller: CrewCaller) {
       notices.push({ input, caller });
+
       return { stored: failNotice ? "uncertain" : true };
     },
   };
+
   const bridge = (
     persisted = false,
     enableWhenMissing?: () => boolean,
@@ -88,12 +97,14 @@ async function fixture() {
       authority,
       async () => {
         reads++;
+
         return {
           async outcome() {
             return confirmedOutcome;
           },
           async pendingQuestions() {
             onRead();
+
             return pending;
           },
           async questionBelongsToInput(
@@ -111,6 +122,7 @@ async function fixture() {
             answer: QuestionAnswer | null,
           ) {
             replies.push(answer);
+
             if (failWrite) throw new Error("private details");
           },
         };
@@ -129,11 +141,13 @@ async function fixture() {
         ...(onUnavailable ? { onUnavailable } : {}),
       },
     );
+
   const caller: CrewCaller = {
     sessionID: "ses_captain",
     agent: defaultTeam.captain.id,
     signal,
   };
+
   return {
     directory,
     state: () => state,
@@ -190,9 +204,11 @@ test("routes one durable native offer to the originating captain, never Slack", 
   await f.reopen();
   await f.bridge().poll(signal);
   expect(f.notices).toHaveLength(1);
+
   const result = await f
     .bridge()
     .run({ op: "answer", token: offer?.token, answer: "2" }, f.caller);
+
   expect(result).toEqual({ outcome: "answered" });
   expect(f.replies).toEqual([{ q0: "green" }]);
 });
@@ -212,6 +228,7 @@ test("worker, other captain and malformed answers cannot consume an offer", asyn
   const f = await fixture();
   await f.bridge().poll(signal);
   const offer = f.state().crewQuestionOffers(f.task.id)[0];
+
   for (const caller of [
     { ...f.caller, agent: "worker" },
     { ...f.caller, sessionID: "ses_other" },
@@ -256,10 +273,12 @@ test("native write is claimed before I/O and unknown failures are never replayed
   const offer = f.state().crewQuestionOffers(f.task.id)[0];
   f.failWrite();
   const input = { op: "answer", token: offer?.token, answer: "1" };
+
   const results = await Promise.allSettled([
     f.bridge().run(input, f.caller),
     f.bridge().run(input, f.caller),
   ]);
+
   expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
   expect(f.replies).toHaveLength(1);
   expect(f.state().crewQuestionOffers(f.task.id)[0]?.outcome).toBe("uncertain");
@@ -312,6 +331,7 @@ test("restart reconciles a claimed write even when the native form disappeared",
   const f = await fixture();
   await f.bridge().poll(signal);
   const offer = f.state().crewQuestionOffers(f.task.id)[0];
+
   if (!offer) throw new Error("Missing offer");
   expect(f.state().claimCrewQuestion(offer.token, 1000)).toBe(true);
   f.pending([]);
@@ -323,11 +343,13 @@ test("restart reconciles a claimed write even when the native form disappeared",
 
 test("persisted gate uses the native captain definition, not its logical crew ID", async () => {
   const f = await fixture();
+
   const settings = {
     enabled: true,
     timeoutMs: 300_000,
     answer: "requester" as const,
   };
+
   await saveQuestionSettings(
     f.directory,
     defaultTeam.captain.id,
@@ -362,6 +384,7 @@ test("paired crew enables missing settings, honours explicit off, and waits if u
   await bridge.poll(signal);
   expect(f.notices).toHaveLength(1);
   const offer = f.state().crewQuestionOffers(f.task.id)[0];
+
   if (!offer) throw new Error("Expected paired question offer");
   const input = { op: "answer", token: offer.token, answer: "1" };
   paired = false;
@@ -381,9 +404,11 @@ test("paired crew enables missing settings, honours explicit off, and waits if u
 test("a disabled route reports only an enabled, active native task and does no form work", async () => {
   const f = await fixture();
   let diagnostics = 0;
+
   const bridge = f.bridge(false, undefined, () => {
     diagnostics++;
   });
+
   f.enabled(false);
   await bridge.poll(signal, false);
   expect(diagnostics).toBe(0);
@@ -404,6 +429,7 @@ test("gateway restart reconciles an uncertain crew answer once and retains its c
   const bridge = f.bridge();
   await bridge.poll(signal);
   const offer = f.state().crewQuestionOffers(f.task.id)[0];
+
   if (!offer) throw new Error("Missing offer");
   f.failWrite();
   await bridge.run({ op: "answer", token: offer.token, answer: "1" }, f.caller);

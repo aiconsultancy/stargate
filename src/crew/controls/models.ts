@@ -22,6 +22,7 @@ import { CrewError } from "../execution/state";
 import { agentIDSchema, defaultModelProviders, type Team } from "../team";
 
 const target = agentIDSchema.pipe(settingsDefault("captain"));
+
 const modelBranches = Schema.Union([
   settingsStruct({
     op: Schema.Literal("get"),
@@ -57,6 +58,7 @@ const modelBranches = Schema.Union([
     compactFirst: Schema.Boolean.pipe(settingsDefault(false)),
   }),
 ]);
+
 export const modelInputSchema = settingsDiscriminatedUnion(
   "op",
   modelBranches.members,
@@ -65,28 +67,37 @@ export const modelInputSchema = settingsDiscriminatedUnion(
 // The legacy object envelope orders fields but leaves branch defaults to run().
 // Keep this model-only SDK adapter native; other operation envelopes stay put.
 const modelEnvelope = effectProjectToolInput(modelBranches);
+
 const decodeEnvelope = Schema.decodeUnknownResult(modelEnvelope, {
   errors: "all",
 });
+
 const decodeOperation = Schema.decodeUnknownResult(modelInputSchema, {
   errors: "all",
 });
+
 const modelDocument = Schema.toJsonSchemaDocument(modelEnvelope, {
   onExcessProperty: "error",
 });
+
 const modelProperties = modelDocument.schema["properties"];
+
 if (!Predicate.isObject(modelProperties))
   throw new Error("Invalid model tool advertisement");
+
 // Preserve the installed Zod converter's literal/boolean union spelling.
 modelProperties["op"] = {
   anyOf: modelBranches.members.map((member) => {
     const json = Schema.toJsonSchemaDocument(member.fields.op).schema;
     const values = json["enum"];
+
     if (!Array.isArray(values) || values.length !== 1)
       throw new Error("Invalid model operation advertisement");
+
     return { type: "string", const: values[0] };
   }),
 };
+
 for (const [key, property] of Object.entries(modelProperties)) {
   if (
     Predicate.isObject(property) &&
@@ -96,7 +107,9 @@ for (const [key, property] of Object.entries(modelProperties)) {
   )
     modelProperties[key] = property["anyOf"][0];
 }
+
 const modelFieldOrder = Object.keys(modelProperties);
+
 export const modelToolInputSchema: StandardSchemaV1<Record<string, unknown>> &
   StandardJSONSchemaV1<Record<string, unknown>> = {
   "~standard": {
@@ -104,10 +117,12 @@ export const modelToolInputSchema: StandardSchemaV1<Record<string, unknown>> &
     vendor: "effect",
     validate: (raw) => {
       const result = decodeEnvelope(raw);
+
       if (Result.isFailure(result)) {
         if (Predicate.isObject(raw)) {
           const { project: _project, ...operation } = raw;
           const failure = decodeOperation(operation);
+
           if (Result.isFailure(failure))
             return {
               issues: [
@@ -118,8 +133,10 @@ export const modelToolInputSchema: StandardSchemaV1<Record<string, unknown>> &
               ],
             };
         }
+
         return settingsIssues(result.failure.issue);
       }
+
       return {
         value: Object.fromEntries(
           modelFieldOrder
@@ -135,6 +152,7 @@ export const modelToolInputSchema: StandardSchemaV1<Record<string, unknown>> &
             $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12,
             ...modelDocument.schema,
           });
+
         if (target === "draft-07")
           return structuredClone({
             $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
@@ -147,14 +165,18 @@ export const modelToolInputSchema: StandardSchemaV1<Record<string, unknown>> &
     },
   },
 };
+
 type ModelRef = SessionSwitchModelInput["model"];
+
 type Request = { signal: AbortSignal };
+
 export interface ModelSessions {
   get(input: SessionGetInput, request?: Request): Promise<{ model?: ModelRef }>;
   switchModel(input: SessionSwitchModelInput, request?: Request): Promise<void>;
   compact(input: SessionCompactInput, request?: Request): Promise<unknown>;
   interrupt(input: SessionInterruptInput, request?: Request): Promise<unknown>;
 }
+
 interface Models {
   list(
     input: ModelListInput,
@@ -168,6 +190,7 @@ interface Models {
     }[];
   }>;
 }
+
 export interface ModelAuthority {
   options: {
     team: Team;
@@ -196,6 +219,7 @@ function describeModel(
     throw new CrewError(
       `${subject} has no selected model; no default inferred.`,
     );
+
   return {
     providerID: model.providerID,
     id: model.id,
@@ -218,71 +242,87 @@ export class CrewModels {
     const parsed = Schema.decodeUnknownResult(modelInputSchema, {
       onExcessProperty: "error",
     })(raw);
+
     if (Result.isFailure(parsed))
       throw new CrewError("Invalid stargate_model operation.");
     const input = parsed.success;
+
     try {
       caller.signal.throwIfAborted();
+
       if (input.op === "get") {
         if (input.target === "captain") await this.authority.captain(caller);
         else await this.authority.authorize(caller);
+
         const { model } = await this.sessions.get(
           { sessionID: caller.sessionID },
           { signal: caller.signal },
         );
+
         return {
           sessionID: caller.sessionID,
           model: describeModel(model, "Session"),
         };
       }
+
       if (input.op === "inspect") {
         const peer = await this.authority.inspectWorkerModel(
           input.target,
           caller,
         );
+
         return {
           sessionID: peer.sessionID,
           target: input.target,
           model: describeModel(peer.model, "Worker"),
         };
       }
+
       if (input.op === "effort") {
         return await this.authority.withWorkerControl(
           input.target,
           caller,
           async (peer) => {
             const current = peer.model;
+
             if (!current)
               throw new CrewError(
                 "Worker has no selected model; no default inferred.",
               );
+
             const providers =
               this.authority.options.team.modelProviders ??
               defaultModelProviders;
+
             if (!providers.includes(current.providerID))
               throw new CrewError(
                 "Worker's selected provider is outside this team's allowed model providers; effort unchanged.",
               );
             const directory = this.authority.options.worktrees[input.target];
+
             if (!directory)
               throw new CrewError("Unknown configured model target.");
             // Local readiness, ownership, control and native idle checks precede
-            // catalogue access. All selection/mutation stays under that guard.
+            // Catalogue access. All selection/mutation stays under that guard.
             const catalog = await this.catalog(directory, caller.signal);
+
             const available = catalog.find(
               (model) =>
                 model.providerID === current.providerID &&
                 model.id === current.id,
             );
+
             if (!available?.variants.some(({ id }) => id === input.variant))
               throw new CrewError(
                 "Effort variant is unavailable for the current model; no model switch or fallback applied.",
               );
+
             const model = {
               providerID: current.providerID,
               id: current.id,
               variant: input.variant,
             };
+
             if (current.variant === input.variant)
               return {
                 status: "unchanged",
@@ -290,25 +330,31 @@ export class CrewModels {
                 model,
                 effect: "subsequent-provider-turns",
               };
+
             return this.switch(peer.sessionID, model, caller.signal);
           },
           { requireReady: true },
         );
       }
+
       await this.authority.captain(caller);
       const { team } = this.authority.options;
+
       if (team.crew.find(({ id }) => id === input.target)?.backend)
         throw new CrewError(
           "Pi worker models are configured in team JSON; live model tools apply only to OpenCode.",
         );
+
       const directory =
         input.target === "captain"
           ? this.authority.options.captainDirectory
           : team.crew.some(({ id }) => id === input.target)
             ? this.authority.options.worktrees[input.target]
             : undefined;
+
       if (!directory) throw new CrewError("Unknown configured model target.");
       const catalog = await this.catalog(directory, caller.signal);
+
       if (input.op === "list")
         return {
           models: catalog.slice(0, 100).map((model) => ({
@@ -318,10 +364,12 @@ export class CrewModels {
           })),
           truncated: catalog.length > 100,
         };
+
       const selected = catalog.find(
         (model) =>
           model.providerID === input.providerID && model.id === input.id,
       );
+
       if (
         !selected ||
         (input.variant &&
@@ -331,11 +379,13 @@ export class CrewModels {
           "Model or variant is unavailable or outside this team's allowed providers; no fallback applied.",
         );
       }
+
       const model: ModelRef = {
         providerID: input.providerID,
         id: input.id,
         ...(input.variant ? { variant: input.variant } : {}),
       };
+
       if (input.target === "captain") {
         if (input.compactFirst) {
           // Waiting for our own turn to compact would deadlock this tool call.
@@ -343,14 +393,17 @@ export class CrewModels {
             { sessionID: caller.sessionID, delivery: "steer" },
             { signal: caller.signal },
           );
+
           return {
             status: "compaction-admitted",
             modelChanged: false,
             next: "After compaction completes, call switch again with compactFirst=false.",
           };
         }
+
         return await this.switch(caller.sessionID, model, caller.signal);
       }
+
       return await this.authority.withWorkerControl(
         input.target,
         caller,
@@ -370,6 +423,7 @@ export class CrewModels {
               );
             }
           }
+
           return this.switch(peer.sessionID, model, caller.signal);
         },
       );
@@ -378,6 +432,7 @@ export class CrewModels {
         throw new CrewError(
           "Model operation cancelled; inspect session state before retrying.",
         );
+
       if (error instanceof CrewError) throw error;
       throw new CrewError(
         "Model operation unavailable or unconfirmed; inspect session state. Raw details withheld.",
@@ -388,6 +443,7 @@ export class CrewModels {
   private async catalog(directory: string, signal: AbortSignal) {
     const providers =
       this.authority.options.team.modelProviders ?? defaultModelProviders;
+
     return (
       await this.models.list(
         { location: { directory }, types: ["chat"] },
@@ -406,6 +462,7 @@ export class CrewModels {
     signal.throwIfAborted();
     await this.sessions.switchModel({ sessionID, model }, { signal });
     const selected = (await this.sessions.get({ sessionID }, { signal })).model;
+
     if (
       selected?.providerID !== model.providerID ||
       selected.id !== model.id ||
@@ -415,6 +472,7 @@ export class CrewModels {
         "Model selection was not confirmed; inspect the session before retrying.",
       );
     }
+
     return {
       status: "switched",
       sessionID,

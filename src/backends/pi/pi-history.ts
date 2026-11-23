@@ -34,6 +34,7 @@ const unavailable = "Pi history unavailable or cancelled.";
 const decodeDescribe = Schema.decodeUnknownSync(historyDescribeInputSchema);
 const decodeChildren = Schema.decodeUnknownSync(historyChildrenInputSchema);
 const decodeEntries = Schema.decodeUnknownSync(historyEntriesInputSchema);
+
 // Canonical decimal only; Pi Durable's backend accepts leading zeros.
 const numericID = Schema.String.check(Schema.isPattern(/^(0|[1-9]\d*)$/)).pipe(
   Schema.decodeTo(
@@ -41,8 +42,10 @@ const numericID = Schema.String.check(Schema.isPattern(/^(0|[1-9]\d*)$/)).pipe(
     SchemaTransformation.transform({ decode: Number, encode: String }),
   ),
 );
+
 const decodeNumericID = Schema.decodeUnknownSync(numericID);
 const checkNumericID = Schema.decodeUnknownResult(numericID);
+
 const decodeCursor = Schema.decodeUnknownSync(
   exactStruct({
     sessionID: Schema.String,
@@ -52,6 +55,7 @@ const decodeCursor = Schema.decodeUnknownSync(
 
 function clipBody(text: string): ReturnType<typeof clipHistory> {
   const clipped = clipHistory(text);
+
   // Also cap UTF-16 units; do not split a surrogate pair.
   return clipped.text.length > HISTORY_TEXT
     ? {
@@ -75,33 +79,43 @@ export function mapPiHistory(
   detail: HistoryEntriesInput["detail"],
 ): HistoryEntry[] {
   type ToolPart = Extract<HistoryPart, { type: "tool" }>;
+
   const calls = new Map<
     string,
     { part: ToolPart; entryID: number; visible: boolean }[]
   >();
+
   const results = new Map<string, { part: ToolPart; entryID: number }[]>();
+
   const entries = records.map((record): HistoryEntry => {
     const parts: HistoryPart[] = [];
+
     const entry: HistoryEntry = {
       id: String(record.id),
       role: "system",
       parts,
     };
+
     if (!["pi.user", "pi.assistant", "pi.tool-result"].includes(record.kind)) {
       parts.push({ type: "notice", label: record.kind.slice(0, 300) });
+
       return entry;
     }
+
     entry.role =
       record.kind === "pi.user"
         ? "user"
         : record.kind === "pi.assistant"
           ? "assistant"
           : "tool";
+
     for (const message of record.model ?? []) {
       if (Number.isSafeInteger(message.timestamp) && message.timestamp >= 0)
         entry.createdAt ??= message.timestamp;
+
       if (message.role === "assistant") {
         entry.model ??= `${message.provider}/${message.model}`.slice(0, 200);
+
         for (const block of message.content) {
           if (block.type === "text") parts.push(textPart(block.text));
           else if (block.type === "thinking")
@@ -114,6 +128,7 @@ export function mapPiHistory(
               detail === "full"
                 ? clipBody(JSON.stringify(block.arguments))
                 : undefined;
+
             const part: ToolPart = {
               type: "tool",
               name: block.name.slice(0, 200),
@@ -125,6 +140,7 @@ export function mapPiHistory(
                   }
                 : {}),
             };
+
             parts.push(part);
             const matches = calls.get(block.id) ?? [];
             matches.push({
@@ -146,6 +162,7 @@ export function mapPiHistory(
                   .join("\n"),
               )
             : undefined;
+
         const part: ToolPart = {
           type: "tool",
           name: message.toolName.slice(0, 200),
@@ -157,6 +174,7 @@ export function mapPiHistory(
               }
             : {}),
         };
+
         parts.push(part);
         const matches = results.get(message.toolCallId) ?? [];
         matches.push({ part, entryID: record.id });
@@ -172,13 +190,17 @@ export function mapPiHistory(
           );
       }
     }
+
     return entry;
   });
+
   const paired = new Set<HistoryPart>();
+
   for (const [id, matches] of calls) {
     const outputs = results.get(id);
     const call = matches[0];
     const result = outputs?.[0];
+
     if (
       matches.length !== 1 ||
       outputs?.length !== 1 ||
@@ -192,9 +214,12 @@ export function mapPiHistory(
     Object.assign(call.part, result.part);
     paired.add(result.part);
   }
+
   return entries.flatMap((entry) => {
     const parts = entry.parts.filter((part) => !paired.has(part));
+
     if (entry.role === "tool" && !parts.length) return [];
+
     return [
       {
         ...entry,
@@ -213,29 +238,35 @@ export function piSessionHistory(
 ): SessionHistory {
   const conversation = (id: string, signal: AbortSignal) => {
     signal.throwIfAborted();
+
     return harness.conversation(
       decodeNumericID(id) as ConversationId,
       withAbortSignal(signal, BACKGROUND_CONTEXT),
     );
   };
+
   const safe = async <T>(signal: AbortSignal, read: () => Promise<T>) => {
     try {
       signal.throwIfAborted();
       const result = await read();
       signal.throwIfAborted();
+
       return result;
     } catch {
       throw new Error(unavailable);
     }
   };
+
   return {
     roots: (signal) => safe(signal, async () => []),
     describe: (ids, signal) =>
       safe(signal, async () => {
         decodeDescribe({ ids });
         const sessions: HistorySession[] = [];
+
         for (const id of ids) {
           if (Result.isFailure(checkNumericID(id))) continue;
+
           try {
             if (await conversation(id, signal))
               sessions.push({
@@ -248,21 +279,26 @@ export function piSessionHistory(
             // Unreadable IDs are omitted; never expose native storage failures.
           }
         }
+
         return sessions;
       }),
     children: (input, signal) =>
       safe(signal, async () => {
         decodeChildren(input);
+
         if (!(await conversation(input.parentID, signal)) || input.cursor)
           throw new Error(unavailable);
-        // greybeard: no fork scan on this surface; crew owns recorded children.
+
+        // Greybeard: no fork scan on this surface; crew owns recorded children.
         return { sessions: [] };
       }),
     entries: (raw, signal) =>
       safe(signal, async () => {
         const input = decodeEntries(raw);
         const native = await conversation(input.sessionID, signal);
+
         if (!native) throw new Error(unavailable);
+
         const cursor = input.cursor
           ? decodeCursor(
               JSON.parse(
@@ -270,8 +306,10 @@ export function piSessionHistory(
               ),
             )
           : undefined;
+
         if (cursor && cursor.sessionID !== input.sessionID)
           throw new Error(unavailable);
+
         // Native cursors retain order; do not override it on continuation.
         const page = await native.entries(
           cursor
@@ -283,6 +321,7 @@ export function piSessionHistory(
           cursor?.page,
           withAbortSignal(signal, BACKGROUND_CONTEXT),
         );
+
         return {
           entries: mapPiHistory(page.items, input.detail),
           ...(page.next
@@ -311,6 +350,7 @@ export async function readPiHistory<T>(
 ): Promise<T> {
   let harness: Harness | undefined;
   let storage: Awaited<ReturnType<typeof openNodeSqliteStorage>> | undefined;
+
   try {
     try {
       signal.throwIfAborted();
@@ -318,19 +358,22 @@ export async function readPiHistory<T>(
       await access(path);
       signal.throwIfAborted();
       // Storage.open() applies migrations. Viewing must not upgrade a store;
-      // fail closed unless its existing schema already matches this SDK.
+      // Fail closed unless its existing schema already matches this SDK.
       const probe = new Database(path, { readonly: true });
+
       try {
         const schema = probe
           .query<{ version: number }, []>(
             "SELECT version FROM durable_schema WHERE singleton=1",
           )
           .get();
+
         if (schema?.version !== CURRENT_SQLITE_SCHEMA_VERSION)
           throw new Error(unavailable);
       } finally {
         probe.close();
       }
+
       storage = await openNodeSqliteStorage(path);
       harness = await Harness.open(
         storage,
@@ -344,6 +387,7 @@ export async function readPiHistory<T>(
       signal.throwIfAborted();
       const result = await read(piSessionHistory(harness));
       signal.throwIfAborted();
+
       return result;
     } finally {
       if (harness) await harness.close(BACKGROUND_CONTEXT);

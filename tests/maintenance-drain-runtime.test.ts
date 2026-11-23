@@ -29,6 +29,7 @@ test("a runtime registers before work, observes the marker through its poll, ack
   const started = Promise.withResolvers<void>();
   const phases: string[] = [];
   let resumes = 0;
+
   const dependencies: RuntimeDependencies = {
     drain: { directory },
     slack: () =>
@@ -65,16 +66,20 @@ test("a runtime registers before work, observes the marker through its poll, ack
         async close() {},
         async maintenanceNotice(record: MaintenanceDrain) {
           phases.push(record.phase);
+
           return [{ sessionID: "ses_pin", status: "queued" as const }];
         },
         async resumeMaintenance() {
           resumes++;
+
           return { resumed: 0, remaining: 0 };
         },
       }) satisfies AgentBackend,
   };
+
   const dataDirectory = join(root, "data");
   const controller = new AbortController();
+
   const running = Effect.runPromise(
     serve(
       { dataDirectory, bots: [bot()] },
@@ -83,13 +88,15 @@ test("a runtime registers before work, observes the marker through its poll, ack
       dependencies,
     ),
   );
+
   try {
     await started.promise;
     // Registered before workers, and visible before any acknowledgement.
     expect(
       readDrainParticipants(directory).map((p) => p.dataDirectory),
     ).toEqual([dataDirectory]);
-    await until(() => resumes >= 1); // restart pickup, no marker
+    await until(() => resumes >= 1); // Restart pickup, no marker
+
     const record: MaintenanceDrain = {
       schema: "stargate.maintenance.drain.v1",
       runID: "run-rt",
@@ -100,6 +107,7 @@ test("a runtime registers before work, observes the marker through its poll, ack
       deadlineAt: Date.now() + 60_000,
       phase: "draining",
     };
+
     await claimMaintenanceDrain(record, directory);
     await until(
       () => readDrainParticipants(directory)[0]?.noticeStatus === "queued",

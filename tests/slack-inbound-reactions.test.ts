@@ -37,6 +37,7 @@ function reaction(name = "eyes", type = "reaction_added", id = "EvAdded") {
 const log = pino({ enabled: false });
 const signal = new AbortController().signal;
 const cleanups: (() => void)[] = [];
+
 afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
@@ -51,8 +52,10 @@ function fixture(
   } = {},
 ) {
   const store = options.store ?? openStore(":memory:");
+
   if (!options.store) cleanups.push(() => store.close());
   const config = bot();
+
   if (options.enabled !== undefined)
     config.slack.inboundReactions = options.enabled;
   config.slack.steerThreadFollowUps = options.steer ?? false;
@@ -60,6 +63,7 @@ function fixture(
   config.waiting.delayMs = null;
   const prompts: string[] = [];
   const steers: SteerInput[] = [];
+
   const backend: AgentBackend = {
     ...(options.pinned || options.steer ? { sessionID: "ses_captain" } : {}),
     async createSession() {
@@ -67,25 +71,31 @@ function fixture(
     },
     async prompt(_session, text, _signal, _onText, _onInput, _files, context) {
       prompts.push(context ? `${sourceLine(context)}\n\n${text}` : text);
+
       return "[[stargate:react:thumbsup]]\nAnswer";
     },
     async steer(input) {
       if (!input.allowed()) return { status: "refused" };
       steers.push(input);
+
       return { status: "accepted" };
     },
     async close() {},
   };
+
   const userInfo = mock(async (user: string): Promise<unknown> => ({
     ok: true,
     user: { id: user, team_id: "T123", is_bot: false, deleted: false },
   }));
+
   const post = mock(async (_channel: string, _thread: string, _text: string) =>
     prompts.length === 1 ? "2.000" : "4.000",
   );
+
   const react = mock(async (_channel: string, _ts: string) => {});
   const readReceipt = mock(async (_channel: string, _ts: string) => {});
   const slack = { post, react, readReceipt, userInfo };
+
   const gateway = new Gateway(
     config,
     identity,
@@ -98,11 +108,15 @@ function fixture(
     undefined,
     options.notifications,
   );
+
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
+
     if (!job) throw new Error("Expected a queued request");
+
     return job;
   };
+
   return { config, store, gateway, backend, slack, next, prompts, steers };
 }
 
@@ -111,6 +125,7 @@ test("confirmed final replies route after restart and Socket Mode retries do not
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "gateway.sqlite");
   const writer = openStore(path);
+
   try {
     const f = fixture({ store: writer });
     expect(await f.gateway.receive(event())).toBe(true);
@@ -121,12 +136,16 @@ test("confirmed final replies route after restart and Socket Mode retries do not
   } finally {
     writer.close();
   }
+
   const first = openStore(path);
+
   try {
     const f = fixture({ enabled: true, store: first });
+
     const ack = mock(async () => {
       expect(f.store.queueCounts(f.gateway.key).queued).toBe(1);
     });
+
     await handleSlackRequest(
       { type: "events_api", body: reaction("+1"), ack },
       (body) => f.gateway.receive(body),
@@ -142,6 +161,7 @@ test("confirmed final replies route after restart and Socket Mode retries do not
   } finally {
     first.close();
   }
+
   const reader = openStore(path);
   cleanups.push(() => reader.close());
   const f = fixture({ enabled: true, store: reader });
@@ -157,6 +177,7 @@ test("only the specified Slack reaction names can wake a new turn", async () => 
   const f = fixture({ enabled: true });
   expect(await f.gateway.receive(event())).toBe(true);
   f.store.savePreview(f.next().id, 0, "2.000");
+
   const allowed = [
     "+1",
     "thumbsup",
@@ -167,10 +188,12 @@ test("only the specified Slack reaction names can wake a new turn", async () => 
     "x",
     "eyes",
   ];
+
   for (const [i, name] of allowed.entries())
     expect(
       await f.gateway.receive(reaction(name, "reaction_added", `Ev${i}`)),
     ).toBe(true);
+
   for (const name of ["heart", "thumbsup::skin-tone-2", "check", "EYES"])
     expect(await f.gateway.receive(reaction(name))).toBe(false);
 });
@@ -179,36 +202,44 @@ test("parallel Slack verification preserves arrival order across reaction and te
   const f = fixture({ enabled: true });
   expect(await f.gateway.receive(event())).toBe(true);
   await f.gateway.process(f.next(), signal);
+
   const human = {
     ok: true,
     user: { id: "U123", team_id: "T123", is_bot: false, deleted: false },
   };
+
   const firstStarted = Promise.withResolvers<void>();
   const secondStarted = Promise.withResolvers<void>();
   const slow = Promise.withResolvers<unknown>();
   f.slack.userInfo
     .mockImplementationOnce(() => {
       firstStarted.resolve();
+
       return slow.promise;
     })
     .mockImplementationOnce(async () => {
       secondStarted.resolve();
+
       return human;
     });
   const ack = mock(async () => {});
+
   const receive = (body: unknown) =>
     handleSlackRequest(
       { type: "events_api", body, ack },
       (raw) => f.gateway.receive(raw),
       log,
     );
+
   const added = receive(reaction());
   await firstStarted.promise;
   const follow = event("more context", "4.000");
+
   const text = receive({
     ...follow,
     event: { ...follow.event, thread_ts: "1.000" },
   });
+
   const removed = receive(reaction("eyes", "reaction_removed", "EvRemoved"));
   const retry = receive(reaction());
   await secondStarted.promise;
@@ -216,6 +247,7 @@ test("parallel Slack verification preserves arrival order across reaction and te
   await Promise.all([added, text, removed, retry]);
   expect(ack).toHaveBeenCalledTimes(4);
   expect(f.store.queueCounts(f.gateway.key).queued).toBe(3);
+
   for (let i = 0; i < 3; i++) await f.gateway.process(f.next(), signal);
   expect(f.prompts.slice(1).map((prompt) => prompt.split("\n").at(-1))).toEqual(
     [
@@ -271,6 +303,7 @@ test("flag off and untrusted reaction sources never reach the queue", async () =
   expect(await f.gateway.receive(reaction())).toBe(false);
   f.config.slack.inboundReactions = true;
   const valid = reaction();
+
   for (const body of [
     { ...valid, api_app_id: "A999" },
     { ...valid, team_id: "T999" },
@@ -321,6 +354,7 @@ test("legacy preview targets steer only their running captain thread, not the re
   await f.gateway.pollFollowUps(signal);
   expect(f.steers).toHaveLength(1);
   const steer = f.steers[0];
+
   if (!steer) throw new Error("Expected steer");
   expect(steer.inputID).toBe("msg_original");
   expect(sourceLine(steer.context)).toBe(
@@ -334,12 +368,14 @@ test("thread mutes block reaction admission and a mute after admission blocks st
   const preferences = new NotificationStore(":memory:");
   cleanups.push(() => preferences.close());
   const registration = "reg";
+
   const f = fixture({
     enabled: true,
     steer: true,
     notifications: (channel, thread) =>
       preferences.status(registration, channel, thread),
   });
+
   expect(await f.gateway.receive(event())).toBe(true);
   const owner = f.next();
   expect(f.store.running(owner.id, owner.text)).toBe(true);
@@ -368,11 +404,13 @@ test.each([false, true])(
     const owner = f.next();
     expect(f.store.running(owner.id, owner.text)).toBe(true);
     f.store.saveInput(f.gateway.key, owner.id, "msg_original", "ses_captain");
+
     if (steer) {
       expect(
         await f.gateway.receive(event("<@UBOT> another thread", "1.500")),
       ).toBe(true);
       const target = f.store.jobByEvent(f.gateway.key, "C123:1.500");
+
       if (!target) throw new Error("Missing other thread");
       f.store.savePreview(target.id, 0, "2.000");
     } else f.store.savePreview(owner.id, 0, "2.000");
@@ -404,6 +442,7 @@ test("an ordinary steer during a reaction turn retains its own Slack message ide
   ).toBe(true);
   await f.gateway.pollFollowUps(signal);
   const steer = f.steers[0];
+
   if (!steer) throw new Error("Expected steer");
   expect(sourceLine(steer.context)).toBe(
     "s=slack;c=C123;t=1.000;m=6.000;u=U123",
@@ -415,23 +454,28 @@ test("Slack fallback uses an exact message returned by the API, never claimed it
   config.slack.inboundReactions = true;
   const store = openStore(":memory:");
   cleanups.push(() => store.close());
+
   const message = {
     type: "message",
     user: "UBOT",
     ts: "2.000",
     thread_ts: "1.000",
   };
+
   let result: unknown = {
     ok: true,
     type: "message",
     channel: "C123",
     message,
   };
+
   const calls: string[] = [];
+
   const slack = new SlackConnection("fixture-app", "fixture-bot", log, {
     fetch: async (input, init) => {
       const url = new URL(String(input));
       calls.push(url.pathname);
+
       if (url.pathname === "/api/users.info")
         return Response.json({
           ok: true,
@@ -441,9 +485,11 @@ test("Slack fallback uses an exact message returned by the API, never claimed it
       const args = new URLSearchParams(String(init?.body));
       expect(args.get("channel")).toBe("C123");
       expect(args.get("timestamp")).toBe("2.000");
+
       return Response.json(result);
     },
   });
+
   const gateway = new Gateway(
     config,
     identity,
@@ -460,7 +506,9 @@ test("Slack fallback uses an exact message returned by the API, never claimed it
     slack satisfies TransportDelivery,
     log,
   );
+
   const valid = result;
+
   for (const candidate of [
     { ok: true, type: "message", channel: "C999", message },
     {
@@ -497,6 +545,7 @@ test("Slack fallback uses an exact message returned by the API, never claimed it
     result = candidate;
     expect(await gateway.receive(reaction())).toBe(false);
   }
+
   result = valid;
   expect(await gateway.receive(reaction())).toBe(true);
   expect(

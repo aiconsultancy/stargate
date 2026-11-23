@@ -23,6 +23,7 @@ export async function readReloadCandidate(
   notificationReload = false,
 ): Promise<ReloadCandidate> {
   const config = await readConfiguration(path, notificationReload);
+
   const environment = await checkCredentials(
     path,
     config.bots,
@@ -32,6 +33,7 @@ export async function readReloadCandidate(
     config.dataDirectory,
     config.agentDispatch,
   );
+
   return {
     config: {
       ...config,
@@ -64,6 +66,7 @@ function fields(
 ) {
   if (!isRecord(current) || !isRecord(next))
     return diff(current, next, path, out);
+
   for (const key of new Set([...Object.keys(current), ...Object.keys(next)]))
     if (!live.includes(key))
       diff(current[key], next[key], child(path, key), out);
@@ -80,11 +83,14 @@ function byId<T extends { readonly id: string }>(
 ) {
   const after = new Map(next.map((entry) => [entry.id, entry]));
   const before = new Set(current.map((entry) => entry.id));
+
   for (const entry of current) {
     const other = after.get(entry.id);
+
     if (other) compare(`${path}[${entry.id}]`, entry, other);
     else if (membership === "restart") out.push(`${path}[${entry.id}]`);
   }
+
   if (membership === "restart")
     for (const id of after.keys())
       if (!before.has(id)) out.push(`${path}[${id}]`);
@@ -132,17 +138,21 @@ export function restartRequired(
     "restart",
     out,
   );
+
   for (const [name, value] of Object.entries(current.environment))
     if (value !== undefined && next.environment[name] !== value)
       out.push(`environment.${name}`);
+
   return out.sort();
 }
 
 const unchangedNote = "The running configuration is unchanged.";
+
 const rejectedMessages = {
   busy: `Configuration reload refused: the runtime is busy. Try again later. ${unchangedNote}`,
   unavailable: `Configuration reload is unavailable. ${unchangedNote}`,
 } as const;
+
 const messages = {
   ...rejectedMessages,
   applied: "Configuration reloaded.",
@@ -193,6 +203,7 @@ export class ConfigReload {
   /** One runtime listener; the returned function removes it. */
   listen(apply: (next: ReloadCandidate) => Promise<void>) {
     this.#apply = apply;
+
     return () => {
       if (this.#apply === apply) this.#apply = undefined;
     };
@@ -202,6 +213,7 @@ export class ConfigReload {
   request(): Promise<ReloadResult> {
     const result = this.#queue.then(() => this.#reload());
     this.#queue = result;
+
     return result;
   }
 
@@ -215,25 +227,33 @@ export class ConfigReload {
     try {
       if (this.#closed) return this.#report("unavailable");
       let next: ReloadCandidate;
+
       try {
         next = await this.read();
       } catch {
         return this.#report("invalid");
       }
+
       const apply = this.#apply;
+
       if (this.#closed || !apply) return this.#report("unavailable");
       const paths = restartRequired(this.#current, next);
+
       if (paths.length > 0) {
         const result = {
           status: "restart-required",
           message: `Configuration reload refused: restart required for ${paths.join(", ")}. ${unchangedNote}`,
           paths,
         } as const;
+
         this.log.warn({ paths }, result.message);
+
         return result;
       }
+
       if (isDeepStrictEqual(this.#current, next))
         return this.#report("unchanged");
+
       try {
         await apply(next);
       } catch (error) {
@@ -241,7 +261,9 @@ export class ConfigReload {
           error instanceof ReloadRejected ? error.status : "failed",
         );
       }
+
       this.#current = next;
+
       return this.#report("applied");
     } catch {
       return this.#report("failed");
@@ -250,8 +272,10 @@ export class ConfigReload {
 
   #report(status: keyof typeof messages): ReloadResult {
     const message = messages[status];
+
     if (status === "applied" || status === "unchanged") this.log.info(message);
     else this.log.warn(message);
+
     return { status, message };
   }
 }

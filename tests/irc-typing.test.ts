@@ -16,6 +16,7 @@ import type { TurnProgress } from "../src/shared/turn-progress";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -36,11 +37,13 @@ async function setup(
     botAccounts: ["galactica"],
     ...(options.caps ? { caps: options.caps } : {}),
   }).start();
+
   cleanup.push(() => fake.stop());
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-typing-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
@@ -70,6 +73,7 @@ async function setup(
       sessionID: "ses_captain",
     },
   });
+
   const ship = await IrcShip.create(config, store, pino({ level: "silent" }), {
     env: { STARGATE_IRC_GALACTICA: "captain-pass" },
     timing: {
@@ -82,9 +86,11 @@ async function setup(
     },
     readyMs: 2000,
   });
+
   let release = Promise.withResolvers<void>();
   let report: ((progress: TurnProgress) => void) | undefined;
   let prompts = 0;
+
   const backend: AgentBackend = {
     sessionID: "ses_captain",
     async createSession() {
@@ -104,13 +110,17 @@ async function setup(
       report = onProgress;
       await release.promise;
       release = Promise.withResolvers<void>();
+
       return "Done.";
     },
     async close() {},
   };
+
   const [captain] = ship.registrations;
+
   if (!captain) throw new Error("missing captain");
   const controller = new AbortController();
+
   const gateway = new Gateway(
     captain.settings,
     captain.identity,
@@ -122,10 +132,13 @@ async function setup(
     undefined,
     captain.transport,
   );
+
   let worker: Promise<void> | undefined;
+
   const startWorker = () => {
     worker ??= gateway.work(controller.signal);
   };
+
   if (!options.deferWorker) startWorker();
   ship.start(() => true);
   cleanup.push(async () => {
@@ -135,6 +148,7 @@ async function setup(
     await ship.close();
   });
   await until(() => captain.client.inChannel("#galactica"), 5000, "joined");
+
   return {
     fake,
     store,
@@ -160,6 +174,7 @@ function progressNotices(fake: FakeIrcServer) {
 
 async function observe(fake: FakeIrcServer) {
   const received: IrcMessage[] = [];
+
   const observer = new IrcClient(
     {
       host: "127.0.0.1",
@@ -173,6 +188,7 @@ async function observe(fake: FakeIrcServer) {
     },
     { message: (message) => received.push(message) },
   );
+
   const controller = new AbortController();
   const running = observer.run(controller.signal);
   cleanup.push(async () => {
@@ -180,6 +196,7 @@ async function observe(fake: FakeIrcServer) {
     await running;
   });
   await until(() => observer.inChannel("#galactica"), 5000, "observer joined");
+
   return received;
 }
 
@@ -188,6 +205,7 @@ test("IRC fleet typing accompanies the thread notice and clears before the reply
     role: "rear_admiral",
     features: { liveProgress: false },
   });
+
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "@galactica check");
   const states = () => typing(fake.received("galactica"), "#galactica");
   await until(
@@ -212,6 +230,7 @@ test("irc typing: active while a turn runs, refreshed, then done before the repl
   );
   finish();
   await until(() => store.queueCounts(captain.key).done === 1, 5000, "done");
+
   const sent = fake
     .received("galactica")
     .map((line) => line.replace(/^@\S+ /, ""))
@@ -220,10 +239,11 @@ test("irc typing: active while a turn runs, refreshed, then done before the repl
         line.startsWith("TAGMSG #galactica") ||
         line.startsWith("PRIVMSG #galactica"),
     );
+
   const states = typing(fake.received("galactica"), "#galactica");
   expect(states.slice(0, -1).every((state) => state === "active")).toBe(true);
   expect(states.at(-1)).toBe("done");
-  // done is sent before the reply text.
+  // Done is sent before the reply text.
   expect(sent.at(-1)).toBe("PRIVMSG #galactica Done.");
   expect(sent.at(-2)).toBe("TAGMSG #galactica");
 });
@@ -249,7 +269,7 @@ test("irc typing: stops when the direct nick changes hands", async () => {
     3000,
     "typing",
   );
-  // jackie quits; another account takes the nick.
+  // Jackie quits; another account takes the nick.
   fake.sendTo("galactica", ":jackie!u@outside QUIT :bye");
   fake.sendTo("galactica", ":carol!u@h JOIN #galactica carol :Carol");
   fake.sendTo("galactica", ":carol!u@h NICK jackie");
@@ -306,6 +326,7 @@ for (const role of ["captain", "rear_admiral"] as const) {
       features: { liveProgress: false, fleetTyping: false },
       turnStatusMs: 30,
     });
+
     expect(captain.settings.turnTimeoutMs).toBe(3_600_000);
     fake.say(
       { nick: "jack", account: "jack" },
@@ -347,6 +368,7 @@ test("irc fleet: a settled turn cancels its delayed progress notice", async () =
     features: { liveProgress: false },
     turnStatusMs: 500,
   });
+
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "@galactica check");
   const notices = () => lineOf(fake.received("galactica"), "NOTICE");
   await until(() => notices().length === 1, 3000, "ack");
@@ -367,6 +389,7 @@ test("irc fleet: timeout reports the last confirmed stage", async () => {
     turnStatusMs: 2000,
     turnTimeoutMs: 1000,
   });
+
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "@galactica check");
   await until(
     () => store.queueCounts(captain.key).running === 1,
@@ -405,6 +428,7 @@ test("live IRC status reads the request observation while its model turn is stil
     role: "captain",
     turnStatusMs: 40,
   });
+
   const user = { nick: "jack", account: "jack" };
   const root = fake.say(user, "#galactica", "@galactica check");
   await until(
@@ -416,6 +440,7 @@ test("live IRC status reads the request observation while its model turn is stil
   await until(
     () => {
       progress(update);
+
       return store.requestProgress(captain.key).length === 1;
     },
     3000,
@@ -430,6 +455,7 @@ test("live IRC status reads the request observation while its model turn is stil
     "first confirmed notice",
   );
   const job = store.jobByEvent(captain.key, `#galactica:${root}`);
+
   if (!job) throw new Error("Missing request");
   expect(
     store.requestProgress(captain.key, job.id, update.observedAt + 60_001)[0],
@@ -469,21 +495,26 @@ test("IRC progress relays authenticated notices for two requests in the same thr
     features: { liveProgress: true, fleetTyping: false, reactions: false },
     turnStatusMs: 30,
   });
+
   const wire = await observe(fake);
   const user = { nick: "jack", account: "jack" };
   const root = fake.say(user, "#galactica", "Fuel report", { msgid: "root-1" });
+
   const ask = (id: string, question: string) =>
     fake.say(user, "#galactica", `@galactica ${question}`, {
       msgid: id,
       "+draft/reply": root,
     });
+
   const first = ask("req-1", "Check the main tank");
+
   const firstReceived = () =>
     progressNotices(fake).some(
       (m) =>
         m.tags.get("+draft/reply") === first &&
         m.tags.get("+stargate/progress") === "received",
     );
+
   await until(() => prompts() === 1 && firstReceived(), 3000, "first turn");
   const second = ask("req-2", "Check the spare tank");
   fake.say(user, "#galactica", "Ordinary notice.", {}, "NOTICE");
@@ -536,17 +567,22 @@ test("IRC progress relays authenticated notices for two requests in the same thr
     message.tags.get("+stargate/progress"),
     ...message.params,
   ];
+
   const fixture = await Bun.file(
     new URL("./fixtures/irc-progress.irc", import.meta.url),
   ).text();
+
   const expected = fixture
     .trim()
     .split("\n")
     .map((line) => {
       const message = parseMessage(line);
+
       if (!message) throw new Error("Invalid IRC transcript line");
+
       return describe(message);
     });
+
   expect(wire.map(describe)).toEqual(expected);
 });
 
@@ -555,6 +591,7 @@ test("IRC progress waits for a lost reply receipt to be retried without rerunnin
     role: "captain",
     features: { liveProgress: false },
   });
+
   const user = { nick: "jack", account: "jack" };
   const request = fake.say(user, "#galactica", "@galactica check");
   await until(() => prompts() === 1, 3000, "active prompt");
@@ -588,6 +625,7 @@ test("IRC progress reports a confirmed model failure even if its error reply is 
     role: "captain",
     features: { liveProgress: false },
   });
+
   const user = { nick: "jack", account: "jack" };
   const request = fake.say(user, "#galactica", "@galactica check");
   await until(() => prompts() === 1, 3000, "active prompt");
@@ -612,20 +650,24 @@ test("IRC progress reports a known failure stored while the IRC connection was o
     features: { liveProgress: false },
     reconnectMinMs: 500,
   });
+
   const request = fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
     "@galactica check",
   );
+
   const job = () => store.jobByEvent(captain.key, `#galactica:${request}`);
   await until(
     () => prompts() === 1 && progressNotices(fake).length === 1,
     3000,
     "active prompt and acknowledgement",
   );
+
   const connection = fake.clients.find(
     ({ account }) => account === "galactica",
   );
+
   if (!connection) throw new Error("Missing ship connection");
   connection.socket.end();
   await until(() => !captain.client.registered, 3000, "disconnected");
@@ -656,6 +698,7 @@ test("IRC progress confirms recovered stored replies and leaves interrupted nati
     role: "captain",
     deferWorker: true,
   });
+
   const user = { nick: "jack", account: "jack" };
   const succeeded = fake.say(user, "#galactica", "@galactica check main tank");
   const unknown = fake.say(user, "#galactica", "@galactica check spare tank");
@@ -664,12 +707,16 @@ test("IRC progress confirms recovered stored replies and leaves interrupted nati
     3000,
     "persisted requests",
   );
+
   for (const request of [succeeded, unknown]) {
     const job = store.jobByEvent(captain.key, `#galactica:${request}`);
+
     if (!job) throw new Error("Missing request");
     expect(store.running(job.id, job.text)).toBe(true);
+
     if (request === succeeded) store.respond(job.id, ["Stored reply."]);
   }
+
   startWorker();
   await until(
     () => store.queueCounts(captain.key).done === 2,
@@ -704,6 +751,7 @@ for (const missing of ["message tags", "the request msgid"] as const) {
           }
         : {}),
     });
+
     fake.say(
       { nick: "jack", account: "jack" },
       "#galactica",

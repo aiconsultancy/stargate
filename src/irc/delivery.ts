@@ -37,18 +37,18 @@ export type IrcFiles = {
   files: Filehost;
   /** Effective FILEHOST now; undefined means files are unavailable. */
   filehost(): URL | undefined;
-  /** features.filesIn: download FILEHOST links of admitted messages. */
+  /** Features.filesIn: download FILEHOST links of admitted messages. */
   download: boolean;
-  /** features.filesOut: upload published files and post their links. */
+  /** Features.filesOut: upload published files and post their links. */
   upload: boolean;
 };
 
 /** Optional per-turn signals. */
 export type IrcPresence = {
-  /** features.typing: +typing while a turn runs. */
+  /** Features.typing: +typing while a turn runs. */
   typing: boolean;
   fleetTyping?: boolean;
-  /** features.reactions: +draft/react for reaction replies. */
+  /** Features.reactions: +draft/react for reaction replies. */
   reactions?: boolean;
 };
 
@@ -74,10 +74,12 @@ const planSchema = settingsStruct({
     ),
   ),
 });
+
 type Plan = typeof planSchema.Type;
+
 type Part = Plan["units"][number]["lines"][number];
 
-/** draft/multiline bytes as Stargate counts them (see packBatches). */
+/** Draft/multiline bytes as Stargate counts them (see packBatches). */
 function batchBytes(lines: readonly Part[]) {
   return lines.reduce(
     (sum, line, index) =>
@@ -99,9 +101,11 @@ export function packBatches(
   const units: Plan["units"] = [];
   let lines: Part[] = [];
   let bytes = 0;
+
   for (const part of parts) {
     const cost = (line: Part, first: boolean) =>
       utf8Bytes(line.text) + (first || line.concat ? 0 : 1);
+
     if (
       lines.length &&
       (lines.length >= limits.maxLines ||
@@ -111,11 +115,14 @@ export function packBatches(
       lines = [];
       bytes = 0;
     }
+
     const line = lines.length ? part : { ...part, concat: false };
     bytes += cost(line, lines.length === 0);
     lines.push(line);
   }
+
   if (lines.length) units.push({ lines });
+
   return units;
 }
 
@@ -172,18 +179,24 @@ export class IrcDelivery implements TransportDelivery {
     request?: string,
   ) {
     const finish = this.client.startStatus();
+
     if (signal.aborted) {
       finish();
+
       return;
     }
+
     // Typing may stop early (for example a DM nick changed hands); the turn
-    // still owns its aggregate status handle until its actual lifecycle ends.
+    // Still owns its aggregate status handle until its actual lifecycle ends.
     signal.addEventListener("abort", finish, { once: true });
+
     const fleetTyping =
       turnStatus && turnStatus !== "quiet" && this.presence.fleetTyping
         ? this.typing(channel, signal, allowed).catch(() => {})
         : undefined;
+
     const active = () => !signal.aborted && (allowed?.() ?? true);
+
     try {
       if (turnStatus) {
         if (turnStatus === "live") {
@@ -192,8 +205,10 @@ export class IrcDelivery implements TransportDelivery {
           await delay(Math.min(3000, this.client.turnStatusMs), undefined, {
             signal,
           }).catch(() => {});
+
           while (active()) {
             const observed = readProgress?.();
+
             if (
               !sent ||
               (observed &&
@@ -213,12 +228,15 @@ export class IrcDelivery implements TransportDelivery {
                 observedProgress(request, observed),
               ).catch(() => {});
             }
+
             await delay(Math.min(30_000, this.client.turnStatusMs), undefined, {
               signal,
             }).catch(() => {});
           }
+
           return;
         }
+
         if (turnStatus === "notice") {
           void this.turnNotice(
             channel,
@@ -229,12 +247,15 @@ export class IrcDelivery implements TransportDelivery {
           ).catch(() => {});
           let reported: TurnProgress | undefined;
           let first = true;
+
           while (!signal.aborted) {
             await delay(this.client.turnStatusMs, undefined, { signal }).catch(
               () => {},
             );
+
             if (signal.aborted || (allowed && !allowed())) break;
             const progress = readProgress?.();
+
             if (!first && reported === progress) continue;
             first = false;
             reported = progress;
@@ -247,14 +268,18 @@ export class IrcDelivery implements TransportDelivery {
               active,
               progress ? observedProgress(request, progress) : undefined,
             ).catch(() => {});
+
             if (!readProgress) break;
           }
         }
+
         return;
       }
+
       await this.typing(channel, signal, allowed);
     } finally {
       await fleetTyping;
+
       if (signal.aborted) finish();
     }
   }
@@ -267,6 +292,7 @@ export class IrcDelivery implements TransportDelivery {
     allowed: () => boolean,
   ) {
     if (signal.aborted) return;
+
     if (!this.client.registered) {
       try {
         await this.client.waitReady(this.readyMs, signal);
@@ -274,6 +300,7 @@ export class IrcDelivery implements TransportDelivery {
         return;
       }
     }
+
     await this.turnNotice(
       channel,
       request,
@@ -295,16 +322,20 @@ export class IrcDelivery implements TransportDelivery {
         await new Promise<void>((resolve) =>
           signal.addEventListener("abort", () => resolve(), { once: true }),
         );
+
       return;
     }
+
     const target = await this.target(channel);
     const guard = this.guard(channel, target, allowed);
     const timer = this.client.typingMs;
+
     while (!signal.aborted) {
       if (guard && !guard()) return;
       this.client.notify(target, { "+typing": "active" }, guard);
       await delay(timer, undefined, { signal }).catch(() => {});
     }
+
     this.client.notify(target, { "+typing": "done" }, guard);
   }
 
@@ -317,21 +348,27 @@ export class IrcDelivery implements TransportDelivery {
     progress?: NoticeProgress,
   ) {
     if (!active() || !this.client.registered) return;
+
     const terminal =
       progress?.stage === "completed" || progress?.stage === "failed";
+
     if (terminal && !this.client.hasCap("message-tags")) return;
     const target = await this.target(channel).catch(() => undefined);
+
     if (!target || !active()) return;
     const parent = progress?.request ?? this.replyParent?.(thread) ?? thread;
+
     const tags: Record<string, string> =
       this.client.hasCap("message-tags") &&
       validMsgid(parent) &&
       !parent.startsWith("stargate-")
         ? { "+draft/reply": parent }
         : {};
+
     if (progress && tags["+draft/reply"])
       tags["+stargate/progress"] =
         progress.stage + (progress.disconnected ? ",disconnected" : "");
+
     if (terminal && !tags["+stargate/progress"]) return;
     // A missing acknowledgement or IRC confirmation must not hold up a reply.
     void this.client
@@ -354,8 +391,10 @@ export class IrcDelivery implements TransportDelivery {
     const target = planTarget(channel);
     const plain = plainText(text);
     const limits = this.client.multiline;
+
     if (!limits) {
       const budget = this.client.budget("PRIVMSG", target, reply);
+
       return {
         batched: false,
         units: ircLines(plain, budget).map((line) => ({
@@ -363,6 +402,7 @@ export class IrcDelivery implements TransportDelivery {
         })),
       };
     }
+
     // A fragment fits both one IRC line and the whole batch limit.
     const budget = Math.min(
       limits.maxBytes,
@@ -371,6 +411,7 @@ export class IrcDelivery implements TransportDelivery {
         "draft/multiline-concat": "",
       }),
     );
+
     const parts = plain
       .split("\n")
       .map((line) => line.trimEnd())
@@ -381,6 +422,7 @@ export class IrcDelivery implements TransportDelivery {
           concat: index > 0,
         })),
       );
+
     return { batched: true, units: packBatches(parts, limits) };
   }
 
@@ -390,11 +432,14 @@ export class IrcDelivery implements TransportDelivery {
    */
   get files(): AttachmentTransport | undefined {
     const hosted = this.hosted;
+
     if (!hosted?.filehost()) return undefined;
+
     return {
       download: (urls, _channel, signal) => {
         if (!hosted.download)
           return Promise.reject(new Error("IRC file input is off"));
+
         return hosted.files.download(urls, signal);
       },
       ...(hosted.upload
@@ -417,6 +462,7 @@ export class IrcDelivery implements TransportDelivery {
   ) {
     await this.client.waitReady(this.readyMs);
     const host = this.hosted?.filehost();
+
     if (!host || !URL.canParse(url) || !safeFileURL(new URL(url), host))
       throw new Error("IRC file link is not a plain FILEHOST URL");
     const target = await this.target(channel);
@@ -424,8 +470,10 @@ export class IrcDelivery implements TransportDelivery {
     const budget = this.client.budget("PRIVMSG", target, reply);
     const room = budget - utf8Bytes(`: ${url}`);
     let name = cleanText(title).trim() || "File";
+
     while (name && utf8Bytes(name) > room)
       name = [...name].slice(0, -1).join("");
+
     if (!name || utf8Bytes(url) > budget)
       throw new Error("IRC file link does not fit one line");
     await this.client.privmsg(
@@ -456,6 +504,7 @@ export class IrcDelivery implements TransportDelivery {
    */
   private guard(channel: string, target: string, allowed?: () => boolean) {
     if (isIrcChannel(channel)) return allowed;
+
     return () => this.client.holds(channel, target) && (allowed?.() ?? true);
   }
 
@@ -465,6 +514,7 @@ export class IrcDelivery implements TransportDelivery {
         ? (this.replyParent(thread) ??
           (isIrcChannel(channel) ? undefined : thread))
         : thread;
+
     return this.client.hasCap("message-tags") && validMsgid(parent)
       ? { "+draft/reply": parent }
       : {};
@@ -484,6 +534,7 @@ export class IrcDelivery implements TransportDelivery {
     unit?: DeliveryUnit | { allowed: () => boolean },
   ) {
     await this.client.waitReady(this.readyMs);
+
     if (unit?.allowed && !unit.allowed())
       throw new Error("IRC delivery access denied");
     const target = await this.target(channel);
@@ -491,12 +542,15 @@ export class IrcDelivery implements TransportDelivery {
     const tracked = unit && "job" in unit ? unit : undefined;
     let plan: Plan = this.plan(channel, text, reply);
     let done = 0;
+
     if (tracked && this.progress) {
       const stored = this.progress.plan(tracked, JSON.stringify(plan));
       plan = Schema.decodeUnknownSync(planSchema)(JSON.parse(stored.plan));
       done = stored.done;
     }
+
     const limits = this.client.multiline;
+
     if (
       plan.batched &&
       (!limits ||
@@ -509,19 +563,23 @@ export class IrcDelivery implements TransportDelivery {
           ))
     ) {
       // Multiline is gone (or its limits shrank) since the plan was made:
-      // each remaining line becomes its own unit, stored, so line progress
-      // survives a retry.
+      // Each remaining line becomes its own unit, stored, so line progress
+      // Survives a retry.
       plan = this.unbatch(plan, done, planTarget(channel), reply);
+
       if (tracked && this.progress)
         this.progress.replan(tracked, JSON.stringify(plan));
     }
-    // greybeard: a nick that changes hands without a QUIT/NICK/ACCOUNT we
-    // can see (no shared channel) after WHOIS is not detected for the
-    // lines of this chunk; each delivery attempt revalidates with WHOIS.
+
+    // Greybeard: a nick that changes hands without a QUIT/NICK/ACCOUNT we
+    // Can see (no shared channel) after WHOIS is not detected for the
+    // Lines of this chunk; each delivery attempt revalidates with WHOIS.
     const recipient = this.guard(channel, target);
     const guard = () => (recipient?.() ?? true) && (unit?.allowed?.() ?? true);
+
     for (let index = done; index < plan.units.length; index++) {
       const lines = plan.units[index]?.lines ?? [];
+
       if (plan.batched)
         await this.client.sendBatch(
           target,
@@ -541,6 +599,7 @@ export class IrcDelivery implements TransportDelivery {
             "normal",
             thread,
           );
+
       if (tracked && this.progress) this.progress.done(tracked, index + 1);
     }
   }
@@ -557,6 +616,7 @@ export class IrcDelivery implements TransportDelivery {
     reply: Record<string, string>,
   ): Plan {
     const budget = this.client.budget("PRIVMSG", target, reply);
+
     return {
       batched: false,
       units: [
@@ -588,6 +648,7 @@ export class IrcDelivery implements TransportDelivery {
   ) {
     await this.client.waitReady(this.readyMs);
     const reply = this.reply(ts);
+
     if (!("+draft/reply" in reply))
       throw new Error("IRC reactions need message tags");
     const target = await this.target(channel);
@@ -613,6 +674,7 @@ function observedProgress(
   progress?: TurnProgress,
 ): NoticeProgress | undefined {
   if (!request || progress?.stage === "completed") return;
+
   return {
     request,
     stage: progress?.stage ?? "received",

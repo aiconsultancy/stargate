@@ -123,5 +123,6 @@ const phrases = [
 export function waitingPhrase(name: string, index: number): string {
   const whole = Number.isFinite(index) ? Math.trunc(index) : 0;
   const offset = ((whole % phrases.length) + phrases.length) % phrases.length;
+
   return `${name} is ${phrases[offset]}…`;
 }

@@ -10,9 +10,11 @@ import { codexInput } from "../src/backends/codex";
 import { SlackFiles, type SlackFilesFetch } from "../src/slack/slack-files";
 
 const cleanup: (() => Promise<unknown>)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const pdf = new TextEncoder().encode("%PDF-1.7\nBinary document\0");
 const signal = () => new AbortController().signal;
@@ -22,6 +24,7 @@ function fixture() {
   const transfers: { url: string; init: RequestInit | undefined }[] = [];
   const uploads: { auth: string | null; data: Uint8Array }[] = [];
   const info = new Map<string, Record<string, unknown>>();
+
   const file = (
     id = "F1",
     data = png,
@@ -39,57 +42,76 @@ function fixture() {
     ims: [],
     url_private_download: `https://files.slack.com/files-pri/${id}/download`,
   });
+
   info.set("F1", file());
+
   let api = (path: string, params: URLSearchParams): unknown => {
     if (path === "/api/files.info")
       return { ok: true, file: info.get(params.get("file") ?? "") };
+
     if (path === "/api/files.getUploadURLExternal")
       return {
         ok: true,
         file_id: "F99",
         upload_url: "https://files.slack.com/upload/v1/F99",
       };
+
     if (path === "/api/files.completeUploadExternal")
       return { ok: true, files: [{ id: "F99" }] };
     throw new Error("Unexpected fixture API path");
   };
+
   let download = async (_url: URL, _init?: RequestInit) =>
     new Response(png, { headers: { "content-type": "image/png" } });
+
   let upload: SlackFilesFetch | undefined;
   let apiFetch: SlackFilesFetch | undefined;
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const path = new URL(request.url).pathname;
+
       if (path.startsWith("/api/")) {
         const params = new URLSearchParams(await request.text());
         records.push({ path, params });
+
         return Response.json(api(path, params));
       }
+
       if (path === "/upload/v1/F99") {
         uploads.push({
           auth: request.headers.get("authorization"),
           data: new Uint8Array(await request.arrayBuffer()),
         });
+
         return new Response("OK", { status: 200 });
       }
+
       throw new Error("Unexpected fixture transfer path");
     },
   });
+
   cleanup.push(() => server.stop(true));
+
   const request: SlackFilesFetch = async (url, init) => {
     const source = new URL(url);
+
     if (source.origin === "https://files.slack.com") {
       transfers.push({ url: source.href, init });
+
       if (!source.pathname.startsWith("/upload/"))
         return download(source, init);
+
       if (upload) return upload(source, init);
     } else if (source.origin !== "https://slack.com")
       throw new Error("Fixture blocked outbound host");
     else if (apiFetch) return apiFetch(source, init);
+
     return fetch(new URL(source.pathname, server.url), init);
   };
+
   const files = new SlackFiles(
     (stop) =>
       new WebClient("xoxb-fixture", {
@@ -116,6 +138,7 @@ function fixture() {
     "xoxb-fixture",
     request,
   );
+
   return {
     files,
     info,
@@ -150,6 +173,7 @@ test("Slack file download resolves IDs, checks channel membership and returns PN
     expect(new Headers(init?.headers).get("authorization")).toBe(
       "Bearer xoxb-fixture",
     );
+
     return new Response(url.pathname.includes("F2") ? pdf : png, {
       headers: {
         "content-type": url.pathname.includes("F2")
@@ -178,12 +202,15 @@ test("Slack file download resolves IDs, checks channel membership and returns PN
 test("Slack pasted Markdown reaches Claude and Codex as the complete UTF-8 snippet", async () => {
   const f = fixture();
   const encoder = new TextEncoder();
+
   const prefix = `${Array.from(
     { length: 602 },
     (_, index) => `- Item ${index + 1}: **café** \`code\``,
   ).join("\n")}\n## End: `;
+
   const markdown =
     prefix + "x".repeat(33_340 - encoder.encode(prefix).byteLength);
+
   const bytes = encoder.encode(markdown);
   expect(bytes.byteLength).toBe(33_340);
   expect(markdown.split("\n")).toHaveLength(603);
@@ -196,6 +223,7 @@ test("Slack pasted Markdown reaches Claude and Codex as the complete UTF-8 snipp
     expect(new Headers(init?.headers).get("authorization")).toBe(
       "Bearer xoxb-fixture",
     );
+
     return new Response(bytes, {
       headers: { "content-type": "application/force-download" },
     });
@@ -229,6 +257,7 @@ test("Slack pasted Markdown reaches Claude and Codex as the complete UTF-8 snipp
 test("Slack force-download is limited to verified text snippets", async () => {
   const f = fixture();
   const encoder = new TextEncoder();
+
   const cases = [
     { mode: "hosted", mime: "text/plain", data: encoder.encode("plain text") },
     { mode: "hosted", mime: "application/force-download", data: png },
@@ -241,6 +270,7 @@ test("Slack force-download is limited to verified text snippets", async () => {
       data: encoder.encode("<!doctype html><html>Sign in</html>"),
     },
   ];
+
   for (const { mode, mime, data } of cases) {
     f.info.set("F1", { ...f.file("F1", data, mime, "pasted.md"), mode });
     f.download(
@@ -257,12 +287,13 @@ test("Slack force-download is limited to verified text snippets", async () => {
 
 test("Slack clip facts: only a finished, untruncated transcript is returned", async () => {
   const audio = new TextEncoder().encode("fixture m4a bytes");
+
   const cases: [Record<string, unknown>, NonNullable<Attachment["source"]>][] =
     [
       [{}, { id: "F1" }],
       [
-        { duration_ms: 68638, transcription: { status: "none" } },
-        { id: "F1", durationMs: 68638 },
+        { duration_ms: 68_638, transcription: { status: "none" } },
+        { id: "F1", durationMs: 68_638 },
       ],
       [
         {
@@ -283,7 +314,7 @@ test("Slack clip facts: only a finished, untruncated transcript is returned", as
         { id: "F1", transcript: "Deploy it." },
       ],
       // A preview that continues elsewhere, an unfinished or empty transcript and
-      // an unknown shape never stand in for the speech.
+      // An unknown shape never stand in for the speech.
       [
         {
           transcription: {
@@ -305,6 +336,7 @@ test("Slack clip facts: only a finished, untruncated transcript is returned", as
       ],
       [{ transcription: "complete", duration_ms: "long" }, { id: "F1" }],
     ];
+
   for (const [change, source] of cases) {
     const f = fixture();
     f.info.set("F1", {
@@ -340,6 +372,7 @@ test("Slack file metadata refuses missing scope, foreign IDs/channels and extern
     );
     expect(f.transfers).toEqual([]);
   }
+
   const f = fixture();
   f.api(() => ({
     ok: false,
@@ -452,6 +485,7 @@ test("Slack file batch applies count and aggregate budgets before allocating mor
   ).rejects.toThrow("Slack file");
   expect(f.records).toEqual([]);
   const size = 9 * 1024 * 1024;
+
   for (const id of ["F1", "F2", "F3"])
     f.info.set(
       id,
@@ -498,11 +532,13 @@ test("Slack file download abort cancels a blocked stream and never returns parti
 
 test("Slack upload reserves once, posts raw bytes without auth and completes in the exact thread", async () => {
   const f = fixture();
+
   const reserved = await f.files.reserveUpload(
     "report.pdf",
     pdf.byteLength,
     signal(),
   );
+
   expect(reserved).toEqual({
     fileID: "F99",
     url: "https://files.slack.com/upload/v1/F99",
@@ -520,14 +556,18 @@ test("Slack upload reserves once, posts raw bytes without auth and completes in 
     method: "POST",
     redirect: "error",
   });
+
   const reserve = f.records.find(({ path }) =>
     path.endsWith("getUploadURLExternal"),
   )?.params;
+
   expect(reserve?.get("filename")).toBe("report.pdf");
   expect(reserve?.get("length")).toBe(String(pdf.byteLength));
+
   const completion = f.records.find(({ path }) =>
     path.endsWith("completeUploadExternal"),
   )?.params;
+
   expect(completion?.get("channel_id")).toBe("C1");
   expect(completion?.get("thread_ts")).toBe("1.000");
   expect(JSON.parse(completion?.get("files") ?? "null")).toEqual([
@@ -537,6 +577,7 @@ test("Slack upload reserves once, posts raw bytes without auth and completes in 
 
 test("Slack upload rejects invalid reservations and unsafe transfer destinations", async () => {
   const f = fixture();
+
   for (const response of [
     { ok: false, error: "missing_scope" },
     { ok: true, file_id: "F99", upload_url: "https://evil.test/upload" },
@@ -551,6 +592,7 @@ test("Slack upload rejects invalid reservations and unsafe transfer destinations
       f.files.reserveUpload("file.zip", 8, signal()),
     ).rejects.toThrow("Slack file");
   }
+
   await expect(f.files.reserveUpload("../secret", 8, signal())).rejects.toThrow(
     "Slack file",
   );
@@ -565,10 +607,12 @@ test("Slack upload rejects invalid reservations and unsafe transfer destinations
 
 test("Slack signed upload rejects redirects/non-200 responses and never sends bearer auth", async () => {
   const f = fixture();
+
   for (const status of [302, 500]) {
     f.upload(async (_url, init) => {
       expect(init?.redirect).toBe("error");
       expect(new Headers(init?.headers).has("authorization")).toBe(false);
+
       return new Response(null, {
         status,
         headers: { location: "https://evil.test/upload" },
@@ -578,6 +622,7 @@ test("Slack signed upload rejects redirects/non-200 responses and never sends be
       f.files.putUpload("https://files.slack.com/upload/v1/F99", png, signal()),
     ).rejects.toThrow("Slack file");
   }
+
   expect(f.records).toEqual([]);
 });
 
@@ -586,9 +631,11 @@ test("Slack metadata and signed-upload operations honour abort through injected 
     const f = fixture();
     const started = Promise.withResolvers<void>();
     let aborted = false;
+
     const pending: SlackFilesFetch = async (_url, init) =>
       new Promise<Response>((_resolve, reject) => {
         const signal = init?.signal;
+
         if (!signal) throw new Error("Missing request signal");
         signal.addEventListener(
           "abort",
@@ -600,9 +647,11 @@ test("Slack metadata and signed-upload operations honour abort through injected 
         );
         started.resolve();
       });
+
     if (operation === "metadata") f.apiFetch(pending);
     else f.upload(pending);
     const stop = new AbortController();
+
     const work =
       operation === "metadata"
         ? f.files.download(["F1"], "C1", stop.signal)
@@ -611,6 +660,7 @@ test("Slack metadata and signed-upload operations honour abort through injected 
             png,
             stop.signal,
           );
+
     await started.promise;
     stop.abort();
     await expect(work).rejects.toThrow("Slack file");
@@ -635,18 +685,20 @@ test("Slack upload completion accepts display-title separators without changing 
 
 test("Slack upload completion rejects invalid display titles before the API call", async () => {
   const f = fixture();
+
   for (const title of [
     "",
     "x".repeat(256),
     "Before\tafter",
     "Before\nafter",
     "Before\0after",
-    "Before\x7fafter",
+    "Before\u007fafter",
   ]) {
     await expect(
       f.files.completeUpload("C1", "1.000", "F99", title, signal()),
     ).rejects.toThrow("Slack file");
   }
+
   expect(f.records).toEqual([]);
 });
 
@@ -685,6 +737,7 @@ test("Slack share confirmation distinguishes exact thread, root shares and prove
 
 test("Slack share confirmation throws on missing, malformed, foreign or API-error evidence", async () => {
   const f = fixture();
+
   for (const response of [
     { ok: false, error: "missing_scope" },
     { ok: true, file: { id: "F99" } },

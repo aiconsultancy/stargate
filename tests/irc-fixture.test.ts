@@ -17,6 +17,7 @@ test("IRC poll teardown stops polling without resuming an ended test", () => {
   let resumed = false;
   void until(() => {
     calls++;
+
     return false;
   }, 1000).then(
     () => {
@@ -41,6 +42,7 @@ test("IRC poll abort at teardown start stops before resource cleanup", async () 
   void until(
     () => {
       calls++;
+
       return false;
     },
     1000,

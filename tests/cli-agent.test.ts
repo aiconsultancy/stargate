@@ -12,6 +12,7 @@ import {
 } from "../src/backends/cli-agent";
 
 const cleanup: (() => Promise<unknown>)[] = [];
+
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
@@ -23,6 +24,7 @@ test("a process whose identity changed is never signalled", async () => {
   const turn = crypto.randomUUID();
   const marker = { variable: "STARGATE_TEST_TURN", value: turn };
   const id = crypto.randomUUID();
+
   type Fake = {
     start: number;
     group?: number;
@@ -30,6 +32,7 @@ test("a process whose identity changed is never signalled", async () => {
     marker?: string;
     cmdline?: string[];
   };
+
   const write = async (pid: number, fake: Fake) => {
     const directory = join(root, String(pid));
     await mkdir(directory, { recursive: true });
@@ -52,12 +55,15 @@ test("a process whose identity changed is never signalled", async () => {
       `${(fake.cmdline ?? ["claude", `--resume=${id}`]).join("\0")}\0`,
     );
   };
+
   const kills: [number, string][] = [];
+
   const table: ProcessTable = {
     root,
     uid: 1000,
     kill: (pid, name) => kills.push([pid, name]),
   };
+
   await write(100, { start: 500 });
   await write(101, { start: 500, uids: [1000, 1000, 0, 1000] });
   await write(102, { start: 500, marker: crypto.randomUUID() });
@@ -67,6 +73,7 @@ test("a process whose identity changed is never signalled", async () => {
   // Other user, other marker, or older than the turn: never a candidate.
   expect(found).toEqual([{ pid: 100, start: 500 }]);
   const signalled = () => signalTurnProcesses(table, found, marker, "SIGTERM");
+
   // The PID was reused by a newer process, another user or another turn.
   for (const reused of [
     { start: 900 },
@@ -76,6 +83,7 @@ test("a process whose identity changed is never signalled", async () => {
     await write(100, reused);
     expect(signalled()).toBe(0);
   }
+
   await rm(join(root, "100"), { recursive: true });
   expect(signalled()).toBe(0);
   expect(kills).toEqual([]);
@@ -88,6 +96,7 @@ test("a process whose identity changed is never signalled", async () => {
   expect(signalTurnGroup(table, leader, "SIGTERM")).toBe(true);
   expect(kills).toEqual([[-100, "SIGTERM"]]);
   kills.length = 0;
+
   for (const [recorded, actual] of [
     [{ start: 499 }, { start: 500 }],
     [{}, { start: 500, marker: crypto.randomUUID() }],
@@ -100,6 +109,7 @@ test("a process whose identity changed is never signalled", async () => {
       false,
     );
   }
+
   expect(kills).toEqual([]);
   // Without a known user ID nothing is signalled.
   await write(100, { start: 500 });
@@ -114,6 +124,7 @@ test("a marker under another variable name or as a suffix never matches", async 
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const value = crypto.randomUUID();
   const table: ProcessTable = { root, uid: 1000, kill: () => {} };
+
   const write = async (pid: number, environ: string) => {
     const directory = join(root, String(pid));
     await mkdir(directory);
@@ -127,6 +138,7 @@ test("a marker under another variable name or as a suffix never matches", async 
     );
     await writeFile(join(directory, "environ"), environ);
   };
+
   await write(10, `STARGATE_A_TURN=${value}\0`);
   await write(11, `XSTARGATE_A_TURN=${value}\0`);
   await write(12, `STARGATE_B_TURN=${value}\0`);
@@ -146,7 +158,7 @@ test("turn start time is read from /proc/uptime in clock ticks", async () => {
   const table: ProcessTable = { root, uid: 1000, kill: () => {} };
   expect(await bootTicks(table)).toBe(0);
   await writeFile(join(root, "uptime"), "1234.56 999.00\n");
-  expect(await bootTicks(table)).toBe(123454);
+  expect(await bootTicks(table)).toBe(123_454);
   expect(
     statStart("1 (a) b) S 0 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 777 0"),
   ).toBe(777);

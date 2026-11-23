@@ -5,6 +5,7 @@ const commandName = Schema.Struct({
   command: Schema.String,
   text: Schema.optional(Schema.String),
 });
+
 const pairingAction = Schema.Union([
   Schema.Struct({
     view: Schema.Struct({ callback_id: Schema.Literal("stargate_pair") }),
@@ -40,6 +41,7 @@ export function controlInteractions(
   return {
     async command(body, ack) {
       const parsed = Schema.decodeUnknownResult(commandName)(body);
+
       if (
         Result.isSuccess(parsed) &&
         parsed.success.command === "/stargate" &&

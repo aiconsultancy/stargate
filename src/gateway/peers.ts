@@ -87,6 +87,7 @@ const humanUserInfo = Schema.Struct({
 /** The verified actor can belong to a different home team in Slack Connect. */
 export function isSlackHuman(raw: unknown, user: string): boolean {
   const parsed = Schema.decodeUnknownResult(humanUserInfo)(raw);
+
   return Result.isSuccess(parsed) && parsed.success.user.id === user;
 }
 
@@ -108,13 +109,16 @@ export class PeerDirectory {
 
   async verify(sender: PeerSender, signal: AbortSignal): Promise<boolean> {
     const cached = this.cache.get(sender.user);
+
     if (cached && cached.until > this.now())
       return cached.bot !== undefined && cached.bot === sender.bot;
     let bot: string | undefined;
+
     try {
       const parsed = Schema.decodeUnknownResult(userInfo)(
         await this.lookup(sender.user, signal),
       );
+
       const user = Result.isSuccess(parsed) ? parsed.success.user : undefined;
       bot =
         user &&
@@ -131,11 +135,15 @@ export class PeerDirectory {
     } catch {
       return false;
     }
+
     if (this.cache.size >= cacheLimit) {
       const oldest = this.cache.keys().next().value;
+
       if (oldest !== undefined) this.cache.delete(oldest);
     }
+
     this.cache.set(sender.user, { bot, until: this.now() + cacheMs });
+
     return bot !== undefined && bot === sender.bot;
   }
 }
@@ -146,9 +154,11 @@ export function botSender(body: unknown): PeerSender | undefined {
     typeof body === "object" && body !== null && "event" in body
       ? body.event
       : undefined;
+
   if (typeof event !== "object" || event === null) return;
   const user = "user" in event ? event.user : undefined;
   const bot = "bot_id" in event ? event.bot_id : undefined;
+
   return typeof user === "string" &&
     /^[UW][A-Z0-9]+$/.test(user) &&
     typeof bot === "string" &&

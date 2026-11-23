@@ -25,11 +25,13 @@ const absolutePath = Schema.String.check(Schema.isMaxCodePoints(4096))
       message: "Paths cannot contain newlines",
     }),
   );
+
 const clock = Schema.String.check(
   settingsPattern(/^([01]\d|2[0-3]):[0-5]\d$/, {
     message: "Use 24-hour HH:MM",
   }),
 );
+
 export const timeZoneSchema = Schema.String.check(Schema.isMinCodePoints(1))
   .check(Schema.isMaxCodePoints(100))
   .check(
@@ -37,8 +39,10 @@ export const timeZoneSchema = Schema.String.check(Schema.isMinCodePoints(1))
       (zone) => {
         // Intl accepts fixed offsets; they are not IANA zones and ignore DST.
         if (/^[+-]/.test(zone)) return false;
+
         try {
           new Intl.DateTimeFormat("en", { timeZone: zone }).format(0);
+
           return true;
         } catch {
           return false;
@@ -47,13 +51,17 @@ export const timeZoneSchema = Schema.String.check(Schema.isMinCodePoints(1))
       { message: "Use an IANA time zone name" },
     ),
   );
+
 const envName = Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/));
+
 const repository = Schema.String.check(
   settingsPattern(/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/),
 );
+
 const unitName = Schema.String.check(
   settingsPattern(/^[a-zA-Z0-9][a-zA-Z0-9_.@-]{0,200}\.service$/),
 );
+
 const argument = Schema.String.check(Schema.isMinCodePoints(1))
   .check(Schema.isMaxCodePoints(4096))
   .check(
@@ -61,15 +69,18 @@ const argument = Schema.String.check(Schema.isMinCodePoints(1))
       message: "No control characters",
     }),
   );
+
 const command = Schema.mutable(Schema.Array(argument))
   .check(Schema.isMinLength(1))
   .check(Schema.isMaxLength(64));
+
 const url = (loopbackOnly: boolean) =>
   settingsURL.check(
     settingsRefine(
       (value) => {
         const parsed = new URL(value);
         const loopback = isLocalhost(parsed.hostname);
+
         return (
           !parsed.username &&
           !parsed.password &&
@@ -87,15 +98,19 @@ const url = (loopbackOnly: boolean) =>
       },
     ),
   );
+
 const coolOffHours = Schema.Finite.check(Schema.isInt())
   .check(Schema.isGreaterThanOrEqualTo(0))
   .check(Schema.isLessThanOrEqualTo(720));
+
 export const familySchema = Schema.String.check(
   settingsPattern(/^(claude|gpt)-[a-z]+$/),
 );
+
 const modelProvider = Schema.String.check(
   settingsPattern(/^[a-z0-9][a-z0-9_-]{0,99}$/),
 );
+
 const npmName = Schema.String.check(
   settingsPattern(/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/),
 ).check(Schema.isMaxCodePoints(214));
@@ -273,7 +288,7 @@ export const maintenanceSchema = settingsStruct({
   agentClis: Schema.optional(
     settingsStruct({
       npm: command.pipe(settingsDefault(["npm"])),
-      /** npm global prefix, for example /home/me/.local. */
+      /** Npm global prefix, for example /home/me/.local. */
       prefix: absolutePath,
       registry: url(false).pipe(settingsDefault("https://registry.npmjs.org")),
       packages: Schema.mutable(
@@ -390,10 +405,13 @@ export const maintenanceSchema = settingsStruct({
   settingsCheck((value, context) => {
     const minutes = (clock: string) => {
       const [hour = 0, minute = 0] = clock.split(":").map(Number);
+
       return hour * 60 + minute;
     };
+
     const { start, end, jitterMinutes, reserveMinutes } = value.window;
     const length = (minutes(end) - minutes(start) + 1440) % 1440;
+
     if (length === 0)
       context.addIssue({
         code: "custom",
@@ -406,11 +424,13 @@ export const maintenanceSchema = settingsStruct({
         path: ["window", "jitterMinutes"],
         message: "Jitter plus reserve must be shorter than the window",
       });
+
     const need = (
       component: keyof typeof value.components,
       sections: (keyof typeof value)[],
     ) => {
       if (!value.components[component]) return;
+
       for (const section of sections)
         if (value[section] === undefined)
           context.addIssue({
@@ -419,13 +439,16 @@ export const maintenanceSchema = settingsStruct({
             message: `components.${component} requires the ${section} section`,
           });
     };
+
     const droid = value.droid;
+
     if (droid?.enabled && !value.report)
       context.addIssue({
         code: "custom",
         path: ["droid", "enabled"],
         message: "droid requires the report section (its Slack destination)",
       });
+
     // The proxy provider serves only named models (see pi-durable.ts).
     if (
       droid &&

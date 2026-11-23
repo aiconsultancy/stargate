@@ -27,19 +27,23 @@ class Clock {
   readonly schedule = (callback: () => void) => {
     const id = ++this.sequence;
     this.timers.set(id, { at: this.now + 1000, callback });
+
     return () => {
       this.timers.delete(id);
     };
   };
   advance(ms: number) {
     const end = this.now + ms;
+
     for (;;) {
       const next = [...this.timers].sort(([, a], [, b]) => a.at - b.at)[0];
+
       if (!next || next[1].at > end) break;
       this.now = next[1].at;
       this.timers.delete(next[0]);
       next[1].callback();
     }
+
     this.now = end;
   }
 }
@@ -79,6 +83,7 @@ async function fixture(report = false) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-progress-"));
   const state = await CrewState.open(directory, "progress", "identity");
   const clock = new Clock();
+
   const member = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [
@@ -90,6 +95,7 @@ async function fixture(report = false) {
       },
     ],
   }).crew[0];
+
   if (!member) throw new Error("Missing member");
   const peer = state.reservePeer(member.id);
   state.readyPeer(member.id);
@@ -102,6 +108,7 @@ async function fixture(report = false) {
   const submissionId = 1 as SubmissionId;
   const inputEntry = 1 as EntryId;
   let activeConversationId = 1 as ConversationId;
+
   let record: SubmissionRecord = {
     id: submissionId,
     conversationId: activeConversationId,
@@ -109,9 +116,11 @@ async function fixture(report = false) {
     status: "placed",
     entry: inputEntry,
   };
+
   const publications: ReturnType<typeof Promise.withResolvers<void>>[] = [];
   let final = assistant(3, "CANONICAL FINAL");
   let reportsCreated = 0;
+
   const view = (
     entries: readonly EntryRecord[] = [],
     text = "",
@@ -132,6 +141,7 @@ async function fixture(report = false) {
       },
     },
   });
+
   const advance = (entries: readonly EntryRecord[] = [], text = "") => {
     if (!observer) throw new Error("Observer not attached");
     const published = Promise.withResolvers<void>();
@@ -140,14 +150,17 @@ async function fixture(report = false) {
       { kind: "value", value: view(entries, text), ops: [], retired: false },
       BACKGROUND_CONTEXT,
     );
+
     return published.promise;
   };
+
   const harness = {
     async observeConversation(
       _id: ConversationId,
       attached: Observer<ConversationView>,
     ) {
       observer = attached;
+
       return {
         value: view(),
         detach() {
@@ -157,6 +170,7 @@ async function fixture(report = false) {
     },
     async conversation(id: ConversationId) {
       activeConversationId = id;
+
       return {
         async submit() {
           record = {
@@ -166,6 +180,7 @@ async function fixture(report = false) {
             status: "placed",
             entry: inputEntry,
           };
+
           const submission: Submission = {
             id: submissionId,
             async status() {
@@ -176,7 +191,9 @@ async function fixture(report = false) {
               return record.status === "placed" ? "already_placed" : "settled";
             },
           };
+
           started.resolve();
+
           return submission;
         },
         async commit() {
@@ -197,46 +214,57 @@ async function fixture(report = false) {
     },
     async createConversation() {
       reportsCreated++;
+
       return { id: 2 as ConversationId };
     },
     async close() {},
   };
+
   const backend: PiDurableBackend = Reflect.construct(PiDurableBackend, [
     harness,
     { model: "openai/test" },
     new Set(),
     {},
   ]);
+
   const settled = Promise.withResolvers<void>();
   const complete = state.complete.bind(state);
   state.complete = (...args) => {
     complete(...args);
     settled.resolve();
   };
+
   const uncertain = state.uncertain.bind(state);
   state.uncertain = (...args) => {
     uncertain(...args);
     settled.resolve();
   };
+
   let task: CrewTask | null | undefined;
+
   if (report) {
     const capture = state.reporting.start("captain", "request", "twiki");
     state.reporting.finish(capture);
+
     const queued = state.enqueue(
       peer,
       "captain",
       "Report input must stay private",
       capture.id,
     );
+
     task = state.promote(queued.id, null)?.task;
   } else task = state.reserveTask(peer, "captain", "Maintenance assignment");
+
   if (!task) throw new Error("Missing task");
+
   const workers = new PiCrewWorkers(
     state,
     directory,
     async () => backend,
     clock.schedule,
   );
+
   // The fake harness implements the provider boundary, including cancellation.
   const prompt = backend.prompt.bind(backend);
   backend.prompt = (...args) => {
@@ -246,14 +274,17 @@ async function fixture(report = false) {
       { once: true },
     );
     const onText = args[3];
+
     if (onText) {
       args[3] = (text) => {
         onText(text);
         publications.shift()?.resolve();
       };
     }
+
     return prompt(...args);
   };
+
   return {
     directory,
     state,
@@ -314,6 +345,7 @@ async function fixture(report = false) {
 for (const report of [false, true]) {
   test(`Pi ${report ? "reporter" : "maintenance"} retains canonical final after >64k visible intermediate text`, async () => {
     const f = await fixture(report);
+
     try {
       await f.start();
       await f.intermediate("INTERMEDIATE ".repeat(6000));
@@ -335,14 +367,17 @@ for (const report of [false, true]) {
 
 test("ordinary Pi Slack prompt retains cumulative visible return and live callbacks", async () => {
   const f = await fixture();
+
   try {
     const snapshots: string[] = [];
+
     const result = f.backend.prompt(
       "1",
       "Slack request",
       new AbortController().signal,
       (text) => snapshots.push(text),
     );
+
     await f.started;
     await f.intermediate("VISIBLE INTERMEDIATE");
     f.succeed("FINAL SLACK ANSWER");
@@ -356,6 +391,7 @@ test("ordinary Pi Slack prompt retains cumulative visible return and live callba
 
 test("Pi progress flushes latest burst tail while still busy and redacts before storage", async () => {
   const f = await fixture();
+
   try {
     await f.start();
     await f.emit("First update");
@@ -380,13 +416,16 @@ test("Pi progress flushes latest burst tail while still busy and redacts before 
 for (const outcome of ["success", "failure", "cancel", "close"] as const) {
   test(`Pi progress flushes pending tail on ${outcome}, clears timers and ignores late callbacks`, async () => {
     const f = await fixture();
+
     try {
       await f.start();
       await f.emit("First update");
       await f.emit("Latest pending update");
+
       const callbacks = [...f.clock.timers.values()].map(
         ({ callback }) => callback,
       );
+
       if (outcome === "success") f.succeed();
       else if (outcome === "failure") f.fail();
       else if (outcome === "cancel") await f.workers.interrupt(f.peer);
@@ -399,8 +438,9 @@ for (const outcome of ["success", "failure", "cancel", "close"] as const) {
       );
       const saved = f.state.activity.task(f.state.task(f.task.id) ?? f.task);
       void f.emit("Late observer callback");
+
       for (const callback of callbacks) callback();
-      f.clock.advance(10000);
+      f.clock.advance(10_000);
       expect(f.state.activity.task(f.state.task(f.task.id) ?? f.task)).toEqual(
         saved,
       );
@@ -413,6 +453,7 @@ for (const outcome of ["success", "failure", "cancel", "close"] as const) {
 
 test("Pi progress storage failures do not stop work or escape timer callbacks", async () => {
   const f = await fixture();
+
   try {
     await f.start();
     const progress = f.state.activity.progress.bind(f.state.activity);
@@ -421,6 +462,7 @@ test("Pi progress storage failures do not stop work or escape timer callbacks", 
       if (failing) throw new Error("Private SQLite error");
       progress(...args);
     };
+
     await expect(f.emit("First")).resolves.toBeUndefined();
     await expect(f.emit("Latest update")).resolves.toBeUndefined();
     expect(() => f.clock.advance(1000)).not.toThrow();
@@ -439,10 +481,12 @@ test("Pi progress storage failures do not stop work or escape timer callbacks", 
 
 // Real SQLite setup and recovery writes need headroom on loaded hosts.
 const legacyPiRecoveryTimeoutMs = 30_000;
+
 test(
   "Pi recovery leaves legacy tasks without native conversation binding unresolved",
   async () => {
     const f = await fixture();
+
     try {
       expect(f.state.piTaskConversation(f.task.id)).toBeUndefined();
       expect(
@@ -465,13 +509,18 @@ test("Pi recovery fails closed for unsupported, missing and unreadable receipts 
   const f = await fixture();
   let opens = 0;
   let reads = 0;
+
   const factory: PiWorkerFactory = async () => {
     opens++;
+
     return f.backend;
   };
+
   const workers = new PiCrewWorkers(f.state, f.directory, factory);
+
   try {
     f.state.savePiTaskConversation(f.task.id, "1");
+
     const inspect = () =>
       workers.recover(
         f.task,
@@ -479,6 +528,7 @@ test("Pi recovery fails closed for unsupported, missing and unreadable receipts 
         f.directory,
         new AbortController().signal,
       );
+
     expect(await inspect()).toMatchObject({
       status: "uncertain",
       result: null,
@@ -487,9 +537,12 @@ test("Pi recovery fails closed for unsupported, missing and unreadable receipts 
       expect(conversation).toBe("1");
       expect(request).toBe(f.task.inputID);
       reads++;
+
       if (reads === 2) throw new Error("Private native database error");
+
       return undefined;
     };
+
     expect(await inspect()).toMatchObject({
       status: "uncertain",
       result: null,
@@ -511,6 +564,7 @@ test("Pi receipt arriving after captain abandonment cannot revive old task or co
   const reading = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   let reads = 0;
+
   const factory: PiWorkerFactory = Object.assign(
     async () => {
       throw new Error("Recovery must never open a runtime");
@@ -520,12 +574,15 @@ test("Pi receipt arriving after captain abandonment cannot revive old task or co
         reads++;
         reading.resolve();
         await release.promise;
+
         return "OLD COMMITTED ANSWER";
       },
     },
   );
+
   const workers = new PiCrewWorkers(f.state, f.directory, factory);
   let recovering: Promise<CrewTask> | undefined;
+
   try {
     f.state.savePiTaskConversation(f.task.id, "1");
     f.state.running(f.task.id);
@@ -537,6 +594,7 @@ test("Pi receipt arriving after captain abandonment cannot revive old task or co
       new AbortController().signal,
     );
     await reading.promise;
+
     const control = f.state.beginAbandon(
       { ...f.task, status: "uncertain", controlID: null },
       {
@@ -545,12 +603,15 @@ test("Pi receipt arriving after captain abandonment cannot revive old task or co
         operationKey: "abandon",
       },
     );
+
     f.state.finishAbandon(f.task.id, control, "confirmed", "Stopped");
+
     const next = f.state.reserveTask(
       f.peer,
       "captain",
       "Replacement assignment",
     );
+
     if (!next) throw new Error("Replacement task is missing");
     release.resolve();
     expect(await recovering).toMatchObject({

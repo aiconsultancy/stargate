@@ -13,6 +13,7 @@ import { bot } from "./fixtures";
 
 const now = Date.parse("2026-11-18T12:00:00Z");
 const canary = "SECRET-private-path-token-prompt";
+
 const status = {
   checks: {
     backendRead: { state: "available", reason: canary },
@@ -20,11 +21,12 @@ const status = {
   },
   history: { state: "unknown", incidents: [] },
 };
+
 const sources = {
   host: async () => ({
     load: [1, 2, 3],
     cores: 8,
-    totalMemory: 16000,
+    totalMemory: 16_000,
     availableMemory: 8000,
     uptimeSeconds: 123,
     disks: [],
@@ -32,7 +34,7 @@ const sources = {
       { pid: 12, label: "opencode", cpuPercent: 20, memoryBytes: 4096 },
     ],
     processCoverage: "sampled",
-    growth: { label: "root", bytes: 1048576, intervalSeconds: 60 },
+    growth: { label: "root", bytes: 1_048_576, intervalSeconds: 60 },
     rebootPending: true,
     timeSynchronized: true,
   }),
@@ -57,6 +59,7 @@ const sources = {
   }),
   uptime: () => 50,
 };
+
 function reader(extra: Partial<Parameters<typeof createHealthReader>[0]> = {}) {
   return createHealthReader({
     bot,
@@ -87,6 +90,7 @@ test("health shows current drain and deadline stragglers without private payload
       }),
     },
   })("stargate");
+
   expect(text).toContain("restart drain draining");
   expect(text).toContain("task_busy");
   expect(text).toContain("ses_worker");
@@ -131,6 +135,7 @@ test("strict health settings accept absolute paths and reject executable or rela
 
 test("every section and summary render bounded safe observed values and explicit unknowns", async () => {
   const read = reader();
+
   for (const section of [
     undefined,
     "host",
@@ -145,11 +150,14 @@ test("every section and summary render bounded safe observed values and explicit
     expect(text.length).toBeLessThan(3000);
     expect(text).toContain("unknown");
     expect(text).not.toContain(canary);
+
     if (section) expect(text.toLowerCase()).toContain(section);
   }
+
   expect(await read("opencode")).toContain("✓ backend read");
   expect(await read("opencode")).toContain("✗ pinned session");
   const summary = await read();
+
   for (const section of [
     "host",
     "agents",
@@ -169,6 +177,7 @@ test("every section and summary render bounded safe observed values and explicit
 
 test("invalid sections perform no collection and give only valid section guidance", async () => {
   let calls = 0;
+
   const read = reader({
     sources: {
       ...sources,
@@ -178,6 +187,7 @@ test("invalid sections perform no collection and give only valid section guidanc
       },
     },
   });
+
   expect(await read(canary)).toContain(
     "host, agents, stargate, opencode, proxy, services, starfleet",
   );
@@ -191,6 +201,7 @@ test("source failures remain unknown without raw exceptions or false all-clear",
   const fail = async () => {
     throw Error(canary);
   };
+
   const read = reader({
     sources: {
       host: fail,
@@ -202,6 +213,7 @@ test("source failures remain unknown without raw exceptions or false all-clear",
       uptime: () => 0,
     },
   });
+
   const text = await read();
   expect(text).not.toContain(canary);
   expect(text).not.toContain("✓");
@@ -216,11 +228,12 @@ test("crew ownership never implies native activity and absent activity cannot pr
     summary: canary,
     phase: canary,
     progress: canary,
-    createdAt: now - 9000000,
-    startedAt: now - 9000000,
-    updatedAt: now - 9000000,
+    createdAt: now - 9_000_000,
+    startedAt: now - 9_000_000,
+    updatedAt: now - 9_000_000,
     finishedAt: null,
   };
+
   const read = reader({
     backend: {
       crewStatus: async () => ({
@@ -244,6 +257,7 @@ test("crew ownership never implies native activity and absent activity cannot pr
       }),
     },
   });
+
   const text = await read("agents");
   expect(text).toContain("ownership running");
   expect(text).toContain("task_123");
@@ -289,6 +303,7 @@ test("expired and inactive quota never becomes healthy availability", async () =
       }),
     },
   });
+
   const text = await read("proxy");
   expect(text).toContain("codex-1");
   expect(text).toContain("availability unknown");
@@ -319,6 +334,7 @@ test("bounded detail preserves unknown coverage when crew rows overflow", async 
       }),
     },
   });
+
   const text = await read("agents");
   expect(text.length).toBeLessThan(3000);
   expect(text).toContain("truncated");
@@ -326,7 +342,7 @@ test("bounded detail preserves unknown coverage when crew rows overflow", async 
 });
 
 test("cached Starfleet future, stale and invalid observations are unknown", async () => {
-  for (const observedAt of [now + 1, now - 901000]) {
+  for (const observedAt of [now + 1, now - 901_000]) {
     const read = reader({
       sources: {
         ...sources,
@@ -342,9 +358,11 @@ test("cached Starfleet future, stale and invalid observations are unknown", asyn
         }),
       },
     });
+
     expect(await read("starfleet")).toContain("unknown");
     expect(await read("starfleet")).not.toContain("✓");
   }
+
   const read = reader({
     sources: {
       ...sources,
@@ -354,6 +372,7 @@ test("cached Starfleet future, stale and invalid observations are unknown", asyn
       }),
     },
   });
+
   expect(await read("starfleet")).toContain("unknown");
   expect(await read("starfleet")).not.toContain(canary);
 });
@@ -361,6 +380,7 @@ test("cached Starfleet future, stale and invalid observations are unknown", asyn
 test("snapshot file reader bounds bytes and rejects foreign, missing and symbolic files", async () => {
   const dir = await mkdtemp(join(tmpdir(), "health-"));
   const path = join(dir, "snapshot.json");
+
   try {
     expect(await readStarfleetSnapshot(path)).toBeNull();
     await writeFile(path, JSON.stringify(await sources.starfleet()), {
@@ -374,9 +394,10 @@ test("snapshot file reader bounds bytes and rejects foreign, missing and symboli
     await chmod(path, 0o644);
     expect(await readStarfleetSnapshot(path)).toBeNull();
     await chmod(path, 0o600);
+
     for (const text of [
       "{bad",
-      "x".repeat(65537),
+      "x".repeat(65_537),
       JSON.stringify({ schema: "foreign" }),
     ]) {
       await writeFile(path, text);
@@ -417,6 +438,7 @@ test("maintenance and cron render canonical states and no names or report text",
       },
     ],
   });
+
   const text = await read("stargate");
   expect(text).toContain("completed 2026-11-18T11:00:00Z");
   expect(text).toContain("✗ cron cron-123 failed");
@@ -441,6 +463,7 @@ test("Stargate health exposes transport connection state, not process readiness 
       }),
     },
   });
+
   const text = await read("stargate");
   expect(text).toContain("transports 1/2 connected");
   expect(text).toContain("slack captain: reconnecting");
@@ -465,6 +488,7 @@ test("OpenCode detail consumes optional canonical metadata without exposing igno
       }),
     },
   });
+
   const text = await read("opencode");
   expect(text).toContain("version 2.2.7");
   expect(text).toContain("active sessions 3");
@@ -476,6 +500,7 @@ test("OpenCode detail consumes optional canonical metadata without exposing igno
 
 test("configured unit reads use only fixed read-only systemctl properties and suppress stderr", async () => {
   const commands: string[][] = [];
+
   const read = reader({
     maintenance: Schema.decodeUnknownSync(maintenanceSchema)({
       services: {
@@ -492,6 +517,7 @@ test("configured unit reads use only fixed read-only systemctl properties and su
       run: async (command, options) => {
         commands.push([...command]);
         expect(options.timeoutMs).toBeLessThanOrEqual(5000);
+
         return {
           code: 0,
           stdout: `ActiveState=active\nLoadState=loaded\nDescription=${canary}`,
@@ -500,13 +526,16 @@ test("configured unit reads use only fixed read-only systemctl properties and su
       },
     },
   });
+
   const text = await read();
   expect(commands).toHaveLength(2);
+
   for (const command of commands) {
     expect(command.slice(0, 3)).toEqual(["systemctl", "--user", "show"]);
     expect(command[4]).toBe("--property=LoadState,ActiveState");
     expect(command).not.toContain("restart");
   }
+
   expect(text).not.toContain(canary);
   expect(text).toContain("unit active");
 });
@@ -515,15 +544,17 @@ test("unresponsive metadata readers do not prevent an unknown reply", async () =
   const text = await reader({
     sources: { ...sources, status: () => new Promise(() => {}) },
   })("opencode");
+
   expect(text).toContain("backend read unknown");
   expect(text.length).toBeLessThan(3000);
-}, 10000);
+}, 10_000);
 
 test("summary contains exactly one aggregate status line per section", async () => {
   const text = await reader()();
   const lines = text.split("\n");
   expect(lines).toHaveLength(8);
   expect(lines[0]).toBe("Health · read-only");
+
   for (const [index, section] of [
     "host",
     "agents",
@@ -536,6 +567,7 @@ test("summary contains exactly one aggregate status line per section", async () 
     expect(lines[index + 1]).toMatch(new RegExp(`^[✓⚠✗] ${section}: `));
     expect(lines[index + 1]).toContain("unknown");
   }
+
   expect(lines[2]).toStartWith("✗ agents:");
   expect(lines[4]).toStartWith("✗ opencode:");
   expect(lines[7]).toStartWith("✗ starfleet:");
@@ -558,6 +590,7 @@ test("a late failed cron remains visible in summary and clipped detail aggregate
         lastStatus: index === 19 ? "failed" : "done",
       })),
   });
+
   expect(
     (await read()).split("\n").find((line) => line.includes("stargate:")),
   ).toStartWith("✗ stargate:");
@@ -585,8 +618,8 @@ test("unavailable ticket fields stay explicit and ownership duration uses starte
               summary: canary,
               phase: canary,
               progress: canary,
-              createdAt: now - 200000,
-              startedAt: now - 120000,
+              createdAt: now - 200_000,
+              startedAt: now - 120_000,
               updatedAt: now - 1000,
               finishedAt: null,
             },
@@ -602,10 +635,12 @@ test("unavailable ticket fields stay explicit and ownership duration uses starte
       }),
     },
   });
+
   const agents = await read("agents");
   expect(agents).toContain("running duration 120s");
   expect(agents).toContain("last activity unknown");
   const gateway = await read("stargate");
+
   for (const field of [
     "last delivered unknown",
     "last-hour delivery errors unknown",

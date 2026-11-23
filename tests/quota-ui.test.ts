@@ -31,6 +31,7 @@ const snapshot: QuotaSnapshot = {
     },
   ],
 };
+
 const command = {
   command: "/stargate",
   text: "usage",
@@ -44,12 +45,14 @@ const command = {
 test("usage command ACKs and opens before the read; displays private bounded plain text", async () => {
   const order: string[] = [];
   const views: CronView[] = [];
+
   const ui = new CrewUI(
     bot(),
     identity,
     {
       async quota() {
         order.push("read");
+
         return snapshot;
       },
     },
@@ -57,6 +60,7 @@ test("usage command ACKs and opens before the read; displays private bounded pla
       async open(_trigger, view) {
         order.push("open");
         views.push(view);
+
         return "V123";
       },
       async update(_view, view) {
@@ -67,6 +71,7 @@ test("usage command ACKs and opens before the read; displays private bounded pla
     pino({ enabled: false }),
     new AbortController().signal,
   );
+
   await ui.command(command, async () => {
     order.push("ack");
   });
@@ -76,6 +81,7 @@ test("usage command ACKs and opens before the read; displays private bounded pla
   expect(JSON.stringify(views.at(-1))).toContain("INACTIVE scope");
   expect(JSON.stringify(views.at(-1))).toContain("Reset passed");
   expect(JSON.stringify(views.at(-1))).toContain("not token counts");
+
   for (const block of views.at(-1)?.blocks ?? [])
     expect(block).toMatchObject({
       type: "section",
@@ -84,6 +90,7 @@ test("usage command ACKs and opens before the read; displays private bounded pla
   const max = structuredClone(snapshot);
   const account = snapshot.accounts[0];
   const window = account?.windows[0];
+
   if (!account || !window) throw new Error("Missing quota fixture");
   max.accounts = Array.from({ length: 10 }, (_, i) => ({
     ...account,
@@ -93,8 +100,10 @@ test("usage command ACKs and opens before the read; displays private bounded pla
   const view = quotaStatusView(max, 3000);
   expect(view.blocks.length).toBeLessThan(100);
   expect(JSON.stringify(view)).toContain("claude-10");
+
   for (const block of view.blocks) {
     expect(block.type).toBe("section");
+
     if (
       "text" in block &&
       typeof block.text === "object" &&
@@ -110,6 +119,7 @@ test("usage command preserves app/workspace/access/bot boundaries and rechecks b
   let reads = 0;
   let opens = 0;
   let updates = 0;
+
   const ui = new CrewUI(
     config,
     identity,
@@ -117,12 +127,14 @@ test("usage command preserves app/workspace/access/bot boundaries and rechecks b
       async quota() {
         reads++;
         config.access.deniedUsers.push("U123");
+
         return snapshot;
       },
     },
     {
       async open() {
         opens++;
+
         return "V123";
       },
       async update() {
@@ -132,6 +144,7 @@ test("usage command preserves app/workspace/access/bot boundaries and rechecks b
     pino({ enabled: false }),
     new AbortController().signal,
   );
+
   for (const changes of [
     { api_app_id: "AOTHER" },
     { team_id: "TOTHER" },
@@ -156,6 +169,7 @@ test("usage command preserves app/workspace/access/bot boundaries and rechecks b
 
 test("usage failure and unsupported backends never reveal raw errors", async () => {
   const views: CronView[] = [];
+
   const ui = new CrewUI(
     bot(),
     identity,
@@ -175,9 +189,11 @@ test("usage failure and unsupported backends never reveal raw errors", async () 
     pino({ enabled: false }),
     new AbortController().signal,
   );
+
   await ui.command(command, async () => {});
   expect(JSON.stringify(views)).toContain("Quota unavailable");
   expect(JSON.stringify(views)).not.toContain("Bearer secret");
+
   const unsupported = new CrewUI(
     bot(),
     identity,
@@ -191,6 +207,7 @@ test("usage failure and unsupported backends never reveal raw errors", async () 
     pino({ enabled: false }),
     new AbortController().signal,
   );
+
   await unsupported.command(command, async (payload) => {
     expect(payload).toMatchObject({ response_type: "ephemeral" });
   });
@@ -199,6 +216,7 @@ test("usage failure and unsupported backends never reveal raw errors", async () 
 test("quota adapter uses only location-scoped authenticated RPC, no session or inference", async () => {
   const requests: string[] = [];
   let invalid = false;
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -209,12 +227,15 @@ test("quota adapter uses only location-scoped authenticated RPC, no session or i
       );
       expect(request.headers.get("authorization")).toBe("Bearer fixture-only");
       expect(await request.json()).toEqual({ input: {} });
+
       return Response.json({
         output: invalid ? { secret: "private" } : snapshot,
       });
     },
   });
+
   process.env["STARGATE_QUOTA_TEST_AUTH"] = "Bearer fixture-only";
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
@@ -222,6 +243,7 @@ test("quota adapter uses only location-scoped authenticated RPC, no session or i
       directory: "/captain",
       headersEnv: { Authorization: "STARGATE_QUOTA_TEST_AUTH" },
     });
+
     if (config.type !== "opencode") throw new Error("Invalid fixture");
     const backend = new OpenCodeBackend(config);
     expect(await backend.quota(new AbortController().signal)).toEqual(snapshot);

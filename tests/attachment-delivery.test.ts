@@ -25,6 +25,7 @@ const job = { id: 1, channel: "C1", thread: "1.0" } as Job;
 function fixture(files: AttachmentDelivery[], transport?: AttachmentTransport) {
   const notices: string[] = [];
   let allowed = true;
+
   return {
     files,
     notices,
@@ -55,22 +56,26 @@ function fixture(files: AttachmentDelivery[], transport?: AttachmentTransport) {
 
 function linkTransport() {
   const calls: string[] = [];
+
   const transport: AttachmentTransport = {
     download: async () => [],
     upload: async () => {
       calls.push("upload");
+
       return "https://files.example/a";
     },
     link: async () => {
       calls.push("link");
     },
   };
+
   return { calls, transport };
 }
 
 test("one-shot publication records intent and never repeats an uncertain send", async () => {
   const { calls, transport } = linkTransport();
   transport.publishOnce = true;
+
   const files: AttachmentDelivery[] = [
     {
       path: "/unused.png",
@@ -88,11 +93,13 @@ test("one-shot publication records intent and never repeats an uncertain send", 
       fileID: "data:image/png;base64,proof",
     },
   ];
+
   transport.link = async () => {
     expect(files[0]?.phase).toBe("completing");
     calls.push("link");
     throw new Error("Uncertain delivery");
   };
+
   const run = fixture(files, transport);
   await expect(run.deliver()).rejects.toThrow("Uncertain delivery");
   await run.deliver();
@@ -103,11 +110,13 @@ test("one-shot publication records intent and never repeats an uncertain send", 
 
 test("an upload with an unknown outcome is never repeated", async () => {
   const { calls, transport } = linkTransport();
+
   // A crash after "uploading" was stored and before the URL was recorded.
   const f = fixture(
     [{ path: "/tmp/a.txt", caption: "", phase: "uploading" }],
     transport,
   );
+
   await f.deliver();
   expect(calls).toEqual([]);
   expect(f.files[0]).toMatchObject({ phase: "unavailable", noticeSent: true });
@@ -119,6 +128,7 @@ test("an upload with an unknown outcome is never repeated", async () => {
 
 test("a recorded URL is linked without another upload", async () => {
   const { calls, transport } = linkTransport();
+
   const f = fixture(
     [
       {
@@ -139,6 +149,7 @@ test("a recorded URL is linked without another upload", async () => {
     ],
     transport,
   );
+
   await f.deliver();
   expect(calls).toEqual(["link"]);
   expect(f.files[0]?.phase).toBe("shared");
@@ -147,6 +158,7 @@ test("a recorded URL is linked without another upload", async () => {
 
 test("files on another host are unavailable with one notice", async () => {
   const { calls, transport } = linkTransport();
+
   const f = fixture(
     [
       { path: "/tmp/a.txt", caption: "" },
@@ -154,6 +166,7 @@ test("files on another host are unavailable with one notice", async () => {
     ],
     transport,
   );
+
   await f.deliver(false);
   expect(calls).toEqual([]);
   expect(f.files.map((file) => file.phase)).toEqual([
@@ -165,10 +178,12 @@ test("files on another host are unavailable with one notice", async () => {
 
 test("removed access stops before any notice or transport call", async () => {
   const { calls, transport } = linkTransport();
+
   const f = fixture(
     [{ path: "/tmp/a.txt", caption: "", phase: "uploading" }],
     transport,
   );
+
   f.deny();
   await expect(f.deliver()).rejects.toThrow("access denied");
   expect(calls).toEqual([]);
@@ -182,6 +197,7 @@ test("only an OpenCode server on another host has remote files", () => {
       url,
       directory: "/work",
     });
+
   expect(agentFilesLocal(opencode("http://localhost:4096"))).toBe(true);
   expect(agentFilesLocal(opencode("http://127.0.0.1:4096"))).toBe(true);
   expect(agentFilesLocal(opencode("https://agents.example:4096"))).toBe(false);
@@ -191,6 +207,7 @@ test("reply files from OpenCode's TMPDIR scratch are published; dot segments bel
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "stargate-scratch-")),
   );
+
   const previous = process.env["TMPDIR"];
   // Galactica: TMPDIR=%h/.cache/tmp, so scratch is ~/.cache/tmp/opencode.
   const temporary = join(root, ".cache", "tmp");
@@ -206,17 +223,21 @@ test("reply files from OpenCode's TMPDIR scratch are published; dot segments bel
   await writeFile(join(temporary, "opencode-other", "proof.txt"), "cache");
   await symlink(join(scratch, "proof.txt"), join(scratch, "link.txt"));
   process.env["TMPDIR"] = temporary;
+
   try {
     expect(opencodeScratchDirectory()).toBe(scratch);
     const uploaded: string[] = [];
+
     const transport: AttachmentTransport = {
       download: async () => [],
       upload: async (file) => {
         uploaded.push(new TextDecoder().decode(file.data));
+
         return "https://files.example/proof";
       },
       link: async () => {},
     };
+
     const f = fixture(
       [
         { path: join(scratch, "proof.txt"), caption: "" },
@@ -229,6 +250,7 @@ test("reply files from OpenCode's TMPDIR scratch are published; dot segments bel
       ],
       transport,
     );
+
     await f.deliver();
     expect(f.files.map((file) => file.phase)).toEqual([
       "shared",
@@ -253,6 +275,7 @@ test.each(["unchanged", "changed", "symlink", "TMPDIR"])(
     const root = await realpath(
       await mkdtemp(join(tmpdir(), "stargate-retry-")),
     );
+
     const previous = process.env["TMPDIR"];
     const temporary = join(root, ".cache", "tmp");
     const scratch = join(temporary, "opencode");
@@ -260,14 +283,17 @@ test.each(["unchanged", "changed", "symlink", "TMPDIR"])(
     const path = join(scratch, "proof.txt");
     await writeFile(path, "proof");
     process.env["TMPDIR"] = temporary;
+
     try {
       const calls: string[] = [];
       let fail = true;
+
       const f = fixture([{ path, caption: "" }], {
         download: async () => [],
         reserveUpload: async () => {
           if (fail) throw new Error("Retry reservation");
           calls.push("reserve");
+
           return { fileID: "F1", url: "https://files.example/upload" };
         },
         putUpload: async (_url, data) => {
@@ -279,16 +305,21 @@ test.each(["unchanged", "changed", "symlink", "TMPDIR"])(
         },
         sharedIn: async () => false,
       });
+
       await expect(f.deliver()).rejects.toThrow("Retry reservation");
       expect(f.files[0]?.prepared?.path).toBe(path);
       fail = false;
+
       if (change === "changed") await writeFile(path, "other");
+
       if (change === "symlink") {
         await rm(path);
         await writeFile(join(scratch, "other.txt"), "proof");
         await symlink(join(scratch, "other.txt"), path);
       }
+
       if (change === "TMPDIR") process.env["TMPDIR"] = root;
+
       if (change === "unchanged") {
         await f.deliver();
         expect(f.files[0]?.phase).toBe("shared");

@@ -79,6 +79,7 @@ export class FleetControl {
     validateFleetPermissions(options.permissions);
     this.permissions = options.permissions.map((rule) => ({ ...rule }));
     Schema.decodeUnknownSync(fleetControlSchema)(options.config);
+
     if (
       !options.sessionID ||
       !options.account ||
@@ -87,9 +88,11 @@ export class FleetControl {
       throw new FleetError(
         "Fleet control requires a pinned session and actual account.",
       );
+
     if (options.config.reviews && !options.nativeReviews)
       throw new FleetError("Native review backend unavailable");
     this.ledger = new FleetLedger(options.config.statePath);
+
     if (options.config.reviews) {
       if (!options.nativeReviews)
         throw new FleetError("Native review backend unavailable");
@@ -105,8 +108,10 @@ export class FleetControl {
 
   static async open(options: FleetControlOptions) {
     const control = new FleetControl(options);
+
     try {
       await control.listen();
+
       return control;
     } catch (error) {
       await control.close();
@@ -134,10 +139,12 @@ export class FleetControl {
       this.options.account,
       input.offerID,
     );
+
     if (!recorded || recorded.received < Date.now() - 24 * 3_600_000)
       throw new FleetError(
         "No current offer with this ID was addressed to this captain.",
       );
+
     const result = {
       offerID: input.offerID,
       answer: input.answer,
@@ -145,11 +152,15 @@ export class FleetControl {
       note: "The rear admiral confirms in the channel. Accepting asks it to assign the issue to you; it is not human approval.",
       humanApproval: false as const,
     };
+
     if (recorded.answer === input.answer) return { ...result, repeated: true };
+
     if (recorded.answer !== null)
       throw new FleetError("This offer already has a different answer.");
+
     if (!this.options.answer)
       throw new FleetError("Offer answers are unavailable on this gateway.");
+
     try {
       await this.options.answer(
         recorded.offer,
@@ -162,7 +173,9 @@ export class FleetControl {
         "Answer delivery is unconfirmed; check the channel before answering again.",
       );
     }
+
     this.ledger.answerOffer(this.options.account, input.offerID, input.answer);
+
     return result;
   }
 
@@ -171,18 +184,22 @@ export class FleetControl {
   }
   reviewAssignmentPrompt(dispatchID: string): string | undefined {
     if (!this.reviews) return;
+
     const assignment = this.ledger.reviewContext(
       this.options.sessionID,
       this.options.account,
       dispatchID,
     );
+
     if (!assignment) return;
+
     if (
       !this.options.config.reviews?.repositories.includes(
         assignment.context.repository,
       )
     )
       throw new FleetError("Review repository is not permitted");
+
     return reviewContextPrompt(assignment.context, assignment.text);
   }
   async pollReviews(signal: AbortSignal) {
@@ -269,6 +286,7 @@ export class FleetControl {
       throw new FleetError(
         "Fleet dispatch is disabled by this gateway's capability policy.",
       );
+
     if (
       input.review &&
       (!this.reviews ||
@@ -279,19 +297,24 @@ export class FleetControl {
       throw new FleetError(
         "Review evidence is disabled or repository is not permitted",
       );
+
     const target = this.options.config.targets.find(
       (entry) => entry.id === input.target,
     );
+
     if (!target)
       throw new FleetError("Fleet dispatch target is not configured.");
     const source = this.ledger.verify(caller.sessionID, input.sourceReference);
+
     if (source.authority === "context")
       throw new FleetError(
         "Context-only messages cannot authorise fleet assignments.",
       );
+
     const origin = this.resultsEnabled
       ? this.options.origin?.(source)
       : undefined;
+
     if (
       this.resultsEnabled &&
       (!origin ||
@@ -302,6 +325,7 @@ export class FleetControl {
       throw new FleetError(
         "Fleet result origin has no retained ingress job/native input",
       );
+
     const reserved = this.ledger.reserve({
       ownerSessionID: caller.sessionID,
       requestID: input.requestID ?? caller.id,
@@ -312,22 +336,26 @@ export class FleetControl {
       ...(origin ? { origin } : {}),
       ...(input.review ? { review: input.review } : {}),
     });
+
     if (!reserved.created) return reserved.result;
+
     // This label reports real transport identity and immutable evidence. Rank,
-    // delegated evidence and a human source never grant human approval authority.
+    // Delegated evidence and a human source never grant human approval authority.
     const text = fleetAssignmentText(
       reserved.result,
       input.text,
       source.authority,
     );
+
     try {
       signal.throwIfAborted();
       await this.options.send(target, text, signal);
       signal.throwIfAborted();
+
       return this.ledger.sent(caller.sessionID, reserved.result);
     } catch {
       // The external write may have happened. The durable reservation remains
-      // unknown, including after a process crash; this ID can never resend.
+      // Unknown, including after a process crash; this ID can never resend.
       return reserved.result;
     }
   }
@@ -340,26 +368,33 @@ export class FleetControl {
         response.once("close", () => {
           if (!response.writableEnded) disconnected.abort();
         });
+
         const signal = AbortSignal.any([
           this.stop.signal,
           disconnected.signal,
           AbortSignal.timeout(20_000),
         ]);
+
         try {
           if (request.method === "GET" && request.url?.startsWith("/reviews")) {
             if (!this.reviews) {
               sendJson(response, 404, { error: "Not found" });
+
               return;
             }
+
             const url = new URL(request.url, "http://fleet.local");
+
             const match = /^\/reviews\/(proof_[a-f0-9]{32})$/.exec(
               url.pathname,
             );
+
             if (match && !url.search) {
               const proof = this.ledger.reviewProof(
                 match[1] ?? "",
                 this.options.account,
               );
+
               if (
                 !proof ||
                 !this.options.config.reviews?.repositories.includes(
@@ -368,13 +403,18 @@ export class FleetControl {
               )
                 sendJson(response, 404, { error: "Review proof unavailable" });
               else sendJson(response, 200, { proof });
+
               return;
             }
+
             if (url.pathname !== "/reviews") {
               sendJson(response, 404, { error: "Not found" });
+
               return;
             }
+
             const keys = [...url.searchParams.keys()];
+
             if (
               keys.length !== 3 ||
               new Set(keys).size !== 3 ||
@@ -383,6 +423,7 @@ export class FleetControl {
               )
             )
               throw new FleetError("Invalid review proof lookup");
+
             const target = Schema.decodeUnknownSync(
               settingsStruct({
                 repository: reviewRepositorySchema,
@@ -400,41 +441,53 @@ export class FleetControl {
                 headSHA: Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/)),
               }),
             )(Object.fromEntries(url.searchParams));
+
             const proofs = this.options.config.reviews?.repositories.includes(
               target.repository,
             )
               ? this.ledger.reviewProofs(this.options.account, target)
               : [];
+
             sendJson(response, 200, { proofs });
+
             return;
           }
+
           if (request.method !== "POST" || request.url !== "/fleet") {
             sendJson(response, 404, { error: "Not found" });
+
             return;
           }
+
           const parsed = Schema.decodeUnknownResult(requestSchema)(
             JSON.parse(
               await readBody(request, this.reviews ? 1_000_000 : 32_768),
             ),
           );
+
           if (Result.isFailure(parsed))
             throw new FleetError("Invalid fleet tool request.");
           const value = parsed.success;
+
           if (value.caller.sessionID !== this.options.sessionID)
             throw new FleetError(
               "Fleet tool caller does not match this gateway's native session pin.",
             );
           signal.throwIfAborted();
+
           if (!fleetRequestAllowed(this.permissions, value))
             throw new FleetError(
               "Trusted gateway policy refuses this fleet operation.",
             );
+
           const nativeOrigin = await this.options.authorize(
             value.caller,
             signal,
             value,
           );
+
           signal.throwIfAborted();
+
           const result =
             value.operation === "review"
               ? !this.reviews
@@ -478,6 +531,7 @@ export class FleetControl {
                             ? { transport: await this.options.status() }
                             : {}),
                         };
+
           sendJson(response, 200, { result });
         } catch (error) {
           sendJson(response, 400, {
@@ -488,12 +542,14 @@ export class FleetControl {
           });
         }
       })();
+
       this.pending.add(operation);
       void operation.then(
         () => this.pending.delete(operation),
         () => this.pending.delete(operation),
       );
     });
+
     this.server = server;
     this.identity = await listenOnUnixSocket(
       server,
@@ -506,6 +562,7 @@ export class FleetControl {
     if (this.closed) return;
     this.closed = true;
     this.stop.abort();
+
     if (this.server) await close(this.server);
     await Promise.allSettled(this.pending);
     unlinkOwnSocket(

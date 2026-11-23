@@ -7,26 +7,34 @@ import { CronStore } from "../src/cron/store";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
 const scope = { botKey: "bot", channel: "C123", user: "U123" };
+
 const input = {
   name: "Report",
   expression: "* * * * *",
   timezone: "UTC",
   prompt: "Prepare report.",
 };
+
 const stores: CronStore[] = [];
 const directories: string[] = [];
+
 function open(path = ":memory:") {
   const store = new CronStore(path);
   stores.push(store);
+
   return store;
 }
+
 function databasePath() {
   const directory = mkdtempSync(join(tmpdir(), "stargate-cron-"));
   directories.push(directory);
+
   return join(directory, "cron.sqlite");
 }
+
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
+
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
@@ -35,6 +43,7 @@ describe("CronStore", () => {
   test("persists private schedules, UUIDs, and stable ten-item pages", () => {
     const path = databasePath();
     const first = open(path);
+
     for (let index = 0; index < 12; index++)
       first.add(scope, { ...input, name: `Report ${index}` }, now + index);
     const store = open(path);
@@ -53,6 +62,7 @@ describe("CronStore", () => {
   test("enforces ownership for listing and removal", () => {
     const store = open();
     const schedule = store.add(scope, input, now);
+
     for (const change of [
       { botKey: "other" },
       { channel: "C999" },
@@ -61,6 +71,7 @@ describe("CronStore", () => {
       expect(store.list({ ...scope, ...change })).toEqual([]);
       expect(store.remove({ ...scope, ...change }, schedule.id)).toBe(false);
     }
+
     expect(store.remove(scope, "invalid")).toBe(false);
     expect(store.remove(scope, schedule.id)).toBe(true);
     expect(store.remove(scope, schedule.id)).toBe(false);
@@ -95,7 +106,7 @@ describe("CronStore", () => {
     expect(first.pending(scope.botKey)).toHaveLength(1);
     expect(first.claimDue("other", later)).toHaveLength(1);
     // Still-running work suppresses another occurrence without postponing
-    // nextAt forever or accumulating one row for each missed minute.
+    // NextAt forever or accumulating one row for each missed minute.
     expect(second.claimDue(scope.botKey, later + 60_000)).toEqual([]);
     expect(first.list(scope)[0]?.nextAt).toBe(later + 120_000);
   });
@@ -104,6 +115,7 @@ describe("CronStore", () => {
     const store = open();
     const schedule = store.add(scope, input, now);
     const run = store.claimDue(scope.botKey, now + 60_000)[0];
+
     if (!run) throw new Error("Expected due run");
     expect(store.announcing(run.id)).toBe(true);
     expect(store.announced(run.id, "1.000")).toBe(true);
@@ -118,12 +130,15 @@ describe("CronStore", () => {
 
   test("ambiguous announcing recovery is bot-scoped and never reposts", () => {
     const store = open();
+
     for (const botKey of [scope.botKey, "other"]) {
       store.add({ ...scope, botKey }, input, now);
       const run = store.claimDue(botKey, now + 60_000)[0];
+
       if (!run) throw new Error("Expected due run");
       store.announcing(run.id);
     }
+
     expect(store.recoverAnnouncements(scope.botKey)).toBe(1);
     expect(store.recoverAnnouncements(scope.botKey)).toBe(0);
     expect(store.pending(scope.botKey)).toEqual([]);
@@ -135,12 +150,14 @@ describe("CronStore", () => {
     const store = open(path);
     const schedule = store.add(scope, input, now);
     const run = store.claimDue(scope.botKey, now + 60_000)[0];
+
     if (!run) throw new Error("Expected due run");
     store.announcing(run.id);
     store.announced(run.id, "1.000");
     store.enqueued(run.id, 7);
     expect(store.remove(scope, schedule.id)).toBe(true);
     const db = new Database(path, { readonly: true });
+
     try {
       expect(
         db.query("SELECT status FROM cron_runs WHERE id=?").get(run.id),

@@ -8,16 +8,21 @@ const sessionID = Schema.String.check(
   Schema.isMaxCodePoints(256),
   settingsPattern(/^ses_[A-Za-z0-9]+$/),
 );
+
 const memberID = Schema.String.check(
   settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/),
 );
+
 const member = settingsStruct({
   role: Schema.Literals(["captain", "crew"]),
   id: memberID,
 });
+
 const sequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
 /** An outbox entry older than this is never listed or copied. */
 export const outboxMaxAgeMs = 24 * 60 * 60_000;
+
 export const outboxPageSchema = settingsStruct({
   items: Schema.mutable(
     Schema.Array(
@@ -28,7 +33,7 @@ export const outboxPageSchema = settingsStruct({
         to: member,
         text: Schema.String.check(
           Schema.isMinCodePoints(1),
-          Schema.isMaxCodePoints(64000),
+          Schema.isMaxCodePoints(64_000),
         ),
         /** Time the stargate_dm was stored (ms). */
         created: sequence,
@@ -37,6 +42,7 @@ export const outboxPageSchema = settingsStruct({
   ),
   latest: sequence,
 });
+
 export type OutboxPage = typeof outboxPageSchema.Type;
 
 /**

@@ -1,9 +1,9 @@
 // Adapted from CFP Starfleet Teams 0.4.0; transport logic is independent of Claude Code.
 // The Bot Framework messaging endpoint, served on the ship's Unix socket. The
 // The ingress connector forwards https://<bot-hostname>/api/messages
-// to it. Cloudflare only limits the hostname to POST /api/messages and does not
-// authenticate, so anyone on the internet can reach this handler: the Bot Framework
-// token is checked before the request body is read.
+// To it. Cloudflare only limits the hostname to POST /api/messages and does not
+// Authenticate, so anyone on the internet can reach this handler: the Bot Framework
+// Token is checked before the request body is read.
 
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
@@ -36,10 +36,11 @@ export type TeamsListenerOptions = {
 export function createTeamsListener(options: TeamsListenerOptions): Server {
   const requestTimeout = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const maxBytes = options.maxActivityBytes ?? MAX_ACTIVITY_BYTES;
+
   const server = createServer(
     {
       connectionsCheckingInterval:
-        options.connectionsCheckingIntervalMs ?? 1_000,
+        options.connectionsCheckingIntervalMs ?? 1000,
     },
     (req, res) => {
       handle(req, res).catch((err) => {
@@ -48,15 +49,17 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
       });
     },
   );
+
   server.headersTimeout = Math.min(
     options.headersTimeoutMs ?? HEADERS_TIMEOUT_MS,
     requestTimeout,
   );
   server.requestTimeout = requestTimeout;
+
   return server;
 
   // Answers before the body has been read, and drops the connection so a client
-  // cannot keep it open by trickling an unwanted body.
+  // Cannot keep it open by trickling an unwanted body.
   function refuse(
     req: IncomingMessage,
     res: ServerResponse,
@@ -77,8 +80,10 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
     if (err instanceof AuthError) {
       options.log(`rejected a request to ${MESSAGES_PATH}: ${err.message}`);
       refuse(req, res, err.status);
+
       return;
     }
+
     // Signing keys unavailable or a refresh deferred: the Bot Connector service retries.
     options.log(
       `cannot validate a request to ${MESSAGES_PATH} yet: ${describeError(err)}`,
@@ -91,14 +96,18 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
     res: ServerResponse,
   ): Promise<void> {
     const path = (req.url ?? "").split("?")[0];
+
     if (path !== MESSAGES_PATH) return refuse(req, res, 404);
+
     if (req.method !== "POST") {
       res.setHeader("allow", "POST");
+
       return refuse(req, res, 405);
     }
 
     // 1. Signature, issuer, audience and expiry, before anything else.
     let token: VerifiedToken;
+
     try {
       token = await options.verifyToken(req.headers["authorization"]);
     } catch (err) {
@@ -108,6 +117,7 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
     if (!/^application\/json\b/i.test(req.headers["content-type"] ?? ""))
       return refuse(req, res, 415);
     let activity: unknown;
+
     try {
       activity = JSON.parse(await readBody(req, maxBytes));
     } catch (err) {
@@ -115,6 +125,7 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
         ? refuse(req, res, 413)
         : sendJson(res, 400);
     }
+
     if (!activity || typeof activity !== "object" || Array.isArray(activity))
       return sendJson(res, 400);
 

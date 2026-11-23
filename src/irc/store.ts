@@ -19,10 +19,12 @@ export class IrcRecords implements IrcOperations {
   }): number {
     if (!input.botKeys.length) return 0;
     const keys = input.botKeys.map(() => "?").join(",");
+
     const [column, value] =
       "conversation" in input.scope
         ? ["conversation", input.scope.conversation]
         : ["channel", input.scope.channel];
+
     return (
       this.db
         .query<{ n: number }, (string | number)[]>(
@@ -133,6 +135,7 @@ export class IrcRecords implements IrcOperations {
     request?: string,
   ) {
     const existing = this.ircThreadRoot(botKey, channel, msgid);
+
     if (existing !== undefined && existing !== root)
       throw new Error("IRC thread ancestry conflict");
     this.db

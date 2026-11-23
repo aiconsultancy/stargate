@@ -34,15 +34,19 @@ const identity = Schema.String.check(
       value.trim().length > 0 &&
       [...value].every((character) => {
         const code = character.charCodeAt(0);
+
         return code > 31 && code !== 127;
       }),
   ),
 );
+
 const absolutePath = Schema.String.check(
   Schema.makeFilter((value) => isAbsolute(value) && !value.includes("\0")),
 );
+
 const eventID = Schema.String.check(settingsPattern(/^[a-f0-9]{32}$/));
 const sequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
 const optionsSchema = settingsStruct({
   command: absolutePath,
   projectDirectory: absolutePath,
@@ -54,10 +58,12 @@ const optionsSchema = settingsStruct({
     Schema.isBetween({ minimum: 1, maximum: 300_000 }),
   ).pipe(settingsDefault(30_000)),
 });
+
 const registrationSchema = settingsStruct({
   actor: identity,
   sessionID: identity,
 });
+
 const sendSchema = settingsStruct({
   ...registrationSchema.fields,
   to: identity,
@@ -69,6 +75,7 @@ const sendSchema = settingsStruct({
   key: identity,
   replyTo: Schema.optional(eventID),
 });
+
 const inboxSchema = settingsStruct({
   sessionID: identity,
   after: sequence.pipe(settingsDefault(0)),
@@ -76,7 +83,8 @@ const inboxSchema = settingsStruct({
     settingsDefault(100),
   ),
 });
-// v0.1.0 returns extra source context. Keep only fields callers need.
+
+// V0.1.0 returns extra source context. Keep only fields callers need.
 const eventSchema = Schema.Struct({
   id: eventID,
   sequence: sequence.check(Schema.isGreaterThan(0)),
@@ -96,9 +104,13 @@ const eventSchema = Schema.Struct({
 });
 
 export type MesijOptions = typeof optionsSchema.Encoded;
+
 export type MesijSend = typeof sendSchema.Encoded;
+
 export type MesijInbox = typeof inboxSchema.Encoded;
+
 export type MesijReceipt = { id: string; sequence: number };
+
 export type MesijMessage = MesijReceipt & {
   actor: string;
   sessionID: string;
@@ -114,7 +126,9 @@ function parse<S extends Schema.ConstraintDecoder<unknown>>(
   code: MesijErrorCode,
 ): S["Type"] {
   const result = Schema.decodeUnknownResult(schema)(input);
+
   if (Result.isFailure(result)) throw new MesijError(code);
+
   return result.success;
 }
 
@@ -144,22 +158,27 @@ export class MesijClient {
     signal: AbortSignal,
   ): Promise<MesijReceipt> {
     const input = parse(registrationSchema, { actor, sessionID }, "input");
+
     const output = await this.run(
       ["session", "--actor", input.actor, "--id", input.sessionID, "--json"],
       signal,
     );
+
     const event = parse(eventSchema, json(output), "output");
+
     if (
       event.actor !== input.actor ||
       event.session !== input.sessionID ||
       event.type !== "session.started"
     )
       throw new MesijError("output");
+
     return receipt(event);
   }
 
   async send(input: MesijSend, signal: AbortSignal): Promise<MesijReceipt> {
     const message = parse(sendSchema, input, "input");
+
     const output = await this.run(
       ["emit"],
       signal,
@@ -173,7 +192,9 @@ export class MesijClient {
         ...(message.replyTo ? { reply_to: message.replyTo } : {}),
       }),
     );
+
     const event = parse(eventSchema, json(output), "output");
+
     if (
       event.actor !== message.actor ||
       event.session !== message.sessionID ||
@@ -183,12 +204,14 @@ export class MesijClient {
       event.payload.message !== message.text
     )
       throw new MesijError("output");
+
     return receipt(event);
   }
 
   /** Includes sent messages and actor mentions, as defined by Mesij's inbox. */
   async inbox(input: MesijInbox, signal: AbortSignal): Promise<MesijMessage[]> {
     const query = parse(inboxSchema, input, "input");
+
     const output = await this.run(
       [
         "inbox",
@@ -202,6 +225,7 @@ export class MesijClient {
       ],
       signal,
     );
+
     const events = parse(
       Schema.mutable(Schema.Array(eventSchema)).check(
         Schema.isMaxLength(query.limit),
@@ -209,11 +233,14 @@ export class MesijClient {
       json(output),
       "output",
     );
+
     let previous = query.after;
+
     return events.map((event) => {
       if (event.sequence <= previous || !event.type.startsWith("message."))
         throw new MesijError("output");
       previous = event.sequence;
+
       return {
         ...receipt(event),
         actor: event.actor,
@@ -237,6 +264,7 @@ export class MesijClient {
     delete env["MESIJ_DB"];
     delete env["MESIJ_PROJECT"];
     delete env["MESIJ_HOME"];
+
     if (this.options.dataDirectory)
       env["MESIJ_HOME"] = this.options.dataDirectory;
 
@@ -245,6 +273,7 @@ export class MesijClient {
       let length = 0;
       const chunks: Buffer[] = [];
       const grouped = process.platform !== "win32";
+
       const child = spawn(
         this.options.command,
         ["--project", `path:${this.options.projectDirectory}`, ...args],
@@ -255,8 +284,10 @@ export class MesijClient {
           detached: grouped,
         },
       );
+
       const stop = (code: MesijErrorCode) => {
         failure ??= code;
+
         try {
           if (grouped && child.pid) process.kill(-child.pid, "SIGKILL");
           else child.kill("SIGKILL");
@@ -265,6 +296,7 @@ export class MesijClient {
           child.kill("SIGKILL");
         }
       };
+
       const abort = () => stop("cancelled");
       const timer = setTimeout(() => stop("timeout"), this.options.timeoutMs);
       timer.unref();
@@ -274,16 +306,19 @@ export class MesijClient {
       child.stdout.on("data", (chunk: Buffer) => {
         if (failure) return;
         length += chunk.length;
+
         if (length > this.options.maxOutputBytes) stop("limit");
         else chunks.push(chunk);
       });
       child.on("close", (code) => {
         clearTimeout(timer);
         signal.removeEventListener("abort", abort);
+
         if (failure) reject(new MesijError(failure));
         else if (code !== 0) reject(new MesijError("process"));
         else resolve(Buffer.concat(chunks).toString("utf8"));
       });
+
       if (signal.aborted) abort();
       child.stdin.end(input);
     });

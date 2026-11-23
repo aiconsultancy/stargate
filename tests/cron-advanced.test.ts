@@ -21,16 +21,19 @@ const now = Date.parse("2026-01-01T00:00:00Z");
 const signal = new AbortController().signal;
 const paths: string[] = [];
 const stores: CronStore[] = [];
+
 const input = {
   name: "quota-watch",
   expression: "* * * * *",
   timezone: "UTC",
   prompt: "Check quota and return the verified outcome.",
 };
+
 const model = "openai-proxy/gpt-6-luna#medium";
 
 afterEach(async () => {
   for (const store of stores.splice(0)) store.close();
+
   for (const path of paths.splice(0))
     await rm(path, { recursive: true, force: true });
 });
@@ -38,6 +41,7 @@ afterEach(async () => {
 async function fixture(advanced = true) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-advanced-cron-"));
   paths.push(directory);
+
   const config = Schema.decodeUnknownSync(botSchema)({
     ...bot(),
     cronjobs: {
@@ -47,30 +51,38 @@ async function fixture(advanced = true) {
       advanced,
     },
   });
+
   const store = new CronStore(join(directory, "cron.sqlite"));
   stores.push(store);
+
   const scope = {
     botKey: botKey(config, identity),
     channel: "C123",
     user: "U123",
   };
+
   const queued: ScheduledInput[] = [];
   const posts: string[] = [];
+
   const gateway = {
     enqueueScheduled(job: ScheduledInput) {
       queued.push(job);
+
       return queued.length;
     },
     scheduledStatus() {
       return "done" as const;
     },
   };
+
   const delivery = {
     async announce(_channel: string, text: string) {
       posts.push(text);
+
       return "1.000";
     },
   };
+
   const worker = (services: CronServices = {}) =>
     new CronScheduler(
       config,
@@ -81,6 +93,7 @@ async function fixture(advanced = true) {
       pino({ level: "silent" }),
       { now: () => now, ...services },
     );
+
   return { directory, config, store, scope, queued, posts, worker };
 }
 
@@ -102,6 +115,7 @@ test("event-only definitions preserve trigger, model, once and arbiter in the ex
     enabled: true,
     report: "daily" as const,
   };
+
   expect(parseCronjob(renderCronjob(definition), definition.name, now)).toEqual(
     definition,
   );
@@ -128,6 +142,7 @@ test("disabled advanced flag fails accepted advanced occurrences without a model
     .worker({
       async evaluate() {
         calls++;
+
         return { model, text: "No change.", verdict: "act" };
       },
     })
@@ -142,13 +157,16 @@ test("ignore completes a one-off job with no captain admission or Slack announce
   const f = await fixture();
   f.store.add(f.scope, { ...input, model, arbiter: "twiki", once: true }, now);
   let calls = 0;
+
   const services: CronServices = {
     async evaluate(run) {
       calls++;
       expect(run.arbiter).toBe("twiki");
+
       return { model, text: "No action required.", verdict: "ignore" };
     },
   };
+
   await f.worker(services).tick(now + 60_000, signal);
   await f.worker(services).tick(now + 120_000, signal);
   expect(calls).toBe(1);
@@ -168,6 +186,7 @@ test.each(["act", "escalate"] as const)(
         async evaluate() {
           expect(f.posts).toEqual([]);
           expect(f.queued).toEqual([]);
+
           return { model, text: "Verified quota event.", verdict };
         },
       })
@@ -184,12 +203,14 @@ test("failed tools-off evaluation occurrences are not replayed and future occurr
   const f = await fixture();
   f.store.add(f.scope, { ...input, model }, now);
   let calls = 0;
+
   const services: CronServices = {
     async evaluate() {
       calls++;
       throw new Error("Provider outcome unknown");
     },
   };
+
   await f.worker(services).tick(now + 60_000, signal);
   await f.worker(services).tick(now + 60_000, signal);
   expect(calls).toBe(1);
@@ -217,6 +238,7 @@ test("gateway quota polling uses no model until a durable event and supplies its
   let resetAt = now + 3_600_000;
   let usedPercent = 10;
   let evaluations = 0;
+
   const services: CronServices = {
     async quota() {
       return {
@@ -249,9 +271,11 @@ test("gateway quota polling uses no model until a durable event and supplies its
       expect(run.prompt).toContain(`"resetAt":${resetAt}`);
       expect(run.prompt).toContain(`"previousResetAt":${now + 3_600_000}`);
       expect(run.prompt).toContain(`"observedAt":${seen}`);
+
       return { model, text: "No further action.", verdict: "ignore" };
     },
   };
+
   const worker = f.worker(services);
   await worker.tick(now, signal);
   expect(evaluations).toBe(0);
@@ -272,6 +296,7 @@ test("control validates explicit models and shows selection in add, list and rep
     configPath,
     JSON.stringify({ dataDirectory: f.directory, bots: [f.config] }),
   );
+
   const dependencies = {
     now: () => now,
     async identity() {
@@ -283,14 +308,17 @@ test("control validates explicit models and shows selection in add, list and rep
       selected: { model?: string },
     ) {
       if (selected.model !== model) throw new Error("Unavailable model");
+
       return { model };
     },
   };
+
   const binding = {
     configPath,
     bot: f.config.id,
     expectedDirectory: "/workspace",
   };
+
   const add = {
     op: "add",
     name: input.name,
@@ -301,6 +329,7 @@ test("control validates explicit models and shows selection in add, list and rep
     arbiter: "twiki",
     once: true,
   };
+
   expect(
     await runCronOperation(add, binding, signal, dependencies),
   ).toMatchObject({
@@ -340,11 +369,13 @@ test("hot-reloaded control refuses a new fingerprint instead of syncing an empty
       ],
     }),
   );
+
   const binding = {
     configPath,
     bot: f.config.id,
     expectedDirectory: "/workspace",
   };
+
   await expect(
     runCronOperation({ op: "list" }, binding, signal, {
       now: () => now,
@@ -387,14 +418,17 @@ test("list and remove cover DM jobs without crossing bots or ignoring explicit f
     JSON.stringify({ dataDirectory: f.directory, bots: [f.config] }),
   );
   const binding = { configPath, bot: f.config.id };
+
   const dependencies = {
     now: () => now,
     async identity() {
       return identity;
     },
   };
+
   const run = (value: unknown) =>
     runCronOperation(value, binding, signal, dependencies);
+
   const listed = await run({ op: "list" });
   expect(listed).toHaveProperty("jobs.length", 2);
   expect(JSON.stringify(listed)).not.toContain(input.prompt);
@@ -468,6 +502,7 @@ test("advanced-off file sync fails accepted occurrences without forwarding file 
   const job = f.store.list(f.scope)[0];
   expect(job).toBeDefined();
   f.store.runNow(f.scope, input.name, now);
+
   if (!f.config.cronjobs) throw new Error("Fixture cron configuration missing");
   worker.reconfigure({
     ...f.config,
@@ -494,6 +529,7 @@ test("quota observations timestamped after read start reach the default captain"
   let time = now + 1;
   let resetAt = now + 3_600_000;
   let usedPercent = 10;
+
   const services: CronServices = {
     now: () => time,
     async quota() {
@@ -522,6 +558,7 @@ test("quota observations timestamped after read start reach the default captain"
       };
     },
   };
+
   const worker = f.worker(services);
   await worker.tick(now, signal);
   expect(f.queued).toEqual([]);
@@ -554,28 +591,36 @@ test("a timed-out tools-off occurrence fails without replay and the next occurre
   f.store.add(f.scope, { ...input, name: "clock-only" }, now);
   const deadline = new AbortController();
   let deadlines = 0;
+
   const timeout = spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
     expect(ms).toBe(60_000);
+
     return deadlines++ === 0 ? deadline.signal : new AbortController().signal;
   });
+
   const reading = Promise.withResolvers<{
     model: string;
     text: string;
     verdict: "act";
   }>();
+
   let calls = 0;
+
   const worker = f.worker({
     async evaluate(_run, current) {
       calls++;
       expect(current.aborted).toBe(false);
+
       if (calls > 1)
         return { model, text: "Future occurrence", verdict: "act" };
       queueMicrotask(() =>
         deadline.abort(new DOMException("Deadline", "TimeoutError")),
       );
+
       return reading.promise; // Deliberately ignore cancellation.
     },
   });
+
   try {
     await worker.tick(now + 60_000, signal);
     expect(calls).toBe(1);

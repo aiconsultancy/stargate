@@ -12,6 +12,7 @@ import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -34,11 +35,13 @@ async function setup(features?: Record<string, boolean>) {
     caps,
     isupport: ["BOT=B"],
   }).start();
+
   cleanup.push(() => fake.stop());
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-presence-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
@@ -66,6 +69,7 @@ async function setup(features?: Record<string, boolean>) {
       sessionID: "ses_captain",
     },
   });
+
   const ship = await IrcShip.create(config, store, pino({ level: "silent" }), {
     env: {
       STARGATE_IRC_GALACTICA: "captain-pass",
@@ -74,6 +78,7 @@ async function setup(features?: Record<string, boolean>) {
     timing: { reconnectMinMs: 20, intervalMs: 5, burst: 50 },
     readyMs: 2000,
   });
+
   const backend: AgentBackend = {
     sessionID: "ses_captain",
     async createSession() {
@@ -84,9 +89,12 @@ async function setup(features?: Record<string, boolean>) {
     },
     async close() {},
   };
+
   const [captain, chief] = ship.registrations;
+
   if (!captain || !chief) throw new Error("missing registrations");
   const controller = new AbortController();
+
   const worker = new Gateway(
     captain.settings,
     captain.identity,
@@ -98,6 +106,7 @@ async function setup(features?: Record<string, boolean>) {
     undefined,
     captain.transport,
   ).work(controller.signal);
+
   ship.start(() => true);
   cleanup.push(async () => {
     controller.abort();
@@ -111,11 +120,13 @@ async function setup(features?: Record<string, boolean>) {
     5000,
     "joined",
   );
+
   return { fake, store, captain };
 }
 
 test("irc presence: always-on and bot mode for captain and crew accounts", async () => {
   const { fake } = await setup();
+
   for (const account of ["galactica", "galactica-chief"]) {
     await until(
       () => fake.received(account).includes("PERSISTENCE SET ON"),
@@ -171,6 +182,7 @@ test("irc presence: each switch turns its feature off", async () => {
     botMode: false,
     readMarker: false,
   });
+
   fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",

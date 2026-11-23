@@ -34,12 +34,15 @@ test("ready update notices are opt-in, persistent across restarts and included i
   let queued = 0;
   let contexts = 0;
   const configured = bot();
+
   if (configured.backend.type !== "opencode")
     throw new Error("Wrong fixture backend");
+
   const pinned = {
     ...configured,
     backend: { ...configured.backend, sessionID: "ses_captain" },
   };
+
   try {
     for (const [enabled, changed, expected, status] of [
       [false, false, 0, undefined],
@@ -49,6 +52,7 @@ test("ready update notices are opt-in, persistent across restarts and included i
     ] as const) {
       const f = harness();
       const make = f.dependencies.backend;
+
       const dependencies: RuntimeDependencies = {
         ...f.dependencies,
         backend: async (config, context) => ({
@@ -56,6 +60,7 @@ test("ready update notices are opt-in, persistent across restarts and included i
           sessionID: "ses_captain",
           updateNoticeContext: async (_session, snapshot) => {
             contexts++;
+
             return scopedUpdate(snapshot, {}, {});
           },
           queueUpdateNotice: async () => {
@@ -63,8 +68,10 @@ test("ready update notices are opt-in, persistent across restarts and included i
           },
         }),
       };
+
       const controller = new AbortController();
       const before = Date.now();
+
       const running = Effect.runPromise(
         serve(
           {
@@ -80,15 +87,20 @@ test("ready update notices are opt-in, persistent across restarts and included i
           dependencies,
         ),
       );
+
       try {
         await f.started;
+
         for (let i = 0; i < 200; i++) {
           const ready = await readReady(dataDirectory);
+
           if (ready && ready.readyAt >= before) break;
           await Bun.sleep(5);
         }
+
         expect(queued).toBe(expected);
         const ready = await readReady(dataDirectory);
+
         if (enabled)
           expect(ready?.updateNotices?.[0]).toMatchObject({
             sessionID: "ses_captain",
@@ -110,6 +122,7 @@ test("unpinned Slack sessions get the notice only on their next normal turn", as
   const order: string[] = [];
   const f = harness();
   const make = f.dependencies.backend;
+
   const dependencies: RuntimeDependencies = {
     ...f.dependencies,
     backend: async (config, context) => ({
@@ -121,11 +134,14 @@ test("unpinned Slack sessions get the notice only on their next normal turn", as
       },
       prompt: async () => {
         order.push("prompt");
+
         return "Answer";
       },
     }),
   };
+
   const controller = new AbortController();
+
   const running = Effect.runPromise(
     serve(
       { dataDirectory, notifications: { updateNotice: true }, bots: [bot()] },
@@ -134,12 +150,15 @@ test("unpinned Slack sessions get the notice only on their next normal turn", as
       dependencies,
     ),
   );
+
   try {
     await f.started;
+
     for (let i = 0; i < 100 && !(await readReady(dataDirectory)); i++)
       await Bun.sleep(5);
     expect(order).toEqual([]);
     await f.intake().accept(event("<@UBOT> hello", "100.001"));
+
     for (let i = 0; i < 200 && order.length < 2; i++) await Bun.sleep(5);
     expect(order).toEqual(["notice", "prompt"]);
   } finally {
@@ -155,6 +174,7 @@ function harness(turn: Turn = async () => "Answer.") {
   const events: string[] = [];
   const calls: string[] = [];
   const started = Promise.withResolvers<void>();
+
   const intakes = new Map<
     string,
     {
@@ -162,12 +182,15 @@ function harness(turn: Turn = async () => "Answer.") {
       open: () => boolean;
     }
   >();
+
   const backends: AgentBackend[] = [];
+
   const dependencies: RuntimeDependencies = {
     slack: (bot) =>
       ({
         async identity() {
           if (bot.id === "broken") throw new Error("auth.test failed");
+
           return bot.id === "helper"
             ? identity
             : { team: "T123", user: `U${bot.id.toUpperCase()}` };
@@ -200,26 +223,33 @@ function harness(turn: Turn = async () => "Answer.") {
       }) satisfies SlackApp,
     backend: async (_config, context) => {
       const bot = context.dataDirectory.split("/").at(-2) ?? "";
+
       const backend: AgentBackend = {
         async createSession() {
           calls.push(`${bot} createSession`);
+
           return `${bot}-session`;
         },
         async prompt(_session, _text, signal) {
           calls.push(`${bot} prompt`);
+
           return turn(bot, signal);
         },
         async close() {
           events.push("backend closed");
+
           // Intake must be closed for every bot before any backend closes.
           for (const [id, intake] of intakes)
             if (intake.open()) events.push(`${id} intake still open`);
         },
       };
+
       backends.push(backend);
+
       return backend;
     },
   };
+
   return {
     events,
     calls,
@@ -228,7 +258,9 @@ function harness(turn: Turn = async () => "Answer.") {
     dependencies,
     intake: (id = "helper") => {
       const intake = intakes.get(id);
+
       if (!intake) throw new Error("Slack intake not started");
+
       return intake;
     },
   };
@@ -236,6 +268,7 @@ function harness(turn: Turn = async () => "Answer.") {
 
 function seed(path: string, config: BotConfig, user = identity.user) {
   const store = openStore(path);
+
   try {
     const key = botKey(config, { team: identity.team, user });
     const thread = `${Date.now()}.${store.ready(key, 0, 1).length}`;
@@ -250,7 +283,9 @@ function seed(path: string, config: BotConfig, user = identity.user) {
       text: "hello",
     });
     const job = store.queuedJob(key, `C123:${thread}`);
+
     if (!job) throw new Error("Missing seeded job");
+
     return { key, id: job.id };
   } finally {
     store.close();
@@ -259,6 +294,7 @@ function seed(path: string, config: BotConfig, user = identity.user) {
 
 function status(path: string, key: string, id: number) {
   const store = openStore(path);
+
   try {
     return store.jobStatus(key, id);
   } finally {
@@ -274,15 +310,19 @@ test("pinned Slack runtime reads persisted notification preferences before model
   const dataDirectory = await directory();
   const controller = new AbortController();
   let running: Promise<void> | undefined;
+
   try {
     const config = bot();
+
     if (config.backend.type !== "opencode")
       throw new Error("Expected OpenCode");
     config.backend.sessionID = "ses_captain";
     config.access.textMentions = { channels: ["C123"], names: ["helper"] };
+
     const preferences = new NotificationStore(
       join(dataDirectory, "notifications.sqlite"),
     );
+
     preferences.operate(
       notificationKey(config, identity),
       { op: "mute", scope: "thread", channel: "C123", thread_ts: "1.000" },
@@ -300,6 +340,7 @@ test("pinned Slack runtime reads persisted notification preferences before model
       async prompt(_session, text) {
         prompts.push(text);
         invoked.resolve();
+
         return "Answer.";
       },
       async close() {},
@@ -333,16 +374,20 @@ test("pinned Slack runtime reads persisted notification preferences before model
 
 test("shutdown closes intake before workers drain and backends close", async () => {
   const dataDirectory = await directory();
+
   try {
     const config = { dataDirectory, bots: [bot()] };
     const f = harness();
     const controller = new AbortController();
+
     const running = Effect.runPromise(
       serve(config, silent, controller.signal, f.dependencies),
     );
+
     await f.started;
     const { accept, open } = f.intake();
     let acks = 0;
+
     const deliver = () =>
       handleSlackRequest(
         {
@@ -357,6 +402,7 @@ test("shutdown closes intake before workers drain and backends close", async () 
         undefined,
         open,
       );
+
     await deliver();
     expect(acks).toBe(1);
     controller.abort();
@@ -378,6 +424,7 @@ test("shutdown closes intake before workers drain and backends close", async () 
 
 test("a failed worker stops the process with a restartable failure", async () => {
   const dataDirectory = await directory();
+
   try {
     const helper = bot();
     const store = openStore(join(dataDirectory, "stargate.sqlite"));
@@ -394,6 +441,7 @@ test("a failed worker stops the process with a restartable failure", async () =>
     });
     store.saveSession(conversation, "session-1");
     const job = store.queuedJob(key, "C123:1.000");
+
     if (!job) throw new Error("Missing seeded job");
     store.running(job.id);
     store.close();
@@ -406,11 +454,14 @@ test("a failed worker stops the process with a restartable failure", async () =>
       opened.interrupt = async () => {
         throw new Error("OpenCode unavailable");
       };
+
       return opened;
     };
+
     const failure = await Effect.runPromise(
       serve(config, silent, new AbortController().signal, f.dependencies),
     ).catch((error: unknown) => error);
+
     expect(failure).toBeInstanceOf(RuntimeStopped);
     expect(f.events).toContain("backend closed");
     lockInstance(join(dataDirectory, "instance.sqlite")).close();
@@ -421,6 +472,7 @@ test("a failed worker stops the process with a restartable failure", async () =>
 
 test("a startup failure releases bots that already connected", async () => {
   const dataDirectory = await directory();
+
   try {
     const broken = Schema.decodeUnknownSync(botSchema)({
       ...bot("broken"),
@@ -430,6 +482,7 @@ test("a startup failure releases bots that already connected", async () => {
         botTokenEnv: "BROKEN_BOT_TOKEN",
       },
     });
+
     const config = { dataDirectory, bots: [bot(), broken] };
     const f = harness();
     await expect(
@@ -458,6 +511,7 @@ test("ready waits for connection and records later outages and recovery", async 
   f.dependencies.connectionTiming = { outageMs: 200, pollMs: 2 };
   f.dependencies.slack = (bot, log) => {
     const slack = make(bot, log);
+
     return {
       ...slack,
       get connectionState() {
@@ -470,7 +524,9 @@ test("ready waits for connection and records later outages and recovery", async 
       },
     };
   };
+
   const controller = new AbortController();
+
   const running = Effect.runPromise(
     serve(
       { dataDirectory, bots: [bot()] },
@@ -479,19 +535,24 @@ test("ready waits for connection and records later outages and recovery", async 
       f.dependencies,
     ),
   );
+
   try {
     await Bun.sleep(10);
     expect(await readReady(dataDirectory)).toBeNull();
     connect.resolve();
     await f.started;
+
     const waitState = async (expected: ConnectionState) => {
       for (let i = 0; i < 100; i++) {
         const record = await readReady(dataDirectory);
+
         if (record?.transports?.[0]?.state === expected) return record;
         await Bun.sleep(2);
       }
+
       throw new Error(`Missing transport state ${expected}`);
     };
+
     const first = await waitState("connected");
     state = "reconnecting";
     expect((await waitState("reconnecting")).readyAt).toBe(first.readyAt);
@@ -513,6 +574,7 @@ test("an exhausted post-start transport exits the runtime as a failure", async (
     ...make(bot, log),
     watch: () => failed.promise,
   });
+
   const running = Effect.runPromise(
     serve(
       { dataDirectory, bots: [bot()] },
@@ -521,6 +583,7 @@ test("an exhausted post-start transport exits the runtime as a failure", async (
       f.dependencies,
     ),
   );
+
   const result = running.catch((error: unknown) => error);
   await f.started;
   failed.reject(new Error("Slack connection unavailable"));
@@ -544,13 +607,16 @@ test("a disconnect during initial readiness I/O is not lost by the observer", as
     },
   });
   let changed = false;
+
   const watcher = watch(dataDirectory, (_event, file) => {
     if (!changed && file?.startsWith("ready.json.tmp-")) {
       changed = true;
       state = "reconnecting";
     }
   });
+
   const controller = new AbortController();
+
   const running = Effect.runPromise(
     serve(
       { dataDirectory, bots: [bot()] },
@@ -559,8 +625,10 @@ test("a disconnect during initial readiness I/O is not lost by the observer", as
       f.dependencies,
     ),
   );
+
   try {
     await f.started;
+
     for (
       let i = 0;
       i < 100 &&
@@ -583,6 +651,7 @@ test("a disconnect during initial readiness I/O is not lost by the observer", as
 
 test("a failed Slack connection starts no queued turn", async () => {
   const dataDirectory = await directory();
+
   try {
     const helper = bot();
     const path = join(dataDirectory, "stargate.sqlite");
@@ -591,6 +660,7 @@ test("a failed Slack connection starts no queued turn", async () => {
     const f = harness();
     f.dependencies.slack = (bot, log) => {
       const slack = harness().dependencies.slack(bot, log);
+
       return {
         ...slack,
         identity: () => slack.identity(),
@@ -601,6 +671,7 @@ test("a failed Slack connection starts no queued turn", async () => {
         close: () => slack.close(),
       };
     };
+
     await expect(
       Effect.runPromise(
         serve(config, silent, new AbortController().signal, f.dependencies),
@@ -618,8 +689,10 @@ test(
   "shutdown closes every intake and stops every worker together",
   async () => {
     const dataDirectory = await directory();
+
     try {
       const helper = bot();
+
       const other = Schema.decodeUnknownSync(botSchema)({
         ...bot("other"),
         slack: {
@@ -628,10 +701,12 @@ test(
           botTokenEnv: "OTHER_BOT_TOKEN",
         },
       });
+
       const path = join(dataDirectory, "stargate.sqlite");
       const busy = Promise.withResolvers<void>();
       let late: { key: string; id: number } | undefined;
       let draining: boolean[] = [];
+
       const f = harness(
         (bot, signal) =>
           new Promise((_resolve, reject) => {
@@ -655,8 +730,10 @@ test(
             );
           }),
       );
+
       seed(path, other, "UOTHER");
       const controller = new AbortController();
+
       const running = Effect.runPromise(
         serve(
           { dataDirectory, bots: [helper, other] },
@@ -665,6 +742,7 @@ test(
           f.dependencies,
         ),
       );
+
       await busy.promise;
       controller.abort();
       await running;
@@ -674,6 +752,7 @@ test(
         f.events.filter((event) => event === "backend closed"),
       ).toHaveLength(2);
       expect(f.calls).toEqual(["other createSession", "other prompt"]);
+
       if (!late) throw new Error("Late job was not seeded");
       expect(status(path, late.key, late.id)).toBe("queued");
     } finally {
@@ -685,20 +764,25 @@ test(
 
 test("the dashboard socket serves the fleet and is removed on shutdown", async () => {
   const dataDirectory = await directory();
+
   try {
     const config = { dataDirectory, dashboard: true, bots: [bot()] };
     const f = harness();
     const controller = new AbortController();
+
     const running = Effect.runPromise(
       serve(config, silent, controller.signal, f.dependencies),
     );
+
     await f.started;
     const socket = join(dataDirectory, "dashboard.sock");
+
     const present = () =>
       stat(socket).then(
         (info) => info.isSocket(),
         () => false,
       );
+
     for (let attempt = 0; attempt < 200 && !(await present()); attempt++)
       await Bun.sleep(10);
     expect((await stat(socket)).mode & 0o777).toBe(0o600);
@@ -722,43 +806,54 @@ test("the dashboard socket serves the fleet and is removed on shutdown", async (
 
 test("the Fleet API serves the projected fleet with the generated token", async () => {
   const dataDirectory = await directory();
+
   try {
     const probe = Bun.listen({
       hostname: "127.0.0.1",
       port: 0,
       socket: { data() {} },
     });
+
     const port = probe.port;
     probe.stop(true);
+
     const config = {
       dataDirectory,
       api: { listen: `127.0.0.1:${port}`, fleetName: "Test Fleet" },
       bots: [bot()],
     };
+
     const f = harness();
     const controller = new AbortController();
+
     const running = Effect.runPromise(
       serve(config, silent, controller.signal, f.dependencies),
     );
+
     await f.started;
     const tokenFile = join(dataDirectory, "api-token");
+
     for (let attempt = 0; attempt < 200; attempt++) {
       if (await Bun.file(tokenFile).exists()) break;
       await Bun.sleep(10);
     }
+
     expect((await stat(tokenFile)).mode & 0o777).toBe(0o600);
     const token = (await Bun.file(tokenFile).text()).trim();
     const base = `http://127.0.0.1:${port}/api/v1`;
     let unauthorized: Response | undefined;
+
     for (let attempt = 0; attempt < 200 && !unauthorized; attempt++)
       unauthorized = await fetch(`${base}/fleet`).catch(() => undefined);
     expect(unauthorized?.status).toBe(401);
+
     const response = await fetch(`${base}/fleet`, {
       headers: {
         authorization: `Bearer ${token}`,
         origin: "subspace://fleet-console",
       },
     });
+
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBe(
       "subspace://fleet-console",
@@ -776,9 +871,11 @@ test("the Fleet API serves the projected fleet with the generated token", async 
         expect.objectContaining({ key: "api", enabled: true }),
       ]),
     );
+
     const ship = await fetch(`${base}/ships/helper`, {
       headers: { authorization: `Bearer ${token}` },
     });
+
     expect(ship.status).toBe(200);
     expect(await ship.json()).toMatchObject({ id: "helper" });
     controller.abort();
@@ -790,9 +887,11 @@ test("the Fleet API serves the projected fleet with the generated token", async 
 
 test("no dashboard socket exists unless it is configured", async () => {
   const dataDirectory = await directory();
+
   try {
     const f = harness();
     const controller = new AbortController();
+
     const running = Effect.runPromise(
       serve(
         { dataDirectory, bots: [bot()] },
@@ -801,6 +900,7 @@ test("no dashboard socket exists unless it is configured", async () => {
         f.dependencies,
       ),
     );
+
     await f.started;
     controller.abort();
     await running;
@@ -814,6 +914,7 @@ test("no dashboard socket exists unless it is configured", async () => {
 
 test("gateway writes a readiness record and delivers maintenance summaries", async () => {
   const dataDirectory = await directory();
+
   try {
     await queueNotice(dataDirectory, {
       schema: "stargate.maintenance.notice.v1",
@@ -824,16 +925,19 @@ test("gateway writes a readiness record and delivers maintenance summaries", asy
     const f = harness();
     const announced: string[] = [];
     const slack = f.dependencies.slack;
+
     const dependencies: RuntimeDependencies = {
       ...f.dependencies,
       slack: (config, log) => ({
         ...slack(config, log),
         async announce(channel, text) {
           announced.push(`${channel} ${text}`);
+
           return "9.000";
         },
       }),
     };
+
     const config = {
       dataDirectory,
       bots: [bot()],
@@ -841,12 +945,16 @@ test("gateway writes a readiness record and delivers maintenance summaries", asy
         report: { bot: "helper", channel: "C123" },
       }),
     };
+
     const controller = new AbortController();
     const before = Date.now();
+
     const running = Effect.runPromise(
       serve(config, silent, controller.signal, dependencies),
     );
+
     await f.started;
+
     for (let i = 0; i < 100 && !announced.length; i++) await Bun.sleep(20);
     const ready = await readReady(dataDirectory);
     expect(ready?.readyAt).toBeGreaterThanOrEqual(before);

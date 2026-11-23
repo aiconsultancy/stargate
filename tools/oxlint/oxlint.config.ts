@@ -87,8 +87,7 @@ export default defineConfig({
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
-    // Spacing is owned by Oxfmt in this repository; the anti-slop rule is a
-    // whitespace policy (see its README: edit the vendored policy to taste).
+    // The root gate checks statement spacing; do not repeat it in this advisory run.
     "anti-slop/require-readable-spacing": "off",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
     // Effect group: this repository depends on Effect (see AGENTS.md).

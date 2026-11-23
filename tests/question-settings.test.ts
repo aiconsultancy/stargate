@@ -20,22 +20,27 @@ import { bot } from "./fixtures";
 
 test("question authority rejects symbolic, oversized and non-private files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "questions-authority-"));
+
   try {
     const config = bot();
+
     if (config.backend.type !== "opencode")
       throw new Error("Expected OpenCode");
     config.backend.directory = directory;
     config.backend.agent = "captain";
+
     const settings = {
       enabled: true,
       timeoutMs: 900_000,
       answer: "allowed",
     } as const;
+
     const disabled = {
       enabled: false,
       timeoutMs: 900_000,
       answer: "requester",
     } as const;
+
     await saveQuestionSettings(
       directory,
       "captain",
@@ -65,23 +70,29 @@ test("question authority rejects symbolic, oversized and non-private files", asy
 
 test("question settings are private, atomic, isolated and fail closed", async () => {
   const directory = await mkdtemp(join(tmpdir(), "questions-settings-"));
+
   try {
     const config = bot();
+
     if (config.backend.type !== "opencode")
       throw new Error("Expected OpenCode");
     config.backend.directory = directory;
     config.backend.agent = "captain";
+
     const defaults = {
       enabled: false,
       timeoutMs: 900_000,
       answer: "requester",
     } as const;
+
     expect(await resolveQuestionSettings(config)).toEqual(defaults);
+
     const settings = {
       enabled: true,
       timeoutMs: 300_000,
       answer: "allowed",
     } as const;
+
     await saveQuestionSettings(
       directory,
       "captain",
@@ -100,6 +111,7 @@ test("question settings are private, atomic, isolated and fail closed", async ()
     config.backend.agent = "other";
     expect(await resolveQuestionSettings(config)).toEqual(defaults);
     config.backend.agent = "captain";
+
     for (const value of [
       "bad json",
       JSON.stringify({ ...settings, timeoutMs: 1 }),
@@ -110,6 +122,7 @@ test("question settings are private, atomic, isolated and fail closed", async ()
       await writeFile(path, value);
       expect(await resolveQuestionSettings(config)).toEqual(defaults);
     }
+
     await rm(path);
     await import("node:fs/promises").then(({ mkdir }) => mkdir(path));
     expect(await resolveQuestionSettings(config)).toEqual(defaults);
@@ -120,8 +133,10 @@ test("question settings are private, atomic, isolated and fail closed", async ()
 
 test("the paired default applies only to an absent settings file without creating it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "questions-settings-"));
+
   try {
     const config = bot();
+
     if (config.backend.type !== "opencode")
       throw new Error("Expected OpenCode");
     config.backend.directory = directory;
@@ -130,11 +145,13 @@ test("the paired default applies only to an absent settings file without creatin
     expect((await resolveQuestionSettings(config, true)).enabled).toBe(true);
     expect((await resolveQuestionSettings(config)).enabled).toBe(false);
     await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+
     const off = {
       enabled: false,
       timeoutMs: 300_000,
       answer: "allowed",
     } as const;
+
     await saveQuestionSettings(
       directory,
       "captain",

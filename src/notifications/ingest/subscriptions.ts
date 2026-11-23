@@ -24,10 +24,13 @@ export function resolveSubscriptions(
   if (subscriptions.length > 512 || Object.keys(destinations).length > 128)
     throw new StoreUnavailable();
   const resolved = new Map<string, Destination>();
+
   for (const raw of subscriptions) {
     const checked = Schema.decodeUnknownResult(Subscription)(raw);
+
     if (Result.isFailure(checked)) throw new StoreUnavailable();
     const subscription = checked.success;
+
     if (
       !topicMatches(subscription.topic, input.topic) ||
       !Object.entries(subscription.tags ?? {}).every(([key, values]) => {
@@ -35,14 +38,17 @@ export function resolveSubscriptions(
           input.tags && Object.hasOwn(input.tags, key)
             ? input.tags[key]
             : undefined;
+
         return tag !== undefined && values.includes(tag);
       })
     )
       continue;
+
     for (const alias of subscription.to) {
       const decoded = Schema.decodeUnknownResult(Destination)(
         Object.hasOwn(destinations, alias) ? destinations[alias] : undefined,
       );
+
       if (
         Result.isFailure(decoded) ||
         !audienceAllowed(source.audience, decoded.success.audience)
@@ -51,6 +57,7 @@ export function resolveSubscriptions(
       const destination = decoded.success;
       const key = physicalKey(destination);
       const existing = resolved.get(key);
+
       if (
         existing &&
         (existing.audience !== destination.audience ||
@@ -60,5 +67,6 @@ export function resolveSubscriptions(
       resolved.set(key, destination);
     }
   }
+
   return [...resolved.values()];
 }

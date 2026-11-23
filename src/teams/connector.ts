@@ -1,36 +1,40 @@
 // Adapted from CFP Starfleet Teams 0.4.0; transport logic is independent of Claude Code.
 // Outbound side: a Bot Connector token from Azure IMDS for the ship's user-assigned
-// identity, and posts to {serviceUrl}/v3/conversations/{conversationId}/activities.
+// Identity, and posts to {serviceUrl}/v3/conversations/{conversationId}/activities.
 //
 // Accepted risk (contract revision 2026-11-06): IMDS serves any attached identity's
-// token to any local user, so a process on the VM can post to Teams as any ship.
+// Token to any local user, so a process on the VM can post to Teams as any ship.
 // It cannot forge inbound traffic: inbound tokens must be issued and signed by Bot
 // Framework (iss https://api.botframework.com), and an Entra token from IMDS fails
-// that check.
+// That check.
 import { serviceUrlBase } from "./service-url";
 
 export const IMDS_TOKEN_ENDPOINT =
   "http://169.254.169.254/metadata/identity/oauth2/token";
+
 // IMDS takes a resource rather than a scope; this is https://api.botframework.com/.default.
 export const BOT_FRAMEWORK_RESOURCE = "https://api.botframework.com";
 const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
-const IMDS_TIMEOUT_MS = 5_000;
+const IMDS_TIMEOUT_MS = 5000;
 const CONNECTOR_TIMEOUT_MS = 15_000;
 
 type FetchFn = typeof fetch;
+
 type Sleep = (ms: number) => Promise<void>;
 
 const defaultSleep: Sleep = (ms) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 // Settles with the promise, or rejects as soon as the signal aborts. The underlying
-// work (a shared token request, say) carries on, but this caller stops waiting.
+// Work (a shared token request, say) carries on, but this caller stops waiting.
 function untilAborted<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
 ): Promise<T> {
   if (!signal) return promise;
+
   if (signal.aborted) return Promise.reject(signal.reason);
+
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
@@ -57,25 +61,30 @@ async function readError(
   res: Response,
 ): Promise<{ code?: string; detail: string }> {
   try {
-    const text = (await res.text()).slice(0, 2_000);
+    const text = (await res.text()).slice(0, 2000);
+
     try {
       const body = JSON.parse(text) as Record<string, unknown>;
+
       const error = body["error"] as
         | Record<string, unknown>
         | string
         | undefined;
+
       const code =
         typeof error === "string"
           ? error
           : typeof error?.["code"] === "string"
             ? error["code"]
             : undefined;
+
       const parts = [
         code,
         typeof error === "object" ? error?.["message"] : undefined,
         body["error_description"],
         body["message"],
       ].filter((part) => typeof part === "string" && part);
+
       return {
         ...(code ? { code } : {}),
         detail: parts.length ? `: ${parts.join(" - ").slice(0, 300)}` : "",
@@ -93,8 +102,8 @@ async function errorDetail(res: Response): Promise<string> {
 }
 
 // A Bot Connector refusal, with its HTTP status and, where the body gives one, its
-// error code. afterServerError: an earlier try of the same send got a 5xx answer,
-// so the activity may have been delivered all the same.
+// Error code. afterServerError: an earlier try of the same send got a 5xx answer,
+// So the activity may have been delivered all the same.
 export class ConnectorError extends Error {
   status: number;
   code: string | undefined;
@@ -113,9 +122,9 @@ export class ConnectorError extends Error {
 }
 
 // Whether a failed send certainly did not deliver its activity: the Bot Connector
-// refused it with a 4xx status, and no earlier try of it got a 5xx answer. Any
-// other failure, such as a timeout, a network error (a lost answer among them) or
-// a 5xx answer, leaves it unknown whether the activity was delivered.
+// Refused it with a 4xx status, and no earlier try of it got a 5xx answer. Any
+// Other failure, such as a timeout, a network error (a lost answer among them) or
+// A 5xx answer, leaves it unknown whether the activity was delivered.
 export function isDefiniteRefusal(err: unknown): boolean {
   return (
     err instanceof ConnectorError &&
@@ -127,7 +136,7 @@ export function isDefiniteRefusal(err: unknown): boolean {
 
 // Teams refuses a message over its size limit with HTTP 413 and the error code
 // MessageSizeTooBig (see TEAMS_SAFE_MESSAGE_BYTES in teams.ts). Either is taken
-// to mean the message was too large, so a smaller one may still go through.
+// To mean the message was too large, so a smaller one may still go through.
 export function isMessageTooLarge(err: unknown): boolean {
   return (
     err instanceof ConnectorError &&
@@ -136,11 +145,11 @@ export function isMessageTooLarge(err: unknown): boolean {
 }
 
 export class ManagedIdentityTokenProvider implements TokenProvider {
-  #clientId: string;
-  #fetch: FetchFn;
-  #now: () => number;
-  #sleep: Sleep;
-  #endpoint: string;
+  readonly #clientId: string;
+  readonly #fetch: FetchFn;
+  readonly #now: () => number;
+  readonly #sleep: Sleep;
+  readonly #endpoint: string;
   #cached: { token: string; expiresAt: number } | undefined;
   #inflight: Promise<string> | undefined;
 
@@ -160,11 +169,13 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
 
   async getToken(): Promise<string> {
     const cached = this.#cached;
+
     if (cached && cached.expiresAt - TOKEN_REFRESH_MARGIN_MS > this.#now())
       return cached.token;
     this.#inflight ??= this.#request().finally(() => {
       this.#inflight = undefined;
     });
+
     return this.#inflight;
   }
 
@@ -178,9 +189,11 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
     url.searchParams.set("resource", BOT_FRAMEWORK_RESOURCE);
     url.searchParams.set("client_id", this.#clientId);
     let lastError = new Error("IMDS token request was not attempted");
+
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await this.#sleep(500 * 2 ** attempt);
       let res: Response;
+
       try {
         res = await this.#fetch(url, {
           headers: { Metadata: "true" },
@@ -193,27 +206,35 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
         );
         continue;
       }
+
       if (res.ok) {
         const body = (await res.json()) as Record<string, unknown>;
         const token = body["access_token"];
+
         if (typeof token !== "string" || !token)
           throw new Error("IMDS returned no access token");
         const expiresOn = Number(body["expires_on"]) * 1000;
         const expiresIn = Number(body["expires_in"]) * 1000;
+
         const expiresAt =
           expiresOn > 0
             ? expiresOn
             : this.#now() + (expiresIn > 0 ? expiresIn : 10 * 60 * 1000);
+
         this.#cached = { token, expiresAt };
+
         return token;
       }
+
       lastError = new Error(
         `IMDS token request failed: HTTP ${res.status}${await errorDetail(res)}`,
       );
+
       // IMDS asks callers to retry throttling, server errors and identity propagation (404).
       if (!(res.status === 404 || res.status === 429 || res.status >= 500))
         break;
     }
+
     throw lastError;
   }
 }
@@ -222,24 +243,24 @@ export type OutgoingActivity = {
   type: "message" | "typing";
   text?: string;
   textFormat?: "markdown" | "plain" | "xml";
-  attachments?: Array<{
+  attachments?: {
     contentType: "image/png" | "image/jpeg";
     contentUrl: string;
     name: string;
-  }>;
+  }[];
   replyToId?: string;
-  entities?: Array<{
+  entities?: {
     type: "streamInfo";
     streamType: "informative" | "final";
     streamId?: string;
     streamSequence?: number;
-  }>;
+  }[];
 };
 
 export class ConnectorClient {
-  #tokens: TokenProvider;
-  #fetch: FetchFn;
-  #sleep: Sleep;
+  readonly #tokens: TokenProvider;
+  readonly #fetch: FetchFn;
+  readonly #sleep: Sleep;
 
   constructor(options: {
     tokenProvider: TokenProvider;
@@ -251,7 +272,7 @@ export class ConnectorClient {
     this.#sleep = options.sleep ?? defaultSleep;
   }
 
-  // options.signal bounds the whole send, token and retry included.
+  // Options.signal bounds the whole send, token and retry included.
   async sendToConversation(
     serviceUrl: string,
     conversationId: string,
@@ -262,10 +283,12 @@ export class ConnectorClient {
     const base = serviceUrlBase(serviceUrl);
     const url = `${base}/v3/conversations/${encodeURIComponent(conversationId)}/activities`;
     let afterServerError = false;
+
     for (let attempt = 0; ; attempt++) {
       const { signal } = options;
       const token = await untilAborted(this.#tokens.getToken(), signal);
       const timeout = AbortSignal.timeout(CONNECTOR_TIMEOUT_MS);
+
       const res = await this.#fetch(url, {
         method: "POST",
         headers: {
@@ -277,19 +300,23 @@ export class ConnectorClient {
         redirect: "error",
         signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
       });
+
       if (res.ok) {
         const text = await res.text();
+
         try {
           return text ? (JSON.parse(text) as { id?: string }) : {};
         } catch {
           return {};
         }
       }
+
       if (attempt === 0 && (res.status === 401 || res.status === 403)) {
         await res.body?.cancel().catch(() => {});
         this.#tokens.invalidate();
         continue;
       }
+
       if (
         attempt === 0 &&
         (res.status === 429 ||
@@ -304,6 +331,7 @@ export class ConnectorClient {
         );
         continue;
       }
+
       const { code, detail } = await readError(res);
       throw new ConnectorError(
         `Bot Connector refused the activity: HTTP ${res.status}${detail}`,

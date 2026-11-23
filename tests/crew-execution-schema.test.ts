@@ -38,6 +38,7 @@ const team = {
   captain: { id: "captain" },
   crew: [{ id: "worker", role: "Builder", permissionProfile: "coding" }],
 };
+
 const options = {
   namespace: "fixture",
   stateDirectory: "/state",
@@ -47,6 +48,7 @@ const options = {
   mesijCommand: "/bin/mesij",
   team,
 };
+
 const resume = {
   op: "resume",
   taskID: "task_fixture",
@@ -77,6 +79,7 @@ test("crew SDK advertisements retain frozen input and Pi contracts", () => {
       "e1dbb81c0306c43bd4c237c5926ec4a77c73fdd42760efb0182248d074e4f573",
     ],
   ] as const;
+
   // Frozen c6 advertisements, canonical JSON object keys only; array order stays.
   for (const [json, hash] of values)
     expect(
@@ -87,12 +90,14 @@ test("crew SDK advertisements retain frozen input and Pi contracts", () => {
 
 test("crew envelope preserves native field transforms but not top-level defaults", async () => {
   const standard = crewOpenCodeInput()["~standard"];
+
   const expected = {
     status: "uncertain",
     workerSessionID: "session",
     originCaptainID: "captain",
     inputID: "input",
   };
+
   const input = {
     op: "abandon",
     taskID: "task_fixture",
@@ -101,6 +106,7 @@ test("crew envelope preserves native field transforms but not top-level defaults
     key: "fixture",
     acknowledgeUnconfirmedStop: true,
   };
+
   expect(await standard.validate(input)).toEqual({
     value: { ...input, reason: "inspect" },
   });
@@ -116,6 +122,7 @@ test("crew envelope preserves native field transforms but not top-level defaults
       reason: "inspect",
     },
   });
+
   const invalid = Schema.decodeUnknownResult(crewInputSchema)({
     op: "reset",
     crew: "worker",
@@ -126,6 +133,7 @@ test("crew envelope preserves native field transforms but not top-level defaults
     },
     acknowledgeDiscard: false,
   });
+
   if (Result.isSuccess(invalid))
     throw new Error("False acknowledgement accepted");
   expect(invalid.failure.message).toContain('["acknowledgeDiscard"]');
@@ -157,11 +165,14 @@ test("crew defaults and optional protection preserve input distinctions", () => 
       exclusiveWorkerInput: false,
     }).exclusiveWorkerInput,
   ).toBe(false);
+
   const explicit = Schema.decodeUnknownSync(crewOptionsSchema)({
     ...options,
     exclusiveWorkerInput: undefined,
   });
+
   expect(Object.hasOwn(explicit, "exclusiveWorkerInput")).toBe(true);
+
   const abandoned = decode({
     op: "abandon",
     taskID: "task_fixture",
@@ -175,14 +186,17 @@ test("crew defaults and optional protection preserve input distinctions", () => 
     key: "fixture",
     acknowledgeUnconfirmedStop: true,
   });
+
   expect(abandoned).toMatchObject({
     reason: "inspect",
     expected: { controlID: null },
   });
+
   for (const idleAt of [1, Number.MAX_SAFE_INTEGER])
     expect(
       decode({ ...resume, expected: { ...resume.expected, idleAt } }),
     ).toMatchObject({ expected: { idleAt } });
+
   for (const idleAt of [
     0,
     -1,
@@ -221,14 +235,17 @@ test("project raw-key rejection precedes record stripping and path rules stay di
       }),
     ),
   ).toBe(true);
+
   for (const key of ["__proto__", "constructor", "prototype", "default"]) {
     const raw = JSON.parse(
       `{"${key}":{"projectDirectory":"/other","worktrees":{"worker":"/other/worker"}}}`,
     );
+
     expect(
       Result.isFailure(Schema.decodeUnknownResult(projectsSchema)(raw)),
     ).toBe(true);
   }
+
   expect(
     Result.isFailure(
       Schema.decodeUnknownResult(projectsSchema)(
@@ -252,6 +269,7 @@ test("OpenCode envelope is strict and raw; Pi keeps union/default requirements a
     required: ["op"],
     additionalProperties: false,
   });
+
   for (const key of ["anyOf", "oneOf", "allOf"])
     expect(json).not.toHaveProperty(key);
   expect(
@@ -260,13 +278,17 @@ test("OpenCode envelope is strict and raw; Pi keeps union/default requirements a
       expected: { ...resume.expected, status: "uncertain" },
     }),
   ).toHaveProperty("issues");
+
   const extension = piCrewExtension(
     { authorize() {}, async run() {} },
     async () => ({}),
   );
+
   const tool = extension.tools?.find((tool) => tool.name === "stargate_crew");
+
   if (!tool) throw new Error("Missing native crew tool");
   expect(tool.parameters).toHaveProperty("oneOf");
+
   const parse = (
     input: Parameters<typeof validateToolArguments>[1]["arguments"],
   ): unknown =>
@@ -276,6 +298,7 @@ test("OpenCode envelope is strict and raw; Pi keeps union/default requirements a
       name: "stargate_crew",
       arguments: input,
     });
+
   expect(() =>
     parse({ op: "dispatch", crew: "worker", text: "raw" }),
   ).toThrow();
@@ -289,11 +312,14 @@ test("OpenCode envelope is strict and raw; Pi keeps union/default requirements a
 
 test("portable recovery RPC stays nested-strict and excludes resume", async () => {
   const validate = CrewRecovery.methods.run.input["~standard"].validate;
+
   const input = {
     sessionID: "captain",
     request: { op: "inspect" as const, crew: "worker" },
   };
+
   expect(await validate(input)).toEqual({ value: input });
+
   for (const request of [
     resume,
     { ...input.request, extra: true },
@@ -347,8 +373,10 @@ test("recovery acknowledgements retain field paths in native and Standard input"
       "acknowledgeUnconfirmedStop",
     ],
   ] as const;
+
   const codec = CrewRecovery.methods.run.input;
   const decode = Schema.decodeUnknownResult(codec);
+
   for (const [request, field] of operations) {
     expect(
       await codec["~standard"].validate({
@@ -356,6 +384,7 @@ test("recovery acknowledgements retain field paths in native and Standard input"
         request: { ...request, [field]: true },
       }),
     ).toHaveProperty("value");
+
     for (const acknowledgement of [
       {},
       { [field]: undefined },
@@ -365,12 +394,16 @@ test("recovery acknowledgements retain field paths in native and Standard input"
         sessionID: "captain",
         request: { ...request, ...acknowledgement },
       };
+
       const parsed = decode(input);
+
       if (Result.isSuccess(parsed))
         throw new Error("Invalid recovery acknowledgement accepted");
+
       const expected = expect.arrayContaining([
         expect.objectContaining({ path: ["request", field] }),
       ]);
+
       expect(settingsIssues(parsed.failure.issue).issues).toEqual(expected);
       expect(await codec["~standard"].validate(input)).toMatchObject({
         issues: expected,
@@ -392,6 +425,7 @@ test("automatic evidence retains MissingTaskResult identity, UTF16 clipping and 
     released: 0,
     notifying: 0,
   };
+
   const input: ResultMessage = {
     id: "input",
     type: "user",
@@ -411,7 +445,9 @@ test("automatic evidence retains MissingTaskResult identity, UTF16 clipping and 
       },
     },
   };
+
   let data: ResultMessage[] = [input];
+
   const api: ResultAPI = {
     message: {
       async list() {
@@ -419,22 +455,25 @@ test("automatic evidence retains MissingTaskResult identity, UTF16 clipping and 
       },
     },
   };
+
   const signal = new AbortController().signal;
   await expect(readTaskResult(api, task, signal)).rejects.toBeInstanceOf(
     MissingTaskResult,
   );
+
   const final: ResultMessage = {
     id: "final",
     type: "assistant",
     agent: "worker",
     finish: "stop",
     time: { created: 3, completed: 4 },
-    content: [{ type: "text", text: " a" + "😀".repeat(32000) + " " }],
+    content: [{ type: "text", text: " a" + "😀".repeat(32_000) + " " }],
   };
+
   data = [final, input];
   const text = await readTaskResult(api, task, signal);
-  expect(text.length).toBe(64000);
-  expect(text.charCodeAt(63999)).toBe(0xd83d);
+  expect(text.length).toBe(64_000);
+  expect(text.charCodeAt(63_999)).toBe(0xd8_3d);
   data = [
     final,
     {

@@ -12,6 +12,7 @@ const marker = "# Managed by Stargate CLI";
 export function timerName(name = "stargate-maintenance") {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name))
     throw new Error("Invalid timer name.");
+
   return name;
 }
 
@@ -49,11 +50,13 @@ export function buildMaintenanceUnits(input: {
     if (!isAbsolute(path)) throw new Error("Unit paths must be absolute.");
   const name = timerName(input.name);
   const window = `${input.spec.start}–${input.spec.end} ${input.spec.timeZone}`;
+
   const timeout = startTimeoutMinutes(
     input.spec,
     input.jitter,
     input.recoveryMinutes,
   );
+
   const service = `${marker}
 [Unit]
 Description=Stargate nightly maintenance (${window})
@@ -70,6 +73,7 @@ UMask=0077
 TimeoutStartSec=${timeout}min
 TimeoutStopSec=${input.recoveryMinutes}min
 `;
+
   const timer = `${marker}
 [Unit]
 Description=Stargate nightly maintenance window (${window})
@@ -83,6 +87,7 @@ Unit=${name}.service
 [Install]
 WantedBy=timers.target
 `;
+
   return { service, timer };
 }
 
@@ -107,12 +112,14 @@ export function buildDroidUnits(input: {
   for (const path of [input.configPath, input.executable, input.entrypoint])
     if (!isAbsolute(path)) throw new Error("Unit paths must be absolute.");
   const name = timerName(input.name);
+
   const times = [
     ...new Set([
       addClock(input.spec.end, input.afterRunMinutes),
       input.healthCheck,
     ]),
   ];
+
   const service = `${marker}
 [Unit]
 Description=Stargate maintenance droid (checks ${times.join(", ")} ${input.spec.timeZone})
@@ -127,6 +134,7 @@ ExecStart=${quote(input.executable, true)} ${quote(input.entrypoint, true)} main
 UMask=0077
 TimeoutStartSec=${input.timeoutMinutes}min
 `;
+
   const timer = `${marker}
 [Unit]
 Description=Stargate maintenance droid checks
@@ -140,6 +148,7 @@ Unit=${name}.service
 [Install]
 WantedBy=timers.target
 `;
+
   return { service, timer };
 }
 
@@ -163,18 +172,21 @@ export function buildUpdateCommand(input: {
 }) {
   for (const path of [input.configPath, input.executable, input.entrypoint]) {
     if (!isAbsolute(path)) throw new Error("Unit paths must be absolute.");
+
     // The service manager expands these in a transient unit's command.
     if (/[%$]/.test(path)) throw new Error("Unit paths cannot contain % or $.");
   }
+
   if (!/^\d+\.\d+\.\d+$/.test(input.version))
     throw new Error("Use a MAJOR.MINOR.PATCH version.");
   const unit = timerName(input.unit);
   const main = [quote(input.executable, true), quote(input.entrypoint, true)];
+
   return [
     "systemd-run",
     "--user",
-    // systemd-run returns when the command has started; a command that
-    // cannot be executed is an error here, not a silent failed unit.
+    // Systemd-run returns when the command has started; a command that
+    // Cannot be executed is an error here, not a silent failed unit.
     "--service-type=exec",
     "--collect",
     `--unit=${unit}`,

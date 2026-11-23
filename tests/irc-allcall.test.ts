@@ -18,6 +18,7 @@ const wait = 15_000;
 const limit = 30_000;
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -51,11 +52,13 @@ async function setup(
       "galactica-tyrol": "pass",
     },
   }).start();
+
   cleanup.push(() => fake.stop());
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-allcall-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
@@ -66,7 +69,9 @@ async function setup(
     crew: [crew("chief"), crew("tyrol")],
     backend: { ...backend, sessionID: "ses_captain" },
   });
+
   const log = pino({ level: "silent" });
+
   const ship = await IrcShip.create(config, store, log, {
     env: {
       STARGATE_IRC_GALACTICA_CAPTAIN: "pass",
@@ -76,10 +81,13 @@ async function setup(
     timing: { reconnectMinMs: 20, intervalMs: 5, burst: 20 },
     readyMs: 2000,
   });
+
   const prompts: Record<string, Prompt[]> = {};
+
   const backends = ship.registrations.map((registration) => {
     const name = registration.account;
     prompts[name] = [];
+
     const agent: AgentBackend = {
       ...(registration.role === "captain" ? { sessionID: "ses_captain" } : {}),
       async createSession() {
@@ -87,16 +95,22 @@ async function setup(
       },
       async prompt(_session, text) {
         prompts[name]?.push({ text, at: Date.now() });
+
         return answers[name] ?? "[[stargate:silent]]";
       },
       async close() {},
     };
+
     return agent;
   });
+
   const controller = new AbortController();
+
   const gateways = ship.registrations.map((registration, index) => {
     const selected = backends[index];
+
     if (!selected) throw new Error("missing backend");
+
     return new Gateway(
       registration.settings,
       registration.identity,
@@ -109,19 +123,26 @@ async function setup(
       registration.transport,
     );
   });
+
   const workers = gateways.map((gateway) => gateway.work(controller.signal));
+
   const member = (account: string) => {
     const index = ship.registrations.findIndex(
       (registration) => registration.account === account,
     );
+
     const registration = ship.registrations[index];
     const gateway = gateways[index];
+
     if (!registration || !gateway) throw new Error(`missing ${account}`);
+
     return { registration, gateway };
   };
+
   const db = new Database(join(directory, "stargate.sqlite"), {
     readonly: true,
   });
+
   cleanup.push(() => db.close());
   ship.start(() => true);
   cleanup.push(async () => {
@@ -137,6 +158,7 @@ async function setup(
     wait,
     "every member joined",
   );
+
   return {
     fake,
     prompts,
@@ -150,6 +172,7 @@ async function setup(
     sees(account: string, line: string) {
       const { registration } = member(account);
       const [job] = store.ready(registration.key, Number.MAX_SAFE_INTEGER, 1);
+
       return (
         job !== undefined &&
         (registration.transport.note(job) ?? "").includes(line)
@@ -162,7 +185,9 @@ async function setup(
           "SELECT retry_at AS start, received FROM jobs WHERE botKey=? ORDER BY id DESC LIMIT 1",
         )
         .get(member(account).registration.key);
+
       if (!row) throw new Error(`no job of ${account}`);
+
       return row.start === 0 ? 0 : row.start - row.received;
     },
     /** Every accepted job is delivered or failed. */
@@ -171,6 +196,7 @@ async function setup(
         () =>
           ship.registrations.every((registration) => {
             const counts = store.queueCounts(registration.key);
+
             return counts.queued + counts.running + counts.responding === 0;
           }),
         wait,
@@ -189,8 +215,9 @@ test(
       },
       { allCallStaggerMs: 400 },
     );
+
     // The stagger orders the starts. A crew turn is held here until its
-    // connection has the earlier answer, so the list never depends on speed.
+    // Connection has the earlier answer, so the list never depends on speed.
     hold("galactica-chief");
     hold("galactica-tyrol");
     const sent = Date.now();
@@ -219,6 +246,7 @@ test(
     const [captain] = prompts["galactica-captain"] ?? [];
     const [chief] = prompts["galactica-chief"] ?? [];
     const [tyrol] = prompts["galactica-tyrol"] ?? [];
+
     if (!captain || !chief || !tyrol) throw new Error("missing prompt");
     // Captain first, then crew in configuration order, one step apart.
     expect(startDelay("galactica-captain")).toBe(0);
@@ -261,6 +289,7 @@ test(
       {},
       { allCallStaggerMs: 0 },
     );
+
     fake.say(
       { nick: "jack", account: "jack" },
       "#ship-galactica",
@@ -274,10 +303,12 @@ test(
     expect(startDelay("galactica-chief")).toBe(0);
     expect(startDelay("galactica-tyrol")).toBe(0);
     await idle();
+
     const parse = (value: unknown) =>
       Schema.decodeUnknownResult(ircSchema.fields.access)({
         allCallStaggerMs: value,
       });
+
     const defaults = parse(undefined);
     expect(
       Result.isSuccess(defaults) && defaults.success.allCallStaggerMs,
@@ -300,6 +331,7 @@ test("irc all-call: the note tells agents to take turns and stay silent on repea
     ["all hands"],
     ["galactica-captain: Fuel at 40%."],
   );
+
   expect(note).toContain("This is an all-call");
   expect(note).toContain("captain first");
   expect(note).toContain(
@@ -316,6 +348,7 @@ test(
       { "galactica-captain": "Fuel at 40%." },
       { allCallStaggerMs: 400 },
     );
+
     hold("galactica-chief");
     const sent = Date.now();
     fake.say(
@@ -337,6 +370,7 @@ test(
       "crew turns",
     );
     const [chief] = prompts["galactica-chief"] ?? [];
+
     if (!chief) throw new Error("missing prompt");
     expect(startDelay("galactica-chief")).toBe(400);
     expect(chief.at - sent).toBeGreaterThanOrEqual(380);

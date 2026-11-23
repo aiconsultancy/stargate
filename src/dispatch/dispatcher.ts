@@ -38,11 +38,13 @@ export type DispatchAnswerInput = {
 function pause(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve) => {
     if (signal.aborted) return resolve();
+
     const done = () => {
       clearTimeout(timer);
       signal.removeEventListener("abort", done);
       resolve();
     };
+
     const timer = setTimeout(done, ms);
     signal.addEventListener("abort", done, { once: true });
   });
@@ -88,6 +90,7 @@ export class AgentDispatcher {
   private serial<T>(work: () => Promise<T>): Promise<T> {
     const next = this.queue.then(work, work);
     this.queue = next.catch(() => {});
+
     return next;
   }
 
@@ -112,6 +115,7 @@ export class AgentDispatcher {
   /** A captain's answer from the transport; untrusted until checked here. */
   answer(input: DispatchAnswerInput, signal?: AbortSignal) {
     const stop = signal ?? this.runSignal ?? new AbortController().signal;
+
     return this.serial(() => this.handleAnswer(input, stop)).finally(() =>
       this.kick?.(),
     );
@@ -120,6 +124,7 @@ export class AgentDispatcher {
   /** When a tracked issue's next step is due, after any failure back-off. */
   private dueAt(tracked: TrackedIssue): number | undefined {
     const offer = tracked.offer;
+
     const at =
       tracked.state === "asking"
         ? offer && tracked.closedOffer === offer.id
@@ -131,17 +136,22 @@ export class AgentDispatcher {
             ? undefined
             : // A pending write is retried by every timer run; never spin for it.
               this.now() + this.settings.pollIntervalMs;
+
     const retry = this.retryAt.get(tracked.issue);
+
     return at === undefined || retry === undefined ? at : Math.max(at, retry);
   }
 
   /** Earliest time any timer is due, if any. */
   private nextDue(): number | undefined {
     let due: number | undefined;
+
     for (const tracked of this.options.ledger.active()) {
       const at = this.dueAt(tracked);
+
       if (at !== undefined && (due === undefined || at < due)) due = at;
     }
+
     return due;
   }
 
@@ -153,14 +163,17 @@ export class AgentDispatcher {
   async run(signal: AbortSignal) {
     this.runSignal = signal;
     let nextPoll = this.now();
+
     while (!signal.aborted) {
       let due = nextPoll;
+
       try {
         if (this.now() >= nextPoll) {
           // Scheduled before the poll: a failure waits a whole interval.
           nextPoll = this.now() + this.settings.pollIntervalMs;
           await this.serial(() => this.polling.poll(signal));
         }
+
         await this.serial(() => this.timers(signal));
         due = Math.min(nextPoll, this.nextDue() ?? nextPoll);
         this.polling.cleared("cycle");
@@ -172,14 +185,18 @@ export class AgentDispatcher {
           "Agent dispatch cycle failed; retrying later",
         );
       }
+
       if (signal.aborted) return;
+
       const wait = Math.min(
         Math.max(1000, due - this.now()),
         this.settings.pollIntervalMs,
       );
+
       // An answer wakes the loop early so its follow-up timer is not late.
       const wake = new AbortController();
       this.kick = () => wake.abort();
+
       try {
         await this.wait(wait, AbortSignal.any([signal, wake.signal]));
       } catch {
@@ -206,6 +223,7 @@ export class AgentDispatcher {
       ...(version === undefined ? {} : { doneVersion: version }),
       updatedAt: this.now(),
     });
+
     if (open)
       await this.announce(
         {
@@ -233,12 +251,15 @@ export class AgentDispatcher {
 
   private async timers(signal: AbortSignal) {
     // Nothing moves until this process has read the roster: at a poll, or
-    // before an acceptance write as a confirmed identity.
+    // Before an acceptance write as a confirmed identity.
     if (!this.polling.roster) return;
+
     for (const tracked of this.options.ledger.active()) {
       signal.throwIfAborted();
       const retry = this.retryAt.get(tracked.issue);
+
       if (retry !== undefined && this.now() < retry) continue;
+
       try {
         await this.due(tracked, signal);
         this.retryAt.delete(tracked.issue);
@@ -262,9 +283,12 @@ export class AgentDispatcher {
 
   private async due(tracked: TrackedIssue, signal: AbortSignal) {
     const now = this.now();
+
     if (tracked.state === "asking") {
       const offer = tracked.offer;
+
       if (!offer) return;
+
       // Declined, timed out or never delivered: move on without waiting.
       if (tracked.closedOffer === offer.id) {
         await this.askNext(
@@ -272,8 +296,10 @@ export class AgentDispatcher {
           tracked.resume ?? tracked.position + 1,
           signal,
         );
+
         return;
       }
+
       if (now < offer.deadline) return;
       const closed: TrackedIssue = { ...tracked, closedOffer: offer.id };
       this.options.ledger.save(closed);
@@ -310,21 +336,27 @@ export class AgentDispatcher {
   private async stillReady(tracked: TrackedIssue, signal: AbortSignal) {
     const current = await this.options.api.issue(tracked.issue, signal);
     const reason = await this.polling.unqualified(current, signal);
+
     if (reason || !current) {
       await this.finish(tracked, reason ?? "missing", current?.version, signal);
+
       return;
     }
+
     return current;
   }
 
   private async startRound(tracked: TrackedIssue, signal: AbortSignal) {
     const roster = this.polling.roster;
+
     if (!roster) return;
     const current = await this.stillReady(tracked, signal);
+
     if (!current) return;
     const ids = [...roster.captains.keys()].sort();
     const shift = ids.length ? tracked.start % ids.length : 0;
     const order = [...ids.slice(shift), ...ids.slice(0, shift)];
+
     const next: TrackedIssue = {
       ...tracked,
       round: tracked.round + 1,
@@ -334,6 +366,7 @@ export class AgentDispatcher {
       nextRoundAt: undefined,
       updatedAt: this.now(),
     };
+
     this.options.ledger.save(next);
     await this.askNext(next, 0, signal, current.version);
   }
@@ -349,17 +382,23 @@ export class AgentDispatcher {
     checked?: number,
   ) {
     const roster = this.polling.roster;
+
     if (!roster) return;
     let version = checked;
+
     if (version === undefined && position < tracked.order.length) {
       const current = await this.stillReady(tracked, signal);
+
       if (!current) return;
       version = current.version;
     }
+
     for (let index = position; index < tracked.order.length; index++) {
       const captain = roster.captains.get(tracked.order[index] ?? "");
+
       if (!captain?.available || !captain.reachable) continue;
       const now = this.now();
+
       const asking: TrackedIssue = {
         ...tracked,
         state: "asking",
@@ -374,11 +413,14 @@ export class AgentDispatcher {
         },
         updatedAt: now,
       };
+
       const offer = asking.offer;
+
       if (!offer) continue;
       // Recorded before it is sent: a restart keeps waiting for this offer.
       this.options.ledger.save(asking);
       let sent: { messageID: string | undefined } | undefined;
+
       try {
         sent = await this.options.messenger.offer(
           captain,
@@ -391,8 +433,9 @@ export class AgentDispatcher {
         );
       } catch (error) {
         signal.throwIfAborted();
+
         // No captain could ever be sent this issue: stop tracking it until
-        // someone changes it, without holding the poll or other issues.
+        // Someone changes it, without holding the poll or other issues.
         if (error instanceof UndeliverableIssue) {
           this.options.ledger.save({
             ...tracked,
@@ -407,11 +450,13 @@ export class AgentDispatcher {
             { issue: tracked.issue },
             "Agent dispatch skipped a ready issue whose identifier cannot be sent in chat; it is offered again only after the issue changes",
           );
+
           return;
         }
+
         // Our own chat connection failed, not the captain: close this
-        // undelivered offer and ask the same captain again later, so an
-        // outage never uses up a round or skips anyone.
+        // Undelivered offer and ask the same captain again later, so an
+        // Outage never uses up a round or skips anyone.
         this.options.ledger.save({
           ...asking,
           closedOffer: offer.id,
@@ -419,8 +464,10 @@ export class AgentDispatcher {
         });
         throw error;
       }
+
       // The captain is not online under its account now: like unavailable.
       if (!sent) continue;
+
       if (sent.messageID === undefined)
         this.polling.warnOnce(
           "message-id",
@@ -443,14 +490,17 @@ export class AgentDispatcher {
         },
         "Agent dispatch offered a ready issue",
       );
+
       return;
     }
+
     await this.endRound(tracked, signal);
   }
 
   private async endRound(tracked: TrackedIssue, signal: AbortSignal) {
     const ladder = this.settings.retryLadderMs;
     const now = this.now();
+
     if (tracked.round > ladder.length) {
       const clearing: TrackedIssue = {
         ...tracked,
@@ -458,10 +508,13 @@ export class AgentDispatcher {
         offer: undefined,
         updatedAt: now,
       };
+
       this.options.ledger.save(clearing);
       await this.giveUp(clearing, signal);
+
       return;
     }
+
     this.options.ledger.save({
       ...tracked,
       state: "waiting",
@@ -473,22 +526,29 @@ export class AgentDispatcher {
 
   private async giveUp(tracked: TrackedIssue, signal: AbortSignal) {
     const { api, ledger } = this.options;
+
     // Never write as an identity this process has not confirmed.
     if (!(await this.polling.identityConfirmed(signal))) return;
     let state = tracked;
+
     for (let attempt = 0; attempt < maxEditAttempts; attempt++) {
       const current = await api.issue(state.issue, signal);
       const reason = await this.polling.unqualified(current, signal);
+
       // After the comment, a cleared flag is most likely our own write whose
-      // answer was lost: finish the give-up and still say so in chat.
+      // Answer was lost: finish the give-up and still say so in chat.
       if (reason === "unflagged" && state.commented && current) {
         await this.gaveUp(state, current.version, signal);
+
         return;
       }
+
       if (reason || !current) {
         await this.finish(state, reason ?? "missing", current?.version, signal);
+
         return;
       }
+
       if (!state.commented) {
         await api.comment(
           state.issue,
@@ -498,9 +558,12 @@ export class AgentDispatcher {
         state = { ...state, commented: true, updatedAt: this.now() };
         ledger.save(state);
       }
+
       const result = await api.clearReady(state.issue, current.version, signal);
+
       if (result.conflict) continue;
       await this.gaveUp(state, result.version ?? current.version + 1, signal);
+
       return;
     }
   }
@@ -536,6 +599,7 @@ export class AgentDispatcher {
   private async handleAnswer(input: DispatchAnswerInput, signal: AbortSignal) {
     const tracked = this.options.ledger.byOffer(input.offerID);
     const offer = tracked?.offer;
+
     if (
       !tracked ||
       !offer ||
@@ -548,8 +612,10 @@ export class AgentDispatcher {
       input.at > offer.deadline
     ) {
       this.options.log.debug("Agent dispatch ignored an uncorrelated answer");
+
       return;
     }
+
     if (input.answer === "decline") {
       this.options.log.info(
         { issue: tracked.identifier, captain: offer.account },
@@ -559,16 +625,19 @@ export class AgentDispatcher {
       const declined: TrackedIssue = { ...tracked, closedOffer: offer.id };
       this.options.ledger.save(declined);
       await this.askNext(declined, declined.position + 1, signal);
+
       return;
     }
+
     // The acceptance is recorded first: when this process has not yet
-    // confirmed its API identity (after a restart, say) and cannot now, the
-    // write waits in the ledger for a poll that confirms it.
+    // Confirmed its API identity (after a restart, say) and cannot now, the
+    // Write waits in the ledger for a poll that confirms it.
     const accepting: TrackedIssue = {
       ...tracked,
       state: "accepting",
       updatedAt: this.now(),
     };
+
     this.options.ledger.save(accepting);
     await this.assignAccepted(accepting, signal);
   }
@@ -582,23 +651,30 @@ export class AgentDispatcher {
    */
   private async assignAccepted(tracked: TrackedIssue, signal: AbortSignal) {
     const offer = tracked.offer;
+
     if (!offer) return;
+
     if (!(await this.polling.identityConfirmed(signal))) {
       this.polling.warnOnce(
         "unconfirmed-write",
         "Agent dispatch holds an accepted offer until its API identity is confirmed",
         { issue: tracked.identifier },
       );
+
       return;
     }
+
     this.polling.cleared("unconfirmed-write");
     const { api, ledger } = this.options;
     let refused: RefusedReason | undefined;
+
     try {
       for (let attempt = 0; attempt < maxEditAttempts; attempt++) {
         const current = await api.issue(tracked.issue, signal);
+
         if (current?.assignee) {
           const mine = current.assignee.userId === offer.captain;
+
           if (mine)
             ledger.recordNotified(
               tracked.issue,
@@ -626,9 +702,12 @@ export class AgentDispatcher {
             },
             signal,
           );
+
           return;
         }
+
         const reason = await this.polling.unqualified(current, signal);
+
         if (reason) {
           await this.finish(
             { ...tracked, state: "asking" },
@@ -636,24 +715,30 @@ export class AgentDispatcher {
             current?.version,
             signal,
           );
+
           return;
         }
+
         if (!current) return;
+
         // The offer's stored user ID is not proof: the captain may have left
-        // the fleet, been demoted or been renamed to another chat account.
+        // The fleet, been demoted or been renamed to another chat account.
         const captain = (await this.polling.freshRoster(signal)).captains.get(
           offer.captain,
         );
+
         if (!captain || !this.same(captain.account, offer.account)) {
           refused = captain ? "account" : "captain";
           break;
         }
+
         const result = await api.assign(
           tracked.issue,
           current.version,
           offer.captain,
           signal,
         );
+
         if (result.conflict) continue;
         // The captain accepted: no separate assignment notice follows.
         ledger.recordNotified(
@@ -684,10 +769,12 @@ export class AgentDispatcher {
           { issue: tracked.identifier, captain: offer.account },
           "Agent dispatch assigned an accepted offer",
         );
+
         return;
       }
     } catch (error) {
       signal.throwIfAborted();
+
       if (tracked.outcome !== "retrying") {
         ledger.save({ ...tracked, outcome: "retrying", updatedAt: this.now() });
         await this.announce(
@@ -701,8 +788,10 @@ export class AgentDispatcher {
           signal,
         );
       }
+
       throw error;
     }
+
     if (refused) await this.refuseAcceptance(tracked, refused, signal);
   }
 
@@ -716,7 +805,9 @@ export class AgentDispatcher {
     signal: AbortSignal,
   ) {
     const offer = tracked.offer;
+
     if (!offer) return;
+
     const declined: TrackedIssue = {
       ...tracked,
       state: "asking",
@@ -725,6 +816,7 @@ export class AgentDispatcher {
       outcome: undefined,
       updatedAt: this.now(),
     };
+
     // Recorded first: a restart or a failed next offer moves on from here.
     this.options.ledger.save(declined);
     this.options.log.info(

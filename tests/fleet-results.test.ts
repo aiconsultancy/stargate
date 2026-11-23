@@ -43,11 +43,14 @@ import {
 } from "./teams-support";
 
 const cleanup: (() => Promise<unknown> | unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
 const log = pino({ enabled: false });
 const signal = () => new AbortController().signal;
+
 const lockCommand: NonNullable<
   NonNullable<FleetControlOptions["ownership"]>["lockCommand"]
 > = (path) => ({
@@ -59,7 +62,9 @@ const lockCommand: NonNullable<
     path,
   ],
 });
+
 type Call = { input: string; text: string; context?: PromptSourceContext };
+
 class Native implements AgentBackend {
   readonly calls: Call[] = [];
   readonly makers = new Map<string, NativeMaker[]>();
@@ -95,6 +100,7 @@ class Native implements AgentBackend {
       text,
       ...(context ? { context } : {}),
     };
+
     this.calls.push(call);
     this.active = call;
     onInput?.(call.input);
@@ -103,6 +109,7 @@ class Native implements AgentBackend {
       input: call.input,
       created: this.records.length + 1,
     });
+
     try {
       const result = await this.handler(call);
       this.makers.set(call.input, [
@@ -119,6 +126,7 @@ class Native implements AgentBackend {
         text: result,
         created: this.records.length + 1,
       });
+
       return result;
     } finally {
       this.active = undefined;
@@ -138,6 +146,7 @@ class Native implements AgentBackend {
     input: unknown,
   ) {
     if (!this.active) throw new Error("No native input is executing");
+
     return fleetRequest(
       socket,
       Schema.decodeUnknownSync(requestSchema)({
@@ -156,15 +165,20 @@ class Native implements AgentBackend {
   async executionMakers(session: string, input: string) {
     if (session !== this.sessionID || !this.makers.has(input))
       throw new Error("No exact native maker");
+
     return this.makers.get(input) ?? [];
   }
   async transcript(session: string, after: string | undefined) {
     if (session !== this.sessionID) throw new Error("Wrong native session");
     const head = this.records.at(-1);
+
     if (after === undefined) return { cursor: head?.id ?? "", entries: [] };
+
     const index =
       after === "" ? -1 : this.records.findIndex((entry) => entry.id === after);
+
     if (after !== "" && index < 0) throw new Error("Missing native cursor");
+
     return {
       cursor: head?.id ?? after,
       entries: this.records.slice(index + 1).flatMap((entry) =>
@@ -209,12 +223,15 @@ async function world(
   const directory = await realpath(
     await mkdtemp(join(tmpdir(), "sg-fleet-result-")),
   );
+
   await chmod(directory, 0o700);
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
+
   const fake = new FakeIrcServer({
     accounts: { vance: "vance-pass", captain: "captain-pass" },
     botAccounts: ["vance", "captain"],
   }).start();
+
   cleanup.push(() => fake.stop());
   const ownerStore = openStore(join(directory, "owner.sqlite"));
   const captainStore = openStore(join(directory, "captain.sqlite"));
@@ -224,6 +241,7 @@ async function world(
   });
   const vance = new Native("vance", "ses_owner");
   const captain = new Native("captain", "ses_target");
+
   const backendConfig = (backend: Native) => ({
     type: "opencode",
     url: `http://${backend.account}.invalid:4096`,
@@ -235,6 +253,7 @@ async function world(
       id: "not-the-native-result-model",
     },
   });
+
   const fleetConfig = (backend: Native) => ({
     socketPath: join(directory, `${backend.account}.sock`),
     statePath: join(directory, "fleet.sqlite"),
@@ -258,6 +277,7 @@ async function world(
             },
           ],
   });
+
   const policy = (backend: Native, peer: string) => ({
     role: backend.account === "vance" ? "rear_admiral" : "captain",
     humanAccounts: [HUMAN, OTHER_HUMAN, "operator"],
@@ -265,6 +285,7 @@ async function world(
     assignedCheckout: directory,
     capabilities: ["read_code", "subspace", "dispatch", "implement"],
   });
+
   const buildShip = async (backend: Native, peer: string, store: Store) => {
     const config = Schema.decodeUnknownSync(ircSchema)({
       id: backend.account,
@@ -289,14 +310,18 @@ async function world(
       fleetControl: fleetConfig(backend),
       features: { catchUp: false },
     });
+
     const ship = await IrcShip.create(config, store, log, {
       env: { IRC_PASSWORD: `${backend.account}-pass` },
       timing: { intervalMs: 1, burst: 100 },
       readyMs: 2000,
     });
+
     cleanup.push(() => ship.close());
     const registration = ship.registrations[0];
+
     if (!registration) throw new Error("No IRC registration");
+
     const gateway = new Gateway(
       registration.settings,
       registration.identity,
@@ -308,11 +333,15 @@ async function world(
       undefined,
       registration.transport,
     );
+
     cleanup.push(() => gateway.close());
+
     return { ship, registration, gateway };
   };
+
   const ownerIrc = await buildShip(vance, "captain", ownerStore);
   const targetIrc = await buildShip(captain, "vance", captainStore);
+
   const teamsConfig = Schema.decodeUnknownSync(teamsSchema)({
     id: "admiral",
     botClientId: APP_ID,
@@ -323,7 +352,9 @@ async function world(
     backend: backendConfig(vance),
     fleetPolicy: policy(vance, "captain"),
   });
+
   const sent: { conversation: string; activity: OutgoingActivity }[] = [];
+
   const teams = new TeamsRegistration(
     teamsConfig,
     join(directory, "teams.sqlite"),
@@ -333,11 +364,14 @@ async function world(
     {
       async sendToConversation(_service, conversation, message) {
         sent.push({ conversation, activity: message });
+
         return { id: `reply-${sent.length}` };
       },
     },
   );
+
   cleanup.push(() => teams.close());
+
   const teamsGateway = new Gateway(
     teamsConfig,
     { team: TENANT_ID, user: APP_ID },
@@ -349,9 +383,11 @@ async function world(
     undefined,
     teams.transport,
   );
+
   cleanup.push(() => teamsGateway.close());
   const statePath = join(directory, "fleet.sqlite");
   const packets: string[] = [];
+
   const controlOptions = (
     backend: Native,
     store: Store,
@@ -390,16 +426,20 @@ async function world(
       );
     },
   });
+
   const ownerOptions = controlOptions(vance, ownerStore, ownerIrc, [
     teams.key,
     ownerIrc.registration.key,
   ]);
+
   const owner = await FleetControl.open(ownerOptions);
+
   const receiver = await FleetControl.open(
     controlOptions(captain, captainStore, targetIrc, [
       targetIrc.registration.key,
     ]),
   );
+
   cleanup.push(async () => {
     await receiver.close();
     await owner.close();
@@ -407,16 +447,20 @@ async function world(
   ownerIrc.ship.sourceRecorder = (source) => {
     owner.recordSource(source);
   };
+
   teams.sourceRecorder = (source) => {
     owner.recordSource(source);
   };
+
   targetIrc.ship.sourceRecorder = (source) => {
     receiver.recordSource(source);
   };
+
   targetIrc.ship.assignmentRecorder = (input, fold) =>
     receiver.assignment(input, fold);
   ownerIrc.ship.assignmentRecorder = (input, fold) =>
     owner.assignment(input, fold);
+
   const ownerResults = new FleetResults({
     control: owner,
     store: ownerStore,
@@ -425,6 +469,7 @@ async function world(
     account: vance.account,
     backend: vance,
   });
+
   const targetResults = new FleetResults({
     control: receiver,
     store: captainStore,
@@ -433,6 +478,7 @@ async function world(
     account: captain.account,
     backend: captain,
   });
+
   ownerIrc.ship.start(() => true);
   targetIrc.ship.start(() => true);
   await until(
@@ -443,18 +489,24 @@ async function world(
     5000,
     "joined",
   );
+
   const processNext = async (gateway: Gateway, store: Store) => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
     if (!job) throw new Error("No queued job");
     await gateway.process(job, signal());
+
     return job;
   };
+
   let dispatch: { dispatchID?: string; sourceReference?: string } | undefined;
   vance.handler = async (call) => {
     if (call.context?.source.authority === "agent")
       return "Captain outcome verified: implementation is complete.";
+
     if (call.text.includes("Other request")) return "Other request answered.";
     const reference = call.context?.source.reference;
+
     if (!reference) throw new Error("No original source");
     dispatch = (await vance.tool(
       owner,
@@ -466,33 +518,43 @@ async function world(
         text: "Implement the agreed issue, without deployment.",
       },
     )) as typeof dispatch;
+
     return "Assignment sent.";
   };
+
   captain.handler = async (call) => {
     const reference = /source=(\S+) authority=/.exec(call.text)?.[1];
+
     if (!reference) throw new Error("Missing delegated original");
+
     const verified = await captain.tool(
       receiver,
       join(directory, "captain.sock"),
       "verify",
       { reference },
     );
+
     expect(verified).toMatchObject({
       authority: "human",
       account: HUMAN,
       humanApproval: false,
     });
+
     return "Implemented and checked; no deployment performed.";
   };
+
   const original = activity({
     id: "human-original",
     text: "Implement the agreed issue, without deployment.",
   });
+
   const begin = async () => {
     const key = await makeSigningKey();
+
     const keys = new BotFrameworkKeyStore({
       fetch: mockFetch(botFrameworkKeys([key.jwk])).fetch,
     });
+
     await authenticateActivityRequest(
       `Bearer ${await signToken(key)}`,
       original,
@@ -508,6 +570,7 @@ async function world(
       "real captain intake",
     );
   };
+
   return {
     directory,
     fake,
@@ -596,13 +659,17 @@ test("fleet results: duplicate transport/polls and a copied dispatch never rerun
   await f.begin();
   const job = await f.processNext(f.targetIrc.gateway, f.captainStore);
   const accept = f.targetIrc.ship.assignmentRecorder;
+
   if (!accept) throw new Error("No assignment recorder");
   let attempts = 0;
   f.targetIrc.ship.assignmentRecorder = (value, fold) => {
     attempts++;
+
     return accept(value, fold);
   };
+
   const text = f.packets[0];
+
   if (!text) throw new Error("No dispatch packet");
   const msgid = job.eventId.slice(job.channel.length + 1);
   f.fake.say({ nick: "vance", account: "vance" }, "#captain", text, {
@@ -643,6 +710,7 @@ test("fleet results: outbox and queued continuation survive reopen after queue-b
   f.owner.acknowledgeResult = () => {
     throw new Error("Crash after durable enqueue");
   };
+
   await expect(f.ownerResults.poll(signal())).rejects.toThrow(
     "Crash after durable enqueue",
   );
@@ -653,11 +721,14 @@ test("fleet results: outbox and queued continuation survive reopen after queue-b
   await f.owner.close();
   const store = openStore(join(f.directory, "owner.sqlite"));
   cleanup.push(() => store.close());
+
   const owner = await FleetControl.open({
     ...f.ownerOptions,
     origin: (source) => fleetOrigin(store, f.vance.sessionID, source),
   });
+
   cleanup.push(() => owner.close());
+
   const teams = new TeamsRegistration(
     f.teams.config,
     join(f.directory, "teams.sqlite"),
@@ -667,11 +738,14 @@ test("fleet results: outbox and queued continuation survive reopen after queue-b
     {
       async sendToConversation(_service, conversation, message) {
         f.sent.push({ conversation, activity: message });
+
         return { id: "recovered-reply" };
       },
     },
   );
+
   cleanup.push(() => teams.close());
+
   const gateway = new Gateway(
     f.teams.config,
     { team: TENANT_ID, user: APP_ID },
@@ -683,7 +757,9 @@ test("fleet results: outbox and queued continuation survive reopen after queue-b
     undefined,
     teams.transport,
   );
+
   cleanup.push(() => gateway.close());
+
   const recovery = new FleetResults({
     control: owner,
     store,
@@ -692,6 +768,7 @@ test("fleet results: outbox and queued continuation survive reopen after queue-b
     account: "vance",
     backend: f.vance,
   });
+
   await recovery.poll(signal());
   await recovery.poll(signal());
   expect(store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 100)).toHaveLength(
@@ -713,11 +790,13 @@ test("fleet results: outbox and queued continuation survive reopen after queue-b
 test("fleet results: interrupted admitted execution reports uncertainty without replaying captain work", async () => {
   const f = await world();
   await f.begin();
+
   const job = f.captainStore.ready(
     f.targetIrc.gateway.key,
     Number.MAX_SAFE_INTEGER,
     1,
   )[0];
+
   if (!job) throw new Error("No captain assignment");
   f.captainStore.running(job.id);
   f.captainStore.saveInput(
@@ -729,11 +808,13 @@ test("fleet results: interrupted admitted execution reports uncertainty without 
   f.captainStore.recover(job.botKey);
   await f.targetResults.poll(signal());
   await f.ownerResults.poll(signal());
+
   const result = f.ownerStore.ready(
     f.teamsGateway.key,
     Number.MAX_SAFE_INTEGER,
     1,
   )[0];
+
   if (!result) throw new Error("No uncertain result");
   expect(result.fleet).toMatchObject({
     kind: "result",
@@ -759,6 +840,7 @@ test("fleet results: oversized backend makers become empty uncertain evidence", 
   await f.begin();
   const job = await f.processNext(f.targetIrc.gateway, f.captainStore);
   const inputID = f.captainStore.jobByEvent(job.botKey, job.eventId)?.input;
+
   if (!inputID) throw new Error("Missing admitted native input");
   f.captain.makers.set(
     inputID,
@@ -774,11 +856,13 @@ test("fleet results: oversized backend makers become empty uncertain evidence", 
     [],
   );
   await f.ownerResults.poll(signal());
+
   const result = f.ownerStore.ready(
     f.teamsGateway.key,
     Number.MAX_SAFE_INTEGER,
     1,
   )[0];
+
   expect(result?.fleet).toMatchObject({
     kind: "result",
     completion: { outcome: "uncertain", makers: [], humanApproval: false },
@@ -797,13 +881,17 @@ test("fleet results: agent continuation cannot borrow the old human's approval o
       action: "shell",
       resources: ["approval-boundary-test"],
     };
+
     f.vance.pending = [request];
     f.vance.permissionInputs.set(request.id, call.input);
+
     if (call.context?.source.authority === "human") {
       await f.teams.pollApprovals();
+
       const notice = f.sent.find((item) =>
         item.activity.text?.includes("Reply approve"),
       )?.activity.text;
+
       oldToken = /approve ([a-f0-9]{32})/.exec(notice ?? "")?.[1];
       expect(oldToken).toBeDefined();
       f.vance.pending = [];
@@ -811,6 +899,7 @@ test("fleet results: agent continuation cannot borrow the old human's approval o
       const noticesBefore = f.sent.filter((item) =>
         item.activity.text?.includes("Reply approve"),
       ).length;
+
       await f.teams.pollApprovals();
       expect(
         f.sent.filter((item) => item.activity.text?.includes("Reply approve")),
@@ -822,8 +911,10 @@ test("fleet results: agent continuation cannot borrow the old human's approval o
       expect(call.context?.source.authority).toBe("agent");
       f.vance.pending = [];
     }
+
     return handler(call);
   };
+
   await f.begin();
   await f.processNext(f.targetIrc.gateway, f.captainStore);
   await f.targetResults.poll(signal());
@@ -838,12 +929,15 @@ test("fleet results: agent continuation cannot borrow the old human's approval o
 test("fleet results: explicit peer chat remains agent context and forged native/target completion cannot become a result", async () => {
   const f = await world();
   await f.begin();
+
   const job = f.captainStore.ready(
     f.targetIrc.gateway.key,
     Number.MAX_SAFE_INTEGER,
     1,
   )[0];
+
   if (job?.fleet?.kind !== "assignment") throw new Error("No delegation");
+
   const completion = {
     dispatchID: job.fleet.dispatchID,
     sourceReference: f.dispatch?.sourceReference ?? "missing",
@@ -856,6 +950,7 @@ test("fleet results: explicit peer chat remains agent context and forged native/
     makers: [],
     humanApproval: false as const,
   };
+
   expect(() => f.owner.complete(job.botKey, job.eventId, completion)).toThrow(
     "gateway target",
   );
@@ -865,6 +960,7 @@ test("fleet results: explicit peer chat remains agent context and forged native/
   expect(() =>
     f.receiver.complete(job.botKey, job.eventId, completion),
   ).toThrow("native request");
+
   const refused = await new Promise<{ status: number; body: string }>(
     (resolve, reject) => {
       const request = httpRequest(
@@ -883,6 +979,7 @@ test("fleet results: explicit peer chat remains agent context and forged native/
           );
         },
       );
+
       request.on("error", reject);
       request.end(
         JSON.stringify({
@@ -898,18 +995,22 @@ test("fleet results: explicit peer chat remains agent context and forged native/
       );
     },
   );
+
   expect(refused).toEqual({
     status: 400,
     body: JSON.stringify({ error: "Invalid fleet tool request." }),
   });
   const record = f.ownerIrc.ship.assignmentRecorder;
+
   if (!record) throw new Error("No assignment recorder");
   let checked = false;
   f.ownerIrc.ship.assignmentRecorder = (input, fold) => {
     const dispatchID = record(input, fold);
     checked = true;
+
     return dispatchID;
   };
+
   f.fake.say(
     { nick: "captain", account: "captain" },
     "#command",
@@ -989,18 +1090,23 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
   const f = await world(true, "captain", true);
   let ownerPeerChat = 0;
   let captainPeerChat = 0;
+
   for (const [ship, peer, recordChat] of [
     [f.ownerIrc.ship, "captain", () => ownerPeerChat++],
     [f.targetIrc.ship, "vance", () => captainPeerChat++],
   ] as const) {
     const record = ship.assignmentRecorder;
+
     if (!record) throw new Error("Missing real assignment recorder");
     ship.assignmentRecorder = (input, fold) => {
       const dispatchID = record(input, fold);
+
       if (!dispatchID && input.sender === peer) recordChat();
+
       return dispatchID;
     };
   }
+
   const original = f.vance.handler;
   f.vance.handler = async (call) => {
     if (call.context?.source.authority === "agent")
@@ -1008,10 +1114,13 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
         ? "Captain: result verified."
         : "[[stargate:silent]]";
     await original(call);
+
     return "Captain: assignment sent.";
   };
+
   f.captain.handler = async (call) => {
     const reference = /source=(\S+) authority=/.exec(call.text)?.[1];
+
     if (!reference) return "[[stargate:silent]]";
     expect(
       await f.captain.tool(
@@ -1027,15 +1136,19 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
       authority: "human",
       humanApproval: false,
     });
+
     return "@Vance: work is complete.";
   };
+
   const time = new Date().toISOString();
+
   const sourceID = f.fake.say(
     { nick: "operator", account: "operator" },
     "#command",
     "Vance: use dispatch to ask captain for a result.",
     { time },
   );
+
   await until(
     () =>
       f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 1)
@@ -1058,17 +1171,21 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
     2000,
     "real correlated assignment",
   );
+
   const assignment = f.captainStore
     .ready(f.targetIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
     .find((job) => job.fleet?.kind === "assignment");
+
   if (!assignment) throw new Error("Missing protected assignment");
   await f.targetIrc.gateway.process(assignment, signal());
   expect(assignment.fleet?.kind).toBe("assignment");
   await f.targetResults.poll(signal());
   await f.ownerResults.poll(signal());
+
   const result = f.ownerStore
     .ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
     .find((job) => job.fleet?.kind === "result");
+
   if (!result) throw new Error("Missing protected result");
   await f.ownerIrc.gateway.process(result, signal());
   expect(result.fleet?.kind).toBe("result");
@@ -1085,17 +1202,20 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
     2000,
     "ordinary initial/result feedback inspected after correlation checks",
   );
+
   for (const [gateway, store] of [
     [f.ownerIrc.gateway, f.ownerStore],
     [f.targetIrc.gateway, f.captainStore],
   ] as const) {
     for (let turn = 0; turn < 5; turn++) {
       const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
       if (!job) break;
       expect(job.fleet).toBeUndefined();
       await gateway.process(job, signal());
     }
   }
+
   expect(
     f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100),
   ).toHaveLength(0);
@@ -1111,6 +1231,7 @@ async function forcedNick(f: Awaited<ReturnType<typeof world>>, nick: string) {
   const connection = f.fake.clients.find(
     (client) => client.account === "vance",
   );
+
   if (!connection?.nick) throw new Error("Missing authenticated connection");
   const old = connection.nick;
   connection.nick = nick;
@@ -1129,15 +1250,18 @@ for (const [accepted, later] of [
   test(`peer admission survives ${accepted} to ${later} for queued work and post-execution delivery`, async () => {
     const f = await world(true, "captain", true);
     f.vance.handler = async () => "Peer request completed.";
+
     for (const phase of ["queued", "delivery"] as const) {
       await forcedNick(f, accepted);
       const text = `@${accepted}: inspect request in ${phase} phase`;
+
       const source = f.fake.say(
         { nick: "captain", account: "captain" },
         "#command",
         text,
         { bot: "" },
       );
+
       await until(
         () =>
           f.ownerStore.ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 1)
@@ -1145,16 +1269,19 @@ for (const [accepted, later] of [
         2000,
         "peer queued",
       );
+
       const job = f.ownerStore.ready(
         f.ownerIrc.gateway.key,
         Number.MAX_SAFE_INTEGER,
         1,
       )[0];
+
       if (!job) throw new Error("Missing admitted peer job");
       expect(job.text).toBe(text);
       expect(job.textMention).toBe(`@${accepted}`);
       expect(job.eventId).toBe(`#command:${source}`);
       const before = f.vance.calls.length;
+
       if (phase === "queued") await forcedNick(f, later);
       else {
         const delivery = f.ownerIrc.registration.delivery;
@@ -1166,9 +1293,11 @@ for (const [accepted, later] of [
               ?.status,
           ).toBe("responding");
           await forcedNick(f, later);
+
           return post(...args);
         };
       }
+
       await f.ownerIrc.gateway.process(job, signal());
       expect(f.vance.calls).toHaveLength(before + 1);
       expect(f.vance.calls.at(-1)?.context?.source).toMatchObject({
@@ -1186,6 +1315,7 @@ for (const [accepted, later] of [
       });
       expect(f.ownerIrc.registration.client.nick).toBe(later);
     }
+
     expect(f.captain.calls).toHaveLength(0);
   });
 }
@@ -1205,11 +1335,13 @@ test.each([
       "vance: start bounded peer exchange",
       { bot: "" },
     );
+
     for (let turn = 0; turn < limit * 2; turn++) {
       const entry =
         turn % 2 === 0
           ? ([f.ownerIrc.gateway, f.ownerStore] as const)
           : ([f.targetIrc.gateway, f.captainStore] as const);
+
       const [gateway, store] = entry;
       await until(
         () => store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1).length === 1,
@@ -1217,11 +1349,13 @@ test.each([
         "next addressed peer turn",
       );
       const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
       if (!job) throw new Error("Missing bounded peer job");
       expect(job.fleet).toBeUndefined();
       expect(job.sender).toBe("captain");
       await gateway.process(job, signal());
     }
+
     await Bun.sleep(80);
     expect(f.vance.calls).toHaveLength(limit);
     expect(f.captain.calls).toHaveLength(limit);
@@ -1230,6 +1364,7 @@ test.each([
         (call) => call.context?.source.authority === "agent",
       ),
     ).toBe(true);
+
     for (const [gateway, store] of [
       [f.ownerIrc.gateway, f.ownerStore],
       [f.targetIrc.gateway, f.captainStore],
@@ -1245,9 +1380,11 @@ test.each([
 test("fleet results: queued and recovered ordinary peer jobs are retained but refused before native work or delivery", async () => {
   const f = await world();
   const key = f.ownerIrc.gateway.key;
+
   const before = f.fake
     .received("vance")
     .filter((line) => line.includes("PRIVMSG"));
+
   for (const state of ["queued", "running", "responding"] as const) {
     const eventId = `#command:old-peer-${state}`;
     expect(
@@ -1263,16 +1400,21 @@ test("fleet results: queued and recovered ordinary peer jobs are retained but re
       }),
     ).toBe(true);
     const queued = f.ownerStore.jobByEvent(key, eventId);
+
     if (!queued) throw new Error("Missing preserved old job");
+
     if (state !== "queued") {
       f.ownerStore.running(queued.id);
+
       if (state === "responding")
         f.ownerStore.respond(queued.id, [
           "Captain: old response would restart the loop.",
         ]);
       else f.ownerStore.recover(key);
     }
+
     const held = f.ownerStore.jobByEvent(key, eventId);
+
     if (!held) throw new Error("Missing recovery record");
     await f.ownerIrc.gateway.process(held, signal());
     expect(f.ownerStore.jobByEvent(key, eventId)).toMatchObject({
@@ -1283,6 +1425,7 @@ test("fleet results: queued and recovered ordinary peer jobs are retained but re
       sent: 0,
     });
   }
+
   expect(f.vance.calls).toHaveLength(0);
   expect(
     f.fake.received("vance").filter((line) => line.includes("PRIVMSG")),
@@ -1292,9 +1435,11 @@ test("fleet results: queued and recovered ordinary peer jobs are retained but re
 test("fleet results: recovery refuses retained misaddressed human jobs but a correctly addressed nested-prefix request runs", async () => {
   const f = await world(true, "captain", true);
   const key = f.targetIrc.gateway.key;
+
   const before = f.fake
     .received("captain")
     .filter((line) => line.includes("PRIVMSG"));
+
   for (const [id, text] of [
     ["misaddressed", "Vance: ask captain to report."],
     // Older intake may have removed an own prefix; do not guess or rewrite it.
@@ -1316,6 +1461,7 @@ test("fleet results: recovery refuses retained misaddressed human jobs but a cor
       }),
     ).toBe(true);
     const job = f.captainStore.jobByEvent(key, eventId);
+
     if (!job) throw new Error("Missing retained human request");
     await f.targetIrc.gateway.process(job, signal());
     expect(f.captainStore.jobByEvent(key, eventId)).toMatchObject({
@@ -1326,20 +1472,25 @@ test("fleet results: recovery refuses retained misaddressed human jobs but a cor
       sent: 0,
     });
   }
+
   expect(f.captain.calls).toHaveLength(0);
   expect(
     f.fake.received("captain").filter((line) => line.includes("PRIVMSG")),
   ).toEqual(before);
   f.captain.handler = async () => "Correctly addressed human request answered.";
+
   const text =
     "Captain: Vance: this request is for captain, not the nested name.";
+
   const time = new Date().toISOString();
+
   const id = f.fake.say(
     { nick: "operator", account: "operator" },
     "#command",
     text,
     { time },
   );
+
   await until(
     () =>
       f.captainStore.ready(key, Number.MAX_SAFE_INTEGER, 1).length === 1 &&

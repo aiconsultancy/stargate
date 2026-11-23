@@ -33,34 +33,43 @@ if (process.argv.includes("--version")) {
     join(process.cwd(), "fixture-probe.json"),
   );
   const version = readFileSync(join(process.cwd(), "fixture-version"), "utf8");
+
   if (version === "hang") {
     process.on("SIGTERM", () => {});
     setInterval(() => {}, 1000);
     await new Promise(() => {});
   }
+
   if (version === "fail") {
     console.error("private-version-error");
     process.exit(1);
   }
+
   console.log(version);
   process.exit(0);
 }
 
 const home = process.env["CLAUDE_CONFIG_DIR"] ?? "";
+
 const flag = (name: string) => {
   const index = process.argv.findIndex(
     (argument) => argument === name || argument.startsWith(`${name}=`),
   );
+
   const argument = process.argv[index];
+
   if (index < 0 || argument === undefined) return undefined;
+
   return argument.includes("=")
     ? argument.slice(name.length + 1)
     : process.argv[index + 1];
 };
+
 const created = flag("--session-id");
 const resumed = flag("--resume");
 const session = created ?? resumed ?? "";
 const transcript = join(home, "projects", "fixture", `${session}.jsonl`);
+
 const log = (entry: object) =>
   appendFileSync(join(home, "fixture.jsonl"), `${JSON.stringify(entry)}\n`);
 
@@ -73,6 +82,7 @@ log({
 
 const write = (frame: unknown) =>
   process.stdout.write(`${JSON.stringify(frame)}\n`);
+
 const base = () => ({ session_id: session, uuid: crypto.randomUUID() });
 
 function result(
@@ -136,6 +146,7 @@ async function stubborn(detached: boolean) {
     ],
     { stdio: ["ignore", "pipe", "ignore"], detached },
   );
+
   await new Promise((resolve) => child.stdout.once("data", resolve));
   log({ grandchild: child.pid });
 }
@@ -144,6 +155,7 @@ let linger = false;
 
 async function answer(text: string) {
   linger = text.includes("linger");
+
   if (resumed && !existsSync(transcript))
     return result("error_during_execution", true);
   mkdirSync(join(home, "projects", "fixture"), { recursive: true });
@@ -164,16 +176,21 @@ async function answer(text: string) {
     claude_code_version: "fixture",
     ...base(),
   });
+
   if (text.includes("stubborn")) await stubborn(text.includes("detached"));
+
   if (text.includes("hang")) {
     // A tool command in the same process group must stop with the CLI.
     const child = spawn("sleep", ["600"], { stdio: "ignore" });
     log({ grandchild: child.pid });
+
     return;
   }
+
   if (text.includes("crash")) process.exit(3);
   // "fail", "fail:<cause>" or "fail:<cause>:<status>"; "tool" runs one first.
   const failure = /fail(?::(\w+))?(?::(\d+))?/.exec(text);
+
   if (failure) {
     if (text.includes("tool"))
       assistant("msg_tool", {
@@ -187,6 +204,7 @@ async function answer(text: string) {
       { type: "text", text: "API Error: raw upstream detail sk-ant-secret" },
       failure[1] ?? "rate_limit",
     );
+
     return result(
       "success",
       true,
@@ -194,6 +212,7 @@ async function answer(text: string) {
       failure[2] ? Number(failure[2]) : undefined,
     );
   }
+
   stream({ type: "message_start", message: { id: "msg_1" } });
   stream({
     type: "content_block_start",
@@ -248,9 +267,12 @@ async function answer(text: string) {
 }
 
 let buffer = "";
+
 process.stdin.setEncoding("utf8");
+
 process.stdin.on("data", (chunk: string) => {
   buffer += chunk;
+
   for (
     let index = buffer.indexOf("\n");
     index >= 0;
@@ -258,9 +280,11 @@ process.stdin.on("data", (chunk: string) => {
   ) {
     const line = buffer.slice(0, index);
     buffer = buffer.slice(index + 1);
+
     if (!line.trim()) continue;
     const frame = JSON.parse(line);
     log({ input: frame });
+
     if (frame.type === "control_request")
       write({
         type: "control_response",
@@ -282,6 +306,7 @@ process.stdin.on("data", (chunk: string) => {
     }
   }
 });
+
 process.stdin.on("end", () => {
   if (linger) setInterval(() => {}, 1000);
   else process.exit(0);

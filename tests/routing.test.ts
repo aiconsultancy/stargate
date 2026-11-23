@@ -58,10 +58,12 @@ describe("routing", () => {
         Schema.decodeUnknownResult(configSchema)({ bots: [config] }),
       ),
     ).toBe(true);
+
     const request = {
       ...event(),
       event: { ...event().event, user: "U999", channel: "C999" },
     };
+
     expect(routeEvent(request, config, identity)?.channel).toBe("C999");
     expect(
       routeEvent(
@@ -92,15 +94,18 @@ describe("routing", () => {
     for (const wildcard of [false, true]) {
       for (const dimension of ["users", "channels"] as const) {
         const config = bot();
+
         if (wildcard) {
           config.access.users = ["*"];
           config.access.channels = ["*"];
         }
+
         if (dimension === "users") config.access.deniedUsers = ["U123"];
         else config.access.deniedChannels = ["C123"];
         expect(routeEvent(event(), config, identity)).toBeUndefined();
       }
     }
+
     for (const field of ["deniedUsers", "deniedChannels"] as const) {
       const config = bot();
       config.access[field] = ["*"];
@@ -120,6 +125,7 @@ describe("routing", () => {
         Schema.decodeUnknownResult(configSchema)({ bots: [config] }),
       ),
     ).toBe(true);
+
     for (const access of [
       { ...config.access, channels: ["C*"] },
       { ...config.access, deniedUsers: ["C123"] },
@@ -149,6 +155,7 @@ describe("routing", () => {
         ?.conversation,
     );
     const changed = bot();
+
     if (changed.backend.type === "opencode")
       changed.backend.directory = "/different";
     expect(botKey(changed, identity)).not.toBe(botKey(bot(), identity));
@@ -177,6 +184,7 @@ describe("routing", () => {
       event("<@UBOT> "),
       {},
     ];
+
     for (const value of cases)
       expect(routeEvent(value, bot(), identity)).toBeUndefined();
   });
@@ -190,6 +198,7 @@ describe("routing", () => {
         thread_ts: "1.000",
       },
     };
+
     const result = routeEvent(reply, bot(), identity);
     expect(result?.startsConversation).toBe(false);
     expect(result?.conversation).toBe(
@@ -205,6 +214,7 @@ describe("routing", () => {
       ...event(),
       event: { ...event("hello").event, channel: "D123", channel_type: "im" },
     };
+
     expect(routeEvent(dm, bot(), identity)?.startsConversation).toBe(true);
   });
 

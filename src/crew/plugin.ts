@@ -57,7 +57,7 @@ import { CrewError } from "./execution/state";
 import { objectToolInput } from "./input/tool-input";
 import { CrewWaiting, waitingInputSchema } from "./controls/waiting";
 
-// greybeard: configured shared workers; only explicit DM wakes a captain.
+// Greybeard: configured shared workers; only explicit DM wakes a captain.
 // Host tools and the general HTTP API are not an OS sandbox.
 const plugin = Plugin.define({
   id: "stargate.crew",
@@ -67,6 +67,7 @@ const plugin = Plugin.define({
     const resources = resourceScope();
     let engine: CrewEngine;
     let projects: CrewProjects;
+
     try {
       projects = await resources.own(
         () =>
@@ -89,6 +90,7 @@ const plugin = Plugin.define({
                 connectHistoryAPI(selected.options.team, session, signal),
               { drain: () => activeMaintenanceDrain() },
             );
+
             return selected;
           }),
         (projects) => projects.close(),
@@ -101,9 +103,12 @@ const plugin = Plugin.define({
           : "Stargate crew setup failed; check private state access and options.",
       );
     }
+
     const models = new Map<CrewEngine, CrewModels>();
+
     const modelsFor = (selected: CrewEngine) => {
       let value = models.get(selected);
+
       if (value) return value;
       value = new CrewModels(
         selected,
@@ -118,26 +123,35 @@ const plugin = Plugin.define({
           ),
       );
       models.set(selected, value);
+
       return value;
     };
+
     const waiting = new CrewWaiting(engine);
     // Current and additional project contexts share a captain location, pin
-    // and team. The mailbox stays in the captain location's plugin instance.
+    // And team. The mailbox stays in the captain location's plugin instance.
     const { captainDirectory, captainSessionID, team } = engine.options;
+
     const captainLocation =
       resolve(ctx.location.directory) === resolve(captainDirectory);
+
     const handoff = new CrewQuestionHandoff(captainSessionID);
+
     const canUseQuestionGateway =
       team.questionGateway !== false && !!captainSessionID;
+
     const autoQuestionGateway =
       canUseQuestionGateway && team.questionGateway === undefined;
+
     const waitsForGateway = autoQuestionGateway && !!team.historyAPI;
     const workerBootstrap = !captainLocation && canUseQuestionGateway;
     let consumerRecordedAt: number | undefined;
     let unavailableReported = false;
     const questions = new Map<CrewEngine, CrewQuestions>();
+
     const questionsFor = (selected: CrewEngine) => {
       let bridge = questions.get(selected);
+
       if (bridge) return bridge;
       bridge = new CrewQuestions(
         selected,
@@ -146,6 +160,7 @@ const plugin = Plugin.define({
             { sessionID: task.workerSessionID },
             { signal },
           );
+
           if (
             worker.id !== task.workerSessionID ||
             worker.parentID ||
@@ -159,20 +174,24 @@ const plugin = Plugin.define({
             )
           )
             throw new CrewError("Native crew clarification identity changed.");
+
           // Choose one backend for this operation. An ambiguous gateway write
-          // must never be retried using direct native form access.
+          // Must never be retried using direct native form access.
           const route = handoff.route(
             selected.options.team.questionGateway,
             !!selected.options.team.historyAPI,
           );
+
           if (route === "unavailable")
             throw new CrewError(
               "Crew questions require the owning gateway with this history service.",
             );
+
           if (route === "gateway") {
             const member = selected.options.team.crew.find(
               (m) => m.id === task.crewID && !m.backend,
             );
+
             if (
               !member ||
               !worker.agent ||
@@ -181,6 +200,7 @@ const plugin = Plugin.define({
               throw new CrewError(
                 "Crew question requires the owning pinned captain.",
               );
+
             return handoff.backend(
               task,
               {
@@ -191,11 +211,13 @@ const plugin = Plugin.define({
               () => !!questionsFor(selected).active(task),
             );
           }
+
           const client = await connectHistoryAPI(
             selected.options.team,
             worker,
             signal,
           );
+
           return new OpenCodeBackend(
             {
               type: "opencode",
@@ -225,22 +247,27 @@ const plugin = Plugin.define({
         },
       );
       questions.set(selected, bridge);
+
       return bridge;
     };
+
     const cron = new CrewCron(engine);
     const post = new CrewPost(engine);
     const notifications = new CrewNotifications(engine);
+
     // Released after the RPC registrations, before the engine closes.
     const maintenance = await resources.own(
       async () => new CrewMaintenance(engine),
       (maintenance) => maintenance.dispose(),
     );
+
     const report = async <T>(
       signal: AbortSignal,
       operation: () => Promise<T>,
     ): Promise<T> => {
       try {
         signal.throwIfAborted();
+
         if (
           resolve(ctx.location.directory) !==
           resolve(engine.options.captainDirectory)
@@ -248,6 +275,7 @@ const plugin = Plugin.define({
           throw new CrewError(
             "Stargate RPC requires the configured captain location.",
           );
+
         return await operation();
       } catch (error) {
         throw new Error(
@@ -257,6 +285,7 @@ const plugin = Plugin.define({
         );
       }
     };
+
     /** One error boundary: permission first, then only safe crew messages. */
     const guard = async (
       context: ToolContext,
@@ -273,6 +302,7 @@ const plugin = Plugin.define({
         resources: [resource],
         save: [resource],
       });
+
       try {
         return { content: JSON.stringify(await run()) };
       } catch (error) {
@@ -281,6 +311,7 @@ const plugin = Plugin.define({
         });
       }
     };
+
     try {
       for (const selected of projects.contexts.values()) {
         if (workerBootstrap && !autoQuestionGateway) continue;
@@ -288,19 +319,21 @@ const plugin = Plugin.define({
         await resources.own(
           async () => {
             const stop = new AbortController();
+
             const done = Effect.runPromise(
               abortable(async (signal) => {
                 while (!signal.aborted) {
                   try {
                     // Worker locations relinquish polling to a paired captain.
                     // With a configured history service, waiting can report
-                    // the route from local state without touching native forms.
+                    // The route from local state without touching native forms.
                     const paired = workerBootstrap
                       ? engine.state.hasCrewQuestionConsumer(
                           Date.now(),
                           crewQuestionConsumerLeaseMs,
                         )
                       : handoff.hasConsumer();
+
                     if (!workerBootstrap || !paired)
                       await bridge.poll(
                         AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
@@ -309,11 +342,13 @@ const plugin = Plugin.define({
                   } catch {
                     // Only safe structured tool errors are exposed; no raw SDK logs.
                   }
+
                   await delay(3000, undefined, { signal }).catch(() => {});
                 }
               }),
               { signal: stop.signal },
             ).catch(() => {});
+
             return { stop, done };
           },
           async ({ stop, done }) => {
@@ -322,6 +357,7 @@ const plugin = Plugin.define({
           },
         );
       }
+
       await ctx.session.hook(
         "context",
         workingAgreementContext(
@@ -339,11 +375,13 @@ const plugin = Plugin.define({
             event.system,
           );
       });
+
       const register: typeof ctx.rpc.register = (definition, handlers) =>
         resources.own(
           () => ctx.rpc.register(definition, handlers),
           (registration) => registration.dispose(),
         );
+
       await register(CrewRecovery, {
         run: (input, context) =>
           report(context.signal, async () => {
@@ -357,6 +395,7 @@ const plugin = Plugin.define({
                 signal: context.signal,
               },
             );
+
             return runRecoveryOperator(selected.engine, input, context.signal);
           }),
       });
@@ -370,12 +409,14 @@ const plugin = Plugin.define({
         close: (input, context) =>
           report(context.signal, async () => maintenance.close(input)),
       });
+
       if (canUseQuestionGateway && captainLocation)
         await register(CrewQuestionRpc, {
           take: (input, context) =>
             report(context.signal, async () => {
               if (autoQuestionGateway && input.captain === captainSessionID) {
                 const now = Date.now();
+
                 if (
                   consumerRecordedAt === undefined ||
                   now < consumerRecordedAt ||
@@ -385,6 +426,7 @@ const plugin = Plugin.define({
                   consumerRecordedAt = now;
                 }
               }
+
               return handoff.take(input.captain);
             }),
           confirm: (input, context) =>
@@ -439,30 +481,36 @@ const plugin = Plugin.define({
           report(context.signal, async () => {
             const tools = noticeTools(await ctx.tool.list());
             const receipts = [];
+
             for (const selected of projects.contexts.values())
               receipts.push(
                 ...(await selected.updateNotice(input, tools, context.signal)),
               );
+
             return receipts;
           }),
         maintenanceNotice: (input, context) =>
           report(context.signal, async () => {
             const receipts = [];
+
             for (const selected of projects.contexts.values())
               receipts.push(
                 ...(await selected.maintenanceNotice(input, context.signal)),
               );
+
             return receipts;
           }),
         resumeMaintenance: (_input, context) =>
           report(context.signal, async () => {
             let resumed = 0;
             let remaining = 0;
+
             for (const selected of projects.contexts.values()) {
               const result = await selected.resumeMaintenance(context.signal);
               resumed += result.resumed;
               remaining += result.remaining;
             }
+
             return { resumed, remaining };
           }),
         quota: (_input, context) =>
@@ -521,6 +569,7 @@ const plugin = Plugin.define({
               "Crew clarification outcome unconfirmed; raw details withheld.",
               async () => {
                 const selected = await projects.select(input, context);
+
                 return questionsFor(selected.engine).run(
                   selected.input,
                   context,
@@ -587,6 +636,7 @@ const plugin = Plugin.define({
               "Quota unavailable; private details withheld.",
               async () => {
                 const selected = await projects.select(input, context);
+
                 return selected.engine.quota(selected.input, context);
               },
             ),
@@ -605,6 +655,7 @@ const plugin = Plugin.define({
               "Coordination operation unconfirmed; raw details withheld.",
               async () => {
                 const selected = await projects.select(input, context);
+
                 return selected.engine.journal(selected.input, context);
               },
             ),
@@ -623,6 +674,7 @@ const plugin = Plugin.define({
               "Coordination operation unconfirmed; raw details withheld.",
               async () => {
                 const selected = await projects.select(input, context, true);
+
                 return selected.engine.dm(selected.input, context);
               },
             ),
@@ -685,6 +737,7 @@ const plugin = Plugin.define({
               "Model operation unconfirmed; raw details withheld.",
               async () => {
                 const selected = await projects.select(input, context);
+
                 return modelsFor(selected.engine).run(selected.input, context);
               },
             ),
@@ -703,15 +756,18 @@ const plugin = Plugin.define({
               "History operation unavailable; raw details withheld.",
               async () => {
                 const selected = await projects.select(input, context);
+
                 const caller = await ctx.session.get(
                   { sessionID: context.sessionID },
                   { signal: context.signal },
                 );
+
                 const client = await connectHistoryAPI(
                   selected.engine.options.team,
                   caller,
                   context.signal,
                 );
+
                 const history = new CrewHistory({
                   sessions: client.session,
                   messages: client.message,
@@ -722,6 +778,7 @@ const plugin = Plugin.define({
                       session,
                     ),
                 });
+
                 return history.run(selected.input, context.signal);
               },
             ),
@@ -740,6 +797,7 @@ const plugin = Plugin.define({
               "Mail operation failed; raw details withheld.",
               async () => {
                 const selected = await projects.select(input, context, true);
+
                 return selected.engine.mail(selected.input, context);
               },
             ),
@@ -751,6 +809,7 @@ const plugin = Plugin.define({
         "Stargate crew tool registration failed; check plugin compatibility.",
       );
     }
+
     return resources.close;
   },
 });
@@ -760,8 +819,8 @@ export default EffectPlugin.define({
   effect: (host) =>
     Effect.gen(function* () {
       const runtime = yield* Effect.context<never>();
-      // greybeard: SDK 2.2.5 Promise methods discard request signals. Bridge
-      // native wait only; remove this override when that adapter forwards them.
+      // Greybeard: SDK 2.2.5 Promise methods discard request signals. Bridge
+      // Native wait only; remove this override when that adapter forwards them.
       const wait = nativeWait(host.session.wait, runtime);
       yield* fromPromise({
         ...plugin,

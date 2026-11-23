@@ -23,16 +23,20 @@ import { type Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const close: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const cleanup of close.splice(0).reverse()) await cleanup();
 });
+
 const captains = ["discovery", "phoenix", "prometheus", "protostar"];
 const agents = ["vance", ...captains];
+
 function config(account = "discovery", port = 6667): IrcConfig {
   const channels =
     account === "vance"
       ? ["#starbase", "#command"]
       : [`#${account}`, "#command"];
+
   return Schema.decodeUnknownSync(ircSchema)({
     id: account,
     server: { host: "127.0.0.1", port, tls: false },
@@ -81,6 +85,7 @@ function config(account = "discovery", port = 6667): IrcConfig {
     audit: { channel: "#audit" },
   });
 }
+
 function member(config: IrcConfig): IrcMember {
   return {
     id: config.id,
@@ -91,6 +96,7 @@ function member(config: IrcConfig): IrcMember {
     channels: config.channels,
   };
 }
+
 function wire(
   channel: string,
   text: string,
@@ -103,9 +109,12 @@ function wire(
       ...tags,
     }).replace(/^(@\S+ )/, "$1:jac!u@fixture "),
   );
+
   if (!parsed) throw new Error("Invalid fixture message");
+
   return parsed;
 }
+
 function route(
   config: IrcConfig,
   channel: string,
@@ -146,6 +155,7 @@ test("fake IRC capability changes are isolated from other servers and caller opt
 test("opt-in channel policy wakes all captains for human top-level messages, even another fleet addressee", () => {
   for (const account of captains) {
     const cfg = config(account);
+
     for (const text of [
       "rollcall please",
       "vance: arrange a rollcall",
@@ -160,6 +170,7 @@ test("opt-in channel policy wakes all captains for human top-level messages, eve
         true,
       );
     }
+
     expect(route(cfg, `#${account}`, "own-channel work")).toBeDefined();
     expect(
       route(cfg, "#command", "peer chatter", { account: "vance", bot: "" }),
@@ -172,18 +183,21 @@ test("opt-in channel policy wakes all captains for human top-level messages, eve
     ).toBeUndefined();
     expect(route(cfg, "#command", "bot human", { bot: "" })).toBeUndefined();
   }
+
   const vance = config("vance");
   expect(route(vance, "#command", "rollcall please")).toBeUndefined();
   expect(route(vance, "#command", "@vance: rollcall please")).toBeDefined();
   expect(route(vance, "#starbase", "rollcall please")).toBeDefined();
   expect(route(vance, "#audit", "vance: no conversation")).toBeUndefined();
   const cfg = config();
+
   const crew = {
     ...member(cfg),
     role: "crew" as const,
     account: "worker",
     nick: "worker",
   };
+
   expect(
     routeIrcMessage(wire("#command", "ordinary human broadcast"), {
       config: cfg,
@@ -201,7 +215,9 @@ test("fleet visitors require a current explicit tag, even in a thread they joine
   for (const account of ["phoenix", "vance"]) {
     const base = config(account);
     const channel = "#prometheus";
+
     if (!base.fleetControl) throw new Error("Missing fleet control fixture");
+
     const cfg = {
       ...base,
       channels: [...base.channels, channel],
@@ -219,11 +235,14 @@ test("fleet visitors require a current explicit tag, even in a thread they joine
         ],
       },
     };
+
     const visitor = member(cfg);
+
     const withoutResults = {
       ...cfg,
       fleetControl: { ...cfg.fleetControl, results: false },
     };
+
     expect(
       ircResultJobAllowed(withoutResults, visitor, account, "jac", {
         channel,
@@ -241,6 +260,7 @@ test("fleet visitors require a current explicit tag, even in a thread they joine
         text: "Raise digest",
       }),
     ).toBe(true);
+
     const admit = (text: string, sender: string, inThread: boolean) =>
       routeIrcMessage(
         wire(channel, text, {
@@ -260,6 +280,7 @@ test("fleet visitors require a current explicit tag, even in a thread they joine
           participating: () => true,
         },
       );
+
     for (const sender of ["jac", "prometheus"]) {
       for (const inThread of [false, true]) {
         for (const text of [
@@ -281,6 +302,7 @@ test("fleet visitors require a current explicit tag, even in a thread they joine
             }),
           ).toBe(false);
         }
+
         const text = `@${account.toUpperCase()} please check`;
         const admitted = admit(text, sender, inThread);
         expect(admitted?.textMention).toBe(`@${account}`);
@@ -289,6 +311,7 @@ test("fleet visitors require a current explicit tag, even in a thread they joine
         ).toBe(true);
       }
     }
+
     const label = `[fleet_dispatch from=prometheus source=fixture authority=human dispatch=abc; not human approval] ${account}: check CI`;
     const envelope = admit(label, "prometheus", false);
     expect(envelope).toBeDefined();
@@ -311,6 +334,7 @@ test("only explicit invitations or confirmed own replies create durable thread p
   let store = openStore(path);
   const cfg = config();
   const broad = route(cfg, "#command", "top-level", { msgid: "root" }, store);
+
   if (!broad) throw new Error("Missing broad input");
   expect(store.enqueueIrcHuman(broad, false)).toBe(true);
   expect(store.irc.ircThreadParticipating(cfg.id, "#command", "root")).toBe(
@@ -328,6 +352,7 @@ test("only explicit invitations or confirmed own replies create durable thread p
   expect(
     route(cfg, "#command", "unknown", { "+reply": "unknown" }, store),
   ).toBeUndefined();
+
   const invited = route(
     cfg,
     "#command",
@@ -335,6 +360,7 @@ test("only explicit invitations or confirmed own replies create durable thread p
     { msgid: "invite", "+draft/reply": "unknown" },
     store,
   );
+
   if (!invited) throw new Error("Missing invited input");
   expect(invited.threadInvitation).toBe(true);
   expect(
@@ -369,6 +395,7 @@ test("only explicit invitations or confirmed own replies create durable thread p
   );
   store.close();
   store = openStore(path);
+
   try {
     expect(
       route(
@@ -393,6 +420,7 @@ test("only explicit invitations or confirmed own replies create durable thread p
     expect(store.irc.ircThreadParticipating(cfg.id, "#other", "root")).toBe(
       false,
     );
+
     for (const tags of [
       { "+draft/reply": "" },
       { "+reply": "bad\nroot" },
@@ -407,9 +435,11 @@ test("only explicit invitations or confirmed own replies create durable thread p
 
 test("all-replies mode admits unknown opaque parents from verified humans; other channels and captains stay restricted", () => {
   const store = openStore(":memory:");
+
   try {
     const cfg = config("vance");
     const broad = route(cfg, "#starbase", "root", { msgid: "root" }, store);
+
     if (!broad) throw new Error("Missing root");
     store.enqueueIrcHuman(broad, false);
     expect(
@@ -421,6 +451,7 @@ test("all-replies mode admits unknown opaque parents from verified humans; other
         store,
       ),
     ).toBeDefined();
+
     const unknown = route(
       cfg,
       "#starbase",
@@ -428,6 +459,7 @@ test("all-replies mode admits unknown opaque parents from verified humans; other
       { "+draft/reply": "unknown" },
       store,
     );
+
     expect(unknown).toMatchObject({
       user: "jac",
       thread: "request",
@@ -465,10 +497,12 @@ test("all-replies mode admits unknown opaque parents from verified humans; other
         store,
       ),
     ).toBeUndefined();
+
     const legacy = {
       ...cfg,
       access: { ...cfg.access, humanWakeChannels: undefined },
     };
+
     expect(route(legacy, "#starbase", "unaddressed")).toBeUndefined();
     expect(
       Result.isSuccess(
@@ -526,6 +560,7 @@ async function liveFixture(multiline = false) {
       agents.map((account) => [account, "fixture-password"]),
     ),
   });
+
   if (multiline) fake.caps.push("draft/multiline=max-bytes=4096,max-lines=100");
   fake.start();
   close.push(() => fake.stop());
@@ -533,25 +568,32 @@ async function liveFixture(multiline = false) {
   close.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "state.sqlite");
   let store = openStore(path);
+
   const prompts: {
     account: string;
     text: string;
     context?: PromptSourceContext;
   }[] = [];
+
   let ships: IrcShip[] = [];
   let controllers: AbortController[] = [];
   let workers: Promise<void>[] = [];
   const log = pino({ level: "silent" });
+
   const start = async () => {
     for (const account of agents) {
       const cfg = config(account, fake.port);
+
       const ship = await IrcShip.create(cfg, store, log, {
         env: { IRC_TEST_PASSWORD: "fixture-password" },
         timing: { reconnectMinMs: 20, intervalMs: 1, burst: 100 },
         readyMs: 2000,
       });
+
       const primary = ship.registrations[0];
+
       if (!primary) throw new Error("Missing captain");
+
       const backend: AgentBackend = {
         sessionID: `ses_${account}`,
         async createSession() {
@@ -567,13 +609,16 @@ async function liveFixture(multiline = false) {
           context,
         ) {
           prompts.push({ account, text, ...(context ? { context } : {}) });
+
           return text.includes("remain silent")
             ? "[[stargate:silent]]"
             : `${account} reply`;
         },
         async close() {},
       };
+
       const detail = ircDashboardShip(primary, cfg, backend);
+
       if (detail.transport?.kind !== "irc")
         throw new Error("Missing IRC dashboard transport");
       expect(detail.transport.access.humanWakeChannels).toEqual(
@@ -597,6 +642,7 @@ async function liveFixture(multiline = false) {
       ships.push(ship);
       ship.start(() => true);
     }
+
     await until(
       () =>
         ships.every((ship) =>
@@ -606,6 +652,7 @@ async function liveFixture(multiline = false) {
       "all human wake agents joined",
     );
   };
+
   const stop = async () => {
     for (const controller of controllers) controller.abort();
     await Promise.all(workers);
@@ -614,23 +661,28 @@ async function liveFixture(multiline = false) {
     controllers = [];
     workers = [];
   };
+
   close.push(async () => {
     await stop();
     store.close();
   });
   await start();
+
   const settled = () =>
     until(
       () =>
         ships.every((ship) => {
           const key = ship.registrations[0]?.key;
+
           if (!key) return false;
           const q = store.queueCounts(key);
+
           return q.queued + q.running + q.responding === 0;
         }),
       5000,
       "human wake requests settled",
     );
+
   return {
     fake,
     prompts,
@@ -654,24 +706,29 @@ async function liveFixture(multiline = false) {
 for (const multiline of [false, true])
   test(`real IRC intake keeps silent broad listeners out of threads, confirms publication, and survives restart/replay (${multiline ? "multiline" : "single line"})`, async () => {
     const f = await liveFixture(multiline);
+
     const root = f.fake.say(
       { nick: "jac", account: "jac" },
       "#command",
       "@vance: remain silent",
     );
+
     await until(
       () => f.prompts.length === 5,
       5000,
       "all captains and tagged Vance saw top-level input",
     );
     await f.settled();
+
     for (const ship of f.ships) {
       const primary = ship.registrations[0];
+
       if (!primary) throw new Error("Missing captain");
       expect(
         f.store.irc.ircThreadParticipating(primary.key, "#command", root),
       ).toBe(false);
     }
+
     f.fake.say({ nick: "jac", account: "jac" }, "#command", "uninvited reply", {
       "+draft/reply": root,
     });
@@ -688,18 +745,25 @@ for (const multiline of [false, true])
       "one captain explicitly invited",
     );
     await f.settled();
+
     const discovery = f.ships.find(
       (ship) => ship.registrations[0]?.account === "discovery",
     )?.registrations[0];
+
     if (!discovery) throw new Error("Missing discovery");
+
     const publication = () => {
       const lines = f.fake.received("discovery");
+
       const message = lineOf(lines, "PRIVMSG").find(
         (line) =>
           line.params[0] === "#command" && line.params[1] === "discovery reply",
       );
+
       const batch = message?.tags.get("batch");
+
       if (batch === undefined) return message;
+
       // Client tags belong to a multiline BATCH opener, not its inner lines.
       return lineOf(lines, "BATCH").find(
         (line) =>
@@ -708,8 +772,9 @@ for (const multiline of [false, true])
           line.params[2] === "#command",
       );
     };
+
     // The explicit invitation already records participation; wait for the real
-    // wire response rather than treating that earlier state as delivery proof.
+    // Wire response rather than treating that earlier state as delivery proof.
     await until(
       () => publication() !== undefined,
       5000,
@@ -761,12 +826,14 @@ for (const multiline of [false, true])
     await f.settled();
     expect(f.prompts.at(-1)?.account).toBe("vance");
     expect(f.prompts).toHaveLength(final + 1);
+
     const opaque = f.fake.say(
       { nick: "jac", account: "jac" },
       "#starbase",
       "human reply to unseen context",
       { "+draft/reply": "unseen-parent" },
     );
+
     await until(
       () => f.prompts.length === final + 2,
       5000,
@@ -785,16 +852,21 @@ for (const multiline of [false, true])
 
 test("only matched actual own publication joins a broad-wake thread; forged own echoes cannot create membership", async () => {
   const f = await liveFixture();
+
   const root = f.fake.say(
     { nick: "jac", account: "jac" },
     "#command",
     "plain top-level request",
   );
+
   await until(() => f.prompts.length === 4, 5000, "four broad captain turns");
   await f.settled();
+
   for (const ship of f.ships) {
     const primary = ship.registrations[0];
+
     if (!primary) throw new Error("Missing captain");
+
     if (primary.account === "vance") continue;
     await until(
       () => f.store.irc.ircThreadParticipating(primary.key, "#command", root),
@@ -810,6 +882,7 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
       `@account=jac;msgid=wrong-account-own;+draft/reply=wrong-root :${primary.account}!u@fixture PRIVMSG #command :Wrong SASL identity`,
     );
   }
+
   f.fake.say({ nick: "jac", account: "jac" }, "#command", "thread follow-up", {
     "+draft/reply": root,
   });
@@ -819,8 +892,10 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
     "actual publishers rejoin thread",
   );
   await f.settled();
+
   for (const ship of f.ships) {
     const primary = ship.registrations[0];
+
     if (!primary) throw new Error("Missing captain");
     expect(
       f.store.irc.ircThreadParticipating(
@@ -836,6 +911,7 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
       f.store.irc.ircThreadParticipating(primary.key, "#command", "wrong-root"),
     ).toBe(false);
   }
+
   let missed = "";
   await f.restart(() => {
     missed = f.fake.say(
@@ -850,8 +926,10 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
     "missed human root admitted once through history",
   );
   await f.settled();
+
   for (const ship of f.ships) {
     const primary = ship.registrations[0];
+
     if (!primary) throw new Error("Missing captain");
     expect(
       f.store.irc.ircThreadParticipating(primary.key, "#command", missed),

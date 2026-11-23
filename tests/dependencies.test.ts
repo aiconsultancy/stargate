@@ -6,6 +6,7 @@ test("Pi runtime packages stay pinned to one release", async () => {
   const { dependencies } = z
     .object({ dependencies: z.record(z.string(), z.string()) })
     .parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
+
   const versions = [
     "@earendil-works/chord",
     "@earendil-works/pi-ai",
@@ -16,6 +17,7 @@ test("Pi runtime packages stay pinned to one release", async () => {
       .regex(/^\d+\.\d+\.\d+$/)
       .parse(dependencies[name]),
   );
+
   expect(new Set(versions).size).toBe(1);
 });
 
@@ -23,6 +25,7 @@ test("Claude Agent SDK stays pinned to one exact release", async () => {
   const { dependencies } = z
     .object({ dependencies: z.record(z.string(), z.string()) })
     .parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
+
   // The SDK bundles its Claude Code CLI; a range would change it silently.
   expect(dependencies["@anthropic-ai/claude-agent-sdk"]).toMatch(
     /^\d+\.\d+\.\d+$/,
@@ -33,10 +36,12 @@ test("Codex SDK stays pinned to one exact release with its CLI", async () => {
   const { dependencies } = z
     .object({ dependencies: z.record(z.string(), z.string()) })
     .parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
+
   const pinned = z
     .string()
     .regex(/^\d+\.\d+\.\d+$/)
     .parse(dependencies["@openai/codex-sdk"]);
+
   // The SDK runs the CLI of its own version; the lock must agree.
   const sdk = z
     .object({
@@ -51,6 +56,7 @@ test("Codex SDK stays pinned to one exact release with its CLI", async () => {
         ),
       ).json(),
     );
+
   expect(sdk.version).toBe(pinned);
   expect(sdk.dependencies["@openai/codex"]).toBe(pinned);
 });
@@ -73,17 +79,23 @@ test("dependency provenance checks every page, signature, count, and current hea
         ).text(),
       ),
     );
+
   const script = workflow.jobs.quality.steps.find(
     ({ name }) => name === "Verify dependency commit provenance",
   )?.run;
+
   const filter = script?.split("jq -e")[1]?.match(/'([\s\S]+)'/)?.[1];
+
   if (!filter) throw new Error("Missing dependency provenance filter");
+
   const trusted = {
     sha: "head",
     author: { login: "dependabot[bot]" },
     commit: { verification: { verified: true } },
   };
+
   const first = { ...trusted, sha: "first" };
+
   const status = (pages: unknown[][], count: number, head = "head") =>
     spawnSync(
       "jq",
@@ -99,6 +111,7 @@ test("dependency provenance checks every page, signature, count, and current hea
       ],
       { input: JSON.stringify(pages), encoding: "utf8" },
     ).status;
+
   expect(status([[trusted]], 1)).toBe(0);
   expect(status([[first], [trusted]], 2)).toBe(0);
   expect(
@@ -121,16 +134,20 @@ test("OpenCode SDK packages share an exact stable release and its Effect version
     dependencies: z.record(z.string(), z.string()),
     peerDependencies: z.record(z.string(), z.string()).default({}),
   });
+
   const read = async (path: string) =>
     manifest.parse(await Bun.file(new URL(path, import.meta.url)).json());
+
   const stargate = await read("../package.json");
   const plugin = await read("../node_modules/@opencode/plugin/package.json");
   const client = await read("../node_modules/@opencode/client/package.json");
   const schema = await read("../node_modules/@opencode/schema/package.json");
+
   const sdkVersion = z
     .string()
     .regex(/^\d+\.\d+\.\d+$/)
     .parse(stargate.dependencies["@opencode/plugin"]);
+
   expect(stargate.dependencies["@opencode/client"]).toBe(sdkVersion);
   expect(stargate.dependencies["@opencode/schema"]).toBe(sdkVersion);
   expect(client.version).toBe(sdkVersion);
@@ -175,6 +192,7 @@ test("Dependabot updates OpenCode and Effect together after one day", async () =
         ).text(),
       ),
     );
+
   const bun = updates.find((update) => update["package-ecosystem"] === "bun");
   expect(bun?.groups["opencode-sdk"]?.patterns).toEqual([
     "@opencode/*",
@@ -185,6 +203,7 @@ test("Dependabot updates OpenCode and Effect together after one day", async () =
   expect(groups.indexOf("opencode-sdk")).toBeLessThan(
     groups.indexOf("dependencies"),
   );
+
   for (const update of updates) {
     expect(update.schedule.interval).toBe("daily");
     expect(update.cooldown["default-days"]).toBe(1);

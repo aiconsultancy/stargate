@@ -23,6 +23,7 @@ export type DeliveryUnit = {
 };
 
 export type IrcTurnStatus = "notice" | "live" | "quiet";
+
 export type RequestOutcome = "completed" | "failed";
 
 /** A verified reaction target a transport may publish a reaction onto. */
@@ -72,7 +73,7 @@ export interface TransportDelivery {
     /** Already classified content of `text`; the transport must not reparse. */
     content?: SlackContent,
   ): Promise<string> | Promise<void>;
-  /** false means the user removed the preview; post a replacement. */
+  /** False means the user removed the preview; post a replacement. */
   update?(
     channel: string,
     ts: string,

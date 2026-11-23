@@ -83,6 +83,7 @@ async function installedRelease(
 ): Promise<string | null> {
   try {
     const directory = await realpath(resolve(dirname(unit.entrypoint), ".."));
+
     return dirname(directory) === (await realpath(layout(root).releases)) &&
       (await readMetadata(directory))?.verification === "verified"
       ? basename(directory)
@@ -101,10 +102,13 @@ const stargateOf = (report: Report) =>
 /** Which services a switch to `version` restarts, as far as is known now. */
 async function restartText(config: Config, version: string) {
   const root = config.maintenance?.stargate?.root;
+
   if (!root) return "";
   const staged = await readMetadata(join(root, "releases", version));
+
   if (staged?.verification !== "verified")
     return "Restart: decided after staging. The gateway only when the crew plugin is unchanged; otherwise OpenCode and the gateway.";
+
   return (await samePlugin(root, version))
     ? "Restart: the gateway only (the crew plugin is unchanged)."
     : "Restart: OpenCode and the gateway (the crew plugin changed or is unknown).";
@@ -112,15 +116,21 @@ async function restartText(config: Config, version: string) {
 
 function refusal(report: Report, version: string) {
   const stargate = stargateOf(report);
+
   if (!stargate) return "No managed Stargate release is configured.";
+
   if (stargate.status === "unchanged")
     return `Stargate ${version} is the current release. Nothing to do.`;
+
   if (stargate.reason === "version-mismatch")
     return `Refused: ${version} is older than the current release ${stargate.before}. To go back after a failed update, use stargate maintenance recover.`;
+
   if (stargate.reason === "known-bad")
     return `Refused: ${version} failed here after an earlier switch. Use --retry-failed to try it again.`;
+
   if (stargate.reason === "not-found")
     return `Refused: no published release ${version} was found.`;
+
   return `Refused: Stargate ${version} cannot be installed (${stargate.reason ?? stargate.status}).`;
 }
 
@@ -130,24 +140,31 @@ export async function maintenanceUpdate(
   deps: UpdateDependencies,
 ): Promise<number> {
   const m = config.maintenance;
+
   if (!m?.stargate)
     throw new UpdateRefused("maintenance.stargate is required for an update.");
   const version = options.version;
+
   if (!version || normalizeVersion(version) !== version)
     throw new UpdateRefused("--version MAJOR.MINOR.PATCH is required.");
+
   if (options.plan === options.now)
     throw new UpdateRefused("Use exactly one of --plan and --now.");
+
   if (options.foreground && !options.now)
     throw new UpdateRefused("--foreground applies only with --now.");
+
   // The code that switches, rolls back and recovers is this release's.
   const runnerRelease = options.now
     ? await installedRelease(m.stargate.root, deps.unit)
     : null;
+
   if (options.now && !runnerRelease)
     throw new UpdateRefused(
       `This Stargate is not an installed release: an update runs only from a verified release in ${layout(m.stargate.root).releases}. Run the installed stargate (${join(layout(m.stargate.root).current, "src", "main.ts")}). Nothing was changed.`,
     );
   const maintenance = deps.maintenance ?? runMaintenance;
+
   const input = (mode: "plan" | "run"): RunInput => ({
     config,
     configPath: options.configPath,
@@ -159,13 +176,16 @@ export async function maintenanceUpdate(
     },
     signal: deps.signal,
   });
+
   const run = (mode: "plan" | "run") =>
     maintenance(input(mode), { ...defaultDependencies, ...deps.run });
 
   if (options.foreground) {
     const { report, reportPath, attention } = await run("run");
+
     if (options.json) deps.print(JSON.stringify(report, null, 2));
     else deps.print(summary(report, reportPath ?? "not written"));
+
     return report.outcome === "failed" ||
       attention ||
       stargateOf(report)?.status !== "updated"
@@ -176,6 +196,7 @@ export async function maintenanceUpdate(
   // Read-only: the same checks that the update makes first.
   const { report } = await run("plan");
   const planned = stargateOf(report)?.status === "planned";
+
   if (options.plan) {
     if (options.json) deps.print(JSON.stringify(report, null, 2));
     else if (planned) {
@@ -185,13 +206,18 @@ export async function maintenanceUpdate(
       deps.print(await restartText(config, version));
       deps.print("Nothing was changed.");
     } else deps.print(refusal(report, version));
+
     return planned || stargateOf(report)?.status === "unchanged" ? 0 : 1;
   }
+
   if (!planned) {
     deps.print(refusal(report, version));
+
     return stargateOf(report)?.status === "unchanged" ? 0 : 1;
   }
+
   const unit = `stargate-update-${version.replaceAll(".", "-")}-${Math.floor(deps.now() / 1000)}`;
+
   const started = await deps.launcher.run(
     buildUpdateCommand({
       unit,
@@ -204,6 +230,7 @@ export async function maintenanceUpdate(
     }),
     { timeoutMs: 30_000 },
   );
+
   if (started.code !== 0)
     throw new UpdateRefused(
       "systemd-run could not start the update unit. Check the user session bus and that Bun can run. Nothing was changed.",
@@ -219,5 +246,6 @@ export async function maintenanceUpdate(
       `Verify: ${join(config.dataDirectory, "ready.json")} names version ${version}.`,
     ].join("\n"),
   );
+
   return 0;
 }

@@ -21,19 +21,25 @@ export function settingsStruct<const F extends Schema.Struct.Fields>(
       Schema.mutableKey(value),
     ]),
   ) as { [K in keyof F]: Schema.mutableKey<F[K]> };
+
   const keys = new Set(Object.keys(fields));
+
   const exact = Schema.makeFilter<unknown>(
     (value) => {
       if (!Predicate.isObject(value)) return "Expected an object";
       const extra: string[] = [];
+
       for (const key in value) if (!keys.has(key)) extra.push(key);
+
       return extra.length
         ? `Unrecognized key${extra.length === 1 ? "" : "s"}: ${extra.map((key) => JSON.stringify(key)).join(", ")}`
         : undefined;
     },
     { settingsRawDiagnostic: true },
   );
+
   const shape = Schema.Struct(mutable);
+
   return Schema.flip(Schema.flip(shape.check(exact)).check(exact));
 }
 
@@ -57,6 +63,7 @@ export function settingsRecord<
             return input;
           const copy = { ...input };
           Reflect.deleteProperty(copy, "__proto__");
+
           return copy;
         },
         encode: (input) => input,
@@ -105,17 +112,19 @@ export function settingsDefault<S extends Schema.Constraint>(value: S["Type"]) {
 /** Unknown discriminators retain the configuration field's original path. */
 export function settingsDiscriminatedUnion<
   const Key extends string,
-  const Members extends ReadonlyArray<
-    Schema.Constraint & { readonly Type: { readonly [K in Key]: PropertyKey } }
-  >,
+  const Members extends readonly (Schema.Constraint & {
+    readonly Type: Readonly<Record<Key, PropertyKey>>;
+  })[],
 >(key: Key, members: Members) {
   const union = Schema.Union(members).pipe(Schema.toTaggedUnion(key));
   const tags = new Set(Object.keys(union.cases));
+
   const discriminator = Schema.makeFilter<unknown>((value) =>
     Predicate.isObject(value) && !tags.has(String(value[key]))
       ? { path: [key], issue: "Invalid input" }
       : undefined,
   );
+
   return Schema.Unknown.check(discriminator).pipe(Schema.decodeTo(union));
 }
 
@@ -139,6 +148,7 @@ export function settingsCheck<T>(
         addIssue: ({ path = [], message = "Invalid input" }) =>
           issues.push({ path, issue: message }),
       });
+
       return issues;
     },
     { settingsDiagnostic: true },
@@ -164,6 +174,7 @@ export const settingsURL = Schema.Trim.check(
     }),
   ),
 );
+
 /** Keep the existing JSON pattern without changing non-Unicode JS semantics. */
 export const settingsPattern = (
   pattern: RegExp,
@@ -188,6 +199,7 @@ export const settingsUUID = Schema.String.check(
     /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
   ),
 );
+
 export const settingsEmail = Schema.String.check(
   settingsPattern(
     /^(?:[A-Za-z0-9_'+-]+\.)*[A-Za-z0-9_'+-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/,
@@ -200,6 +212,7 @@ export const settingsIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 const absolutePath = Schema.String.check(
   settingsRefine(isAbsolute, { message: "Use an absolute path" }),
 );
+
 const envName = Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/));
 
 export { absolutePath, envName };
@@ -209,6 +222,7 @@ export const secureLocalOrHttpsURL = settingsURL.check(
     (value) => {
       const url = new URL(value);
       const loopback = isLoopbackHost(url.hostname);
+
       return (
         (url.protocol === "https:" || (url.protocol === "http:" && loopback)) &&
         !url.username &&

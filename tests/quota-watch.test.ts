@@ -9,6 +9,7 @@ import { QuotaWatch, quotaWatchSchema } from "../src/quota/quota-watch";
 import { isAllowedChannel } from "../src/gateway/routing";
 
 const start = Date.parse("2026-11-15T12:00:00Z");
+
 const config = {
   proxy: {
     baseURL: "http://127.0.0.1:8317",
@@ -37,7 +38,7 @@ function account(
         usedPercent: 100 - remaining,
         remainingPercent: remaining,
         active: null,
-        resetAt: now + 3600_000,
+        resetAt: now + 3_600_000,
       },
     ],
   };
@@ -46,13 +47,16 @@ function account(
 test("quota notices and launch policy track the two providers independently across restarts", async () => {
   const path = await mkdtemp(join(tmpdir(), "stargate-quota-watch-"));
   const stateFile = join(path, "crew", "quota.json");
+
   const settings = Schema.decodeUnknownSync(quotaWatchSchema)({
     ...config,
     stateFile,
   });
+
   const messages: string[] = [];
   let now = start;
   let accounts: Account[] = [];
+
   const create = () =>
     new QuotaWatch(
       settings,
@@ -70,9 +74,12 @@ test("quota notices and launch policy track the two providers independently acro
       { warn: () => {} },
       () => now,
     );
+
   const signal = new AbortController().signal;
+
   const state = async (): Promise<unknown> =>
     JSON.parse(await readFile(stateFile, "utf8"));
+
   try {
     accounts = [account("claude", 25, now), account("codex", 75, now)];
     await create().tick(signal);
@@ -97,7 +104,7 @@ test("quota notices and launch policy track the two providers independently acro
       { ...account("claude", 100, now), status: "unavailable" },
       {
         ...account("codex", 100, now),
-        windows: account("codex", 100, now - 7200_000).windows,
+        windows: account("codex", 100, now - 7_200_000).windows,
       },
     ];
     await create().tick(signal);
@@ -125,17 +132,21 @@ test("quota notices and launch policy track the two providers independently acro
 test("quota compares the tightest windows without adding account percentages", async () => {
   const path = await mkdtemp(join(tmpdir(), "stargate-quota-watch-pool-"));
   const stateFile = join(path, "quota.json");
+
   const settings = Schema.decodeUnknownSync(quotaWatchSchema)({
     ...config,
     stateFile,
     providers: ["claude"],
   });
+
   const a = account("claude", 90, start);
   const b = account("claude", 14, start, 2);
   const weekly = account("claude", 20, start).windows[0];
+
   if (!weekly) throw new Error("Missing fixture limit");
   a.windows.push({ ...weekly, window: "5h" });
   a.windows.push({ ...weekly, scope: "fable", remainingPercent: 0 });
+
   const watcher = new QuotaWatch(
     settings,
     {
@@ -150,6 +161,7 @@ test("quota compares the tightest windows without adding account percentages", a
     { warn: () => {} },
     () => start,
   );
+
   try {
     await watcher.tick(new AbortController().signal);
     expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual({
@@ -171,12 +183,16 @@ test("quota report config authorises one outbound destination without opening in
     access: { users: ["U123"], channels: ["C456"], deniedChannels: ["C789"] },
     backend: { type: "module", module: "/private/backend.ts" },
   };
+
   const quotaWatch = { ...config, stateFile: "/private/quota.json" };
+
   const parsed = Schema.decodeUnknownSync(configSchema)({
     bots: [bot],
     quotaWatch,
   });
+
   const reporter = parsed.bots[0];
+
   if (!reporter) throw new Error("Missing report bot fixture");
   expect(isAllowedChannel(reporter, quotaWatch.report.channel)).toBe(false);
   expect(
@@ -207,13 +223,16 @@ test("native Codex receipts override proxy accounts and only a valid fresh recei
   const path = await mkdtemp(join(tmpdir(), "stargate-native-quota-"));
   const stateFile = join(path, "quota.json");
   const nativeCodexFile = join(path, "native.json");
+
   const settings = Schema.decodeUnknownSync(quotaWatchSchema)({
     ...config,
     stateFile,
     nativeCodexFile,
   });
+
   const messages: string[] = [];
   let now = start;
+
   const watcher = new QuotaWatch(
     settings,
     {
@@ -230,15 +249,19 @@ test("native Codex receipts override proxy accounts and only a valid fresh recei
     { warn: () => {} },
     () => now,
   );
+
   const write = (remainingPercent: number, resetAt: number | null = null) =>
     writeFile(
       nativeCodexFile,
       JSON.stringify({ remainingPercent, observedAt: now / 1000, resetAt }),
       { mode: 0o600 },
     );
+
   const signal = new AbortController().signal;
+
   const state = async (): Promise<unknown> =>
     JSON.parse(await readFile(stateFile, "utf8"));
+
   try {
     await write(8);
     await watcher.tick(signal);

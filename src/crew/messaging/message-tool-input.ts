@@ -23,6 +23,7 @@ function jsonTarget(
       $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12,
       ...json,
     });
+
   if (target === "draft-07")
     return structuredClone({
       $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
@@ -40,8 +41,10 @@ export function messagePortableSchema<S extends Schema.Codec<unknown, unknown>>(
   schema: S,
 ) {
   const native = Schema.toStandardSchemaV1(schema);
+
   const project = ({ target }: { target: StandardJSONSchemaV1.Target }) =>
     jsonTarget(settingsInputAdvertisement(schema), target);
+
   return Object.assign(native, {
     "~standard": {
       ...native["~standard"],
@@ -60,10 +63,12 @@ export function messageOpenCodeInput(
   const decode = Schema.decodeUnknownResult(effectProjectToolInput(schema), {
     errors: "all",
   });
+
   const members = "members" in schema ? schema.members : [schema];
   const union = "members" in schema;
   const properties: Record<string, unknown> = {};
   const fields = new Map<string, Schema.Constraint[]>();
+
   for (const member of members)
     for (const [key, field] of Object.entries(member.fields)) {
       const variants = fields.get(key) ?? [];
@@ -74,6 +79,7 @@ export function messageOpenCodeInput(
       );
       fields.set(key, variants);
     }
+
   const operation = union
     ? Schema.decodeUnknownResult(
         Schema.Struct({
@@ -86,15 +92,20 @@ export function messageOpenCodeInput(
         { errors: "all" },
       )
     : undefined;
+
   const decoders = new Map<
     string,
-    Array<(raw: unknown) => Result.Result<unknown, Schema.SchemaError>>
+    ((raw: unknown) => Result.Result<unknown, Schema.SchemaError>)[]
   >();
+
   const required: string[] = [];
+
   for (const [key, variants] of fields) {
     const schemas = variants.map((field) => settingsInputAdvertisement(field));
+
     if (union) for (const field of schemas) delete field["default"];
     properties[key] = union ? { anyOf: schemas } : schemas[0];
+
     if (
       union
         ? key === "op"
@@ -111,20 +122,24 @@ export function messageOpenCodeInput(
       ),
     );
   }
+
   properties["project"] = settingsInputAdvertisement(
     effectProjectKeySchema.annotate({
       description:
         "Configured repository key, never a path. Captain omission uses default; worker omission uses its persisted native context.",
     }),
   );
+
   const json = {
     type: "object",
     properties,
     required,
     additionalProperties: false,
   };
+
   const project = ({ target }: { target: StandardJSONSchemaV1.Target }) =>
     jsonTarget(json, target);
+
   return {
     "~standard": {
       version: 1,
@@ -132,8 +147,10 @@ export function messageOpenCodeInput(
       jsonSchema: { input: project, output: project },
       validate: (raw) => {
         const result = decode(raw);
+
         if (Result.isFailure(result)) {
           const failed = operation?.(raw);
+
           if (failed && Result.isFailure(failed))
             return {
               issues: [
@@ -143,17 +160,25 @@ export function messageOpenCodeInput(
                 ...settingsIssues(failed.failure.issue).issues,
               ],
             };
+
           return settingsIssues(result.failure.issue);
         }
+
         const value: Record<string, unknown> = {};
+
         for (const key of Object.keys(properties)) {
           const present = Object.hasOwn(result.success, key);
+
           if (!present && (union || key === "project")) continue;
           const input = result.success[key];
+
           if (present) value[key] = input;
+
           if (union && input === undefined) continue;
+
           for (const decoder of decoders.get(key) ?? []) {
             const decoded = decoder(input);
+
             if (Result.isSuccess(decoded)) {
               if (present || decoded.success !== undefined)
                 value[key] = decoded.success;
@@ -161,6 +186,7 @@ export function messageOpenCodeInput(
             }
           }
         }
+
         return { value };
       },
     },
@@ -171,19 +197,24 @@ export function messageOpenCodeInput(
 export function messagePiParameters(schema: EffectToolInput) {
   const json = settingsAdvertisement(schema);
   const branches = "members" in schema ? json["anyOf"] : [json];
+
   if ("members" in schema && Array.isArray(branches)) {
     json["oneOf"] = branches;
     delete json["anyOf"];
   }
+
   if (Array.isArray(branches))
     for (const branch of branches) {
       const properties = Predicate.isObject(branch)
         ? branch["properties"]
         : undefined;
+
       const text = Predicate.isObject(properties)
         ? properties["text"]
         : undefined;
+
       if (Predicate.isObject(text)) delete text["pattern"];
     }
+
   return { $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12, ...json };
 }

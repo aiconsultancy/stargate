@@ -152,6 +152,7 @@ export type V1Feature = {
 };
 
 export type V1Transport = "slack" | "irc" | "teams";
+
 export type V1Backend =
   | "opencode"
   | "pi-durable"
@@ -168,6 +169,7 @@ export type V1RequestProgress = {
   status: import("../../../gateway/store").JobStatus;
   failure: import("../../../shared/request-failure").RequestFailure | null;
 };
+
 export type V1Captain = {
   requests?: V1RequestProgress[];
   /** Configured registration ID. */
@@ -178,7 +180,7 @@ export type V1Captain = {
   backend: V1Backend;
   model: string | null;
   queue: V1QueueCounts;
-  /** running when a job runs, queued when only queued jobs exist, else idle. */
+  /** Running when a job runs, queued when only queued jobs exist, else idle. */
   activity: "running" | "queued" | "idle";
   /** When `activity` last changed while this process was running. */
   since: number | null;

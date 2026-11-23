@@ -44,6 +44,7 @@ test("team configuration rejects ambiguous identities and implicit tool access",
       ),
     ).toBe(false);
   }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(teamSchema)({ ...team, unknown: true }),
@@ -54,6 +55,7 @@ test("team configuration rejects ambiguous identities and implicit tool access",
 test("specialisms share broad tools without granting captain model controls", () => {
   const research = crewPermissions("research");
   const coding = crewPermissions("coding");
+
   for (const action of ["shell", "edit", "execute", "browser"]) {
     expect(research).toContainEqual({
       action,
@@ -62,6 +64,7 @@ test("specialisms share broad tools without granting captain model controls", ()
     });
     expect(coding).toContainEqual({ action, resource: "*", effect: "allow" });
   }
+
   expect(research).toContainEqual({
     action: "linear_*",
     resource: "*",

@@ -36,10 +36,13 @@ function fleetToolInput<S extends Schema.Codec<unknown, unknown>>(
   presentation: Schema.Constraint = schema,
 ) {
   const native = Schema.toStandardSchemaV1(schema);
+
   const project = ({ target }: { target: StandardJSONSchemaV1.Target }) => {
     const json = settingsInputAdvertisement(presentation);
+
     if (target === "draft-2020-12")
       return { $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12, ...json };
+
     if (target === "draft-07")
       return {
         $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
@@ -51,6 +54,7 @@ function fleetToolInput<S extends Schema.Codec<unknown, unknown>>(
       };
     throw new Error(`Unsupported fleet schema target: ${target}`);
   };
+
   return Object.assign(native, {
     "~standard": {
       ...native["~standard"],
@@ -58,6 +62,7 @@ function fleetToolInput<S extends Schema.Codec<unknown, unknown>>(
     },
   });
 }
+
 type ToolHost = {
   options: unknown;
   tool: Pick<Context["tool"], "transform">;
@@ -67,6 +72,7 @@ type ToolHost = {
 /** Separate export permits native-host tests without a provider or model call. */
 export async function installFleetTools(ctx: ToolHost) {
   const options = Schema.decodeUnknownSync(optionsSchema)(ctx.options);
+
   const caller = (context: ToolContext) =>
     Schema.decodeUnknownSync(callerSchema)({
       sessionID: context.sessionID,
@@ -74,6 +80,7 @@ export async function installFleetTools(ctx: ToolHost) {
       messageID: context.messageID,
       id: context.id,
     });
+
   const guard = async (
     context: ToolContext,
     action: string,
@@ -90,12 +97,14 @@ export async function installFleetTools(ctx: ToolHost) {
       resources: [resource],
       save: [resource],
     });
+
     try {
       const result = await fleetRequest(
         options.socketPath,
         value,
         context.signal,
       );
+
       return { content: JSON.stringify(result) };
     } catch (error) {
       throw new ToolError({
@@ -106,6 +115,7 @@ export async function installFleetTools(ctx: ToolHost) {
       });
     }
   };
+
   const registration = await ctx.tool.transform((editor) => {
     if (options.reviews)
       editor.add({
@@ -178,6 +188,7 @@ export async function installFleetTools(ctx: ToolHost) {
         }),
     });
   });
+
   return () => registration.dispose();
 }
 
@@ -185,4 +196,5 @@ export const fleetPlugin = Plugin.define({
   id: "stargate.fleet",
   setup: installFleetTools,
 });
+
 export default fromPromise(fleetPlugin);

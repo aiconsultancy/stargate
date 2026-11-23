@@ -28,6 +28,7 @@ const diskIntegrationTimeoutMs = 30_000;
 
 async function fixture(safeReports = true) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-reporting-"));
+
   const team = Schema.decodeUnknownSync(teamSchema)({
     ...defaultTeam,
     crew: [
@@ -44,6 +45,7 @@ async function fixture(safeReports = true) {
       },
     ],
   });
+
   const options: CrewOptions = {
     namespace: "report-test",
     stateDirectory: directory,
@@ -55,6 +57,7 @@ async function fixture(safeReports = true) {
     team,
     mesijCommand: "/usr/bin/mesij",
   };
+
   const native = new Map<string, CrewSession>(
     ["captain-a", "captain-b"].map((id) => [
       id,
@@ -65,22 +68,28 @@ async function fixture(safeReports = true) {
       },
     ]),
   );
+
   const sessions: CrewSessions = {
     async get({ sessionID }) {
       const session = native.get(sessionID);
+
       if (!session) throw { _tag: "Session.NotFoundError" };
+
       return session;
     },
     async create(input) {
       if (!input.id || !input.agent || !input.location)
         throw new Error("Invalid fake session");
+
       const session: CrewSession = {
         id: input.id,
         agent: input.agent,
         location: input.location,
         ...(input.metadata ? { metadata: input.metadata } : {}),
       };
+
       native.set(session.id, session);
+
       return session;
     },
     async prompt({ sessionID, id }) {
@@ -91,6 +100,7 @@ async function fixture(safeReports = true) {
     async synthetic() {},
     async compact() {},
   };
+
   const turns: {
     mode: "maintenance" | "report";
     text: string;
@@ -99,9 +109,11 @@ async function fixture(safeReports = true) {
     resolve: (text: string) => void;
     onText: TextSink | undefined;
   }[] = [];
+
   let next = () => {};
   let creations = 0;
   const opened = Promise.withResolvers<void>();
+
   const prompt =
     (mode: "maintenance" | "report") =>
     async (
@@ -125,34 +137,43 @@ async function fixture(safeReports = true) {
         onText,
       });
       next();
+
       return answer.promise;
     };
+
   const factory: PiWorkerFactory = async () => {
     opened.resolve();
+
     const backend: PiWorkerBackend = {
       async createSession() {
         creations++;
+
         return "17";
       },
       prompt: prompt("maintenance"),
       ...(safeReports ? { promptReport: prompt("report") } : {}),
       async close() {},
     };
+
     return backend;
   };
+
   let mailSequence = 0;
+
   const mailer = {
     async register() {
       return { id: "receipt", sequence: 1 };
     },
     async send() {
       const sequence = ++mailSequence;
+
       return { id: String(sequence).padStart(32, "0"), sequence };
     },
     async inbox() {
       return [];
     },
   };
+
   const engine = await CrewEngine.open(
     options,
     sessions,
@@ -160,19 +181,24 @@ async function fixture(safeReports = true) {
     undefined,
     factory,
   );
+
   const caller = (
     sessionID = "captain-a",
     signal = new AbortController().signal,
   ) => ({ sessionID, agent: "bowser", signal, id: "captain-call" });
+
   const start = (
     requestID = "turn-a",
     sessionID = "captain-a",
     reporter = "twiki",
   ) =>
     engine.reporting.start({ sessionID, requestID, reporter }, caller().signal);
+
   const owner = (id: string, sessionID = "captain-a") => ({ id, sessionID });
+
   const read = (id: string, sessionID = "captain-a") =>
     engine.reporting.read(owner(id, sessionID), caller().signal);
+
   const dispatch = async (
     text: string,
     crew = "chief",
@@ -182,12 +208,17 @@ async function fixture(safeReports = true) {
     const task = (
       await engine.run({ op: "dispatch", text, crew, queue }, caller(sessionID))
     ).task;
+
     if (!task) throw new Error("Missing fixture task");
+
     return task;
   };
+
   const complete = (taskID: string, result: string) => {
     const task = engine.state.task(taskID);
+
     if (!task) throw new Error("Missing fixture task");
+
     return engine.run(
       { op: "complete", taskID, result },
       {
@@ -197,6 +228,7 @@ async function fixture(safeReports = true) {
       },
     );
   };
+
   return {
     directory,
     options,
@@ -215,6 +247,7 @@ async function fixture(safeReports = true) {
     started() {
       const event = Promise.withResolvers<void>();
       next = event.resolve;
+
       return event.promise;
     },
     get creations() {
@@ -222,7 +255,9 @@ async function fixture(safeReports = true) {
     },
     reportTask(id: string) {
       const taskID = engine.state.reporting.owned("captain-a", id).reportTaskID;
+
       if (!taskID) throw new Error("Missing report reservation");
+
       return taskID;
     },
     async close() {
@@ -234,10 +269,12 @@ async function fixture(safeReports = true) {
 
 test("reporting is opt-in; state stays private and inactive dispatch collects nothing", async () => {
   const f = await fixture();
+
   try {
     const task = await f.dispatch("Private assignment");
     await f.complete(task.id, "Private result");
     const db = new Database(f.engine.state.path, { readonly: true });
+
     try {
       for (const table of [
         "activity_captures",
@@ -255,6 +292,7 @@ test("reporting is opt-in; state stays private and inactive dispatch collects no
     } finally {
       db.close();
     }
+
     expect((await stat(f.engine.state.path)).mode & 0o777).toBe(0o600);
     expect(f.turns).toHaveLength(0);
   } finally {
@@ -264,12 +302,15 @@ test("reporting is opt-in; state stays private and inactive dispatch collects no
 
 test("empty capture finishes without starting or queuing Twiki inference", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
+
     const finished = await f.engine.reporting.finish(
       f.owner(capture.id),
       f.caller().signal,
     );
+
     expect(finished).toMatchObject({ status: "complete", entries: [] });
     expect(
       f.engine.state.reporting.owned("captain-a", capture.id).reportTaskID,
@@ -282,11 +323,13 @@ test("empty capture finishes without starting or queuing Twiki inference", async
 
 test("journal-only activity needs no reporter, retains late facts and never calls a model", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.engine.reporting.start(
       { sessionID: "captain-a", requestID: "facts-only" },
       f.caller().signal,
     );
+
     await f.engine.journal(
       { op: "append", text: "Captain checked inputs" },
       { ...f.caller(), id: "note-1" },
@@ -297,6 +340,7 @@ test("journal-only activity needs no reporter, retains late facts and never call
     });
     await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
     let final = await f.read(capture.id);
+
     for (
       let attempt = 0;
       attempt < 10 && final.status === "summarizing";
@@ -323,6 +367,7 @@ test("saved Stop dry-reads a summarizing capture without admitting a report", as
   const f = await fixture();
   const store = openStore(":memory:");
   let delivery: ActivityDelivery | undefined;
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("Running source");
@@ -338,6 +383,7 @@ test("saved Stop dry-reads a summarizing capture without admitting a report", as
       text: "request",
     });
     const job = store.ready("bot", Date.now(), 1)[0];
+
     if (!job) throw new Error("Missing job");
     store.activityRecords.saveActivity(job.id, {
       capture: capture.id,
@@ -345,6 +391,7 @@ test("saved Stop dry-reads a summarizing capture without admitting a report", as
       revision: 0,
       done: true,
     });
+
     const backend: AgentBackend = {
       async createSession() {
         throw new Error("No session creation");
@@ -368,6 +415,7 @@ test("saved Stop dry-reads a summarizing capture without admitting a report", as
         };
       },
     };
+
     const published = Promise.withResolvers<void>();
     let status = "";
     delivery = new ActivityDelivery(
@@ -377,6 +425,7 @@ test("saved Stop dry-reads a summarizing capture without admitting a report", as
         async activity(_channel, _thread, view) {
           status = view.status;
           published.resolve();
+
           return "box";
         },
       },
@@ -401,6 +450,7 @@ test("saved Stop dry-reads a summarizing capture without admitting a report", as
 
 test("a final model summary cannot hide later journal facts or run again", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
     await f.engine.journal(
@@ -429,6 +479,7 @@ test("a final model summary cannot hide later journal facts or run again", async
     );
     expect(f.turns).toHaveLength(1);
     const db = new Database(f.engine.state.path, { readonly: true });
+
     try {
       expect(db.query("SELECT * FROM activity_entries").all()).toEqual([]);
     } finally {
@@ -441,6 +492,7 @@ test("a final model summary cannot hide later journal facts or run again", async
 
 test("reporter's maintenance is not crew activity and cannot cause a report of itself", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
     const started = f.started();
@@ -448,10 +500,12 @@ test("reporter's maintenance is not crew activity and cannot cause a report of i
     await started;
     f.turns[0]?.resolve("Maintenance done");
     await f.engine.run({ op: "wait", taskID: maintenance.id }, f.caller());
+
     const finished = await f.engine.reporting.finish(
       f.owner(capture.id),
       f.caller().signal,
     );
+
     expect(finished).toMatchObject({ status: "complete", entries: [] });
     expect(f.turns.map(({ mode }) => mode)).toEqual(["maintenance"]);
     expect(
@@ -464,9 +518,11 @@ test("reporter's maintenance is not crew activity and cannot cause a report of i
 
 test("active capture read renews its lease beyond five minutes", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
     const started = Date.now();
+
     for (let minute = 1; minute <= 6; minute++) {
       setSystemTime(started + minute * 60_000);
       expect((await f.read(capture.id)).status).toBe("collecting");
@@ -484,13 +540,16 @@ test(
   "captures assignments, validated messages, urgency, results, and configured names only",
   async () => {
     const f = await fixture();
+
     try {
       const historical = await f.dispatch("Earlier turn", "luigi");
       const capture = await f.start();
       expect(await f.start()).toEqual(capture);
+
       const task = await f.dispatch(
         "Inspect API_KEY=assignment-secret xoxb-111-secret",
       );
+
       await f.engine.mail(
         {
           op: "send",
@@ -538,6 +597,7 @@ test(
       ).toBe(true);
       const visible = JSON.stringify(snapshot);
       expect(visible).toContain("Chief → Bowser");
+
       for (const secret of [
         "assignment-secret",
         "message-secret",
@@ -545,10 +605,12 @@ test(
       ])
         expect(visible).not.toContain(secret);
       const db = new Database(f.engine.state.path, { readonly: true });
+
       try {
         const persisted = JSON.stringify(
           db.query("SELECT * FROM activity_entries").all(),
         );
+
         expect(persisted).not.toContain("assignment-secret");
         expect(persisted).not.toContain("message-secret");
       } finally {
@@ -563,6 +625,7 @@ test(
 
 test("exact capture ownership rejects other captains, workers, child sessions, and locations", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
     await expect(f.read(capture.id, "captain-b")).rejects.toThrow(
@@ -591,6 +654,7 @@ test("exact capture ownership rejects other captains, workers, child sessions, a
       agent: "bowser",
       location: { directory: "/other" },
     });
+
     for (const sessionID of ["child", "elsewhere", "missing"])
       await expect(f.start("turn", sessionID)).rejects.toThrow();
     const task = await f.dispatch("Worker task");
@@ -613,19 +677,23 @@ test(
   "busy reporter is skipped; facts remain visible and unrelated maintenance continues",
   async () => {
     const f = await fixture();
+
     try {
       const maintenanceStarted = f.started();
+
       const maintenance = await f.dispatch(
         "Unrelated maintenance",
         "twiki",
         "captain-b",
       );
+
       await maintenanceStarted;
       const capture = await f.start();
       const task = await f.dispatch("Build feature");
       await f.complete(task.id, "Feature ready");
       await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
       let final = await f.read(capture.id);
+
       for (
         let attempt = 0;
         attempt < 10 && final.status === "summarizing";
@@ -642,6 +710,7 @@ test(
         { op: "wait", taskID: maintenance.id },
         f.caller("captain-b"),
       );
+
       for (let index = 0; index < 3; index++) await f.read(capture.id);
       expect(f.turns).toHaveLength(1);
     } finally {
@@ -653,6 +722,7 @@ test(
 
 test("finish waits only linked tasks; later turns and other captains cannot enter summary", async () => {
   const f = await fixture();
+
   try {
     const a = await f.start();
     const taskA = await f.dispatch("Turn A assignment");
@@ -689,6 +759,7 @@ test("finish waits only linked tasks; later turns and other captains cannot ente
 
 test("queued reporting cancellation never interrupts Twiki's unrelated maintenance", async () => {
   const f = await fixture();
+
   try {
     const started = f.started();
     const maintenance = await f.dispatch("Keep running", "twiki", "captain-b");
@@ -724,11 +795,14 @@ for (const operation of ["finish", "read"] as const) {
       entered.resolve(signal);
       await release.promise;
       signal.throwIfAborted();
+
       return reporterFree(id, signal);
     };
+
     try {
       const capture = await f.start();
       const task = await f.dispatch("Feature");
+
       if (operation === "read")
         await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
       await f.complete(task.id, "Ready");
@@ -761,30 +835,37 @@ for (const phase of ["reporterFree", "progressReport"] as const) {
       const release = Promise.withResolvers<void>();
       let ownerSignal: AbortSignal | undefined;
       let drained = false;
+
       const block = async (signal: AbortSignal) => {
         ownerSignal = signal;
         entered.resolve(signal);
+
         try {
           await release.promise;
         } finally {
           drained = true;
         }
       };
+
       if (phase === "reporterFree") {
         const original = f.engine.reporterFree.bind(f.engine);
         f.engine.reporterFree = async (id, signal) => {
           await block(signal);
+
           return original(id, signal);
         };
       } else {
         const original = f.engine.progressReport.bind(f.engine);
         f.engine.progressReport = async (id, caller) => {
           await block(caller.signal);
+
           // A busy admission may return without promoting or throwing.
           if (caller.signal.aborted) return;
+
           return original(id, caller);
         };
       }
+
       try {
         const capture = await f.start();
         const task = await f.dispatch("Feature");
@@ -792,6 +873,7 @@ for (const phase of ["reporterFree", "progressReport"] as const) {
         await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
         await entered.promise;
         let stopped = false;
+
         const stopping = (
           stop === "cancel"
             ? f.engine.reporting.cancel(f.owner(capture.id), f.caller().signal)
@@ -799,6 +881,7 @@ for (const phase of ["reporterFree", "progressReport"] as const) {
         ).then(() => {
           stopped = true;
         });
+
         // Cancellation verifies the RPC caller before it can abort owned work.
         if (stop === "cancel")
           await f.engine.reporting.read(
@@ -813,6 +896,7 @@ for (const phase of ["reporterFree", "progressReport"] as const) {
         expect(drained).toBe(true);
         expect(f.turns).toEqual([]);
         const reportID = f.engine.state.reporting.reportTaskID(capture.id);
+
         if (phase === "progressReport") {
           expect(reportID).toBeDefined();
           expect(f.engine.state.task(reportID ?? "")).toMatchObject({
@@ -840,19 +924,23 @@ test("failed queued report cleanup records safe unavailable and drains", async (
     await release.promise;
     throw new Error("private admission details");
   };
+
   f.engine.cancelReport = async () => {
     throw new Error("private cleanup details");
   };
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("Feature");
     await f.complete(task.id, "Ready");
     await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
     await entered.promise;
+
     const closing = f.engine.reporting.close().then(
       () => "closed",
       (error: unknown) => error,
     );
+
     release.resolve();
     expect(await closing).toBe("closed");
     expect(
@@ -875,20 +963,24 @@ test("accepted capture cancellation does not access state after concurrent close
   f.engine.reporterFree = async () => {
     entered.resolve();
     await release.promise;
+
     return true;
   };
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("Feature");
     await f.complete(task.id, "Ready");
     await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
     await entered.promise;
+
     const cancelling = f.engine.reporting
       .cancel(f.owner(capture.id), f.caller().signal)
       .then(
         (result) => result,
         (error: unknown) => error,
       );
+
     expect(
       await f.engine.reporting.read(
         { ...f.owner(capture.id), passive: true },
@@ -900,10 +992,12 @@ test("accepted capture cancellation does not access state after concurrent close
       lateAccess++;
       throw new Error("State accessed after reporter close");
     };
+
     f.engine.cancelReport = async () => {
       lateAccess++;
       throw new Error("Engine accessed after reporter close");
     };
+
     const closing = f.engine.close();
     release.resolve();
     await closing;
@@ -920,6 +1014,7 @@ test("reporter close rejects verification that resumes after owner drain", async
   const f = await fixture();
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("Feature");
@@ -929,16 +1024,20 @@ test("reporter close rejects verification that resumes after owner drain", async
       const session = await get(...args);
       entered.resolve();
       await release.promise;
+
       return session;
     };
+
     const finishing = f.engine.reporting.finish(
       f.owner(capture.id),
       f.caller().signal,
     );
+
     const outcome = finishing.then(
       () => new Error("Unexpected reporting success"),
       (error: unknown) => error,
     );
+
     await entered.promise;
     await f.engine.close();
     release.resolve();
@@ -954,11 +1053,13 @@ test("reporter close rejects verification that resumes after owner drain", async
 
 test("pre-aborted reporting RPCs cannot authorize jobs or cancel captures", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("Feature");
     await f.complete(task.id, "Ready");
     const signal = AbortSignal.abort();
+
     for (const operation of ["read", "finish", "cancel"] as const)
       await expect(
         f.engine.reporting[operation](f.owner(capture.id), signal),
@@ -979,6 +1080,7 @@ test("pre-aborted reporting RPCs cannot authorize jobs or cancel captures", asyn
 
 test("active reporting cancellation aborts only its own task", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("Feature");
@@ -999,6 +1101,7 @@ test("active reporting cancellation aborts only its own task", async () => {
 
 test("follow-up captain messages cannot enter an earlier turn's linked task capture", async () => {
   const f = await fixture();
+
   try {
     const first = await f.start();
     const task = await f.dispatch("Original task");
@@ -1027,12 +1130,14 @@ test("follow-up captain messages cannot enter an earlier turn's linked task capt
 
 test("deadline reports missing results without promoting unrelated source tasks", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("Unfinished source task");
     await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
     expect(f.turns).toHaveLength(0);
     const db = new Database(f.engine.state.path);
+
     try {
       db.query("UPDATE activity_captures SET deadline=0 WHERE id=?").run(
         capture.id,
@@ -1040,6 +1145,7 @@ test("deadline reports missing results without promoting unrelated source tasks"
     } finally {
       db.close();
     }
+
     const final = await f.read(capture.id);
     expect(final.summary).toContain("deadline reached");
     expect(JSON.stringify(final.entries)).toContain("Unfinished source task");
@@ -1053,6 +1159,7 @@ test("deadline reports missing results without promoting unrelated source tasks"
 
 test("concurrent location engines reserve only one reporting task", async () => {
   const f = await fixture();
+
   const other = await CrewEngine.open(
     f.options,
     f.sessions,
@@ -1060,6 +1167,7 @@ test("concurrent location engines reserve only one reporting task", async () => 
     undefined,
     f.factory,
   );
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("Feature");
@@ -1071,6 +1179,7 @@ test("concurrent location engines reserve only one reporting task", async () => 
     ]);
     await started;
     const db = new Database(f.engine.state.path, { readonly: true });
+
     try {
       expect(
         db
@@ -1082,6 +1191,7 @@ test("concurrent location engines reserve only one reporting task", async () => 
     } finally {
       db.close();
     }
+
     expect(f.turns).toHaveLength(1);
     f.turns[0]?.resolve("Chief: ready");
     await f.engine.run(
@@ -1097,9 +1207,11 @@ test("concurrent location engines reserve only one reporting task", async () => 
 
 test("abandoned capture expires; bounded windows and input redaction survive persistence", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("A".repeat(2000));
+
     for (let index = 0; index < 12; index++)
       await f.engine.run(
         {
@@ -1128,6 +1240,7 @@ test("abandoned capture expires; bounded windows and input redaction survive per
   } finally {
     await f.close();
   }
+
   const redacted = redactCredentials(
     [
       "xoxb-111-slack xapp-111-app sk-proj-provider ghp_github",
@@ -1142,6 +1255,7 @@ test("abandoned capture expires; bounded windows and input redaction survive per
       ].join("\n"),
     ].join("\n"),
   );
+
   for (const secret of [
     "111-slack",
     "111-app",
@@ -1158,6 +1272,7 @@ test("abandoned capture expires; bounded windows and input redaction survive per
 
 test("reporter absence and unsafe backend return truthful unavailable without maintenance inference", async () => {
   const f = await fixture(false);
+
   try {
     const missing = await f.start("missing", "captain-a", "unknown");
     expect(missing.status).toBe("collecting");
@@ -1168,6 +1283,7 @@ test("reporter absence and unsafe backend return truthful unavailable without ma
     await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
     await f.opened;
     let snapshot = await f.read(capture.id);
+
     for (
       let attempt = 0;
       attempt < 10 && snapshot.status === "summarizing";
@@ -1185,6 +1301,7 @@ test("reporter absence and unsafe backend return truthful unavailable without ma
 
 test("restart preserves capture/task identity and does not replay unconfirmed reporting", async () => {
   const f = await fixture();
+
   try {
     const capture = await f.start();
     const task = await f.dispatch("Feature");
@@ -1195,6 +1312,7 @@ test("restart preserves capture/task identity and does not replay unconfirmed re
     const reportID = f.reportTask(capture.id);
     const sessionID = f.engine.state.task(reportID)?.workerSessionID;
     await f.engine.close();
+
     const reopened = await CrewEngine.open(
       f.options,
       f.sessions,
@@ -1202,11 +1320,13 @@ test("restart preserves capture/task identity and does not replay unconfirmed re
       undefined,
       f.factory,
     );
+
     try {
       const snapshot = await reopened.reporting.read(
         f.owner(capture.id),
         f.caller().signal,
       );
+
       expect(snapshot.status).toBe("unavailable");
       expect(reopened.state.task(reportID)?.workerSessionID).toBe(sessionID);
       expect(reopened.state.task(reportID)?.status).toBe("uncertain");
@@ -1229,6 +1349,7 @@ function completion(content: string, toolCall?: object) {
       model: "opencode-go/deepseek-v4.1-flash",
       choices: [{ index: 0, delta, finish_reason }],
     })}\n\n`;
+
   return new Response(
     chunk({ role: "assistant" }) +
       chunk(toolCall ? { tool_calls: [toolCall] } : { content }) +
@@ -1243,8 +1364,10 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
   const apiKeyEnv = "STARGATE_REPORTING_PROXY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
+
   const requests: { body: Record<string, unknown>; session: string | null }[] =
     [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -1253,11 +1376,14 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
         body: await request.json(),
         session: request.headers.get("x-opencode-session"),
       });
+
       return completion(`Fixture answer ${requests.length}`);
     },
   });
+
   let backend: PiDurableBackend | undefined;
   const signal = new AbortController().signal;
+
   try {
     backend = await PiDurableBackend.open(
       Schema.decodeUnknownSync(piDurableBackendSchema)({
@@ -1270,16 +1396,19 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
       }),
       { dataDirectory: directory },
     );
+
     const maintenance = await backend.createSession({
       key: "worker",
       title: "Twiki",
       signal,
     });
+
     await backend.prompt(maintenance, "PRIVATE OTHER SLACK THREAD", signal);
     await backend.promptReport(maintenance, "ONLY SANITIZED CAPTURE A", signal);
     await backend.promptReport(maintenance, "ONLY SANITIZED CAPTURE B", signal);
     await backend.prompt(maintenance, "Continue original maintenance", signal);
     expect(requests).toHaveLength(4);
+
     for (const index of [1, 2]) {
       const body = requests[index]?.body;
       expect(body?.["tools"] ?? []).toEqual([]);
@@ -1289,6 +1418,7 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
       expect(messages).not.toContain("Fixture answer 1");
       expect(messages).toContain(index === 1 ? "CAPTURE A" : "CAPTURE B");
     }
+
     expect(JSON.stringify(requests[2]?.body["messages"])).not.toContain(
       "CAPTURE A",
     );
@@ -1306,6 +1436,7 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
   } finally {
     await backend?.close();
     await server.stop(true);
+
     if (previous === undefined) delete process.env[apiKeyEnv];
     else process.env[apiKeyEnv] = previous;
     await rm(directory, { recursive: true, force: true });
@@ -1319,11 +1450,13 @@ test("malicious report tool call cannot execute maintenance", async () => {
   process.env[apiKeyEnv] = "fixture-only";
   const marker = join(directory, "must-not-exist");
   const bodies: Record<string, unknown>[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       bodies.push(await request.json());
+
       return completion("", {
         index: 0,
         id: "malicious",
@@ -1335,8 +1468,10 @@ test("malicious report tool call cannot execute maintenance", async () => {
       });
     },
   });
+
   let backend: PiDurableBackend | undefined;
   const signal = new AbortController().signal;
+
   try {
     backend = await PiDurableBackend.open(
       Schema.decodeUnknownSync(piDurableBackendSchema)({
@@ -1348,11 +1483,13 @@ test("malicious report tool call cannot execute maintenance", async () => {
       }),
       { dataDirectory: directory },
     );
+
     const maintenance = await backend.createSession({
       key: "worker",
       title: "Twiki",
       signal,
     });
+
     await expect(
       backend.promptReport(
         maintenance,
@@ -1366,6 +1503,7 @@ test("malicious report tool call cannot execute maintenance", async () => {
   } finally {
     await backend?.close();
     await server.stop(true);
+
     if (previous === undefined) delete process.env[apiKeyEnv];
     else process.env[apiKeyEnv] = previous;
     await rm(directory, { recursive: true, force: true });

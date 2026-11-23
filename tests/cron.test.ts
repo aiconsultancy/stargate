@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { validateCronInput } from "../src/cron/index";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
+
 const input = {
   name: "Daily report",
   expression: "0 9 * * *",
@@ -20,6 +21,7 @@ describe("cron validation", () => {
       },
       now,
     );
+
     expect(result.input.name).toBe("Report");
     expect(result.input.expression).toBe("0 9 * * *");
     expect(result.input.timezone).toBe("UTC");
@@ -42,6 +44,7 @@ describe("cron validation", () => {
         /^Invalid cron /,
       );
     }
+
     expect(() => validateCronInput(input, Number.NaN)).toThrow();
   });
 
@@ -61,18 +64,22 @@ describe("cron validation", () => {
       expression: "30 1 * * *",
       timezone: "America/New_York",
     };
+
     const first = validateCronInput(
       local,
       Date.parse("2026-11-01T00:00:00Z"),
     ).nextAt;
+
     expect(first).toBe(Date.parse("2026-11-01T05:30:00Z"));
     expect(validateCronInput(local, first).nextAt).toBe(
       Date.parse("2026-11-02T06:30:00Z"),
     );
+
     const spring = validateCronInput(
       { ...local, expression: "30 2 * * *" },
       Date.parse("2026-03-08T00:00:00Z"),
     ).nextAt;
+
     expect(spring).toBe(Date.parse("2026-03-08T07:00:00Z"));
   });
 
@@ -82,6 +89,7 @@ describe("cron validation", () => {
       expression: "*/15 * * * *",
       timezone: "America/New_York",
     };
+
     expect(
       validateCronInput(interval, Date.parse("2026-11-01T05:45:00Z")).nextAt,
     ).toBe(Date.parse("2026-11-01T06:00:00Z"));

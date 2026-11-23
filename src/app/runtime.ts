@@ -116,6 +116,7 @@ import {
 
 export async function loadEnvironment(configPath: string) {
   const file = Bun.file(`${configPath}.env`);
+
   if (await file.exists()) {
     for (const [key, value] of Object.entries(parseEnv(await file.text()))) {
       if (process.env[key] === undefined) process.env[key] = value;
@@ -125,8 +126,10 @@ export async function loadEnvironment(configPath: string) {
 
 export function lockInstance(path: string) {
   const lock = new Database(path, { create: true });
+
   try {
     lock.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE;");
+
     return lock;
   } catch {
     lock.close();
@@ -215,12 +218,14 @@ async function openCodeVersion(
   for (const ship of ships)
     if (ship.backend instanceof OpenCodeBackend)
       return ship.backend.serverVersion(signal);
+
   return null;
 }
 
 /** One idempotent close owner, shared by reload retirement and shutdown. */
 function ownedBackend(backend: AgentBackend) {
   let closing: Promise<void> | undefined;
+
   return {
     backend,
     close: () => (closing ??= Promise.resolve().then(() => backend.close())),
@@ -238,7 +243,9 @@ export function listenForReload(
   const request = () => {
     void reload.request();
   };
+
   source.on("SIGHUP", request);
+
   return () => {
     source.off("SIGHUP", request);
   };
@@ -262,6 +269,7 @@ export function serve(
   reload?: ConfigReload,
 ) {
   let started = false;
+
   const program = Effect.scoped(
     Effect.gen(function* () {
       yield* Effect.promise(async () => {
@@ -270,6 +278,7 @@ export function serve(
             config.dataDirectory,
             config.dashboardSocket.path,
           );
+
           if (
             path === "" ||
             (!isAbsolute(path) && path !== ".." && !path.startsWith("../"))
@@ -278,6 +287,7 @@ export function serve(
               "Shared dashboard socket must be outside the private data directory",
             );
         }
+
         await mkdir(config.dataDirectory, { recursive: true, mode: 0o700 });
         await chmod(config.dataDirectory, 0o700);
       });
@@ -290,18 +300,22 @@ export function serve(
         rm(join(config.dataDirectory, "ready.json"), { force: true }),
       );
       const transportSources: (() => NonNullable<Ready["transports"]>)[] = [];
+
       const transportSnapshot = () =>
         transportSources.flatMap((read) => read());
+
       const connectionTiming = dependencies.connectionTiming ?? {
         outageMs: 600_000,
         pollMs: 250,
       };
+
       const store = yield* Effect.acquireRelease(
         Effect.sync(() =>
           openStore(join(config.dataDirectory, "stargate.sqlite")),
         ),
         (store) => Effect.sync(() => store.close()),
       );
+
       // Registered before any worker starts; a failure never stops the gateway.
       const drain = dependencies.drain
         ? yield* Effect.acquireRelease(
@@ -324,32 +338,38 @@ export function serve(
                   ? { directory: dependencies.drain.directory }
                   : {}),
               });
+
               await control.start().catch(() => {
                 log.warn("Maintenance drain registration unavailable");
               });
+
               return control;
             }),
             (control) => Effect.promise(() => control.close()),
           )
         : undefined;
+
       const cronStore = yield* Effect.acquireRelease(
         Effect.sync(
           () => new CronStore(join(config.dataDirectory, "cron.sqlite")),
         ),
         (store) => Effect.sync(() => store.close()),
       );
+
       // One intake gate for every bot: the first close stops all ACKs, and
-      // modal and pairing reads stop, before any worker drains.
+      // Modal and pairing reads stop, before any worker drains.
       let open = true;
       const requests = new AbortController();
       const connections: (() => Promise<void>)[] = [];
       const notify = notifyEnabled(config.notify) ? config.notify : undefined;
       const notificationRegistrations: SlackRegistration[] = [];
+
       let notificationView = {
         notify: config.notify,
         registrations:
           notificationRegistrations as readonly SlackRegistration[],
       };
+
       const notificationConnections = new Map<string, NotificationSlack>();
       let notificationCore: NotificationCore | undefined;
       let notificationScope: Scope.Closeable | undefined;
@@ -358,6 +378,7 @@ export function serve(
       let notificationTimer: ReturnType<typeof setTimeout> | undefined;
       let notificationStop: Promise<void> | undefined;
       let notificationClosing = false;
+
       const beginNotificationClose = () => {
         if (!notify || notificationClosing) return;
         notificationClosing = true;
@@ -367,6 +388,7 @@ export function serve(
             log.error(
               "Notification shutdown did not settle; terminating process",
             );
+
             if (dependencies.notification?.terminate)
               dependencies.notification.terminate();
             process.exit(1);
@@ -380,24 +402,30 @@ export function serve(
         apiServer?.closeAdmission();
         notificationCore?.closeAdmission();
       };
+
       const stopNotifications = () => {
         if (!notify) return Promise.resolve();
         beginNotificationClose();
         notificationStop ??= (async () => {
           const result = await notificationCore?.shutdown();
+
           if (result?.state === "unresolved")
             await new Promise<never>(() => {});
           await apiServer?.stop();
+
           if (notificationScope)
             await Effect.runPromise(Scope.close(notificationScope, Exit.void));
+
           if (notificationTimer) clearTimeout(notificationTimer);
         })().catch(async () => {
           // Cleanup failure cannot prove quiescence. Keep ownership to hard exit.
           log.error("Notification cleanup did not establish settlement");
           await new Promise<never>(() => {});
         });
+
         return notificationStop;
       };
+
       const closeIntake = (only?: () => Promise<void>) =>
         Effect.sync(() => {
           open = false;
@@ -415,9 +443,11 @@ export function serve(
           // A stuck socket must not keep accepted turns from draining.
           Effect.timeoutOption("5 seconds"),
         );
+
       const stopped = yield* Deferred.make<void, RuntimeStopped>();
       // Covers startup failure too. No timeout can release the outer lock.
       yield* Effect.addFinalizer(() => Effect.promise(stopNotifications));
+
       const supervise = (
         botLog: Logger,
         worker: "gateway" | "cron" | "transport",
@@ -432,15 +462,19 @@ export function serve(
                   ? "Cron worker stopped unexpectedly"
                   : "Transport stopped unexpectedly",
             );
+
             return Deferred.fail(stopped, new RuntimeStopped({ worker }));
           }),
         );
+
       const workers: { key: string; work: Effect.Effect<void> }[] = [];
       let updateSnapshot: UpdateSnapshot | undefined;
       const updateTargets = new Map<AgentBackend, string>();
+
       const noticeFor = (backend: AgentBackend, scope: string) => {
         const owner = createHash("sha256").update(scope).digest("hex");
         updateTargets.set(backend, owner);
+
         return async (sessionID: string, signal: AbortSignal) => {
           if (
             !updateSnapshot ||
@@ -449,11 +483,13 @@ export function serve(
           )
             return;
           const bounded = AbortSignal.any([signal, AbortSignal.timeout(2000)]);
+
           const selected = await backend.updateNoticeContext(
             sessionID,
             updateSnapshot,
             bounded,
           );
+
           return store.updateNotices
             .deliver(
               sessionID,
@@ -467,6 +503,7 @@ export function serve(
             .then(() => {});
         };
       };
+
       const botBindings = new Map<
         string,
         (
@@ -474,15 +511,18 @@ export function serve(
           transcriber: ReturnType<typeof createTranscriber> | undefined,
         ) => void
       >();
+
       const ships: DashboardShip[] = [];
       const identities = new Set<string>();
       const teamsRegistrations: TeamsRegistration[] = [];
+
       for (const teams of config.teams ?? []) {
         const teamLog = log.child({ teams: teams.id });
         const dataDirectory = join(config.dataDirectory, teams.id);
         yield* Effect.promise(() =>
           mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
         );
+
         const resource = yield* Effect.acquireRelease(
           Effect.promise(async () =>
             ownedBackend(
@@ -491,6 +531,7 @@ export function serve(
           ),
           (resource) => release(teamLog, "Teams backend", resource.close),
         );
+
         const registration = yield* Effect.acquireRelease(
           Effect.sync(
             () =>
@@ -505,6 +546,7 @@ export function serve(
           (registration) =>
             release(teamLog, "Teams transport", () => registration.close()),
         );
+
         const gateway = new Gateway(
           teams,
           { team: teams.tenantId, user: teams.botClientId },
@@ -523,6 +565,7 @@ export function serve(
           ),
           drain,
         );
+
         workers.push({
           key: registration.key,
           work: supervise(teamLog, "gateway", (signal) => gateway.work(signal)),
@@ -532,6 +575,7 @@ export function serve(
           teamsDashboardShip(teams, registration.key, resource.backend),
         );
       }
+
       for (const bot of config.bots) {
         let currentBot = bot;
         const botLog = log.child({ bot: bot.id });
@@ -548,6 +592,7 @@ export function serve(
           },
         ]);
         const key = JSON.stringify([identity.team, identity.user]);
+
         if (identities.has(key))
           return yield* Effect.die(
             new Error("Two registrations use the same Slack bot"),
@@ -555,6 +600,7 @@ export function serve(
         identities.add(key);
         const notificationRegistration = { bot, identity };
         notificationRegistrations.push(notificationRegistration);
+
         if (notify) {
           if (!slack.notification)
             return yield* Effect.die(
@@ -564,13 +610,16 @@ export function serve(
             notification: slack.notification.bind(slack),
           });
         }
+
         const namespace = createHash("sha256")
           .update(botKey(bot, identity))
           .digest("hex");
+
         const dataDirectory = join(config.dataDirectory, bot.id, namespace);
         yield* Effect.promise(() =>
           mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
         );
+
         const resource = yield* Effect.acquireRelease(
           Effect.promise(async () =>
             ownedBackend(
@@ -579,7 +628,9 @@ export function serve(
           ),
           (resource) => release(botLog, "Resource", resource.close),
         );
+
         const backend = resource.backend;
+
         const gateway = new Gateway(
           bot,
           identity,
@@ -601,6 +652,7 @@ export function serve(
                 const preferences = new NotificationStore(
                   join(config.dataDirectory, "notifications.sqlite"),
                 );
+
                 try {
                   return preferences.status(
                     notificationKey(currentBot, identity),
@@ -641,6 +693,7 @@ export function serve(
                     ]),
                   ),
                 );
+
                 return Result.isSuccess(result);
               } catch {
                 return false;
@@ -650,13 +703,16 @@ export function serve(
               const preferences = new NotificationStore(
                 join(config.dataDirectory, "notifications.sqlite"),
               );
+
               try {
                 const result = preferences.operate(
                   notificationKey(currentBot, identity),
                   { op: "list" },
                   { id: "meta-list", caller: "gateway", now: Date.now },
                 );
+
                 if (result.op !== "list") throw new Error("Expected mute list");
+
                 return result;
               } finally {
                 preferences.close();
@@ -669,23 +725,28 @@ export function serve(
           ),
           drain,
         );
+
         const cronServices: CronServices = {
           quota: (signal) => {
             if (!backend.cronQuota)
               throw new Error("Cron quota reader unavailable.");
+
             return backend.cronQuota(signal);
           },
           model: (input, signal) => {
             if (!backend.cronModel)
               throw new Error("Cron model validation unavailable.");
+
             return backend.cronModel(input, signal);
           },
           evaluate: (input, signal) => {
             if (!backend.cronEvaluate)
               throw new Error("Cron evaluation unavailable.");
+
             return backend.cronEvaluate(input, signal);
           },
         };
+
         const cron = new CronScheduler(
           bot,
           identity,
@@ -695,6 +756,7 @@ export function serve(
           botLog,
           cronServices,
         );
+
         workers.push(
           {
             key: `gateway:${bot.id}`,
@@ -707,6 +769,7 @@ export function serve(
             work: supervise(botLog, "cron", (signal) => cron.work(signal)),
           },
         );
+
         if (config.maintenance?.report?.bot === bot.id) {
           // Maintenance summaries use this bot's normal Slack client.
           const outbox = new MaintenanceOutbox(
@@ -715,6 +778,7 @@ export function serve(
             (channel, text, signal) => slack.announce(channel, text, signal),
             botLog,
           );
+
           workers.push({
             key: `maintenance:${bot.id}`,
             work: abortable((signal) => outbox.work(signal)).pipe(
@@ -722,11 +786,14 @@ export function serve(
             ),
           });
         }
+
         const quota = config.quotaWatch;
+
         if (quota?.report.bot === bot.id) {
           const viaProxy = quota.providers.filter(
             (provider) => provider !== "codex" || !quota.nativeCodexFile,
           );
+
           const watcher = new QuotaWatch(
             quota,
             new QuotaReader(
@@ -744,19 +811,25 @@ export function serve(
             },
             botLog,
           );
+
           workers.push({
             key: `quota:${bot.id}`,
             work: abortable((signal) => watcher.work(signal)),
           });
         }
+
         let closing: Promise<void> | undefined;
+
         const close = () => {
           closing ??= slack.close();
+
           return closing;
         };
+
         connections.push(close);
         // Startup failure: close this socket before its backend closes.
         yield* Effect.addFinalizer(() => closeIntake(close));
+
         const cronUI = new CronUI(
           bot,
           identity,
@@ -765,6 +838,7 @@ export function serve(
           botLog,
           cronServices.model,
         );
+
         const pairing = new PairingUI(
           bot,
           identity,
@@ -773,6 +847,7 @@ export function serve(
           botLog,
           requests.signal,
         );
+
         const crewUI = new CrewUI(
           bot,
           identity,
@@ -781,6 +856,7 @@ export function serve(
           botLog,
           requests.signal,
         );
+
         const interactions = controlInteractions(
           cronUI,
           pairing,
@@ -788,6 +864,7 @@ export function serve(
           crewUI,
           (body, ack) => gateway.configInteraction(body, ack, () => open),
         );
+
         yield* Effect.promise(() =>
           slack.start(
             async (body) => open && gateway.receive(body, () => open),
@@ -798,6 +875,7 @@ export function serve(
           ),
         );
         slackStarted = true;
+
         if (slack.watch)
           workers.push({
             key: `transport:${bot.id}`,
@@ -808,12 +886,14 @@ export function serve(
             ),
           });
         botLog.info("Bot connected");
+
         const dashboardShip = {
           bot,
           identity,
           key: botKey(bot, identity),
           backend,
         };
+
         ships.push(dashboardShip);
         botBindings.set(bot.id, (next, transcriber) => {
           gateway.reconfigure(next, transcriber);
@@ -825,8 +905,9 @@ export function serve(
           currentBot = next;
         });
       }
+
       // IRC never blocks startup or Slack: connections retry in the
-      // background, and delivery waits for them or retries later.
+      // Background, and delivery waits for them or retries later.
       const buildRegistration = async (
         registration: IrcRegistration,
         irc: IrcConfig,
@@ -834,15 +915,19 @@ export function serve(
         const namespace = createHash("sha256")
           .update(registration.key)
           .digest("hex");
+
         const dataDirectory = join(
           config.dataDirectory,
           registration.id,
           namespace,
         );
+
         await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
+
         const resource = ownedBackend(
           await dependencies.backend(registration.backend, { dataDirectory }),
         );
+
         try {
           const gateway = new Gateway(
             registration.settings,
@@ -866,12 +951,14 @@ export function serve(
             ),
             drain,
           );
+
           registration.stopTurn = (conversation, thread) =>
             gateway.stopTurn(conversation, thread);
           registration.operatorQuestion =
             gateway.operatorQuestion.bind(gateway);
           registration.answerQuestion = (input, control) =>
             gateway.answerQuestion(input, control);
+
           return {
             registration,
             gateway,
@@ -883,22 +970,28 @@ export function serve(
           throw error;
         }
       };
+
       type Registration = Awaited<ReturnType<typeof buildRegistration>>;
+
       const ircBindings = new Map<
         string,
         { ship: IrcShip; entries: Map<string, Registration> }
       >();
+
       for (const irc of config.irc ?? []) {
         const ship = yield* Effect.promise(() =>
           (dependencies.irc ?? IrcShip.create)(irc, store, log),
         );
+
         const entries = new Map<string, Registration>();
+
         for (const registration of ship.registrations) {
           const entry = yield* Effect.acquireRelease(
             Effect.promise(() => buildRegistration(registration, irc)),
             (entry) =>
               release(registration.log, "Resource", entry.resource.close),
           );
+
           entries.set(registration.key, entry);
           ships.push(entry.dashboard);
           workers.push({
@@ -908,7 +1001,9 @@ export function serve(
             ),
           });
         }
+
         ircBindings.set(irc.id, { ship, entries });
+
         if (
           irc.fleetControl &&
           irc.backend.type === "opencode" &&
@@ -919,14 +1014,17 @@ export function serve(
           const fleetControl = irc.fleetControl;
           const primary = ship.registrations[0];
           const entry = primary ? entries.get(primary.key) : undefined;
+
           if (!entry || !primary)
             throw new Error("Fleet primary registration unavailable");
+
           const relatedTeams = teamsRegistrations.filter(
             (team) =>
               team.config.backend.type === "opencode" &&
               team.config.backend.sessionID === pin &&
               backendFingerprint(team.config) === backendFingerprint(irc),
           );
+
           const control = yield* Effect.acquireRelease(
             Effect.promise(() =>
               FleetControl.open({
@@ -969,6 +1067,7 @@ export function serve(
                   : {}),
                 authorize: async (caller, signal, request) => {
                   const { action } = fleetRequestAction(request);
+
                   for (const key of [
                     primary.key,
                     ...relatedTeams.map((team) => team.key),
@@ -997,6 +1096,7 @@ export function serve(
                         };
                     }
                   }
+
                   throw new Error("Fleet caller is not an active native input");
                 },
                 send: async (target, text, signal) => {
@@ -1030,19 +1130,24 @@ export function serve(
             ),
             (control) => release(log, "Fleet control", () => control.close()),
           );
+
           ship.sourceRecorder = (source) => {
             control.recordSource(source);
           };
+
           ship.offerRecorder = (offer) => control.recordOffer(offer);
+
           for (const team of relatedTeams)
             team.sourceRecorder = (source) => {
               control.recordSource(source);
             };
+
           if (control.resultsEnabled) {
             ship.assignmentRecorder = (input, fold) =>
               control.assignment(input, fold);
             ship.assignmentPrompt = (dispatchID) =>
               control.reviewAssignmentPrompt(dispatchID);
+
             const results = new FleetResults({
               control,
               store,
@@ -1051,6 +1156,7 @@ export function serve(
               account: irc.account,
               backend: entry.resource.backend,
             });
+
             workers.push({
               key: `${primary.key}:fleet-results`,
               work: supervise(
@@ -1061,6 +1167,7 @@ export function serve(
             });
           }
         }
+
         let closing: Promise<void> | undefined;
         const close = () => (closing ??= ship.close());
         connections.push(close);
@@ -1070,7 +1177,9 @@ export function serve(
         transportSources.push(() =>
           ship.registrations.map((registration) => {
             const id = `${irc.id}:${registration.id}`;
+
             if (registration.client.registered) seen.add(id);
+
             return {
               kind: "irc",
               id,
@@ -1084,6 +1193,7 @@ export function serve(
         );
         log.info({ irc: irc.id }, "IRC connecting");
       }
+
       // Off unless enabled: then nothing is opened, listened to or contacted.
       const agentDispatch = yield* Effect.acquireRelease(
         Effect.sync(() =>
@@ -1099,6 +1209,7 @@ export function serve(
         ),
         (started) => Effect.sync(() => started?.close()),
       );
+
       if (agentDispatch) {
         workers.push({
           key: agentDispatch.key,
@@ -1108,6 +1219,7 @@ export function serve(
         });
         agentDispatch.log.info("Agent dispatch enabled");
       }
+
       for (const team of teamsRegistrations) {
         yield* Effect.promise(() => team.start(() => open));
         transportSources.push(() => [
@@ -1119,20 +1231,24 @@ export function serve(
         ]);
         log.info({ teams: team.config.id }, "Teams listener ready");
       }
+
       const notificationDestinations = notify
         ? resolveDestinations(notify, notificationRegistrations)
         : undefined;
+
       if (config.notify) {
         const error = notifyConfigError(
           config.notify,
           config.bots,
           config.api?.listen,
         );
+
         if (error) return yield* Effect.die(new Error(error));
       }
+
       if (config.dashboard) {
         // Before the worker fork: a bind failure is an ordinary startup
-        // failure. Released after workers drain and before backends close.
+        // Failure. Released after workers drain and before backends close.
         const viewers = new AbortController();
         yield* Effect.acquireRelease(
           Effect.promise(async () =>
@@ -1157,14 +1273,18 @@ export function serve(
         );
         log.info("Dashboard listening");
       }
+
       let fleetDashboard: ReturnType<typeof dashboardSource> | undefined;
+
       if (config.api) {
         // Like the dashboard: a bind failure is an ordinary startup failure.
         const api = config.api;
         const viewers = new AbortController();
+
         const dashboard = dashboardSource(ships, store, cronStore, Date.now, {
           fleetSignal: viewers.signal,
         });
+
         fleetDashboard = dashboard;
         apiServer = yield* Effect.acquireRelease(
           Effect.promise(async () =>
@@ -1175,6 +1295,7 @@ export function serve(
                 requests: (registration, at) => {
                   if (registration.kind !== "irc") return [];
                   const cfg = registration.config;
+
                   return store.requestProgress(
                     ircKey(cfg.id, cfg.server, cfg.account, cfg.backend),
                     undefined,
@@ -1182,7 +1303,7 @@ export function serve(
                   );
                 },
                 // This instance carries the viewers' signal, so shutdown and
-                // reload can cancel the shared crew reads.
+                // Reload can cancel the shared crew reads.
                 dashboard,
                 config: () => reload?.current.config ?? config,
                 dataDirectory: config.dataDirectory,
@@ -1209,6 +1330,7 @@ export function serve(
                             Effect.fail(new ShuttingDown()),
                         },
                       );
+
                       return producer.routes;
                     },
                   }
@@ -1227,8 +1349,9 @@ export function serve(
         );
         log.info({ listen: api.listen }, "Fleet API listening");
       }
+
       // Dynamic backend resources close after worker interruption, before the
-      // stores. The single finalizer also owns later roster additions.
+      // Stores. The single finalizer also owns later roster additions.
       const addedResources: Registration[] = [];
       yield* Effect.addFinalizer(() =>
         Effect.all(
@@ -1240,6 +1363,7 @@ export function serve(
       );
       // Registered after backends: shutdown interrupts every worker first.
       const fibers = yield* FiberMap.make<string, void>();
+
       if (config.notifications?.updateNotice)
         updateSnapshot = yield* Effect.promise(async () =>
           buildUpdateSnapshot(
@@ -1251,20 +1375,26 @@ export function serve(
             ).catch(() => ""),
           ),
         );
+
       for (const worker of workers)
         yield* FiberMap.run(fibers, worker.key, worker.work);
+
       if (reload) {
         const apply = async (candidate: ReloadCandidate) => {
           const staged: {
             entry: Registration;
             start: Deferred.Deferred<void>;
           }[] = [];
+
           const paused: Gateway[] = [];
           let committed = false;
+
           try {
             const bots = candidate.config.bots.map((next) => {
               const publish = botBindings.get(next.id);
+
               if (!publish) throw new ReloadRejected("unavailable");
+
               return {
                 publish,
                 next,
@@ -1273,20 +1403,25 @@ export function serve(
                   : undefined,
               };
             });
+
             const plans = [];
+
             for (const next of candidate.config.irc) {
               const binding = ircBindings.get(next.id);
+
               if (!binding) throw new ReloadRejected("unavailable");
+
               const plan = await binding.ship.prepareReload(
                 next,
                 candidate.environment,
               );
+
               for (const registration of plan.added) {
                 const entry = await buildRegistration(registration, next);
                 const start = Deferred.makeUnsafe<void>();
                 staged.push({ entry, start });
                 // A staged worker cannot recover or process anything until the
-                // synchronous commit publishes the whole candidate.
+                // Synchronous commit publishes the whole candidate.
                 await Effect.runPromise(
                   FiberMap.run(
                     fibers,
@@ -1301,6 +1436,7 @@ export function serve(
                   ),
                 );
               }
+
               plans.push({
                 binding,
                 plan,
@@ -1310,48 +1446,60 @@ export function serve(
                   : undefined,
               });
             }
+
             if (!open || requests.signal.aborted)
               throw new ReloadRejected("unavailable");
+
             for (const { binding, plan } of plans)
               for (const registration of plan.removed) {
                 const entry = binding.entries.get(registration.key);
+
                 if (!entry) throw new ReloadRejected("unavailable");
                 entry.gateway.pause();
                 paused.push(entry.gateway);
               }
+
             if (paused.some((gateway) => !gateway.isIdle()))
               throw new ReloadRejected("busy");
+
             // Resolve every entry and namespace before publishing anything.
             const updates = plans.flatMap(
               ({ binding, plan, transcriber, next }) => {
                 const removed = new Set(plan.removed);
+
                 const registrations = [
                   ...binding.ship.registrations.filter(
                     (registration) => !removed.has(registration),
                   ),
                   ...plan.added,
                 ];
+
                 return registrations.map((registration) => {
                   const entry =
                     staged.find(
                       ({ entry }) => entry.registration === registration,
                     )?.entry ?? binding.entries.get(registration.key);
+
                   if (
                     !entry ||
                     entry.gateway.key !== registration.transport.key
                   )
                     throw new ReloadRejected("unavailable");
+
                   return { binding, registration, entry, transcriber, next };
                 });
               },
             );
+
             // No awaits: publish all access/settings and roster references in
-            // one JS turn. Admission cannot observe a half-applied candidate.
+            // One JS turn. Admission cannot observe a half-applied candidate.
             for (const { binding, plan } of plans)
               plan.commit(
                 (key) => binding.entries.get(key)?.gateway.isIdle() ?? false,
               );
+
             for (const bot of bots) bot.publish(bot.next, bot.transcriber);
+
             for (const {
               binding,
               registration,
@@ -1368,9 +1516,11 @@ export function serve(
                 entry.dashboard,
                 ircDashboardShip(registration, next, entry.resource.backend),
               );
+
               if (!ships.includes(entry.dashboard)) ships.push(entry.dashboard);
               binding.entries.set(registration.key, entry);
             }
+
             notificationView = {
               notify: candidate.config.notify,
               registrations: notificationRegistrations.map(
@@ -1382,26 +1532,32 @@ export function serve(
                 }),
               ),
             };
+
             // Retire all removed Fleet backends before a crew refresh can
-            // sample an alias that is waiting for asynchronous cleanup.
+            // Sample an alias that is waiting for asynchronous cleanup.
             for (const { binding, plan } of plans) {
               for (const registration of plan.removed) {
                 const entry = binding.entries.get(registration.key);
+
                 if (entry) {
                   const index = ships.indexOf(entry.dashboard);
+
                   if (index >= 0) ships.splice(index, 1);
                   fleetDashboard?.retireFleetBackend(entry.resource.backend);
                 }
               }
             }
+
             committed = true;
             fleetDashboard?.invalidateFleetCrew();
+
             for (const { entry, start } of staged) {
               addedResources.push(entry);
               Effect.runSync(Deferred.succeed(start, undefined));
             }
+
             // Removed members are already detached. They were idle, so worker
-            // cancellation and cleanup cannot discard queued or active work.
+            // Cancellation and cleanup cannot discard queued or active work.
             for (const { binding, plan } of plans) {
               for (const registration of plan.removed) {
                 const entry = binding.entries.get(registration.key);
@@ -1413,6 +1569,7 @@ export function serve(
                   .close()
                   .catch(() => log.warn("Retired backend cleanup failed"));
               }
+
               await plan
                 .retire()
                 .catch(() => log.warn("Retired IRC cleanup failed"));
@@ -1420,6 +1577,7 @@ export function serve(
           } finally {
             if (!committed) {
               for (const gateway of paused) gateway.pause(false);
+
               for (const { entry } of staged) {
                 await Effect.runPromise(
                   FiberMap.remove(fibers, entry.registration.key),
@@ -1431,6 +1589,7 @@ export function serve(
             }
           }
         };
+
         const unsubscribe = reload.listen(apply);
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
@@ -1439,10 +1598,12 @@ export function serve(
           }),
         );
       }
+
       // LIFO: close intake and abort reload preparation before workers drain.
       yield* Effect.addFinalizer(() => closeIntake());
       yield* Effect.promise(async () => {
         const deadline = Date.now() + connectionTiming.outageMs;
+
         while (
           transportSnapshot().length &&
           !transportSnapshot().some(
@@ -1454,6 +1615,7 @@ export function serve(
           await delay(connectionTiming.pollMs, undefined, { signal: shutdown });
         }
       });
+
       if (notify) {
         const destinations = notificationDestinations ?? {};
         notificationScope = yield* Scope.make();
@@ -1484,9 +1646,11 @@ export function serve(
           closeIntake().pipe(Effect.andThen(Effect.promise(stopNotifications))),
         );
       }
+
       started = true;
       log.info("Stargate ready");
       const updateReceipts: UpdateReceipt[] = [];
+
       if (updateSnapshot)
         yield* Effect.promise(async () => {
           await Promise.all(
@@ -1495,6 +1659,7 @@ export function serve(
                 requests.signal,
                 AbortSignal.timeout(10_000),
               ]);
+
               try {
                 if (
                   backend.sessionID &&
@@ -1507,6 +1672,7 @@ export function serve(
                     updateSnapshot,
                     signal,
                   );
+
                   updateReceipts.push(
                     await store.updateNotices.deliver(
                       backend.sessionID,
@@ -1524,6 +1690,7 @@ export function serve(
                     ),
                   );
                 }
+
                 if (
                   backend.sessionID &&
                   backend.crewUpdateNotice &&
@@ -1541,6 +1708,7 @@ export function serve(
       // Readiness record for maintenance health checks; never fatal.
       const readyAt = Date.now();
       let readinessWrite = Promise.resolve();
+
       const publishReady = (transports = transportSnapshot()) => {
         readinessWrite = readinessWrite.then(() =>
           writeReady(
@@ -1560,8 +1728,10 @@ export function serve(
             () => log.warn("Readiness record not written"),
           ),
         );
+
         return readinessWrite;
       };
+
       const initialTransports = transportSnapshot();
       yield* Effect.promise(() => publishReady(initialTransports));
       yield* Effect.addFinalizer(() =>
@@ -1580,22 +1750,27 @@ export function serve(
         supervise(log, "transport", async (signal) => {
           let last = JSON.stringify(initialTransports);
           let lostSince: number | undefined;
+
           while (!signal.aborted) {
             await delay(connectionTiming.pollMs, undefined, { signal }).catch(
               () => {},
             );
+
             if (signal.aborted) break;
             const transports = transportSnapshot();
             const next = JSON.stringify(transports);
+
             if (next !== last) {
               await publishReady(transports);
               last = next;
             }
+
             if (
               transports.length &&
               !transports.some((transport) => transport.state === "connected")
             ) {
               lostSince ??= Date.now();
+
               if (Date.now() - lostSince >= connectionTiming.outageMs)
                 throw new Error(
                   "No transport connected before outage deadline",
@@ -1608,19 +1783,23 @@ export function serve(
         Deferred.await(stopped),
         Effect.callback<void>((resume) => {
           const stop = () => resume(Effect.void);
+
           if (shutdown.aborted) return stop();
           shutdown.addEventListener("abort", stop, { once: true });
+
           return Effect.sync(() => shutdown.removeEventListener("abort", stop));
         }),
       );
     }),
   );
+
   // After startup, any failure, including a failed release, is a runtime
-  // stop, not a startup failure. The raw cause is never exposed.
+  // Stop, not a startup failure. The raw cause is never exposed.
   return program.pipe(
     Effect.catchCause((cause) => {
       if (shutdown.aborted && !started) return Effect.void;
       const error = Cause.squash(cause);
+
       return started &&
         !Cause.hasInterruptsOnly(cause) &&
         !(error instanceof RuntimeStopped)
@@ -1634,19 +1813,22 @@ export async function start(configPath: string) {
   process.umask(0o077);
   const baseEnvironment = { ...process.env };
   const initial = await readReloadCandidate(configPath, baseEnvironment);
+
   // Startup still supplies companion references to backend modules. Reload
-  // candidates never mutate process.env or connected transport credentials.
+  // Candidates never mutate process.env or connected transport credentials.
   const producerReferences = new Set(
     Object.values(initial.config.notify?.adapters ?? {})
       .filter((adapter) => adapter.enabled)
       .flatMap((adapter) => adapter.sources.map((source) => source.tokenEnv)),
   );
+
   const registrations = [
     ...initial.config.bots,
     ...initial.config.teams,
     ...initial.config.irc,
     ...initial.config.irc.flatMap((registration) => registration.crew),
   ];
+
   const existingReferences = new Set([
     ...initial.config.bots.flatMap((bot) => [
       bot.slack.appTokenEnv,
@@ -1659,8 +1841,11 @@ export async function start(configPath: string) {
     ),
     ...registrations.flatMap(({ backend }) => {
       if (backend.type === "opencode") return Object.values(backend.headersEnv);
+
       if (backend.type === "module") return [];
+
       if (backend.provider) return [backend.provider.apiKeyEnv];
+
       return [
         backend.model.startsWith("anthropic/")
           ? "ANTHROPIC_API_KEY"
@@ -1668,6 +1853,7 @@ export async function start(configPath: string) {
       ];
     }),
   ]);
+
   for (const [key, value] of Object.entries(initial.environment))
     if (
       (!producerReferences.has(key) || existingReferences.has(key)) &&
@@ -1676,16 +1862,19 @@ export async function start(configPath: string) {
     )
       process.env[key] = value;
   const log = pino({ level: "info" });
+
   const reload = new ConfigReload(
     initial,
     () => readReloadCandidate(configPath, baseEnvironment, true),
     log,
   );
+
   const controller = new AbortController();
   const stop = () => controller.abort();
   const unlisten = listenForReload(reload);
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
+
   try {
     await Effect.runPromise(
       serve(initial.config, log, controller.signal, defaults, reload),

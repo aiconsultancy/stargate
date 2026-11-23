@@ -150,13 +150,14 @@ type ShipOptions = {
   auditQueue?: number;
   /** Crew plugin link; default from the captain backend, null for none. */
   crewLink?: CrewLink | null;
-  /** stargate_dm outbox poll interval (default 2000 ms). */
+  /** Stargate_dm outbox poll interval (default 2000 ms). */
   copyPollMs?: number;
 };
 
 /** An IRC copy of a stargate_dm: its text limit, and how long it is retried. */
 const copyBytes = 1800;
 const copyRetryMs = 10 * 60_000;
+
 /** Client-only tag of an IRC copy: the stargate_dm's Mesij receipt ID. */
 const copyTag = "+stargate/dm";
 
@@ -167,21 +168,25 @@ const copyTag = "+stargate/dm";
  */
 export function copyText(item: { id: string; text: string }) {
   const clean = item.text.split("\n").map(cleanText).join("\n").trim();
+
   if (sensitive(item.text) || sensitive(clean))
     return `[stargate_dm ${item.id}: not copied to IRC, it may contain credentials. Read it with stargate_mail.]`;
   const marked = `[stargate_dm] ${clean}`;
+
   if (Buffer.byteLength(marked) <= copyBytes) return marked;
   const suffix = " … (truncated; full text in stargate_mail)";
   let cut = marked;
+
   while (Buffer.byteLength(cut + suffix) > copyBytes)
     cut = [...cut].slice(0, -64).join("");
+
   return `${cut.trimEnd()}${suffix}`;
 }
 
 /** Crew IRC session binding: one attempt's limit. */
 const bindMs = 10_000;
 
-/** dmPolicy redirect: one answer per sender and connection in this time. */
+/** DmPolicy redirect: one answer per sender and connection in this time. */
 const redirectCooldownMs = 5 * 60_000;
 
 /** One configured connection of a ship: the captain or one crew member. */
@@ -238,17 +243,21 @@ function shipMembers(config: IrcConfig): ShipMember[] {
 /** Load each distinct PEM once; never substitute another account's credential. */
 async function memberCertificates(members: readonly ShipMember[]) {
   const certificates = new Map<string, Awaited<ReturnType<typeof clientPem>>>();
+
   for (const member of members) {
     const path = member.clientPemFile;
+
     if (path && !certificates.has(path))
       certificates.set(path, await clientPem(path));
   }
+
   return certificates;
 }
 
 /** Non-reloadable connection settings; includes each member's auth references. */
 function connection(config: IrcConfig, member: ShipMember) {
   const { questions: _, ...connectionFeatures } = config.features;
+
   return JSON.stringify([
     config.server,
     connectionFeatures,
@@ -277,9 +286,11 @@ function gatewaySettings(config: IrcConfig, member: ShipMember): GatewayConfig {
 
 /** One channel line a connection saw, for all-call turns. */
 type Said = { time: number; msgid: string | undefined; text: string };
+
 /** Lines kept per connection and channel, and how long. */
 const saidLimit = 50;
 const saidMs = 30 * 60_000;
+
 /** Lines and characters per line that an all-call note lists. */
 const sinceLines = 20;
 const sinceChars = 300;
@@ -288,6 +299,7 @@ const burstPolicies = new WeakMap<IrcConfig, string>();
 /** Runtime config objects are immutable snapshots, replaced on reload. */
 function burstPolicy(config: IrcConfig): string {
   let value = burstPolicies.get(config);
+
   if (value === undefined) {
     value = questionFingerprint({
       access: config.access,
@@ -297,6 +309,7 @@ function burstPolicy(config: IrcConfig): string {
     });
     burstPolicies.set(config, value);
   }
+
   return value;
 }
 
@@ -352,6 +365,7 @@ function shipTransport(
     const stored = job?.eventId
       ? store.jobByEvent(member.key, job.eventId)
       : null;
+
     if (
       !ircAllowed(config, member, user, channel, client.fold) ||
       !ircResultJobAllowed(
@@ -364,13 +378,15 @@ function shipTransport(
       )
     )
       return false;
+
     if (
       !config.fleetControl?.results &&
       !requiresVisitorTag(config, member, channel, client.fold)
     )
       return true;
+
     // Recheck original addressing too: the JSON wrapper must not conceal a
-    // source that a later policy would refuse before execution or delivery.
+    // Source that a later policy would refuse before execution or delivery.
     return (
       !stored ||
       store.irc
@@ -387,6 +403,7 @@ function shipTransport(
         )
     );
   };
+
   return {
     progressRequest: (job) =>
       job.received != null &&
@@ -397,12 +414,14 @@ function shipTransport(
         : undefined,
     turnStatus: (job) => {
       const rank = config.fleetPolicy?.role;
+
       if (
         !config.features.turnStatus ||
         member.role !== "captain" ||
         (rank !== "captain" && rank !== "rear_admiral")
       )
         return;
+
       return !job.fleet &&
         !job.sender &&
         job.eventId.startsWith(`${job.channel}:`) &&
@@ -439,8 +458,10 @@ function shipTransport(
                       ),
                     send: async (text: string, allowed: () => boolean) => {
                       const account = config.questionOperator;
+
                       if (!account || !allowed()) return;
                       const nick = await client.verifiedNick(account);
+
                       for (const line of ircLines(text, 300)) {
                         await client.send(
                           "PRIVMSG",
@@ -468,6 +489,7 @@ function shipTransport(
             publish: async (job, text, allowed) => {
               if (!client.hasCap("message-tags"))
                 throw new Error("IRC questions need message tags");
+
               const delivery = new IrcDelivery(
                 client,
                 3000,
@@ -476,6 +498,7 @@ function shipTransport(
                 { typing: false },
                 () => job.replyParent ?? job.thread,
               );
+
               await delivery.post(job.channel, job.thread, text, undefined, {
                 allowed,
               });
@@ -544,6 +567,7 @@ function questionHuman(
 
 /** Connection lifetime of one registration, inside the ship's lifetime. */
 type Lifetime = { readonly controller: AbortController; loop?: Promise<void> };
+
 type Built = { registration: IrcRegistration; lifetime: Lifetime };
 
 /**
@@ -600,7 +624,7 @@ export class IrcShip {
    * of the ship: crew hand their DMs to it and never join the channel.
    */
   private readonly audit: IrcAudit | undefined;
-  /** dmPolicy redirect: last answer per connection and sender. */
+  /** DmPolicy redirect: last answer per connection and sender. */
   private readonly redirected = new Recent<number>(4096);
   /** Recent channel lines per connection and folded channel (all-calls). */
   private readonly said = new Map<string, Said[]>();
@@ -651,10 +675,13 @@ export class IrcShip {
     options: ShipOptions = {},
   ) {
     config = effectiveIrcConfig(config);
+
     const ca = config.server.caFile
       ? await readFile(config.server.caFile, "utf8")
       : undefined;
+
     const certificates = await memberCertificates(shipMembers(config));
+
     return new IrcShip(config, store, log, ca, certificates, options);
   }
 
@@ -674,6 +701,7 @@ export class IrcShip {
     this.started = true;
     this.open = open;
     this.track(this.maintain(this.controller.signal));
+
     if (
       this.config.features.crewQuestionHandoff &&
       this.config.backend.type === "opencode" &&
@@ -685,9 +713,12 @@ export class IrcShip {
           this.options.env ?? process.env,
         ).run(this.controller.signal),
       );
+
     if (this.audit) this.track(this.audit.run(this.controller.signal));
+
     if (this.link && this.config.crewMessaging.ircCopies)
       this.track(this.copies(this.link, this.controller.signal));
+
     for (const registration of this.current) this.run(registration);
   }
 
@@ -695,12 +726,15 @@ export class IrcShip {
   private async maintain(signal: AbortSignal) {
     while (!signal.aborted) {
       await delay(60_000, undefined, { signal }).catch(() => {});
+
       if (signal.aborted) return;
+
       if (
         !this.config.features.questions &&
         !this.config.access.humanWakeChannels?.length
       )
         continue;
+
       try {
         for (const registration of this.current)
           this.store.pruneIrcHistory(registration.key, Date.now());
@@ -713,9 +747,11 @@ export class IrcShip {
   /** Count a loop until it ends, so `close` waits for it. */
   private track(loop: Promise<void>) {
     this.loops.add(loop);
+
     const ended = () => {
       this.loops.delete(loop);
     };
+
     loop.then(ended, ended);
   }
 
@@ -744,21 +780,28 @@ export class IrcShip {
   ): Promise<IrcReload> {
     next = effectiveIrcConfig(next);
     const base = this.config;
+
     if (next.id !== base.id)
       throw new Error("IRC registration ID changed; restart required");
+
     const previous = new Map(
       shipMembers(base).map((member) => [member.id, connection(base, member)]),
     );
+
     const current = new Map(this.current.map((item) => [item.id, item]));
+
     const certificates = await memberCertificates(
       shipMembers(next).filter((member) => !current.has(member.id)),
     );
+
     const slots: ({ member: ShipMember } & (
       | { kept: IrcRegistration }
       | { built: Built }
     ))[] = [];
+
     for (const member of shipMembers(next)) {
       const kept = current.get(member.id);
+
       if (!kept) {
         slots.push({
           member,
@@ -766,30 +809,38 @@ export class IrcShip {
         });
         continue;
       }
+
       if (previous.get(member.id) !== connection(next, member))
         throw new Error(
           `IRC connection settings of ${member.id} changed; restart required`,
         );
       slots.push({ member, kept });
     }
+
     const ids = new Set(slots.map(({ member }) => member.id));
     const removed = this.current.filter((item) => !ids.has(item.id));
+
     const added = slots.flatMap((slot) =>
       "built" in slot ? [slot.built] : [],
     );
+
     const stopping: Promise<void>[] = [];
     let committed = false;
     let retiring: Promise<void> | undefined;
+
     return {
       added: added.map(({ registration }) => registration),
       removed,
       commit: (idle) => {
         if (committed) return;
+
         if (this.controller.signal.aborted)
           throw new Error("IRC ship closed; reload not applied");
+
         if (this.config !== base)
           throw new Error("IRC reload plan is stale; prepare it again");
         const busy = removed.filter((item) => !idle(item.key));
+
         if (busy.length)
           throw new Error(
             `IRC crew busy: ${busy.map(({ id }) => id).join(", ")}; reload not applied`,
@@ -807,14 +858,18 @@ export class IrcShip {
             this.sessionReady(next, slot.member),
           );
           slot.kept.settings = gatewaySettings(next, slot.member);
+
           return slot.kept;
         });
+
         for (const registration of removed) {
           const lifetime = this.lifetimes.get(registration);
           this.lifetimes.delete(registration);
           lifetime?.controller.abort();
+
           if (lifetime?.loop !== undefined) stopping.push(lifetime.loop);
         }
+
         if (this.started)
           for (const { registration } of added) this.run(registration);
         committed = true;
@@ -822,6 +877,7 @@ export class IrcShip {
       retire: () => {
         if (!committed) return Promise.resolve();
         retiring ??= Promise.allSettled(stopping).then(() => {});
+
         return retiring;
       },
     };
@@ -829,21 +885,25 @@ export class IrcShip {
 
   private adopt({ registration, lifetime }: Built) {
     this.lifetimes.set(registration, lifetime);
+
     return registration;
   }
 
   /** Connect one registration once, within its own and the ship's lifetime. */
   private run(registration: IrcRegistration) {
     const lifetime = this.lifetimes.get(registration);
+
     if (
       !lifetime ||
       lifetime.loop !== undefined ||
       this.controller.signal.aborted
     )
       return;
+
     const loop = registration.client.run(
       AbortSignal.any([this.controller.signal, lifetime.controller.signal]),
     );
+
     lifetime.loop = loop;
     this.track(loop);
   }
@@ -862,19 +922,24 @@ export class IrcShip {
     const certificate = member.clientPemFile
       ? certificates.get(member.clientPemFile)
       : undefined;
+
     const credential = member.passwordEnv
       ? { password: secret(member.passwordEnv, env) }
       : certificate
         ? { clientCertificate: certificate }
         : undefined;
+
     if (!credential) throw new Error("Missing IRC registration credential");
+
     const key = ircKey(
       member.id,
       config.server,
       member.account,
       member.backend,
     );
+
     const memberLog = this.log.child({ irc: member.id });
+
     const identity: IrcMember = {
       id: member.id,
       role: member.role,
@@ -883,11 +948,13 @@ export class IrcShip {
       channels: member.channels,
       key,
     };
+
     const lifetime: Lifetime = { controller: new AbortController() };
     // A removed connection's late events never count.
     const detached = () => lifetime.controller.signal.aborted;
     const lastStatus = new Map<string, number>();
     const ca = this.ca;
+
     const client: IrcClient = new IrcClient(
       {
         host: config.server.host,
@@ -930,19 +997,24 @@ export class IrcShip {
         // Chathistory replays use the same rules; event IDs deduplicate.
         message: (message, replay) => {
           const strict = this.config.access.channelRequests === "nick-mention";
+
           if (
             detached() ||
             (strict && replay && !this.config.access.humanWakeChannels?.length)
           )
             return;
+
           // Our own stargate_dm copy: delivered natively already, and mirrored
-          // as the sender's outgoing DM. Never a turn, never mirrored twice.
+          // As the sender's outgoing DM. Never a turn, never mirrored twice.
           if (this.ownCopy(client, message)) {
             this.advance(identity, client, message);
+
             return;
           }
+
           const body = message.params[1] ?? "";
           const status = /^@?([^\s:,]+)[:,]\s+status\s*$/i.exec(body);
+
           if (
             this.config.features.liveProgress &&
             this.config.fleetPolicy?.humanAccounts.length &&
@@ -954,16 +1026,20 @@ export class IrcShip {
           ) {
             const actor = message.tags.get("account");
             const target = message.params[0] ?? "";
+
             const channel = client.isChannel(target)
               ? client.fold(target)
               : client.fold(actor ?? "");
+
             const root = message.tags.get("+draft/reply");
+
             const authorized = () =>
               !detached() &&
               this.open() &&
               !!actor &&
               questionHuman(this.config, actor, client.fold) &&
               ircAllowed(this.config, identity, actor, channel, client.fold);
+
             if (
               !replay &&
               validMsgid(message.tags.get("msgid")) &&
@@ -973,20 +1049,26 @@ export class IrcShip {
             ) {
               this.mirrorIncoming(identity, client, message, false);
               const user = client.fold(actor);
+
               if ((lastStatus.get(user) ?? 0) > Date.now() - 2000) return;
               lastStatus.set(user, Date.now());
+
               const requested =
                 root &&
                 this.store.jobByEvent(identity.key, `${channel}:${root}`);
+
               const anchor = requested
                 ? root
                 : root &&
                   this.store.irc.ircRequestAnchor(identity.key, channel, root);
+
               const job =
                 requested ||
                 (anchor &&
                   this.store.jobByEvent(identity.key, `${channel}:${anchor}`));
+
               let text = "Reply to your original request to check its status.";
+
               if (
                 job &&
                 anchor &&
@@ -998,6 +1080,7 @@ export class IrcShip {
                   ? `${row.failure ? "Request ended: " + row.failure + ". " : ""}${turnProgressText({ stage: row.stage, observedAt: row.observedAt, disconnected: row.disconnected, ...(this.config.backend.type === "claude" || this.config.backend.type === "codex" ? { backend: this.config.backend.type } : {}) })}`
                   : `Stargate request is ${job.status}. Backend activity is unconfirmed.`;
               }
+
               void registration.delivery
                 .post(
                   channel,
@@ -1008,10 +1091,13 @@ export class IrcShip {
                 )
                 .catch(() => {});
             }
+
             return;
           }
+
           const actor = message.tags.get("account");
           const operator = this.config.questionOperator;
+
           const privateControl =
             member.role === "captain" &&
             this.config.features.questions &&
@@ -1019,10 +1105,12 @@ export class IrcShip {
             message.command === "PRIVMSG" &&
             client.fold(message.params[0] ?? "") === client.fold(client.nick) &&
             operatorControl(body);
+
           const isOperator =
             !!actor &&
             !!operator &&
             client.fold(actor) === client.fold(operator);
+
           if (
             privateControl &&
             (isOperator ||
@@ -1054,12 +1142,17 @@ export class IrcShip {
                   this.log.warn("Private question control unavailable"),
                 );
             }
+
             return;
           }
+
           this.mirrorIncoming(identity, client, message, replay);
+
           // The audit channel is never a conversation: no turn, no Stop.
           if (this.isAuditChannel(client, message.params[0] ?? "")) return;
+
           if (!replay && !strict) this.remember(identity, client, message);
+
           // A replayed reaction is old intent: it never stops a turn.
           if (message.command === "TAGMSG") {
             if (
@@ -1088,11 +1181,13 @@ export class IrcShip {
             this.isAuditChannel(client, target)
           )
             return;
+
           const recipient = client.isChannel(target)
             ? target
             : this.config.features.questions
               ? client.knownAccount(target)
               : undefined;
+
           if (
             !recipient ||
             (!client.isChannel(target) && !client.holds(recipient, target))
@@ -1108,6 +1203,7 @@ export class IrcShip {
         },
         invite: (channel) => {
           if (detached()) return;
+
           if (!client.join(channel))
             memberLog.info("Ignored IRC invite to an unlisted channel");
         },
@@ -1116,8 +1212,10 @@ export class IrcShip {
         },
       },
     );
+
     const filehost = () =>
       credential.password ? this.filehost(client) : undefined;
+
     const files = credential.password
       ? new Filehost(filehost, {
           account: member.account,
@@ -1125,6 +1223,7 @@ export class IrcShip {
           ...(ca ? { ca } : {}),
         })
       : undefined;
+
     const registration: IrcRegistration = {
       ...identity,
       settings: gatewaySettings(config, member),
@@ -1168,6 +1267,7 @@ export class IrcShip {
       client,
       log: memberLog,
     };
+
     return { registration, lifetime };
   }
 
@@ -1178,19 +1278,24 @@ export class IrcShip {
    */
   private filehost(client: IrcClient): URL | undefined {
     const secure = this.config.server.tls;
+
     const advertised = client.filehost
       ? filehostURL(client.filehost, secure)
       : undefined;
+
     const configured = this.config.server.filehostOverride;
     const override = configured ? filehostURL(configured, secure) : undefined;
+
     if (advertised && override && advertised.origin !== override.origin) {
       if (!this.filehostConflict)
         this.log.warn(
           "IRC FILEHOST differs from filehostOverride; files are off",
         );
       this.filehostConflict = true;
+
       return;
     }
+
     return advertised ?? override;
   }
 
@@ -1203,12 +1308,16 @@ export class IrcShip {
     if (!this.config.features.catchUp) return;
     const cursor = this.store.irc.ircCursor(key, target);
     const now = new Date();
+
     if (!cursor) {
       this.store.irc.saveIrcCursor(key, target, now.toISOString());
+
       return;
     }
+
     const oldest = now.getTime() - this.config.catchUpHours * 3_600_000;
     const at = Date.parse(cursor);
+
     return new Date(
       Math.max(Number.isFinite(at) ? at : oldest, oldest),
     ).toISOString();
@@ -1221,14 +1330,18 @@ export class IrcShip {
    */
   private partnerSince(key: string, target: string, latest?: string) {
     if (!this.config.features.catchUp) return;
+
     const cursor =
       this.store.irc.ircCursor(key, target) ??
       this.store.irc.ircCursor(key, directBaseline);
+
     if (!cursor) return;
+
     if (latest && Number.isFinite(Date.parse(latest)) && latest <= cursor)
       return;
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
     const at = Date.parse(cursor);
+
     return new Date(
       Math.max(Number.isFinite(at) ? at : oldest, oldest),
     ).toISOString();
@@ -1244,9 +1357,11 @@ export class IrcShip {
     if (!this.open()) return;
     const time = message.tags.get("time");
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
+
     if (replay && (!time || Date.parse(time) < oldest)) return;
+
     // Only after the sender and channel rules every message passes; the
-    // dispatcher then checks account, offer, reply and deadline itself.
+    // Dispatcher then checks account, offer, reply and deadline itself.
     if (
       member.role === "captain" &&
       this.dispatchListener &&
@@ -1263,23 +1378,29 @@ export class IrcShip {
       } catch {
         this.log.warn("Agent dispatch answer handler failed");
       }
+
     if (
       this.config.dmPolicy === "redirect" &&
       !client.isChannel(message.params[0] ?? "")
     ) {
       // Never a turn: answer with the ship channel, act on nothing.
       this.advance(member, client, message);
+
       if (!replay) this.redirect(member, client, message);
+
       return;
     }
+
     const control = questionControl(message.params[1] ?? "");
+
     const ownControl =
       control &&
       [member.account, client.nick].some(
         (name) => client.fold(name) === client.fold(control.target),
       );
+
     // Account aliases are valid only for controls. Normal strict requests still
-    // require the current nick; all original identity/thread tags remain intact.
+    // Require the current nick; all original identity/thread tags remain intact.
     const routed = ownControl
       ? {
           ...message,
@@ -1289,6 +1410,7 @@ export class IrcShip {
           ],
         }
       : message;
+
     const admission = routeIrcMessage(routed, {
       config: this.config,
       member,
@@ -1312,6 +1434,7 @@ export class IrcShip {
       fold: client.fold,
       filehost: this.config.features.filesIn ? filehost() : undefined,
     });
+
     if (control) {
       // Every ship suppresses the reserved namespace, even when not its target.
       if (
@@ -1333,24 +1456,31 @@ export class IrcShip {
             this.log.warn("Native clarification control unavailable"),
           );
       }
+
       this.advance(member, client, message);
+
       return;
     }
+
     if (!admission) {
       this.advance(member, client, message);
+
       return;
     }
+
     // Only this fleet's rear admiral's dispatch notice or offer is never
-    // dropped by the peer limit (the dispatcher bounds its own rate), and its
-    // turn is fixed text from the marker, without the issue's title. The same
-    // marker from any other agent is an ordinary peer message.
+    // Dropped by the peer limit (the dispatcher bounds its own rate), and its
+    // Turn is fixed text from the marker, without the issue's title. The same
+    // Marker from any other agent is an ordinary peer message.
     const dispatchTurn =
       admission.sender === "captain" &&
       member.role === "captain" &&
       isRearAdmiral(this.config, admission.user, client.fold)
         ? dispatchRequestTurn(message, admission.text)
         : undefined;
+
     const dispatchRequest = dispatchTurn !== undefined;
+
     if (
       !dispatchRequest &&
       !withinLimits(
@@ -1370,10 +1500,13 @@ export class IrcShip {
           : "IRC peer captain limit reached; message not admitted",
       );
       this.advance(member, client, message);
+
       return;
     }
+
     let dispatchID: string | undefined;
     let privateReview: string | undefined;
+
     try {
       dispatchID = this.assignmentRecorder?.(
         {
@@ -1385,14 +1518,17 @@ export class IrcShip {
         },
         client.fold,
       );
+
       if (dispatchID) privateReview = this.assignmentPrompt?.(dispatchID);
     } catch {
       this.log.warn(
         "Fleet assignment correlation refused; IRC request not admitted",
       );
       this.advance(member, client, message);
+
       return;
     }
+
     if (
       this.config.fleetControl?.results &&
       this.config.fleetPolicy &&
@@ -1408,16 +1544,20 @@ export class IrcShip {
       )
     ) {
       this.advance(member, client, message);
+
       return;
     }
+
     // An offer counts only in the command channel, when the captain knows it.
     const commandChannel = this.config.fleetChannels?.command;
+
     const offer =
       dispatchRequest &&
       (commandChannel === undefined ||
         admission.channel === client.fold(commandChannel))
         ? ircDispatchOffer(message)
         : undefined;
+
     if (offer && this.offerRecorder) {
       try {
         const target = message.params[0] ?? "";
@@ -1431,6 +1571,7 @@ export class IrcShip {
         this.log.warn("Agent dispatch offer was not recorded");
       }
     }
+
     if (this.sourceRecorder && this.config.fleetPolicy) {
       try {
         const messageID = admission.eventId.slice(admission.channel.length + 1);
@@ -1458,10 +1599,13 @@ export class IrcShip {
         this.log.warn(
           "Fleet source persistence failed; IRC request not admitted",
         );
+
         return;
       }
     }
+
     const text = dispatchTurn ?? admission.text;
+
     const input = {
       ...admission,
       text: privateReview ? `${text}\n\n${privateReview}` : text,
@@ -1470,6 +1614,7 @@ export class IrcShip {
         ? { fleet: { kind: "assignment" as const, dispatchID } }
         : {}),
     };
+
     if (
       this.config.features.questions &&
       !message.tags.has("bot") &&
@@ -1480,6 +1625,7 @@ export class IrcShip {
     )
       this.store.questions.recordQuestionSource(input);
     const quietMs = this.config.access.humanMessageDebounceMs ?? 0;
+
     const trackThreads =
       member.role === "captain" &&
       !!this.config.access.humanWakeChannels?.some(
@@ -1487,6 +1633,7 @@ export class IrcShip {
       ) &&
       !!this.config.fleetPolicy &&
       fleetAuthority(this.config.fleetPolicy, admission.user) === "human";
+
     const followUp =
       member.role === "captain" &&
       this.config.features.steerThreadFollowUps &&
@@ -1499,6 +1646,7 @@ export class IrcShip {
             admission.threadInvitation === true,
           )
         : undefined;
+
     if (followUp !== undefined) {
       // Receipt is durable before advancing CHATHISTORY or the read marker.
     } else if (
@@ -1526,6 +1674,7 @@ export class IrcShip {
     this.advance(member, client, message);
     // Accepted: tell the server's read marker (channel, or the partner).
     const target = message.params[0] ?? "";
+
     if (time)
       client.markRead(
         client.isChannel(target) ? target : sourceNick(message.source),
@@ -1542,12 +1691,15 @@ export class IrcShip {
   private advance(member: IrcMember, client: IrcClient, message: IrcMessage) {
     const time = message.tags.get("time");
     const target = message.params[0] ?? "";
+
     if (!time || !Number.isFinite(Date.parse(time))) return;
+
     if (client.isChannel(target)) {
       if (client.channel(target))
         this.store.irc.saveIrcCursor(member.key, client.fold(target), time);
     } else if (client.fold(target) === client.fold(client.nick)) {
       const partner = sourceNick(message.source);
+
       if (partner)
         this.store.irc.saveIrcCursor(
           member.key,
@@ -1566,39 +1718,48 @@ export class IrcShip {
    */
   private async copies(link: CrewLink, signal: AbortSignal) {
     const captain = this.current[0];
+
     if (!captain) return;
     const first = new Map<string, number>();
     let failing = false;
+
     while (!signal.aborted) {
       try {
         const cursor = this.store.irc.stargateDmCursor(captain.key);
+
         const page = await link.outbox(
           cursor === undefined ? { limit: 50 } : { after: cursor, limit: 50 },
           AbortSignal.any([signal, AbortSignal.timeout(bindMs)]),
         );
+
         failing = false;
+
         // A baseline, or nothing listed although newer entries exist: all of
-        // those expired, so the cursor moves past them.
+        // Those expired, so the cursor moves past them.
         if (
           cursor === undefined ||
           (!page.items.length && page.latest > cursor)
         )
           this.store.irc.saveStargateDmCursor(captain.key, page.latest);
+
         for (const item of cursor === undefined ? [] : page.items) {
           if ((await this.copy(item)) === "retry") {
             const since = first.get(item.id) ?? Date.now();
             first.set(item.id, since);
+
             if (Date.now() - since < copyRetryMs) break;
             this.log.warn(
               { irc: this.config.id },
               "IRC stargate_dm copy not sent in time; skipped",
             );
           }
+
           first.delete(item.id);
           this.store.irc.saveStargateDmCursor(captain.key, item.sequence);
         }
       } catch {
         if (signal.aborted) break;
+
         if (!failing)
           this.log.warn(
             { irc: this.config.id },
@@ -1606,6 +1767,7 @@ export class IrcShip {
           );
         failing = true;
       }
+
       await delay(this.options.copyPollMs ?? 2000, undefined, {
         signal,
       }).catch(() => {});
@@ -1636,20 +1798,26 @@ export class IrcShip {
     if (Date.now() - item.created > outboxMaxAgeMs) return "skipped";
     const sender = this.registrationOf(item.from);
     const recipient = this.registrationOf(item.to);
+
     if (!sender || !recipient || sender === recipient) return "skipped";
     const client = sender.client;
+
     if (!client.registered) return "retry";
+
     if (!client.hasCap("message-tags")) return "skipped";
+
     try {
       const nick = await client.verifiedNick(recipient.account);
       this.store.irc.markStargateDmCopy(item.id);
       const tags = { [copyTag]: item.id };
       const guard = () => client.holds(recipient.account, nick);
+
       for (const line of ircLines(
         copyText(item),
         client.budget("PRIVMSG", "n".repeat(32), tags),
       ))
         await client.privmsg(nick, line, tags, guard);
+
       return "sent";
     } catch {
       return "retry";
@@ -1665,6 +1833,7 @@ export class IrcShip {
     const id = message.tags.get(copyTag);
     const account = message.tags.get("account");
     const target = message.params[0] ?? "";
+
     return (
       message.command === "PRIVMSG" &&
       id !== undefined &&
@@ -1690,6 +1859,7 @@ export class IrcShip {
   ): GatewayTransport["sessionReady"] {
     const link = this.link;
     const crewID = member.crewID;
+
     if (
       !link ||
       crewID === undefined ||
@@ -1699,8 +1869,10 @@ export class IrcShip {
       member.backend.url !== config.backend.url
     )
       return;
+
     return async (sessionID, signal) => {
       if (this.bound.has(sessionID)) return;
+
       try {
         await link.bind(
           sessionID,
@@ -1734,6 +1906,7 @@ export class IrcShip {
     },
   ) {
     const step = this.config.access.allCallStaggerMs;
+
     if (
       !step ||
       !admission.textMention ||
@@ -1741,12 +1914,14 @@ export class IrcShip {
     )
       return {};
     const turn = agentTurn(this.config, member, admission.channel, client.fold);
+
     return turn ? { notBefore: admission.received + turn * step } : {};
   }
 
   /** Keep a live channel PRIVMSG for later all-call turns of this agent. */
   private remember(member: IrcMember, client: IrcClient, message: IrcMessage) {
     const [target = "", raw = ""] = message.params;
+
     if (
       message.command !== "PRIVMSG" ||
       !client.isChannel(target) ||
@@ -1757,10 +1932,13 @@ export class IrcShip {
     const key = `${member.id} ${client.fold(target)}`;
     const time = Date.parse(message.tags.get("time") ?? "");
     const now = Date.now();
+
     const lines = (this.said.get(key) ?? []).filter(
       (line) => now - line.time < saidMs,
     );
+
     const text = raw.split("\n").map(cleanText).join(" / ").trim();
+
     if (!text) return;
     lines.push({
       time: Number.isFinite(time) ? time : now,
@@ -1788,6 +1966,7 @@ export class IrcShip {
   /** The DM audit channel of this ship, under the server's case folding. */
   private isAuditChannel(client: IrcClient, name: string) {
     const audit = this.config.audit?.channel;
+
     return (
       audit !== undefined &&
       client.isChannel(name) &&
@@ -1807,22 +1986,27 @@ export class IrcShip {
     replay: boolean,
   ) {
     const audit = this.audit;
+
     if (
       !audit ||
       (message.command !== "PRIVMSG" && message.command !== "NOTICE")
     )
       return;
     const [target = "", text = ""] = message.params;
+
     if (
       client.isChannel(target) ||
       client.fold(target) !== client.fold(client.nick)
     )
       return;
+
     if (!message.source?.includes("!")) return;
     const nick = sourceNick(message.source);
+
     if (client.fold(nick) === client.fold(client.nick)) return;
     const time = message.tags.get("time");
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
+
     if (replay && (!time || Date.parse(time) < oldest)) return;
     const account = message.tags.get("account");
     audit.record(
@@ -1855,7 +2039,7 @@ export class IrcShip {
   }
 
   /**
-   * dmPolicy redirect: answer a direct PRIVMSG with a NOTICE that names
+   * DmPolicy redirect: answer a direct PRIVMSG with a NOTICE that names
    * the connection's ship channel. Only a logged-in account is answered,
    * once per account in `redirectCooldownMs`, so rotating nicks cannot
    * flood the connection. Never a NOTICE in reply to a NOTICE (so two bots
@@ -1865,13 +2049,18 @@ export class IrcShip {
   private redirect(member: IrcMember, client: IrcClient, message: IrcMessage) {
     if (message.command !== "PRIVMSG") return;
     const [target = "", text = ""] = message.params;
+
     if (client.fold(target) !== client.fold(client.nick)) return;
     const command = ctcp(text);
+
     if (command && command.verb !== "ACTION") return;
+
     if (!message.source?.includes("!")) return;
     const nick = sourceNick(message.source);
     const account = message.tags.get("account");
+
     if (!account || account === "*") return;
+
     if (
       serviceNick(nick) ||
       client.fold(nick) === client.fold(client.nick) ||
@@ -1879,10 +2068,12 @@ export class IrcShip {
     )
       return;
     const channel = member.channels[0];
+
     if (!channel) return;
     const key = `${member.id} ${client.fold(account)}`;
     const now = Date.now();
     const last = this.redirected.get(key);
+
     if (last !== undefined && now - last < redirectCooldownMs) return;
     this.redirected.set(key, now);
     client
@@ -1897,9 +2088,11 @@ export class IrcShip {
     if (!this.open() || !this.config.features.reactions) return;
     const client = registration.client;
     const target = message.params[0] ?? "";
+
     const channel = client.fold(
       client.isChannel(target) ? target : (message.tags.get("account") ?? ""),
     );
+
     const stop = routeIrcStop(message, {
       config: this.config,
       member: registration,
@@ -1910,7 +2103,9 @@ export class IrcShip {
         this.store.irc.ircBurstRequest(registration.key, channel, msgid) ??
         client.requestAnchor(msgid),
     });
+
     if (!stop) return;
+
     if (registration.stopTurn?.(stop.conversation, stop.thread))
       this.log.info({ irc: registration.id }, "IRC Stop reaction accepted");
   }
@@ -1923,18 +2118,24 @@ export class IrcShip {
     numeric: string,
   ) {
     const captain = this.current[0];
+
     if (this.isAuditChannel(client, channel)) {
       this.log.warn(
         { irc: member.id },
         "IRC DM audit channel join refused; audit lines wait",
       );
+
       return;
     }
+
     if (member.role !== "crew" || numeric !== "473" || !captain) {
       this.log.warn({ irc: member.id }, "IRC channel join refused");
+
       return;
     }
+
     const nick = client.nick;
+
     if (!nick || !captain.client.inChannel(channel)) return;
     captain.client
       .invite(nick, channel)

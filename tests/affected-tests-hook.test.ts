@@ -21,12 +21,15 @@ function git(root: string, ...args: string[]) {
     encoding: "utf8",
     timeout: 30_000,
   });
+
   if (result.status !== 0) throw new Error(result.stderr);
+
   return result.stdout;
 }
 
 async function scenario() {
   const root = await mkdtemp(join(tmpdir(), "affected-hook-"));
+
   for (const directory of ["src", "tests", "scripts", "bin"])
     await mkdir(join(root, directory));
   git(root, "init", "-b", "main");
@@ -55,6 +58,7 @@ async function scenario() {
     '#!/bin/sh\n[ -z "${GIT_INDEX_FILE+x}" ] || exit 93\nprintf "%s\\n" "$@" > "$PWD/ran"\nexit "${RUNNER_EXIT:-0}"\n',
   );
   await chmod(join(root, "bin/bun"), 0o755);
+
   return root;
 }
 
@@ -63,6 +67,7 @@ function run(root: string, extra: NodeJS.ProcessEnv = {}, hook = HOOK) {
   delete env["STARGATE_UNTRUSTED_TESTS"];
   delete env["STARGATE_AFFECTED_TEST_LIMIT"];
   delete env["STARGATE_FORCE_AFFECTED_TESTS"];
+
   return spawnSync(process.execPath, [hook], {
     cwd: root,
     encoding: "utf8",
@@ -80,6 +85,7 @@ async function fixture(root: string, files: Record<string, string>) {
     await mkdir(dirname(join(root, path)), { recursive: true });
     await writeFile(join(root, path), text);
   }
+
   git(root, "add", ...Object.keys(files));
   git(root, "-c", "core.hooksPath=/dev/null", "commit", "-m", "fixture inputs");
 }
@@ -88,11 +94,13 @@ function untrustedPaths(output: string): Set<string> {
   const value: unknown = JSON.parse(
     /^Untrusted paths: (\[.*\])\./m.exec(output)?.[1] ?? "[]",
   );
+
   if (
     !Array.isArray(value) ||
     !value.every((path): path is string => typeof path === "string")
   )
     throw new Error("Invalid untrusted-path notice");
+
   return new Set(value);
 }
 
@@ -106,6 +114,7 @@ async function pendingSnapshot(
   const done = join(root, "writer-done");
   const snapshots = join(root, "snapshots");
   await mkdir(snapshots);
+
   // EOF also releases the child: an old handler exits before its queued write.
   const writer = `
     const { mkdir, writeFile, rename } = await import("node:fs/promises");
@@ -122,6 +131,7 @@ async function pendingSnapshot(
     await rename(done + ".pending", done);
     if (process.env.CONTROL_WRITER_FAILURE === "1") process.exitCode = 7;
   `;
+
   const control = `
     let writer;
     let delivered = 0;
@@ -143,7 +153,9 @@ async function pendingSnapshot(
       await settled;
     }
   `;
+
   let source = await readFile(HOOK, "utf8");
+
   const rewrites: [string, string][] = [
     ["import { spawnSync }", "import { spawn, spawnSync }"],
     [
@@ -160,16 +172,20 @@ async function pendingSnapshot(
       "const interrupt = () => { terminate(130); afterSignal(); };",
     ],
   ];
+
   for (const [before, after] of rewrites) {
     expect(source.split(before)).toHaveLength(2);
     source = source.replace(before, after);
   }
+
   await writeFile(hook, source);
+
   const result = run(
     root,
     { TMPDIR: snapshots, CONTROL_WRITER_FAILURE: fail ? "1" : "0" },
     hook,
   );
+
   // Child EOF completion, not a sleep, orders the late-write assertion.
   const target = await readFile(done, "utf8").catch(async () => {
     const { watch } = await import("node:fs");
@@ -179,16 +195,21 @@ async function pendingSnapshot(
         watcher.close();
         resolve();
       });
+
       watcher.once("error", reject);
+
       if (existsSync(done)) {
         watcher.close();
         resolve();
       }
     });
+
     return readFile(done, "utf8");
   });
+
   const snapshot = dirname(dirname(target));
   expect(dirname(snapshot)).toBe(snapshots);
+
   return { result, snapshot };
 }
 
@@ -208,15 +229,18 @@ describe("affected-tests hook", () => {
     "%s waits for the in-flight snapshot write before cleanup",
     async (_name, signals, status, phase, fail) => {
       const root = await scenario();
+
       try {
         await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
         git(root, "add", "src/leaf.ts");
+
         const { result, snapshot } = await pendingSnapshot(
           root,
           [...signals],
           phase,
           fail,
         );
+
         expect(result.status).toBe(status);
         expect(existsSync(snapshot)).toBe(false);
         expect(result.stdout).toBe("");
@@ -236,14 +260,18 @@ describe("affected-tests hook", () => {
     "two selected files with limit %s run locally: %s",
     async (limit, local) => {
       const root = await scenario();
+
       try {
         await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
         git(root, "add", "src/leaf.ts");
+
         const result = run(root, {
           STARGATE_AFFECTED_TEST_LIMIT: String(limit),
         });
+
         expect(result.status).toBe(0);
         expect(await Bun.file(join(root, "ran")).exists()).toBe(local);
+
         if (local) {
           expect(await readFile(join(root, "ran"), "utf8")).toBe(
             "test\n./tests/commonjs.test.ts\n./tests/dependent.test.ts\n",
@@ -268,11 +296,13 @@ describe("affected-tests hook", () => {
 
   test("the default bound defers 21 files and names every deferred test", async () => {
     const root = await scenario();
+
     try {
       const names = Array.from(
         { length: 21 },
         (_, n) => `tests/selected-${n}.test.ts`,
       ).sort();
+
       for (const name of names)
         await writeFile(join(root, name), "export {};\n");
       git(root, "add", ...names);
@@ -281,6 +311,7 @@ describe("affected-tests hook", () => {
       expect(result.stdout).toContain(
         "21 selected files exceed the local limit 20",
       );
+
       for (const name of names) expect(result.stdout).toContain(`  ${name}\n`);
       expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
     } finally {
@@ -290,14 +321,17 @@ describe("affected-tests hook", () => {
 
   test("the explicit override runs an over-limit set and preserves failure", async () => {
     const root = await scenario();
+
     try {
       await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
       git(root, "add", "src/leaf.ts");
+
       const result = run(root, {
         STARGATE_AFFECTED_TEST_LIMIT: "1",
         STARGATE_FORCE_AFFECTED_TESTS: "1",
         RUNNER_EXIT: "7",
       });
+
       expect(result.status).toBe(7);
       expect(result.stdout).not.toContain("deferring these tests");
       expect(await readFile(join(root, "ran"), "utf8")).toBe(
@@ -310,14 +344,17 @@ describe("affected-tests hook", () => {
 
   test("untrusted full opt-in bypasses the selection bound", async () => {
     const root = await scenario();
+
     try {
       await writeFile(join(root, "package.json"), "{}\n");
       git(root, "add", "package.json");
+
       const result = run(root, {
         STARGATE_UNTRUSTED_TESTS: "full",
         STARGATE_AFFECTED_TEST_LIMIT: "0",
         RUNNER_EXIT: "7",
       });
+
       expect(result.status).toBe(7);
       expect(result.stdout).toContain("Running the full suite locally");
       expect(result.stdout).not.toContain("deferring these tests");
@@ -329,13 +366,16 @@ describe("affected-tests hook", () => {
 
   test("selection errors retain full fallback even with a zero limit", async () => {
     const root = await scenario();
+
     try {
       await writeFile(join(root, "src/leaf.ts"), "export const = ;\n");
       git(root, "add", "src/leaf.ts");
+
       const result = run(root, {
         STARGATE_AFFECTED_TEST_LIMIT: "0",
         RUNNER_EXIT: "7",
       });
+
       expect(result.status).toBe(7);
       expect(result.stderr).toContain("computation error; running full suite");
       expect(await readFile(join(root, "ran"), "utf8")).toBe("test\n");
@@ -354,6 +394,7 @@ describe("affected-tests hook", () => {
     "invalid bound configuration fails without running tests: %j",
     async (extra) => {
       const root = await scenario();
+
       try {
         await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
         git(root, "add", "src/leaf.ts");
@@ -369,6 +410,7 @@ describe("affected-tests hook", () => {
 
   test("a staged source selects transitive dependent tests from the index", async () => {
     const root = await scenario();
+
     try {
       await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
       git(root, "add", "src/leaf.ts");
@@ -394,6 +436,7 @@ describe("affected-tests hook", () => {
 
   test("source edits also select architecture scanners without source imports", async () => {
     const root = await scenario();
+
     try {
       await writeFile(
         join(root, "tests/architecture-graph.ts"),
@@ -425,6 +468,7 @@ describe("affected-tests hook", () => {
 
   test("deleting a source selects its HEAD importers without running all tests", async () => {
     const root = await scenario();
+
     try {
       await rm(join(root, "src/leaf.ts"));
       git(root, "add", "-u");
@@ -441,6 +485,7 @@ describe("affected-tests hook", () => {
 
   test("a source rename and import rewrites select old and new dependents", async () => {
     const root = await scenario();
+
     try {
       git(root, "mv", "src/leaf.ts", "src/renamed.ts");
       await writeFile(
@@ -465,11 +510,13 @@ describe("affected-tests hook", () => {
     "a test %s never runs its old path",
     async (operation) => {
       const root = await scenario();
+
       try {
         if (operation === "delete") git(root, "rm", "tests/unrelated.test.ts");
         else
           git(root, "mv", "tests/unrelated.test.ts", "tests/renamed.test.ts");
         expect(run(root).status).toBe(0);
+
         if (operation === "delete")
           expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
         else
@@ -560,10 +607,12 @@ describe("affected-tests hook", () => {
       ["tests/cronjob-integration.test.ts"],
     ],
   ];
+
   test.each(readerCases)(
     "maps %s to its actual readers",
     async (path, expected) => {
       const root = await scenario();
+
       try {
         await fixture(
           root,
@@ -596,6 +645,7 @@ describe("affected-tests hook", () => {
     "an orphan test helper is never silently trusted in %s mode",
     async (mode) => {
       const root = await scenario();
+
       try {
         await writeFile(
           join(root, "tests/unmapped-fixture.ts"),
@@ -607,6 +657,7 @@ describe("affected-tests hook", () => {
         expect(result.stdout).toContain(
           'Untrusted paths: ["tests/unmapped-fixture.ts"]',
         );
+
         if (mode === "defer") {
           expect(result.stdout).toContain(
             "full suite runs in hosted Quality checks",
@@ -623,6 +674,7 @@ describe("affected-tests hook", () => {
     "a filename-executed script is untrusted in %s mode without a reader mapping",
     async (mode) => {
       const root = await scenario();
+
       try {
         await fixture(root, {
           "scripts/generate-review.ts": 'console.log("old review");\n',
@@ -639,6 +691,7 @@ describe("affected-tests hook", () => {
         expect(untrustedPaths(result.stdout)).toEqual(
           new Set(["scripts/generate-review.ts"]),
         );
+
         if (mode === "defer")
           expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
         else expect(await readFile(join(root, "ran"), "utf8")).toBe("test\n");
@@ -650,6 +703,7 @@ describe("affected-tests hook", () => {
 
   test("every added, modified, deleted or renamed path selects a reader, is a test, or has a notice", async () => {
     const root = await scenario();
+
     try {
       await fixture(root, {
         "src/orphan.ts": "export const unused = 0;\n",
@@ -671,6 +725,7 @@ describe("affected-tests hook", () => {
       git(root, "mv", "src/movable.ts", "src/moved.ts");
       git(root, "mv", "scripts/old-runner.ts", "scripts/new-runner.ts");
       git(root, "mv", "tests/old.test.ts", "tests/renamed.test.ts");
+
       for (const path of [
         "src/orphan.ts",
         "tests/extra-helper.ts",
@@ -678,6 +733,7 @@ describe("affected-tests hook", () => {
         "misc/deleted.data",
       ])
         git(root, "rm", path);
+
       const edits: Record<string, string> = {
         "src/leaf.ts": "export const value = 2;\n",
         "src/added-orphan.ts": "export const added = true;\n",
@@ -690,14 +746,17 @@ describe("affected-tests hook", () => {
         "tests/nested/added.test.ts": "export {};\n",
         "misc/added.data": "new\n",
       };
+
       for (const [path, text] of Object.entries(edits)) {
         await mkdir(dirname(join(root, path)), { recursive: true });
         await writeFile(join(root, path), text);
       }
+
       git(root, "add", ...Object.keys(edits));
       const result = run(root);
       expect(result.status).toBe(0);
       expect(result.stderr).not.toContain("computation error");
+
       const selected = new Set(
         (await readFile(join(root, "ran"), "utf8"))
           .trim()
@@ -705,9 +764,11 @@ describe("affected-tests hook", () => {
           .slice(1)
           .map((path) => path.replace(/^\.\//, "")),
       );
+
       const noticed = untrustedPaths(result.stdout);
+
       // Ground truth comes from this fixture's explicit import relationships,
-      // not from the selector's graph or its total selected count.
+      // Not from the selector's graph or its total selected count.
       const readers = new Map<string, string[]>([
         ["src/leaf.ts", ["tests/commonjs.test.ts", "tests/dependent.test.ts"]],
         ["src/movable.ts", ["tests/movable.test.ts"]],
@@ -715,6 +776,7 @@ describe("affected-tests hook", () => {
         ["tests/shared.ts", ["tests/shared.test.ts"]],
         ["tests/fixtures/value.json", ["tests/data.test.ts"]],
       ]);
+
       const changed = git(
         root,
         "diff",
@@ -726,16 +788,21 @@ describe("affected-tests hook", () => {
       )
         .split("\0")
         .filter(Boolean);
+
       for (const path of changed) {
         const isTest = path.endsWith(".test.ts");
+
         const contributes =
           readers.get(path)?.some((reader) => selected.has(reader)) ?? false;
+
         expect({
           path,
           covered: contributes || isTest || noticed.has(path),
         }).toEqual({ path, covered: true });
+
         if (isTest) expect(noticed.has(path)).toBe(false);
       }
+
       expect(selected).toEqual(
         new Set([
           "tests/commonjs.test.ts",
@@ -766,8 +833,10 @@ describe("affected-tests hook", () => {
     "SIG%s during snapshot creation cleans its private index and exits %s",
     async (signal, status) => {
       const root = await scenario();
+
       try {
         const realGit = Bun.which("git");
+
         if (!realGit) throw new Error("Git unavailable");
         await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
         git(root, "add", "src/leaf.ts");
@@ -798,6 +867,7 @@ describe("affected-tests hook", () => {
     "imported helper or fixture %s is graph-selectable",
     async (path) => {
       const root = await scenario();
+
       try {
         await fixture(root, {
           [path]: path.endsWith(".json") ? "{}\n" : "export {};\n",
@@ -826,14 +896,17 @@ describe("affected-tests hook", () => {
     "untrusted %s mode preserves selected-test results",
     async (mode) => {
       const root = await scenario();
+
       try {
         await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
         await writeFile(join(root, "package.json"), "{}\n");
         git(root, "add", "src/leaf.ts", "package.json");
+
         const result = run(root, {
           STARGATE_UNTRUSTED_TESTS: mode,
           RUNNER_EXIT: "7",
         });
+
         expect(result.status).toBe(7);
         expect(result.stdout).toContain('Untrusted paths: ["package.json"]');
         expect(result.stdout).toContain(`untrusted-mode=${mode}`);
@@ -850,9 +923,10 @@ describe("affected-tests hook", () => {
 
   test("default defer runs no tests for config-only changes and names all untrusted paths", async () => {
     const root = await scenario();
+
     try {
       // The real gateway imports package.json too. Global config remains
-      // untrusted by policy even when an import edge happens to exist.
+      // Untrusted by policy even when an import edge happens to exist.
       await fixture(root, {
         "package.json": "{}\n",
         "src/manifest.ts":
@@ -882,6 +956,7 @@ describe("affected-tests hook", () => {
       `${mode}: %s errors still run the full suite`,
       async (failure) => {
         const root = await scenario();
+
         try {
           await writeFile(
             join(root, "src/leaf.ts"),
@@ -890,6 +965,7 @@ describe("affected-tests hook", () => {
               : 'import "./missing";\n',
           );
           git(root, "add", "src/leaf.ts");
+
           const result = run(root, {
             STARGATE_UNTRUSTED_TESTS: mode,
             RUNNER_EXIT: "7",
@@ -897,6 +973,7 @@ describe("affected-tests hook", () => {
               ? { GIT_DIR: join(root, "missing.git") }
               : {}),
           });
+
           expect(result.status).toBe(7);
           expect(result.stderr).toContain(
             "computation error; running full suite",
@@ -911,6 +988,7 @@ describe("affected-tests hook", () => {
 
   test("an empty index diff exits zero without starting tests", async () => {
     const root = await scenario();
+
     try {
       expect(run(root).status).toBe(0);
       expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
@@ -921,6 +999,7 @@ describe("affected-tests hook", () => {
 
   test("an unreachable source has a notice; a new staged test selects itself", async () => {
     const root = await scenario();
+
     try {
       await fixture(root, { "src/isolated.ts": "export const unused = 0;\n" });
       await writeFile(

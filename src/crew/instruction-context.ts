@@ -26,19 +26,26 @@ function pathFormat(path: string) {
   if (
     Array.from(path).some((character) => {
       const code = character.charCodeAt(0);
+
       return code < 32 || code === 127;
     })
   )
     return;
+
   if (posix.isAbsolute(path) && posix.normalize(path) === path) return posix;
+
   if (win32.isAbsolute(path) && win32.normalize(path) === path) return win32;
+
   return;
 }
 
 function describes(path: string, description: string): boolean {
   const format = pathFormat(path);
+
   if (!format || !description) return false;
+
   if (description === path) return true;
+
   return (
     !format.isAbsolute(description) &&
     format.normalize(description) === description &&
@@ -59,15 +66,18 @@ export function isNativeInstructionContext(
     typeof message.text !== "string" ||
     message.text.length > 1024 * 1024 ||
     typeof message.description !== "string" ||
-    message.description.length > 16384 ||
+    message.description.length > 16_384 ||
     !message.description.startsWith("Loaded ")
   )
     return false;
   const parsed = Schema.decodeUnknownResult(metadataSchema)(message.metadata);
+
   if (Result.isFailure(parsed)) return false;
   const paths = parsed.success.instruction.paths;
+
   if (new Set(paths).size !== paths.length) return false;
   const descriptions = message.description.slice("Loaded ".length).split(", ");
+
   if (
     descriptions.length !== paths.length ||
     !paths.every((path, index) => describes(path, descriptions[index] ?? ""))
@@ -76,17 +86,21 @@ export function isNativeInstructionContext(
   // File bodies are opaque; a quoted header inside one is ordinary content.
   // Only the metadata-declared block markers must appear in their native order.
   let cursor = 0;
+
   for (const [index, path] of paths.entries()) {
     const header = `Instructions from: ${path}\n`;
+
     if (index === 0) {
       if (!message.text.startsWith(header)) return false;
       cursor = header.length;
     } else {
       const marker = `\n\n${header}`;
       const found = message.text.indexOf(marker, cursor);
+
       if (found < 0) return false;
       cursor = found + marker.length;
     }
   }
+
   return true;
 }

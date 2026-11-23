@@ -20,6 +20,7 @@ const diskIntegrationTimeoutMs = 30_000;
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-crew-history-"));
   const state = await CrewState.open(directory, "history", "identity");
+
   const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [
@@ -47,7 +48,9 @@ async function fixture() {
       { id: "absent", role: "Not provisioned", permissionProfile: "coding" },
     ],
   });
+
   const peers = new Map<string, Peer>();
+
   for (const [id, native] of [
     ["mario", undefined],
     ["twiki", "17"],
@@ -55,33 +58,44 @@ async function fixture() {
   ] as const) {
     const peer = state.reservePeer(id);
     state.readyPeer(id);
+
     if (native) {
       state.reservePiPeer(peer.sessionID);
       state.readyPiPeer(peer.sessionID, native);
     }
+
     peers.set(id, peer);
   }
+
   state.reservePeer("pending");
+
   const peer = (id: string) => {
     const value = peers.get(id);
+
     if (!value) throw new Error("Missing test peer");
+
     return value;
   };
+
   const task = (id: string, conversationID: string, report = false) => {
     const worker = peer(id);
     const task = state.reserveTask(worker, "captain", "private assignment");
+
     if (!task) throw new Error("Missing task");
     state.savePiTaskConversation(task.id, conversationID);
+
     if (report) state.reporting.markReport(task.id, "test-capture");
     state.complete(task.id, worker.sessionID, "private result");
     state.release(task.id);
   };
+
   task("twiki", "17");
   task("twiki", "18", true);
   task("twiki", "19");
   task("twiki", "19");
   task("r2d2", "28");
   const reads: { member: string; conversationID: string }[] = [];
+
   const history: SessionHistory = {
     async roots() {
       throw new Error("Must not read native roots");
@@ -95,6 +109,7 @@ async function fixture() {
     async entries(input, call) {
       call.throwIfAborted();
       reads.push({ member: activeMember, conversationID: input.sessionID });
+
       return {
         entries: [
           {
@@ -106,16 +121,21 @@ async function fixture() {
       };
     },
   };
+
   let activeMember = "";
+
   const workers: Pick<PiCrewWorkers, "readHistory"> = {
     async readHistory(member, _signal, read) {
       activeMember = member.id;
+
       return read(history, _signal);
     },
   };
+
   const rpc = new CrewHistoryRPC(team, state, workers);
   const root = (id: string) => `pi:${peer(id).sessionID}`;
   const db = new Database(state.path, { readonly: true });
+
   const snapshot = () =>
     [
       "peers",
@@ -125,6 +145,7 @@ async function fixture() {
       "pending_tasks",
       "activity_report_tasks",
     ].map((table) => db.query(`SELECT * FROM ${table} ORDER BY rowid`).all());
+
   return {
     directory,
     state,
@@ -144,6 +165,7 @@ async function fixture() {
 
 test("history RPC mixed roots are pure provisioned-state reads", async () => {
   const f = await fixture();
+
   try {
     const before = f.snapshot();
     const page = await f.rpc.historyRoots(signal());
@@ -188,9 +210,11 @@ test("history RPC mixed roots are pure provisioned-state reads", async () => {
 
 test("history RPC authorizes every describe, children and entry ID before reads", async () => {
   const f = await fixture();
+
   try {
     const before = f.snapshot();
     const root = f.root("twiki");
+
     const foreign = [
       "pi:17",
       "pi:foreign~18",
@@ -201,6 +225,7 @@ test("history RPC authorizes every describe, children and entry ID before reads"
       `${root}~018`,
       `${root}~18~19`,
     ];
+
     expect(
       await f.rpc.historyDescribe([...foreign, root, `${root}~18`], signal()),
     ).toMatchObject({
@@ -209,6 +234,7 @@ test("history RPC authorizes every describe, children and entry ID before reads"
         { id: `${root}~18`, kind: "conversation", parentID: root },
       ],
     });
+
     for (const id of foreign) {
       await expect(
         f.rpc.historyChildren({ parentID: id, limit: 10 }, signal()),
@@ -220,6 +246,7 @@ test("history RPC authorizes every describe, children and entry ID before reads"
         ),
       ).rejects.toThrow(unavailable);
     }
+
     expect(f.reads).toEqual([]);
     expect(f.snapshot()).toEqual(before);
   } finally {
@@ -231,13 +258,16 @@ test(
   "history RPC pages recorded task/report children, excludes main and duplicates",
   async () => {
     const f = await fixture();
+
     try {
       const before = f.snapshot();
       const root = f.root("twiki");
+
       const first = await f.rpc.historyChildren(
         { parentID: root, limit: 1 },
         signal(),
       );
+
       expect(first.sessions).toEqual([
         {
           id: `${root}~18`,
@@ -247,11 +277,14 @@ test(
           title: "report",
         },
       ]);
+
       if (!first.cursor) throw new Error("Missing cursor");
+
       const second = await f.rpc.historyChildren(
         { parentID: root, limit: 1, cursor: first.cursor },
         signal(),
       );
+
       expect(second.sessions).toEqual([
         {
           id: `${root}~19`,
@@ -262,10 +295,12 @@ test(
         },
       ]);
       expect(second.cursor).toBeUndefined();
+
       const recent = await f.rpc.historyChildren(
         { parentID: root, limit: 1, updatedSince: 0 },
         signal(),
       );
+
       expect(recent.sessions).toMatchObject([
         { parentID: root, updatedAt: expect.any(Number) },
       ]);
@@ -299,18 +334,23 @@ test(
 
 test("history RPC children cursors are exact string records", async () => {
   const f = await fixture();
+
   try {
     const root = f.root("twiki");
+
     const encode = (value: unknown) =>
       Buffer.from(JSON.stringify(value)).toString("base64url");
+
     const children = (cursor: string) =>
       f.rpc.historyChildren({ parentID: root, limit: 1, cursor }, signal());
+
     expect(
       (await children(encode({ parentID: root, after: "18" }))).sessions,
     ).toMatchObject([{ id: `${root}~19` }]);
     expect(
       (await children(encode({ parentID: root, after: "" }))).sessions,
     ).toMatchObject([{ id: `${root}~18` }]);
+
     for (const cursor of [
       encode({ parentID: root, after: "18", extra: true }),
       encode({ parentID: root, after: 18 }),
@@ -329,17 +369,21 @@ test("history RPC children cursors are exact string records", async () => {
 
 test("history RPC reads only owned native conversations without state changes", async () => {
   const f = await fixture();
+
   try {
     const before = f.snapshot();
+
     for (const sessionID of [f.root("twiki"), `${f.root("twiki")}~18`]) {
       const page = await f.rpc.historyEntries(
         { sessionID, limit: 10, order: "desc", detail: "full" },
         signal(),
       );
+
       expect(page.entries[0]?.parts).toEqual([
         { type: "text", text: "retained" },
       ]);
     }
+
     expect(f.reads).toEqual([
       { member: "twiki", conversationID: "17" },
       { member: "twiki", conversationID: "18" },
@@ -354,6 +398,7 @@ test("history RPC abort uses fixed errors and never reads state or transcripts",
   const f = await fixture();
   const controller = new AbortController();
   controller.abort(new Error("private reason"));
+
   try {
     const before = f.snapshot();
     await expect(f.rpc.historyRoots(controller.signal)).rejects.toThrow(
@@ -384,6 +429,7 @@ test("history RPC abort uses fixed errors and never reads state or transcripts",
 test("Pi history reuses the shared live pool and never opens a second runtime", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-live-history-"));
   const state = await CrewState.open(directory, "history-pool", "identity");
+
   const member: CrewMember = {
     id: "twiki",
     role: "Maintenance",
@@ -395,10 +441,12 @@ test("Pi history reuses the shared live pool and never opens a second runtime", 
       systemPrompt: "",
     },
   };
+
   let opens = 0;
   let creates = 0;
   let prompts = 0;
   let closes = 0;
+
   const history: SessionHistory = {
     async roots() {
       return [];
@@ -413,12 +461,15 @@ test("Pi history reuses the shared live pool and never opens a second runtime", 
       return { entries: [] };
     },
   };
+
   const factory: PiWorkerFactory = async () => {
     opens++;
+
     return {
       history,
       async createSession() {
         creates++;
+
         return "17";
       },
       async prompt() {
@@ -430,10 +481,13 @@ test("Pi history reuses the shared live pool and never opens a second runtime", 
       },
     };
   };
+
   const owner = new PiCrewWorkers(state, directory, factory);
+
   const viewer = new PiCrewWorkers(state, directory, async () => {
     throw new Error("Must reuse live backend");
   });
+
   try {
     const peer = state.reservePeer(member.id);
     await owner.ensure(member, directory, peer, signal());
@@ -462,6 +516,7 @@ test("Pi history reuses the shared live pool and never opens a second runtime", 
 test("Pi history owner shutdown cancels active reads without interrupting work", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-history-cancel-"));
   const state = await CrewState.open(directory, "history-cancel", "identity");
+
   const member = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [
@@ -473,8 +528,10 @@ test("Pi history owner shutdown cancels active reads without interrupting work",
       },
     ],
   }).crew[0];
+
   if (!member) throw new Error("Missing member");
   let interrupts = 0;
+
   const history: SessionHistory = {
     async roots() {
       return [];
@@ -489,6 +546,7 @@ test("Pi history owner shutdown cancels active reads without interrupting work",
       return { entries: [] };
     },
   };
+
   const workers = new PiCrewWorkers(state, directory, async () => ({
     history,
     async createSession() {
@@ -502,6 +560,7 @@ test("Pi history owner shutdown cancels active reads without interrupting work",
     },
     async close() {},
   }));
+
   try {
     await workers.ensure(
       member,
@@ -510,6 +569,7 @@ test("Pi history owner shutdown cancels active reads without interrupting work",
       signal(),
     );
     const entered = Promise.withResolvers<AbortSignal>();
+
     const reading = workers.readHistory(
       member,
       signal(),
@@ -524,6 +584,7 @@ test("Pi history owner shutdown cancels active reads without interrupting work",
         });
       },
     );
+
     const outcome = reading.catch((error: unknown) => error);
     const call = await entered.promise;
     await workers.close();

@@ -46,9 +46,12 @@ This bound does not change untrusted full opt-in or error full fallbacks.
 Run `make hooks-install` once per clone. `make hooks` runs the pre-commit gate,
 including workflow and file hygiene checks, but does not replace the full CI
 gate. With no staged changes, affected tests report an explicit no-op.
-Use `make format` for safe fixes;
-do not suppress or weaken type-safety rules to pass the gate. Index-signature
-properties require bracket access; Oxlint's conflicting `useLiteralKeys` rule is
+Use `make format` for the supported safe lint fixes and Oxfmt. The gated
+`anti-slop/require-readable-spacing` rule owns blank lines between statements;
+Oxfmt owns the rest of formatting. The anti-slop rules not selected by the root gate stay advisory
+under `make oxlint`. Do not suppress or weaken type-safety rules to pass the
+gate. Index-signature properties require bracket access. Oxlint's conflicting
+`useLiteralKeys` rule is
 intentionally disabled. Dependency declaration checks remain excluded because
 installed SDK declarations have upstream type errors; first-party code and tests
 must pass every configured check.

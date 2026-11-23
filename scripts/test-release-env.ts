@@ -9,10 +9,14 @@ import { join } from "node:path";
 import { isolatedEnvironment } from "../src/maintenance/nightly/update/release";
 
 const cache = process.env["XDG_CACHE_HOME"] || join(homedir(), ".cache");
+
 await mkdir(cache, { recursive: true });
+
 const base = await mkdtemp(join(cache, "stargate-release-test-"));
+
 try {
   const env = await isolatedEnvironment(join(base, ".staging-test"));
+
   const child = Bun.spawn(
     [process.execPath, "test", ...process.argv.slice(2)],
     {
@@ -20,6 +24,7 @@ try {
       stdio: ["inherit", "inherit", "inherit"],
     },
   );
+
   process.exitCode = await child.exited;
 } finally {
   await rm(base, { recursive: true, force: true });

@@ -57,25 +57,30 @@ import {
 export { nativeCodex } from "./codex-paths";
 
 type Config = Extract<BackendConfig, { type: "codex" }>;
+
 type CodexConfig = NonNullable<CodexOptions["config"]>;
 
 /** Fixed, safe failure text produced by this adapter. */
 class CodexTurnError extends Error {}
 
 // A CLI that ends without a result proves nothing about its tools: frames
-// can be lost with the process. Never report that nothing ran.
+// Can be lost with the process. Never report that nothing ran.
 const crashed = { ran: true } as const;
 
 /** Conversation and thread IDs are UUIDs: never options, paths or flags. */
 const maximumID = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+
 const idSchema = Schema.String.check(
   Schema.isUUID(),
   // Zod accepted the max UUID only in lowercase; preserve existing ID spelling.
   Schema.makeFilter((id) => id.toLowerCase() !== maximumID || id === maximumID),
 );
+
 const isID = Schema.is(idSchema);
+
 /** The turn marker variable of Codex children; see `TurnMarker`. */
 const turnVariable = "STARGATE_CODEX_TURN";
+
 /** The proxy key's variable in the Codex process; tool commands never get it. */
 const keyVariable = "STARGATE_CODEX_PROVIDER_KEY";
 
@@ -116,8 +121,10 @@ export function codexLauncher(
   utilities: Record<"sh" | "mkfifo" | "cat" | "rm", string>,
 ) {
   const tool = (name: keyof typeof utilities) => shellQuote(utilities[name]);
+
   if (!/^\/[A-Za-z0-9._+/-]+$/.test(utilities.sh))
     throw new Error("Codex launcher shell path is not usable");
+
   return [
     `#!${utilities.sh}`,
     "set -eu",
@@ -126,7 +133,7 @@ export function codexLauncher(
     `${tool("mkfifo")} -m 600 "$out"`,
     `${tool("cat")} "$out" &`,
     // Returns once cat has opened the FIFO. Removing its path then keeps
-    // every other process out.
+    // Every other process out.
     'exec 3>"$out"',
     `${tool("rm")} -f "$out"`,
     `exec ${shellQuote(cli)} "$@" >&3 3>&- 2>/dev/null`,
@@ -144,6 +151,7 @@ export async function verifyLauncher(path: string, expected: string) {
   const uid = process.getuid?.();
   const directory = await lstat(dirname(path));
   const file = await lstat(path);
+
   if (
     !(await linkFree(path)) ||
     !directory.isDirectory() ||
@@ -165,6 +173,7 @@ export async function verifyLauncher(path: string, expected: string) {
 export async function writeLauncher(path: string, script: string) {
   if (!(await linkFree(dirname(path))))
     throw new CodexTurnError("Codex launcher failed verification");
+
   const file = await open(
     path,
     constants.O_WRONLY |
@@ -173,11 +182,13 @@ export async function writeLauncher(path: string, script: string) {
       constants.O_NOFOLLOW,
     0o700,
   );
+
   try {
     await file.writeFile(script);
   } finally {
     await file.close();
   }
+
   await verifyLauncher(path, script);
 }
 
@@ -193,11 +204,12 @@ export function codexEnvironment(
   parent: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
   const directories = codexDirectories(data);
+
   return {
     ...inherited(parent),
     CODEX_HOME: directories.home,
     // Codex runs commands with the account's login shell, whatever SHELL
-    // says. zsh reads `$ZDOTDIR/.zshenv` even when not interactive.
+    // Says. zsh reads `$ZDOTDIR/.zshenv` even when not interactive.
     ZDOTDIR: directories.shell,
     // Direct connections only; no inherited HTTP proxy.
     NO_PROXY: "*",
@@ -253,10 +265,10 @@ export function codexConfig(config: Config): CodexConfig {
     shell_environment_policy: {
       exclude: [keyVariable],
       // Network seccomp makes getpeername fail with EPERM, which Bash
-      // mistakes for a remote shell at level 1 and sources HOME/.bashrc.
+      // Mistakes for a remote shell at level 1 and sources HOME/.bashrc.
       set: { SHLVL: "1" },
     },
-    // workspace-write: `directory` and the turn's TMPDIR, not shared /tmp.
+    // Workspace-write: `directory` and the turn's TMPDIR, not shared /tmp.
     sandbox_workspace_write: { exclude_slash_tmp: true },
   };
 }
@@ -297,8 +309,10 @@ export function codexInput(
       "Invalid or oversized Codex attachments",
     );
   }
+
   const parts = text ? [text] : [];
   const images: Attachment[] = [];
+
   for (const file of files) {
     if (imageTypes[file.mime]) {
       parts.push(`Attachment: ${file.name} (image ${images.length + 1})`);
@@ -309,6 +323,7 @@ export function codexInput(
         "Codex supports UTF-8 text and PNG/JPEG/GIF/WebP attachments only",
       );
   }
+
   return { text: parts.join("\n\n"), images };
 }
 
@@ -316,6 +331,7 @@ const startedEvent = Schema.Struct({
   type: Schema.Literal("thread.started"),
   thread_id: Schema.String,
 });
+
 const itemEvent = Schema.Struct({
   type: Schema.Literals(["item.started", "item.updated", "item.completed"]),
   item: Schema.Struct({
@@ -324,15 +340,18 @@ const itemEvent = Schema.Struct({
     text: Schema.optional(Schema.String),
   }),
 });
+
 const endEvent = Schema.Struct({
   type: Schema.Literals(["turn.completed", "turn.failed", "error"]),
   // `error` carries `message`; `turn.failed` carries `error.message`.
   message: Schema.optional(Schema.String),
   error: Schema.optional(Schema.Struct({ message: Schema.String })),
 });
+
 const decodeStartedEvent = Schema.decodeUnknownOption(startedEvent);
 const decodeItemEvent = Schema.decodeUnknownOption(itemEvent);
 const decodeEndEvent = Schema.decodeUnknownOption(endEvent);
+
 /** Items that mean the turn did work outside the model. */
 const workItems = new Set([
   "command_execution",
@@ -353,19 +372,25 @@ export function codexFailureKind(
     /\b([45]\d\d) (?:Bad Request|Unauthorized|Payment Required|Forbidden|Not Found|Request Timeout|Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)\b/i.exec(
       message,
     )?.[1];
+
   if (status)
     return { kind: statusKind(Number(status)), status: Number(status) };
+
   if (/usage limit|rate limit|quota|too many requests/i.test(message))
     return { kind: "quota" };
+
   if (/unauthorized|api key|authentication|access token/i.test(message))
     return { kind: "auth" };
+
   if (/timed out|timeout/i.test(message)) return { kind: "timeout" };
+
   if (
     /error sending request|connection (?:refused|reset|closed)|stream disconnected|dns error|network/i.test(
       message,
     )
   )
     return { kind: "network" };
+
   return undefined;
 }
 
@@ -390,31 +415,44 @@ export class CodexTurn {
     )
       stage("model");
     const started = decodeStartedEvent(raw);
+
     if (Option.isSome(started)) {
       this.thread = started.value.thread_id;
+
       return false;
     }
+
     const item = decodeItemEvent(raw);
+
     if (Option.isSome(item)) {
       const { id, type, text } = item.value.item;
+
       if (item.value.type === "item.started") {
         if (type === "reasoning") stage?.("reasoning");
         else if (workItems.has(type)) stage?.("tool");
         else if (type === "agent_message") stage?.("reply");
       }
+
       if (workItems.has(type)) this.worked = true;
+
       if (type !== "agent_message" || text === undefined) return false;
+
       if (this.messages.get(id) === text) return false;
       this.messages.set(id, text);
+
       return true;
     }
+
     const end = decodeEndEvent(raw);
+
     if (Option.isSome(end)) {
       this.result = { ok: end.value.type === "turn.completed" };
       const message = end.value.error?.message ?? end.value.message;
+
       if (!this.result.ok && message)
         this.failure = codexFailureKind(message) ?? this.failure;
     }
+
     return false;
   }
 
@@ -438,10 +476,13 @@ const recordSchema = Schema.Struct({
   turn: idSchema,
   since: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
+
 const threadSchema = Schema.Struct({ thread: idSchema });
+
 const decodeRecord = Schema.decodeUnknownSync(recordSchema, {
   onExcessProperty: "error",
 });
+
 const decodeThread = Schema.decodeUnknownSync(threadSchema, {
   onExcessProperty: "error",
 });
@@ -493,11 +534,13 @@ export class CodexBackend implements AgentBackend {
     // Fail at startup, not on the first turn, when the key is missing.
     secret(config.provider.apiKeyEnv);
     // From here on Stargate uses only the canonical form of each path that it
-    // writes, checks or runs, and refuses links that could change later.
+    // Writes, checks or runs, and refuses links that could change later.
     const write = config.sandbox === "workspace-write";
+
     const directory = write
       ? await trustedPath(config.directory)
       : config.directory;
+
     const roots = write ? [directory] : [];
     const data = await trustedPath(context.dataDirectory, roots);
     const canonical = { ...config, directory };
@@ -505,20 +548,25 @@ export class CodexBackend implements AgentBackend {
     await checkCodexPaths(canonical, data);
     const utilities = await trustedUtilities();
     const directories = codexDirectories(data);
+
     for (const path of Object.values(directories)) {
       await mkdir(path, { recursive: true, mode: 0o700 });
+
       if (!(await linkFree(path)))
         throw new Error("Codex data directories must not be symbolic links");
       await chmod(path, 0o700);
     }
+
     // Launchers are written per turn; none from earlier runs is kept.
     await rm(directories.bin, { recursive: true, force: true });
     await mkdir(directories.bin, { mode: 0o700 });
     await chmod(directories.bin, 0o700);
     const native = nativeCodex();
+
     const helpers = existsSync(native.helpers)
       ? await trustedPath(native.helpers, roots)
       : undefined;
+
     return new CodexBackend(
       canonical,
       data,
@@ -538,7 +586,9 @@ export class CodexBackend implements AgentBackend {
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
     signal.throwIfAborted();
+
     if (this.closed) throw new Error("Codex backend is closing");
+
     // Codex assigns the thread ID on the first turn; Stargate maps to it.
     return crypto.randomUUID();
   }
@@ -569,17 +619,24 @@ export class CodexBackend implements AgentBackend {
       ? (value: TurnStage) =>
           onProgress({ stage: value, observedAt: Date.now(), backend: "codex" })
       : undefined;
+
     signal.throwIfAborted();
+
     if (this.closed) throw new Error("Codex backend is closing");
+
     if (!isID(sessionId))
       throw new CodexTurnError("Codex conversation ID is not valid");
     const id = sessionId;
+
     if (this.runs.has(id)) throw new CodexTurnError("Codex thread is busy");
+
     const input = codexInput(
       context ? `${sourceLine(context)}\n\n${text}` : text,
       files,
     );
+
     const env = codexEnvironment(this.config, this.data);
+
     const run: Run = {
       controller: new AbortController(),
       done: Promise.resolve(),
@@ -587,6 +644,7 @@ export class CodexBackend implements AgentBackend {
       since: 0,
       record: join(this.records, `${id}.json`),
     };
+
     this.runs.set(id, run);
     const finished = Promise.withResolvers<void>();
     run.done = finished.promise;
@@ -612,8 +670,10 @@ export class CodexBackend implements AgentBackend {
      */
     let reaping: Promise<void> | undefined;
     const abandon = Promise.withResolvers<"abandon">();
+
     const cancel = () => {
       if (live) sdk.abort();
+
       if (!recorded || reaping !== undefined) return;
       reaping = stopTurnProcesses(
         systemProcesses,
@@ -627,16 +687,20 @@ export class CodexBackend implements AgentBackend {
         )
         .then(() => abandon.resolve("abandon"));
     };
+
     run.controller.signal.addEventListener("abort", cancel, { once: true });
+
     try {
       // Never resume a thread that an earlier process is still running.
       await this.stopOrphan(id, AbortSignal.timeout(5000));
       temporary = await mkdtemp(join(tmpdir(), "stargate-codex-"));
       const roots = writableRoots(this.config);
+
       // Again for each turn, on canonical paths only.
       try {
         temporary = await trustedPath(temporary, roots);
         await checkCodexPaths(this.config, this.data, temporary);
+
         for (const path of Object.values(codexDirectories(this.data)))
           if (!(await linkFree(path)))
             throw new Error(
@@ -645,15 +709,19 @@ export class CodexBackend implements AgentBackend {
       } catch (error) {
         throw new CodexTurnError((error as Error).message);
       }
+
       const prompt: UserInput[] = [{ type: "text", text: input.text }];
+
       for (const [index, image] of input.images.entries()) {
         const path = join(
           temporary,
           `attachment-${index + 1}${imageTypes[image.mime]}`,
         );
+
         await writeFile(path, image.data, { mode: 0o600 });
         prompt.push({ type: "local_image", path });
       }
+
       const mapped = await this.thread(id);
       run.since = await bootTicks();
       writeFileSync(
@@ -670,6 +738,7 @@ export class CodexBackend implements AgentBackend {
         `${run.marker.value}.sh`,
       );
       await writeLauncher(launcher, codexLauncher(this.cli, this.utilities));
+
       const codex = new Codex({
         env: {
           ...env,
@@ -682,36 +751,46 @@ export class CodexBackend implements AgentBackend {
         config: codexConfig(this.config),
         codexPathOverride: launcher,
       });
+
       const options = codexThreadOptions(this.config);
+
       const thread = mapped
         ? codex.resumeThread(mapped, options)
         : codex.startThread(options);
+
       const turn = new CodexTurn();
       let known = mapped;
       let settle: ReturnType<typeof setTimeout> | undefined;
       live = true;
+
       const { events } = await thread.runStreamed(prompt, {
         signal: sdk.signal,
       });
+
       const stream = events[Symbol.asyncIterator]();
       let open = true;
+
       try {
         for (;;) {
           const next = stream.next();
           const step = await Promise.race([next, abandon.promise]);
+
           if (step === "abandon") {
             // Clean-up ran and the stream still did not end: stop waiting.
             next.catch(() => {});
             break;
           }
+
           if (step.done) {
             open = false;
             break;
           }
+
           const event = step.value;
           // Leaving the loop closes the stream: no SDK abort after that.
           live = false;
           const changed = turn.add(event, stage);
+
           if (turn.thread !== undefined && turn.thread !== known) {
             if (known !== undefined || !isID(turn.thread))
               throw new CodexTurnError("Codex thread identity changed");
@@ -723,29 +802,38 @@ export class CodexBackend implements AgentBackend {
             );
             known = turn.thread;
           }
+
           if (changed && onText) {
             const visible = turn.answer();
+
             if (visible) onText(visible);
           }
+
           if (turn.result && !settle)
             // A CLI that does not exit after its result is stopped.
             settle = setTimeout(stop, this.grace);
           live = true;
+
           if (run.controller.signal.aborted) sdk.abort();
         }
       } catch (error) {
         // The result completes the turn; a later teardown error does not.
         if (signal.aborted || error instanceof CodexTurnError) throw error;
+
         // The CLI ended without a result; SDK errors carry its stderr.
         if (!turn.result) throw new BackendFailure("crash", crashed);
       } finally {
         live = false;
         clearTimeout(settle);
+
         // Closes the SDK's stream, now or once a pending read settles.
         if (open) stream.return(undefined).catch(() => {});
       }
+
       signal.throwIfAborted();
+
       if (!turn.result) throw new BackendFailure("crash", crashed);
+
       if (!turn.result.ok)
         throw turn.failure
           ? new BackendFailure(turn.failure.kind, {
@@ -753,11 +841,13 @@ export class CodexBackend implements AgentBackend {
               ran: turn.worked,
             })
           : new CodexTurnError("Codex turn failed");
+
       return turn.answer();
     } catch (error) {
       // The SDK SIGTERMs its CLI when the stream closes early; the marker
-      // clean-up below stops whatever remains.
+      // Clean-up below stops whatever remains.
       signal.throwIfAborted();
+
       if (
         error instanceof AttachmentInputUnavailable ||
         error instanceof BackendFailure ||
@@ -770,6 +860,7 @@ export class CodexBackend implements AgentBackend {
       signal.removeEventListener("abort", stop);
       run.controller.signal.removeEventListener("abort", cancel);
       await reaping;
+
       // Stop every verified process of the turn that is still left.
       if (recorded)
         await stopTurnProcesses(
@@ -778,10 +869,14 @@ export class CodexBackend implements AgentBackend {
           run.since,
           this.grace,
         );
+
       if (temporary)
         await rm(temporary, { recursive: true, force: true }).catch(() => {});
+
       if (launcher) await rm(launcher, { force: true }).catch(() => {});
+
       if (recorded) await rm(run.record, { force: true });
+
       if (this.runs.get(id) === run) this.runs.delete(id);
       finished.resolve();
     }
@@ -795,11 +890,13 @@ export class CodexBackend implements AgentBackend {
   private async stopOrphan(id: string, signal: AbortSignal) {
     const path = join(this.records, `${id}.json`);
     let record: typeof recordSchema.Type;
+
     try {
       record = decodeRecord(JSON.parse(await readFile(path, "utf8")));
     } catch {
       return;
     }
+
     await stopTurnProcesses(
       systemProcesses,
       { variable: turnVariable, value: record.turn },
@@ -813,17 +910,21 @@ export class CodexBackend implements AgentBackend {
   async interrupt(sessionId: string, signal: AbortSignal) {
     if (!isID(sessionId)) return;
     const run = this.runs.get(sessionId);
+
     if (run) {
       run.controller.abort();
       await run.done;
+
       return;
     }
+
     await this.stopOrphan(sessionId, signal);
   }
 
   async close() {
     this.closed = true;
     const runs = [...this.runs.values()];
+
     for (const run of runs) run.controller.abort();
     await Promise.all(runs.map((run) => run.done));
   }

@@ -86,10 +86,12 @@ export function metaCandidate(raw: unknown, identity: Identity): boolean {
       }),
     }),
   )(raw);
+
   if (Result.isFailure(parsed)) return false;
   const event = parsed.success.event;
   const text = event.text.trimStart();
   const tag = `<@${identity.user}>`;
+
   return (
     text.startsWith(tag) &&
     /^\s*\/[a-z][a-z-]*(?=\s|$)/.test(text.slice(tag.length)) &&
@@ -104,28 +106,34 @@ class MetaAdmissionChanged extends Error {
     super("Command admission changed; retry delivery.");
   }
 }
+
 function assertOpen(open: () => boolean) {
   if (!open()) throw new MetaAdmissionChanged();
 }
 
 function unsafeMetadata(raw: unknown, depth = 0): boolean {
   if (depth > 12) return true;
+
   if (Array.isArray(raw))
     return (
       raw.length > 1000 ||
       raw.some((entry: unknown) => unsafeMetadata(entry, depth + 1))
     );
+
   const parsed = Schema.decodeUnknownResult(
     settingsRecord(Schema.String, Schema.Unknown),
   )(raw);
+
   if (Result.isFailure(parsed)) return false;
   const node = parsed.success;
+
   if (
     node["type"] === "rich_text_quote" ||
     node["type"] === "rich_text_preformatted" ||
     node["code"] === true
   )
     return true;
+
   return Object.values(node).some((value) => unsafeMetadata(value, depth + 1));
 }
 
@@ -136,6 +144,7 @@ export interface MetaOptions {
   /** Authenticated directory evidence, not a payload's omission of is_bot. */
   isHuman?: (user: string) => Promise<boolean>;
 }
+
 type Context = {
   bot: BotConfig;
   user: string;
@@ -143,24 +152,30 @@ type Context = {
   open: () => boolean;
   beforeWrite?: () => Promise<void>;
 };
+
 type Outcome = {
   reply: string;
   oldDelayMs?: number | null;
   newDelayMs?: number | null;
   questions?: QuestionSettings;
 };
+
 type Command = {
   syntax: string;
   pattern: RegExp;
   panel?: ConfigPanelRow;
   run(context: Context, match: RegExpMatchArray): Promise<Outcome>;
 };
+
 const unavailable = "Waiting settings unavailable for this registration.";
+
 const unconfirmed =
   "Command outcome unconfirmed; use /config to read current settings. Do not replay the change.";
+
 function seconds(value: number | null) {
   return value === null ? "off" : `${value / 1000} seconds`;
 }
+
 function questionTimeout(value: number) {
   return value === 3_600_000 ? "1h" : `${value / 60_000}m`;
 }
@@ -181,6 +196,7 @@ async function changeQuestions(
     questions,
     AbortSignal.timeout(5000),
   );
+
   return {
     reply: `questions: ${questions.enabled ? "on" : "off"}; timeout: ${questionTimeout(questions.timeoutMs)}; answer: ${questions.answer}; changed by ${user}.`,
     questions,
@@ -228,6 +244,7 @@ const commands: readonly Command[] = [
     async run({ bot, options }) {
       const page = await mutePage(options);
       const questions = await resolveQuestionSettings(bot);
+
       return {
         reply: `waiting: ${seconds((await resolveWaiting(bot)).delayMs)}\nquestions: ${questions.enabled ? "on" : "off"}; timeout: ${questionTimeout(questions.timeoutMs)}; answer: ${questions.answer}\nmutes (read-only): ${page ? `${page.counts.channel} channels, ${page.counts.thread} threads` : "unavailable"}\n${help()}`,
       };
@@ -249,8 +266,10 @@ const commands: readonly Command[] = [
     async run({ bot, user, open, beforeWrite }, match) {
       const value = match[1];
       const count = value === "off" ? null : Number(value);
+
       if (count !== null && (!Number.isSafeInteger(count) || count > 3600))
         return { reply: help() };
+
       if (bot.backend.type !== "opencode" || !bot.backend.agent)
         return { reply: unavailable };
       const oldDelayMs = (await resolveWaiting(bot)).delayMs;
@@ -263,6 +282,7 @@ const commands: readonly Command[] = [
         newDelayMs,
         AbortSignal.timeout(5000),
       );
+
       return {
         reply: `waiting: ${seconds(oldDelayMs)} → ${seconds(newDelayMs)}; changed by ${user}.`,
         oldDelayMs,
@@ -355,20 +375,25 @@ const commands: readonly Command[] = [
     },
     async run({ options }) {
       const page = await mutePage(options);
+
       if (!page) {
         return { reply: "Mute preferences unavailable for this registration." };
       }
+
       const candidates = page.settings.map(
         ({ target, setting }) =>
           `${target.channel}${target.scope === "thread" ? ` thread ${target.thread_ts}` : " channel"}: ${setting.state}; expiry ${setting.mute_until ?? "none"}`,
       );
+
       const lines: string[] = [];
       let size = 0;
+
       for (const line of candidates) {
         if (size + line.length > 2400) break;
         lines.push(line);
         size += line.length + 1;
       }
+
       // One bounded page/reply; reasons never enter Slack output.
       return {
         reply: `Mutes: ${page.counts.channel} channels, ${page.counts.thread} threads.\n${lines.join("\n") || "None saved."}${page.cursor || lines.length < candidates.length ? `\nTruncated: first ${lines.length} settings shown.` : ""}`,
@@ -397,6 +422,7 @@ const commands: readonly Command[] = [
     },
   },
 ];
+
 function help(): string {
   return `Valid commands:\n${commands.map((command) => command.syntax).join("\n")}`;
 }
@@ -423,6 +449,7 @@ export class MetaCommands {
     if (!metaCandidate(raw, identity)) return false;
     const next = this.tail.then(() => this.handle(raw, bot, identity, open));
     this.tail = next.catch(() => {});
+
     return next.then(() => true);
   }
 
@@ -437,11 +464,14 @@ export class MetaCommands {
     if (!configActionCandidate(raw)) return false;
     assertOpen(open);
     await ack();
+
     const next = this.tail.then(() =>
       this.handleInteractive(raw, bot, identity, open),
     );
+
     this.tail = next.catch(() => {});
     await next;
+
     return true;
   }
 
@@ -467,6 +497,7 @@ export class MetaCommands {
   ) {
     assertOpen(open);
     const target = configReplyTarget(raw, bot, identity.team);
+
     if (
       target &&
       isAllowedChannel(bot, target.channel.id) &&
@@ -489,9 +520,12 @@ export class MetaCommands {
     open: () => boolean,
   ) {
     assertOpen(open);
+
     const reject = (text = configPanelRefused) =>
       this.refuse(raw, bot, identity, open, text);
+
     const parsed = Schema.decodeUnknownResult(configActionSchema)(raw);
+
     if (
       Result.isFailure(parsed) ||
       !bot.configPanelEnabled ||
@@ -500,6 +534,7 @@ export class MetaCommands {
       return reject();
     const body = parsed.success;
     const action = body.actions[0];
+
     if (
       !action ||
       body.api_app_id !== bot.slack.appId ||
@@ -514,17 +549,21 @@ export class MetaCommands {
     )
       return reject();
     let human = false;
+
     try {
       human = (await this.options.isHuman?.(body.user.id)) === true;
     } catch {
       /* Fail closed. */
     }
+
     assertOpen(open);
+
     if (!human) return reject();
     const [nonce = "", rawRevision = ""] = action.value.split(":");
     const revision = Number(rawRevision);
     const registration = notificationKey(bot, identity);
     const panel = this.store.configPanel(registration, nonce);
+
     if (
       !panel ||
       panel.ts !== body.message.ts ||
@@ -533,25 +572,32 @@ export class MetaCommands {
     )
       return reject();
     const at = (this.options.now ?? Date.now)();
+
     if (panel.createdAt > at || at - panel.createdAt > 86_400_000)
       return reject(configPanelStale);
+
     const entry = commands.find((command) =>
       command.panel?.actions.some(
         (candidate) =>
           `${configActionPrefix}${candidate.id}` === action.action_id,
       ),
     );
+
     const choice = entry?.panel?.actions.find(
       (candidate) =>
         `${configActionPrefix}${candidate.id}` === action.action_id,
     );
+
     if (!entry || !choice) return reject(`Unknown config action. ${help()}`);
     const message = `panel:${nonce}:${revision}:${action.action_ts}`;
     const receipt = this.store.metaReceipt(registration, message);
+
     if (receipt) {
       if (receipt.user !== body.user.id || receipt.command !== entry.syntax)
         return reject();
+
       if (receipt.state === "pending") return reject(unconfirmed);
+
       if (
         receipt.oldDelayMs === null &&
         receipt.newDelayMs === null &&
@@ -560,26 +606,33 @@ export class MetaCommands {
       ) {
         return reject(receipt.reply ?? unconfirmed);
       }
+
       if (
         panel.revision !== revision + 1 ||
         !(await this.matchesSnapshot(bot, panel))
       )
         return reject(configPanelStale);
       assertOpen(open);
+
       if (!receipt.delivered) await this.updatePanel(panel, open);
       this.store.deliverMeta(registration, message);
+
       return;
     }
+
     if (
       panel.revision !== revision ||
       !(await this.matchesSnapshot(bot, panel))
     )
       return reject(configPanelStale);
+
     if (this.store.pendingConfigPanel(registration, nonce))
       return reject(unconfirmed);
     const match = entry.pattern.exec(choice.command);
+
     if (!match) return reject();
     assertOpen(open);
+
     if (
       !this.store.claimMeta({
         registration,
@@ -594,6 +647,7 @@ export class MetaCommands {
       return reject(unconfirmed);
     let outcome: Outcome;
     let next: ConfigPanelRecord | undefined;
+
     try {
       outcome = await entry.run(
         {
@@ -609,16 +663,19 @@ export class MetaCommands {
         },
         match,
       );
+
       if (
         (outcome.oldDelayMs !== undefined &&
           outcome.newDelayMs !== undefined) ||
         outcome.questions !== undefined
       ) {
         const snapshot = await this.snapshot(bot);
+
         // A tool can write after our file rename. Retain our outcome, but never
-        // attribute that newer value to this actor or repaint it as our change.
+        // Attribute that newer value to this actor or repaint it as our change.
         if (outcome.newDelayMs !== undefined)
           snapshot.delayMs = outcome.newDelayMs;
+
         if (outcome.questions) snapshot.questions = outcome.questions;
         next = {
           ...panel,
@@ -641,13 +698,18 @@ export class MetaCommands {
         error instanceof ConfigSnapshotChanged
       ) {
         this.store.releaseMetaClaim(registration, message);
+
         if (error instanceof MetaAdmissionChanged) throw error;
+
         return reject(configPanelStale);
       }
+
       // The file may have changed; retain pending and never write on a retry.
       return reject(unconfirmed);
     }
+
     assertOpen(open);
+
     if (next) {
       if (!(await this.matchesSnapshot(bot, next)))
         return reject(configPanelStale);
@@ -674,9 +736,11 @@ export class MetaCommands {
 
   private async updatePanel(panel: ConfigPanelRecord, open: () => boolean) {
     assertOpen(open);
+
     if (!panel.ts || !this.slack.update)
       throw new Error(configPanelUnavailable);
     const content = this.view(panel);
+
     const updated = await this.slack.update(
       panel.channel,
       panel.ts,
@@ -684,6 +748,7 @@ export class MetaCommands {
       undefined,
       content,
     );
+
     if (updated === false) throw new Error(configPanelUnavailable);
   }
 
@@ -694,12 +759,14 @@ export class MetaCommands {
     open: () => boolean,
   ) {
     const parsed = Schema.decodeUnknownResult(envelope)(raw);
+
     if (Result.isFailure(parsed)) return;
     assertOpen(open);
     const body = parsed.success;
     const event = body.event;
     const text = event.text.trim();
     const tag = `<@${identity.user}>`;
+
     if (
       body.api_app_id !== bot.slack.appId ||
       body.team_id !== identity.team ||
@@ -716,14 +783,18 @@ export class MetaCommands {
     )
       return;
     const commandText = text.slice(tag.length).trim().replace(/\s+/g, " ");
+
     if (!commandText.startsWith("/")) return;
     const registration = notificationKey(bot, identity);
     const message = `${event.channel}:${event.ts}`;
+
     const entry = commands.find((candidate) =>
       candidate.pattern.test(commandText),
     );
+
     const at = (this.options.now ?? Date.now)();
     assertOpen(open);
+
     const fresh = this.store.claimMeta({
       registration,
       message,
@@ -733,9 +804,12 @@ export class MetaCommands {
       at,
       command: entry?.syntax ?? "unknown",
     });
+
     let publishPanel = false;
+
     if (fresh) {
       let outcome: Outcome;
+
       try {
         const match = entry?.pattern.exec(commandText);
         outcome =
@@ -745,6 +819,7 @@ export class MetaCommands {
                 match,
               )
             : { reply: help() };
+
         if (
           commandText === "/config" &&
           bot.configPanelEnabled &&
@@ -752,6 +827,7 @@ export class MetaCommands {
         ) {
           const snapshot = await this.snapshot(bot);
           assertOpen(open);
+
           const panel: ConfigPanelRecord = {
             nonce: randomUUID(),
             registration,
@@ -765,6 +841,7 @@ export class MetaCommands {
             user: event.user,
             at,
           };
+
           this.store.createConfigPanel(panel);
           outcome = { reply: this.view(panel).text };
           publishPanel = true;
@@ -774,6 +851,7 @@ export class MetaCommands {
           this.store.releaseMetaClaim(registration, message);
           throw error;
         }
+
         // A write may have completed: retain pending and never reapply it.
         assertOpen(open);
         await this.slack.post(
@@ -782,8 +860,10 @@ export class MetaCommands {
           unconfirmed,
         );
         this.store.deliverMeta(registration, message);
+
         return;
       }
+
       this.store.applyMeta(
         registration,
         message,
@@ -792,16 +872,22 @@ export class MetaCommands {
         outcome.newDelayMs,
       );
     }
+
     const receipt = this.store.metaReceipt(registration, message);
+
     if (!receipt || receipt.user !== event.user) return;
     assertOpen(open);
+
     if (receipt.delivered) return;
     const panel = this.store.configPanelForMessage(registration, message);
+
     if (panel) {
       if (!bot.configPanelEnabled || !this.slack.update) return;
+
       if (!panel.ts) {
         // Never republish after a crash/ambiguous post. No unbound controls exist.
         if (!publishPanel) return;
+
         const ts = await this.slack.post(
           panel.channel,
           panel.thread,
@@ -809,21 +895,28 @@ export class MetaCommands {
           undefined,
           { allowed: open },
         );
+
         if (typeof ts !== "string" || !/^\d{1,16}\.\d{1,6}$/.test(ts)) {
           this.store.deliverMeta(registration, message);
+
           return;
         }
+
         this.store.bindConfigPanel(registration, panel.nonce, ts);
         panel.ts = ts;
       }
+
       assertOpen(open);
+
       if (!(await this.matchesSnapshot(bot, panel))) {
         assertOpen(open);
         await this.slack.update(panel.channel, panel.ts, configPanelStale);
       } else await this.updatePanel(panel, open);
       this.store.deliverMeta(registration, message);
+
       return;
     }
+
     await this.slack.post(
       receipt.channel,
       receipt.thread,

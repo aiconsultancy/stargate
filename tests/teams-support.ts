@@ -74,6 +74,7 @@ export class TeamsBackend implements AgentBackend {
     decision: "once" | "reject",
   ) {
     this.replies.push({ session, request, decision });
+
     if (this.failReply) throw new Error("Uncertain provider outcome");
   }
   permission(input = "native-human-input") {
@@ -83,8 +84,10 @@ export class TeamsBackend implements AgentBackend {
       action: "bash",
       resources: ["private tool arguments must not reach chat"],
     };
+
     this.pending = [request];
     this.bindings.set(request.id, input);
+
     return request;
   }
 }
@@ -101,6 +104,7 @@ export function registrationFixture(
   const directory = mkdtempSync(join(tmpdir(), "sg-teams-"));
   const storePath = join(directory, "queue.sqlite");
   const path = join(directory, "teams.sqlite");
+
   const config = Schema.decodeUnknownSync(teamsSchema)({
     id: "test-admiral",
     livePresence: options.presence === true,
@@ -128,19 +132,25 @@ export function registrationFixture(
         }
       : {}),
   });
+
   const backend = new TeamsBackend();
+
   const sent: {
     service: string;
     conversation: string;
     activity: OutgoingActivity;
   }[] = [];
+
   const connector: Pick<ConnectorClient, "sendToConversation"> = {
     async sendToConversation(service, conversation, message) {
       sent.push({ service, conversation, activity: message });
+
       return { id: `reply-${sent.length}` };
     },
   };
+
   let store = openStore(storePath);
+
   let registration = new TeamsRegistration(
     config,
     path,
@@ -149,6 +159,7 @@ export function registrationFixture(
     () => {},
     connector,
   );
+
   return {
     config,
     backend,
@@ -161,14 +172,17 @@ export function registrationFixture(
     },
     async running(message = activity(), input = "native-human-input") {
       await registration.accept(message);
+
       const job = store
         .ready(registration.key, Date.now(), 100)
         .find(
           (job) => job.eventId === `${message.conversation.id}:${message.id}`,
         );
+
       if (!job) throw new Error("Fixture activity was not queued");
       store.running(job.id);
       store.saveInput(registration.key, job.id, input, backend.sessionID);
+
       return { ...job, input, status: "running" as const };
     },
     async reopen() {
@@ -193,8 +207,11 @@ export function registrationFixture(
       const text = sent.find((call) =>
         call.activity.text?.includes("Reply approve"),
       )?.activity.text;
+
       const token = /approve ([a-f0-9]{32})/.exec(text ?? "")?.[1];
+
       if (!token) throw new Error("No approval was offered");
+
       return token;
     },
   };
@@ -204,22 +221,26 @@ export type SigningKeyPair = {
   privateKey: CryptoKey;
   jwk: JWK & { kid: string; endorsements: string[] };
 };
+
 export async function makeSigningKey(
   kid = "test-key",
   endorsements = ["msteams"],
 ): Promise<SigningKeyPair> {
   const { privateKey, publicKey } = await generateKeyPair("RS256");
+
   return {
     privateKey,
     jwk: { ...(await exportJWK(publicKey)), kid, use: "sig", endorsements },
   };
 }
+
 export async function signToken(
   key: SigningKeyPair,
   overrides: Record<string, unknown> = {},
   header: { alg?: string; kid?: string } = {},
 ) {
   const now = Math.floor(Date.now() / 1000);
+
   const claims: Record<string, unknown> = {
     iss: BOT_FRAMEWORK_ISSUER,
     aud: APP_ID,
@@ -228,8 +249,10 @@ export async function signToken(
     exp: now + 3600,
     ...overrides,
   };
+
   for (const name of Object.keys(claims))
     if (claims[name] === undefined) delete claims[name];
+
   return new SignJWT(claims)
     .setProtectedHeader({
       alg: header.alg ?? "RS256",
@@ -238,19 +261,26 @@ export async function signToken(
     })
     .sign(key.privateKey);
 }
+
 export function unsignedToken() {
   const now = Math.floor(Date.now() / 1000);
+
   const encode = (value: unknown) =>
     Buffer.from(JSON.stringify(value)).toString("base64url");
+
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ iss: BOT_FRAMEWORK_ISSUER, aud: APP_ID, exp: now + 3600 })}.`;
 }
+
 export type FetchCall = { url: string; redirect?: RequestRedirect | undefined };
+
 type Route = (
   url: URL,
   call: FetchCall,
 ) => Response | undefined | Promise<Response | undefined>;
+
 export function mockFetch(route: Route) {
   const calls: FetchCall[] = [];
+
   const fetchFn = async (
     input: string | URL | Request,
     init: RequestInit = {},
@@ -262,20 +292,25 @@ export function mockFetch(route: Route) {
           ? input.href
           : input.url,
     );
+
     const call = { url: url.href, redirect: init.redirect };
     calls.push(call);
+
     return (
       (await route(url, call)) ?? new Response("not found", { status: 404 })
     );
   };
+
   return { fetch: fetchFn as typeof fetch, calls };
 }
+
 export function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
   });
 }
+
 export function botFrameworkKeys(keys: Record<string, unknown>[]): Route {
   return (url) => {
     if (url.href === BOT_FRAMEWORK_OPENID_URL)
@@ -284,7 +319,9 @@ export function botFrameworkKeys(keys: Record<string, unknown>[]): Route {
         jwks_uri: JWKS_URL,
         id_token_signing_alg_values_supported: ["RS256"],
       });
+
     if (url.href === JWKS_URL) return json({ keys });
+
     return undefined;
   };
 }

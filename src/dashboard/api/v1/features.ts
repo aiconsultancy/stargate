@@ -43,6 +43,7 @@ export function gatewayFeatures(config: ApiV1Config): V1Feature[] {
   const maintenance = config.maintenance;
   const waiting = [...config.bots, ...(config.teams ?? [])];
   const transcription = [...config.bots, ...(config.irc ?? [])];
+
   return [
     flag("dashboard", "Dashboard", config.dashboard === true),
     flag(
@@ -149,6 +150,7 @@ function ircFeatures(config: IrcConfig): V1Feature[] {
   const defaults = ircFeedbackDefaults(config);
   const mode = access.channelRequests ?? "standard";
   const keys = Object.keys(ircLabels) as (keyof typeof ircLabels)[];
+
   return [
     flag(
       "irc.crewQuestionHandoff",
@@ -280,6 +282,7 @@ export async function registrationFeatures(
 ): Promise<V1Feature[]> {
   const { kind, config } = registration;
   const features: V1Feature[] = [];
+
   if (kind !== "irc") {
     const detail = config.crewActivity.detail;
     features.push(
@@ -297,6 +300,7 @@ export async function registrationFeatures(
       ),
     );
   }
+
   if (kind !== "teams") {
     features.push(
       flag(
@@ -308,6 +312,7 @@ export async function registrationFeatures(
       ),
     );
   }
+
   if (kind === "slack") {
     const questions = await resolveQuestionSettings(config);
     features.push(
@@ -404,6 +409,7 @@ export async function registrationFeatures(
   }
 
   const { backend } = config;
+
   if (backend.type === "opencode") {
     features.push(
       flag(
@@ -466,5 +472,6 @@ export async function registrationFeatures(
       ),
     );
   }
+
   return features;
 }

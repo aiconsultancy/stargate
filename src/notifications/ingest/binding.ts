@@ -19,25 +19,32 @@ export function notifyConfigError(
   live = false,
 ): string | undefined {
   const paths = new Set<string>();
+
   for (const adapter of Object.values(notify.adapters)) {
     if (adapter.enabled && listen !== "unix")
       return "Notification HTTP requires Unix API mode";
+
     if (paths.has(adapter.path)) return "Duplicate notification mount";
     paths.add(adapter.path);
+
     if (
       new Set(adapter.sources.map((source) => source.id)).size !==
       adapter.sources.length
     )
       return "Duplicate notification source";
   }
+
   const aliases = new Map<string, string>();
+
   for (const destination of Object.values(notify.destinations)) {
     const sender = bots.find((bot) => bot.id === destination.slack.bot);
+
     if (
       !sender ||
       (!live && !isAllowedChannel(sender, destination.slack.channel))
     )
       return "Notification destination must name an allowed Slack channel and registration";
+
     if (
       !live &&
       bots.some(
@@ -49,20 +56,25 @@ export function notifyConfigError(
       )
     )
       return "Notification destination may echo into a local receiver";
+
     const key = JSON.stringify([
       destination.slack.bot,
       destination.slack.channel,
     ]);
+
     if (aliases.has(key) && aliases.get(key) !== destination.audience)
       return "Conflicting notification destination aliases";
     aliases.set(key, destination.audience);
   }
+
   for (const subscription of notify.subscriptions) {
     for (const alias of subscription.to) {
       if (!Object.hasOwn(notify.destinations, alias))
         return "Unknown notification destination alias";
       const destination = notify.destinations[alias];
+
       if (!destination) return "Unknown notification destination alias";
+
       for (const adapter of Object.values(notify.adapters))
         for (const source of adapter.sources)
           if (
@@ -74,18 +86,22 @@ export function notifyConfigError(
             return "Notification audience is not allowed";
     }
   }
+
   return undefined;
 }
+
 function patternsOverlap(left: string, right: string) {
   return (
     topicMatches(left, right.replace(/\.\*$/, ".x")) ||
     topicMatches(right, left.replace(/\.\*$/, ".x"))
   );
 }
+
 export interface SlackRegistration {
   readonly bot: BotConfig;
   readonly identity: Identity;
 }
+
 function echo(
   destination: Destination,
   registrations: readonly SlackRegistration[],
@@ -99,18 +115,22 @@ function echo(
       isAllowedUser(bot, destination.botUserId),
   );
 }
+
 export function resolveDestinations(
   notify: NotifyConfig,
   registrations: readonly SlackRegistration[],
 ): Record<string, Destination> {
   const result: Record<string, Destination> = {};
   const physical = new Map<string, Destination>();
+
   for (const [alias, configured] of Object.entries(notify.destinations)) {
     const sender = registrations.find(
       ({ bot }) => bot.id === configured.slack.bot,
     );
+
     if (!sender || !isAllowedChannel(sender.bot, configured.slack.channel))
       throw new Error("Unsafe notification destination binding");
+
     const decoded = Schema.decodeUnknownResult(Destination)({
       transport: "slack",
       registrationId: sender.bot.id,
@@ -120,10 +140,12 @@ export function resolveDestinations(
       channel: configured.slack.channel,
       audience: configured.audience,
     });
+
     if (Result.isFailure(decoded) || echo(decoded.success, registrations))
       throw new Error("Unsafe notification destination binding");
     const destination = decoded.success;
     const previous = physical.get(physicalKey(destination));
+
     if (
       previous &&
       (previous.audience !== destination.audience ||
@@ -133,8 +155,10 @@ export function resolveDestinations(
     physical.set(physicalKey(destination), destination);
     result[alias] = destination;
   }
+
   return result;
 }
+
 /** One synchronous view and check directly before request dispatch. */
 export function bindingAllowed(
   destination: DeliveryDestination,
@@ -147,28 +171,34 @@ export function bindingAllowed(
     !audienceAllowed(destination.sourceAudience, destination.audience)
   )
     return false;
+
   try {
     const aliases = Object.entries(admitted).filter(
       ([, value]) =>
         physicalKey(value) === physicalKey(destination) &&
         value.registrationId === destination.registrationId,
     );
+
     const destinations: NotifyConfig["destinations"] = Object.fromEntries(
       aliases.flatMap(([alias]) => {
         const value = Object.hasOwn(notify.destinations, alias)
           ? notify.destinations[alias]
           : undefined;
+
         return value ? [[alias, value]] : [];
       }),
     );
+
     const current = resolveDestinations(
       { ...notify, destinations },
       registrations,
     );
+
     return (
       aliases.length > 0 &&
       aliases.every(([alias]) => {
         const value = current[alias];
+
         return (
           value !== undefined &&
           value.registrationId === destination.registrationId &&

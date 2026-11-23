@@ -32,16 +32,20 @@ type Session = Pick<
   SessionInfo,
   "id" | "parentID" | "title" | "agent" | "model" | "time"
 >;
+
 interface Page<T> {
   data: readonly T[];
   cursor: { next?: string | null; previous?: string | null };
 }
+
 interface Request {
   signal: AbortSignal;
 }
+
 interface ReportingRequest extends Request {
   location: { directory: string };
 }
+
 export interface OpenCodeHistoryReporting {
   historyRoots(
     input: Record<string, never>,
@@ -60,6 +64,7 @@ export interface OpenCodeHistoryReporting {
     request: ReportingRequest,
   ): Promise<unknown>;
 }
+
 /** Read-only structural subset; fixtures need neither an SDK nor a server. */
 export interface OpenCodeHistoryClient {
   session: {
@@ -84,6 +89,7 @@ const decodeEntryPage = Schema.decodeUnknownSync(historyEntryPageSchema);
 
 const FAILURE =
   "Session history unavailable or cancelled; raw details withheld.";
+
 const DESCRIBE_CONCURRENCY = 5;
 
 function modelName(model: ModelRef): string {
@@ -125,12 +131,14 @@ function toolPart(
   const metadata = "metadata" in state ? state.metadata : undefined;
   const child = metadata?.["sessionID"] ?? metadata?.["sessionId"];
   const input = full ? toolBody(state.input) : undefined;
+
   const output =
     full && "content" in state && state.content !== undefined
       ? toolBody(state.content)
       : full && state.status === "error"
         ? toolBody(state.error.message)
         : undefined;
+
   return {
     type: "tool",
     name: tool.name.slice(0, 200),
@@ -148,6 +156,7 @@ function entry(
 ): HistoryEntry | undefined {
   let role: HistoryEntry["role"] = "system";
   let parts: HistoryPart[];
+
   switch (message.type) {
     case "idle":
       return;
@@ -171,8 +180,10 @@ function entry(
       parts = message.content.map((part): HistoryPart => {
         if (part.type === "text")
           return { type: "text", ...clipHistory(part.text) };
+
         if (part.type === "reasoning")
           return { type: "reasoning", ...(full && clipHistory(part.text)) };
+
         return toolPart(part, full);
       });
       break;
@@ -183,8 +194,10 @@ function entry(
     case "shell": {
       role = "tool";
       const input = full ? clipHistory(message.command) : undefined;
+
       const output =
         full && message.output ? clipHistory(message.output.output) : undefined;
+
       parts = [
         {
           type: "tool",
@@ -205,6 +218,7 @@ function entry(
       ];
       break;
     }
+
     case "skill":
       parts = [notice(`Skill: ${message.name}`)];
       break;
@@ -221,6 +235,7 @@ function entry(
       parts = [notice(`Location: ${message.location.directory}`)];
       break;
   }
+
   return {
     id: message.id,
     role,
@@ -248,6 +263,7 @@ export class OpenCodeHistory implements SessionHistory {
       signal.throwIfAborted();
       const result = await run();
       signal.throwIfAborted();
+
       return result;
     } catch {
       throw new Error(FAILURE);
@@ -277,6 +293,7 @@ export class OpenCodeHistory implements SessionHistory {
     return this.read(signal, async () => {
       const input = decodeDescribe({ ids });
       const piIDs = input.ids.filter((id) => id.startsWith(piHistoryPrefix));
+
       const sessions = piIDs.length
         ? decodeSessions(
             await this.client
@@ -284,15 +301,18 @@ export class OpenCodeHistory implements SessionHistory {
               .historyDescribe({ ids: piIDs }, this.request(signal)),
           ).sessions
         : [];
+
       const nativeIDs = input.ids.filter(
         (id) => !id.startsWith(piHistoryPrefix),
       );
+
       for (
         let index = 0;
         index < nativeIDs.length;
         index += DESCRIBE_CONCURRENCY
       ) {
         signal.throwIfAborted();
+
         const batch = await Promise.all(
           nativeIDs
             .slice(index, index + DESCRIBE_CONCURRENCY)
@@ -302,22 +322,30 @@ export class OpenCodeHistory implements SessionHistory {
                   { sessionID: id },
                   { signal },
                 );
+
                 signal.throwIfAborted();
+
                 if (session.id !== id) throw new Error(FAILURE);
+
                 return sessionInfo(session);
               } catch (error) {
                 signal.throwIfAborted();
+
                 if (isSessionNotFoundError(error)) return undefined;
                 throw error;
               }
             }),
         );
+
         sessions.push(...batch.filter((session) => session !== undefined));
       }
+
       const found = new Map(sessions.map((session) => [session.id, session]));
+
       return decodeSessions({
         sessions: input.ids.flatMap((id) => {
           const session = found.get(id);
+
           return session ? [session] : [];
         }),
       }).sessions;
@@ -327,12 +355,14 @@ export class OpenCodeHistory implements SessionHistory {
   children(input: HistoryChildrenInput, signal: AbortSignal) {
     return this.read(signal, async () => {
       const request = decodeChildren(input);
+
       if (request.parentID.startsWith(piHistoryPrefix))
         return decodeSessionPage(
           await this.client
             .rpc(CrewReporting)
             .historyChildren(request, this.request(signal)),
         );
+
       const page = await this.client.session.list(
         {
           limit: request.limit,
@@ -344,7 +374,9 @@ export class OpenCodeHistory implements SessionHistory {
         },
         { signal },
       );
+
       if (page.data.length > request.limit) throw new Error(FAILURE);
+
       return decodeSessionPage({
         sessions: page.data.map(sessionInfo),
         ...(page.cursor.next != null && { cursor: page.cursor.next }),
@@ -355,12 +387,14 @@ export class OpenCodeHistory implements SessionHistory {
   entries(input: HistoryEntriesInput, signal: AbortSignal) {
     return this.read(signal, async () => {
       const request = decodeEntries(input);
+
       if (request.sessionID.startsWith(piHistoryPrefix))
         return decodeEntryPage(
           await this.client
             .rpc(CrewReporting)
             .historyEntries(request, this.request(signal)),
         );
+
       const page = await this.client.message.list(
         {
           sessionID: request.sessionID,
@@ -371,10 +405,13 @@ export class OpenCodeHistory implements SessionHistory {
         },
         { signal },
       );
+
       if (page.data.length > request.limit) throw new Error(FAILURE);
+
       return decodeEntryPage({
         entries: page.data.flatMap((message) => {
           const result = entry(message, request.detail === "full");
+
           return result ? [result] : [];
         }),
         ...(page.cursor.next != null && { cursor: page.cursor.next }),

@@ -35,8 +35,9 @@ import {
 import { messagePortableSchema } from "../messaging/message-tool-input";
 
 // Clients require Standard Schema definitions; OpenCode still decodes and
-// encodes these Effect codecs directly, without caller parse options.
+// Encodes these Effect codecs directly, without caller parse options.
 const portable = Schema.toStandardSchemaV1;
+
 const owner = settingsStruct({
   sessionID: Schema.String.check(
     Schema.isMinCodePoints(1),
@@ -47,6 +48,7 @@ const owner = settingsStruct({
     Schema.isMaxCodePoints(100),
   ),
 });
+
 export const CrewReporting = Rpc.define({
   id: "stargate.crew.reporting",
   events: {},
@@ -155,7 +157,7 @@ export const CrewReporting = Rpc.define({
     },
     // Read-only operator history. Roots list every provisioned crew member.
     // Describe, children and entries serve only this team's `pi:` sessions;
-    // callers read OpenCode sessions through the server API instead.
+    // Callers read OpenCode sessions through the server API instead.
     historyRoots: {
       input: portable(exactStruct({})),
       output: portable(historySessionsSchema),

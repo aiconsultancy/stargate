@@ -51,6 +51,7 @@ import { toolchain } from "./codex-toolchain";
 const apiKeyEnv = "STARGATE_CODEX_TEST_PROXY_KEY";
 const key = "local-proxy-test-only";
 const fixture = join(import.meta.dir, "codex-fixture.ts");
+
 // Host secrets that must never reach the Codex child.
 const hostSecrets = {
   OPENAI_API_KEY: "native-key-must-not-be-sent",
@@ -63,6 +64,7 @@ const hostSecrets = {
   HTTPS_PROXY: "http://127.0.0.1:2",
   NODE_OPTIONS: "--require /host/hook.js",
 };
+
 const saved = new Map<string, string | undefined>();
 const cleanup: (() => Promise<unknown>)[] = [];
 
@@ -77,11 +79,13 @@ afterEach(async () => {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
   }
+
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
 // The tests' own programs; see `codex-toolchain.ts`.
 const tools = await toolchain();
+
 afterAll(() => tools.remove());
 
 function config(extra: Record<string, unknown> = {}, directory = "/workspace") {
@@ -120,25 +124,32 @@ async function open(extra: Record<string, unknown> = {}, root?: string) {
   await mkdir(dataDirectory, { recursive: true });
   // The working directory never contains Stargate's data directory.
   await mkdir(join(root, "workspace"), { recursive: true });
+
   const backend = await CodexBackend.open(
     config(extra, join(root, "workspace")),
     { dataDirectory },
     { executable, graceMs: 200 },
   );
+
   cleanup.push(() => backend.close());
+
   const log = async () =>
     (await readFile(join(dataDirectory, "codex", "fixture.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .map((line) => logEntry.parse(JSON.parse(line)));
+
   const runs = async () =>
     (await log()).flatMap((entry) => ("argv" in entry ? [entry] : []));
+
   const prompts = async () =>
     (await log()).flatMap((entry) => ("prompt" in entry ? [entry] : []));
+
   const grandchildren = async () =>
     (await log().catch(() => [])).flatMap((entry) =>
       "grandchild" in entry ? [entry.grandchild] : [],
     );
+
   return {
     root,
     dataDirectory,
@@ -151,12 +162,14 @@ async function open(extra: Record<string, unknown> = {}, root?: string) {
 }
 
 const signal = () => AbortSignal.timeout(20_000);
+
 const session = (backend: CodexBackend) =>
   backend.createSession({ key: "k", title: "Stargate test", signal: signal() });
 
 function alive(pid: number) {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -165,6 +178,7 @@ function alive(pid: number) {
 
 async function until(check: () => Promise<boolean> | boolean, ms = 10_000) {
   const deadline = Date.now() + ms;
+
   while (!(await check())) {
     if (Date.now() > deadline) throw new Error("Condition not reached");
     await delay(25);
@@ -180,6 +194,7 @@ function overrides(argv: readonly string[]) {
     const at = value.indexOf("=");
     map.set(value.slice(0, at), value.slice(at + 1));
   });
+
   return map;
 }
 
@@ -188,11 +203,14 @@ test("Codex turn streams agent messages only and returns this turn's answer", as
   const id = await session(backend);
   expect(id).toMatch(/^[0-9a-f-]{36}$/);
   const previews: string[] = [];
+
   const answer = await backend.prompt(id, "Say hello", signal(), (text) =>
     previews.push(text),
   );
+
   expect(answer).toBe("Hello world\n\nDone.");
   expect(previews).toEqual(["Hello world", "Hello world\n\nDone."]);
+
   for (const text of previews)
     expect(text).not.toMatch(/private|SECRETOUTPUT|cat \/secret|raw/);
   const [first] = await prompts();
@@ -210,6 +228,7 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
   expect(argv[argv.indexOf("--model") + 1]).toBe("gpt-6.1-sol");
   expect(argv[argv.indexOf("--cd") + 1]).toBe(join(root, "workspace"));
   expect(argv).toContain("--skip-git-repo-check");
+
   for (const flag of argv)
     expect(flag).not.toMatch(/dangerously|--trust|--profile|^-p$|bypass/);
   const map = overrides(argv);
@@ -234,8 +253,10 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
     '["STARGATE_CODEX_PROVIDER_KEY"]',
   );
   expect(map.get("shell_environment_policy.set.SHLVL")).toBe('"1"');
+
   // The key travels only in the environment, never in arguments.
   for (const flag of argv) expect(flag).not.toContain(key);
+
   // Explicit widening maps to the CLI's own enforcement.
   const widened = await open({
     sandbox: "workspace-write",
@@ -244,6 +265,7 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
     systemPrompt: "Be brief.",
     reasoningEffort: "high",
   });
+
   await widened.backend.prompt(await session(widened.backend), "hi", signal());
   const [wide] = await widened.runs();
   const wideMap = overrides(wide?.argv ?? []);
@@ -262,6 +284,7 @@ test("Codex child receives only a minimal, explicit environment", async () => {
   await backend.prompt(await session(backend), "hi", signal());
   const [run] = await runs();
   const env = run?.env ?? {};
+
   for (const name of Object.keys(hostSecrets))
     if (name !== "CODEX_HOME") expect(env[name]).toBeUndefined();
   expect(env["STARGATE_CODEX_PROVIDER_KEY"]).toBe(key);
@@ -274,6 +297,7 @@ test("Codex child receives only a minimal, explicit environment", async () => {
   // Each turn gets a private temporary directory, removed after the turn.
   expect(env["TMPDIR"]).toStartWith(join(tmpdir(), "stargate-codex-"));
   await expect(readdir(env["TMPDIR"] ?? "")).rejects.toThrow();
+
   const allowed = new Set([
     ...inheritedEnvironment,
     "CODEX_HOME",
@@ -286,6 +310,7 @@ test("Codex child receives only a minimal, explicit environment", async () => {
     // Set by the fixture's wrapper shell, not by Stargate.
     "PWD",
   ]);
+
   expect(Object.keys(env).filter((name) => !allowed.has(name))).toEqual([]);
   expect(
     Object.keys(
@@ -318,11 +343,13 @@ test("Codex resumes its own thread, also after restart, and never another namesp
   await first.backend.prompt(id, "one", signal());
   await first.backend.prompt(id, "two", signal());
   await first.backend.close();
+
   const reopened = await CodexBackend.open(
     config({}, join(first.root, "workspace")),
     { dataDirectory: first.dataDirectory },
     { executable: join(first.root, "fake-codex"), graceMs: 200 },
   );
+
   cleanup.push(() => reopened.close());
   expect(await reopened.prompt(id, "three", signal())).toBe(
     "Hello world\n\nDone.",
@@ -348,11 +375,13 @@ test("Codex resumes its own thread, also after restart, and never another namesp
   expect(all.at(-1)?.argv[(all.at(-1)?.argv.indexOf("resume") ?? 0) + 1]).toBe(
     thread,
   );
+
   // Backend settings select the namespace, as for other backends.
   const fingerprint = (backend: unknown) =>
     backendFingerprint({
       backend: Schema.decodeUnknownSync(backendSchema)(backend),
     });
+
   expect(fingerprint(config())).not.toBe(
     fingerprint(config({ sandbox: "workspace-write" })),
   );
@@ -383,8 +412,9 @@ test("no tool process outlives its Codex turn, even one ignoring SIGTERM", async
       if (alive(pid)) process.kill(pid, "SIGKILL");
   });
   const id = await session(backend);
+
   // In the CLI's process group or in its own session, after a normal exit,
-  // an early exit, a CLI that lingers, or cancellation.
+  // An early exit, a CLI that lingers, or cancellation.
   for (const placement of ["", "detached "]) {
     expect(await backend.prompt(id, `${placement}stubborn`, signal())).toBe(
       "Hello world\n\nDone.",
@@ -397,15 +427,18 @@ test("no tool process outlives its Codex turn, even one ignoring SIGTERM", async
     ).toBe("Hello world\n\nDone.");
     const before = (await grandchildren()).length;
     const controller = new AbortController();
+
     const turn = backend.prompt(
       id,
       `${placement}stubborn hang`,
       controller.signal,
     );
+
     await until(async () => (await grandchildren()).length === before + 2);
     controller.abort();
     await expect(turn).rejects.toThrow();
   }
+
   const pids = await grandchildren();
   expect(pids.length).toBe(10);
   await until(() => pids.every((pid) => !alive(pid)), 3000);
@@ -422,8 +455,10 @@ test("a Codex CLI that ignores SIGTERM cannot keep a turn pending", async () => 
     ])
       if (alive(pid)) process.kill(pid, "SIGKILL");
   });
+
   const started = async (count: number) =>
     until(async () => (await runs().catch(() => [])).length >= count);
+
   const settles = async (turn: Promise<unknown>, action: () => unknown) => {
     const begin = Date.now();
     await action();
@@ -431,8 +466,10 @@ test("a Codex CLI that ignores SIGTERM cannot keep a turn pending", async () => 
       () => {},
       () => {},
     );
+
     return Date.now() - begin;
   };
+
   // Cancellation by the request's signal, by interrupt and by close.
   const controller = new AbortController();
   const id = await session(backend);
@@ -447,7 +484,7 @@ test("a Codex CLI that ignores SIGTERM cannot keep a turn pending", async () => 
   ).toBeLessThan(bound);
   await expect(turn).rejects.toThrow();
   // Its output can stay open in a process without the marker, which the
-  // clean-up does not find: the turn stops waiting for the stream.
+  // Clean-up does not find: the turn stops waiting for the stream.
   turn = backend.prompt(id, "deaf hold hang", signal());
   await started(3);
   expect(
@@ -479,18 +516,24 @@ test.skipIf(process.platform !== "linux")(
       ])
         if (alive(pid)) process.kill(pid, "SIGKILL");
     });
+
     /** Pipes and socket pairs open here: Bun gives children socket pairs. */
     const pipes = async () => {
       let count = 0;
+
       for (const fd of await readdir("/proc/self/fd")) {
         const target = await readlink(`/proc/self/fd/${fd}`).catch(() => "");
+
         if (/^(pipe|socket):/.test(target)) count++;
       }
+
       return count;
     };
+
     const id = await session(backend);
     await backend.prompt(id, "warm up", signal());
     const baseline = await pipes();
+
     for (let turn = 1; turn <= 3; turn++) {
       // The holder has no turn marker, so the clean-up leaves it running.
       const running = backend.prompt(id, "deaf hold hang", signal());
@@ -503,11 +546,14 @@ test.skipIf(process.platform !== "linux")(
       await expect(running).rejects.toThrow();
       await until(async () => (await pipes()) <= baseline, 3000);
     }
+
     // Every holder still runs: the pipes closed before any holder exited.
     const holders = (await grandchildren()).filter(
       (_, index) => index % 2 === 0,
     );
+
     expect(holders.length).toBe(3);
+
     for (const pid of holders) expect(alive(pid)).toBe(true);
     expect(await pipes()).toBeLessThanOrEqual(baseline);
   },
@@ -515,7 +561,7 @@ test.skipIf(process.platform !== "linux")(
 
 test("the launcher starts the CLI that the SDK would start", () => {
   // Read from the SDK's internals in this test only, so that an SDK update
-  // that moves its CLI fails here.
+  // That moves its CLI fails here.
   const sdk = z
     .object({
       exec: z.object({
@@ -524,6 +570,7 @@ test("the launcher starts the CLI that the SDK would start", () => {
       }),
     })
     .parse(new Codex());
+
   const native = nativeCodex();
   expect(native.executable).toBe(sdk.exec.executablePath);
   expect([native.helpers]).toEqual(sdk.exec.pathDirs);
@@ -546,12 +593,14 @@ test("the launcher keeps arguments, input and exit status, and only cat holds it
   });
   const temporary = join(root, "tmp");
   await mkdir(temporary);
+
   const child = Bun.spawn([launcher, "exec", "a b", "it's"], {
     env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", TMPDIR: temporary },
     stdin: new TextEncoder().encode("prompt"),
     stdout: "pipe",
     stderr: "pipe",
   });
+
   expect(await new Response(child.stdout).text()).toBe("exec|a b|it's|prompt");
   expect(await new Response(child.stderr).text()).toBe("");
   expect(await child.exited).toBe(7);
@@ -562,8 +611,10 @@ test("the launcher keeps arguments, input and exit status, and only cat holds it
 test("a writable Codex directory never holds what runs outside the sandbox", async () => {
   const root = await mkdtemp(join(tmpdir(), "stargate-codex-paths-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
+
   const write = (directory: string, extra: Record<string, unknown> = {}) =>
     config({ sandbox: "workspace-write", ...extra }, directory);
+
   const refused = async (
     directory: string,
     data: string,
@@ -574,17 +625,20 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
     await expect(
       CodexBackend.open(write(directory, extra), { dataDirectory: data }),
     ).rejects.toThrow(reason);
+
     // The read-only sandbox writes nothing, so the same layout is accepted.
     const backend = await CodexBackend.open(config({}, directory), {
       dataDirectory: data,
     });
+
     await backend.close();
   };
+
   // The data directory below the workspace, through a symbolic link, or
-  // the workspace below the data directory.
+  // The workspace below the data directory.
   await refused(join(root, "a"), join(root, "a", "data"), /Stargate's data/);
   // Through a link that Stargate's user can change, the path is refused before
-  // the overlap is even compared.
+  // The overlap is even compared.
   await mkdir(join(root, "b", "data"), { recursive: true });
   await symlink(join(root, "b"), join(root, "link"));
   await refused(join(root, "link"), join(root, "b", "data"), /symbolic link/);
@@ -604,14 +658,17 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
   await refused(join(root, "e"), join(root, "data-e"), /home directory/);
   // A workspace inside the home directory is fine.
   await mkdir(join(root, "e", "home", "project"), { recursive: true });
+
   const inside = await CodexBackend.open(
     write(join(root, "e", "home", "project")),
     { dataDirectory: join(root, "data-e") },
   );
+
   await inside.close();
   // `stargate config check` applies the same rule to the configured data root.
   const path = join(root, "f", "stargate.json");
   await mkdir(join(root, "f"));
+
   const bot = (directory: string) => ({
     id: "codex-helper",
     slack: {
@@ -629,6 +686,7 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
       extraPath: [tools.directory],
     },
   });
+
   for (const name of ["STARGATE_CODEX_TEST_APP", "STARGATE_CODEX_TEST_BOT"])
     saved.set(name, process.env[name]);
   process.env["STARGATE_CODEX_TEST_APP"] = "xapp-test";
@@ -664,11 +722,13 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
 test("Codex uses canonical paths only and refuses links that can change", async () => {
   const root = await mkdtemp(join(tmpdir(), "stargate-codex-links-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
+
   const write = (directory: string) =>
     config({ sandbox: "workspace-write" }, directory);
+
   await mkdir(join(root, "safe"));
   // A workspace, a data directory or a CLI behind a link in a directory
-  // that Stargate's user can write: refused, so no later retarget is followed.
+  // That Stargate's user can write: refused, so no later retarget is followed.
   await symlink(join(root, "safe"), join(root, "linked"));
   await expect(
     CodexBackend.open(write(join(root, "linked")), {
@@ -699,6 +759,7 @@ test("a Codex turn writes, verifies and runs only a fresh canonical launcher", a
   const { backend, runs, dataDirectory, root } = await open({
     sandbox: "workspace-write",
   });
+
   const bin = join(dataDirectory, "codex-bin");
   const id = await session(backend);
   await backend.prompt(id, "hi", signal());
@@ -709,7 +770,7 @@ test("a Codex turn writes, verifies and runs only a fresh canonical launcher", a
   await backend.prompt(id, "again", signal());
   expect((await runs()).length).toBe(2);
   // The launcher directory swapped for a link: the turn fails before it
-  // writes or runs anything there.
+  // Writes or runs anything there.
   const elsewhere = join(root, "elsewhere");
   await mkdir(elsewhere);
   await rm(bin, { recursive: true });
@@ -749,10 +810,12 @@ test("the CLI's PATH holds only the helper and root-owned system directories", a
   const root = await mkdtemp(join(tmpdir(), "stargate-codex-shim-"));
   const workspace = join(root, "workspace");
   const user = join(root, "user-bin");
+
   // Shims for the launcher's utilities and the CLI's commands, in the
-  // workspace and in a user directory before the system directories.
+  // Workspace and in a user directory before the system directories.
   for (const directory of [join(workspace, "bin"), user]) {
     await mkdir(directory, { recursive: true });
+
     for (const name of ["sh", "mkfifo", "cat", "rm", "git", "rg"])
       await writeFile(
         join(directory, name),
@@ -760,16 +823,19 @@ test("the CLI's PATH holds only the helper and root-owned system directories", a
         { mode: 0o755 },
       );
   }
+
   const path = process.env["PATH"] ?? "/usr/bin:/bin";
   saved.set("PATH", path);
   process.env["PATH"] = [join(workspace, "bin"), ".", "bin", user, path].join(
     ":",
   );
   // Nothing of the operator's PATH: the helper directory, then canonical
-  // root-controlled system directories only, whichever this host has. A
-  // host without one (hosted CI runners) gets a clear start-up failure.
+  // Root-controlled system directories only, whichever this host has. A
+  // Host without one (hosted CI runners) gets a clear start-up failure.
   const { found } = await systemDirectories();
+
   for (const entry of found) expect((await lstat(entry)).uid).toBe(0);
+
   if (found.length === 0) {
     await expect(
       open({ sandbox: "workspace-write", extraPath: [] }, root),
@@ -779,6 +845,7 @@ test("the CLI's PATH holds only the helper and root-owned system directories", a
       { sandbox: "workspace-write", extraPath: [] },
       root,
     );
+
     expect(await backend.prompt(await session(backend), "hi", signal())).toBe(
       "Hello world\n\nDone.",
     );
@@ -787,6 +854,7 @@ test("the CLI's PATH holds only the helper and root-owned system directories", a
       ...found,
     ]);
   }
+
   // The same with the tests' toolchain, which comes last.
   const { backend, runs } = await open({ sandbox: "workspace-write" }, root);
   expect(await backend.prompt(await session(backend), "hi", signal())).toBe(
@@ -802,10 +870,12 @@ test("the CLI's PATH holds only the helper and root-owned system directories", a
   ).toEqual([]);
   // Utilities come only from root-controlled system paths.
   await expect(trustedUtilities([user])).rejects.toThrow("root-owned");
+
   for (const tool of Object.values(await trustedUtilities())) {
     expect(tool.startsWith("/")).toBe(true);
     expect((await lstat(tool)).uid).toBe(0);
   }
+
   // The workspace check is also a plain function for `config check`.
   await expect(
     checkCodexPaths(
@@ -817,7 +887,7 @@ test("the CLI's PATH holds only the helper and root-owned system directories", a
 
 test("without a root-controlled system directory, start-up fails clearly", async () => {
   // A system directory that Stargate's user owns, as on hosted CI runners,
-  // where some program in /usr/local/bin or /usr/bin is not root's.
+  // Where some program in /usr/local/bin or /usr/bin is not root's.
   const root = await mkdtemp(join(tmpdir(), "stargate-codex-system-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const system = join(root, "usr-bin");
@@ -857,33 +927,40 @@ test("without a root-controlled system directory, start-up fails clearly", async
       runtime,
     ),
   ).rejects.toThrow(/no root-controlled system directory/);
+
   // The fake CLI runs its processes by absolute path, so turns that start
-  // and stop them work with only the toolchain on PATH.
+  // And stop them work with only the toolchain on PATH.
   const backend = await CodexBackend.open(
     config({}, workspace),
     { dataDirectory: join(root, "data") },
     runtime,
   );
+
   cleanup.push(() => backend.close());
   const log = join(root, "data", "codex", "fixture.jsonl");
+
   const children = async () =>
     (await readFile(log, "utf8").catch(() => ""))
       .split("\n")
       .filter(Boolean)
       .flatMap((line) => {
         const entry = logEntry.parse(JSON.parse(line));
+
         return "grandchild" in entry ? [entry.grandchild] : [];
       });
+
   cleanup.push(async () => {
     for (const pid of await children())
       if (alive(pid)) process.kill(pid, "SIGKILL");
   });
   const controller = new AbortController();
+
   const turn = backend.prompt(
     await session(backend),
     "stubborn hang",
     controller.signal,
   );
+
   await until(async () => (await children()).length === 2);
   controller.abort();
   await expect(turn).rejects.toThrow();
@@ -899,27 +976,34 @@ test("extraPath adds only directories whose programs stay out of the workspace",
   const program = `#!/bin/sh\n: > ${join(root, "ran")}\n`;
   await writeFile(join(workspace, "real-git"), program, { mode: 0o755 });
   await writeFile(join(root, "outside-git"), program, { mode: 0o755 });
+
   const bin = async (name: string, entries: Record<string, string>) => {
     const directory = join(root, name);
     await mkdir(directory);
+
     for (const [entry, target] of Object.entries(entries))
       if (target) await symlink(target, join(directory, entry));
       else await writeFile(join(directory, entry), program, { mode: 0o755 });
+
     return directory;
   };
+
   // Accepted: a user directory of plain programs, last on PATH.
   const tools = await bin("tools", { mytool: "" });
+
   const { backend, runs } = await open(
     { sandbox: "workspace-write", extraPath: [tools] },
     root,
   );
+
   await backend.prompt(await session(backend), "hi", signal());
   expect((await runs())[0]?.env["PATH"]?.split(":").at(-1)).toBe(tools);
   // Refused: reached through a changeable link, inside the workspace, a
-  // program whose link chain passes through the workspace before it
-  // leaves it again, and a program that runs from the workspace.
+  // Program whose link chain passes through the workspace before it
+  // Leaves it again, and a program that runs from the workspace.
   await symlink(tools, join(root, "tools-link"));
   await symlink(join(root, "outside-git"), join(workspace, "hop"));
+
   const refused: [string, RegExp][] = [
     [join(root, "tools-link"), /symbolic link/],
     [join(workspace, "bin"), /inside a writable/],
@@ -929,6 +1013,7 @@ test("extraPath adds only directories whose programs stay out of the workspace",
       /run from a writable/,
     ],
   ];
+
   for (const [directory, reason] of refused)
     await expect(
       CodexBackend.open(
@@ -953,7 +1038,7 @@ test("a program link chain through the workspace is never followed", async () =>
     { mode: 0o755 },
   );
   // A user PATH directory whose git links through a workspace link to a
-  // program outside the workspace: the final target alone looks safe.
+  // Program outside the workspace: the final target alone looks safe.
   await writeFile(join(root, "real-git"), "#!/bin/sh\nexit 0\n", {
     mode: 0o755,
   });
@@ -971,6 +1056,7 @@ test("a program link chain through the workspace is never followed", async () =>
     `#!/bin/sh\nexec "${process.execPath}" "${fixture}" "$@"\n`,
     { mode: 0o755 },
   );
+
   const backend = await CodexBackend.open(
     config({ sandbox: "workspace-write" }, workspace),
     { dataDirectory: join(root, "data") },
@@ -984,6 +1070,7 @@ test("a program link chain through the workspace is never followed", async () =>
       },
     },
   );
+
   cleanup.push(async () => {
     await backend.close();
     await rm(root, { recursive: true, force: true });
@@ -1017,6 +1104,7 @@ test("a PATH link retargeted during a turn is never followed", async () => {
     { mode: 0o755 },
   );
   const dataDirectory = join(root, "data");
+
   const backend = await CodexBackend.open(
     config({ sandbox: "workspace-write" }, workspace),
     { dataDirectory },
@@ -1026,6 +1114,7 @@ test("a PATH link retargeted during a turn is never followed", async () => {
       environment: { STARGATE_TEST_LINK: link, STARGATE_TEST_TARGET: shims },
     },
   );
+
   cleanup.push(async () => {
     await backend.close();
     await rm(root, { recursive: true, force: true });
@@ -1039,6 +1128,7 @@ test("Codex failures carry a fixed cause, never CLI or provider text", async () 
   const { backend } = await open();
   const id = await session(backend);
   const previews: string[] = [];
+
   for (const [prompt, message] of [
     ["fail", /^Codex turn failed$/],
     ["crash", /^Backend failure: crash$/],
@@ -1046,8 +1136,10 @@ test("Codex failures carry a fixed cause, never CLI or provider text", async () 
     const failed = backend.prompt(id, prompt, signal(), (text) =>
       previews.push(text),
     );
+
     await expect(failed).rejects.toThrow(message);
   }
+
   expect(previews.join("\n")).not.toContain("raw");
   const turn = new CodexTurn();
   turn.add({
@@ -1075,6 +1167,7 @@ test("Codex frames keep optional text and errors without accepting malformed fie
         item: { id: "m", type: "agent_message", text: "visible", extra: 1 },
       }),
     ).toBe(true);
+
     for (const item of [
       { id: "m", type: "agent_message", text: null },
       { id: "m", type: "agent_message", text: 1 },
@@ -1085,6 +1178,7 @@ test("Codex frames keep optional text and errors without accepting malformed fie
     turn.add({ type, item: { id: "tool", type: "command_execution" } });
     expect(turn.worked).toBe(true);
   }
+
   for (const [fields, accepted] of [
     [{}, true],
     [{ message: undefined, error: undefined }, true],
@@ -1099,6 +1193,7 @@ test("Codex frames keep optional text and errors without accepting malformed fie
     expect(turn.failure).toBeUndefined();
     expect(turn.answer()).toBe("");
   }
+
   const turn = new CodexTurn();
   turn.add({
     type: "turn.failed",
@@ -1114,6 +1209,7 @@ test("Codex recovery records preserve strict keys, UUID spelling and safe bounds
   const id = await session(backend);
   const path = join(dataDirectory, "codex-runs", `${id}.json`);
   const record = { turn: crypto.randomUUID(), since: Number.MAX_SAFE_INTEGER };
+
   for (const [change, accepted] of [
     [{}, true],
     [{ since: 0 }, true],
@@ -1133,9 +1229,11 @@ test("Codex recovery records preserve strict keys, UUID spelling and safe bounds
     const text = JSON.stringify({ ...record, ...change });
     await writeFile(path, text);
     await backend.interrupt(id, signal());
+
     if (accepted) await expect(readFile(path)).rejects.toThrow();
     else expect(await readFile(path, "utf8")).toBe(text);
   }
+
   const overflow = `{"turn":"${record.turn}","since":1e400}`;
   await writeFile(path, overflow);
   await backend.interrupt(id, signal());
@@ -1146,11 +1244,13 @@ test("Codex conversation and stored thread UUIDs preserve spelling and reject ex
   const { backend, dataDirectory, runs } = await open();
   const home = join(dataDirectory, "codex", "sessions");
   await mkdir(home, { recursive: true });
+
   const ids = [
     "ABCDEFAB-CDEF-4ABC-ABCD-ABCDEFABCDEF",
     "00000000-0000-0000-0000-000000000000",
     "ffffffff-ffff-ffff-ffff-ffffffffffff",
   ];
+
   for (const id of ids) {
     await writeFile(join(home, id), "existing session");
     await writeFile(
@@ -1161,9 +1261,11 @@ test("Codex conversation and stored thread UUIDs preserve spelling and reject ex
       "Hello world\n\nDone.",
     );
   }
+
   expect(
     (await runs()).map((run) => run.argv[run.argv.indexOf("resume") + 1]),
   ).toEqual(ids);
+
   for (const id of [
     "../unsafe",
     "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",
@@ -1175,7 +1277,9 @@ test("Codex conversation and stored thread UUIDs preserve spelling and reject ex
     );
     await expect(backend.interrupt(id, signal())).resolves.toBeUndefined();
   }
+
   const id = await session(backend);
+
   for (const mapping of [
     { thread: ids[0], extra: true },
     { thread: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF" },
@@ -1190,6 +1294,7 @@ test("Codex conversation and stored thread UUIDs preserve spelling and reject ex
       "Codex thread mapping is unreadable",
     );
   }
+
   expect(await runs()).toHaveLength(ids.length);
 });
 
@@ -1198,12 +1303,14 @@ test.skipIf(process.platform !== "linux")(
   async () => {
     const { backend, dataDirectory } = await open();
     const id = await session(backend);
+
     const sleeper = async (argument: string, env: Record<string, string>) => {
       const child = spawn(
         process.execPath,
         ["-e", "setTimeout(() => {}, 600000)", argument],
         { detached: true, stdio: "ignore", env: { ...process.env, ...env } },
       );
+
       const pid = child.pid ?? 0;
       cleanup.push(async () => {
         if (alive(pid)) process.kill(pid, "SIGKILL");
@@ -1211,18 +1318,24 @@ test.skipIf(process.platform !== "linux")(
       await until(async () =>
         (await readFile(`/proc/${pid}/cmdline`, "utf8")).includes(argument),
       );
+
       return pid;
     };
+
     const start = async (pid: number) => {
       const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+
       return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
     };
+
     const turn = crypto.randomUUID();
     const record = join(dataDirectory, "codex-runs", `${id}.json`);
+
     // Another turn's marker, or an earlier start than the record: kept.
     const other = await sleeper("other", {
       STARGATE_CODEX_TURN: crypto.randomUUID(),
     });
+
     const older = await sleeper("older", { STARGATE_CODEX_TURN: turn });
     await delay(50);
     const tool = await sleeper("tool", { STARGATE_CODEX_TURN: turn });
@@ -1230,6 +1343,7 @@ test.skipIf(process.platform !== "linux")(
       record,
       JSON.stringify({ turn, since: (await start(older)) + 1 }),
     );
+
     // The tool may share the older process's clock tick; then it is kept too.
     if ((await start(tool)) <= (await start(older))) return;
     await backend.interrupt(id, signal());
@@ -1257,12 +1371,14 @@ test("Codex attachments become images or inline text, or fail closed", async () 
     mime,
     data: new TextEncoder().encode(data),
   });
+
   expect(codexInput("text", [])).toEqual({ text: "text", images: [] });
   const input = codexInput("look", [file("image/png"), file("text/plain")]);
   expect(input.text).toBe(
     "look\n\nAttachment: file (image 1)\n\nAttachment: file\nhello",
   );
   expect(input.images.map(({ mime }) => mime)).toEqual(["image/png"]);
+
   for (const bad of [
     file("application/pdf"),
     file("application/zip"),
@@ -1294,12 +1410,14 @@ test("Codex configuration is strict and fails closed", () => {
         ...extra,
       }),
     );
+
   const defaults = config();
   expect(defaults.sandbox).toBe("read-only");
   expect(defaults.network).toBe(false);
   expect(defaults.projectDocs).toBe(false);
   expect(parse({})).toBe(true);
   expect(parse({ provider: undefined })).toBe(false);
+
   for (const provider of [
     { baseURL: "http://proxy.example/v1", apiKeyEnv },
     { baseURL: "https://user:pw@proxy.example/v1", apiKeyEnv },
@@ -1308,6 +1426,7 @@ test("Codex configuration is strict and fails closed", () => {
     { baseURL: "http://127.0.0.1:8317/v1", apiKey: "sk-value" },
   ])
     expect(parse({ provider })).toBe(false);
+
   for (const extra of [
     { directory: "relative" },
     { model: "gpt 6" },
@@ -1327,6 +1446,7 @@ test("Codex configuration is strict and fails closed", () => {
     { reasoningEffort: "ultra" },
   ])
     expect(parse(extra)).toBe(false);
+
   for (const extra of [
     { sandbox: "workspace-write" },
     { sandbox: "workspace-write", network: true },
@@ -1339,6 +1459,7 @@ test("Codex configuration is strict and fails closed", () => {
   expect(Object.values(features as object).every((on) => on === false)).toBe(
     true,
   );
+
   for (const name of ["plugins", "apps", "hooks", "shell_snapshot", "goals"])
     expect(Object.keys(features as object)).toContain(name);
   // IRC captains and crew accept the backend too.
@@ -1377,14 +1498,17 @@ test("createBackend opens the Codex adapter on demand", async () => {
 test("Codex maps what the CLI reports to one shared failure category", async () => {
   const { backend } = await open();
   const id = await session(backend);
+
   const failure = (prompt: string) =>
     backend.prompt(id, prompt, signal()).then(
       () => undefined,
       (error: unknown) =>
         error instanceof BackendFailure ? error.failure : String(error),
     );
+
   // Messages as the Codex CLI writes them; the provider body follows a colon.
   const secret = '{"error":"acct_42 sk-proj-secret in cooldown"}';
+
   const cases: [prompt: string, cause: string][] = [
     [
       `fail=unexpected status 429 Too Many Requests: ${secret};`,
@@ -1429,6 +1553,7 @@ test("Codex maps what the CLI reports to one shared failure category", async () 
     // No result: Stargate cannot know what the CLI did.
     ["crash", "provider:crash:0:ran"],
   ];
+
   for (const [prompt, cause] of cases)
     expect([prompt, await failure(prompt)]).toEqual([prompt, cause]);
   // A message that names no provider failure keeps the generic failure.
@@ -1440,6 +1565,7 @@ test("Codex request progress exposes event kinds without tool data or reasoning"
   const stages: string[] = [];
   const stage = (s: string) => stages.push(s);
   turn.add({ type: "turn.started" }, stage);
+
   for (const type of ["reasoning", "command_execution", "agent_message"])
     turn.add(
       { type: "item.started", item: { id: type, type, text: "private" } },

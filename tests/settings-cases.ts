@@ -27,38 +27,45 @@ export const settingsModules: Record<string, string> = {
   fleetPolicySchema: "fleet-policy",
   fleetControlSchema: "fleet/protocol",
 };
+
 const opencode = {
   type: "opencode",
   url: "http://localhost:4096",
   directory: "/workspace",
 };
+
 const provider = {
   baseURL: "http://127.0.0.1:8317/v1",
   apiKeyEnv: "TEST_PROXY_KEY",
 };
+
 const claude = {
   type: "claude",
   directory: "/workspace",
   model: "claude-sonnet-5-5",
   provider,
 };
+
 const codex = {
   type: "codex",
   directory: "/workspace",
   model: "gpt-6.1-sol",
   provider,
 };
+
 const pi = {
   type: "pi-durable",
   directory: "/workspace",
   model: "anthropic/claude-haiku-5-5",
 };
+
 const bot = {
   id: "fixture",
   slack: { appId: "A123", appTokenEnv: "TEST_APP", botTokenEnv: "TEST_BOT" },
   access: { users: ["U123"], channels: ["C123"] },
   backend: opencode,
 };
+
 const transcription = {
   provider: {
     type: "azure-openai",
@@ -68,6 +75,7 @@ const transcription = {
     auth: "managedIdentity",
   },
 };
+
 const policy = {
   role: "captain",
   humanAccounts: ["human"],
@@ -75,6 +83,7 @@ const policy = {
   assignedCheckout: "/workspace",
   capabilities: ["read_code", "dispatch"],
 };
+
 const fleet = {
   socketPath: "/workspace/fleet.sock",
   statePath: "/workspace/fleet.sqlite",
@@ -88,6 +97,7 @@ const fleet = {
     },
   ],
 };
+
 const irc = {
   id: "ship",
   server: { host: "127.0.0.1", port: 6667, tls: false },
@@ -96,7 +106,9 @@ const irc = {
   channels: ["#ship"],
   backend: opencode,
 };
+
 const uuid = "12345678-1234-4123-8123-123456789abc";
+
 const teams = {
   id: "teams",
   botClientId: uuid,
@@ -105,16 +117,19 @@ const teams = {
   access: { users: [uuid] },
   backend: opencode,
 };
+
 const quota = {
   baseURL: "http://127.0.0.1:8317",
   managementKeyFile: "/workspace/key",
   accounts: { claude: ["fixture@example.test"], codex: ["other@example.test"] },
 };
+
 const watch = {
   proxy: quota,
   stateFile: "/workspace/quota.json",
   report: { bot: "fixture", channel: "C123" },
 };
+
 const maintenance = {
   enabled: true,
   components: {
@@ -140,6 +155,7 @@ const maintenance = {
   models: { teamFiles: ["/workspace/team.json"] },
   droid: { backend: { model: "anthropic/claude-haiku-5-5" } },
 };
+
 export const settingsSeeds: Record<string, unknown[]> = {
   configSchema: [
     { bots: [bot] },
@@ -295,18 +311,21 @@ export const settingsSeeds: Record<string, unknown[]> = {
 };
 
 export type SettingsCase = { label: string; input: unknown };
+
 // Bounded record-key corpus: only the outer __proto__ entry is discarded.
 export const settingsRecordCases = [
   '{"__proto__":{"fixture":true},"ordinary":1}',
   '{"__proto__":null,"constructor":1,"prototype":2,"nested":{"__proto__":{"keep":true}}}',
   '{"ordinary":1,"__proto__":"ignored","after":2}',
 ].map((input): unknown => JSON.parse(input));
+
 /** Replace every populated field in raw and decoded seeds, including defaults. */
 export function settingsCases(
   seeds: unknown[],
   decoded: unknown[],
 ): SettingsCase[] {
   const cases: SettingsCase[] = [];
+
   const changes: unknown[] = [
     undefined,
     null,
@@ -323,58 +342,78 @@ export function settingsCases(
     Number.POSITIVE_INFINITY,
     true,
   ];
+
   const seen = new Set<string>();
+
   const add = (label: string, input: unknown) => {
     const key = settingsCanonical(input);
+
     if (seen.has(key)) return;
     seen.add(key);
     cases.push({ label, input });
   };
+
   const walk = (root: unknown, value: unknown, path: (string | number)[]) => {
     if (value === null || typeof value !== "object") return;
+
     if (!Array.isArray(value)) {
       const next = structuredClone(root);
       const target = at(next, path);
+
       if (target && typeof target === "object")
         Object.assign(target, { unexpected: true });
       add(`${path.join(".")}:extra`, next);
     }
+
     for (const [key, item] of Object.entries(value)) {
       const nextPath = [...path, Array.isArray(value) ? Number(key) : key];
+
       for (const [index, replacement] of changes.entries()) {
         const next = structuredClone(root);
         const target = at(next, path);
+
         if (target && typeof target === "object")
           Object.assign(target, { [key]: replacement });
         add(`${nextPath.join(".")}:${index}`, next);
       }
+
       walk(root, item, nextPath);
     }
   };
+
   for (const [index, seed] of [...seeds, ...decoded].entries()) {
     add(`seed:${index}`, seed);
     walk(seed, seed, []);
   }
+
   for (const [index, input] of changes.entries()) add(`root:${index}`, input);
+
   return cases;
 }
+
 function at(root: unknown, path: (string | number)[]): unknown {
   let value = root;
+
   for (const key of path) {
     if (value === null || typeof value !== "object") return;
     value = Reflect.get(value, key);
   }
+
   return value;
 }
+
 export function settingsCanonical(value: unknown): string {
   return JSON.stringify(value, (_key, input: unknown) => {
     if (input === undefined) return { $undefined: true };
+
     if (typeof input === "number" && !Number.isFinite(input))
       return { $number: String(input) };
+
     if (input !== null && typeof input === "object" && !Array.isArray(input))
       return Object.fromEntries(
         Object.entries(input).sort(([a], [b]) => a.localeCompare(b)),
       );
+
     return input;
   });
 }

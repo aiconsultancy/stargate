@@ -89,6 +89,7 @@ import {
 import { OpenCodeHistory } from "./opencode-history";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
+
 const pinnedSessionSchema = Schema.Struct({
   id: Schema.String,
   parentID: Schema.optional(Schema.String),
@@ -105,12 +106,15 @@ const pinnedSessionSchema = Schema.Struct({
     ),
   ),
 });
+
 const readyAgentSchema = Schema.Struct({
   location: Schema.Struct({ directory: Schema.String }),
   data: Schema.Struct({ id: Schema.String }),
 });
+
 const decodePinnedSession = Schema.decodeUnknownSync(pinnedSessionSchema);
 const decodeReadyAgent = Schema.decodeUnknownSync(readyAgentSchema);
+
 const questionOriginSchema = Schema.Struct({
   kind: Schema.Literal("question"),
   tool: Schema.Struct({
@@ -118,12 +122,15 @@ const questionOriginSchema = Schema.Struct({
     id: Schema.NonEmptyString,
   }),
 });
+
 const decodeQuestionOrigin = Schema.decodeUnknownOption(questionOriginSchema, {
   onExcessProperty: "error",
 });
+
 const agentReadyMs = 30_000;
 const agentReadyPollMs = 250;
-const maxFleetStatusProbeMs = 6_400;
+const maxFleetStatusProbeMs = 6400;
+
 const assistantProgress = {
   "session.step.started": "model",
   "session.retry.scheduled": "retry",
@@ -131,15 +138,19 @@ const assistantProgress = {
   "session.tool.called": "tool",
   "session.text.started": "reply",
 } as const satisfies Record<string, TurnStage>;
+
 const previewEvents = ["session.text.delta", "session.text.ended"] as const;
 const ownershipRetryMs = 250;
+
 const pairingCode = Schema.Struct({
   code: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,512}$/)),
   expires_in: Schema.Int.check(
     Schema.isBetween({ minimum: 1, maximum: 86_400 }),
   ),
 });
+
 const decodePairingCode = Schema.decodeUnknownSync(pairingCode);
+
 const settledEvents = [
   "session.execution.succeeded",
   "session.execution.failed",
@@ -148,11 +159,13 @@ const settledEvents = [
 
 function publicEntry(message: SessionMessageInfo): TranscriptEntry | undefined {
   if (message.type !== "assistant") return;
+
   const text = message.content
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("\n")
     .trim();
+
   return text
     ? { id: message.id, text, created: message.time.created }
     : undefined;
@@ -178,13 +191,21 @@ function generationFailureKind(error: {
   status?: number | undefined;
 }): BackendFailureKind | undefined {
   if (error.status !== undefined) return statusKind(error.status);
+
   if (/abort|interrupt|cancel/i.test(error.type)) return undefined;
+
   if (/rate|quota|limit|billing/i.test(error.type)) return "quota";
+
   if (/auth|credential|forbidden/i.test(error.type)) return "auth";
+
   if (/timeout/i.test(error.type)) return "timeout";
+
   if (/connect|network|unreachable/i.test(error.type)) return "network";
+
   if (/model/i.test(error.type)) return "model";
+
   if (/provider|api|server|overload/i.test(error.type)) return "provider";
+
   return undefined;
 }
 
@@ -203,7 +224,7 @@ export class OpenCodeBackend implements AgentBackend {
   };
 
   // Native messages/form IDs are immutable. Recheck their live tool/input state,
-  // but do not traverse the entire session twice every second for the same form.
+  // But do not traverse the entire session twice every second for the same form.
   private readonly questionAncestry = new Map<
     string,
     { fingerprint: string; inputID: string }
@@ -214,6 +235,7 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ) {
     if (this.sessionID !== undefined && sessionID !== this.sessionID) return;
+
     const form = await this.client.session.form
       .get({ sessionID, formID }, { signal })
       .catch((error: unknown) => {
@@ -224,6 +246,7 @@ export class OpenCodeBackend implements AgentBackend {
           return undefined;
         throw error;
       });
+
     if (
       !form ||
       form.id !== formID ||
@@ -232,21 +255,27 @@ export class OpenCodeBackend implements AgentBackend {
     )
       return;
     const origin = decodeQuestionOrigin(form.metadata);
+
     if (Option.isNone(origin)) return;
+
     const message = await this.client.session.message.get(
       { sessionID, messageID: origin.value.tool.messageID },
       { signal },
     );
+
     if (
       message.id !== origin.value.tool.messageID ||
       message.type !== "assistant" ||
       message.time.completed !== undefined
     )
       return;
+
     const tools = message.content.filter(
       (p) => p.type === "tool" && p.id === origin.value.tool.id,
     );
+
     const tool = tools[0];
+
     if (
       tools.length !== 1 ||
       !tool ||
@@ -256,6 +285,7 @@ export class OpenCodeBackend implements AgentBackend {
       tool.time.completed !== undefined
     )
       return;
+
     return { form, toolMessageID: message.id, toolCallID: tool.id };
   }
 
@@ -265,8 +295,10 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ): Promise<PendingQuestion | undefined> {
     const running = await this.runningQuestion(sessionID, formID, signal);
+
     if (!running) return;
     const { form, toolMessageID, toolCallID } = running;
+
     const fingerprint = questionFingerprint({
       id: form.id,
       sessionID,
@@ -274,20 +306,25 @@ export class OpenCodeBackend implements AgentBackend {
       metadata: form.metadata,
       fields: form.fields,
     });
+
     const cacheKey = JSON.stringify([
       sessionID,
       form.id,
       toolMessageID,
       toolCallID,
     ]);
+
     const cached = this.questionAncestry.get(cacheKey);
+
     let inputID =
       cached?.fingerprint === fingerprint ? cached.inputID : undefined;
+
     if (inputID) {
       const input = await this.client.session.message.get(
         { sessionID, messageID: inputID },
         { signal },
       );
+
       if (
         input.id !== inputID ||
         boundaryRecord(input, sessionID).input !== inputID ||
@@ -298,18 +335,23 @@ export class OpenCodeBackend implements AgentBackend {
         return;
     } else {
       inputID = await this.questionInput(sessionID, toolMessageID, signal);
+
       if (
         inputID &&
         (await this.followsInput(sessionID, inputID, signal, toolMessageID))
       ) {
         if (this.questionAncestry.size >= 128) {
           const oldest = this.questionAncestry.keys().next().value;
+
           if (oldest !== undefined) this.questionAncestry.delete(oldest);
         }
+
         this.questionAncestry.set(cacheKey, { fingerprint, inputID });
       } else return;
     }
+
     if (!inputID) return;
+
     const parsed = Schema.decodeUnknownResult(nativeQuestionSchema)({
       id: form.id,
       sessionID,
@@ -320,6 +362,7 @@ export class OpenCodeBackend implements AgentBackend {
       title: form.title,
       fields: form.fields,
     });
+
     return Result.isSuccess(parsed)
       ? parsed.success
       : {
@@ -344,6 +387,7 @@ export class OpenCodeBackend implements AgentBackend {
     let cursor: string | undefined;
     const seen = new Set<string>();
     const chain: InputBoundaryRecord[] = [];
+
     for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
       const page = await this.client.message.list(
         cursor
@@ -351,44 +395,59 @@ export class OpenCodeBackend implements AgentBackend {
           : { sessionID, limit: 100, order: "desc" },
         { signal },
       );
+
       for (const message of page.data) {
         if (!found) {
           if (message.id === assistant && message.type === "assistant")
             found = true;
           continue;
         }
+
         const record = await boundaries.record(message);
+
         if (chain.length && closesBoundaryContext(record)) {
           chain.push(record);
+
           return resolveBoundaryContext(chain);
         }
+
         if (record.input === undefined) continue;
+
         if (!chain.length && record.type !== "synthetic") return record.input;
         chain.push(record);
       }
+
       cursor = page.cursor.next ?? undefined;
+
       if (!cursor) return resolveBoundaryContext(chain);
+
       if (seen.has(cursor)) throw new Error("Question history cursor repeated");
       seen.add(cursor);
     }
+
     throw new Error("Question ancestry exceeds history bound");
   }
 
   async pinnedBackgroundQuestions(signal: AbortSignal) {
     if (!this.sessionID) return [];
+
     const session = await this.createSession({
       key: this.sessionID,
       title: "",
       signal,
     });
+
     const forms = await this.pendingQuestions(session, signal);
     const verified: NativeQuestion[] = [];
+
     for (const q of forms) {
       if ("unsupported" in q) continue;
+
       const input = await this.client.session.message.get(
         { sessionID: session, messageID: q.inputID },
         { signal },
       );
+
       if (
         input.id === q.inputID &&
         input.type === "synthetic" &&
@@ -396,6 +455,7 @@ export class OpenCodeBackend implements AgentBackend {
       )
         verified.push(q);
     }
+
     return verified;
   }
 
@@ -404,6 +464,7 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ): Promise<PendingQuestion[]> {
     if (this.sessionID !== undefined && sessionID !== this.sessionID) return [];
+
     const forms = await this.client.session.form
       .list({ sessionID }, { signal })
       .catch((error: unknown) => {
@@ -411,13 +472,17 @@ export class OpenCodeBackend implements AgentBackend {
           return [];
         throw error;
       });
+
     if (forms.length > 16) throw new Error("Too many native forms");
     const questions: PendingQuestion[] = [];
+
     for (const form of forms) {
       if (form.sessionID !== sessionID) continue;
       const question = await this.nativeQuestion(sessionID, form.id, signal);
+
       if (question) questions.push(question);
     }
+
     return questions;
   }
 
@@ -428,15 +493,19 @@ export class OpenCodeBackend implements AgentBackend {
   ): Promise<"pending" | "resolved" | "missing-session" | "unknown"> {
     if (this.sessionID !== undefined && sessionID !== this.sessionID)
       return "unknown";
+
     try {
       const form = await this.client.session.form.get(
         { sessionID, formID },
         { signal },
       );
+
       if (form.id !== formID || form.sessionID !== sessionID) return "unknown";
+
       return form.state.status === "pending" ? "pending" : "resolved";
     } catch (error) {
       if (isFormNotFoundError(error) && error.id === formID) return "resolved";
+
       if (isSessionNotFoundError(error) && error.sessionID === sessionID)
         return "missing-session";
       throw error;
@@ -451,6 +520,7 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ): Promise<boolean> {
     const question = await this.nativeQuestion(sessionID, formID, signal);
+
     return (
       question?.inputID === inputID && question.fingerprint === fingerprint
     );
@@ -463,10 +533,12 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ) {
     if (sessionID !== this.sessionID) return;
+
     const form = await this.client.session.form.get(
       { sessionID, formID },
       { signal },
     );
+
     if (
       form.id !== formID ||
       form.sessionID !== sessionID ||
@@ -479,8 +551,10 @@ export class OpenCodeBackend implements AgentBackend {
       }) !== fingerprint
     )
       return;
+
     if (form.state.status === "answered" || form.state.status === "cancelled")
       return form.state.status;
+
     return;
   }
 
@@ -495,6 +569,7 @@ export class OpenCodeBackend implements AgentBackend {
       question.id,
       signal,
     );
+
     if (
       !live ||
       "unsupported" in live ||
@@ -503,7 +578,9 @@ export class OpenCodeBackend implements AgentBackend {
     )
       throw new Error("Native question is stale or has no owned input");
     const input = { sessionID: question.sessionID, formID: question.id };
+
     if (allowed && !allowed()) throw new Error("Question route changed");
+
     if (answer === null)
       await this.client.session.form.cancel(input, { signal });
     else await this.client.session.form.reply({ ...input, answer }, { signal });
@@ -517,23 +594,28 @@ export class OpenCodeBackend implements AgentBackend {
     if (this.sessionID !== undefined && sessionID !== this.sessionID)
       return false;
     const session = await this.client.session.get({ sessionID }, { signal });
+
     if (
       session.id !== sessionID ||
       session.time.idle === undefined ||
       session.time.idle < (session.time.busy ?? 0)
     )
       return false;
+
     if ((await this.client.session.active({ signal }))[sessionID]) return false;
+
     if (
       (await this.client.session.inbox.list({ sessionID }, { signal })).some(
         (v) => v.id === inputID,
       )
     )
       return false;
+
     const input = await this.client.session.message.get(
       { sessionID, messageID: inputID },
       { signal },
     );
+
     return (
       input.id === inputID && boundaryRecord(input, sessionID).input === inputID
     );
@@ -549,10 +631,12 @@ export class OpenCodeBackend implements AgentBackend {
     )
       throw new Error("Review worker does not belong to this native root");
     const reviewer = binding.reviewer;
+
     const definition = await this.client.agent.get(
       { agentID: reviewer.agent, location: { directory: reviewer.directory } },
       { signal },
     );
+
     if (
       definition.data.id !== reviewer.agent ||
       definition.location.directory !== reviewer.directory ||
@@ -570,6 +654,7 @@ export class OpenCodeBackend implements AgentBackend {
     const active = await this.client.session.active({ signal });
     let cursor: string | undefined;
     const seen = new Set<string>();
+
     for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
       const page = await this.client.session.list(
         {
@@ -579,6 +664,7 @@ export class OpenCodeBackend implements AgentBackend {
         },
         { signal },
       );
+
       if (
         page.data.some(
           (s) => s.location.directory === reviewer.directory && active[s.id],
@@ -587,22 +673,29 @@ export class OpenCodeBackend implements AgentBackend {
         throw new Error(
           "Configured review worker is busy; no worktree was changed",
         );
+
       for (const candidate of page.data) {
         if (candidate.location.directory !== reviewer.directory) continue;
+
         const inbox = await this.client.session.inbox.list(
           { sessionID: candidate.id },
           { signal },
         );
+
         if (inbox.length)
           throw new Error("Configured review directory has queued native work");
       }
+
       const next = page.cursor.next;
+
       if (!next) break;
+
       if (seen.has(next) || pageNumber === 99)
         throw new Error("Review worker ownership cannot be bounded");
       seen.add(next);
       cursor = next;
     }
+
     const session = await this.client.session.create(
       {
         id: binding.sessionID,
@@ -625,6 +718,7 @@ export class OpenCodeBackend implements AgentBackend {
       },
       { signal },
     );
+
     if (
       session.id !== binding.sessionID ||
       session.agent !== reviewer.agent ||
@@ -651,16 +745,19 @@ export class OpenCodeBackend implements AgentBackend {
   ): Promise<FleetReviewEvidence | undefined> {
     if (binding.context.coordinatorSessionID !== this.sessionID)
       throw new Error("Review root mismatch");
+
     const session = await this.client.session.get(
       { sessionID: binding.sessionID },
       { signal },
     );
+
     if (
       session.id !== binding.sessionID ||
       session.agent !== binding.reviewer.agent ||
       session.location.directory !== binding.reviewer.directory
     )
       throw new Error("Native reviewer session identity changed");
+
     if (binding.reviewer.kind === "captain") {
       if (
         binding.sessionID !== this.sessionID ||
@@ -671,6 +768,7 @@ export class OpenCodeBackend implements AgentBackend {
         throw new Error("Review captain is not the configured root");
     } else {
       const marker = session.metadata?.["stargateReview"];
+
       if (
         typeof marker !== "object" ||
         marker === null ||
@@ -685,6 +783,7 @@ export class OpenCodeBackend implements AgentBackend {
       )
         throw new Error("Native worker review ownership unavailable");
     }
+
     const assistants: {
       maker: NativeMaker;
       completed: boolean;
@@ -693,8 +792,10 @@ export class OpenCodeBackend implements AgentBackend {
       text: string;
       unsafeTools: boolean;
     }[] = [];
+
     let cursor: string | undefined;
     const seen = new Set<string>();
+
     for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
       const page = await this.client.message.list(
         {
@@ -704,6 +805,7 @@ export class OpenCodeBackend implements AgentBackend {
         },
         { signal },
       );
+
       for (const message of page.data) {
         if (message.id === binding.inputID) {
           if (
@@ -718,27 +820,35 @@ export class OpenCodeBackend implements AgentBackend {
               "Native review input does not match immutable context",
             );
           const final = assistants[0];
+
           if (!final) return;
+
           if (assistants.some((m) => m.failed))
             throw new Error("Native review failed");
+
           if (assistants.some((m) => m.unsafeTools))
             throw new Error(
               "Native review used a tool outside the read-only review boundary",
             );
+
           if (assistants.some((m) => !m.completed)) return;
+
           if (final.finish !== "stop")
             throw new Error("Native review did not finish successfully");
           const resultText = final.text;
+
           if (
             !resultText.trim() ||
-            Buffer.byteLength(resultText, "utf8") > 64000
+            Buffer.byteLength(resultText, "utf8") > 64_000
           )
             throw new Error("Native review result is missing or oversized");
+
           return {
             resultText,
             makers: assistants.reverse().map((m) => m.maker),
           };
         }
+
         if (message.type === "assistant") {
           if (assistants.length >= 100)
             throw new Error("Native review maker bound exceeded");
@@ -780,13 +890,17 @@ export class OpenCodeBackend implements AgentBackend {
         )
           assistants.length = 0;
       }
+
       const next = page.cursor.next;
+
       if (!next) return;
+
       if (seen.has(next))
         throw new Error("Native review history cursor repeated");
       seen.add(next);
       cursor = next;
     }
+
     throw new Error("Native review history exceeds bounds");
   }
 
@@ -798,13 +912,16 @@ export class OpenCodeBackend implements AgentBackend {
     expected?: { agent: string; id: string; tool: string; input: unknown },
   ) {
     if (sessionID !== this.sessionID) return false;
+
     if (expected) {
       try {
         const message = await this.client.session.message.get(
           { sessionID, messageID },
           { signal },
         );
+
         signal.throwIfAborted();
+
         if (
           message.id !== messageID ||
           message.type !== "assistant" ||
@@ -812,10 +929,13 @@ export class OpenCodeBackend implements AgentBackend {
           message.time.completed !== undefined
         )
           return false;
+
         const tools = message.content
           .filter((part) => part.type === "tool")
           .filter((part) => part.id === expected.id);
+
         const tool = tools[0];
+
         if (
           tools.length !== 1 ||
           !tool ||
@@ -827,11 +947,13 @@ export class OpenCodeBackend implements AgentBackend {
           return false;
       } catch {
         signal.throwIfAborted();
+
         return false;
       }
     }
+
     // Native records prove liveness/correlation only. IPC authority comes from
-    // the gateway's independent, root-controlled permission rules.
+    // The gateway's independent, root-controlled permission rules.
     return this.followsInput(sessionID, inputID, signal, messageID);
   }
   async permissionBelongsToInput(
@@ -841,10 +963,12 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ) {
     if (sessionID !== this.sessionID) return false;
+
     const request = await this.client.permission.get(
       { sessionID, requestID },
       { signal },
     );
+
     return (
       request.sessionID === sessionID &&
       request.id === requestID &&
@@ -855,6 +979,7 @@ export class OpenCodeBackend implements AgentBackend {
   async pendingPermissions(sessionID: string, signal: AbortSignal) {
     if (sessionID !== this.sessionID)
       throw new Error("Permission session mismatch");
+
     return this.client.permission.list({ sessionID }, { signal });
   }
 
@@ -866,10 +991,12 @@ export class OpenCodeBackend implements AgentBackend {
   ) {
     if (sessionID !== this.sessionID)
       throw new Error("Permission session mismatch");
+
     const pending = await this.client.permission.get(
       { sessionID, requestID },
       { signal },
     );
+
     if (pending.id !== requestID || pending.sessionID !== sessionID)
       throw new Error("Permission request mismatch");
     await this.client.permission.reply(
@@ -897,6 +1024,7 @@ export class OpenCodeBackend implements AgentBackend {
         ]),
       ),
     };
+
     this.client = verifiedClient ?? OpenCode.make(options);
     // A quiet wait can exceed Bun's HTTP idle timeout. Keep the caller's
     // Stop/deadline signal; leave other requests and pairing policy unchanged.
@@ -927,10 +1055,13 @@ export class OpenCodeBackend implements AgentBackend {
   async pair(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
+
       const result = decodePairingCode(
         await this.serverClient.server.pair({ signal }),
       );
+
       signal.throwIfAborted();
+
       return { code: result.code, expiresIn: result.expires_in };
     } catch {
       // SDK failures and validation errors can contain credentials or codes.
@@ -941,13 +1072,16 @@ export class OpenCodeBackend implements AgentBackend {
   async crewStatus(input: CrewStatusInput, signal: AbortSignal) {
     try {
       signal.throwIfAborted();
+
       const result = crewStatusSchema.parse(
         await this.client.rpc(CrewReporting).status(input, {
           location: { directory: this.config.directory },
           signal,
         }),
       );
+
       signal.throwIfAborted();
+
       return result;
     } catch {
       throw new Error(
@@ -968,19 +1102,24 @@ export class OpenCodeBackend implements AgentBackend {
       signal.throwIfAborted();
       const pending = this.fleetStatusRead.pending;
       let probe = pending ? this.fleetStatusProbe : undefined;
+
       if (!probe) {
         if (performance.now() < this.fleetStatusRetryAt) return undefined;
         probe = this.startFleetStatusProbe(input);
         this.fleetStatusProbe = probe;
       }
+
       probe.waiters++;
+
       try {
         const result = await readWithDeadline(
           signal,
           undefined,
           () => probe.result,
         ).result;
+
         if (probe.member === input.member) return result;
+
         // A different filter needs its own probe once the slot is free.
         // A timed-out RPC can still hold the slot while it drains.
         if (this.fleetStatusRead.pending === pending) return undefined;
@@ -995,6 +1134,7 @@ export class OpenCodeBackend implements AgentBackend {
     const probeMs = this.fleetStatusProbeMs;
     const controller = new AbortController();
     let failureCounted = false;
+
     const { result: probe } = this.fleetStatusRead.start(
       controller.signal,
       (reading) =>
@@ -1010,17 +1150,21 @@ export class OpenCodeBackend implements AgentBackend {
         },
       },
     );
+
     const result = probe
       .then((status) => {
         if (controller.signal.aborted || failureCounted) return undefined;
         const result = fleetCrewStatusSchema.parse(status);
         this.fleetStatusFailures = 0;
+
         return result;
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || failureCounted) return undefined;
+
         const timedOut =
           error instanceof DOMException && error.name === "TimeoutError";
+
         if (timedOut && probeMs < maxFleetStatusProbeMs) {
           this.fleetStatusProbeMs = Math.max(
             this.fleetStatusProbeMs,
@@ -1033,12 +1177,15 @@ export class OpenCodeBackend implements AgentBackend {
             typeof error === "object" &&
             "type" in error &&
             error.type === "rpc.method_not_found";
+
           this.recordFleetStatusFailure(unsupported);
           failureCounted = true;
         }
+
         // Ordinary status cannot verify which checkout is provisioned.
         return undefined;
       });
+
     return { member: input.member, result, controller, waiters: 0 };
   }
 
@@ -1048,12 +1195,14 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ) {
     const session = await this.client.session.get({ sessionID }, { signal });
+
     if (
       session.id !== sessionID ||
       session.location.directory !== this.config.directory ||
       (this.config.agent && session.agent !== this.config.agent)
     )
       throw new Error("Update notice session does not belong to this backend");
+
     const tools = await this.client
       .rpc(CrewReporting)
       .updateTools(
@@ -1061,6 +1210,7 @@ export class OpenCodeBackend implements AgentBackend {
         { location: { directory: this.config.directory }, signal },
       )
       .catch(() => null);
+
     return scopedUpdate(snapshot, tools, {
       model: session.model,
       permissions: session.permissions,
@@ -1079,6 +1229,7 @@ export class OpenCodeBackend implements AgentBackend {
         { sessionID, id, text },
         { location: { directory: this.config.directory }, signal },
       );
+
     if (receipt.id !== id || receipt.sessionID !== sessionID)
       throw new Error("Update notice identity changed");
   }
@@ -1090,6 +1241,7 @@ export class OpenCodeBackend implements AgentBackend {
         location: { directory: this.config.directory },
         signal,
       });
+
     return [...receipts];
   }
 
@@ -1100,6 +1252,7 @@ export class OpenCodeBackend implements AgentBackend {
         location: { directory: this.config.directory },
         signal,
       });
+
     return [...receipts];
   }
 
@@ -1115,6 +1268,7 @@ export class OpenCodeBackend implements AgentBackend {
   async quota(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
+
       const result = quotaSnapshotSchema.parse(
         await this.client.rpc(CrewReporting).quota(
           {},
@@ -1124,7 +1278,9 @@ export class OpenCodeBackend implements AgentBackend {
           },
         ),
       );
+
       signal.throwIfAborted();
+
       return result;
     } catch {
       throw new Error(
@@ -1136,6 +1292,7 @@ export class OpenCodeBackend implements AgentBackend {
   async cronQuota(signal: AbortSignal) {
     try {
       signal.throwIfAborted();
+
       const result = quotaObservationSchema.parse(
         await this.client
           .rpc(CrewReporting)
@@ -1144,7 +1301,9 @@ export class OpenCodeBackend implements AgentBackend {
             { location: { directory: this.config.directory }, signal },
           ),
       );
+
       signal.throwIfAborted();
+
       return result;
     } catch {
       throw new Error(
@@ -1159,11 +1318,14 @@ export class OpenCodeBackend implements AgentBackend {
   ) {
     try {
       signal.throwIfAborted();
+
       const result = await this.client.rpc(CrewReporting).cronModel(input, {
         location: { directory: this.config.directory },
         signal,
       });
+
       signal.throwIfAborted();
+
       return { model: Schema.decodeUnknownSync(cronModelSchema)(result.model) };
     } catch {
       throw new Error(
@@ -1178,13 +1340,19 @@ export class OpenCodeBackend implements AgentBackend {
   ) {
     try {
       signal.throwIfAborted();
+
       const result = await this.client.rpc(CrewReporting).cronEvaluate(input, {
         location: { directory: this.config.directory },
         signal,
       });
+
       signal.throwIfAborted();
       const evaluation = Schema.decodeUnknownSync(cronEvaluationSchema)(result);
-      return { ...evaluation, text: redactCredentials(evaluation.text, 12000) };
+
+      return {
+        ...evaluation,
+        text: redactCredentials(evaluation.text, 12_000),
+      };
     } catch {
       throw new Error(
         "Cron evaluation unavailable or unconfirmed; do not replay. Raw details withheld.",
@@ -1208,8 +1376,10 @@ export class OpenCodeBackend implements AgentBackend {
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
     await this.waitForConfiguredAgent(signal);
+
     if (this.sessionID !== undefined) {
       signal.throwIfAborted();
+
       try {
         const session = decodePinnedSession(
           await this.client.session.get(
@@ -1217,7 +1387,9 @@ export class OpenCodeBackend implements AgentBackend {
             { signal },
           ),
         );
+
         signal.throwIfAborted();
+
         if (
           session.id !== this.sessionID ||
           session.parentID !== undefined ||
@@ -1231,6 +1403,7 @@ export class OpenCodeBackend implements AgentBackend {
         ) {
           throw new Error("Incompatible pinned session");
         }
+
         // Operator-selected roots retain their stored model and permissions.
         return this.sessionID;
       } catch {
@@ -1238,6 +1411,7 @@ export class OpenCodeBackend implements AgentBackend {
         throw new Error("Pinned OpenCode session unavailable or incompatible");
       }
     }
+
     const session = await this.client.session.create(
       {
         title,
@@ -1248,6 +1422,7 @@ export class OpenCodeBackend implements AgentBackend {
       },
       { signal },
     );
+
     return session.id;
   }
 
@@ -1259,13 +1434,16 @@ export class OpenCodeBackend implements AgentBackend {
    */
   private async waitForConfiguredAgent(signal: AbortSignal) {
     const agentID = this.config.agent;
+
     if (this.config.enforcePermissions !== true || agentID === undefined)
       return;
     const ready = AbortSignal.any([signal, AbortSignal.timeout(agentReadyMs)]);
+
     try {
       while (true) {
         ready.throwIfAborted();
         let result: Awaited<ReturnType<typeof this.client.agent.get>>;
+
         try {
           result = await this.client.agent.get(
             { agentID, location: { directory: this.config.directory } },
@@ -1273,18 +1451,22 @@ export class OpenCodeBackend implements AgentBackend {
           );
         } catch (error) {
           ready.throwIfAborted();
+
           if (!isAgentNotFoundError(error) || error.agentID !== agentID)
             throw error;
           await delay(agentReadyPollMs, undefined, { signal: ready });
           continue;
         }
+
         ready.throwIfAborted();
         const agent = decodeReadyAgent(result);
+
         if (
           agent.data.id !== agentID ||
           agent.location.directory !== this.config.directory
         )
           throw new Error("Configured agent identity or location mismatch");
+
         return;
       }
     } catch {
@@ -1301,10 +1483,12 @@ export class OpenCodeBackend implements AgentBackend {
 
   async steer(input: SteerInput, signal: AbortSignal): Promise<SteerResult> {
     const { sessionID, inputID, id } = input;
+
     if (sessionID !== this.sessionID || !input.allowed())
       return { status: "refused" };
+
     // Forms/permissions are controls, not prompts. An idle or foreign native
-    // input must not receive this message, even when the gateway row is stale.
+    // Input must not receive this message, even when the gateway row is stale.
     try {
       for (const form of await this.client.session.form.list(
         { sessionID },
@@ -1314,12 +1498,16 @@ export class OpenCodeBackend implements AgentBackend {
           { sessionID, formID: form.id },
           { signal },
         );
+
         if (detail.state.status === "pending") return { status: "refused" };
       }
+
       if ((await this.client.permission.list({ sessionID }, { signal })).length)
         return { status: "refused" };
+
       if (!(await this.followsInput(sessionID, inputID, signal)))
         return { status: "refused" };
+
       if (
         (await this.client.session.inbox.list({ sessionID }, { signal })).some(
           (item) => item.id === inputID,
@@ -1328,6 +1516,7 @@ export class OpenCodeBackend implements AgentBackend {
         return { status: "refused" };
       const active = await this.client.session.active({ signal });
       const session = await this.client.session.get({ sessionID }, { signal });
+
       if (
         !active[sessionID] ||
         session.id !== sessionID ||
@@ -1343,6 +1532,7 @@ export class OpenCodeBackend implements AgentBackend {
       // Preflight is read-only: ordinary queue fallback is safe.
       return { status: "refused" };
     }
+
     try {
       const receipt = await this.client.session.synthetic(
         {
@@ -1361,6 +1551,7 @@ export class OpenCodeBackend implements AgentBackend {
         },
         { signal },
       );
+
       return receipt.id === id &&
         receipt.sessionID === sessionID &&
         receipt.delivery === "steer"
@@ -1368,7 +1559,7 @@ export class OpenCodeBackend implements AgentBackend {
         : { status: "uncertain" };
     } catch {
       // Even an HTTP error can follow a committed write. Only retained native
-      // evidence can resolve it; never submit again or blindly queue fallback.
+      // Evidence can resolve it; never submit again or blindly queue fallback.
       return this.reconcileSteer(input, AbortSignal.timeout(1000));
     }
   }
@@ -1378,6 +1569,7 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ): Promise<SteerResult> {
     if (input.sessionID !== this.sessionID) return { status: "uncertain" };
+
     try {
       const message = await this.client.session.message.get(
         {
@@ -1386,6 +1578,7 @@ export class OpenCodeBackend implements AgentBackend {
         },
         { signal },
       );
+
       const origin = Schema.decodeUnknownSync(
         Schema.Struct({
           originCaptainID: Schema.String,
@@ -1396,6 +1589,7 @@ export class OpenCodeBackend implements AgentBackend {
           ? message.metadata?.[crewMessageMetadataKey]
           : undefined,
       );
+
       if (
         message.id === input.id &&
         message.type === "synthetic" &&
@@ -1406,6 +1600,7 @@ export class OpenCodeBackend implements AgentBackend {
     } catch {
       /* Missing/unreadable history proves neither rejection nor safety. */
     }
+
     return { status: "uncertain" };
   }
 
@@ -1415,24 +1610,32 @@ export class OpenCodeBackend implements AgentBackend {
       { sessionID },
       { signal },
     );
+
     const candidates = forms.filter(
       (form) =>
         form.sessionID === sessionID &&
         Option.isSome(decodeQuestionOrigin(form.metadata)),
     );
+
     if (!candidates.length) return false;
     const active = await this.client.session.active({ signal });
+
     if (!active[sessionID]) return false;
+
     for (const form of candidates) {
       signal.throwIfAborted();
+
       const running = await this.runningQuestion(
         sessionID,
         form.id,
         signal,
       ).catch(() => undefined);
+
       signal.throwIfAborted();
+
       if (running) return true;
     }
+
     return false;
   }
 
@@ -1448,6 +1651,7 @@ export class OpenCodeBackend implements AgentBackend {
     liveProgress = false,
   ) {
     checkAttachments(files);
+
     if (
       !signal.aborted &&
       context?.source.transport === "irc" &&
@@ -1455,39 +1659,49 @@ export class OpenCodeBackend implements AgentBackend {
       !context.source.sender
     ) {
       const check = AbortSignal.any([signal, AbortSignal.timeout(2000)]);
+
       const waiting = await this.waitingForAnswer(sessionId, check).catch(
         () => false,
       );
+
       if (signal.aborted)
         throw new PromptNotSubmitted("OpenCode admission check cancelled", {
           cause: signal.reason,
         });
+
       if (waiting) throw new PendingBackendQuestion();
     }
+
     this.inputs.delete(sessionId);
     signal.throwIfAborted();
     const stop = new AbortController();
     const timer = new AbortController();
     const connected = Promise.withResolvers<void>();
+
     type Phase =
       | { type: "attaching" }
       | { type: "submitting"; input: string }
       | { type: "submitted"; input: string }
       | { type: "settled" };
+
     let phase: Phase = { type: "attaching" };
     // Never reset: once the server accepted the input, the turn can have run.
     let admitted = false;
     const currentPhase = (): Phase => phase;
     const messages = new Map<string, Map<number, string>>();
+
     const ownership = new Map<
       string,
       "checking" | "owned" | "excluded" | { retryAt: number; delayMs: number }
     >();
+
     const checks = new Set<Promise<void>>();
+
     const pendingProgress = new Map<
       string,
       { progress: TurnProgress; order: number }
     >();
+
     // Reserve orders one and two for submission and its HTTP acknowledgement.
     let eventOrder = 2;
     let publishedOrder = 0;
@@ -1495,6 +1709,7 @@ export class OpenCodeBackend implements AgentBackend {
     const inspectingForms = new Map<string, number>();
     let disconnected = false;
     let lastProgress: TurnProgress | undefined;
+
     const report = (progress: TurnProgress, order: number) => {
       if (!signal.aborted && order > publishedOrder) {
         publishedOrder = order;
@@ -1502,15 +1717,19 @@ export class OpenCodeBackend implements AgentBackend {
         onProgress?.(progress);
       }
     };
+
     const reportOwned = (assistant: string) => {
       const observed = pendingProgress.get(assistant);
+
       if (observed) {
         pendingProgress.delete(assistant);
         report(observed.progress, observed.order);
       }
     };
+
     const publish = () => {
       if (phase.type !== "submitted" || !onText) return;
+
       const text = [...messages]
         .filter(([id]) => ownership.get(id) === "owned")
         .map(([, parts]) =>
@@ -1520,11 +1739,14 @@ export class OpenCodeBackend implements AgentBackend {
             .join("\n"),
         )
         .join("\n\n");
+
       if (text) onText(text);
     };
+
     // Consume promptly: slow Slack writes must not block the shared event source.
     const watch = onText || onProgress;
     const eventSignal = AbortSignal.any([signal, stop.signal]);
+
     const consumeEvents = async () => {
       for await (const event of this.client.event.subscribe({
         types: [
@@ -1556,10 +1778,13 @@ export class OpenCodeBackend implements AgentBackend {
           connected.resolve();
           continue;
         }
+
         const current = currentPhase();
+
         if (event.type === "form.replied" || event.type === "form.cancelled") {
           if (event.data.sessionID === sessionId)
             inspectingForms.delete(event.data.id);
+
           if (
             event.data.sessionID === sessionId &&
             event.data.id === waitingForm
@@ -1570,10 +1795,13 @@ export class OpenCodeBackend implements AgentBackend {
               ++eventOrder,
             );
           }
+
           continue;
         }
+
         if (event.type === "form.created") {
           const form = event.data.form;
+
           if (
             form.sessionID !== sessionId ||
             (current.type !== "submitting" && current.type !== "submitted")
@@ -1582,6 +1810,7 @@ export class OpenCodeBackend implements AgentBackend {
           const order = ++eventOrder;
           const observedAt = Date.now();
           inspectingForms.set(form.id, order);
+
           const check = this.nativeQuestion(sessionId, form.id, eventSignal)
             .then((question) => {
               if (
@@ -1599,14 +1828,17 @@ export class OpenCodeBackend implements AgentBackend {
                 inspectingForms.delete(form.id);
               checks.delete(check);
             });
+
           checks.add(check);
           continue;
         }
+
         if (
           (current.type !== "submitting" && current.type !== "submitted") ||
           event.data.sessionID !== sessionId
         )
           continue;
+
         if (
           event.type === "session.inbox.enqueued" ||
           event.type === "session.inbox.delivered"
@@ -1624,9 +1856,12 @@ export class OpenCodeBackend implements AgentBackend {
             );
           continue;
         }
+
         const { assistantMessageID } = event.data;
         const status = ownership.get(assistantMessageID);
+
         if (status === "excluded") continue;
+
         if (
           onProgress &&
           event.type !== "session.text.delta" &&
@@ -1640,6 +1875,7 @@ export class OpenCodeBackend implements AgentBackend {
             order: ++eventOrder,
           });
         }
+
         if (
           onText &&
           current.type === "submitted" &&
@@ -1647,10 +1883,12 @@ export class OpenCodeBackend implements AgentBackend {
             event.type === "session.text.ended")
         ) {
           let parts = messages.get(assistantMessageID);
+
           if (!parts) {
             parts = new Map();
             messages.set(assistantMessageID, parts);
           }
+
           const { ordinal } = event.data;
           parts.set(
             ordinal,
@@ -1659,6 +1897,7 @@ export class OpenCodeBackend implements AgentBackend {
               : event.data.text,
           );
         } else if (!onProgress) continue;
+
         if (status === "owned") {
           reportOwned(assistantMessageID);
           publish();
@@ -1672,6 +1911,7 @@ export class OpenCodeBackend implements AgentBackend {
           // Events identify the session and assistant, not its input.
           // Only transcript placement proves this is not a queued prior turn.
           const readSignal = AbortSignal.any([signal, stop.signal]);
+
           const readOwner = () =>
             this.inputOwnership(
               sessionId,
@@ -1679,15 +1919,17 @@ export class OpenCodeBackend implements AgentBackend {
               readSignal,
               assistantMessageID,
             ).catch(() => undefined);
+
           const check = readOwner()
             .then(async (owned) => {
               // First observations can lead the history projection. Later
-              // state changes can retry with backoff without polling deltas.
+              // State changes can retry with backoff without polling deltas.
               if (owned !== undefined || !onProgress || status !== undefined)
                 return owned;
               await delay(ownershipRetryMs, undefined, {
                 signal: readSignal,
               });
+
               return readOwner();
             })
             .then((owned) => {
@@ -1696,13 +1938,17 @@ export class OpenCodeBackend implements AgentBackend {
                   typeof status === "object"
                     ? status.delayMs
                     : ownershipRetryMs;
+
                 ownership.set(assistantMessageID, {
                   retryAt: Date.now() + delayMs,
                   delayMs: Math.min(delayMs * 2, 10_000),
                 });
+
                 return;
               }
+
               ownership.set(assistantMessageID, owned ? "owned" : "excluded");
+
               if (owned) {
                 if (currentPhase().type !== "settled")
                   reportOwned(assistantMessageID);
@@ -1714,28 +1960,35 @@ export class OpenCodeBackend implements AgentBackend {
             })
             .catch(() => {})
             .finally(() => checks.delete(check));
+
           checks.add(check);
         }
       }
     };
+
     const events = watch
       ? (async () => {
           let retryMs = 250;
+
           while (!eventSignal.aborted) {
             // The SDK closes subscribers when its underlying stream ends.
             // Reattach progress observation, never replay the native prompt.
             await consumeEvents().catch(() => {});
+
             if (liveProgress && !eventSignal.aborted && lastProgress) {
               disconnected = true;
               onProgress?.({ ...lastProgress, disconnected: true });
             }
+
             connected.resolve();
+
             if (!onProgress || eventSignal.aborted) return;
             await delay(retryMs, undefined, { signal: eventSignal });
             retryMs = Math.min(retryMs * 2, 10_000);
           }
         })().catch(() => {})
       : Promise.resolve();
+
     try {
       if (watch) {
         await Promise.race([
@@ -1744,14 +1997,17 @@ export class OpenCodeBackend implements AgentBackend {
         ]);
         timer.abort();
       }
+
       signal.throwIfAborted();
       const id = SessionMessage.ID.create();
       onInput?.(id);
       signal.throwIfAborted();
       phase = { type: "submitting", input: id };
       this.inputs.set(sessionId, id);
+
       if (onProgress)
         report({ stage: "submitting", observedAt: Date.now() }, 1);
+
       const input = await this.client.session.prompt(
         {
           sessionID: sessionId,
@@ -1770,23 +2026,29 @@ export class OpenCodeBackend implements AgentBackend {
         },
         { signal },
       );
+
       if (input.id !== id) throw new Error("OpenCode input identity changed");
       phase = { type: "submitted", input: id };
       admitted = true;
+
       if (onProgress) report({ stage: "accepted", observedAt: Date.now() }, 2);
       await this.waitForIdle({ sessionID: sessionId }, { signal });
       phase = { type: "settled" };
+
       // Read backwards to the submitted input; do not resend earlier replies.
       const history: (InputBoundaryRecord & {
         reply?: Reply;
       })[] = [];
+
       const boundaries = new InputBoundaryReader(
         this.client,
         sessionId,
         signal,
       );
+
       let cursor: string | undefined;
       const cursors = new Set<string>();
+
       do {
         // A continuation cursor carries the first page's order.
         const page = await this.client.message.list(
@@ -1795,6 +2057,7 @@ export class OpenCodeBackend implements AgentBackend {
             : { sessionID: sessionId, order: "desc", limit: 100 },
           { signal },
         );
+
         for (const message of page.data) {
           history.push({
             ...(await boundaries.record(message)),
@@ -1823,22 +2086,28 @@ export class OpenCodeBackend implements AgentBackend {
                 }
               : {}),
           });
+
           if (message.id === input.id) {
             const fold = new InputBoundaryFold();
             let owner: string | undefined;
             const replies: Reply[] = [];
+
             for (const record of history.reverse()) {
               owner = fold.next(record) ?? owner;
+
               if (record.reply && owner === input.id)
                 replies.push(record.reply);
             }
+
             let failed: Reply["error"];
+
             for (const reply of replies) {
               // Only a later successful completion of this input supersedes
-              // an earlier failed attempt. A subsequent error still fails.
+              // An earlier failed attempt. A subsequent error still fails.
               if (reply.error) failed ??= reply.error;
               else if (reply.succeeded) failed = undefined;
             }
+
             if (failed) {
               const kind = generationFailureKind(failed);
               throw kind
@@ -1848,14 +2117,19 @@ export class OpenCodeBackend implements AgentBackend {
                   })
                 : new Error("OpenCode generation failed");
             }
+
             return replies.map((reply) => reply.text).join("\n\n");
           }
         }
+
         cursor = page.cursor.next ?? undefined;
+
         if (cursor && cursors.has(cursor))
           throw new Error("OpenCode history cursor repeated");
+
         if (cursor) cursors.add(cursor);
       } while (cursor);
+
       throw new Error("OpenCode input was not found in session history");
     } catch (error) {
       // Correlate a lost admission response without submitting again. A known
@@ -1865,10 +2139,12 @@ export class OpenCodeBackend implements AgentBackend {
         const cleanup = AbortSignal.timeout(5000);
         await this.interruptInput(sessionId, input, cleanup).catch(() => {});
       }
+
       // The server went away. Nothing ran only when the input was never
-      // sent: before submission, or when the submission made no connection.
+      // Sent: before submission, or when the submission made no connection.
       // After admission, also while history is read, work can have run.
       const connection = signal.aborted ? undefined : connectionFailure(error);
+
       if (connection)
         throw new BackendFailure("network", {
           ran:
@@ -1907,18 +2183,21 @@ export class OpenCodeBackend implements AgentBackend {
   ) {
     if (assistant !== undefined) {
       // Inbox list is unpaginated in this SDK. Presence proves we still queue;
-      // absence proves nothing, so delivered candidates still need history.
+      // Absence proves nothing, so delivered candidates still need history.
       const inbox = await this.client.session.inbox.list(
         { sessionID },
         { signal },
       );
+
       if (inbox.some((item) => item.id === input)) return undefined;
     }
+
     const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
     let found = assistant === undefined;
     let cursor: string | undefined;
     const cursors = new Set<string>();
     const chain: InputBoundaryRecord[] = [];
+
     do {
       const page = await this.client.message.list(
         cursor
@@ -1926,28 +2205,39 @@ export class OpenCodeBackend implements AgentBackend {
           : { sessionID, order: "desc", limit: 100 },
         { signal },
       );
+
       for (const message of page.data) {
         if (!found) {
           if (message.id === input) return undefined;
+
           if (message.id === assistant && message.type === "assistant")
             found = true;
           continue;
         }
+
         const record = await boundaries.record(message);
+
         if (chain.length && closesBoundaryContext(record)) {
           chain.push(record);
+
           return resolveBoundaryContext(chain) === input;
         }
+
         if (record.input === undefined) continue;
+
         if (!chain.length && record.type !== "synthetic")
           return record.input === input;
         chain.push(record);
       }
+
       cursor = page.cursor.next ?? undefined;
+
       if (cursor && cursors.has(cursor))
         throw new Error("OpenCode history cursor repeated");
+
       if (cursor) cursors.add(cursor);
     } while (cursor);
+
     return found ? resolveBoundaryContext(chain) === input : undefined;
   }
 
@@ -1963,17 +2253,21 @@ export class OpenCodeBackend implements AgentBackend {
     if (this.sessionID !== sessionID)
       throw new Error("Fleet maker session is not pinned");
     const { time } = await this.client.session.get({ sessionID }, { signal });
+
     const idle =
       time.idle !== undefined && time.idle >= (time.busy ?? 0)
         ? time.idle
         : undefined;
+
     const messages: (InputBoundaryRecord & {
       maker?: NativeMaker;
       settled: boolean;
     })[] = [];
+
     const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
     let cursor: string | undefined;
     const cursors = new Set<string>();
+
     for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
       const page = await this.client.message.list(
         cursor
@@ -1981,6 +2275,7 @@ export class OpenCodeBackend implements AgentBackend {
           : { sessionID, order: "desc", limit: 100 },
         { signal },
       );
+
       for (const message of page.data) {
         messages.push({
           ...(await boundaries.record(message)),
@@ -2003,27 +2298,36 @@ export class OpenCodeBackend implements AgentBackend {
               }
             : {}),
         });
+
         if (message.id !== inputID) continue;
+
         if (boundaryRecord(message, sessionID).input !== inputID)
           throw new Error("Fleet native input is not a request boundary");
         const fold = new InputBoundaryFold();
         let owner: string | undefined;
         const makers: NativeMaker[] = [];
+
         for (const entry of messages.reverse()) {
           owner = fold.next(entry) ?? owner;
+
           if (entry.maker && owner === inputID && entry.settled)
             makers.push(entry.maker);
         }
+
         if (!makers.length || makers.length > 100)
           throw new Error(
             "Native fleet maker evidence is unavailable or exceeds bounds",
           );
+
         return makers;
       }
+
       cursor = page.cursor.next ?? undefined;
+
       if (!cursor || cursors.has(cursor)) break;
       cursors.add(cursor);
     }
+
     throw new Error("Native fleet input was not found");
   }
 
@@ -2044,11 +2348,12 @@ export class OpenCodeBackend implements AgentBackend {
   ) {
     signal.throwIfAborted();
     // Exact withdrawal cannot cancel another queued input. Placement can race
-    // it, so only the latest raw input, not a settled transcript, permits stop.
+    // It, so only the latest raw input, not a settled transcript, permits stop.
     await this.client.session.inbox
       .cancel({ sessionID: sessionId, inboxID: inputId }, { signal })
       .catch(() => {});
     signal.throwIfAborted();
+
     if (await this.followsInput(sessionId, inputId, signal))
       await this.interrupt(sessionId, signal);
   }
@@ -2060,12 +2365,15 @@ export class OpenCodeBackend implements AgentBackend {
   ): Promise<MaintenanceWatch> {
     const rpc = this.client.rpc(MaintenanceRPC);
     const owner = { sessionID, id: requestID };
+
     const options = (signal: AbortSignal) => ({
       location: { directory: this.config.directory },
       signal,
     });
+
     if (!(await rpc.open(owner, options(signal))))
       throw new Error("Maintenance gateway registration failed");
+
     return {
       read: async (signal) =>
         maintenanceNoticeSchema
@@ -2087,8 +2395,10 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ): Promise<Transcript> {
     const after = cursor === latestInput ? this.inputs.get(sessionID) : cursor;
+
     if (cursor === latestInput && after === undefined)
       throw new TranscriptUnavailable("cursor");
+
     try {
       return await this.readTranscript(sessionID, after, signal);
     } catch (error) {
@@ -2105,64 +2415,80 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ): Promise<Transcript> {
     const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
+
     // Quiet threads: one small page proves nothing follows the cursor.
     if (after) {
       const newest = await this.client.message.list(
         { sessionID, order: "desc", limit: 1 },
         { signal },
       );
+
       if (newest.data[0]?.id === after) return { cursor: after, entries: [] };
     }
+
     // Read idle state first: later text cannot belong to an earlier execution.
     const { time } = await this.client.session.get({ sessionID }, { signal });
+
     const idle =
       time.idle !== undefined && time.idle >= (time.busy ?? 0)
         ? time.idle
         : undefined;
+
     // An idle session has finished every earlier message, even without a mark.
     const settled = (message: SessionMessageInfo) =>
       message.type !== "assistant" ||
       message.time.completed !== undefined ||
       message.error !== undefined ||
       (idle !== undefined && message.time.created <= idle);
+
     // Keep compact records; long gaps must not retain tool payloads.
     const newer: (InputBoundaryRecord & {
       settled: boolean;
       entry?: TranscriptEntry;
     })[] = [];
+
     const context: InputBoundaryRecord[] = [];
     const cursors = new Set<string>();
     let cursor: string | undefined;
     let reached = false;
     let selected = false;
     let needContext = false;
+
     const startsWithSynthetic = () => {
       const oldest = newer.findLast(
         (message) =>
           message.input !== undefined || message.type === "assistant",
       );
+
       return oldest?.type === "synthetic" && oldest.input !== undefined;
     };
+
     // Every page up to the cursor; the caller's signal bounds the work.
     for (;;) {
       signal.throwIfAborted();
+
       const result = await this.client.message.list(
         cursor
           ? { sessionID, limit: 100, cursor }
           : { sessionID, order: "desc", limit: 20 },
         { signal },
       );
+
       for (const message of result.data) {
         const record = await boundaries.record(message);
+
         if (selected) {
           if (record.input !== undefined || record.type === "assistant")
             context.push(record);
+
           if (closesBoundaryContext(record)) {
             needContext = false;
             break;
           }
+
           continue;
         }
+
         if (message.id === after) {
           reached = true;
           selected = true;
@@ -2170,9 +2496,11 @@ export class OpenCodeBackend implements AgentBackend {
           needContext =
             record.type === "synthetic" ||
             (!closesBoundaryContext(record) && startsWithSynthetic());
+
           if (!needContext) break;
           continue;
         }
+
         const entry = publicEntry(message);
         newer.push({
           ...record,
@@ -2180,16 +2508,21 @@ export class OpenCodeBackend implements AgentBackend {
           ...(entry ? { entry } : {}),
         });
       }
+
       if (after === undefined && !selected) {
         selected = true;
         needContext = startsWithSynthetic();
       }
+
       cursor = result.cursor.next ?? undefined;
+
       if ((selected && !needContext) || !cursor) break;
+
       if (cursors.has(cursor))
         throw new Error("OpenCode history cursor repeated");
       cursors.add(cursor);
     }
+
     // Keep the stored cursor; skipping unread history would lose replies.
     if (after && !reached) throw new TranscriptUnavailable("cursor");
     const chronological = newer.reverse();
@@ -2198,22 +2531,29 @@ export class OpenCodeBackend implements AgentBackend {
     const head = done.at(-1)?.id;
     const fold = new InputBoundaryFold();
     let input: string | undefined;
+
     const reanchor =
       context[0]?.id === after && context[0]?.type === "synthetic";
+
     for (const message of context.reverse()) {
       const boundary = fold.next(message);
+
       // Re-anchor cursor-only wakes, including an undelivered mixed batch.
       if (reanchor) input = boundary ?? input;
     }
+
     const entries: TranscriptEntry[] = [];
+
     for (const message of done) {
       input = fold.next(message) ?? input;
+
       if (message.entry)
         entries.push({
           ...message.entry,
           ...(input !== undefined ? { input } : {}),
         });
     }
+
     if (after !== undefined)
       return {
         cursor: head ?? after,
@@ -2221,9 +2561,11 @@ export class OpenCodeBackend implements AgentBackend {
         ...(input !== undefined ? { input } : {}),
         ...(open < 0 ? {} : { pending: true as const }),
       };
+
     // A baseline never delivers earlier history.
     if (head === undefined && cursor)
       throw new Error("OpenCode transcript baseline unavailable");
+
     return {
       cursor: head ?? "",
       entries: [],
@@ -2237,6 +2579,7 @@ export class OpenCodeBackend implements AgentBackend {
     onForm?: () => void,
   ): Promise<void> {
     let wait = 1000;
+
     while (!signal.aborted) {
       try {
         for await (const event of this.client.event.subscribe({
@@ -2271,6 +2614,7 @@ export class OpenCodeBackend implements AgentBackend {
       } catch {
         // Reconnect below; SDK errors can contain request details.
       }
+
       await delay(wait, undefined, { signal }).catch(() => {});
       wait = Math.min(30_000, wait * 2);
     }
@@ -2283,34 +2627,43 @@ export class OpenCodeBackend implements AgentBackend {
     signal: AbortSignal,
   ): Promise<ActivityWatch> {
     const rpc = this.client.rpc(CrewReporting);
+
     const options = (signal: AbortSignal) => ({
       location: { directory: this.config.directory },
       signal,
     });
+
     const capture = Schema.decodeUnknownSync(activitySnapshotSchema)(
       await rpc.start(
         { sessionID, requestID, ...(reporter ? { reporter } : {}) },
         options(signal),
       ),
     );
+
     return this.resumeActivity(sessionID, capture.id);
   }
 
   resumeActivity(sessionID: string, capture: string): ActivityWatch {
     const rpc = this.client.rpc(CrewReporting);
+
     const options = (signal: AbortSignal) => ({
       location: { directory: this.config.directory },
       signal,
     });
+
     const owner = { sessionID, id: capture };
+
     const snapshot = async (request: Promise<unknown>) => {
       const value = Schema.decodeUnknownSync(activitySnapshotSchema)(
         await request,
       );
+
       if (value.id !== capture)
         throw new Error("Crew activity capture changed");
+
       return value;
     };
+
     return {
       id: capture,
       read: (signal, passive) =>

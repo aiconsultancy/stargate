@@ -44,14 +44,17 @@ const prefix = "stargate_question_";
 const timestamp = Schema.String.check(Schema.isPattern(/^\d{1,16}\.\d{1,6}$/));
 const humanID = Schema.String.check(Schema.isPattern(/^[UW][A-Z0-9]+$/));
 const channelID = Schema.String.check(Schema.isPattern(/^[CGD][A-Z0-9]+$/));
+
 const actionCandidate = Schema.decodeUnknownOption(
   Schema.Struct({
     actions: Schema.Array(Schema.Unknown),
   }),
 );
+
 const actionID = Schema.decodeUnknownOption(
   Schema.Struct({ action_id: Schema.String }),
 );
+
 const decodeAction = Schema.decodeUnknownOption(
   Schema.Struct({
     type: Schema.Literal("block_actions"),
@@ -93,6 +96,7 @@ const decodeAction = Schema.decodeUnknownOption(
     ),
   }),
 );
+
 const decodeSelection = Schema.decodeUnknownOption(
   Schema.Struct({
     type: Schema.Literal("checkboxes"),
@@ -101,9 +105,11 @@ const decodeSelection = Schema.decodeUnknownOption(
     ).check(Schema.isMaxLength(20)),
   }),
 );
+
 const decodeTextCandidate = Schema.decodeUnknownOption(
   Schema.Struct({ event: Schema.Struct({ text: Schema.String }) }),
 );
+
 const decodeReply = Schema.decodeUnknownOption(
   Schema.Struct({
     api_app_id: Schema.String,
@@ -131,13 +137,16 @@ function custom(field: NativeQuestion["fields"][number] | undefined) {
         field.custom !== false))
   );
 }
+
 const plain = (text: string) => ({
   type: "plain_text" as const,
   text,
   emoji: false,
 });
+
 const short = (text: string, limit: number) =>
   Array.from(text).slice(0, limit).join("");
+
 const selectionBlock = (token: string, revision: number, group: number) =>
   `${token}:${revision}${group ? `:${group}` : ""}`;
 
@@ -154,9 +163,11 @@ export function buildQuestionBlocks(
   )
     throw new Error("Invalid clarification revision");
   const field = question.fields[revision];
+
   if (!field) {
     const text =
       "All clarification answers are recorded. If submission was interrupted, explicitly submit these saved answers. This grants no tool permission.";
+
     return {
       text,
       blocks: [
@@ -176,7 +187,9 @@ export function buildQuestionBlocks(
       ],
     };
   }
+
   const control = question.fields.length === 1 ? token : `${token}:${revision}`;
+
   const description = [
     "OpenCode needs clarification (not a permission approval).",
     question.title,
@@ -191,23 +204,28 @@ export function buildQuestionBlocks(
   ]
     .filter(Boolean)
     .join("\n");
+
   const blocks: SlackPanelContent["blocks"] = [];
   const chars = Array.from(description);
+
   for (let i = 0; i < chars.length; i += 2800)
     blocks.push({
       type: "section",
       text: plain(chars.slice(i, i + 2800).join("")),
     });
+
   const elements: Extract<
     SlackPanelContent["blocks"][number],
     { type: "actions" }
   >["elements"] = [];
+
   const button = (action: string, value: string, label: string) => ({
     type: "button" as const,
     action_id: `${prefix}${action}`,
     value,
     text: plain(short(label, 75)),
   });
+
   if (field.type === "multiselect" && field.options.length) {
     for (let start = 0; start < field.options.length; start += 10)
       blocks.push({
@@ -238,7 +256,9 @@ export function buildQuestionBlocks(
       ),
     );
   }
+
   if (custom(field)) elements.push(button("custom", control, "Type your own"));
+
   if (field.required === false)
     elements.push(button("skip", control, "Skip optional question"));
   elements.push(button("cancel", control, "Cancel question"));
@@ -247,6 +267,7 @@ export function buildQuestionBlocks(
     block_id: `${token}:${revision}:controls`,
     elements,
   });
+
   return {
     text: description
       .replaceAll("&", "&amp;")
@@ -282,11 +303,14 @@ export class SlackQuestionControls {
 
   private owner(token: string) {
     const bot = this.bot();
+
     if (!bot) return;
     const key = botKey(bot, this.identity);
     const offer = this.store.questions.questionByToken(key, token);
+
     if (offer?.state !== "offered" || offer.expires <= Date.now()) return;
     const job = this.store.jobByInput(key, offer.inputID);
+
     if (
       !job ||
       job.id !== offer.jobID ||
@@ -298,17 +322,21 @@ export class SlackQuestionControls {
       !isAllowedChannel(bot, job.channel)
     )
       return;
+
     return { bot, offer, job };
   }
 
   private bound(token: string) {
     const owner = this.owner(token);
     const binding = this.store.questions.slackQuestion(token);
+
     if (!owner || !binding) return;
+
     try {
       const question = Schema.decodeUnknownSync(nativeQuestionSchema)(
         JSON.parse(binding.question),
       );
+
       if (
         !Number.isInteger(binding.revision) ||
         binding.revision < 0 ||
@@ -319,10 +347,12 @@ export class SlackQuestionControls {
         question.fingerprint !== owner.offer.fingerprint
       )
         return;
+
       const progress = questionAnswer(
         { ...question, fields: question.fields.slice(0, binding.revision) },
         binding.progress,
       );
+
       return {
         ...owner,
         binding,
@@ -341,6 +371,7 @@ export class SlackQuestionControls {
       () => {},
       () => {},
     );
+
     return next;
   }
 
@@ -352,12 +383,15 @@ export class SlackQuestionControls {
     open: () => boolean,
   ) {
     const current = await this.admitted(token, user, channel, thread, open);
+
     if (!current || !this.slack.update || !open()) return;
+
     const panel = buildQuestionBlocks(
       current.question,
       token,
       current.binding.revision,
     );
+
     await this.slack.update(
       channel,
       current.binding.ts,
@@ -383,6 +417,7 @@ export class SlackQuestionControls {
       },
       text,
     );
+
     if (
       !open() ||
       !this.store.questions.advanceSlackQuestion(
@@ -392,10 +427,13 @@ export class SlackQuestionControls {
       )
     )
       return;
+
     if (revision === current.question.fields.length) {
       await this.submit(current.job, current.offer.token, text, user);
+
       return;
     }
+
     await this.repaint(
       current.offer.token,
       user,
@@ -414,6 +452,7 @@ export class SlackQuestionControls {
   ) {
     const matches = (settings: Settings) => {
       const current = this.bound(token);
+
       if (
         !open() ||
         !settings.enabled ||
@@ -426,10 +465,14 @@ export class SlackQuestionControls {
         (settings.answer !== "allowed" && current.job.user !== user)
       )
         return;
+
       return current;
     };
+
     if (!matches(await this.settings())) return;
+
     if (!(await this.isHuman(user))) return;
+
     return matches(await this.settings());
   }
 
@@ -441,6 +484,7 @@ export class SlackQuestionControls {
   ): Promise<void> {
     const settings = await this.settings();
     const current = this.owner(offer.token);
+
     if (
       !settings.enabled ||
       !allowed() ||
@@ -453,9 +497,11 @@ export class SlackQuestionControls {
     )
       throw new Error("Clarification publication refused");
     const trusted = Schema.decodeUnknownSync(nativeQuestionSchema)(question);
+
     if (trusted.fields.length > 1 && !this.slack.update)
       throw new Error("Clarification updates unavailable");
     const panel = buildQuestionBlocks(trusted, offer.token);
+
     const ts = await this.slack.post(
       job.channel,
       job.replyParent ?? job.thread,
@@ -464,6 +510,7 @@ export class SlackQuestionControls {
       { allowed: () => allowed() && !!this.owner(offer.token) },
       panel,
     );
+
     if (typeof ts !== "string" || !/^\d{1,16}\.\d{1,6}$/.test(ts))
       throw new Error("Clarification publication unconfirmed");
     this.store.questions.saveSlackQuestion(offer.token, ts, trusted);
@@ -475,10 +522,12 @@ export class SlackQuestionControls {
     open: () => boolean,
   ): Promise<boolean> {
     const candidate = actionCandidate(raw);
+
     if (
       candidate._tag === "None" ||
       !candidate.value.actions.some((entry) => {
         const action = actionID(entry);
+
         return (
           action._tag === "Some" && action.value.action_id.startsWith(prefix)
         );
@@ -486,13 +535,16 @@ export class SlackQuestionControls {
     )
       return false;
     await ack();
+
     if (!open()) return true;
+
     return this.enqueue(async () => {
       try {
         await this.handleInteractive(raw, open);
       } catch {
         /* Fail closed without exposing provider data. */
       }
+
       return true;
     });
   }
@@ -500,9 +552,11 @@ export class SlackQuestionControls {
   private async handleInteractive(raw: unknown, open: () => boolean) {
     const parsed = decodeAction(raw);
     const bot = this.bot();
+
     if (parsed._tag === "None" || !bot) return;
     const body = parsed.value;
     const action = body.actions[0];
+
     if (
       !action ||
       body.api_app_id !== bot.slack.appId ||
@@ -512,14 +566,19 @@ export class SlackQuestionControls {
       body.container.message_ts !== body.message.ts
     )
       return;
+
     // Checkbox changes only update Slack state. They never answer the form.
     if (action.action_id === `${prefix}select`) return;
+
     if (action.type !== "button") return;
+
     const match = /^([a-f0-9]{32})(?::([0-8])(?::([0-9]|1[0-9]))?)?$/.exec(
       action.value ?? "",
     );
+
     if (!match) return;
     const token = match[1] ?? "";
+
     const current = await this.admitted(
       token,
       body.user.id,
@@ -527,9 +586,12 @@ export class SlackQuestionControls {
       body.message.thread_ts,
       open,
     );
+
     if (!current || current.binding.ts !== body.message.ts) return;
+
     if (match[2] === undefined && current.question.fields.length !== 1) return;
     const revision = Number(match[2] ?? "0");
+
     if (revision !== current.binding.revision) {
       if (revision < current.binding.revision)
         await this.repaint(
@@ -539,13 +601,18 @@ export class SlackQuestionControls {
           body.message.thread_ts,
           open,
         );
+
       return;
     }
+
     if (action.action_id === `${prefix}cancel` && match[3] === undefined) {
       if (open()) await this.submit(current.job, token, null, body.user.id);
+
       return;
     }
+
     const field = current.field;
+
     if (!field) {
       if (
         action.action_id === `${prefix}finish` &&
@@ -558,15 +625,19 @@ export class SlackQuestionControls {
           JSON.stringify(current.progress),
           body.user.id,
         );
+
       return;
     }
+
     let answer: QuestionAnswer;
+
     if (
       action.action_id === `${prefix}pick_${revision}_${match[3]}` &&
       match[3] !== undefined &&
       field.type === "string"
     ) {
       const option = field.options?.[Number(match[3])];
+
       if (!option) return;
       answer = { [field.key]: option.value };
     } else if (match[3] !== undefined) return;
@@ -575,18 +646,23 @@ export class SlackQuestionControls {
       field.type === "multiselect"
     ) {
       const values: string[] = [];
+
       for (let start = 0; start < field.options.length; start += 10) {
         const selection = decodeSelection(
           body.state?.values[selectionBlock(token, revision, start / 10)]?.[
             `${prefix}select`
           ],
         );
+
         if (selection._tag === "None") return;
+
         for (const selected of selection.value.selected_options) {
           const index = /^([a-f0-9]{32}):([0-8]):([0-9]|1[0-9])$/.exec(
             selected.value,
           );
+
           const number = Number(index?.[3]);
+
           const option =
             index?.[1] === token &&
             Number(index[2]) === revision &&
@@ -594,10 +670,12 @@ export class SlackQuestionControls {
             number < start + 10
               ? field.options[number]
               : undefined;
+
           if (!option) return;
           values.push(option.value);
         }
       }
+
       answer = { [field.key]: values };
     } else if (action.action_id === `${prefix}skip` && field.required === false)
       answer = {};
@@ -609,6 +687,7 @@ export class SlackQuestionControls {
           body.message.thread_ts,
           `Reply in this thread: <@${this.identity.user}> answer ${token}${current.question.fields.length > 1 ? `:${revision}` : ""} <your answer>${field.type === "multiselect" ? " (comma-separated choices)" : ""}. Never send credentials.`,
         );
+
       return;
     } else return;
     questionAnswer(
@@ -620,11 +699,15 @@ export class SlackQuestionControls {
 
   receive(raw: unknown, open: () => boolean): Promise<boolean> | false {
     const candidate = decodeTextCandidate(raw);
+
     if (candidate._tag === "None") return false;
+
     const match = new RegExp(
       `^\\s*<@${this.identity.user}>\\s+answer\\s+([a-f0-9]{32})(?::([0-8]))?(?:\\s+([\\s\\S]+))?\\s*$`,
     ).exec(candidate.value.event.text);
+
     if (!match) return false;
+
     return this.enqueue(async () => {
       try {
         if (!(await this.settings()).enabled) return false;
@@ -638,6 +721,7 @@ export class SlackQuestionControls {
       } catch {
         /* Fail closed. */
       }
+
       return true;
     });
   }
@@ -651,13 +735,16 @@ export class SlackQuestionControls {
   ) {
     const parsed = decodeReply(raw);
     const bot = this.bot();
+
     if (parsed._tag === "None" || !bot || !text || text.length > 4000) return;
     const body = parsed.value;
+
     if (
       body.api_app_id !== bot.slack.appId ||
       body.team_id !== this.identity.team
     )
       return;
+
     const current = await this.admitted(
       token,
       body.event.user,
@@ -665,12 +752,14 @@ export class SlackQuestionControls {
       body.event.thread_ts,
       open,
     );
+
     if (
       !current ||
       (revisionText === undefined && current.question.fields.length !== 1)
     )
       return;
     const revision = Number(revisionText ?? "0");
+
     if (revision !== current.binding.revision) {
       if (revision < current.binding.revision)
         await this.repaint(
@@ -680,16 +769,21 @@ export class SlackQuestionControls {
           body.event.thread_ts,
           open,
         );
+
       return;
     }
+
     const field = current.field;
+
     if (!field || !custom(field)) return;
+
     const answer = {
       [field.key]:
         field.type === "multiselect"
           ? text.split(",").map((value) => value.trim())
           : text,
     };
+
     questionAnswer(
       { ...current.question, fields: [field] },
       JSON.stringify(answer),

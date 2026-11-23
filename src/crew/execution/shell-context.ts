@@ -10,23 +10,26 @@ export interface ShellContextRecord {
   text?: string;
   description?: string;
   metadata?: Record<string, unknown>;
-  content?: ReadonlyArray<{
+  content?: readonly {
     type: string;
     id?: string;
     text?: string;
     name?: string;
     executed?: boolean;
     state?: unknown;
-  }>;
+  }[];
 }
+
 const shellID = Schema.String.check(
   settingsPattern(/^sh_[A-Za-z0-9]+$/),
   Schema.isMaxCodePoints(256),
 );
+
 const command = Schema.String.check(
   Schema.isMinCodePoints(1),
-  Schema.isMaxCodePoints(65536),
+  Schema.isMaxCodePoints(65_536),
 );
+
 const notice = settingsStruct({
   source: Schema.Literal("shell"),
   shellID,
@@ -37,6 +40,7 @@ const notice = settingsStruct({
   signal: Schema.optional(Schema.String.check(Schema.isMaxCodePoints(128))),
   timeout: Schema.optional(Schema.Boolean),
 });
+
 const launch = Schema.Struct({
   type: Schema.Literal("tool"),
   name: Schema.Literal("shell"),
@@ -65,6 +69,7 @@ function candidate(message: ShellContextRecord) {
     return;
   const metadata = Schema.decodeUnknownResult(notice)(message.metadata);
   const description = Schema.decodeUnknownResult(command)(message.description);
+
   if (
     Result.isFailure(metadata) ||
     Result.isFailure(description) ||
@@ -73,12 +78,14 @@ function candidate(message: ShellContextRecord) {
     return;
   const prefix = `<shell id="${metadata.success.jobID}" state="${metadata.success.state}" command="${description.success}">\n`;
   const suffix = "\n</shell>";
+
   if (
     !message.text.startsWith(prefix) ||
     !message.text.endsWith(suffix) ||
     message.text.length < prefix.length + suffix.length
   )
     return;
+
   return { shellID: metadata.success.shellID, command: description.success };
 }
 
@@ -96,6 +103,7 @@ type Witness = {
   created: number;
   order: number;
 };
+
 /** Descending scan of ONE original input's retained turn, never the latest turn.
  * Keep compact launch proofs, not arbitrary output. finish() is mandatory after
  * the caller validates its exact original input. Unknown/ambiguous proof fails.
@@ -103,13 +111,13 @@ type Witness = {
 export class ShellCompletionContext {
   private order = 0;
   private valid = true;
-  private callbacks: Array<{
+  private readonly callbacks: {
     shellID: string;
     command: string;
     created: number;
     order: number;
-  }> = [];
-  private launches = new Map<string, Witness[]>();
+  }[] = [];
+  private readonly launches = new Map<string, Witness[]>();
   private witnesses = 0;
   private readonly workerAgents: ReadonlySet<string>;
   constructor(workerAgent: string, crewID = workerAgent) {
@@ -124,15 +132,20 @@ export class ShellCompletionContext {
   /** True only means defer a strict candidate; finish must still prove it. */
   track(message: ShellContextRecord): boolean {
     const order = this.order++;
-    if (this.order > 10000) this.valid = false;
+
+    if (this.order > 10_000) this.valid = false;
+
     if (message.type === "assistant") {
       for (const part of message.content ?? []) {
         const parsed = Schema.decodeUnknownResult(launch)(part);
+
         if (Result.isFailure(parsed)) continue;
-        if (++this.witnesses > 10000) {
+
+        if (++this.witnesses > 10_000) {
           this.valid = false;
           break;
         }
+
         const { metadata, input } = parsed.success.state;
         const entries = this.launches.get(metadata.shellID) ?? [];
         entries.push({
@@ -145,13 +158,19 @@ export class ShellCompletionContext {
         this.launches.set(metadata.shellID, entries);
       }
     }
+
     const parsed = candidate(message);
+
     if (!parsed) return false;
-    if (this.callbacks.length >= 10000) {
+
+    if (this.callbacks.length >= 10_000) {
       this.valid = false;
+
       return true;
     }
+
     this.callbacks.push({ ...parsed, created: message.time.created, order });
+
     return true;
   }
 
@@ -160,9 +179,11 @@ export class ShellCompletionContext {
     if (!this.valid || !Number.isFinite(inputCreated) || inputCreated < 0)
       return false;
     const seen = new Set<string>();
+
     for (const callback of this.callbacks) {
       const entries = this.launches.get(callback.shellID);
       const witness = entries?.[0];
+
       if (
         seen.has(callback.shellID) ||
         entries?.length !== 1 ||
@@ -178,6 +199,7 @@ export class ShellCompletionContext {
         return false;
       seen.add(callback.shellID);
     }
+
     return true;
   }
 }

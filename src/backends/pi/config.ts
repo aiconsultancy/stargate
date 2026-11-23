@@ -19,8 +19,10 @@ export {
  * schema can use it without an import cycle.
  */
 export const piProxyModel = "openai/opencode-go/deepseek-v4.1-flash";
+
 /** Claude through the proxy's Anthropic route; also valid natively. */
 export const piClaudeProxyModel = "anthropic/claude-haiku-5-5";
+
 /** Models an explicit `provider` may serve; anything else fails closed. */
 export const piProxyModels: readonly string[] = [
   piProxyModel,
@@ -53,6 +55,7 @@ export const piDurableBackendSchema = settingsStruct({
 
 const { directory: _piDirectory, ...piCrewBackendFields } =
   piDurableBackendSchema.fields;
+
 /** Crew working directories are supplied by the configured worktree map. */
 export const piCrewBackendSchema = settingsStruct(piCrewBackendFields);
 

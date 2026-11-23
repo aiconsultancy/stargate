@@ -49,6 +49,7 @@ function twikiTeam(): Team {
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-crew-"));
   const team = twikiTeam();
+
   const options: CrewOptions = {
     namespace: "galactica",
     stateDirectory: directory,
@@ -60,6 +61,7 @@ async function fixture() {
     team,
     mesijCommand: "/usr/bin/mesij",
   };
+
   const native = new Map<string, CrewSession>(
     ["captain-a", "captain-b"].map((id) => [
       id,
@@ -70,25 +72,32 @@ async function fixture() {
       },
     ]),
   );
+
   const nativeCalls: string[] = [];
+
   const sessions: CrewSessions = {
     async get({ sessionID }) {
       nativeCalls.push(`get:${sessionID}`);
       const session = native.get(sessionID);
+
       if (!session) throw { _tag: "Session.NotFoundError" };
+
       return session;
     },
     async create(input) {
       if (!input.id || !input.agent || !input.location)
         throw new Error("Invalid fixture session");
+
       const session = {
         id: input.id,
         agent: input.agent,
         location: input.location,
         ...(input.metadata ? { metadata: input.metadata } : {}),
       };
+
       native.set(session.id, session);
       nativeCalls.push(`create:${input.agent}`);
+
       return session;
     },
     async prompt() {
@@ -105,6 +114,7 @@ async function fixture() {
       nativeCalls.push("synthetic");
     },
   };
+
   const turns: {
     text: string;
     sessionID: string;
@@ -113,6 +123,7 @@ async function fixture() {
     reject: (error: Error) => void;
     onText: TextSink | undefined;
   }[] = [];
+
   let creations = 0;
   let opens = 0;
   const definitions: string[] = [];
@@ -123,17 +134,22 @@ async function fixture() {
   let failOpens = 0;
   const lifecycle: string[] = [];
   let closeGate: Promise<void> | undefined;
+
   const started = () => {
     const pending = Promise.withResolvers<void>();
     nextTurn = pending.resolve;
+
     return pending.promise;
   };
+
   let nextTurn = () => {};
+
   const factory: PiWorkerFactory = async (config, context) => {
     if (failOpens > 0) {
       failOpens--;
       throw new Error("private open error");
     }
+
     definitions.push(config.systemPrompt ?? "");
     opens++;
     lifecycle.push("open");
@@ -143,10 +159,13 @@ async function fixture() {
     expect(config.systemPrompt).toContain(
       join(options.captainDirectory, "WAYS_OF_WORKING.md"),
     );
+
     const backend: PiWorkerBackend = {
       async createSession() {
         creations++;
+
         if (failCreate) throw new Error("private provider error");
+
         return "17";
       },
       async prompt(sessionID, text, signal, onText) {
@@ -165,6 +184,7 @@ async function fixture() {
           { once: true },
         );
         nextTurn();
+
         return response.promise;
       },
       async interrupt() {},
@@ -179,10 +199,13 @@ async function fixture() {
         lifecycle.push("close finished");
       },
     };
+
     return backend;
   };
+
   let mailSequence = 0;
   const mailMessages: MesijMessage[] = [];
+
   const mailer = {
     async register() {
       return { id: "0".repeat(32), sequence: 0 };
@@ -199,6 +222,7 @@ async function fixture() {
         type: "message",
         ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       });
+
       return receipt;
     },
     async inbox(input: MesijInbox) {
@@ -211,6 +235,7 @@ async function fixture() {
         .slice(0, input.limit ?? 20);
     },
   };
+
   const engine = await CrewEngine.open(
     options,
     sessions,
@@ -218,6 +243,7 @@ async function fixture() {
     undefined,
     factory,
   );
+
   const caller = (
     sessionID = "captain-a",
     signal = new AbortController().signal,
@@ -227,6 +253,7 @@ async function fixture() {
     signal,
     id: "captain-call",
   });
+
   return {
     directory,
     definitions,
@@ -271,12 +298,14 @@ async function fixture() {
 
 test("oversized Pi mail is refused before storage and does not jam later inbox pages", async () => {
   const f = await fixture();
+
   try {
     await f.engine.run({ op: "ensure", crew: "twiki" }, f.caller());
+
     for (const text of [
-      "x".repeat(64000),
-      "🌌".repeat(15000),
-      '"'.repeat(30000),
+      "x".repeat(64_000),
+      "🌌".repeat(15_000),
+      '"'.repeat(30_000),
     ]) {
       expect(
         await f.engine.mail({ op: "send", to: "twiki", text }, f.caller()),
@@ -287,12 +316,14 @@ test("oversized Pi mail is refused before storage and does not jam later inbox p
           "Message is too large for the Pi inbox; mail was not stored.",
       });
     }
+
     expect(
       await f.engine.mail(
         { op: "send", to: "twiki", text: "Readable follow-up" },
         f.caller(),
       ),
     ).toMatchObject({ stored: true, sequence: 1 });
+
     if (!f.binding) throw new Error("Missing Pi binding");
     expect(
       await f.binding.run(
@@ -313,6 +344,7 @@ test("oversized Pi mail is refused before storage and does not jam later inbox p
 
 test("installed Pi inspection observes native idle and running state without prompting", async () => {
   const f = await fixture();
+
   try {
     await f.engine.run({ op: "ensure", crew: "twiki" }, f.caller());
     expect(
@@ -324,6 +356,7 @@ test("installed Pi inspection observes native idle and running state without pro
       ).execution,
     ).toEqual({ state: "idle", backend: "pi" });
     const started = f.started();
+
     const task = (
       await f.engine.run(
         {
@@ -334,6 +367,7 @@ test("installed Pi inspection observes native idle and running state without pro
         f.caller(),
       )
     ).task;
+
     await started;
     expect(
       (
@@ -351,6 +385,7 @@ test("installed Pi inspection observes native idle and running state without pro
       ),
     ).rejects.toThrow("do not support Mesij status requests");
     f.turns[0]?.resolve("Done");
+
     if (!task) throw new Error("Missing task");
     await f.engine.run({ op: "wait", taskID: task.id }, f.caller());
     expect(
@@ -365,12 +400,15 @@ test("installed Pi inspection observes native idle and running state without pro
 
 test("captain dispatches persistent Pi work and collects only its own result", async () => {
   const f = await fixture();
+
   try {
     const started = f.started();
+
     const first = await f.engine.run(
       { op: "dispatch", crew: "twiki", text: "Check formatting" },
       f.caller(),
     );
+
     await started;
     expect(first.status).toBe("running");
     expect(f.turns[0]?.sessionID).toBe("17");
@@ -390,22 +428,27 @@ test("captain dispatches persistent Pi work and collects only its own result", a
       ).status,
     ).toBe("busy");
     f.turns[0]?.resolve("Formatting verified; no files changed.");
+
     const result = await f.engine.run(
       { op: "wait", taskID: first.task?.id },
       f.caller(),
     );
+
     expect(result.status).toBe("completed");
     expect(result.task?.result).toBe("Formatting verified; no files changed.");
     const secondStarted = f.started();
+
     const second = await f.engine.run(
       { op: "dispatch", crew: "twiki", text: "Check docs" },
       f.caller(),
     );
+
     await secondStarted;
     expect(second.task?.workerSessionID).toBe(first.task?.workerSessionID);
     expect(f.creations).toBe(1);
     f.turns[1]?.resolve("Docs checked.");
     await f.engine.run({ op: "wait", taskID: second.task?.id }, f.caller());
+
     const reopened = await CrewEngine.open(
       f.options,
       f.sessions,
@@ -413,6 +456,7 @@ test("captain dispatches persistent Pi work and collects only its own result", a
       undefined,
       f.factory,
     );
+
     try {
       expect(
         (await reopened.run({ op: "ensure", crew: "twiki" }, f.caller()))
@@ -422,6 +466,7 @@ test("captain dispatches persistent Pi work and collects only its own result", a
     } finally {
       await reopened.close();
     }
+
     expect(f.nativeCalls.some((call) => call.includes("create:twiki"))).toBe(
       false,
     );
@@ -437,6 +482,7 @@ test("captain dispatches persistent Pi work and collects only its own result", a
 
 test("Pi coordination is host-bound and location plugins share one native storage owner", async () => {
   const f = await fixture();
+
   const second = await CrewEngine.open(
     f.options,
     f.sessions,
@@ -444,17 +490,22 @@ test("Pi coordination is host-bound and location plugins share one native storag
     undefined,
     f.factory,
   );
+
   try {
     const started = f.started();
+
     const task = (
       await f.engine.run(
         { op: "dispatch", crew: "twiki", text: "Bound work" },
         f.caller(),
       )
     ).task;
+
     await started;
+
     if (!task || !f.binding) throw new Error("Missing Pi binding");
     expect(() => f.binding?.authorize("18")).toThrow("saved conversation");
+
     const note = await f.binding.run(
       "stargate_journal",
       { op: "append", text: "Pi milestone" },
@@ -462,6 +513,7 @@ test("Pi coordination is host-bound and location plugins share one native storag
       "pi-call-1",
       f.caller().signal,
     );
+
     expect(note).toMatchObject({
       entry: { member: "twiki", taskID: task.id, kind: "note" },
     });
@@ -506,15 +558,19 @@ test("Pi coordination is host-bound and location plugins share one native storag
 
 test("a Pi DM captured before completion stays inbox-only after the exact result is collected", async () => {
   const f = await fixture();
+
   try {
     const started = f.started();
+
     const task = (
       await f.engine.run(
         { op: "dispatch", crew: "twiki", text: "Bound work" },
         f.caller(),
       )
     ).task;
+
     await started;
+
     if (!task) throw new Error("Missing Pi task");
     const notify = f.engine.notifyMail.bind(f.engine);
     f.engine.notifyMail = async (...args) => {
@@ -522,8 +578,10 @@ test("a Pi DM captured before completion stays inbox-only after the exact result
       expect(
         await f.engine.run({ op: "wait", taskID: task.id }, f.caller()),
       ).toMatchObject({ status: "completed" });
+
       return notify(...args);
     };
+
     expect(
       await f.engine.dm({ op: "send", to: "twiki", text: "Check" }, f.caller()),
     ).toMatchObject({ stored: true, notification: "inbox" });
@@ -539,8 +597,10 @@ test("a Pi DM captured before completion stays inbox-only after the exact result
 
 test("Pi consumes the trusted member definition without creating an OpenCode profile", async () => {
   const f = await fixture();
+
   try {
     const member = f.engine.options.team.crew.find(({ id }) => id === "twiki");
+
     if (!member) throw new Error("Missing Pi member");
     const path = piDefinitionPath(f.options.captainDirectory, member);
     await mkdir(
@@ -563,12 +623,15 @@ test("Pi consumes the trusted member definition without creating an OpenCode pro
 
 test("Pi cancellation stops execution and never replays uncertain work", async () => {
   const f = await fixture();
+
   try {
     const started = f.started();
+
     const dispatched = await f.engine.run(
       { op: "dispatch", crew: "twiki", text: "Inspect cleanup" },
       f.caller(),
     );
+
     await started;
     const controller = new AbortController();
     controller.abort();
@@ -605,14 +668,17 @@ test("Pi cancellation stops execution and never replays uncertain work", async (
 test("member status observes live Pi progress across locations without another model call or queue promotion", async () => {
   const f = await fixture();
   let other: CrewEngine | undefined;
+
   try {
     const started = f.started();
+
     const first = (
       await f.engine.run(
         { op: "dispatch", crew: "twiki", text: "Inspect formatting" },
         f.caller(),
       )
     ).task;
+
     await started;
     f.turns[0]?.onText?.(
       "Checked files; formatting in progress. api_key=private-key",
@@ -634,6 +700,7 @@ test("member status observes live Pi progress across locations without another m
       f.factory,
     );
     const before = f.nativeCalls.length;
+
     for (const engine of [f.engine, other]) {
       const status = engine.status({ member: "twiki" });
       expect(status.members[0]).toMatchObject({
@@ -648,6 +715,7 @@ test("member status observes live Pi progress across locations without another m
       expect(status.members[0]?.current?.startedAt).toBeNumber();
       expect(status.members[0]?.current?.updatedAt).toBeNumber();
     }
+
     expect(f.nativeCalls).toHaveLength(before);
     expect(f.turns).toHaveLength(1);
     f.turns[0]?.resolve("PRIVATE RAW FINAL RESULT");
@@ -670,14 +738,17 @@ test("member status observes live Pi progress across locations without another m
 
 test("member status retains safe failed Pi outcome without retry or SDK error details", async () => {
   const f = await fixture();
+
   try {
     const started = f.started();
+
     const task = (
       await f.engine.run(
         { op: "dispatch", crew: "twiki", text: "Inspect failure" },
         f.caller(),
       )
     ).task;
+
     await started;
     f.turns[0]?.reject(new Error("Bearer private-provider-error"));
     expect(
@@ -701,6 +772,7 @@ test("member status retains safe failed Pi outcome without retry or SDK error de
 
 test("a failed Pi harness open is retried, not cached for the process", async () => {
   const f = await fixture();
+
   try {
     f.failOpens(1);
     await expect(
@@ -719,10 +791,12 @@ test("a new owner reopens a Pi store only after the last owner closed it", async
   const f = await fixture();
   const gate = Promise.withResolvers<void>();
   let reopened: CrewEngine | undefined;
+
   try {
     await f.engine.run({ op: "ensure", crew: "twiki" }, f.caller());
     f.holdClose(gate.promise);
     const closing = f.engine.close();
+
     while (!f.lifecycle.includes("close started")) await Bun.sleep(1);
     reopened = await CrewEngine.open(
       f.options,
@@ -732,10 +806,12 @@ test("a new owner reopens a Pi store only after the last owner closed it", async
       f.factory,
     );
     const owner = reopened;
+
     const dispatch = owner.run(
       { op: "dispatch", crew: "twiki", text: "Inspect" },
       f.caller(),
     );
+
     await Bun.sleep(20);
     expect(f.lifecycle).toEqual(["open", "close started"]);
     gate.resolve();
@@ -758,6 +834,7 @@ test("a closed Pi owner cannot acquire a harness after a pending open", async ()
   const f = await fixture();
   const gate = Promise.withResolvers<void>();
   const closeStarted = Promise.withResolvers<void>();
+
   const factory: PiWorkerFactory = async (config, context) => {
     const backend = await f.factory(config, context);
     const close = backend.close.bind(backend);
@@ -765,8 +842,10 @@ test("a closed Pi owner cannot acquire a harness after a pending open", async ()
       closeStarted.resolve();
       await close();
     };
+
     return backend;
   };
+
   const owner = () =>
     new PiCrewWorkers(
       f.engine.state,
@@ -776,12 +855,15 @@ test("a closed Pi owner cannot acquire a harness after a pending open", async ()
       undefined,
       f.options.captainDirectory,
     );
+
   const previous = owner();
   const closed = owner();
   const live = owner();
+
   try {
     const member = f.options.team?.crew.find(({ id }) => id === "twiki");
     const directory = f.options.worktrees["twiki"];
+
     if (!member || !directory) throw new Error("Missing Pi worker");
     await previous.canReport(member, directory);
     f.holdClose(gate.promise);
@@ -813,6 +895,7 @@ test("a closed Pi owner cannot acquire a harness after a pending open", async ()
 
 test("Pi shutdown retains uncertain task and unconfirmed creation is not repeated", async () => {
   const f = await fixture();
+
   try {
     f.failCreate();
     await expect(
@@ -825,17 +908,22 @@ test("Pi shutdown retains uncertain task and unconfirmed creation is not repeate
   } finally {
     await f.close();
   }
+
   const running = await fixture();
+
   try {
     const started = running.started();
+
     const task = (
       await running.engine.run(
         { op: "dispatch", crew: "twiki", text: "Inspect" },
         running.caller(),
       )
     ).task;
+
     await started;
     await running.engine.close();
+
     const reopened = await CrewEngine.open(
       running.options,
       running.sessions,
@@ -843,6 +931,7 @@ test("Pi shutdown retains uncertain task and unconfirmed creation is not repeate
       undefined,
       running.factory,
     );
+
     try {
       expect(
         (
@@ -866,6 +955,7 @@ test("Pi owner shutdown aborts and drains read-only recovery before state closes
   const entered = Promise.withResolvers<AbortSignal>();
   const release = Promise.withResolvers<void>();
   const lifecycle: string[] = [];
+
   const factory: PiWorkerFactory = Object.assign(
     async () => {
       throw new Error("Receipt inspection must not open a runtime");
@@ -881,9 +971,11 @@ test("Pi owner shutdown aborts and drains read-only recovery before state closes
           once: true,
         });
         entered.resolve(signal);
+
         try {
           // Deliberately ignore abort until the native read releases resources.
           await release.promise;
+
           return "Late native answer";
         } finally {
           lifecycle.push("reader cleaned");
@@ -891,24 +983,31 @@ test("Pi owner shutdown aborts and drains read-only recovery before state closes
       },
     },
   );
+
   const owner = new PiCrewWorkers(f.engine.state, f.directory, factory);
   let closing: Promise<void> | undefined;
+
   try {
     const member = f.options.team?.crew.find(({ id }) => id === "twiki");
+
     if (!member) throw new Error("Missing Pi worker");
     const state = f.engine.state;
     const peer = state.reservePeer(member.id);
     state.readyPeer(member.id);
     const task = state.reserveTask(peer, "captain-a", "Inspect receipt");
+
     if (!task) throw new Error("Missing task");
     state.savePiTaskConversation(task.id, "17");
+
     const result = owner
       .recover(task, member, f.directory, new AbortController().signal)
       .then(
         (task) => ({ task, error: undefined }),
         (error: unknown) => ({ task: undefined, error }),
       );
+
     const signal = await entered.promise;
+
     const control = state.beginAbandon(
       { ...task, status: "uncertain", controlID: null },
       {
@@ -917,8 +1016,10 @@ test("Pi owner shutdown aborts and drains read-only recovery before state closes
         operationKey: "close-recovery",
       },
     );
+
     state.finishAbandon(task.id, control, "confirmed", "Stopped");
     const replacement = state.reserveTask(peer, "captain-a", "Replacement");
+
     if (!replacement) throw new Error("Missing replacement task");
     let stateClosed = false;
     let lateReads = 0;
@@ -928,8 +1029,10 @@ test("Pi owner shutdown aborts and drains read-only recovery before state closes
         lateReads++;
         throw new Error("State read after shutdown");
       }
+
       return lookup(id);
     };
+
     let ownerClosed = false;
     closing = owner.close().then(async () => {
       ownerClosed = true;
@@ -972,19 +1075,24 @@ test("Pi owner shutdown aborts and drains read-only recovery before state closes
 
 test("Pi FIFO remains captain-polled and native-only controls fail clearly", async () => {
   const f = await fixture();
+
   try {
     const started = f.started();
+
     const first = (
       await f.engine.run(
         { op: "dispatch", crew: "twiki", text: "First" },
         f.caller(),
       )
     ).task;
+
     await started;
+
     const queued = await f.engine.run(
       { op: "dispatch", crew: "twiki", text: "Second", queue: true },
       f.caller(),
     );
+
     expect(queued.status).toBe("queued");
     f.turns[0]?.resolve("First done");
     await f.engine.run({ op: "wait", taskID: first?.id }, f.caller());
@@ -1019,6 +1127,7 @@ test("Pi FIFO remains captain-polled and native-only controls fail clearly", asy
 test("explicit Pi roster expansion preserves all native peers and results", async () => {
   const f = await fixture();
   await f.engine.close();
+
   const oldOptions = {
     ...f.options,
     team: defaultTeam,
@@ -1026,13 +1135,16 @@ test("explicit Pi roster expansion preserves all native peers and results", asyn
       Object.entries(f.options.worktrees).filter(([id]) => id !== "twiki"),
     ),
   };
+
   // Use a separate namespace because the fixture already persisted the new identity.
   oldOptions.namespace = "upgrade";
   const original = await CrewEngine.open(oldOptions, f.sessions);
   const peers = (await original.run({ op: "ensure" }, f.caller())).peers;
   const peer = peers?.[0];
+
   if (!peer) throw new Error("Missing original peer");
   const task = original.state.reserveTask(peer, "captain-a");
+
   if (!task) throw new Error("Missing original task");
   original.state.complete(task.id, peer.sessionID, "Retained result");
   await original.close();
@@ -1051,10 +1163,12 @@ test("explicit Pi roster expansion preserves all native peers and results", asyn
   `);
   legacy.close();
   const expanded = { ...f.options, namespace: "upgrade" };
+
   try {
     await expect(CrewEngine.open(expanded, f.sessions)).rejects.toThrow(
       "configuration changed",
     );
+
     const upgraded = await CrewEngine.open(
       { ...expanded, allowCrewExpansion: true },
       f.sessions,
@@ -1062,6 +1176,7 @@ test("explicit Pi roster expansion preserves all native peers and results", asyn
       undefined,
       f.factory,
     );
+
     try {
       for (const previous of peers ?? [])
         expect(upgraded.state.peer(previous.crewID)).toEqual(previous);
@@ -1080,17 +1195,21 @@ test("explicit Pi roster expansion preserves all native peers and results", asyn
 
 test("explicit OpenCode roster expansion preserves native and Pi peers and tasks", async () => {
   const f = await fixture();
+
   try {
     const peers = (await f.engine.run({ op: "ensure" }, f.caller())).peers;
     const peer = peers?.find(({ crewID }) => crewID === "mario");
+
     if (!peer) throw new Error("Missing original peer");
     const task = f.engine.state.reserveTask(peer, "captain-a");
+
     if (!task) throw new Error("Missing original task");
     f.engine.state.complete(task.id, peer.sessionID, "Retained native result");
     const savedTask = f.engine.state.task(task.id);
     const statePath = f.engine.state.path;
     await f.engine.close();
     const existingTeam = Schema.decodeUnknownSync(teamSchema)(f.options.team);
+
     const expanded = {
       ...f.options,
       team: Schema.decodeUnknownSync(teamSchema)({
@@ -1106,9 +1225,11 @@ test("explicit OpenCode roster expansion preserves native and Pi peers and tasks
       }),
       worktrees: { ...f.options.worktrees, bosun: join(f.directory, "bosun") },
     };
+
     await expect(CrewEngine.open(expanded, f.sessions)).rejects.toThrow(
       "configuration changed",
     );
+
     const upgraded = await CrewEngine.open(
       { ...expanded, allowCrewExpansion: true },
       f.sessions,
@@ -1116,16 +1237,21 @@ test("explicit OpenCode roster expansion preserves native and Pi peers and tasks
       undefined,
       f.factory,
     );
+
     let bosunSessionID: string | undefined;
+
     try {
       expect(upgraded.state.path).toBe(statePath);
+
       for (const previous of peers ?? [])
         expect(upgraded.state.peer(previous.crewID)).toEqual(previous);
       expect(upgraded.state.task(task.id)).toEqual(savedTask);
+
       const ensured = await upgraded.run(
         { op: "ensure", crew: "bosun" },
         f.caller(),
       );
+
       expect(ensured.status).toBe("ready");
       bosunSessionID = upgraded.state.peer("bosun")?.sessionID;
       expect(bosunSessionID).toBeDefined();
@@ -1133,9 +1259,12 @@ test("explicit OpenCode roster expansion preserves native and Pi peers and tasks
     } finally {
       await upgraded.close();
     }
+
     const reopened = await CrewEngine.open(expanded, f.sessions);
+
     try {
       expect(reopened.state.peer("bosun")?.sessionID).toBe(bosunSessionID);
+
       for (const previous of peers ?? [])
         expect(reopened.state.peer(previous.crewID)).toEqual(previous);
       expect(reopened.state.task(task.id)).toEqual(savedTask);
@@ -1155,12 +1284,14 @@ test("roster expansion accepts OpenCode additions but rejects rebinding and remo
     captain: { id: "adama", directory: "/captain" },
     crew: [{ id: "chief", directory: "/chief", permissionProfile: "coding" }],
   };
+
   const added = {
     id: "twiki",
     directory: "/twiki",
     permissionProfile: "coding",
     backend: { type: "pi-durable" },
   };
+
   const next = { ...old, crew: [...old.crew, added] };
   const before = JSON.stringify(old);
   expect(canExpandCrew(before, JSON.stringify(next))).toBe(true);
@@ -1185,6 +1316,7 @@ test("roster expansion accepts OpenCode additions but rejects rebinding and remo
   expect(
     canExpandCrew(before, JSON.stringify({ ...next, crew: [added] })),
   ).toBe(false);
+
   for (const changed of [
     { ...next, namespace: "another" },
     { ...next, projectDirectory: "/other" },

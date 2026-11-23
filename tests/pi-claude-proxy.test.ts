@@ -11,12 +11,14 @@ import { teamSchema } from "../src/crew/team";
 const apiKeyEnv = "STARGATE_PI_CLAUDE_PROXY_TEST_KEY";
 const model = "anthropic/claude-haiku-5-5";
 const signal = () => new AbortController().signal;
+
 // Native credentials must never reach the proxy or select the native route.
 const native = {
   ANTHROPIC_API_KEY: "native-key-must-not-be-sent",
   ANTHROPIC_AUTH_TOKEN: "native-token-must-not-be-sent",
   ANTHROPIC_BASE_URL: "http://127.0.0.1:1/native",
 };
+
 const saved = new Map<string, string | undefined>();
 
 beforeEach(() => {
@@ -50,6 +52,7 @@ function config(
 function messages(text = "Claude proxy answer") {
   const event = (type: string, data: object) =>
     `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+
   return new Response(
     event("message_start", {
       message: {
@@ -83,10 +86,13 @@ function messages(text = "Claude proxy answer") {
 test("Pi Claude proxy registers only the pinned catalog model at the proxy", () => {
   const settings = config("http://127.0.0.1:8317/v1");
   const models = piModels(settings);
+
   const source = anthropicProvider()
     .getModels()
     .find((entry) => entry.id === "claude-haiku-5-5");
+
   const routed = models.getModel("anthropic", "claude-haiku-5-5");
+
   if (!source) throw new Error("Pinned catalog lacks Claude Haiku 5.5");
   expect(routed).toEqual({ ...source, baseUrl: "http://127.0.0.1:8317" });
   expect(models.getModel("anthropic", "claude-opus-5-5")).toBeUndefined();
@@ -118,11 +124,14 @@ test("Pi thinking level accepts only SDK levels the model supports", () => {
   expect(config(baseURL, "/workspace", { thinkingLevel: "low" })).toMatchObject(
     { thinkingLevel: "low" },
   );
+
   for (const thinkingLevel of ["#low", "LOW", "lowest", "", 1, null])
     expect(() => config(baseURL, "/workspace", { thinkingLevel })).toThrow();
+
   const { directory: _, ...worker } = config(baseURL, "/workspace", {
     thinkingLevel: "low",
   });
+
   const team = (thinkingLevel: unknown) =>
     Schema.decodeUnknownSync(teamSchema)({
       captain: { id: "captain" },
@@ -135,6 +144,7 @@ test("Pi thinking level accepts only SDK levels the model supports", () => {
         },
       ],
     });
+
   expect(team("low").crew[0]?.backend?.thinkingLevel).toBe("low");
   expect(() => team("#low")).toThrow();
   // Haiku maps "minimal" to null; the SDK would clamp it, Stargate refuses it.
@@ -151,16 +161,21 @@ for (const thinkingLevel of [undefined, "low"] as const)
     const directory = await mkdtemp(
       join(tmpdir(), "stargate-pi-claude-level-"),
     );
+
     const bodies: Record<string, unknown>[] = [];
+
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       async fetch(request) {
         bodies.push(await request.json());
+
         return messages();
       },
     });
+
     let backend: PiDurableBackend | undefined;
+
     try {
       backend = await PiDurableBackend.open(
         config(new URL("/v1", server.url).href, directory, {
@@ -168,11 +183,13 @@ for (const thinkingLevel of [undefined, "low"] as const)
         }),
         { dataDirectory: directory },
       );
+
       const session = await backend.createSession({
         key: "level",
         title: "level",
         signal: signal(),
       });
+
       expect(await backend.prompt(session, "hello", signal())).toBe(
         "Claude proxy answer",
       );
@@ -180,6 +197,7 @@ for (const thinkingLevel of [undefined, "low"] as const)
         "Claude proxy answer",
       );
       expect(bodies).toHaveLength(2);
+
       for (const body of bodies) {
         if (thinkingLevel) {
           expect(body["thinking"]).toMatchObject({ type: "adaptive" });
@@ -199,11 +217,13 @@ for (const thinkingLevel of [undefined, "low"] as const)
 
 test("Pi Claude proxy sends Anthropic messages with only the proxy key", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-claude-"));
+
   const requests: {
     path: string;
     headers: Headers;
     body: Record<string, unknown>;
   }[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -213,25 +233,31 @@ test("Pi Claude proxy sends Anthropic messages with only the proxy key", async (
         headers: request.headers,
         body: await request.json(),
       });
+
       return messages();
     },
   });
+
   let backend: PiDurableBackend | undefined;
+
   try {
     backend = await PiDurableBackend.open(
       config(new URL("/v1", server.url).href, directory),
       { dataDirectory: directory },
     );
+
     const session = await backend.createSession({
       key: "claude",
       title: "claude",
       signal: signal(),
     });
+
     expect(await backend.prompt(session, "hello", signal())).toBe(
       "Claude proxy answer",
     );
     expect(requests).toHaveLength(1);
     const [request] = requests;
+
     if (!request) throw new Error("Proxy request is missing");
     expect(request.path).toBe("/v1/messages");
     expect(request.headers.get("x-api-key")).toBe("local-proxy-test-only");
@@ -253,35 +279,43 @@ test("Pi Claude proxy sends Anthropic messages with only the proxy key", async (
 test("Pi Claude proxy refuses redirects to another host", async () => {
   let redirected = 0;
   let proxied = 0;
+
   const target = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       await request.text();
       redirected++;
+
       return messages("REDIRECTED");
     },
   });
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       await request.text();
       proxied++;
+
       return new Response(null, {
         status: 307,
         headers: { location: new URL("/v1/messages", target.url).href },
       });
     },
   });
+
   try {
     // Call the provider directly: the durable harness would retry the failure.
     const models = piModels(config(new URL("/v1", server.url).href));
     const routed = models.getModel("anthropic", "claude-haiku-5-5");
+
     if (!routed) throw new Error("Claude proxy model is missing");
+
     const reply = await models.completeSimple(routed, {
       messages: [{ role: "user", content: "hello", timestamp: 0 }],
     });
+
     expect(reply.stopReason).toBe("error");
     expect(proxied).toBeGreaterThan(0);
     expect(redirected).toBe(0);

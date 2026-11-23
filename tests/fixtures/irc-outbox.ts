@@ -14,13 +14,17 @@ export const outboxFixture = new URL("./irc-outbox.sqlite", import.meta.url);
 if (import.meta.main) {
   const directory = await mkdtemp(join(tmpdir(), "irc-outbox-build-"));
   const path = join(directory, "expected.sqlite");
+
   try {
     const db = new Database(path, { create: true, strict: true });
+
     try {
       new IrcSessions(db);
+
       const insert = db.query(
         "INSERT INTO irc_dm_outbox (id,fromRole,fromID,toRole,toID,text,created) VALUES (?,?,?,?,?,?,?)",
       );
+
       db.transaction(() => {
         for (let n = 1; n <= 1000; n++) {
           insert.run(
@@ -37,12 +41,15 @@ if (import.meta.main) {
     } finally {
       db.close();
     }
+
     if (process.argv.includes("--write")) await copyFile(path, outboxFixture);
     const expected = new Database(path, { readonly: true, strict: true });
+
     const saved = new Database(outboxFixture.pathname, {
       readonly: true,
       strict: true,
     });
+
     try {
       strictEqual(
         saved
@@ -50,6 +57,7 @@ if (import.meta.main) {
           .get()?.integrity_check,
         "ok",
       );
+
       for (const sql of [
         "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name",
         "SELECT * FROM irc_dm_outbox ORDER BY sequence",
@@ -58,6 +66,7 @@ if (import.meta.main) {
       ]) {
         deepStrictEqual(saved.query(sql).all(), expected.query(sql).all());
       }
+
       console.log(
         "Fixture checked: production schema, 1000 synthetic rows, sequence 1000.",
       );

@@ -3,15 +3,19 @@ import { settingsStruct } from "../../config/settings-schema";
 
 const bounded = (max: number) =>
   Schema.String.check(Schema.isMaxCodePoints(max));
+
 export const Id = bounded(64).check(
   Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
 );
+
 export const Topic = bounded(200).check(
   Schema.isPattern(/^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/),
 );
+
 export const TopicPattern = bounded(200).check(
   Schema.isPattern(/^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*(?:\.\*)?$/),
 );
+
 export const Audience = Schema.Literals(["internal", "public"]);
 
 /** RFC 3339 without leap seconds or precision that cannot survive milliseconds. */
@@ -20,6 +24,7 @@ export function utcMillis(value: string): string | undefined {
     /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?([Zz]|[+-]\d{2}:\d{2})$/.exec(
       value,
     );
+
   if (!match) return undefined;
   const year = Number(match[1]);
   const month = Number(match[2]);
@@ -28,6 +33,7 @@ export function utcMillis(value: string): string | undefined {
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   const maxDay = days[month - 1];
   const zone = match[8];
+
   if (
     maxDay === undefined ||
     day < 1 ||
@@ -41,24 +47,31 @@ export function utcMillis(value: string): string | undefined {
   )
     return undefined;
   const time = Date.parse(value);
+
   if (!Number.isFinite(time)) return undefined;
   const canonical = new Date(time).toISOString();
+
   return canonical.length === 24 ? canonical : undefined;
 }
 
 export const OccurredAt = Schema.String.check(
   Schema.makeFilter((value) => utcMillis(value) !== undefined),
 );
+
 const TagKey = bounded(64).check(Schema.isMinLength(1));
+
 const Tags = Schema.Record(Schema.String, bounded(256)).check(
   Schema.isPropertyNames(TagKey),
   Schema.makeFilter((value) => Object.keys(value).length <= 16),
 );
+
 const HttpsUrl = bounded(2048).check(
   Schema.makeFilter((value) => {
     if (/[\s\p{Cc}]/u.test(value) || !/^https:\/\//i.test(value)) return false;
+
     try {
       const url = new URL(value);
+
       return (
         url.protocol === "https:" &&
         !url.username &&
@@ -70,11 +83,13 @@ const HttpsUrl = bounded(2048).check(
     }
   }),
 );
+
 export const DisplayPayload = settingsStruct({
   title: bounded(200),
   body: Schema.optional(bounded(2800)),
   url: Schema.optional(HttpsUrl),
 });
+
 export type DisplayPayload = typeof DisplayPayload.Type;
 
 export const NotificationInput = settingsStruct({
@@ -84,6 +99,7 @@ export const NotificationInput = settingsStruct({
   tags: Schema.optional(Tags),
   payload: DisplayPayload,
 });
+
 export type NotificationInput = typeof NotificationInput.Type;
 
 export const Source = settingsStruct({
@@ -95,7 +111,9 @@ export const Source = settingsStruct({
     Schema.isMaxLength(64),
   ),
 });
+
 export type Source = typeof Source.Type;
+
 export const sourceScope = (source: Source) =>
   JSON.stringify([source.adapter, source.principal]);
 
@@ -108,7 +126,9 @@ export const Destination = settingsStruct({
   channel: bounded(64).check(Schema.isPattern(/^[CG][A-Z0-9]+$/)),
   audience: Audience,
 });
+
 export type Destination = typeof Destination.Type;
+
 export const physicalKey = (destination: Destination) =>
   JSON.stringify([
     destination.appId,
@@ -116,6 +136,7 @@ export const physicalKey = (destination: Destination) =>
     destination.botUserId,
     destination.channel,
   ]);
+
 export const audienceAllowed = (
   source: Source["audience"],
   destination: Destination["audience"],
@@ -137,31 +158,39 @@ export const Subscription = settingsStruct({
   ),
   to: Schema.Array(Id).check(Schema.isMinLength(1), Schema.isMaxLength(128)),
 });
+
 export type Subscription = typeof Subscription.Type;
+
 export interface Accepted {
   readonly signature: string;
   readonly duplicate: boolean;
 }
+
 export class InvalidNotification extends Schema.TaggedError<InvalidNotification>()(
   "InvalidNotification",
   {},
 ) {}
+
 export class TopicNotGranted extends Schema.TaggedError<TopicNotGranted>()(
   "TopicNotGranted",
   {},
 ) {}
+
 export class QueueFull extends Schema.TaggedError<QueueFull>()(
   "QueueFull",
   {},
 ) {}
+
 export class StoreUnavailable extends Schema.TaggedError<StoreUnavailable>()(
   "StoreUnavailable",
   {},
 ) {}
+
 export class ShuttingDown extends Schema.TaggedError<ShuttingDown>()(
   "ShuttingDown",
   {},
 ) {}
+
 export type PublishError =
   | InvalidNotification
   | TopicNotGranted
@@ -171,21 +200,24 @@ export type PublishError =
 
 export const defaultLimits = {
   admissionQueue: 1000,
-  outboxRows: 10000,
+  outboxRows: 10_000,
   perDestination: 500,
   maxAgeMs: 24 * 60 * 60 * 1000,
   sendAttempts: 3,
-  leaseMs: 60000,
+  leaseMs: 60_000,
   spacingMs: 1000,
   concurrency: 4,
   dedupMs: 7 * 24 * 60 * 60 * 1000,
-  dedupRecords: 100000,
-  attemptTimeoutMs: 20000,
-  shutdownGraceMs: 25000,
+  dedupRecords: 100_000,
+  attemptTimeoutMs: 20_000,
+  shutdownGraceMs: 25_000,
 };
+
 export type Limits = typeof defaultLimits;
+
 export function notificationLimits(overrides: Partial<Limits> = {}): Limits {
   const limits = { ...defaultLimits, ...overrides };
+
   if (
     Object.values(limits).some(
       (value) => !Number.isSafeInteger(value) || value <= 0,
@@ -195,5 +227,6 @@ export function notificationLimits(overrides: Partial<Limits> = {}): Limits {
     limits.sendAttempts > 3
   )
     throw new StoreUnavailable();
+
   return limits;
 }

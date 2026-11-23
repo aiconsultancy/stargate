@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { diffEvents, type V1EventSnapshot } from "../src/dashboard/api/v1/diff";
 import type { V1CrewContext, V1Task } from "../src/dashboard/api/v1/types";
 
-const at = 4_000;
+const at = 4000;
+
 const task = (
   id: string,
   status: V1Task["status"],
@@ -68,6 +69,7 @@ function snapshot(contexts: V1CrewContext[] = [context()]) {
     crew: { people: 1, busy: 0, queued: 0 },
     features: [],
   };
+
   const ship = {
     ...summary,
     crewMembers: [
@@ -85,6 +87,7 @@ function snapshot(contexts: V1CrewContext[] = [context()]) {
       },
     ],
   };
+
   return {
     fleet: {
       apiVersion: 1,
@@ -128,6 +131,7 @@ test("initial snapshot emits nothing and volatile sampling timestamps are ignore
   after.fleet.host.sampledAt++;
   after.fleet.host.uptimeSec++;
   const git = after.ships.ship.crewMembers[0]?.contexts[0]?.git;
+
   if (!git) throw new Error("Missing Git fixture");
   git.checkedAt++;
   expect(diffEvents(undefined, before, at)).toEqual([]);
@@ -136,6 +140,7 @@ test("initial snapshot emits nothing and volatile sampling timestamps are ignore
 
 test("a gateway-only change emits a fleet event", () => {
   const before = snapshot();
+
   const after = {
     ...before,
     fleet: {
@@ -143,6 +148,7 @@ test("a gateway-only change emits a fleet event", () => {
       gateway: { ...before.fleet.gateway, opencodeVersion: "2.3.2" },
     },
   };
+
   expect(diffEvents(before, after, at)).toEqual([
     { type: "fleet", data: after.fleet },
   ]);
@@ -177,11 +183,13 @@ test("added ship details appear in stable ID order without fabricated transition
 
 test("dispatch, phase and outcome refer to the matching task in the matching project", () => {
   const old = context({ current: task("old", "running"), activity: "running" });
+
   const next = context({
     current: task("new", "dispatching", { summary: "Add navigation" }),
     activity: "running",
     lastOutcome: task("old", "completed", { finishedAt: at }),
   });
+
   expect(activity(old, next)).toEqual([
     {
       ship: "ship",
@@ -199,6 +207,7 @@ test("dispatch, phase and outcome refer to the matching task in the matching pro
       text: "Test Pilot started “Add navigation”.",
     },
   ]);
+
   const advanced = context({
     current: task("new", "running", {
       summary: "Add navigation",
@@ -206,6 +215,7 @@ test("dispatch, phase and outcome refer to the matching task in the matching pro
     }),
     activity: "running",
   });
+
   expect(activity(next, advanced)).toEqual([
     {
       ship: "ship",
@@ -224,11 +234,13 @@ test("dispatch, phase and outcome refer to the matching task in the matching pro
       }),
     ),
   ).toEqual([]);
+
   const tools = context({
     project: "tools",
     current: task("other", "running"),
     activity: "running",
   });
+
   const before = snapshot([old, tools]);
   const after = snapshot([tools, old]);
   expect(diffEvents(before, after, at).map(({ type }) => type)).toEqual([
@@ -238,11 +250,13 @@ test("dispatch, phase and outcome refer to the matching task in the matching pro
 
 test("an already observed task emits another outcome only when its terminal status changes", () => {
   const uncertain = task("old", "uncertain");
+
   const previous = context({
     current: uncertain,
     lastOutcome: uncertain,
     activity: "uncertain",
   });
+
   expect(activity(previous, context({ lastOutcome: uncertain }))).toEqual([]);
   const abandoned = task("old", "abandoned");
   expect(activity(previous, context({ lastOutcome: abandoned }))).toMatchObject(
@@ -254,16 +268,19 @@ test("reports tasks completed between polls without replaying recent outcomes", 
   const older = task("older", "completed", { finishedAt: 1 });
   const completed = task("completed", "completed", { finishedAt: 2 });
   const cancelled = task("cancelled", "cancelled", { finishedAt: 3 });
+
   const before = context({
     lastOutcome: older,
     recent: [older],
     recentCount: 1,
   });
+
   const after = context({
     lastOutcome: cancelled,
     recent: [cancelled, completed, older],
     recentCount: 3,
   });
+
   expect(diffEvents(undefined, snapshot([after]), at)).toEqual([]);
   expect(activity(before, after)).toMatchObject([
     { kind: "outcome", status: "completed" },
@@ -275,7 +292,9 @@ test("reports tasks completed between polls without replaying recent outcomes", 
 
 test("PR discovery after startup or a Git timeout does not emit activity", () => {
   const before = context();
+
   if (!before.git) throw new Error("Missing Git fixture");
+
   const after = context({
     pullRequest: {
       number: 42,
@@ -285,9 +304,11 @@ test("PR discovery after startup or a Git timeout does not emit activity", () =>
       checks: "running",
     },
   });
+
   const timedOut = context({
     git: { ...before.git, branch: null, error: "Git read timed out." },
   });
+
   expect(activity(before, after)).toEqual([]);
   expect(activity(timedOut, after)).toEqual([]);
 });
@@ -313,6 +334,7 @@ test("queue increases produce one bounded sentence with the added task when visi
 
 test("git emits when branch changes, HEAD detaches or a PR appears", () => {
   const old = context();
+
   if (!old.git) throw new Error("Missing Git fixture");
   const changed = context({ git: { ...old.git, branch: "feature/layout" } });
   expect(activity(old, changed)).toMatchObject([
@@ -326,6 +348,7 @@ test("git emits when branch changes, HEAD detaches or a PR appears", () => {
   expect(activity(changed, detached)).toMatchObject([
     { kind: "git", text: "Test Pilot switched to a detached HEAD." },
   ]);
+
   const pullRequest = {
     number: 42,
     url: "https://github.com/example/project/pull/42",
@@ -333,6 +356,7 @@ test("git emits when branch changes, HEAD detaches or a PR appears", () => {
     state: "open" as const,
     checks: "running" as const,
   };
+
   const withPR = { ...changed, pullRequest };
   expect(
     activity({ ...changed, pullRequestKnown: true }, withPR),
@@ -363,6 +387,7 @@ test("availability flips emit an event without a member", () => {
   const after = snapshot();
   after.ships.ship.available = false;
   const summary = after.fleet.ships[0];
+
   if (!summary) throw new Error("Missing summary");
   summary.available = false;
   const overview = (sample: V1EventSnapshot) => ({ ...sample, ships: {} });
@@ -393,8 +418,10 @@ test("availability flips emit an event without a member", () => {
 test("a timestamp-only refresh publishes a lightweight ship sample event", () => {
   function sample(detailUpdatedAt: number) {
     const { fleet, ships } = snapshot([context()]);
+
     return { fleet, ships: { ship: { ...ships.ship, detailUpdatedAt } } };
   }
+
   const before = sample(at - 1);
   const after = sample(at);
   expect(diffEvents(before, after, at)).toEqual([

@@ -57,6 +57,7 @@ test("release notes list commit subjects", () => {
 test("release flag notes require explicit new flags, defaults and default-on decisions", () => {
   const flags =
     "- New flags: `feature.example`, default off.\n- Default changes: none.\n- Enabled by default: none.";
+
   expect(
     releaseFlagNotes(
       `# Changelog\n\n## Unreleased\n\n### Feature flags\n\n${flags}\n\n### Changes\n- A change\n\n## 0.38.1\nOld notes`,

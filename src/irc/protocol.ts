@@ -14,6 +14,7 @@ export type IrcMessage = {
 
 /** Bytes of one line without CRLF, tags excluded (RFC 1459). */
 export const lineBytes = 510;
+
 /** Received lines are refused above this size: 8191 tag bytes + 512. */
 export const maxReceivedBytes = 8703;
 
@@ -23,18 +24,23 @@ export function validMsgid(value: string | undefined): value is string {
 }
 
 const tagKey = /^\+?(?:[A-Za-z0-9.-]+\/)?[A-Za-z0-9-]+$/;
+
 const unsafe = (value: string) =>
   value.includes("\0") || value.includes("\r") || value.includes("\n");
 
 function unescapeTag(value: string) {
   let result = "";
+
   for (let i = 0; i < value.length; i++) {
     const char = value[i];
+
     if (char !== "\\") {
       result += char;
       continue;
     }
+
     const next = value[++i];
+
     if (next === undefined) break;
     result +=
       next === ":"
@@ -47,6 +53,7 @@ function unescapeTag(value: string) {
               ? "\n"
               : next;
   }
+
   return result;
 }
 
@@ -64,43 +71,58 @@ function escapeTag(value: string) {
 export function parseMessage(line: string): IrcMessage | undefined {
   let rest = line;
   const tags = new Map<string, string>();
+
   if (rest.startsWith("@")) {
     const space = rest.indexOf(" ");
+
     if (space < 0) return;
+
     for (const item of rest.slice(1, space).split(";")) {
       if (!item) continue;
       const equals = item.indexOf("=");
       const key = equals < 0 ? item : item.slice(0, equals);
+
       if (!tagKey.test(key)) continue;
       tags.set(key, equals < 0 ? "" : unescapeTag(item.slice(equals + 1)));
     }
+
     rest = rest.slice(space + 1).replace(/^ +/, "");
   }
+
   let source: string | undefined;
+
   if (rest.startsWith(":")) {
     const space = rest.indexOf(" ");
+
     if (space < 0) return;
     source = rest.slice(1, space);
     rest = rest.slice(space + 1).replace(/^ +/, "");
   }
+
   const space = rest.indexOf(" ");
   const command = (space < 0 ? rest : rest.slice(0, space)).toUpperCase();
+
   if (!/^(?:[A-Z]+|\d{3})$/.test(command)) return;
   rest = space < 0 ? "" : rest.slice(space + 1);
   const params: string[] = [];
+
   while (rest) {
     if (rest.startsWith(":")) {
       params.push(rest.slice(1));
       break;
     }
+
     const next = rest.indexOf(" ");
+
     if (next < 0) {
       params.push(rest);
       break;
     }
+
     if (next > 0) params.push(rest.slice(0, next));
     rest = rest.slice(next + 1);
   }
+
   return { tags, ...(source ? { source } : {}), command, params };
 }
 
@@ -116,22 +138,29 @@ export function formatMessage(
   if (!/^(?:[A-Z]+|\d{3})$/.test(command))
     throw new Error("Invalid IRC command");
   const entries = tags instanceof Map ? [...tags] : Object.entries(tags);
+
   const tagText = entries
     .map(([key, value]) => {
       if (!tagKey.test(key) || value.includes("\0"))
         throw new Error("Invalid IRC tag");
+
       return value === "" ? key : `${key}=${escapeTag(value)}`;
     })
     .join(";");
+
   const parts = params.map((param, index) => {
     if (unsafe(param)) throw new Error("Invalid IRC parameter");
     const last = index === params.length - 1;
+
     if (last && (param === "" || param.includes(" ") || param.startsWith(":")))
       return `:${param}`;
+
     if (param === "" || param.includes(" ") || param.startsWith(":"))
       throw new Error("Invalid IRC middle parameter");
+
     return param;
   });
+
   return `${tagText ? `@${tagText} ` : ""}${[command, ...parts].join(" ")}`;
 }
 
@@ -146,6 +175,7 @@ export function tagBytes(tags: Record<string, string>) {
 export function sourceNick(source: string | undefined) {
   if (!source) return "";
   const bang = source.indexOf("!");
+
   return bang < 0 ? source : source.slice(0, bang);
 }
 
@@ -185,7 +215,9 @@ const rfc1459Pairs: Record<string, string> = {
 export function fold(value: string, mapping: Casemapping = "rfc1459") {
   if (mapping === "unicode") return value.normalize("NFKC").toLowerCase();
   const lower = value.replace(/[A-Z]/g, (char) => char.toLowerCase());
+
   if (mapping === "ascii") return lower;
+
   return lower.replace(
     mapping === "rfc1459" ? /[[\]\\~]/g : /[[\]\\]/g,
     (char) => rfc1459Pairs[char] ?? char,
@@ -211,6 +243,7 @@ export function widestFold(value: string) {
 /** `cap1 cap2=value` → capability map. */
 export function parseCapabilities(text: string) {
   const caps = new Map<string, string>();
+
   for (const item of text.split(" ")) {
     if (!item) continue;
     const equals = item.indexOf("=");
@@ -219,6 +252,7 @@ export function parseCapabilities(text: string) {
       equals < 0 ? "" : item.slice(equals + 1),
     );
   }
+
   return caps;
 }
 
@@ -236,17 +270,22 @@ const hexColour = /[0-9a-fA-F]{6}(?:,[0-9a-fA-F]{6})?/y;
  */
 export function cleanText(text: string) {
   let result = "";
+
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
+
     if (code === 3 || code === 4) {
       const pattern = code === 3 ? colour : hexColour;
       pattern.lastIndex = i + 1;
       const match = pattern.exec(text);
+
       if (match) i += match[0].length;
       continue;
     }
+
     if (code === 9) result += " ";
     else if (code >= 32 && code !== 127) result += text[i];
   }
+
   return result;
 }

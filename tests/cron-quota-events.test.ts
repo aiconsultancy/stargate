@@ -12,21 +12,28 @@ const hour = 3_600_000;
 const scope = { botKey: "bot", channel: "C123", user: "U123" };
 const stores: CronStore[] = [];
 const directories: string[] = [];
+
 function open(path = ":memory:") {
   const store = new CronStore(path);
   stores.push(store);
+
   return store;
 }
+
 function databasePath() {
   const directory = mkdtempSync(join(tmpdir(), "stargate-quota-"));
   directories.push(directory);
+
   return join(directory, "cron.sqlite");
 }
+
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
+
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
+
 function job(trigger: NonNullable<CronInput["trigger"]>): CronInput {
   return {
     name: "Quota",
@@ -36,13 +43,17 @@ function job(trigger: NonNullable<CronInput["trigger"]>): CronInput {
     trigger,
   };
 }
+
 const reset = job({ type: "quota-reset", provider: "claude" });
+
 const thresholdTrigger = {
   type: "quota-threshold",
   provider: "claude",
   usedPercent: 80,
 } as const;
+
 const threshold = job(thresholdTrigger);
+
 function observation(
   usedPercent = 10,
   resetAt = now + 60_000,
@@ -75,12 +86,17 @@ function observation(
 
 function account(snapshot: QuotaSnapshot) {
   const row = snapshot.accounts[0];
+
   if (!row) throw new Error("Expected quota account");
+
   return row;
 }
+
 function limit(snapshot: QuotaSnapshot) {
   const row = account(snapshot).windows[0];
+
   if (!row) throw new Error("Expected quota window");
+
   return row;
 }
 
@@ -109,6 +125,7 @@ test("reset bootstraps silently, advances on manual reset, and survives reopenin
       observedAt: now + 1,
     },
   });
+
   if (!runs[0]) throw new Error("Expected reset run");
   store.upsertFile(
     scope,
@@ -140,6 +157,7 @@ test("threshold fires initially high and only once per account reset cycle", () 
     resetAt: now + 60_000,
   });
   expect(open(path).pending(scope.botKey)).toEqual(first);
+
   if (!first[0]) throw new Error("Expected threshold run");
   store.finish(first[0].id, "done", now);
   const restarted = open(path);
@@ -175,6 +193,7 @@ test("threshold fires initially high and only once per account reset cycle", () 
 
 test("threshold crossing consumes paused, unavailable and busy events without backlog", () => {
   const store = open();
+
   const paused = store.upsertFile(
     scope,
     threshold,
@@ -182,6 +201,7 @@ test("threshold crossing consumes paused, unavailable and busy events without ba
     true,
     now,
   );
+
   const missing = store.upsertFile(
     scope,
     threshold,
@@ -189,8 +209,10 @@ test("threshold crossing consumes paused, unavailable and busy events without ba
     false,
     now,
   );
+
   const busy = store.add(scope, threshold, now);
   const manual = store.runNow(scope, busy.id, now);
+
   if (!manual) throw new Error("Expected manual run");
   store.fileAvailability(scope.botKey, ["/jobs/paused.md"]);
   expect(store.claimQuota(scope.botKey, observation(20), now)).toEqual([]);
@@ -243,6 +265,7 @@ test("invalid, stale, inactive and out-of-order observations cannot change basel
   store.add(scope, reset, now);
   store.claimQuota(scope.botKey, observation(10, now + 600_000), now);
   const invalid: QuotaSnapshot[] = [];
+
   for (const mutate of [
     (s: QuotaSnapshot) => {
       account(s).status = "unavailable";
@@ -270,6 +293,7 @@ test("invalid, stale, inactive and out-of-order observations cannot change basel
     mutate(snapshot);
     invalid.push(snapshot);
   }
+
   for (const snapshot of invalid)
     expect(store.claimQuota(scope.botKey, snapshot, now + 1)).toEqual([]);
   expect(
@@ -301,15 +325,19 @@ test("subsecond jitter and backward drift do not reset or rearm thresholds after
   store.add(scope, reset, now);
   store.add(scope, threshold, now);
   const rawResetAt = now + 5 * hour;
+
   const bootstrap = store.claimQuota(
     scope.botKey,
     observation(90, rawResetAt),
     now,
   );
+
   expect(bootstrap).toHaveLength(1);
+
   if (!bootstrap[0]) throw new Error("Expected threshold run");
   expect(bootstrap[0].quotaEvent?.type).toBe("quota-threshold");
   store.finish(bootstrap[0].id, "done", now);
+
   for (const [offset, used, at] of [
     [499, 90, now + 1],
     [998, 0, now + 2],
@@ -322,13 +350,16 @@ test("subsecond jitter and backward drift do not reset or rearm thresholds after
         at,
       ),
     ).toEqual([]);
+
   // A non-stale backwards timestamp becomes the next raw baseline.
   const next = open(path).claimQuota(
     scope.botKey,
     observation(85, rawResetAt - 200 + hour, now + 4),
     now + 4,
   );
+
   expect(next).toHaveLength(2);
+
   for (const run of next) {
     expect(run.quotaEvent).toMatchObject({
       previousResetAt: rawResetAt - 200,
@@ -336,6 +367,7 @@ test("subsecond jitter and backward drift do not reset or rearm thresholds after
     });
     store.finish(run.id, "done", now + 4);
   }
+
   expect(
     store.claimQuota(
       scope.botKey,
@@ -357,6 +389,7 @@ test("existing quota state backfills the receipt cycle without replaying thresho
   const path = databasePath();
   const rawResetAt = now + 5 * hour;
   const db = new Database(path);
+
   try {
     db.exec(`CREATE TABLE cron_quota_state (
       botKey TEXT NOT NULL, provider TEXT NOT NULL, account TEXT NOT NULL,
@@ -419,6 +452,7 @@ test("multi-hour reset drift without a sufficient usage drop stays in the same c
   expect(
     store.claimQuota(scope.botKey, observation(0, rawResetAt), now),
   ).toEqual([]);
+
   for (const [used, hours, at] of [
     [2, 7, now + 1],
     [0, 9, now + 2],
@@ -429,9 +463,11 @@ test("multi-hour reset drift without a sufficient usage drop stays in the same c
       observation(used, now + hours * hour, at),
       at,
     );
+
     if (used < 80) expect(runs).toEqual([]);
     else {
       expect(runs).toHaveLength(1);
+
       if (!runs[0]) throw new Error("Expected threshold run");
       expect(runs[0].quotaEvent).toMatchObject({
         type: "quota-threshold",
@@ -441,6 +477,7 @@ test("multi-hour reset drift without a sufficient usage drop stays in the same c
       store.finish(runs[0].id, "done", at);
     }
   }
+
   expect(
     store.claimQuota(
       scope.botKey,
@@ -468,6 +505,7 @@ test("weekly reset after the previous deadline fires once without a usage drop",
   limit(next).window = "weekly";
   const runs = open(path).claimQuota(scope.botKey, next, at);
   expect(runs).toHaveLength(1);
+
   if (!runs[0]) throw new Error("Expected weekly reset run");
   expect(runs[0].quotaEvent).toMatchObject({
     previousResetAt,
@@ -484,26 +522,31 @@ test("weekly reset after the previous deadline fires once without a usage drop",
 test("provider, account, window, scope and bot observations stay isolated", () => {
   const store = open();
   const defaultJob = store.add(scope, threshold, now);
+
   const weekly = store.add(
     scope,
     job({ ...thresholdTrigger, window: "weekly" }),
     now,
   );
+
   const opus = store.add(
     scope,
     job({ ...thresholdTrigger, scope: "opus" }),
     now,
   );
+
   const codex = store.add(
     scope,
     job({ type: "quota-threshold", provider: "codex", usedPercent: 80 }),
     now,
   );
+
   const other = store.add({ ...scope, botKey: "other" }, threshold, now);
   const snapshot = observation(90);
   limit(snapshot).scope = "opus";
   const op = store.claimQuota(scope.botKey, snapshot, now);
   expect(op.map((run) => run.scheduleId)).toEqual([opus.id]);
+
   if (!op[0]) throw new Error("Expected subset run");
   store.finish(op[0].id, "done", now);
   const weeklySnapshot = observation(90, now + 60_000, now + 1);
@@ -514,6 +557,7 @@ test("provider, account, window, scope and bot observations stay isolated", () =
       .map((run) => run.scheduleId)
       .sort(),
   ).toEqual([weekly.id, defaultJob.id].sort());
+
   for (const run of store.pending(scope.botKey))
     store.finish(run.id, "done", now + 1);
   const secondAccount = observation(90, now + 60_000, now + 2);
@@ -543,6 +587,7 @@ test("state, receipt and admission roll back together on a storage error", () =>
   const store = open(path);
   store.add(scope, threshold, now);
   const db = new Database(path);
+
   try {
     db.exec(
       "CREATE TRIGGER reject_run BEFORE INSERT ON cron_runs BEGIN SELECT RAISE(ABORT,'test admission failure'); END",
@@ -561,17 +606,21 @@ test("state, receipt and admission roll back together on a storage error", () =>
 
 test("same-instant manual, clock and quota runs retain unique occurrence identities", () => {
   const store = open();
+
   const schedule = store.add(
     scope,
     { ...threshold, expression: "* * * * *" },
     now,
   );
+
   const at = now + 60_000;
   const manual = store.runNow(scope, schedule.id, at);
+
   if (!manual) throw new Error("Expected manual run");
   store.finish(manual.id, "done", at);
   const clock = store.claimDue(scope.botKey, at)[0];
   expect(clock?.dueAt).toBe(at + 1);
+
   if (!clock) throw new Error("Expected clock run");
   store.finish(clock.id, "done", at);
   expect(
@@ -582,12 +631,15 @@ test("same-instant manual, clock and quota runs retain unique occurrence identit
 
 test("quota admission stays bounded without paused rows hiding eligible jobs or replaying overflow", () => {
   const store = open();
+
   for (let index = 0; index < 100; index++)
     store.upsertFile(scope, threshold, `/jobs/paused-${index}.md`, true, now);
+
   for (let index = 0; index < 101; index++)
     store.add(scope, threshold, now + 1);
   const admitted = store.claimQuota(scope.botKey, observation(90), now + 2);
   expect(admitted).toHaveLength(100);
+
   for (const run of admitted) store.finish(run.id, "done", now + 2);
   store.upsertFile(scope, threshold, "/jobs/paused-0.md", false, now + 3);
   expect(

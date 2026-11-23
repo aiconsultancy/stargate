@@ -98,6 +98,7 @@ export class DispatchApiError extends Error {
 }
 
 const nullableString = Schema.optional(Schema.NullOr(Schema.String));
+
 const issueSchema = Schema.Struct({
   id: Schema.String,
   identifier: Schema.String,
@@ -120,10 +121,12 @@ const issueSchema = Schema.Struct({
   state: Schema.Struct({ type: Schema.String }),
   archivedAt: nullableString,
 });
+
 const pageSchema = Schema.Struct({
   items: Schema.Array(Schema.Unknown),
   nextCursor: Schema.optional(Schema.NullOr(Schema.String)),
 });
+
 const fleetSchema = Schema.Struct({
   id: Schema.String,
   slug: Schema.String,
@@ -136,17 +139,20 @@ const fleetSchema = Schema.Struct({
     }),
   ),
 });
+
 const meSchema = Schema.Struct({
   userId: Schema.String,
   kind: Schema.String,
   agentRank: Schema.optional(Schema.NullOr(Schema.String)),
   fleetId: nullableString,
 });
+
 const initiativeSchema = Schema.Struct({
   id: Schema.String,
   parentId: nullableString,
   fleetId: nullableString,
 });
+
 const projectSchema = Schema.Struct({
   id: Schema.String,
   initiativeId: nullableString,
@@ -158,13 +164,16 @@ function decode<S extends Schema.Codec<unknown, unknown>>(
   what: string,
 ): S["Type"] {
   const result = Schema.decodeUnknownResult(schema)(value);
+
   if (Result.isFailure(result))
     throw new DispatchApiError(undefined, `Unexpected ${what} from the API`);
+
   return result.success;
 }
 
 export function toDispatchIssue(value: unknown): DispatchIssue {
   const issue = decode(issueSchema, value, "issue");
+
   return {
     id: issue.id,
     identifier: issue.identifier,
@@ -199,6 +208,7 @@ function json(status: number, text: string): unknown {
  * the next poll from the returned cursor, so its size never blocks a poll.
  */
 const issuePageBudget = 50;
+
 /**
  * Initiatives and projects are needed whole for fleet membership. Bound the
  * walk anyway, so a misbehaving cursor never loops forever; a longer listing
@@ -232,18 +242,23 @@ export class SubspaceApi implements DispatchApi {
 
   private headers(body: boolean) {
     const token = this.env[this.options.tokenEnv]?.trim();
+
     if (!token)
       throw new DispatchApiError(
         undefined,
         "The agent dispatch API token is not set",
       );
+
     const headers = new Headers({
       accept: "application/json",
       authorization: `Bearer ${token}`,
     });
+
     if (body) headers.set("content-type", "application/json");
+
     for (const [name, variable] of Object.entries(this.options.headersEnv)) {
       const value = this.env[variable]?.trim();
+
       if (!value)
         throw new DispatchApiError(
           undefined,
@@ -251,6 +266,7 @@ export class SubspaceApi implements DispatchApi {
         );
       headers.set(name, value);
     }
+
     return headers;
   }
 
@@ -265,6 +281,7 @@ export class SubspaceApi implements DispatchApi {
     body?: unknown,
   ): Promise<{ status: number; text: string }> {
     let response: Response;
+
     try {
       response = await this.fetcher(`${this.base}${path}`, {
         method,
@@ -281,11 +298,14 @@ export class SubspaceApi implements DispatchApi {
       signal.throwIfAborted();
       throw new DispatchApiError(undefined, "The Subspace API is unreachable");
     }
+
     let text: string;
+
     try {
       text = await response.text();
     } catch {
       signal.throwIfAborted();
+
       // A successful write status is the outcome; its body is optional.
       if (method !== "GET" && response.ok)
         return { status: response.status, text: "" };
@@ -294,22 +314,28 @@ export class SubspaceApi implements DispatchApi {
         "The Subspace API response was cut short",
       );
     }
+
     if (text.length > maxBodyBytes)
       throw new DispatchApiError(response.status, "API response too large");
+
     if (response.status === 409 || response.status === 404)
       return { status: response.status, text: "" };
+
     if (!response.ok)
       throw new DispatchApiError(
         response.status,
         `The Subspace API answered HTTP ${response.status}`,
       );
+
     return { status: response.status, text };
   }
 
   private async get(path: string, signal: AbortSignal) {
     const { status, text } = await this.request("GET", path, signal);
+
     if (status === 404 || status === 409)
       throw new DispatchApiError(status, `The Subspace API answered ${status}`);
+
     return json(status, text);
   }
 
@@ -322,18 +348,23 @@ export class SubspaceApi implements DispatchApi {
   ): Promise<ListingPart<unknown>> {
     const items: unknown[] = [];
     let cursor = from;
+
     for (let page = 0; page < budget; page++) {
       const result = decode(
         pageSchema,
         await this.get(route(cursor), signal),
         "page",
       );
+
       items.push(...result.items);
+
       if (!result.nextCursor) return { items, next: undefined };
+
       if (result.nextCursor === cursor)
         throw new DispatchApiError(undefined, "API listing cursor repeated");
       cursor = result.nextCursor;
     }
+
     return { items, next: cursor };
   }
 
@@ -348,11 +379,13 @@ export class SubspaceApi implements DispatchApi {
       maxReferencePages,
       signal,
     );
+
     if (next !== undefined)
       throw new DispatchApiError(
         undefined,
         "API listing exceeded its page bound",
       );
+
     return items;
   }
 
@@ -362,6 +395,7 @@ export class SubspaceApi implements DispatchApi {
     signal: AbortSignal,
   ): Promise<ListingPart<DispatchIssue>> {
     const part = await this.walk(route, from, issuePageBudget, signal);
+
     return { items: part.items.map(toDispatchIssue), next: part.next };
   }
 
@@ -371,6 +405,7 @@ export class SubspaceApi implements DispatchApi {
       await this.get(dispatchRoutes.me(), signal),
       "identity",
     );
+
     return {
       userId: me.userId,
       kind: me.kind,
@@ -385,6 +420,7 @@ export class SubspaceApi implements DispatchApi {
       await this.get(dispatchRoutes.fleet(reference), signal),
       "fleet",
     );
+
     return {
       id: fleet.id,
       slug: fleet.slug,
@@ -401,12 +437,15 @@ export class SubspaceApi implements DispatchApi {
     const initiatives = new Map(
       (await this.pages(dispatchRoutes.initiatives, signal)).map((item) => {
         const value = decode(initiativeSchema, item, "initiative");
+
         return [value.id, value] as const;
       }),
     );
+
     const owner = (id: string | null | undefined) => {
       const seen = new Set<string>();
       let current = id ? initiatives.get(id) : undefined;
+
       while (current && !seen.has(current.id)) {
         if (current.fleetId) return current.fleetId;
         seen.add(current.id);
@@ -414,13 +453,18 @@ export class SubspaceApi implements DispatchApi {
           ? initiatives.get(current.parentId)
           : undefined;
       }
+
       return undefined;
     };
+
     const projects = new Set<string>();
+
     for (const item of await this.pages(dispatchRoutes.projects, signal)) {
       const project = decode(projectSchema, item, "project");
+
       if (owner(project.initiativeId) === fleetId) projects.add(project.id);
     }
+
     return projects;
   }
 
@@ -431,6 +475,7 @@ export class SubspaceApi implements DispatchApi {
     signal: AbortSignal,
   ) {
     if (!assignees.length) return { items: [], next: undefined };
+
     return this.issueListing(
       (page) => dispatchRoutes.assignedIssues(assignees, updatedSince, page),
       cursor,
@@ -448,9 +493,12 @@ export class SubspaceApi implements DispatchApi {
       dispatchRoutes.issue(reference),
       signal,
     );
+
     if (status === 404) return undefined;
+
     if (status === 409)
       throw new DispatchApiError(status, `The Subspace API answered ${status}`);
+
     return toDispatchIssue(json(status, text));
   }
 
@@ -465,14 +513,18 @@ export class SubspaceApi implements DispatchApi {
       signal,
       body,
     );
+
     if (status === 404)
       throw new DispatchApiError(404, "The issue is no longer available");
+
     if (status === 409) return { conflict: true };
+
     // A 2xx means the write was applied; an unreadable body only hides the
-    // new version, which the next read supplies.
+    // New version, which the next read supplies.
     const version = Schema.decodeUnknownResult(
       Schema.fromJsonString(Schema.Struct({ version: Schema.Finite })),
     )(text);
+
     return {
       conflict: false,
       version: Result.isSuccess(version) ? version.success.version : undefined,
@@ -500,6 +552,7 @@ export class SubspaceApi implements DispatchApi {
       signal,
       commentBody(body),
     );
+
     if (status === 404 || status === 409)
       throw new DispatchApiError(status, "The comment was not recorded");
   }

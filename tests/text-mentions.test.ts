@@ -24,6 +24,7 @@ import { openStore } from "../src/app/open-store";
 import { identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -71,6 +72,7 @@ function message(
 ) {
   const channel = options.channel ?? "C123";
   const ts = options.ts ?? "1.000";
+
   return {
     api_app_id: "A123",
     team_id: "T123",
@@ -91,6 +93,7 @@ function message(
 test("setting: off by default; channel IDs and literal names", () => {
   expect(config({ textMentions: false }).access.textMentions).toBeUndefined();
   expect(config().access.textMentions).toEqual({ channels: ["C123"], names });
+
   for (const rule of [
     { channels: ["*"], names },
     { channels: ["D123"], names },
@@ -109,12 +112,14 @@ test("the longest whole-word name wins, in any letter case", () => {
   expect(findMention(["captains, please update"], names)).toBe("captains");
   expect(findMention(["Galactica's PR merged"], names)).toBe("Galactica");
   expect(findMention(["all\ncaptains"], names)).toBe("all captains");
+
   for (const text of ["the captain said", "captainship", "galactic", ""])
     expect(findMention([text], names)).toBeUndefined();
 });
 
 test("only text that Slack shows can name the bot", () => {
   const cfg = config();
+
   for (const text of [
     "<https://example.test/captains|notes>",
     "<https://example.test/all-captains>",
@@ -147,6 +152,7 @@ test("routing admits a top-level message that names the bot, marked with the nam
   expect(
     routeEvent(message("captains, check in <@UDEFIANT>"), cfg, identity),
   ).toMatchObject({ textMention: "captains", startsConversation: true });
+
   // Unrelated text, a thread reply, another channel, or setting off: unchanged.
   for (const [body, c] of [
     [message("lunch is here"), cfg],
@@ -158,6 +164,7 @@ test("routing admits a top-level message that names the bot, marked with the nam
     expect(routed?.startsConversation ?? false).toBe(false);
     expect(routed).not.toHaveProperty("textMention");
   }
+
   // A typed mention and a DM work as before, with no marker.
   for (const body of [
     message("<@UBOT> all captains"),
@@ -167,7 +174,8 @@ test("routing admits a top-level message that names the bot, marked with the nam
     expect(routed?.startsConversation).toBe(true);
     expect(routed).not.toHaveProperty("textMention");
   }
-  // mentionOnly admits a named top-level message.
+
+  // MentionOnly admits a named top-level message.
   expect(
     routeEvent(message("all captains"), config({ mentionOnly: true }), identity)
       ?.textMention,
@@ -204,6 +212,7 @@ function fixture() {
   cleanup.push(() => store.close());
   const prompts: { text: string; context?: PromptSourceContext }[] = [];
   let answer = "[[stargate:silent]]";
+
   const backend: AgentBackend = {
     sessionID: "captain",
     async createSession() {
@@ -211,16 +220,20 @@ function fixture() {
     },
     async prompt(_session, text, _signal, _onText, _onInput, _files, context) {
       prompts.push({ text, ...(context ? { context } : {}) });
+
       return answer;
     },
     async close() {},
   };
+
   const posts: string[] = [];
+
   const slack: TransportDelivery = {
     async post(_channel, _thread, text) {
       posts.push(text);
     },
   };
+
   const peers = new PeerDirectory(
     async (user) =>
       user === "UDEFIANT"
@@ -238,6 +251,7 @@ function fixture() {
         : { ok: false },
     "T123",
   );
+
   const gateway = new Gateway(
     config(),
     identity,
@@ -248,8 +262,10 @@ function fixture() {
     undefined,
     peers,
   );
+
   cleanup.push(() => gateway.close());
   const signal = new AbortController().signal;
+
   const drain = async () => {
     for (
       let jobs = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20);
@@ -258,6 +274,7 @@ function fixture() {
     )
       for (const job of jobs) await gateway.process(job, signal);
   };
+
   return {
     gateway,
     prompts,
@@ -315,6 +332,7 @@ test("a peer captain's call to all captains is admitted and keeps the thread lim
       }),
     ),
   ).toBe(true);
+
   for (let i = 1; i < peerTurnsPerHour; i++)
     expect(
       await f.gateway.receive(

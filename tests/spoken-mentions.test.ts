@@ -19,11 +19,13 @@ import {
 import { identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
 const names = ["Galactica", "Adama", "captain"];
+
 const provider = {
   type: "azure-openai",
   endpoint: "https://example.openai.azure.com",
@@ -31,6 +33,7 @@ const provider = {
   apiVersion: "2024-06-01",
   auth: "managedIdentity",
 };
+
 const voice = (transcript?: string): Attachment => ({
   name: "Audio clip.m4a",
   mime: "audio/mp4",
@@ -89,6 +92,7 @@ function message(
   } = {},
 ) {
   const channel = options.channel ?? "C123";
+
   return {
     api_app_id: "A123",
     team_id: "T123",
@@ -118,6 +122,7 @@ test("setting: off by default; channels are IDs, names are words", () => {
       spokenMentions: valid,
     }).spokenMentions,
   ).toEqual(valid);
+
   for (const spokenMentions of [
     { channels: ["*"], names },
     { channels: ["D123"], names },
@@ -146,6 +151,7 @@ test("spoken mentions are whole words in any letter case", () => {
     "status for\ngalactica",
   ])
     expect(spokenMention([text], names)).toBe(true);
+
   for (const text of [
     "the galactic fleet",
     "all captains report",
@@ -166,6 +172,7 @@ test("routing holds only unmentioned file messages in configured channels", () =
     gate: "spoken",
     startsConversation: false,
   });
+
   // Typed mention, DM, other channel, setting off, or no file: unchanged.
   for (const [body, cfg] of [
     [message({ text: "<@UBOT> look" }), held],
@@ -193,6 +200,7 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
   cleanup.push(() => store.close());
   const cfg = config(options);
   const logged: string[] = [];
+
   const log = pino(
     { level: "trace" },
     new Writable({
@@ -202,6 +210,7 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
       },
     }),
   );
+
   let files: Attachment[] = [voice()];
   let heard = "Galactica, merge pull request 42. SPOKEN_PRIVATE";
   let fail = false;
@@ -210,31 +219,40 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
   const prompts: { text: string; files: readonly Attachment[] }[] = [];
   const posts: { thread: string; text: string }[] = [];
   const failures: RequestFailure[] = [];
+
   const transcriber: Transcriber = {
     label: "Azure OpenAI deployment whisper-transcription",
     async transcribe() {
       calls.push("provider");
+
       if (fail) throw new Error("PRIVATE provider failure");
+
       return heard;
     },
   };
+
   const sessions: string[] = [];
+
   const backend: AgentBackend = {
     supportsAttachments: true,
     async createSession() {
       sessions.push("created");
+
       return "session";
     },
     async prompt(_session, text, _signal, _onText, _onInput, files = []) {
       prompts.push({ text, files });
+
       return "On it.";
     },
     async close() {},
   };
+
   const slack: TransportDelivery = {
     files: {
       async download() {
         downloads++;
+
         return files;
       },
       async reserveUpload() {
@@ -251,9 +269,11 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
     },
     async failure(_channel, _thread, cause) {
       failures.push(cause);
+
       return "status";
     },
   };
+
   const gateway = new Gateway(
     cfg,
     identity,
@@ -263,7 +283,9 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
     log,
     transcriber,
   );
+
   cleanup.push(() => gateway.close());
+
   const drain = async (signal = new AbortController().signal) => {
     for (
       let jobs = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20);
@@ -271,9 +293,11 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
       jobs = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20)
     ) {
       for (const job of jobs) await gateway.process(job, signal);
+
       if (signal.aborted) return;
     }
   };
+
   return {
     store,
     gateway,
@@ -289,7 +313,9 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
       store.follows(conversationKey(gateway.key, "C123", thread)),
     set(next: { files?: Attachment[]; heard?: string; fail?: boolean }) {
       if (next.files) files = next.files;
+
       if (next.heard !== undefined) heard = next.heard;
+
       if (next.fail !== undefined) fail = next.fail;
     },
   };
@@ -395,6 +421,7 @@ test("held and ignored messages never become a thread's delivery target", () => 
   cleanup.push(() => store.close());
   const key = "bot";
   const conversation = conversationKey(key, "C123", "1.000");
+
   const base = {
     botKey: key,
     conversation,
@@ -402,6 +429,7 @@ test("held and ignored messages never become a thread's delivery target", () => 
     thread: "1.000",
     text: "",
   };
+
   store.enqueue({ ...base, eventId: "C123:1.000", user: "U123" });
   store.saveSession(conversation, "session", "cursor");
   store.enqueue({
@@ -414,6 +442,7 @@ test("held and ignored messages never become a thread's delivery target", () => 
     "U123",
   );
   const id = store.queuedJob(key, "C123:1.100")?.id;
+
   if (id === undefined) throw new Error("Missing held job");
   store.discard(id);
   expect(store.transcript.transcriptTarget(key, conversation)?.user).toBe(
@@ -495,6 +524,7 @@ test("an admitted message whose memory copy was lost is transcribed again and ke
   const f = fixture();
   f.gateway.accept(message());
   const job = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
+
   if (!job) throw new Error("Missing job");
   // As after a restart between the gate and the turn.
   expect(f.store.admitSpoken(job.id)).toBe(true);

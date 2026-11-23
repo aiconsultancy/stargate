@@ -16,40 +16,50 @@ import { notificationKey } from "../src/notifications/preferences/notifications"
 import { bot, identity } from "./fixtures";
 
 const directories: string[] = [];
+
 afterEach(async () => {
   for (const directory of directories.splice(0))
     await rm(directory, { recursive: true, force: true });
 });
+
 const target = {
   scope: "thread",
   channel: "C123",
   thread_ts: "1.000",
 } as const;
+
 const signal = () => new AbortController().signal;
 
 async function fixture() {
   const directory = await mkdtemp(
     join(tmpdir(), "stargate-notification-control-"),
   );
+
   directories.push(directory);
   const config = bot();
+
   if (config.backend.type === "opencode") {
     config.backend.directory = "/workspace/captain";
     config.backend.sessionID = "ses_captain";
   }
+
   const configuration = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: directory,
     bots: [config],
   });
+
   let identityCalls = 0;
+
   const dependencies: NotificationDependencies = {
     loadConfig: async () => configuration,
     identity: async () => {
       identityCalls++;
+
       return identity;
     },
     now: () => Date.parse("2026-11-17T10:00:00Z"),
   };
+
   const binding = {
     configPath: "/private/stargate.json",
     bot: config.id,
@@ -57,6 +67,7 @@ async function fixture() {
     captainSessionID: "ses_captain",
     operationID: "call-1",
   };
+
   const run = (input: unknown, overrides: Partial<typeof binding> = {}) =>
     runNotificationOperation(
       input,
@@ -64,6 +75,7 @@ async function fixture() {
       signal(),
       dependencies,
     );
+
   return {
     directory,
     config,
@@ -112,9 +124,11 @@ test("bound control persists a mute/wake preference, reads it, and retries witho
   expect(
     await f.run({ op: "clear_all" }, { operationID: "call-3" }),
   ).toMatchObject({ cleared: { thread: 0, channel: 0 }, changed: false });
+
   const store = new NotificationStore(
     join(f.directory, "notifications.sqlite"),
   );
+
   try {
     expect(
       store.status(notificationKey(f.config, identity), "C123", "1.000").mode,
@@ -126,6 +140,7 @@ test("bound control persists a mute/wake preference, reads it, and retries witho
 
 test("invalid/DM/cross-registration/foreign captain targets fail before store writes", async () => {
   const f = await fixture();
+
   for (const [input, binding] of [
     [{ op: "mute", ...target, channel: "D123" }, {}],
     [{ op: "mute", ...target, channel: "COTHER" }, {}],
@@ -161,6 +176,7 @@ test("aborted, unreadable or failed identity controls claim no success and withh
   f.dependencies.identity = async () => {
     throw new Error("PRIVATE_AUTH_DIAGNOSTIC");
   };
+
   await expect(f.run({ op: "mute", ...target })).rejects.toThrow(
     "Notification operation unconfirmed",
   );
@@ -176,6 +192,7 @@ test("aborted, unreadable or failed identity controls claim no success and withh
 
 test("captain wrapper rejects crew, child and binding injection before its control runner", async () => {
   let calls = 0;
+
   const authority = {
     options: {
       captainDirectory: "/workspace/captain",
@@ -186,17 +203,22 @@ test("captain wrapper rejects crew, child and binding injection before its contr
         throw new CrewError("Captain only.");
     },
   };
+
   const runner: typeof runNotificationOperation = async (_raw, binding) => {
     calls++;
+
     return { binding };
   };
+
   const control = new CrewNotifications(authority, runner);
+
   const caller: CrewCaller = {
     sessionID: "ses_captain",
     agent: "captain",
     id: "host-call",
     signal: signal(),
   };
+
   await expect(
     control.run({ op: "mute", ...target }, { ...caller, agent: "worker" }),
   ).rejects.toThrow("Captain only");
@@ -218,10 +240,12 @@ test("captain wrapper rejects crew, child and binding injection before its contr
       expectedDirectory: "/workspace/captain",
     },
   });
+
   const unbound = new CrewNotifications(
     { ...authority, options: { captainDirectory: "/workspace/captain" } },
     runner,
   );
+
   await expect(unbound.run({ op: "list" }, caller)).rejects.toThrow(
     "unavailable",
   );

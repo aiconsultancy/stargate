@@ -22,6 +22,7 @@ const families = [
   "gpt-terra",
   "gpt-luna",
 ];
+
 const providers = ["openai-proxy", "claude-proxy"];
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -39,6 +40,7 @@ describe("model families", () => {
       token: "sol-6-1",
     });
     expect(parseModel("gpt-6-luna")?.token).toBe("luna-6");
+
     for (const id of [
       "gpt-6.1-sol-fast",
       "claude-opus-5-5-20261101",
@@ -53,9 +55,12 @@ describe("model families", () => {
     const order = (a: string, b: string) => {
       const left = parseModel(a);
       const right = parseModel(b);
+
       if (!left || !right) throw new Error("unparsed");
+
       return compareModels(left, right);
     };
+
     expect(order("claude-opus-5-5", "claude-opus-5-6")).toBe(-1);
     expect(order("claude-opus-5-6", "claude-opus-6")).toBe(-1);
     expect(order("claude-opus-5-10", "claude-opus-5-9")).toBe(1);
@@ -75,6 +80,7 @@ describe("model families", () => {
       "gpt-6.2-sol-fast",
       "claude-fable-9",
     ];
+
     expect(newerModels("claude-opus-5-5", catalog, families)).toEqual([
       "claude-opus-6",
       "claude-opus-6-0",
@@ -95,12 +101,14 @@ describe("model families", () => {
       parseRef("openai-proxy/gpt-6.1-sol"),
       parseRef("anthropic/claude-sonnet-5-5"),
     ].flatMap((ref) => (ref ? [ref] : []));
+
     const result = upgradeCandidates(
       refs,
       ["claude-opus-5-6", "gpt-6.2-sol", "claude-sonnet-6"],
       families,
       providers,
     );
+
     expect([...result]).toEqual([
       ["claude-opus-5-5", ["claude-opus-5-6"]],
       ["gpt-6.1-sol", ["gpt-6.2-sol"]],
@@ -109,6 +117,7 @@ describe("model families", () => {
 
   test("a failed probe falls back to the next newer model only", async () => {
     const probed: string[] = [];
+
     const { chosen, failed } = await chooseUpgrades(
       new Map([
         ["claude-opus-5-5", ["claude-opus-6", "claude-opus-5-6"]],
@@ -116,10 +125,12 @@ describe("model families", () => {
       ]),
       async (id) => {
         probed.push(id);
+
         return id === "claude-opus-5-6";
       },
       2,
     );
+
     expect([...chosen]).toEqual([["claude-opus-5-5", "claude-opus-5-6"]]);
     expect(failed).toHaveLength(3);
     expect(probed).toEqual([
@@ -128,11 +139,13 @@ describe("model families", () => {
       "gpt-6.3-sol",
       "gpt-6.2-sol",
     ]);
+
     const limited = await chooseUpgrades(
       new Map([["claude-opus-5-5", ["claude-opus-6", "claude-opus-5-6"]]]),
       async () => false,
       1,
     );
+
     expect(limited.chosen.size).toBe(0);
     expect(limited.failed).toEqual([
       { from: "claude-opus-5-5", to: "claude-opus-6" },
@@ -160,6 +173,7 @@ describe("configuration rewrites", () => {
         },
       ],
     };
+
     const result = upgradeTeamFile(json(team), upgrades, providers);
     const next = JSON.parse(result.text);
     expect(next.captain.model).toBe("openai-proxy/gpt-6.2-sol#high");
@@ -193,6 +207,7 @@ describe("configuration rewrites", () => {
         },
       ],
     };
+
     const result = upgradeOpenCodeProfile(json(profile), upgrades, providers);
     expect(result.changes.map((c) => c.target)).toEqual([
       "/model",
@@ -218,6 +233,7 @@ describe("child-agent profiles", () => {
       { purpose: "Two", routes: entries.slice(1) },
     ],
   });
+
   const snapshot: ProfilesSnapshot = {
     root: "/cfg/agent-profiles",
     agentsDirectory: "/cfg/agents",
@@ -284,12 +300,14 @@ describe("child-agent profiles", () => {
       new Map([["claude-opus-5-5", "claude-opus-5-6"]]),
       providers,
     );
+
     const writes = Object.fromEntries(
       result.writes.map((w) => [
         w.path.replace("/cfg/agent-profiles/", ""),
         w.content,
       ]),
     );
+
     const routed = writes["05-claude-mix/opus-5-6-high-subagent.md"];
     expect(routed).toContain("\nmodel: claude-proxy/claude-opus-5-6#high\n");
     expect(routed).toContain("(claude-proxy/claude-opus-5-6#high)");
@@ -319,7 +337,7 @@ describe("child-agent profiles", () => {
       },
     ]);
     // Only agents routed by the selected profile load in OpenCode; the
-    // disabled copies in other folders are not verified.
+    // Disabled copies in other folders are not verified.
     expect(result.live).toEqual([
       {
         name: "opus-5-6-high-subagent",
@@ -344,6 +362,7 @@ describe("child-agent profiles", () => {
 
   test("no upgrade, no writes; unknown names are reported, not renamed", () => {
     expect(upgradeProfiles(snapshot, new Map(), providers).writes).toEqual([]);
+
     const odd: ProfilesSnapshot = {
       ...snapshot,
       folders: {
@@ -367,6 +386,7 @@ describe("child-agent profiles", () => {
         },
       },
     };
+
     const result = upgradeProfiles(odd, upgrades, providers);
     expect(result.writes).toEqual([]);
     expect(result.skipped.map((s) => s.target)).toEqual([

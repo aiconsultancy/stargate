@@ -20,6 +20,7 @@ import {
 describe("Teams intake and source ownership", () => {
   test("admits the exact tenant/user and explicitly allowed channel", async () => {
     const f = registrationFixture();
+
     try {
       expect(await f.registration.accept(activity())).toBe(true);
       expect(
@@ -46,8 +47,10 @@ describe("Teams intake and source ownership", () => {
 
   test("fails closed on conflicting/missing tenant, stranger, bot and conversation scope", async () => {
     const f = registrationFixture();
+
     try {
       const wrongTenant = "00000000-0000-4000-8000-000000000000";
+
       const rejected = [
         activity({
           conversation: { id: "dm", conversationType: "personal" },
@@ -81,6 +84,7 @@ describe("Teams intake and source ownership", () => {
         }),
         activity({ serviceUrl: "https://attacker.example/" }),
       ];
+
       for (const message of rejected)
         expect(await f.registration.accept(message)).toBe(false);
       expect(f.store.ready(f.registration.key, Date.now(), 10)).toEqual([]);
@@ -108,6 +112,7 @@ describe("Teams intake and source ownership", () => {
 
   test("deduplicates accepted activities durably before acknowledging retries", async () => {
     const f = registrationFixture();
+
     try {
       await f.registration.accept(activity());
       await f.registration.accept(activity());
@@ -124,8 +129,10 @@ describe("Teams intake and source ownership", () => {
 
   test("reply and model source retain the originating Teams conversation and activity", async () => {
     const f = registrationFixture({ fleet: true });
+
     try {
       const first = await f.running();
+
       const secondMessage = activity({
         id: "request-two",
         conversation: {
@@ -135,6 +142,7 @@ describe("Teams intake and source ownership", () => {
         },
         serviceUrl: "https://europe.botframework.com/",
       });
+
       const second = await f.running(secondMessage, "input-two");
       expect(f.registration.transport.source?.(first)).toEqual({
         transport: "teams",
@@ -182,6 +190,7 @@ describe("Teams intake and source ownership", () => {
 
   test("allowlist changes are rechecked before replies, including channel IDs differing from conversation IDs", async () => {
     const f = registrationFixture();
+
     try {
       const channel = activity({
         conversation: {
@@ -191,6 +200,7 @@ describe("Teams intake and source ownership", () => {
         },
         channelData: { channel: { id: "allowed-channel" } },
       });
+
       await f.registration.accept(channel);
       await f.reopen();
       f.config.access.channels.length = 0;
@@ -214,6 +224,7 @@ describe("Teams intake and source ownership", () => {
 describe("Opt-in Teams native permission decisions", () => {
   function approvalRow(f: ReturnType<typeof registrationFixture>) {
     const db = new Database(join(dirname(f.config.socketPath), "teams.sqlite"));
+
     try {
       return db
         .query<{ token: string; notified: number; used: number }, []>(
@@ -227,9 +238,11 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("failed approval notification retries the same one-use token", async () => {
     const f = registrationFixture({ approvals: true });
+
     const notification = spyOn(f.sent, "push").mockImplementationOnce(() => {
       throw new Error("notification unavailable");
     });
+
     try {
       await f.running();
       f.backend.permission();
@@ -237,6 +250,7 @@ describe("Opt-in Teams native permission decisions", () => {
         "notification unavailable",
       );
       const persisted = approvalRow(f);
+
       if (!persisted) throw new Error("Missing persisted notification offer");
       expect(persisted).toMatchObject({ notified: 0, used: 0 });
       notification.mockRestore();
@@ -260,9 +274,11 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("restart after persisted offer but before notification recovers without rotating it", async () => {
     const f = registrationFixture({ approvals: true });
+
     const notification = spyOn(f.sent, "push").mockImplementationOnce(() => {
       throw new Error("simulated stop before publish");
     });
+
     try {
       await f.running();
       f.backend.permission();
@@ -270,6 +286,7 @@ describe("Opt-in Teams native permission decisions", () => {
         "simulated stop before publish",
       );
       const persisted = approvalRow(f);
+
       if (!persisted) throw new Error("Missing persisted notification offer");
       expect(f.sent).toEqual([]);
       notification.mockRestore();
@@ -287,6 +304,7 @@ describe("Opt-in Teams native permission decisions", () => {
     const f = registrationFixture({ approvals: true });
     const now = Date.now();
     const clock = spyOn(Date, "now").mockReturnValue(now);
+
     try {
       await f.running();
       f.backend.permission();
@@ -321,9 +339,11 @@ describe("Opt-in Teams native permission decisions", () => {
   ] as const) {
     test(`a failed notification cannot be retried after changed ${changed}`, async () => {
       const f = registrationFixture({ approvals: true });
+
       const notification = spyOn(f.sent, "push").mockImplementationOnce(() => {
         throw new Error("notification unavailable");
       });
+
       try {
         const job = await f.running();
         const request = f.backend.permission();
@@ -331,12 +351,17 @@ describe("Opt-in Teams native permission decisions", () => {
           "notification unavailable",
         );
         notification.mockRestore();
+
         if (changed === "input")
           f.backend.bindings.set(request.id, "native-irc-input");
+
         if (changed === "session") f.backend.sessionID = "replacement-session";
+
         if (changed === "arguments")
           f.backend.pending = [{ ...request, resources: ["different scope"] }];
+
         if (changed === "completed") f.store.respond(job.id, ["completed"]);
+
         if (changed === "access") f.config.access.deniedUsers.push(HUMAN);
         await f.registration.pollApprovals();
         expect(f.sent).toEqual([]);
@@ -351,12 +376,15 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("notification rechecks the native request after persisting its offer", async () => {
     const f = registrationFixture({ approvals: true });
+
     try {
       await f.running();
       const request = f.backend.permission();
+
       const pending = spyOn(f.backend, "pendingPermissions")
         .mockResolvedValueOnce([request])
         .mockResolvedValueOnce([]);
+
       try {
         await f.registration.pollApprovals();
         expect(f.sent).toEqual([]);
@@ -373,6 +401,7 @@ describe("Opt-in Teams native permission decisions", () => {
     const f = registrationFixture({ approvals: true });
     const now = Date.now();
     const clock = spyOn(Date, "now").mockReturnValue(now);
+
     try {
       await f.running();
       f.backend.permission();
@@ -409,6 +438,7 @@ describe("Opt-in Teams native permission decisions", () => {
       "CREATE TABLE approvals(token TEXT PRIMARY KEY,request TEXT NOT NULL UNIQUE,session TEXT NOT NULL,conversation TEXT NOT NULL,user TEXT NOT NULL,input TEXT NOT NULL,expires INTEGER NOT NULL,fingerprint TEXT NOT NULL,used INTEGER NOT NULL DEFAULT 0); INSERT INTO approvals VALUES('legacy-token','permission-legacy','session-1','conversation','human','input',1,'fingerprint',1)",
     );
     legacy.close();
+
     const registration = new TeamsRegistration(
       f.config,
       path,
@@ -416,8 +446,10 @@ describe("Opt-in Teams native permission decisions", () => {
       f.backend,
       () => {},
     );
+
     try {
       const db = new Database(path);
+
       try {
         expect(
           db
@@ -437,6 +469,7 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("configuration requires explicit permitted approvers and OpenCode", async () => {
     const f = registrationFixture();
+
     try {
       expect(f.config.approvalUsers).toEqual([]);
       expect(
@@ -471,6 +504,7 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("queued or channel requests cannot acquire a personal approval offer", async () => {
     const f = registrationFixture({ approvals: true });
+
     try {
       await f.registration.accept(activity());
       f.backend.permission();
@@ -496,6 +530,7 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("revoking an approver before the decision fails closed", async () => {
     const f = registrationFixture({ approvals: true });
+
     try {
       await f.running();
       f.backend.permission();
@@ -511,6 +546,7 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("permissions remain disabled by default and approval text never becomes a model prompt", async () => {
     const f = registrationFixture();
+
     try {
       await f.running();
       f.backend.permission();
@@ -538,6 +574,7 @@ describe("Opt-in Teams native permission decisions", () => {
   for (const decision of ["approve", "deny"] as const) {
     test(`${decision} is bound to the pending native input and usable once across reopen`, async () => {
       const f = registrationFixture({ approvals: true });
+
       try {
         await f.running();
         f.backend.permission();
@@ -549,10 +586,12 @@ describe("Opt-in Teams native permission decisions", () => {
         );
         const token = f.approvalToken();
         await f.reopen();
+
         const command = activity({
           id: "decision-1",
           text: `${decision} ${token}`,
         });
+
         await f.registration.accept(command);
         await f.registration.accept({ ...command, id: "decision-replay" });
         expect(f.backend.replies).toEqual([
@@ -571,6 +610,7 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("another admitted human, conversation, or channel cannot use the original human's token", async () => {
     const f = registrationFixture({ approvals: true });
+
     try {
       await f.running();
       f.backend.permission();
@@ -618,6 +658,7 @@ describe("Opt-in Teams native permission decisions", () => {
     const f = registrationFixture({ approvals: true });
     const now = Date.now();
     const clock = spyOn(Date, "now").mockReturnValue(now);
+
     try {
       await f.running();
       f.backend.permission();
@@ -641,19 +682,25 @@ describe("Opt-in Teams native permission decisions", () => {
   ] as const) {
     test(`a changed ${changed} cannot reuse a pending decision`, async () => {
       const f = registrationFixture({ approvals: true });
+
       try {
         const job = await f.running();
         f.backend.permission();
         await f.registration.pollApprovals();
         const text = `approve ${f.approvalToken()}`;
+
         if (changed === "request") f.backend.pending = [];
+
         if (changed === "session") f.backend.sessionID = "replacement-session";
+
         if (changed === "input")
           f.backend.bindings.set("permission-1", "irc-input");
+
         if (changed === "arguments")
           f.backend.pending = [
             { ...f.backend.permission(), resources: ["different tool scope"] },
           ];
+
         if (changed === "completed")
           f.store.respond(job.id, ["already completed"]);
         await f.reopen();
@@ -669,6 +716,7 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("an IRC permission on the shared pin cannot borrow an older Teams human", async () => {
     const f = registrationFixture({ approvals: true });
+
     try {
       await f.running();
       f.backend.permission("native-irc-input");
@@ -682,6 +730,7 @@ describe("Opt-in Teams native permission decisions", () => {
         text: "Read repository",
       });
       const irc = f.store.ready("irc-registration", Date.now(), 10)[0];
+
       if (!irc) throw new Error("Missing IRC fixture");
       f.store.running(irc.id);
       f.store.saveInput(
@@ -700,6 +749,7 @@ describe("Opt-in Teams native permission decisions", () => {
 
   test("uncertain permission API outcomes consume the token before retry", async () => {
     const f = registrationFixture({ approvals: true });
+
     try {
       await f.running();
       f.backend.permission();
@@ -721,10 +771,12 @@ describe("Opt-in Teams native permission decisions", () => {
 
 test("live Teams presence anchors an informative stage and closes it with the original reply", async () => {
   const f = registrationFixture({ presence: true });
+
   try {
     const job = await f.running();
     expect(f.registration.transport.turnStatus?.(job)).toBe("notice");
     const abort = new AbortController();
+
     const working = f.registration.delivery.working?.(
       job.channel,
       job.thread,
@@ -733,6 +785,7 @@ test("live Teams presence anchors an informative stage and closes it with the or
       "notice",
       () => ({ stage: "reasoning", observedAt: Date.now() }),
     );
+
     await Bun.sleep(10);
     abort.abort();
     await working;
@@ -783,8 +836,10 @@ test("live Teams presence anchors an informative stage and closes it with the or
 
 test("a Teams connector that declines informative updates still gets typing and the ordinary reply", async () => {
   const f = registrationFixture({ presence: true });
+
   try {
     const job = await f.running();
+
     const connector = {
       sendToConversation: async (
         _service: string,
@@ -792,17 +847,23 @@ test("a Teams connector that declines informative updates still gets typing and 
         activity: import("../src/teams/connector").OutgoingActivity,
       ) => {
         if (activity.entities) throw new Error("Informative streams disabled");
+
         return { id: activity.type };
       },
     };
+
     const spy = spyOn(connector, "sendToConversation");
+
     const presence = new (await import("../src/teams/presence")).TeamsPresence(
       5,
     );
+
     const abort = new AbortController();
+
     const send = (
       activity: import("../src/teams/connector").OutgoingActivity,
     ) => connector.sendToConversation(SERVICE_URL, job.channel, activity);
+
     const work = presence.working(
       job.channel,
       job.thread,
@@ -811,6 +872,7 @@ test("a Teams connector that declines informative updates still gets typing and 
       () => undefined,
       send,
     );
+
     await Bun.sleep(14);
     abort.abort();
     await work;
@@ -841,6 +903,7 @@ describe("Teams waiting phrases", () => {
     name: "Adama",
     ...settings,
   });
+
   const informative = (sent: Outgoing[]) =>
     sent.flatMap((activity) =>
       activity.entities && activity.text !== undefined ? [activity.text] : [],
@@ -853,6 +916,7 @@ describe("Teams waiting phrases", () => {
   ) {
     const sent: Outgoing[] = [];
     const abort = new AbortController();
+
     const work = new TeamsPresence(5).working(
       "conversation",
       "anchor",
@@ -861,13 +925,16 @@ describe("Teams waiting phrases", () => {
       progress,
       async (activity) => {
         sent.push(activity);
+
         return { id: "stream-1" };
       },
       settings,
     );
+
     await Bun.sleep(ms);
     abort.abort();
     await work;
+
     return sent;
   }
 
@@ -899,6 +966,7 @@ describe("Teams waiting phrases", () => {
         "Connection interrupted",
       ],
     ];
+
     for (const [progress, label] of labels)
       expect(informative(await run(() => progress, waiting(), 40))).toEqual([
         label,
@@ -909,6 +977,7 @@ describe("Teams waiting phrases", () => {
     let progress: Progress = { stage: "reasoning", observedAt: 0 };
     const sent: Outgoing[] = [];
     const abort = new AbortController();
+
     const work = new TeamsPresence(5).working(
       "conversation",
       "anchor",
@@ -917,10 +986,12 @@ describe("Teams waiting phrases", () => {
       () => progress,
       async (activity) => {
         sent.push(activity);
+
         return { id: "stream-1" };
       },
       waiting({ intervalMs: 60_000 }),
     );
+
     await Bun.sleep(40);
     progress = { stage: "tool", observedAt: 0 };
     await Bun.sleep(40);
@@ -943,9 +1014,11 @@ describe("Teams waiting phrases", () => {
     expect(informative(await run(() => undefined, undefined, 40))).toEqual([
       "Working",
     ]);
+
     const delayed = informative(
       await run(reasoning, waiting({ delayMs: 30, intervalMs: 60_000 }), 120),
     );
+
     expect(delayed).toEqual(["Thinking", waitingPhrase("Adama", 0)]);
   });
 
@@ -957,6 +1030,7 @@ describe("Teams waiting phrases", () => {
         10,
       ),
     );
+
     expect(texts).toEqual([waitingPhrase(`Ad ama${"x".repeat(94)}`, 0)]);
     expect(
       informative(await run(() => undefined, waiting({ name: " \n " }), 10)),
@@ -977,8 +1051,10 @@ describe("Teams waiting phrases", () => {
       agent: "captain",
       displayName: "Adama",
     });
+
     try {
       const backend = f.config.backend;
+
       if (backend.type !== "opencode") throw new Error("OpenCode fixture");
       // The configured 5 second delay would keep "Thinking" for this turn.
       await saveWaitingDelay(
@@ -989,6 +1065,7 @@ describe("Teams waiting phrases", () => {
       );
       const job = await f.running();
       const abort = new AbortController();
+
       const working = f.registration.delivery.working?.(
         job.channel,
         job.thread,
@@ -997,6 +1074,7 @@ describe("Teams waiting phrases", () => {
         "notice",
         () => ({ stage: "reasoning", observedAt: Date.now() }),
       );
+
       await Bun.sleep(40);
       abort.abort();
       await working;

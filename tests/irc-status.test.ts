@@ -10,6 +10,7 @@ type Attempt = {
 };
 
 const statuses: IrcStatus[] = [];
+
 afterEach(async () => {
   await Promise.all(statuses.splice(0).map((status) => status.shutdown()));
 });
@@ -19,6 +20,7 @@ const pause = (ms: number) =>
 
 async function until(check: () => boolean) {
   const deadline = Date.now() + 1500;
+
   while (!check()) {
     if (Date.now() >= deadline) throw new Error("status condition timed out");
     await pause(1);
@@ -30,11 +32,13 @@ function setup(
   name = "Adama",
 ) {
   const attempts: Attempt[] = [];
+
   const status = new IrcStatus(
     name,
     (value, guard) => {
       const reply = Promise.withResolvers<StatusResult>();
       attempts.push({ value, guard, at: Date.now(), resolve: reply.resolve });
+
       return reply.promise;
     },
     {
@@ -45,20 +49,27 @@ function setup(
       ...timing,
     },
   );
+
   statuses.push(status);
+
   const next = async (count: number) => {
     await until(() => attempts.length >= count);
     const attempt = attempts[count - 1];
+
     if (!attempt) throw new Error("missing attempt");
+
     return attempt;
   };
+
   const ack = async (count: number) => {
     const attempt = await next(count);
     expect(attempt.guard()).toBe(true);
     attempt.resolve({ kind: "ok" });
     await pause(0);
+
     return attempt;
   };
+
   return { status, attempts, next, ack };
 }
 
@@ -90,6 +101,7 @@ test("irc status: synchronous short turns cancel starts and leave known clear al
   const { status, ack, attempts } = setup();
   status.connected();
   await ack(1);
+
   for (let i = 0; i < 100; i++) status.begin()();
   await pause(40);
   expect(attempts).toHaveLength(1);
@@ -158,9 +170,11 @@ test("irc status: ten-attempt rolling quota reserves a clear slot across reconne
     windowMs: 140,
     limit: 10,
   });
+
   status.connected();
   const startup = await ack(1);
   const finish = status.begin();
+
   for (let count = 2; count <= 9; count++) await ack(count);
   await pause(12);
   expect(attempts).toHaveLength(9);
@@ -175,6 +189,7 @@ test("irc status: ten-attempt rolling quota reserves a clear slot across reconne
   expect(reconnect.value).toBeUndefined();
   expect(reconnect.at - startup.at).toBeGreaterThanOrEqual(140);
   await ack(11);
+
   for (const attempt of attempts) {
     expect(
       attempts.filter(
@@ -214,16 +229,19 @@ test("irc status: terminal cleanup survives local quota exhaustion and new start
     windowMs: 150,
     retryMs: 2,
   });
+
   status.connected();
   await ack(1);
   const finish = status.begin();
   await ack(2);
   finish();
+
   for (let count = 3; count <= 10; count++) {
     const clear = await next(count);
     expect(clear.value).toBeUndefined();
     clear.resolve({ kind: "rejected" });
   }
+
   const newer = status.begin();
   await pause(20);
   expect(attempts).toHaveLength(10);
@@ -238,15 +256,19 @@ test("irc status: terminal cleanup survives local quota exhaustion and new start
 test("irc status: thrown publisher failures retain clear without unhandled rejection", async () => {
   let calls = 0;
   const values: (string | undefined)[] = [];
+
   const status = new IrcStatus(
     "Adama",
     async (value) => {
       values.push(value);
+
       if (++calls === 1) throw new Error("synthetic transport failure");
+
       return { kind: "ok" };
     },
     { retryMs: 5, shutdownMs: 50 },
   );
+
   statuses.push(status);
   status.connected();
   await until(() => calls === 2);
@@ -302,9 +324,11 @@ test("irc status: shutdown waits for clear ACK, closes guards and is idempotent"
   status.begin();
   const busy = await ack(2);
   let done = false;
+
   const closing = status.shutdown().then(() => {
     done = true;
   });
+
   status.begin()();
   const clear = await next(3);
   expect(clear.value).toBeUndefined();
@@ -368,8 +392,9 @@ test("irc status: never-connected unsupported transport emits nothing", async ()
 test("irc status: names are control-free; UTF-8 caps preserve complete fixed phrases", async () => {
   const { status, ack, next } = setup(
     {},
-    `Adama\r\n\0\x01\x7f${"🚀".repeat(100)}`,
+    `Adama\r\n\0\u0001\u007f${"🚀".repeat(100)}`,
   );
+
   status.connected(55);
   await ack(1);
   const finish = status.begin();
@@ -390,6 +415,7 @@ test("irc status: hard value cap applies; tiny advertised caps still permit clea
     status.connected(cap);
     await ack(1);
     const finish = status.begin();
+
     if (cap === 1) {
       await pause(40);
       expect(attempts).toHaveLength(1);
@@ -401,6 +427,7 @@ test("irc status: hard value cap applies; tiny advertised caps still permit clea
       finish();
       await ack(3);
     }
+
     await status.shutdown();
   }
 });

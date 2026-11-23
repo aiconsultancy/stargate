@@ -12,6 +12,7 @@ import {
 export const mentionNameSchema = Schema.Trim.check(Schema.isMinCodePoints(1))
   .check(Schema.isMaxCodePoints(40))
   .check(settingsPattern(/^[\p{L}\p{N}][\p{L}\p{N}' -]*$/u));
+
 export const mentionNamesSchema = Schema.mutable(
   Schema.Array(mentionNameSchema),
 )
@@ -71,6 +72,7 @@ export function findMention(
     .sort((a, b) => b.length - a.length)
     .find((name) => {
       const match = pattern(name);
+
       return texts.some((text) => match.test(text));
     });
 }

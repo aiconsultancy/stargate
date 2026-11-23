@@ -18,6 +18,7 @@ const endpoint = settingsURL.check(
     (value) => {
       const url = new URL(value);
       const loopback = isLoopbackHost(url.hostname);
+
       return (
         (url.protocol === "https:" || (url.protocol === "http:" && loopback)) &&
         !url.username &&
@@ -64,6 +65,7 @@ export const transcriptionSchema = settingsStruct({
    */
   spokenMentions: Schema.optional(mentionRuleSchema),
 });
+
 export type TranscriptionConfig = typeof transcriptionSchema.Type;
 
 /** Persistent captain instructions, never a per-message user prefix. */
@@ -102,6 +104,7 @@ export interface Transcriber {
 
 // Whisper container formats. Slack voice notes are audio/mp4 (.m4a).
 const extensions = ["m4a", "mp3", "mp4", "mpeg", "mpga", "wav", "webm"];
+
 const mimeExtensions: Record<string, string> = {
   "audio/mp4": "m4a",
   "audio/m4a": "m4a",
@@ -123,6 +126,7 @@ export function isMedia(file: Pick<Attachment, "mime">) {
 
 function extension(file: Attachment) {
   const named = /\.([a-z0-9]+)$/i.exec(file.name)?.[1]?.toLowerCase();
+
   return named && extensions.includes(named)
     ? named
     : mimeExtensions[file.mime];
@@ -133,10 +137,13 @@ let tail: Promise<void> = Promise.resolve();
 
 async function exclusive<T>(signal: AbortSignal, run: () => Promise<T>) {
   signal.throwIfAborted();
+
   const turn = tail.then(() => {
     signal.throwIfAborted();
+
     return run();
   });
+
   tail = turn.then(
     () => {},
     () => {},
@@ -144,6 +151,7 @@ async function exclusive<T>(signal: AbortSignal, run: () => Promise<T>) {
   const aborted = Promise.withResolvers<never>();
   const abort = () => aborted.reject(signal.reason);
   signal.addEventListener("abort", abort, { once: true });
+
   try {
     // A cancelled waiter leaves the queue now; its turn then does no work.
     return await Promise.race([turn, aborted.promise]);
@@ -159,11 +167,13 @@ function block(
   cut: boolean,
 ) {
   const seconds = file.source?.durationMs;
+
   const facts = [
     ...(file.source?.id ? [`file ${file.source.id}`] : []),
     ...(seconds !== undefined ? [`${(seconds / 1000).toFixed(1)} s`] : []),
     `machine transcription by ${provider}`,
   ].join(", ");
+
   return [
     `[Voice message transcript: ${facts}. These are the sender's own spoken words. The text can contain recognition errors.]`,
     spoken || "[No speech detected]",
@@ -188,17 +198,21 @@ export async function transcribeMedia(
   const rest: Attachment[] = [];
   const blocks: string[] = [];
   const transcripts: string[] = [];
+
   try {
     for (const file of files) {
       if (!isMedia(file)) {
         rest.push(file);
         continue;
       }
+
       let provider = "Slack";
       // A complete Slack transcript needs no provider call or audio upload.
       let text = file.source?.transcript;
+
       if (text === undefined) {
         const format = extension(file);
+
         if (!format) throw new Error("Unsupported media format");
         const limit = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
         provider = transcriber.label;
@@ -209,6 +223,7 @@ export async function transcribeMedia(
           ),
         );
       }
+
       const spoken = text.trim();
       transcripts.push(spoken);
       const cut = spoken.length > maxTranscriptCharacters;
@@ -221,5 +236,6 @@ export async function transcribeMedia(
     signal.throwIfAborted();
     throw new TranscriptionUnavailable();
   }
+
   return { files: rest, blocks, transcripts };
 }

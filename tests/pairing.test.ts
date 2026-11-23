@@ -15,17 +15,21 @@ function fixture(deadline?: () => AbortSignal) {
       urls: ["https://code.example.test", "http://host.tail123.ts.net:4096"],
     },
   });
+
   const calls: { kind: string; view: CronView }[] = [];
   const order: string[] = [];
   const logs: string[] = [];
   const signals: AbortSignal[] = [];
+
   const backend = {
     async pair(signal: AbortSignal) {
       order.push("pair");
       signals.push(signal);
+
       return { code: "fixture-secret", expiresIn: 123 };
     },
   };
+
   const api = {
     async open(_trigger: string, view: CronView) {
       order.push("open");
@@ -36,10 +40,12 @@ function fixture(deadline?: () => AbortSignal) {
       calls.push({ kind: "update", view });
     },
   };
+
   const log = pino({ level: "error" }, { write: (text) => logs.push(text) });
   const controller = new AbortController();
   let now = 1_000_000;
   let wall = 1_000_000;
+
   const ui = new PairingUI(
     config,
     identity,
@@ -51,16 +57,22 @@ function fixture(deadline?: () => AbortSignal) {
     deadline,
     () => wall,
   );
+
   const acks: (Record<string, unknown> | undefined)[] = [];
+
   const ack = async (value?: Record<string, unknown>) => {
     order.push("ack");
     acks.push(value);
   };
+
   const opened = () => {
     const view = calls[0]?.view;
+
     if (!view) throw new Error("Missing confirmation");
+
     return view;
   };
+
   return {
     config,
     calls,
@@ -118,6 +130,7 @@ function action(view: CronView) {
 test("pairing config is off by default; operators are exact and URLs are origins", () => {
   expect(bot().pairing).toBeUndefined();
   const config = fixture().config;
+
   for (const pairing of [
     { ...config.pairing, operators: [] },
     { ...config.pairing, operators: ["*"] },
@@ -130,6 +143,7 @@ test("pairing config is off by default; operators are exact and URLs are origins
         Schema.decodeUnknownResult(botSchema)({ ...config, pairing }),
       ),
     ).toBe(false);
+
   for (const url of [
     "ftp://example.test",
     "https://u:p@example.test",
@@ -214,6 +228,7 @@ test("invalid, denied, bot, disabled, unsupported commands never mint", async ()
     { user_name: "slackbot" },
     { trigger_id: "" },
   ];
+
   for (const delta of variants) {
     const f = fixture();
     await f.ui.command({ ...command(), ...delta }, f.ack);
@@ -221,6 +236,7 @@ test("invalid, denied, bot, disabled, unsupported commands never mint", async ()
     expect(f.order).toEqual(["ack"]);
     expect(f.acks[0]).toMatchObject({ response_type: "ephemeral" });
   }
+
   for (const change of [
     "disabled",
     "user",
@@ -229,11 +245,16 @@ test("invalid, denied, bot, disabled, unsupported commands never mint", async ()
     "no-capability",
   ]) {
     const f = fixture();
+
     if (change === "disabled") delete f.config.pairing;
+
     if (change === "user") f.config.access.deniedUsers = ["U123"];
+
     if (change === "channel") f.config.access.deniedChannels = ["C123"];
+
     if (change === "unsupported")
       f.config.backend = { type: "module", module: "/x", options: {} };
+
     if (change === "no-capability")
       delete (f.backend as Pick<AgentBackend, "pair">).pair;
     await f.ui.command(command(), f.ack);
@@ -262,30 +283,44 @@ test("button reauthorizes operator and normal denies, app, team, human and chann
     const f = fixture();
     await f.ui.command(command(), f.ack);
     const body = action(f.opened());
+
     if (change === "operator" && f.config.pairing)
       f.config.pairing.operators = ["UOTHER"];
+
     if (change === "user") f.config.access.deniedUsers = ["U123"];
+
     if (change === "channel") f.config.access.deniedChannels = ["C123"];
+
     if (change === "disabled") delete f.config.pairing;
+
     if (change === "app") body.api_app_id = "AOTHER";
+
     if (change === "team") body.team.id = "TOTHER";
+
     if (change === "human") Object.assign(body.user, { is_bot: true });
+
     if (change === "owner") body.user.id = "UOTHER";
+
     if (change === "container") body.container.view_id = "VOTHER";
+
     if (change === "callback") body.view.callback_id = "cron_list";
+
     if (change === "nonce") body.view.private_metadata = "forged";
+
     if (change === "action")
       body.actions[0] = {
         type: "button",
         action_id: "stargate_pair_other",
         value: "generate",
       };
+
     if (change === "multi")
       body.actions.push({
         type: "button",
         action_id: "stargate_pair_generate",
         value: "generate",
       });
+
     if (change === "expired") f.advance(300_001);
     await f.ui.interactive(body, f.ack);
     expect(f.order).not.toContain("pair");
@@ -299,8 +334,10 @@ test("retries and concurrent clicks do not issue or deliver a second code", asyn
   f.backend.pair = async (signal) => {
     f.order.push("pair");
     f.signals.push(signal);
+
     return pending.promise;
   };
+
   await f.ui.command(command(), f.ack);
   const body = action(f.opened());
   const first = f.ui.interactive(body, f.ack);
@@ -317,10 +354,13 @@ test("failed mint or modal delivery is sanitized and never retried", async () =>
     const f = fixture();
     await f.ui.command(command(), f.ack);
     const body = action(f.opened());
+
     const fail = async () => {
       throw new Error("fixture-secret https://secret.test");
     };
+
     if (target === "pair") f.backend.pair = fail;
+
     if (target === "update") f.api.update = fail;
     await f.ui.interactive(body, target === "ack" ? fail : f.ack);
     await f.ui.interactive(body, f.ack);
@@ -335,6 +375,7 @@ test("failed mint or modal delivery is sanitized and never retried", async () =>
 
 test("pending confirmation count is bounded and stale records expire", async () => {
   const f = fixture();
+
   for (let n = 0; n < 130; n++) await f.ui.command(command(), f.ack);
   expect(f.calls).toHaveLength(128);
   const old = action(f.opened());
@@ -356,8 +397,10 @@ test("shutdown cancels mint and prevents delivery", async () => {
         once: true,
       }),
     );
+
     return { code: "unused", expiresIn: 123 };
   };
+
   await f.ui.command(command(), f.ack);
   const run = f.ui.interactive(action(f.opened()), f.ack);
   await started.promise;
@@ -382,8 +425,10 @@ test("deadline cancels mint without replay and shows only a private failure noti
         { once: true },
       ),
     );
+
     return { code: "unused", expiresIn: 123 };
   };
+
   await f.ui.command(command(), f.ack);
   const body = action(f.opened());
   const run = f.ui.interactive(body, f.ack);
@@ -405,12 +450,16 @@ test("access changes during ACK or issuance prevent mint or secret delivery", as
     f.backend.pair = async (signal) => {
       const code = await original(signal);
       f.config.access.deniedChannels = ["C123"];
+
       return code;
     };
+
     await f.ui.interactive(action(f.opened()), async () => {
       await f.ack();
+
       if (stage === "ack") f.config.access.deniedChannels = ["C123"];
     });
+
     if (stage === "ack") expect(f.order).not.toContain("pair");
     expect(f.calls).toHaveLength(1);
   }
@@ -460,10 +509,12 @@ test("code display adds elapsed-adjusted lifetime to current wall time after clo
     const original = f.backend.pair;
     f.backend.pair = async (signal) => {
       const result = await original(signal);
-      f.advance(2_000);
+      f.advance(2000);
       f.jumpWall(jump);
+
       return result;
     };
+
     await f.ui.command(command(), f.ack);
     await f.ui.interactive(action(f.opened()), f.ack);
     const displayed = JSON.stringify(f.calls.at(-1)?.view);
@@ -479,10 +530,12 @@ test("elapsed code expiry prevents secret display despite wall-clock rollback or
     const original = f.backend.pair;
     f.backend.pair = async (signal) => {
       const result = await original(signal);
-      f.advance(result.expiresIn * 1_000);
+      f.advance(result.expiresIn * 1000);
       f.jumpWall(jump);
+
       return result;
     };
+
     await f.ui.command(command(), f.ack);
     const body = action(f.opened());
     await f.ui.interactive(body, f.ack);

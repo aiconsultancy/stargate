@@ -25,6 +25,7 @@ import { codexBackendSchema } from "../src/config";
 import { toolchain } from "./codex-toolchain";
 
 const tools = await toolchain();
+
 afterAll(() => tools.remove());
 
 /*
@@ -46,7 +47,9 @@ afterEach(async () => {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
   }
+
   saved.clear();
+
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
@@ -63,6 +66,7 @@ type Tool = {
   description?: string | undefined;
   tools?: Tool[] | undefined;
 };
+
 const toolSchema: z.ZodType<Tool> = z.lazy(() =>
   z.object({
     type: z.string(),
@@ -71,6 +75,7 @@ const toolSchema: z.ZodType<Tool> = z.lazy(() =>
     tools: z.array(toolSchema).optional(),
   }),
 );
+
 const body = z.object({
   model: z.string(),
   tools: z.array(toolSchema).default([]),
@@ -92,8 +97,10 @@ const body = z.object({
 function toolNames(tools: readonly Tool[], prefix = ""): string[] {
   return tools.flatMap((tool) => {
     const name = `${prefix}${tool.name ?? tool.type}`;
+
     if (tool.tools) return toolNames(tool.tools, `${name}.`);
     const nested = [...(tool.description ?? "").matchAll(/^### `([^`]+)`/gm)];
+
     return [name, ...nested.map((match) => `${name}/${match[1]}`)];
   });
 }
@@ -113,9 +120,12 @@ function fixture(script: Reply[] = []) {
     tools?: string[];
     outputs?: string[];
   }[] = [];
+
   let probes = 0;
+
   const event = (data: { type: string; [field: string]: unknown }) =>
     `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`;
+
   const usage = {
     input_tokens: 1,
     input_tokens_details: { cached_tokens: 0 },
@@ -123,15 +133,19 @@ function fixture(script: Reply[] = []) {
     output_tokens_details: { reasoning_tokens: 0 },
     total_tokens: 2,
   };
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       const url = new URL(request.url);
+
       if (url.pathname === "/probe") {
         probes++;
+
         return new Response("PROBED");
       }
+
       const text = request.method === "POST" ? await request.text() : "";
       const parsed = body.safeParse(text ? JSON.parse(text) : {});
       requests.push({
@@ -156,10 +170,12 @@ function fixture(script: Reply[] = []) {
             }
           : {}),
       });
+
       if (url.pathname !== "/v1/responses")
         return Response.json({}, { status: 404 });
       const reply = script.shift() ?? { text: "Fixture reply" };
       const id = `resp_${requests.length}`;
+
       const item =
         "text" in reply
           ? {
@@ -179,6 +195,7 @@ function fixture(script: Reply[] = []) {
               input: reply.exec,
               status: "completed",
             };
+
       return new Response(
         event({ type: "response.created", response: { id } }) +
           event({
@@ -199,7 +216,9 @@ function fixture(script: Reply[] = []) {
       );
     },
   });
+
   cleanup.push(async () => server.stop(true));
+
   return {
     requests,
     script,
@@ -212,6 +231,7 @@ function fixture(script: Reply[] = []) {
 /** An HTTP proxy that records each request line and refuses it. */
 async function recordingProxy() {
   const seen: string[] = [];
+
   const server = createServer((socket) => {
     socket.once("data", (data) => {
       seen.push(data.toString("latin1").split("\r\n")[0] ?? "");
@@ -219,6 +239,7 @@ async function recordingProxy() {
     });
     socket.on("error", () => {});
   });
+
   await new Promise<void>((resolve) =>
     server.listen(0, "127.0.0.1", () => resolve()),
   );
@@ -228,6 +249,7 @@ async function recordingProxy() {
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
   const url = `http://127.0.0.1:${port}`;
+
   // Test seam: route everything but the loopback fixture via the recorder.
   const environment = {
     HTTPS_PROXY: url,
@@ -235,6 +257,7 @@ async function recordingProxy() {
     ALL_PROXY: url,
     NO_PROXY: "127.0.0.1",
   };
+
   return { seen, environment };
 }
 
@@ -251,6 +274,7 @@ async function processesOf(turn: string) {
     { variable: "STARGATE_CODEX_TURN", value: turn },
     testStart,
   );
+
   return found.map(({ pid }) => pid);
 }
 
@@ -260,8 +284,10 @@ async function setup(name: string) {
   const home = join(root, "home");
   const project = join(root, "project");
   const data = join(root, "data");
+
   for (const directory of [home, project, data])
     await mkdir(directory, { recursive: true });
+
   return { root, home, project, data };
 }
 
@@ -273,6 +299,7 @@ async function open(
   runtime: CodexRuntime = {},
 ) {
   await mkdir(dataDirectory, { recursive: true });
+
   const backend = await CodexBackend.open(
     Schema.decodeUnknownSync(codexBackendSchema)({
       type: "codex",
@@ -286,11 +313,14 @@ async function open(
     { dataDirectory },
     { graceMs: 500, ...runtime },
   );
+
   cleanup.push(() => backend.close());
+
   return backend;
 }
 
 const signal = () => AbortSignal.timeout(90_000);
+
 const session = (backend: CodexBackend) =>
   backend.createSession({ key: "k", title: "T", signal: signal() });
 
@@ -303,8 +333,10 @@ const session = (backend: CodexBackend) =>
 async function sandboxWorks() {
   if (process.platform !== "linux") return false;
   const home = await mkdtemp(join(tmpdir(), "stargate-codex-probe-"));
+
   try {
     const native = nativeCodex();
+
     const result = spawnSync(native.executable, ["sandbox", "--", "true"], {
       env: {
         PATH: await codexSearchPath([tools.directory], native.helpers, []),
@@ -314,6 +346,7 @@ async function sandboxWorks() {
       stdio: "ignore",
       timeout: 30_000,
     });
+
     return result.status === 0;
   } catch {
     return false;
@@ -321,6 +354,7 @@ async function sandboxWorks() {
     await rm(home, { recursive: true, force: true });
   }
 }
+
 const sandboxed = await sandboxWorks();
 
 test("real Codex CLI uses only the configured proxy, key and thread", async () => {
@@ -332,6 +366,7 @@ test("real Codex CLI uses only the configured proxy, key and thread", async () =
     join(home, ".codex", "auth.json"),
     JSON.stringify({ OPENAI_API_KEY: `sk-${canary}`, auth_mode: "apikey" }),
   );
+
   const redirect = `model_provider = "canary"
 notify = ["touch", "${join(root, "notified")}"]
 [model_providers.canary]
@@ -342,6 +377,7 @@ env_key = "OPENAI_API_KEY"
 command = "touch"
 args = ["${join(root, "mcp")}"]
 `;
+
   await writeFile(join(home, ".codex", "config.toml"), redirect);
   await writeFile(join(project, ".codex", "config.toml"), redirect);
   await writeFile(
@@ -349,11 +385,14 @@ args = ["${join(root, "mcp")}"]
     `---\nname: stargate\ndescription: ${skill}\n---\n${skill}\n`,
   );
   await writeFile(join(project, "AGENTS.md"), memory);
+
   for (const rc of [".zshrc", ".bashrc", ".profile", ".zprofile"])
     await writeFile(join(home, rc), `touch ${join(root, "rc")}\n`);
+
   const before = (await readdir(home)).concat(
     await readdir(join(home, ".codex")),
   );
+
   const { requests, baseURL } = fixture();
   const proxy = await recordingProxy();
   setEnv({
@@ -385,15 +424,17 @@ args = ["${join(root, "mcp")}"]
   const turns = requests.filter(({ path }) => path === "/v1/responses");
 
   expect(turns.length).toBe(3);
+
   for (const turn of turns.slice(1))
     expect(turn.body).toContain("STARGATEFIRST");
+
   for (const turn of turns) {
     expect(turn.model).toBe("gpt-6.1-sol");
     expect(turn.memory).toBe(false);
     expect(turn.skill).toBe(false);
     // No web search, subagent, plugin, app, goal or image generation
-    // tools. The MCP resource tools have no servers to read: project and
-    // user configuration are not loaded.
+    // Tools. The MCP resource tools have no servers to read: project and
+    // User configuration are not loaded.
     expect(turn.tools).toEqual([
       "clock.sleep",
       "functions.exec",
@@ -410,17 +451,19 @@ args = ["${join(root, "mcp")}"]
       "functions.wait",
     ]);
   }
+
   // A new conversation is a new thread: no earlier text.
   const other = await restarted.prompt(
     await session(restarted),
     "Fresh",
     signal(),
   );
+
   expect(other).toBe("Fixture reply");
   expect(requests.at(-1)?.body).not.toContain("STARGATEFIRST");
 
   // Project instructions load only when selected; the system prompt, effort
-  // and image attachments reach the model.
+  // And image attachments reach the model.
   const docs = await open(
     project,
     join(data, "docs"),
@@ -432,12 +475,14 @@ args = ["${join(root, "mcp")}"]
     },
     runtime,
   );
+
   const png = Uint8Array.from(
     atob(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
     ),
     (char) => char.charCodeAt(0),
   );
+
   await docs.prompt(await session(docs), "Hi", signal(), undefined, undefined, [
     { name: "dot.png", mime: "image/png", data: png },
   ]);
@@ -457,7 +502,9 @@ args = ["${join(root, "mcp")}"]
     expect(request.bearer).toBe(true);
     expect(request.canary).toBe(false);
   }
+
   expect(proxy.seen).toEqual([]);
+
   for (const file of ["notified", "mcp", "rc"])
     expect(await readdir(root)).not.toContain(file);
   expect(
@@ -494,8 +541,10 @@ function commands(
 /** Waits until no process of the turn is left. */
 async function noneLeft(turn: string) {
   const deadline = Date.now() + 3000;
+
   while ((await processesOf(turn)).length && Date.now() < deadline)
     await Bun.sleep(25);
+
   return processesOf(turn);
 }
 
@@ -505,6 +554,7 @@ test.skipIf(!sandboxed)(
     const { root, home, project, data } = await setup("tools");
     const { requests, script, baseURL, port, probes } = fixture();
     const proxy = await recordingProxy();
+
     // Shell start-up files that would run in every tool command.
     for (const rc of [".zshenv", ".zshrc", ".bashrc", ".profile"])
       await writeFile(join(home, rc), "export STARGATE_RC_RAN=1\n");
@@ -521,17 +571,20 @@ test.skipIf(!sandboxed)(
         ),
       ),
     );
+
     const run = async (name: string, extra: Record<string, unknown>) => {
       const dataDirectory = join(data, name);
+
       const backend = await open(project, dataDirectory, baseURL, extra, {
         environment: proxy.environment,
       });
+
       script.push(
         {
           exec: commands([
             {
               // The marker, and a count of variables that must be absent;
-              // the environment itself is never printed.
+              // The environment itself is never printed.
               tag: "ENV",
               cmd: environmentCommand,
             },
@@ -580,8 +633,10 @@ test.skipIf(!sandboxed)(
       expect(output).not.toContain(key);
       expect(output).not.toContain("STARGATE_CODEX_PROVIDER_KEY");
       expect(output).not.toContain(apiKeyEnv);
+
       return output;
     };
+
     // Read-only: no writes, no network, no escalation.
     await run("readonly", {});
     expect(await readdir(project)).toEqual([]);
@@ -596,6 +651,7 @@ test.skipIf(!sandboxed)(
     expect(
       (await readdir(root)).filter((f) => f.startsWith("escalated")),
     ).toEqual([]);
+
     for (const name of ["readonly", "workspace", "network"])
       expect(await Bun.file(`${shared}-${name}`).exists()).toBe(false);
     expect(proxy.seen).toEqual([]);
@@ -611,8 +667,9 @@ test.skipIf(!sandboxed)(
     const bin = join(project, "bin");
     await mkdir(bin);
     // The CLI runs git outside the sandbox in a repository; the launcher
-    // runs sh, mkfifo, cat and rm.
+    // Runs sh, mkfifo, cat and rm.
     const names = ["git", "rg", "sh", "mkfifo", "cat", "rm", "bwrap"];
+
     for (const name of names)
       await writeFile(
         join(bin, name),
@@ -620,7 +677,7 @@ test.skipIf(!sandboxed)(
         { mode: 0o755 },
       );
     // A PATH entry behind a link outside the workspace, retargeted to the
-    // shims between turns, and a directory with a link to the git shim.
+    // Shims between turns, and a directory with a link to the git shim.
     const benign = join(root, "benign");
     await mkdir(benign);
     const linked = join(root, "linked-bin");
@@ -635,15 +692,19 @@ test.skipIf(!sandboxed)(
         ":",
       ),
     });
+
     const backend = await open(project, join(data, "shims"), baseURL, {
       sandbox: "workspace-write",
     });
+
     const id = await session(backend);
+
     for (const turn of [1, 2]) {
       if (turn === 2) {
         await rm(linked);
         await symlink(bin, linked);
       }
+
       script.push(
         { exec: commands([{ tag: "WHICH", cmd: "command -v git cat rg" }]) },
         { text: "Done" },
@@ -651,12 +712,14 @@ test.skipIf(!sandboxed)(
       expect(await backend.prompt(id, "Look", signal())).toBe("Done");
       const output = (requests.at(-1)?.outputs ?? []).join("\n");
       expect(output).toContain("WHICH:");
+
       for (const path of [bin, linked, links])
         expect(output).not.toContain(path);
       expect(
         (await readdir(root)).filter((name) => name.startsWith("ran-")),
       ).toEqual([]);
     }
+
     // A data directory inside the workspace is refused before any turn.
     await expect(
       open(project, join(project, ".stargate"), baseURL, {
@@ -673,8 +736,9 @@ test.skipIf(process.platform !== "linux")(
     const { root, project, data } = await setup("cancel");
     const { script, baseURL } = fixture();
     setEnv({ [apiKeyEnv]: key });
+
     // The real CLI behind a shell that ignores SIGTERM and keeps its output
-    // open: the SDK's own SIGTERM cannot end the turn.
+    // Open: the SDK's own SIGTERM cannot end the turn.
     const [native] = [
       ...new Bun.Glob(
         "node_modules/@openai/codex-*/vendor/*/bin/codex",
@@ -683,6 +747,7 @@ test.skipIf(process.platform !== "linux")(
         absolute: true,
       }),
     ];
+
     const deaf = join(root, "deaf-codex");
     await writeFile(
       deaf,
@@ -690,12 +755,16 @@ test.skipIf(process.platform !== "linux")(
       { mode: 0o755 },
     );
     const full = { sandbox: "danger-full-access", network: true };
+
     // With the sandbox and without one, where tools see the host directly.
     const modes: { extra: Record<string, unknown>; runtime?: CodexRuntime }[] =
       [{ extra: full }, { extra: full, runtime: { executable: deaf } }];
+
     if (sandboxed) modes.push({ extra: {} });
+
     for (const [index, { extra, runtime }] of modes.entries()) {
       const dataDirectory = join(data, String(index));
+
       const backend = await open(
         project,
         dataDirectory,
@@ -703,6 +772,7 @@ test.skipIf(process.platform !== "linux")(
         extra,
         runtime,
       );
+
       script.push({
         exec: commands([
           {
@@ -717,29 +787,38 @@ test.skipIf(process.platform !== "linux")(
       const turn = backend.prompt(id, "Hang", controller.signal);
       const record = join(dataDirectory, "codex-runs", `${id}.json`);
       let marker = "";
+
       const sleeping = async () => {
         marker ||= await readFile(record, "utf8").then(
           (text) => z.object({ turn: z.string() }).parse(JSON.parse(text)).turn,
           () => "",
         );
+
         if (!marker) return false;
+
         for (const pid of await processesOf(marker)) {
           const argv = await readFile(`/proc/${pid}/cmdline`, "utf8").catch(
             () => "",
           );
+
           if (argv.split("\0")[0] === "sleep") return true;
         }
+
         return false;
       };
+
       const deadline = Date.now() + 60_000;
+
       while (!(await sleeping())) {
         if (Date.now() > deadline) {
           controller.abort();
           await turn.catch(() => {});
           throw new Error("No tool process started");
         }
+
         await Bun.sleep(50);
       }
+
       cleanup.push(async () => {
         for (const pid of await processesOf(marker))
           process.kill(pid, "SIGKILL");

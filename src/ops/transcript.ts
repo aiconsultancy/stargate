@@ -59,18 +59,23 @@ export async function repairTranscript(input: {
 }): Promise<TranscriptRepair> {
   if (input.backend.sessionID)
     throw new Error("Captain-scoped transcript repair unsupported");
+
   if (!input.backend.transcript)
     throw new Error("Backend has no transcript support");
+
   const conversation = conversationKey(
     input.botKey,
     input.channel,
     input.thread,
   );
+
   const target = input.store.transcript.transcriptTarget(
     input.botKey,
     conversation,
   );
+
   if (!target) throw new Error("No mapped conversation for this bot thread");
+
   const read = await input.backend
     .transcript(
       target.session,
@@ -80,19 +85,25 @@ export async function repairTranscript(input: {
     .catch(() => {
       throw new Error("since is not readable in the mapped session");
     });
+
   const entries = input.only
     ? read.entries.filter((entry) => input.only?.includes(entry.id))
     : read.entries;
+
   if (input.only && entries.length !== new Set(input.only).size)
     throw new Error("Some requested messages are not settled public replies");
+
   const rows = input.store.transcript.transcriptRows(
     input.botKey,
     conversation,
   );
+
   const scope = new Set(entries.map((entry) => `transcript:${entry.id}`));
+
   const requeue = rows.filter(
     (row) => row.status === "failed" && scope.has(row.eventId),
   );
+
   // Requeued rows deliver their stored text, so that text counts as sent.
   const sent = comparable(
     [
@@ -102,27 +113,37 @@ export async function repairTranscript(input: {
       .map(replySource)
       .join("\n"),
   );
+
   const delivered: string[] = [];
   const missing: { id: string; created: number; text: string }[] = [];
+
   for (const entry of entries) {
     const text = transcriptReply([entry]);
+
     if (!text) continue;
+
     if (sent.includes(comparable(text))) delivered.push(entry.id);
     else missing.push({ id: entry.id, created: entry.created, text });
   }
+
   const limit = input.limit ?? 20;
+
   if (missing.length > limit)
     throw new Error(`Found ${missing.length} missing replies; limit ${limit}`);
   const existing = new Set(rows.map((row) => row.eventId));
+
   const conflicts = missing
     .filter((entry) => existing.has(`transcript:${entry.id}`))
     .map((entry) => entry.id);
+
   let queued = 0;
+
   if (input.apply) {
     if (conflicts.length)
       throw new Error(
         `Outbox rows conflict with missing replies: ${conflicts.join(", ")}`,
       );
+
     const result = input.store.appendTranscript({
       botKey: input.botKey,
       conversation,
@@ -138,10 +159,12 @@ export async function repairTranscript(input: {
       })),
       requeue: requeue.map((row) => row.eventId),
     });
+
     if (result === undefined)
       throw new Error("Thread is busy or changed; run the repair again");
     queued = result;
   }
+
   return {
     session: target.session,
     cursor: read.cursor,
@@ -178,12 +201,14 @@ export async function repairThread(input: {
   await loadEnvironment(input.config);
   const config = await loadConfig(input.config);
   const bot = config.bots.find((candidate) => candidate.id === input.bot);
+
   if (!bot) throw new Error("Unknown bot ID");
   // Harden existing state before SQLite creates WAL/SHM. Never create a
-  // replacement database or follow a database symlink during repair.
+  // Replacement database or follow a database symlink during repair.
   await chmod(config.dataDirectory, 0o700);
   const path = join(config.dataDirectory, "stargate.sqlite");
   const file = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
+
   try {
     if (!(await file.stat()).isFile())
       throw new Error("Invalid gateway database");
@@ -191,12 +216,15 @@ export async function repairThread(input: {
   } finally {
     await file.close();
   }
+
   const store = openStore(path);
+
   try {
     const keys = store.transcript
       .threadBots(input.channel, input.thread)
       .filter((key) => {
         const parts: unknown = JSON.parse(key);
+
         return (
           Array.isArray(parts) &&
           parts[0] === bot.id &&
@@ -204,9 +232,12 @@ export async function repairThread(input: {
           parts[4] === backendFingerprint(bot)
         );
       });
+
     const [botKey] = keys;
+
     if (!botKey || keys.length !== 1)
       throw new Error("Expected one current bot namespace for this thread");
+
     const backend = await createBackend(bot.backend, {
       dataDirectory: join(
         config.dataDirectory,
@@ -214,6 +245,7 @@ export async function repairThread(input: {
         createHash("sha256").update(botKey).digest("hex"),
       ),
     });
+
     try {
       return await repairTranscript({ ...input, store, backend, botKey });
     } finally {

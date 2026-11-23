@@ -24,18 +24,22 @@ export function abortable<A, E>(
     Effect.suspend(() => {
       const controller = new AbortController();
       let promise: Promise<A>;
+
       try {
         promise = Promise.resolve(run(controller.signal));
       } catch (error) {
         promise = Promise.reject(error);
       }
+
       const settled = promise.then(
         () => {},
         () => {},
       );
+
       const wait = onError
         ? Effect.tryPromise({ try: () => promise, catch: onError })
         : Effect.promise(() => promise);
+
       return restore(wait).pipe(
         Effect.onInterrupt(() =>
           Effect.sync(() => controller.abort()).pipe(
@@ -66,6 +70,7 @@ export function runAbortable<A, E>(
  */
 export function resourceScope() {
   const scope = Effect.runSync(Scope.make());
+
   return {
     own<A>(
       acquire: () => Promise<A>,

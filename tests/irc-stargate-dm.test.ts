@@ -15,6 +15,7 @@ import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -41,12 +42,14 @@ class FakeLink implements CrewLink {
       this.fail--;
       throw new Error("plugin unavailable");
     }
+
     this.binds.push({ sessionID, crewID });
   }
   async outbox(input: { after?: number; limit: number }) {
     this.reads.push(input.after);
     const latest = this.items.at(-1)?.sequence ?? 0;
     const after = input.after;
+
     return after === undefined
       ? { items: [], latest }
       : {
@@ -80,11 +83,13 @@ async function setup(
   const fake = new FakeIrcServer({
     accounts: { "galactica-captain": "pass", "galactica-chief": "pass" },
   }).start();
+
   cleanup.push(() => fake.stop());
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-stargate-dm-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
   cleanup.push(() => store.close());
+
   const config = Schema.decodeUnknownSync(ircSchema)({
     id: "galactica-irc",
     server: { host: "127.0.0.1", port: fake.port, tls: false },
@@ -108,8 +113,10 @@ async function setup(
     backend: opencode("/srv/galactica/captain", { sessionID: "ses_captain" }),
     ...options.extra,
   });
+
   const log = pino({ level: "silent" });
   const link = options.link ?? new FakeLink();
+
   const ship = await IrcShip.create(config, store, log, {
     env: {
       STARGATE_IRC_GALACTICA_CAPTAIN: "pass",
@@ -120,10 +127,13 @@ async function setup(
     crewLink: link,
     copyPollMs: 30,
   });
+
   const prompts: Record<string, Prompt[]> = { captain: [], chief: [] };
+
   const backends = ship.registrations.map((registration) => {
     const name = registration.role === "captain" ? "captain" : "chief";
     let sessions = 0;
+
     const agent: AgentBackend = {
       ...(name === "captain" ? { sessionID: "ses_captain" } : {}),
       async createSession() {
@@ -134,16 +144,22 @@ async function setup(
           session,
           text: `${link.binds.length}:${text}`,
         });
+
         return "[[stargate:silent]]";
       },
       async close() {},
     };
+
     return agent;
   });
+
   const controller = new AbortController();
+
   const workers = ship.registrations.map((registration, index) => {
     const selected = backends[index];
+
     if (!selected) throw new Error("missing backend");
+
     return new Gateway(
       registration.settings,
       registration.identity,
@@ -156,6 +172,7 @@ async function setup(
       registration.transport,
     ).work(controller.signal);
   });
+
   ship.start(() => true);
   cleanup.push(async () => {
     controller.abort();
@@ -170,6 +187,7 @@ async function setup(
     5000,
     "joined",
   );
+
   return { fake, store, ship, link, prompts };
 }
 
@@ -216,6 +234,7 @@ test("irc crew link: off by default, and only on the captain's OpenCode server",
     await delay(50);
     expect(link.binds).toEqual([]);
   }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(ircSchema.fields.crewMessaging)({
@@ -237,12 +256,15 @@ const copies = { sessions: true, ircCopies: true };
 
 test("irc stargate_dm copy: sent from the sender's account, once, never a second turn", async () => {
   const link = new FakeLink();
+
   const { fake, store, ship, prompts } = await setup({
     link,
     crewMessaging: copies,
     extra: { audit: { channel: "#agent-dms" } },
   });
+
   const [captain] = ship.registrations;
+
   if (!captain) throw new Error("missing captain");
   await until(() => captain.client.inChannel("#agent-dms"), 5000, "audit");
   await until(() => link.reads.includes(0), 5000, "baseline read");
@@ -260,12 +282,14 @@ test("irc stargate_dm copy: sent from the sender's account, once, never a second
   const [copy] = sentTo(fake, "galactica-chief", "galactica-captain");
   expect(copy?.params[1]).toBe("[stargate_dm] Build is green.");
   expect(copy?.tags.get("+stargate/dm")).toBe(id(1));
+
   // The captain got the DM natively already: the copy is not a turn, and
-  // the audit mirror shows it once (as the sender's outgoing DM).
+  // The audit mirror shows it once (as the sender's outgoing DM).
   const mirrored = (text: string) =>
     lineOf(fake.received("galactica-captain"), "PRIVMSG").filter(
       (m) => m.params[0] === "#agent-dms" && m.params[1]?.includes(text),
     ).length;
+
   await until(() => mirrored("Build is green.") === 1, 5000, "mirror");
   await delay(200);
   expect(prompts["captain"]).toEqual([]);
@@ -324,9 +348,11 @@ test("irc stargate_dm copy: baseline, members without IRC, credentials and lengt
     "copies",
   );
   await delay(200);
+
   const lines = sentTo(fake, "galactica-chief", "galactica-captain").map(
     (m) => m.params[1] ?? "",
   );
+
   // The baseline item and the item for a member without IRC were skipped.
   expect(lines.some((line) => line.includes("old"))).toBe(false);
   expect(lines.some((line) => line.includes("not on IRC"))).toBe(false);
@@ -337,6 +363,7 @@ test("irc stargate_dm copy: baseline, members without IRC, credentials and lengt
   expect(long.startsWith("[stargate_dm] long report")).toBe(true);
   expect(long.endsWith("(truncated; full text in stargate_mail)")).toBe(true);
   expect(Buffer.byteLength(long)).toBeLessThan(2200);
+
   for (const raw of fake.received("galactica-chief"))
     expect(Buffer.byteLength(raw) + 2).toBeLessThanOrEqual(512);
   expect(fake.received("galactica-chief").join("\n")).not.toContain("xoxb");
@@ -344,11 +371,13 @@ test("irc stargate_dm copy: baseline, members without IRC, credentials and lengt
 
 test("irc stargate_dm copy: never answered by a redirect, and off by default", async () => {
   const link = new FakeLink();
+
   const { fake } = await setup({
     link,
     crewMessaging: copies,
     extra: { dmPolicy: "redirect" },
   });
+
   await until(() => link.reads.includes(0), 5000, "baseline read");
   link.push({ id: id(1), from: chiefMember, to: captainMember, text: "Hi." });
   await until(
@@ -381,6 +410,7 @@ test("irc stargate_dm copy: CTCP wrappers never hide a credential", () => {
     );
     expect(copied).not.toContain("secret");
   }
+
   expect(copyText({ id: id(8), text: "\u0001ACTION waves\u0001" })).toBe(
     "[stargate_dm] ACTION waves",
   );

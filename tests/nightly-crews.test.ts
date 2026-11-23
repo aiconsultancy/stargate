@@ -7,14 +7,17 @@ import { type Config, configSchema } from "../src/config";
 import { discoverCrews } from "../src/maintenance/nightly/crews";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-crews-"));
+
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 async function setup(name: string) {
   const dir = join(root, name);
   const captain = join(dir, "captain");
   const chief = join(dir, "chief");
+
   for (const path of [captain, chief])
     await mkdir(join(path, ".opencode"), { recursive: true });
+
   const options = {
     namespace: "ship",
     stateDirectory: join(captain, ".local", "stargate-crew"),
@@ -22,8 +25,10 @@ async function setup(name: string) {
     worktrees: { chief },
     team: { captain: { id: "adama" }, crew: [{ id: "chief" }] },
   };
+
   const profile = (extra = {}) =>
     `${JSON.stringify({ plugins: [{ package: "/srv/stargate/plugin", options: { ...options, ...extra } }] }, null, 2)}\n`;
+
   const config: Config = Schema.decodeUnknownSync(configSchema)({
     dataDirectory: join(dir, "data"),
     bots: [
@@ -39,6 +44,7 @@ async function setup(name: string) {
       },
     ],
   });
+
   return { dir, captain, chief, profile, config };
 }
 
@@ -46,8 +52,10 @@ describe("crew discovery fails closed", () => {
   test("drain discovery includes configured project crew state without changing the legacy gate", async () => {
     const { dir, captain, chief, profile, config } =
       await setup("drain-projects");
+
     const other = join(dir, "other-chief");
     await mkdir(join(other, ".opencode"), { recursive: true });
+
     const text = profile({
       projects: {
         other: {
@@ -56,6 +64,7 @@ describe("crew discovery fails closed", () => {
         },
       },
     });
+
     for (const directory of [captain, chief, other])
       await writeFile(join(directory, ".opencode", "opencode.json"), text);
     expect(await discoverCrews(config)).toHaveLength(1);
@@ -92,6 +101,7 @@ describe("crew discovery fails closed", () => {
   test("cleanup protects permanent Pi worktrees as well as OpenCode roots", async () => {
     const { captain, chief, profile, config } = await setup("pi-protection");
     const pi = join(root, "pi-worker");
+
     const text = profile({
       worktrees: { chief, twiki: pi },
       team: {
@@ -101,6 +111,7 @@ describe("crew discovery fails closed", () => {
         ],
       },
     });
+
     await writeFile(join(captain, ".opencode", "opencode.json"), text);
     await writeFile(join(chief, ".opencode", "opencode.json"), text);
     const crews = await discoverCrews(config);

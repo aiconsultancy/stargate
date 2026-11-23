@@ -19,9 +19,9 @@
     "test": "bun test",
     "typecheck": "tsrs --noEmit",
     "typecheck:tsc": "tsc --noEmit",
-    "lint": "oxlint --type-aware --deny-warnings src tests scripts perf && oxfmt --check",
+    "lint": "(bun scripts/check-zod-exclusions.ts && bun ./node_modules/.bin/oxlint --type-aware --deny-warnings src tests scripts perf && oxfmt --check) || { printf '%s\\n' 'For tool-fixable lint and formatting findings, run make format.' >&2; exit 1; }",
     "oxlint": "oxlint --type-aware -c tools/oxlint/oxlint.config.ts --disable-nested-config src tests scripts perf",
-    "format": "oxfmt --write",
+    "format": "bun scripts/format.ts",
     "check": "bun run typecheck && bun run lint && bun test"
   },
   "dependencies": {

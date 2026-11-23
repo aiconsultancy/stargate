@@ -19,6 +19,7 @@ test("interruption aborts the Promise and waits until it settles", async () => {
             ),
         ),
       );
+
       yield* Effect.yieldNow;
       yield* Fiber.interrupt(fiber);
       events.push("interrupt returned");
@@ -29,6 +30,7 @@ test("interruption aborts the Promise and waits until it settles", async () => {
 
 test("rejections are typed only when mapped", async () => {
   class Failed extends Error {}
+
   const typed = await Effect.runPromiseExit(
     abortable(
       async () => {
@@ -37,24 +39,29 @@ test("rejections are typed only when mapped", async () => {
       () => new Failed("safe"),
     ),
   );
+
   expect(Exit.isFailure(typed) && Exit.hasFails(typed)).toBe(true);
+
   const defect = await Effect.runPromiseExit(
     abortable(() => {
       throw new Error("synchronous");
     }),
   );
+
   expect(Exit.isFailure(defect) && Exit.hasDies(defect)).toBe(true);
 });
 
 test("an aborted caller signal interrupts and finalizes the program", async () => {
   const controller = new AbortController();
   const events: string[] = [];
+
   const run = runAbortable(
     Effect.never.pipe(
       Effect.ensuring(Effect.sync(() => events.push("finalized"))),
     ),
     controller.signal,
   );
+
   controller.abort();
   await expect(run).rejects.toThrow();
   expect(events).toEqual(["finalized"]);

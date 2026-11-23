@@ -13,6 +13,7 @@ test("worker compaction uses the verified global API stream and waits until conn
     location: { directory: "/crew/mario" },
     metadata: { stargateCrew: { namespace: "one", crewID: "mario" } },
   };
+
   const envName = "STARGATE_COMPACTION_FIXTURE_AUTH";
   const previous = process.env[envName];
   process.env[envName] = "Bearer fixture-only";
@@ -22,6 +23,7 @@ test("worker compaction uses the verified global API stream and waits until conn
   let connected = false;
   let sequence = 0;
   let admissions = 0;
+
   const emit = (type: string, data: Record<string, unknown>) => {
     stream?.enqueue(
       encoder.encode(
@@ -36,14 +38,17 @@ test("worker compaction uses the verified global API stream and waits until conn
       ),
     );
   };
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       expect(request.headers.get("authorization")).toBe("Bearer fixture-only");
       const path = new URL(request.url).pathname;
+
       if (path === `/api/session/${worker.id}`)
         return Response.json({ data: worker });
+
       if (path === "/api/event")
         return new Response(
           new ReadableStream<Uint8Array>({
@@ -66,6 +71,7 @@ test("worker compaction uses the verified global API stream and waits until conn
           }),
           { headers: { "content-type": "text/event-stream" } },
         );
+
       if (path === `/api/session/${worker.id}/compact`) {
         expect(connected).toBe(true);
         admissions++;
@@ -87,6 +93,7 @@ test("worker compaction uses the verified global API stream and waits until conn
           sessionID: worker.id,
           reason: "manual",
         });
+
         return Response.json({
           data: {
             id: input.id,
@@ -98,9 +105,11 @@ test("worker compaction uses the verified global API stream and waits until conn
           },
         });
       }
+
       return new Response("not found", { status: 404 });
     },
   });
+
   try {
     await compactOnServer(
       {
@@ -121,6 +130,7 @@ test("worker compaction uses the verified global API stream and waits until conn
     expect(admissions).toBe(1);
   } finally {
     clearTimeout(timer);
+
     if (previous === undefined) delete process.env[envName];
     else process.env[envName] = previous;
     await server.stop(true);
@@ -130,9 +140,11 @@ test("worker compaction uses the verified global API stream and waits until conn
 test("compact-first waits for its correlated completion, not admission or another session", async () => {
   let requestID: string | undefined;
   let admit = () => {};
+
   const admitted = new Promise<void>((resolve) => {
     admit = resolve;
   });
+
   const events: CompactionEvents = {
     async *subscribe() {
       await admitted;
@@ -154,6 +166,7 @@ test("compact-first waits for its correlated completion, not admission or anothe
       };
     },
   };
+
   await compactAndWait(
     {
       async compact(input) {
@@ -177,6 +190,7 @@ test("compaction failure is not treated as successful compact-first", async () =
       };
     },
   };
+
   await expect(
     compactAndWait(
       { async compact() {} },

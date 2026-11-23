@@ -18,6 +18,7 @@ function completion(
 ) {
   const chunk = (delta: object, finish_reason: string | null = null) =>
     `data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", created: 1, model: "opencode-go/deepseek-v4.1-flash", choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+
   return new Response(
     chunk({ role: "assistant" }) +
       chunk(
@@ -45,24 +46,30 @@ test("Pi preserves required default fields and native argument coercion", () => 
     { authorize() {}, async run() {} },
     async () => ({}),
   );
+
   for (const name of ["pi_history", "stargate_journal", "stargate_quota"]) {
     const tool = extension.tools?.find((tool) => tool.name === name);
+
     if (!tool) throw new Error(`Missing registered tool: ${name}`);
+
     if (name !== "stargate_journal")
       expect(tool.parameters).toHaveProperty("type", "object");
     expect(tool.replay).toBe("unsafe");
+
     const input =
       name === "stargate_journal"
         ? { op: "read", after: 0, limit: "2", member: null }
         : name === "pi_history"
           ? { limit: "2", cursor: null }
           : {};
+
     const parsed = validateToolArguments(tool, {
       type: "toolCall",
       id: "fixture-call",
       name,
       arguments: input,
     });
+
     expect(parsed).toEqual(
       name === "stargate_journal"
         ? { op: "read", after: 0, limit: 2, member: "null" }
@@ -70,6 +77,7 @@ test("Pi preserves required default fields and native argument coercion", () => 
           ? { limit: 2 }
           : {},
     );
+
     if (name !== "stargate_quota")
       for (const arguments_ of name === "pi_history"
         ? [{}, { cursor: {} }]
@@ -82,11 +90,13 @@ test("Pi preserves required default fields and native argument coercion", () => 
             arguments: arguments_,
           });
         }).toThrow("Validation failed for tool");
+
     if (name === "pi_history") {
       const arguments_ = {
         limit: 20,
         cursor: { nested: [1, "2", null, { done: false }] },
       };
+
       expect(
         validateToolArguments(tool, {
           type: "toolCall",
@@ -103,6 +113,7 @@ test("Pi preserves required default fields and native argument coercion", () => 
           arguments: { limit: 1.5 },
         }),
       ).toEqual({ limit: 1 });
+
       for (const arguments_ of [
         { limit: 0 },
         { limit: 51 },
@@ -117,8 +128,9 @@ test("Pi preserves required default fields and native argument coercion", () => 
           });
         }).toThrow("Validation failed for tool");
     }
+
     if (name === "stargate_journal") {
-      for (const text of ["  note  ", "  ", "😀".repeat(64000)]) {
+      for (const text of ["  note  ", "  ", "😀".repeat(64_000)]) {
         const arguments_ = { op: "append", text };
         expect(
           validateToolArguments(tool, {
@@ -129,11 +141,12 @@ test("Pi preserves required default fields and native argument coercion", () => 
           }),
         ).toEqual(arguments_);
       }
+
       for (const arguments_ of [
         { op: "read", after: Number.MAX_SAFE_INTEGER + 1, limit: 20 },
         { op: "read", after: 0, limit: 101 },
         { op: "append", text: "note", after: 0 },
-        { op: "append", text: `${"😀".repeat(64000)}x` },
+        { op: "append", text: `${"😀".repeat(64_000)}x` },
       ])
         expect(() => {
           validateToolArguments(tool, {
@@ -153,18 +166,22 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
   const requests: Record<string, unknown>[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       requests.push(await request.json());
+
       return completion("Fixture answer", requests.length === 1);
     },
   });
+
   let backend: PiDurableBackend | undefined;
   let saved = "";
   let authorized = 0;
   const signal = new AbortController().signal;
+
   try {
     const config = Schema.decodeUnknownSync(piDurableBackendSchema)({
       type: "pi-durable",
@@ -175,6 +192,7 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
       systemPrompt:
         "Shared working agreement: /captain/WAYS_OF_WORKING.md. Read initially; reread when updated.",
     });
+
     backend = await PiDurableBackend.open(config, {
       dataDirectory: directory,
       crew: {
@@ -206,18 +224,23 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
     expect(JSON.stringify(requests[1]?.["messages"])).toContain(
       "Read own history",
     );
+
     const toolMessages = z
       .array(z.object({ role: z.string(), content: z.unknown() }))
       .parse(requests[1]?.["messages"]);
+
     const output = toolMessages.find(({ role }) => role === "tool")?.content;
+
     if (typeof output !== "string")
       throw new Error("Missing native history result");
+
     const page = z
       .object({
         items: z.array(z.object({ conversationId: z.number() })),
         next: z.unknown(),
       })
       .parse(JSON.parse(output));
+
     expect(page.items.length).toBeGreaterThan(0);
     expect(
       page.items.every(
@@ -247,6 +270,7 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
   } finally {
     await backend?.close();
     await server.stop(true);
+
     if (previous === undefined) delete process.env[apiKeyEnv];
     else process.env[apiKeyEnv] = previous;
     await rm(directory, { recursive: true, force: true });
@@ -261,21 +285,26 @@ for (const tools of ["coding", "none"] as const) {
     const previous = process.env[apiKeyEnv];
     process.env[apiKeyEnv] = "fixture-only";
     const requests: Record<string, unknown>[] = [];
+
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       async fetch(request) {
         requests.push(await request.json());
+
         return completion("Fixture answer");
       },
     });
+
     let backend: PiDurableBackend | undefined;
     let saved = "";
     const signal = new AbortController().signal;
+
     const notices = () =>
       JSON.stringify(requests.at(-1)?.["messages"]).match(
         /Shared working agreement changed:/g,
       )?.length ?? 0;
+
     try {
       await writeFile(path, "PRIVATE AGREEMENT ONE");
       backend = await PiDurableBackend.open(
@@ -302,11 +331,13 @@ for (const tools of ["coding", "none"] as const) {
       await backend.prompt(saved, "Next request", signal);
       expect(notices()).toBe(0);
       await writeFile(path, "PRIVATE AGREEMENT TWO");
+
       const foreign = await backend.createSession({
         key: "foreign",
         title: "Foreign",
         signal,
       });
+
       await backend.prompt(foreign, "Foreign request", signal);
       expect(notices()).toBe(0);
       await backend.prompt(saved, "Request after update", signal);
@@ -321,6 +352,7 @@ for (const tools of ["coding", "none"] as const) {
       await backend.prompt(saved, "Resume normal request", signal);
       expect(notices()).toBe(1);
       expect(JSON.stringify(requests)).not.toContain("PRIVATE AGREEMENT");
+
       if (tools === "none")
         expect(
           requests.every(
@@ -333,6 +365,7 @@ for (const tools of ["coding", "none"] as const) {
     } finally {
       await backend?.close();
       await server.stop(true);
+
       if (previous === undefined) delete process.env[apiKeyEnv];
       else process.env[apiKeyEnv] = previous;
       await rm(directory, { recursive: true, force: true });
@@ -448,7 +481,7 @@ for (const scenario of [
     title: "oversized inbox returns a fixed error, not partial JSON",
     name: "stargate_mail",
     args: { op: "inbox", limit: 20 },
-    result: { messages: [{ text: "x".repeat(64000) }], nextAfter: 999 },
+    result: { messages: [{ text: "x".repeat(64_000) }], nextAfter: 999 },
     error: "result too large, retry with a smaller limit",
   },
   {
@@ -489,11 +522,13 @@ for (const scenario of [
     const previous = process.env[apiKeyEnv];
     process.env[apiKeyEnv] = "fixture-only";
     const requests: Record<string, unknown>[] = [];
+
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       async fetch(request) {
         requests.push(await request.json());
+
         return completion(
           "Finished",
           requests.length === 1,
@@ -502,8 +537,10 @@ for (const scenario of [
         );
       },
     });
+
     let backend: PiDurableBackend | undefined;
     const inputs: unknown[] = [];
+
     try {
       backend = await PiDurableBackend.open(
         Schema.decodeUnknownSync(piDurableBackendSchema)({
@@ -522,25 +559,33 @@ for (const scenario of [
             },
             async run(_name, input) {
               inputs.push(input);
+
               if (scenario.result === null)
                 throw new CrewError(scenario.error ?? "");
+
               return scenario.result;
             },
           },
         },
       );
       const signal = new AbortController().signal;
+
       const saved = await backend.createSession({
         key: "member",
         title: "Member",
         signal,
       });
+
       await backend.prompt(saved, "Read a page", signal);
+
       const messages = z
         .array(z.object({ role: z.string(), content: z.unknown() }))
         .parse(requests[1]?.["messages"]);
+
       const output = messages.find(({ role }) => role === "tool")?.content;
+
       if (typeof output !== "string") throw new Error("Missing tool result");
+
       if (scenario.error) {
         expect(output).toContain(scenario.error);
         expect(output).not.toContain("nextAfter");
@@ -561,11 +606,13 @@ for (const scenario of [
           nextAfter: scenario.result?.nextAfter,
           entries: scenario.result?.entries,
         });
+
       if ("input" in scenario)
         expect(inputs).toEqual(scenario.input === null ? [] : [scenario.input]);
     } finally {
       await backend?.close();
       await server.stop(true);
+
       if (previous === undefined) delete process.env[apiKeyEnv];
       else process.env[apiKeyEnv] = previous;
       await rm(directory, { recursive: true, force: true });
@@ -577,17 +624,20 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
   const directory = await mkdtemp(
     join(tmpdir(), "stargate-pi-visible-history-"),
   );
+
   const apiKeyEnv = "STARGATE_VISIBLE_HISTORY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
   const requests: Record<string, unknown>[] = [];
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
       requests.push(await request.json());
+
       return requests.length === 1
-        ? completion(`Visible prior token=fixture-secret ${"x".repeat(60000)}`)
+        ? completion(`Visible prior token=fixture-secret ${"x".repeat(60_000)}`)
         : completion(
             "Finished",
             requests.length === 2,
@@ -596,7 +646,9 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
           );
     },
   });
+
   let backend: PiDurableBackend | undefined;
+
   try {
     backend = await PiDurableBackend.open(
       Schema.decodeUnknownSync(piDurableBackendSchema)({
@@ -617,18 +669,24 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
       },
     );
     const signal = new AbortController().signal;
+
     const saved = await backend.createSession({
       key: "member",
       title: "Member",
       signal,
     });
+
     await backend.prompt(saved, "First turn", signal);
     await backend.prompt(saved, "Read history", signal);
+
     const messages = z
       .array(z.object({ role: z.string(), content: z.unknown() }))
       .parse(requests[2]?.["messages"]);
+
     const output = messages.find(({ role }) => role === "tool")?.content;
+
     if (typeof output !== "string") throw new Error("Missing history output");
+
     const page = z
       .object({
         next: z.record(z.string(), z.unknown()),
@@ -640,6 +698,7 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
         ),
       })
       .parse(JSON.parse(output));
+
     expect(page.items.some(({ text }) => text.includes("Visible prior"))).toBe(
       true,
     );
@@ -650,6 +709,7 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
   } finally {
     await backend?.close();
     await server.stop(true);
+
     if (previous === undefined) delete process.env[apiKeyEnv];
     else process.env[apiKeyEnv] = previous;
     await rm(directory, { recursive: true, force: true });

@@ -22,6 +22,7 @@ export {
   secret,
   teamsSchema,
 } from "./config/composition";
+
 export type {
   AgentDispatchConfig,
   BackendConfig,

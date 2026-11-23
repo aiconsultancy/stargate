@@ -63,6 +63,7 @@ const call = {
   name: "read",
   arguments: { path: "file" },
 } as const;
+
 const result: Message = {
   role: "toolResult",
   toolCallId: call.id,
@@ -94,6 +95,7 @@ test("Pi maps all built-in entry kinds and custom notices", () => {
     ],
     "full",
   );
+
   expect(mapped.map(({ id, role }) => [id, role])).toEqual([
     ["1", "user"],
     ["2", "assistant"],
@@ -126,6 +128,7 @@ test("Pi maps all built-in entry kinds and custom notices", () => {
 
 test("Pi summary hides reasoning and tool bodies; full clips every body", () => {
   const long = "x".repeat(HISTORY_TEXT + 1);
+
   const records = [
     entry(
       1,
@@ -142,6 +145,7 @@ test("Pi summary hides reasoning and tool bodies; full clips every body", () => 
       content: [{ type: "text", text: long }],
     }),
   ];
+
   const summary = mapPiHistory(records, "summary");
   expect(summary[0]?.parts).toEqual([
     { type: "text", text: long.slice(0, HISTORY_TEXT), truncated: true },
@@ -167,6 +171,7 @@ test("Pi ambiguous or unpaired results remain tool entries", () => {
     entry(1, "pi.assistant", assistant([call, call])),
     entry(2, "pi.tool-result", result),
   ];
+
   expect(mapPiHistory(records, "full")[1]).toMatchObject({
     id: "2",
     role: "tool",
@@ -174,11 +179,13 @@ test("Pi ambiguous or unpaired results remain tool entries", () => {
   expect(
     mapPiHistory([records[1] as EntryRecord], "summary")[0]?.parts,
   ).toEqual([{ type: "tool", name: "read", status: "completed" }]);
+
   const duplicates = [
     entry(1, "pi.assistant", assistant([call])),
     entry(2, "pi.tool-result", result),
     entry(3, "pi.tool-result", result),
   ];
+
   expect(mapPiHistory(duplicates, "full")).toHaveLength(3);
 });
 
@@ -187,12 +194,15 @@ test("Pi counts parts beyond the bound", () => {
     { length: HISTORY_PARTS + 3 },
     () => ({ type: "text", text: "part" }),
   );
+
   const mapped = mapPiHistory(
     [entry(1, "pi.assistant", assistant(parts))],
     "summary",
   );
+
   expect(mapped[0]?.parts).toHaveLength(HISTORY_PARTS);
   expect(mapped[0]?.omittedParts).toBe(3);
+
   const hiddenCall = mapPiHistory(
     [
       entry(1, "pi.assistant", assistant([...parts, call])),
@@ -200,6 +210,7 @@ test("Pi counts parts beyond the bound", () => {
     ],
     "full",
   );
+
   expect(hiddenCall[1]).toMatchObject({
     role: "tool",
     parts: [{ type: "tool", output: "contents" }],
@@ -217,6 +228,7 @@ test("Pi clips non-BMP text within the wire bound without splitting characters",
     ],
     "full",
   );
+
   Schema.decodeUnknownSync(historyEntryPageSchema)({ entries });
   expect(entries[0]?.parts[0]).toEqual({
     type: "text",
@@ -228,6 +240,7 @@ test("Pi clips non-BMP text within the wire bound without splitting characters",
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-history-"));
   const path = join(directory, "pi.sqlite");
+
   const harness = await Harness.open(
     await openNodeSqliteStorage(path),
     {
@@ -236,10 +249,12 @@ async function fixture() {
     },
     BACKGROUND_CONTEXT,
   );
+
   const conversation = await harness.createConversation(
     { ownership: { kind: "ownerless" } },
     BACKGROUND_CONTEXT,
   );
+
   for (let i = 0; i < 5; i++)
     await conversation.commit(
       (tx) =>
@@ -249,6 +264,7 @@ async function fixture() {
         }),
       BACKGROUND_CONTEXT,
     );
+
   return {
     directory,
     path,
@@ -265,6 +281,7 @@ test("Pi native pagination supports both orders and cursor retains original orde
   const f = await fixture();
   const history = piSessionHistory(f.harness);
   const signal = new AbortController().signal;
+
   try {
     expect(await history.roots(signal)).toEqual([]);
     expect(await history.describe([f.id, "999999", "bad"], signal)).toEqual([
@@ -274,9 +291,11 @@ test("Pi native pagination supports both orders and cursor retains original orde
       await history.children({ parentID: f.id, limit: 10 }, signal),
     ).toEqual({ sessions: [] });
     const orders: string[][] = [];
+
     for (const order of ["asc", "desc"] as const) {
       const ids: string[] = [];
       let cursor: string | undefined;
+
       do {
         const page = await history.entries(
           {
@@ -288,19 +307,24 @@ test("Pi native pagination supports both orders and cursor retains original orde
           },
           signal,
         );
+
         Schema.decodeUnknownSync(historyEntryPageSchema)(page);
         ids.push(...page.entries.map(({ id }) => id));
         cursor = page.cursor;
       } while (cursor);
+
       expect(ids).toHaveLength(5);
       expect(new Set(ids).size).toBe(5);
       orders.push(ids);
     }
+
     expect(orders[0]).toEqual(orders[1]?.toReversed());
+
     const first = await history.entries(
       { sessionID: f.id, limit: 1, detail: "full", order: "desc" },
       signal,
     );
+
     if (!first.cursor) throw new Error("Missing cursor");
     await expect(
       history.entries(
@@ -335,9 +359,10 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
   const f = await fixture();
   await f.harness.close(BACKGROUND_CONTEXT);
   const db = new Database(f.path);
+
   try {
     const task: TaskRecord<null, { phase: string }, null> = {
-      id: 100000 as TaskId<null>,
+      id: 100_000 as TaskId<null>,
       conversationId: Number(f.id) as ConversationId,
       kind: "test.never-run",
       version: 1,
@@ -347,6 +372,7 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
       restarts: 3,
       state: { status: "running", checkpoint: { phase: "run" } },
     };
+
     db.query("INSERT INTO tasks VALUES (?,?,?,?,?,?,?)").run(
       task.id,
       task.conversationId,
@@ -356,6 +382,7 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
       0,
       JSON.stringify(task),
     );
+
     const snapshot = () =>
       [
         "tasks",
@@ -364,7 +391,9 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
         "submissions",
         "durable_metadata",
       ].map((table) => db.query(`SELECT * FROM ${table} ORDER BY rowid`).all());
+
     const before = snapshot();
+
     const page = await readPiHistory(
       f.directory,
       new AbortController().signal,
@@ -374,6 +403,7 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
           new AbortController().signal,
         ),
     );
+
     expect(page.entries).toHaveLength(5);
     expect(snapshot()).toEqual(before);
   } finally {
@@ -385,14 +415,18 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
 test("Pi history aborts without native reads or missing-database creation", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-history-abort-"));
   let reads = 0;
+
   const history = piSessionHistory({
     async conversation() {
       reads++;
+
       return undefined;
     },
   });
+
   const controller = new AbortController();
   controller.abort(new Error("private abort reason"));
+
   try {
     await expect(
       history.entries(
@@ -417,6 +451,7 @@ test("Pi history refuses stores that need a schema migration", async () => {
   const f = await fixture();
   await f.harness.close(BACKGROUND_CONTEXT);
   const db = new Database(f.path);
+
   try {
     db.exec("UPDATE durable_schema SET version=1");
     const before = db.query("SELECT * FROM durable_schema").all();
@@ -433,13 +468,17 @@ test("Pi history refuses stores that need a schema migration", async () => {
 test("Pi history forwards only canonical numeric IDs and exact JSON cursors", async () => {
   const f = await fixture();
   const opened: number[] = [];
+
   const history = piSessionHistory({
     conversation(id, context) {
       opened.push(id);
+
       return f.harness.conversation(id, context);
     },
   });
+
   const signal = new AbortController().signal;
+
   try {
     expect(
       await history.describe(
@@ -465,6 +504,7 @@ test("Pi history forwards only canonical numeric IDs and exact JSON cursors", as
     await expect(history.describe([f.id, ""], signal)).rejects.toThrow(
       "Pi history unavailable",
     );
+
     const read = (sessionID: string, cursor?: unknown) =>
       history.entries(
         {
@@ -482,12 +522,16 @@ test("Pi history forwards only canonical numeric IDs and exact JSON cursors", as
         },
         signal,
       );
+
     await expect(read(`0${f.id}`)).rejects.toThrow("Pi history unavailable");
     const first = await read(f.id);
+
     if (!first.cursor) throw new Error("Missing cursor");
+
     const cursor: unknown = JSON.parse(
       Buffer.from(first.cursor, "base64url").toString("utf8"),
     );
+
     if (
       !Predicate.hasProperty(cursor, "page") ||
       !Predicate.isObject(cursor.page)
@@ -499,6 +543,7 @@ test("Pi history forwards only canonical numeric IDs and exact JSON cursors", as
     expect(
       await read(f.id, { ...cursor, page: { ...cursor.page, nested } }),
     ).toEqual(next);
+
     for (const invalid of [
       { ...cursor, extra: true },
       { sessionID: f.id },
@@ -522,6 +567,7 @@ test("Pi history cursor JSON __proto__ keys keep the base pagination outcome", a
   const f = await fixture();
   const history = piSessionHistory(f.harness);
   const signal = new AbortController().signal;
+
   // Raw JSON text keeps __proto__ as an own key, as a client would send it.
   const read = (cursor: string) =>
     history.entries(
@@ -534,25 +580,31 @@ test("Pi history cursor JSON __proto__ keys keep the base pagination outcome", a
       },
       signal,
     );
+
   try {
     const start = await history.entries(
       { sessionID: f.id, limit: 2, order: "asc", detail: "summary" },
       signal,
     );
+
     if (!start.cursor) throw new Error("Missing cursor");
+
     const { page } = JSON.parse(
       Buffer.from(start.cursor, "base64url").toString("utf8"),
     );
+
     const next = await read(JSON.stringify({ sessionID: f.id, page }));
     expect(next.entries).toHaveLength(2);
     const session = `"sessionID":"${f.id}"`;
     const own = `"after":${page.after},"order":"${page.order}"`;
+
     for (const cursor of [
       `{${session},"page":{${own},"__proto__":{"after":0,"order":"descending"}}}`,
       `{${session},"page":{${own},"__proto__":1}}`,
       `{${session},"page":{${own},"x":{"__proto__":{"a":1}}}}`,
     ])
       expect(await read(cursor), cursor).toEqual(next);
+
     for (const cursor of [
       `{${session},"page":{"__proto__":{${own}}}}`,
       `{${session},"page":{"__proto__":1}}`,

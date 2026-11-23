@@ -16,9 +16,12 @@ export function piInputContent(
   } catch {
     throw new AttachmentInputUnavailable("Invalid or oversized Pi attachments");
   }
+
   if (!files.length) return text;
   const content: Exclude<UserInput, string> = [];
+
   if (text) content.push({ type: "text", text });
+
   for (const file of files) {
     if (
       ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.mime)
@@ -46,6 +49,7 @@ export function piInputContent(
       ].includes(file.mime)
     ) {
       let decoded: string;
+
       try {
         decoded = new TextDecoder("utf-8", { fatal: true }).decode(file.data);
       } catch {
@@ -53,6 +57,7 @@ export function piInputContent(
           "Pi text attachments require valid UTF-8",
         );
       }
+
       if (
         file.data.some(
           (byte) =>
@@ -73,5 +78,6 @@ export function piInputContent(
       );
     }
   }
+
   return content;
 }

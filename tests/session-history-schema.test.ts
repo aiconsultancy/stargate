@@ -17,17 +17,19 @@ type HistoryMethod = Extract<
   keyof typeof CrewReporting.methods,
   `history${string}`
 >;
+
 const historyMethods: readonly string[] = [
   "historyRoots",
   "historyDescribe",
   "historyChildren",
   "historyEntries",
 ] satisfies HistoryMethod[];
+
 const isHistoryMethod = (name: string | undefined): name is HistoryMethod =>
   name !== undefined && historyMethods.includes(name);
 
 // Installed OpenCode 2.3 core Rpc.call decodes Effect input and encodes Effect
-// output with default parse options. Standard Schema adapters are not used.
+// Output with default parse options. Standard Schema adapters are not used.
 const codecs: Record<
   HistoryMethod,
   {
@@ -42,24 +44,30 @@ const codecs: Record<
  */
 function native(handler: (input: unknown) => unknown, raw = false) {
   const received: unknown[] = [];
+
   const fetch = async (url: URL | RequestInfo, init?: RequestInit) => {
     const request = new Request(url, init);
     const name = new URL(request.url).pathname.split("/").at(-1);
+
     if (!isHistoryMethod(name)) return new Response(null, { status: 404 });
     const method = codecs[name];
     const body: unknown = await request.json();
+
     const exit = await Effect.runPromiseExit(
       Effect.gen(function* () {
         const input = yield* Schema.decodeUnknownEffect(method.input)(
           Predicate.hasProperty(body, "input") ? body.input : undefined,
         );
+
         received.push(input);
         const output = handler(input);
+
         return raw
           ? output
           : yield* Schema.encodeUnknownEffect(method.output)(output);
       }),
     );
+
     return exit._tag === "Success"
       ? Response.json({ output: exit.value })
       : Response.json(
@@ -67,12 +75,15 @@ function native(handler: (input: unknown) => unknown, raw = false) {
           { status: 400 },
         );
   };
+
   const client = OpenCode.make({
     baseUrl: "http://opencode.invalid",
     fetch: Object.assign(fetch, { preconnect: globalThis.fetch.preconnect }),
   });
+
   const rpc = client.rpc(CrewReporting);
   const options = { location: { directory: "/captain" } };
+
   const run = async (name: HistoryMethod, input: unknown) => {
     try {
       // Invalid inputs must reach the endpoint; bypass the typed signature.
@@ -80,17 +91,20 @@ function native(handler: (input: unknown) => unknown, raw = false) {
         input,
         options,
       ]);
+
       return { ok: true, value: await result };
     } catch {
       return { ok: false };
     }
   };
+
   return { client, received, run };
 }
 
 const emoji = (count: number) => "😀".repeat(count);
 const session = { id: "s", harness: "pi-durable", kind: "conversation" };
 const text = (value: string) => ({ type: "text", text: value });
+
 const page = (...parts: unknown[]) => ({
   entries: [{ id: "e", role: "assistant", parts }],
 });
@@ -102,6 +116,7 @@ describe("history RPC input decoding", () => {
         ? { sessions: [] }
         : { entries: [] },
     );
+
     expect(await f.run("historyChildren", { parentID: "a" })).toEqual({
       ok: true,
       value: { sessions: [] },
@@ -136,6 +151,7 @@ describe("history RPC input decoding", () => {
     const f = native(() => {
       throw new Error("Handler must not run");
     });
+
     const cases: [HistoryMethod, unknown][] = [
       ["historyRoots", { extra: true }],
       ["historyRoots", null],
@@ -163,6 +179,7 @@ describe("history RPC input decoding", () => {
       ["historyEntries", { sessionID: "a", limit: 2 ** 53 }],
       ["historyEntries", { sessionID: "a", extra: true }],
     ];
+
     for (const [name, input] of cases)
       expect(await f.run(name, input), JSON.stringify(input)).toEqual({
         ok: false,
@@ -201,6 +218,7 @@ describe("history RPC output validation", () => {
     },
     { sessions: Array(HISTORY_PAGE).fill(session) },
   ];
+
   const rejected: unknown[] = [
     { sessions: [], extra: true },
     { sessions: [{ ...session, extra: true }] },
@@ -221,6 +239,7 @@ describe("history RPC output validation", () => {
         value: output,
       });
     }
+
     for (const output of rejected) {
       const f = native(() => output);
       expect(
@@ -263,6 +282,7 @@ describe("history RPC output validation", () => {
       },
       { entries: Array(HISTORY_PAGE).fill(page().entries[0]) },
     ];
+
     for (const output of valid) {
       const f = native(() => output);
       expect(await f.run("historyEntries", { sessionID: "a" })).toEqual({
@@ -270,6 +290,7 @@ describe("history RPC output validation", () => {
         value: output,
       });
     }
+
     const invalid = [
       page(text(emoji(HISTORY_TEXT + 1))),
       page({ ...text("x"), extra: true }),
@@ -285,6 +306,7 @@ describe("history RPC output validation", () => {
       { entries: Array(HISTORY_PAGE + 1).fill(page().entries[0]) },
       { entries: [], cursor: "" },
     ];
+
     for (const output of invalid) {
       const f = native(() => output);
       expect(
@@ -298,8 +320,10 @@ describe("history RPC output validation", () => {
 describe("OpenCode history through the native RPC client", () => {
   const failure =
     "Session history unavailable or cancelled; raw details withheld.";
+
   const history = (output: unknown) =>
     new OpenCodeHistory(native(() => output, true).client, "/captain");
+
   const signal = new AbortController().signal;
 
   test("valid Pi pages pass and unknown nested keys fail closed", async () => {
@@ -333,15 +357,18 @@ describe("OpenCode history through the native RPC client", () => {
 
 describe("exported history decoders", () => {
   // Zod 4 strict objects enumerate keys with for...in: inherited enumerable
-  // keys are unknown, while inherited declared fields still decode.
+  // Keys are unknown, while inherited declared fields still decode.
   const inherit = (prototype: object, own: object): unknown =>
     Object.assign(Object.create(prototype), own);
+
   const decode = (schema: Schema.Codec<unknown, unknown>, value: unknown) => {
     const exit = Schema.decodeUnknownExit(schema)(value);
+
     return Exit.isSuccess(exit)
       ? { ok: true, value: exit.value }
       : { ok: false };
   };
+
   const roots = CrewReporting.methods.historyRoots.input;
 
   test("inherited unknown keys reject at every strict object", () => {
@@ -371,6 +398,7 @@ describe("exported history decoders", () => {
         inherit({ limit: 2 }, { parentID: "a" }),
       ),
     ).toStrictEqual({ ok: true, value: { parentID: "a", limit: 2 } });
+
     for (const value of [
       Object.create(null),
       Object.defineProperty({}, "hidden", { value: 1 }),

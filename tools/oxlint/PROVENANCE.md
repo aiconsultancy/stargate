@@ -17,14 +17,10 @@
 - Biome was removed in November 2026: the quality gate is the root
   `.oxlintrc.json` (correctness category plus the former Biome rule set),
   and this file is the advisory deep configuration.
-- Local policy: `require-readable-spacing` is disabled because Biome owns
-  this repository's formatting. Every other generic and Effect rule runs
-  as an error.
-- Run with `make oxlint` (mise task `oxlint`). Not yet part of `make
-  check` until the existing findings are triaged.
-
-- Run with `make oxlint` (mise task `oxlint`). Not yet part of `make
-  check` until the existing findings are triaged.
+- Local policy: the root gate checks `anti-slop/require-readable-spacing`.
+  Oxfmt handles the rest of formatting. Run `make format` to apply both.
+  The other generic and Effect rules and the lint size ceilings stay advisory.
+- Run the advisory configuration with `make oxlint` (mise task `oxlint`).
 
 ## Type-checking audit (November 2026)
 

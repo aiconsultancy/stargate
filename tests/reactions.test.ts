@@ -33,6 +33,7 @@ test("explicit first-line directives select supported emoji and strip only that 
       silent: false,
     });
   }
+
   expect(parseReactionReply("[[stargate:react:eyes]]\r\nReviewed.").text).toBe(
     "Reviewed.",
   );
@@ -67,6 +68,7 @@ test("invalid, quoted, embedded, and target-bearing directives remain ordinary t
 
 test("streaming buffers only possible leading directives until the line completes", () => {
   const directive = "[[stargate:react:eyes]]";
+
   for (let length = 0; length <= directive.length; length++) {
     expect(parseReactionReply(directive.slice(0, length), false)).toEqual({
       text: "",
@@ -75,6 +77,7 @@ test("streaming buffers only possible leading directives until the line complete
       silent: false,
     });
   }
+
   expect(parseReactionReply(`${directive}\r`, false).pending).toBe(true);
   expect(parseReactionReply(`${directive}\nLooking now.`, false)).toEqual({
     text: "Looking now.",
@@ -105,6 +108,7 @@ test("a first-line silent directive removes all public text", () => {
       silent: true,
     });
   }
+
   expect(silentDirective).toBe("[[stargate:silent]]");
   expect(reactionInstructions).toContain(silentDirective);
 });
@@ -122,6 +126,7 @@ test("silent combines with one reaction in either order", () => {
       silent: true,
     });
   }
+
   // Each directive leads at most once; a repeat is ordinary text.
   expect(
     parseReactionReply(
@@ -171,6 +176,7 @@ test("streaming holds a possible silent directive until its line completes", () 
       { text: "", pending: true, reaction: undefined, silent: false },
     );
   }
+
   expect(parseReactionReply(`${silentDirective}\r`, false).pending).toBe(true);
   // The line is complete: silent is known while a reaction line can follow.
   expect(parseReactionReply(`${silentDirective}\n`, false)).toEqual({

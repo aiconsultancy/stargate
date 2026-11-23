@@ -10,17 +10,20 @@ const plan = {
   impact: "Brief disconnect",
   rollback: "Restore release",
 };
+
 const caller = (signal = new AbortController().signal) => ({
   sessionID: "captain",
   agent: "adama",
   signal,
 });
+
 const owner = { sessionID: "captain", id: "turn" };
 
 function fixture() {
   let now = 0;
   let authorized = true;
   const waiting = new Set<() => void>();
+
   const gate = new CrewMaintenance(
     {
       options: { team: { captain: { id: "adama" } } },
@@ -42,17 +45,21 @@ function fixture() {
             waiting.delete(done);
             resolve();
           };
+
           const abort = () => {
             signal.removeEventListener("abort", abort);
             waiting.delete(done);
             reject(new Error("Cancelled"));
           };
+
           waiting.add(done);
           signal.addEventListener("abort", abort, { once: true });
+
           if (signal.aborted) abort();
         }),
     },
   );
+
   return {
     gate,
     advance: (ms: number) => {
@@ -70,6 +77,7 @@ function fixture() {
 test("maintenance requires confirmed notice delivery and the full opt-out window", async () => {
   let now = 1000;
   const waits: (() => void)[] = [];
+
   const gate = new CrewMaintenance(
     { options: { team: { captain: { id: "adama" } } }, async captain() {} },
     {
@@ -77,9 +85,11 @@ test("maintenance requires confirmed notice delivery and the full opt-out window
       wait: () => new Promise<void>((resolve) => waits.push(resolve)),
     },
   );
+
   const signal = new AbortController().signal;
   const owner = { sessionID: "captain", id: "turn" };
   await gate.open(owner, signal);
+
   const task = gate.run(
     {
       plan: "Restart Stargate",
@@ -88,10 +98,13 @@ test("maintenance requires confirmed notice delivery and the full opt-out window
     },
     { sessionID: "captain", agent: "adama", signal },
   );
+
   await Promise.resolve();
   const notice = gate.read(owner);
   expect(notice?.plan).toBe("Restart Stargate");
+
   if (!notice) throw new Error("Notice missing");
+
   const advance = (ms: number) => {
     while (ms > 0) {
       const step = Math.min(ms, 5000);
@@ -100,6 +113,7 @@ test("maintenance requires confirmed notice delivery and the full opt-out window
       ms -= step;
     }
   };
+
   advance(maintenanceWindowMs);
   expect(gate.read(owner)?.id).toBe(notice.id);
   gate.delivered({ ...owner, noticeID: notice.id });
@@ -118,6 +132,7 @@ test("maintenance requires confirmed notice delivery and the full opt-out window
     windowMs: 300_000,
   });
   gate.close(owner);
+
   for (const resolve of waits) resolve();
 });
 
@@ -127,23 +142,31 @@ test("cancellation, disposal, expired lease and failed authority never grant per
     const stop = new AbortController();
     await f.gate.open(owner, stop.signal);
     const result = f.gate.run(plan, caller(stop.signal));
+
     const rejected = result.then(
       () => false,
       () => true,
     );
+
     await Promise.resolve();
     const notice = f.gate.read(owner);
+
     if (!notice) throw new Error("Missing notice");
     f.gate.delivered({ ...owner, noticeID: notice.id });
+
     if (action === "cancel") stop.abort();
+
     if (action === "dispose") f.gate.dispose();
+
     if (action === "disconnect") {
       f.advance(10_001);
       f.tick();
     }
+
     expect(await rejected).toBe(true);
     f.gate.dispose();
   }
+
   const f = fixture();
   f.deny();
   await expect(f.gate.open(owner, caller().signal)).rejects.toThrow(
@@ -161,6 +184,7 @@ test("turn ownership, stale delivery and unregistered tool calls fail closed", a
   await expect(f.gate.open(owner, caller().signal)).rejects.toThrow(
     "already registered",
   );
+
   for (const other of [
     { ...owner, sessionID: "other" },
     { ...owner, id: "other" },
@@ -168,12 +192,15 @@ test("turn ownership, stale delivery and unregistered tool calls fail closed", a
     expect(() => f.gate.read(other)).toThrow("ownership unavailable");
     expect(() => f.gate.delivered({ ...other, noticeID: "old" })).toThrow();
   }
+
   expect(() => f.gate.close({ ...owner, id: "other" })).toThrow("turn changed");
   const result = f.gate.run(plan, caller());
+
   const rejected = result.then(
     () => false,
     () => true,
   );
+
   await Promise.resolve();
   expect(() => f.gate.delivered({ ...owner, noticeID: "old" })).toThrow(
     "notice changed",
@@ -193,12 +220,15 @@ test("duplicate delivery cannot shorten the window and expired gateway cannot re
   const f = fixture();
   await f.gate.open(owner, caller().signal);
   const result = f.gate.run(plan, caller());
+
   const rejected = result.then(
     () => false,
     () => true,
   );
+
   await Promise.resolve();
   const notice = f.gate.read(owner);
+
   if (!notice) throw new Error("Missing notice");
   f.gate.delivered({ ...owner, noticeID: notice.id });
   f.advance(5000);
@@ -212,17 +242,20 @@ test("duplicate delivery cannot shorten the window and expired gateway cannot re
 test("turn budget pauses only the maintenance wait and does not replenish work time", () => {
   let now = 0;
   const timers: { ms: number; cancelled: boolean; expire(): void }[] = [];
+
   const budget = new TurnBudget(
     30_000,
     () => now,
     (ms, expire) => {
       const timer = { ms, expire, cancelled: false };
       timers.push(timer);
+
       return () => {
         timer.cancelled = true;
       };
     },
   );
+
   try {
     now = 1000;
     budget.pause();

@@ -6,8 +6,10 @@ import { open } from "node:fs/promises";
 export async function clientPem(path: string) {
   try {
     const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+
     try {
       const stat = await file.stat();
+
       if (
         !stat.isFile() ||
         stat.uid !== process.getuid?.() ||
@@ -16,13 +18,17 @@ export async function clientPem(path: string) {
       )
         throw new Error();
       const pem = await file.readFile({ encoding: "utf8" });
+
       const certs = pem.match(
         /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g,
       );
+
       const key = pem.match(
         /-----BEGIN (PRIVATE KEY|EC PRIVATE KEY|RSA PRIVATE KEY)-----[\s\S]*?-----END \1-----/,
       )?.[0];
+
       const leaf = certs?.[0];
+
       if (
         !certs ||
         !leaf ||
@@ -30,6 +36,7 @@ export async function clientPem(path: string) {
         !new X509Certificate(leaf).checkPrivateKey(createPrivateKey(key))
       )
         throw new Error();
+
       return { cert: certs.join("\n"), key };
     } finally {
       await file.close();

@@ -21,13 +21,17 @@ import {
 
 const failure =
   "Session history unavailable or cancelled; raw details withheld.";
+
 const model = { providerID: "provider", id: "model", variant: "high" };
 const time = { created: 10 };
+
 const info = (id: string): Pick<SessionInfo, "id" | "time"> => ({
   id,
   time: { created: 10, updated: 20 },
 });
+
 const base = { id: "message", time };
+
 const assistant = (
   content: Extract<SessionMessageInfo, { type: "assistant" }>["content"],
 ): SessionMessageInfo => ({
@@ -37,6 +41,7 @@ const assistant = (
   model,
   content,
 });
+
 const tool = (
   state: SessionMessageAssistantTool["state"],
   name = "subagent",
@@ -51,7 +56,8 @@ const tool = (
 function fixture() {
   const controller = new AbortController();
   const { signal } = controller;
-  const calls: Array<{ method: string; input: unknown; request: unknown }> = [];
+  const calls: { method: string; input: unknown; request: unknown }[] = [];
+
   const data = {
     messages: [] as SessionMessageInfo[],
     sessions: [info("child")],
@@ -65,6 +71,7 @@ function fixture() {
     children: { sessions: [] } as unknown,
     entries: { entries: [] } as unknown,
   };
+
   const record = (
     method: string,
     input: unknown,
@@ -73,47 +80,59 @@ function fixture() {
     expect(request.signal).toBe(signal);
     calls.push({ method, input, request });
   };
+
   const reporting: OpenCodeHistoryReporting = {
     async historyRoots(input, request) {
       record("roots", input, request);
+
       return data.roots;
     },
     async historyDescribe(input, request) {
       record("describe", input, request);
+
       return data.describe;
     },
     async historyChildren(input, request) {
       record("children", input, request);
+
       return data.children;
     },
     async historyEntries(input, request) {
       record("entries", input, request);
+
       return data.entries;
     },
   };
+
   const client: OpenCodeHistoryClient = {
     session: {
       async get(input, request) {
         record("get", input, request);
+
         return info(input.sessionID);
       },
       async list(input, request) {
         record("list", input, request);
+
         return { data: data.sessions, cursor: { next: data.cursor ?? null } };
       },
     },
     message: {
       async list(input, request) {
         record("messages", input, request);
+
         return { data: data.messages, cursor: { next: data.cursor ?? null } };
       },
     },
     rpc(definition) {
       expect(definition).toBe(CrewReporting);
+
       return reporting;
     },
   };
+
   const history = new OpenCodeHistory(client, "/captain");
+
   const entries = (input: Partial<HistoryEntriesInput> = {}) =>
     history.entries(
       Schema.decodeUnknownSync(historyEntriesInputSchema)({
@@ -122,6 +141,7 @@ function fixture() {
       }),
       signal,
     );
+
   return {
     client,
     reporting,
@@ -166,8 +186,10 @@ describe("OpenCode fleet history", () => {
     };
     f.client.session.get = async ({ sessionID }, { signal }) => {
       expect(signal).toBe(f.signal);
+
       if (sessionID === "missing")
         throw { _tag: "SessionNotFoundError", message: "private missing ID" };
+
       return {
         ...info(sessionID),
         ...(sessionID === "child" && { parentID: "native" }),
@@ -176,6 +198,7 @@ describe("OpenCode fleet history", () => {
         model,
       };
     };
+
     expect(
       await f.history.describe(
         ["native", "pi:worker", "missing", "child", "pi:child"],
@@ -231,15 +254,19 @@ describe("OpenCode fleet history", () => {
       calls++;
       active++;
       maximum = Math.max(maximum, active);
+
       if (active === 5) started.resolve();
       await gate.promise;
       active--;
+
       return info(sessionID);
     };
+
     const result = f.history.describe(
       Array.from({ length: 12 }, (_, i) => `session-${i}`),
       f.signal,
     );
+
     await started.promise;
     expect(calls).toBe(5);
     gate.resolve();
@@ -254,10 +281,12 @@ describe("OpenCode fleet history", () => {
       info("active"),
     ];
     f.data.cursor = "opaque-next";
+
     const first = await f.history.children(
       { parentID: "root", limit: 2 },
       f.signal,
     );
+
     expect(first.sessions.map((session) => session.id)).toEqual([
       "archived",
       "active",
@@ -613,22 +642,26 @@ describe("OpenCode fleet history", () => {
     const page = await f.entries({ detail: "full" });
     expect(page.entries[0]?.parts).toHaveLength(HISTORY_PARTS);
     expect(page.entries[0]?.omittedParts).toBe(3);
+
     for (const entry of page.entries)
       for (const part of entry.parts) {
         if (part.type === "text" && part.text !== "extra") {
           expect(part.text).toHaveLength(HISTORY_TEXT);
           expect(part.truncated).toBe(true);
         }
+
         if (part.type === "reasoning") {
           expect(part.text).toHaveLength(HISTORY_TEXT);
           expect(part.truncated).toBe(true);
         }
+
         if (part.type === "tool") {
           expect(part.input).toHaveLength(HISTORY_TEXT);
           expect(part.output).toHaveLength(HISTORY_TEXT);
           expect(part.truncated).toBe(true);
         }
       }
+
     expect(() =>
       Schema.decodeUnknownSync(historyEntryPageSchema)(page),
     ).not.toThrow();
@@ -678,9 +711,11 @@ describe("OpenCode fleet history", () => {
 
   test("sanitizes SDK and RPC failures; only real not-found errors are omitted", async () => {
     const f = fixture();
+
     const fail = async () => {
       throw new Error("private transcript token headers session-id");
     };
+
     f.client.session.get = fail;
     f.client.session.list = fail;
     f.client.message.list = fail;
@@ -688,6 +723,7 @@ describe("OpenCode fleet history", () => {
     f.reporting.historyDescribe = fail;
     f.reporting.historyChildren = fail;
     f.reporting.historyEntries = fail;
+
     const operations = [
       () => f.history.roots(f.signal),
       () => f.history.describe(["native"], f.signal),
@@ -697,6 +733,7 @@ describe("OpenCode fleet history", () => {
       () => f.entries(),
       () => f.entries({ sessionID: "pi:worker" }),
     ];
+
     for (const run of operations) await expect(run()).rejects.toThrow(failure);
   });
 
@@ -720,12 +757,14 @@ describe("OpenCode fleet history", () => {
     f.client.message.list = async (_input, { signal }) => {
       expect(signal).toBe(f.signal);
       started.resolve();
+
       return new Promise((_resolve, reject) =>
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         }),
       );
     };
+
     const reading = f.entries();
     await started.promise;
     f.controller.abort(new Error("private abort reason"));
@@ -736,8 +775,10 @@ describe("OpenCode fleet history", () => {
     const f = fixture();
     f.reporting.historyRoots = async () => {
       f.controller.abort();
+
       return f.data.roots;
     };
+
     await expect(f.history.roots(f.signal)).rejects.toThrow(failure);
   });
 });

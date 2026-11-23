@@ -25,14 +25,17 @@ import { CrewError } from "../src/crew/execution/state";
 import { settingsIssues } from "../src/config/settings-schema";
 
 const directories: string[] = [];
+
 afterEach(async () => {
   for (const path of directories.splice(0))
     await rm(path, { recursive: true, force: true });
 });
+
 const signal = () => new AbortController().signal;
 
 test("stored post files remain unbounded while new posts permit at most ten paths", () => {
   const store = new CaptainPostStore(":memory:");
+
   const file = {
     path: "/report.txt",
     caption: "report",
@@ -41,10 +44,12 @@ test("stored post files remain unbounded while new posts permit at most ten path
     size: 1,
     sha256: "a".repeat(64),
   };
+
   const files = Array.from({ length: 11 }, () => ({
     file,
     status: "pending" as const,
   }));
+
   try {
     store.admit(
       "bot",
@@ -96,7 +101,7 @@ type FixtureOptions = {
 
 async function fixture(initial: FixtureOptions = {}) {
   // Under TMPDIR (often ~/.cache/tmp): hidden segments above a post
-  // directory are allowed; hidden segments below it stay denied.
+  // Directory are allowed; hidden segments below it stay denied.
   const root = await realpath(await mkdtemp(join(tmpdir(), "stargate-post-")));
   directories.push(root);
   const captain = join(root, "captain");
@@ -104,6 +109,7 @@ async function fixture(initial: FixtureOptions = {}) {
   await mkdir(captain);
   await mkdir(files);
   const configPath = join(root, "stargate.json");
+
   const writeConfig = (options: FixtureOptions) =>
     writeFile(
       configPath,
@@ -141,6 +147,7 @@ async function fixture(initial: FixtureOptions = {}) {
         ],
       }),
     );
+
   await writeConfig(initial);
   const calls: Call[] = [];
   const uploads: Uint8Array[] = [];
@@ -148,6 +155,7 @@ async function fixture(initial: FixtureOptions = {}) {
   let clock = Date.parse("2026-11-13T10:00:00Z");
   let counter = 0;
   const shares = new Map<string, { channel: string; thread: string }>();
+
   const behaviour: {
     post: (params: URLSearchParams) => unknown;
     complete: (params: URLSearchParams) => unknown;
@@ -159,27 +167,37 @@ async function fixture(initial: FixtureOptions = {}) {
       const [file] = JSON.parse(params.get("files") ?? "[]") as {
         id: string;
       }[];
+
       shares.set(file?.id ?? "", {
         channel: params.get("channel_id") ?? "",
         thread: params.get("thread_ts") ?? "",
       });
+
       return { ok: true, files: [{ id: file?.id }] };
     },
   };
+
   let uploadID = 0;
+
   const fetch: PostDependencies["fetch"] = async (url, init) => {
     const target = new URL(url);
+
     if (target.origin === "https://files.slack.com") {
       uploads.push(new Uint8Array(init?.body as ArrayBuffer));
+
       return behaviour.upload(target);
     }
+
     const method = target.pathname.replace("/api/", "");
     const params = new URLSearchParams(String(init?.body ?? ""));
     calls.push({ method, params });
+
     const json = (value: unknown) => {
       if (value instanceof Error) throw value;
+
       return Response.json(value);
     };
+
     switch (method) {
       case "auth.test":
         return json({ ok: true, bot_id: "B1", team_id: "T1", user_id: "UB" });
@@ -192,6 +210,7 @@ async function fixture(initial: FixtureOptions = {}) {
         });
       case "files.getUploadURLExternal":
         uploadID++;
+
         return json({
           ok: true,
           file_id: `F${uploadID}`,
@@ -202,6 +221,7 @@ async function fixture(initial: FixtureOptions = {}) {
       case "files.info": {
         const id = params.get("file") ?? "";
         const share = shares.get(id);
+
         return json({
           ok: true,
           file: {
@@ -213,24 +233,30 @@ async function fixture(initial: FixtureOptions = {}) {
         });
       }
     }
+
     throw new Error(`Unexpected Slack method ${method}`);
   };
+
   const dependencies: PostDependencies = {
     now: () => clock,
     token: async () => "test-bot-token",
     fetch,
     audit: (entry) => audits.push(entry),
   };
+
   const binding = {
     configPath,
     bot: "galactica",
     expectedDirectory: captain,
     captainSessionID: "ses_captain",
   };
+
   const post = (input: Record<string, unknown>, stop = signal()) =>
     runCaptainPost(input, binding, stop, dependencies);
+
   const posts = () =>
     calls.filter(({ method }) => method === "chat.postMessage");
+
   return {
     root,
     captain,
@@ -254,11 +280,13 @@ async function fixture(initial: FixtureOptions = {}) {
 
 test("posts top-level markdown as the bound bot and returns its permalink", async () => {
   const f = await fixture();
+
   const result = await f.post({
     channel: "C123",
     text: "Release *ready* for <@U0ABC>",
     key: "call_1",
   });
+
   expect(result).toMatchObject({
     status: "posted",
     channel: "C123",
@@ -312,12 +340,14 @@ test("posts need captainPost.channels and inbound access; denies override", asyn
     deniedChannels: ["CSECRET"],
     captainPost: { channels: ["C123", "CSECRET", "D777", "GMPIM1"] },
   });
+
   // Inbound `*` never widens outbound posting; DMs and group DMs need an ID.
   for (const channel of ["CSECRET", "CUNLISTED", "D999", "GMPIM2"])
     await expect(
       f.post({ channel, text: "hello", key: channel }),
     ).rejects.toThrow("not allowed");
   expect(f.calls).toHaveLength(0);
+
   for (const channel of ["C123", "D777", "GMPIM1"])
     await f.post({ channel, text: "hello" });
   expect(f.posts().map(({ params }) => params.get("channel"))).toEqual([
@@ -332,6 +362,7 @@ test("posts need captainPost.channels and inbound access; denies override", asyn
     channels: ["C123"],
     captainPost: { channels: ["C123", "COPS"] },
   });
+
   await expect(narrow.post({ channel: "COPS", text: "x" })).rejects.toThrow(
     "not allowed",
   );
@@ -344,6 +375,7 @@ test("disabled bots and mismatched bindings refuse before Slack", async () => {
     "stargate_post is off",
   );
   const f = await fixture();
+
   for (const binding of [
     { ...f.binding, expectedDirectory: "/other" },
     { ...f.binding, captainSessionID: "ses_other" },
@@ -411,6 +443,7 @@ test("rolling hourly limit is per bot and retries do not count", async () => {
   const f = await fixture({
     captainPost: { postsPerHour: 2, fileDirectories: [] },
   });
+
   await f.post({ channel: "C123", text: "1", key: "a" });
   await f.post({ channel: "C123", text: "1", key: "a" });
   await f.post({ channel: "C123", text: "2", key: "b" });
@@ -431,6 +464,7 @@ test("files must be canonical regular files inside post directories", async () =
   await symlink(outside, linked);
   const hidden = join(f.files, ".hidden.txt");
   await writeFile(hidden, "hidden");
+
   for (const path of [outside, linked, hidden, "relative.txt"])
     await expect(
       f.post({ channel: "C123", text: "proof", files: [path] }),
@@ -460,16 +494,19 @@ test("files upload into the new message's thread and resume on retry", async () 
   const complete = f.behaviour.complete;
   f.behaviour.complete = (params) => {
     completions++;
+
     return completions === 2
       ? { ok: false, error: "internal_error" }
       : complete(params);
   };
+
   const input = {
     channel: "C123",
     text: "See files",
     files: [report, second],
     key: "call_files",
   };
+
   const result = await f.post(input);
   expect(result).toMatchObject({
     status: "partial",
@@ -479,9 +516,11 @@ test("files upload into the new message's thread and resume on retry", async () 
       { name: "second.txt", status: "unconfirmed" },
     ],
   });
+
   const share = f.calls.find(
     ({ method }) => method === "files.completeUploadExternal",
   );
+
   expect(share?.params.get("thread_ts")).toBe("1700000000.000100");
   expect(new TextDecoder().decode(f.uploads[0])).toBe("report body");
   // Unconfirmed completion is checked, not completed again.
@@ -513,12 +552,15 @@ test("captainPost config needs explicit channels and an OpenCode backend", () =>
         },
       ],
     });
+
   expect(Result.isSuccess(check({ channels: ["C1", "G2", "D3"] }))).toBe(true);
   expect(Result.isSuccess(check({ channels: ["C1"] }, "module"))).toBe(false);
+
   for (const invalid of [{}, { channels: [] }, { channels: ["#general"] }])
     expect(Result.isSuccess(check(invalid))).toBe(false);
   const wildcard = check({ channels: ["*"] });
   expect(Result.isSuccess(wildcard)).toBe(false);
+
   if (Result.isFailure(wildcard))
     expect(
       JSON.stringify(settingsIssues(wildcard.failure.issue).issues),
@@ -527,6 +569,7 @@ test("captainPost config needs explicit channels and an OpenCode backend", () =>
 
 function crew() {
   const calls: { raw: unknown; binding: unknown }[] = [];
+
   const authority = {
     options: {
       captainDirectory: "/captain",
@@ -537,16 +580,20 @@ function crew() {
       if (caller.agent !== "adama") throw new CrewError("Captain only.");
     },
   };
+
   const runner = (async (raw: unknown, binding: unknown) => {
     calls.push({ raw, binding });
+
     return { status: "posted" };
   }) as unknown as typeof runCaptainPost;
+
   const caller: CrewCaller = {
     agent: "adama",
     sessionID: "ses_captain",
     id: "call_tool",
     signal: signal(),
   };
+
   return { calls, authority, runner, caller };
 }
 
@@ -585,10 +632,12 @@ test("crew members cannot post and binding fields cannot be injected", async () 
       raw: expect.objectContaining({ key: "explicit" }),
     }),
   ]);
+
   const unbound = new CrewPost(
     { ...c.authority, options: { captainDirectory: "/captain" } },
     c.runner,
   );
+
   await expect(
     unbound.run({ channel: "C123", text: "x" }, c.caller),
   ).rejects.toThrow("stargate_post unavailable");
@@ -605,6 +654,7 @@ test("default file roots follow OpenCode's tmpdir rule at call time", async () =
   await writeFile(join(f.captain, "notes.txt"), "notes");
   await writeFile(join(f.files, "elsewhere.txt"), "elsewhere");
   process.env["TMPDIR"] = scratch;
+
   try {
     expect(
       await f.post({
@@ -619,6 +669,7 @@ test("default file roots follow OpenCode's tmpdir rule at call time", async () =
         { name: "notes.txt", status: "shared" },
       ],
     });
+
     for (const path of [
       join(opencode, ".git", "config"),
       join(f.files, "elsewhere.txt"),
@@ -630,6 +681,7 @@ test("default file roots follow OpenCode's tmpdir rule at call time", async () =
     if (previous === undefined) delete process.env["TMPDIR"];
     else process.env["TMPDIR"] = previous;
   }
+
   expect(f.posts()).toHaveLength(1);
 });
 
@@ -644,22 +696,28 @@ test("concurrent same-key retries never upload one file twice", async () => {
     files: [{ status: "not-shared" }],
   });
   let release: () => void = () => {};
+
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
+
   const started: (() => void)[] = [];
+
   const putStarted = [0, 1].map(
     (index) =>
       new Promise<void>((resolve) => {
         started[index] = resolve;
       }),
   );
+
   let puts = 0;
   f.behaviour.upload = async () => {
     started[puts++]?.();
     await gate;
+
     return new Response("OK");
   };
+
   const first = f.post(input);
   await putStarted[0];
   const second = f.post(input);

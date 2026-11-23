@@ -22,11 +22,13 @@ describe("Markdown reply chunks", () => {
       const code = `${"const n = '🦘';\n".repeat(400)}done();\n`;
       const parts = chunks(`${marker}typescript\n${code}${marker}`);
       expect(parts.length).toBeGreaterThan(1);
+
       for (const part of parts) {
         expect(Array.from(part).length).toBeLessThanOrEqual(2800);
         expect(part).toStartWith(`${marker}typescript\n`);
         expect(part).toEndWith(`\n${marker}`);
       }
+
       expect(
         parts
           .map((part) =>
@@ -66,6 +68,7 @@ describe("Markdown reply chunks", () => {
     ]) {
       const parts = chunks(snapshot);
       expect(chunks(snapshot)).toEqual(parts);
+
       for (const part of parts) {
         expect(Array.from(part).length).toBeLessThanOrEqual(2800);
         expect(part).toEndWith(snapshot.startsWith("~") ? "\n~~~" : "\n```");
@@ -74,6 +77,7 @@ describe("Markdown reply chunks", () => {
         );
       }
     }
+
     expect(chunks("```ts\nhello\n```\nFinal")).toEqual([
       "```ts\nhello\n```\nFinal",
     ]);
@@ -90,6 +94,7 @@ describe("Markdown reply chunks", () => {
       expect(parts.every((part) => Array.from(part).length <= 2800)).toBe(true);
       expect(parts.join("")).toContain("[Response truncated by Stargate.]");
     }
+
     expect(chunks("a".repeat(70_000)).join("")).toBe(
       `${"a".repeat(60_000)}\n[Response truncated by Stargate.]`,
     );
@@ -108,6 +113,7 @@ test("chunk boundaries never cut bounded complete user or channel mentions", () 
       expect(parts.every((part) => Array.from(part).length <= 2800)).toBe(true);
     }
   }
+
   const unicode = "🦘".repeat(2798) + "<@U123>";
   expect(prepareSlackReply(unicode).map(replyText)).toEqual([
     "🦘".repeat(2798),
@@ -120,12 +126,15 @@ test("inline code cannot notify when split, including marker-free middle chunks"
     const source = `Use \`${"x".repeat(3000)} <@U123> ${"y".repeat(5500)}${close}`;
     const parts = prepareSlackReply(source);
     expect(parts.length).toBeGreaterThan(3);
+
     for (const part of parts) {
       expect(Array.from(replyText(part)).length).toBeLessThanOrEqual(2800);
       expect(JSON.stringify(part)).not.toContain('"user_id":"U123"');
     }
+
     if (close) expect(JSON.stringify(parts)).toContain('"user_id":"U9"');
   }
+
   const parts = prepareSlackReply(`${"a".repeat(2796)}\`<@U123>\``);
   expect(parts.length).toBe(2);
   expect(JSON.stringify(parts)).not.toContain('"type":"user"');
@@ -144,11 +153,13 @@ test("an unmatched code span crossing a fence cannot hang chunking", () => {
     ],
     { cwd: new URL("..", import.meta.url).pathname, timeout: 2000 },
   );
+
   expect(result.exitCode).toBe(0);
 });
 
 test("a stray backtick cannot flatten subsequent Markdown paragraphs", () => {
   const prefix = "Press the ` key to open the console.\n\n";
+
   const text =
     prefix +
     Array.from(
@@ -156,6 +167,7 @@ test("a stray backtick cannot flatten subsequent Markdown paragraphs", () => {
       (_, index) =>
         `## Heading ${index}\n\n${"Plain prose. ".repeat(40)}\n\n- First\n- Second\n\n`,
     ).join("");
+
   const parts = chunks(text);
   expect(parts[0]).toStartWith(prefix);
   expect(parts.join("")).toBe(text.trimEnd());
@@ -169,6 +181,7 @@ test("full-reply classification protects blockquote fences across messages", () 
     "> <@U123> ping\n" +
     ("> " + "y".repeat(70) + "\n").repeat(10) +
     "> ```";
+
   const parts = prepareSlackReply(quote);
   expect(parts.length).toBeGreaterThan(1);
   expect(JSON.stringify(parts)).not.toContain('"user_id":"U123"');
@@ -182,6 +195,7 @@ test("uncertain full replies fall back to plain text for every chunk", () => {
     "<@U1>\n\n```\ncode",
   ]) {
     const parts = prepareSlackReply(source);
+
     for (const part of parts) {
       expect(JSON.stringify(part)).toContain('"type":"plain_text"');
       expect(JSON.stringify(part)).not.toContain('"type":"user"');

@@ -18,19 +18,26 @@ export async function readCommand(
       stderr: "ignore",
       killSignal: "SIGKILL",
     });
+
     const decoder = new TextDecoder();
     let bytes = 0;
     let stdout = "";
+
     for await (const chunk of child.stdout) {
       bytes += chunk.byteLength;
+
       if (bytes > outputLimit) {
         child.kill("SIGKILL");
         await child.exited;
+
         return null;
       }
+
       stdout += decoder.decode(chunk, { stream: true });
     }
+
     const code = await child.exited;
+
     return { code, stdout: stdout + decoder.decode() };
   } catch {
     return null;

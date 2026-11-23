@@ -33,11 +33,13 @@ export function defaultInstallID(configPath: string, host = hostname()) {
 export function stableJitter(installID: string, max: number) {
   if (max <= 0) return 0;
   const digest = createHash("sha256").update(`jitter:${installID}`).digest();
+
   return digest.readUInt32BE(0) % (max + 1);
 }
 
 function clock(value: string) {
   const [hour = 0, minute = 0] = value.split(":").map(Number);
+
   return { hour, minute };
 }
 
@@ -65,12 +67,15 @@ export function occurrence(
   const crosses =
     clock(spec.end).hour * 60 + clock(spec.end).minute <=
     clock(spec.start).hour * 60 + clock(spec.start).minute;
+
   const opens = zonedInstant(date, spec.start, spec.timeZone);
+
   const closes = zonedInstant(
     crosses ? date.add({ days: 1 }) : date,
     spec.end,
     spec.timeZone,
   );
+
   return {
     date: date.toString(),
     opens,
@@ -89,30 +94,39 @@ function localDate(now: number, timeZone: string) {
 /** The window containing `now`, if any. */
 export function currentWindow(now: number, spec: WindowSpec, jitter: number) {
   const today = localDate(now, spec.timeZone);
+
   for (const date of [today.subtract({ days: 1 }), today]) {
     const window = occurrence(date, spec, jitter);
+
     if (window.opens <= now && now < window.closes) return window;
   }
+
   return undefined;
 }
 
 /** The next window whose planned start is after `now`. */
 export function nextWindow(now: number, spec: WindowSpec, jitter: number) {
   let date = localDate(now, spec.timeZone).subtract({ days: 1 });
+
   for (let day = 0; day < 4; day++, date = date.add({ days: 1 })) {
     const window = occurrence(date, spec, jitter);
+
     if (window.start > now) return window;
   }
+
   throw new Error("No maintenance window found.");
 }
 
 /** The latest window whose planned start is at or before `now`. */
 export function previousWindow(now: number, spec: WindowSpec, jitter: number) {
   let date = localDate(now, spec.timeZone).add({ days: 1 });
+
   for (let day = 0; day < 4; day++, date = date.subtract({ days: 1 })) {
     const window = occurrence(date, spec, jitter);
+
     if (window.start <= now) return window;
   }
+
   throw new Error("No maintenance window found.");
 }
 
@@ -121,14 +135,16 @@ export function addClock(time: string, minutes: number) {
   const { hour, minute } = clock(time);
   const total = (((hour * 60 + minute + minutes) % 1440) + 1440) % 1440;
   const pad = (n: number) => String(n).padStart(2, "0");
+
   return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
 }
 
-/** systemd OnCalendar for the planned start in the window's time zone. */
+/** Systemd OnCalendar for the planned start in the window's time zone. */
 export function timerCalendar(spec: WindowSpec, jitter: number) {
   const { hour, minute } = clock(spec.start);
   const total = (hour * 60 + minute + jitter) % 1440;
   const pad = (n: number) => String(n).padStart(2, "0");
+
   return `*-*-* ${pad(Math.floor(total / 60))}:${pad(total % 60)}:00 ${spec.timeZone}`;
 }
 
@@ -136,5 +152,6 @@ export function timerCalendar(spec: WindowSpec, jitter: number) {
 export function windowMinutes(spec: Pick<WindowSpec, "start" | "end">) {
   const s = clock(spec.start);
   const e = clock(spec.end);
+
   return (e.hour * 60 + e.minute - (s.hour * 60 + s.minute) + 1440) % 1440;
 }

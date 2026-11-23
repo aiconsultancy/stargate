@@ -6,6 +6,7 @@ import { backendSchema } from "../src/config";
 const sessionID = "ses_fleet";
 const messageID = "msg_assistant";
 const inputID = "msg_human";
+
 const expected = {
   agent: "configured-agent",
   id: "call_live",
@@ -17,6 +18,7 @@ const expected = {
     requestID: "durable-request",
   },
 };
+
 type Changes = {
   id?: string;
   agent?: string;
@@ -35,6 +37,7 @@ type Changes = {
 
 function fixture(changes: Changes = {}) {
   const calls: string[] = [];
+
   const tool = {
     type: "tool",
     id: changes.callID ?? expected.id,
@@ -50,6 +53,7 @@ function fixture(changes: Changes = {}) {
       ...(changes.toolCompleted ? { completed: 4 } : {}),
     },
   };
+
   const message = {
     id: changes.id ?? messageID,
     type: "assistant",
@@ -58,12 +62,14 @@ function fixture(changes: Changes = {}) {
     time: { created: 2, ...(changes.completed ? { completed: 4 } : {}) },
     content: changes.duplicate ? [tool, tool] : [tool],
   };
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname;
       calls.push(path);
+
       if (path === `/api/session/${sessionID}`)
         return Response.json({
           data: {
@@ -76,10 +82,13 @@ function fixture(changes: Changes = {}) {
             },
           },
         });
+
       if (path === `/api/session/${sessionID}/message/${messageID}`)
         return Response.json({ data: message });
+
       if (path === `/api/session/${sessionID}/inbox`)
         return Response.json({ data: changes.queued ? [{ id: inputID }] : [] });
+
       if (path === `/api/session/${sessionID}/message`)
         return Response.json({
           data: [
@@ -110,17 +119,21 @@ function fixture(changes: Changes = {}) {
           ],
           cursor: {},
         });
+
       return new Response(null, { status: 404 });
     },
   });
+
   const config = Schema.decodeUnknownSync(backendSchema)({
     type: "opencode",
     url: server.url.href,
     directory: "/workspace",
     sessionID,
   });
+
   if (config.type !== "opencode") throw new Error("Invalid native fixture");
   const backend = new OpenCodeBackend(config);
+
   return {
     calls,
     backend,
@@ -148,6 +161,7 @@ test("live native tool correlation requires exact agent/call/name/full input and
       target: "captain",
     },
   });
+
   try {
     expect(await f.check()).toBe(true);
     expect(f.calls).toEqual([
@@ -162,6 +176,7 @@ test("live native tool correlation requires exact agent/call/name/full input and
 
 test("fleet makers are read from exact settled native input, excluding a later request", async () => {
   const f = fixture({ completed: true, laterInput: true });
+
   try {
     expect(
       await f.backend.executionMakers(
@@ -201,6 +216,7 @@ test("fleet makers are read from exact settled native input, excluding a later r
 test("missing or unsettled native maker evidence fails closed", async () => {
   for (const changes of [{ origin: "another-input" }, { busy: true }]) {
     const f = fixture(changes);
+
     try {
       await expect(
         f.backend.executionMakers(
@@ -231,8 +247,10 @@ test("mismatched native actor, call, tool, payload and completed/ambiguous calls
     { toolCompleted: true },
     { duplicate: true },
   ];
+
   for (const changes of cases) {
     const f = fixture(changes);
+
     try {
       expect(await f.check()).toBe(false);
       expect(f.calls).toHaveLength(1);
@@ -245,6 +263,7 @@ test("mismatched native actor, call, tool, payload and completed/ambiguous calls
 test("a matching live call still requires delivered native input ancestry", async () => {
   for (const changes of [{ origin: "msg_different" }, { queued: true }]) {
     const f = fixture(changes);
+
     try {
       expect(await f.check()).toBe(false);
     } finally {
@@ -255,6 +274,7 @@ test("a matching live call still requires delivered native input ancestry", asyn
 
 test("a foreign pinned root cannot use a native tool call from this backend", async () => {
   const f = fixture();
+
   try {
     expect(
       await f.backend.toolBelongsToInput(

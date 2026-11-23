@@ -45,19 +45,24 @@ export function startAgentDispatch(
   host: AgentDispatchHost,
 ): AgentDispatchRuntime | undefined {
   const dispatch = host.config;
+
   if (!dispatch?.enabled) return;
   const target = agentDispatchTarget(dispatch, host.irc);
+
   if (typeof target === "string") throw new Error(target);
   const ship = host.ship(target.registration.id);
   const primary = ship?.registrations[0];
+
   if (!ship || !primary)
     throw new Error("Agent dispatch registration unavailable");
   const client = primary.client;
   const enrolled = target.registration.fleetPolicy?.agentAccounts ?? [];
   const log = host.log.child({ agentDispatch: dispatch.fleet });
+
   const ledger = new DispatchLedger(
     join(host.dataDirectory, "agent-dispatch.sqlite"),
   );
+
   const dispatcher = new AgentDispatcher({
     settings: {
       fleet: dispatch.fleet,
@@ -87,6 +92,7 @@ export function startAgentDispatch(
     ledger,
     log,
   });
+
   const listener: NonNullable<IrcShip["dispatchListener"]> = (
     message,
     caseFold,
@@ -97,12 +103,15 @@ export function startAgentDispatch(
       Date.now(),
       caseFold,
     );
+
     if (answer)
       void dispatcher
         .answer(answer)
         .catch(() => log.warn("Agent dispatch answer failed"));
   };
+
   ship.dispatchListener = listener;
+
   return {
     key: `${primary.key}:agent-dispatch`,
     log,

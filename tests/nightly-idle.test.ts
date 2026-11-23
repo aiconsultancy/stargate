@@ -25,6 +25,7 @@ import { openStore } from "../src/app/open-store";
 import { jobStatuses } from "../src/gateway/store";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-idle-"));
+
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 const opencode = {
@@ -37,16 +38,20 @@ const opencode = {
   unreadable: [] as string[],
   fail: false,
 };
+
 const control = {
   active: async () => opencode.active,
   pendingInput: async () => opencode.pending,
   parent: async (id: string) => {
     if (opencode.unreadable.includes(id)) throw new Error("unreadable");
+
     return opencode.parents[id];
   },
 } as unknown as OpenCodeControl;
+
 const connect = async () => {
   if (opencode.fail) throw new Error("down");
+
   return control;
 };
 
@@ -106,6 +111,7 @@ const input = (scope: IdleInput["scope"] = "stargate"): IdleInput => ({
   connect,
   signal: AbortSignal.timeout(5000),
 });
+
 const exec = (path: string, sql: string) => {
   const db = new Database(path);
   db.exec(sql);
@@ -167,6 +173,7 @@ describe("idle gate", () => {
       enabled: false,
       deadlineMinutes: 10,
     });
+
     for (const deadlineMinutes of [0, -1, 1.5, 1441])
       expect(() =>
         Schema.decodeUnknownSync(maintenanceSchema)({
@@ -209,6 +216,7 @@ describe("idle gate", () => {
       text: "hello",
     });
     store.close();
+
     for (const status of jobStatuses) {
       exec(join(data, "stargate.sqlite"), `UPDATE jobs SET status='${status}'`);
       expect((await checkIdle(input())).idle).toBe(
@@ -224,6 +232,7 @@ describe("idle gate", () => {
        VALUES ('s','k','C1','U1','n','0 2 * * *','UTC','p',${now + 86_400_000},0);
        INSERT INTO cron_runs (id,scheduleId,dueAt) VALUES ('r','s',${now})`,
     );
+
     const statuses: Record<CronRun["status"], boolean> = {
       pending: false,
       evaluating: false,
@@ -235,6 +244,7 @@ describe("idle gate", () => {
       failed: true,
       canceled: true,
     };
+
     for (const [status, idle] of Object.entries(statuses)) {
       exec(
         join(data, "cron.sqlite"),
@@ -251,6 +261,7 @@ describe("idle gate", () => {
         `INSERT INTO cron_schedules (id,botKey,channel,user,name,expression,timezone,prompt,nextAt,createdAt)
          VALUES ('s${nextAt}','k','C1','U1','n','0 2 * * *','UTC','p',${nextAt},0)`,
       );
+
     schedule(now + 2 * 3_600_000);
     expect((await checkIdle(input())).idle).toBe(true);
     schedule(now + 30 * 60_000);
@@ -263,6 +274,7 @@ describe("idle gate", () => {
   test("an event-only quota watcher is idle until it has an accepted run", async () => {
     const store = new CronStore(join(data, "cron.sqlite"));
     const scope = { botKey: "k", channel: "C1", user: "U1" };
+
     try {
       store.add(
         scope,
@@ -290,6 +302,7 @@ describe("idle gate", () => {
   test("interrupted tools-off evaluation fails without keeping maintenance busy", async () => {
     const store = new CronStore(join(data, "cron.sqlite"));
     const scope = { botKey: "k", channel: "C1", user: "U1" };
+
     try {
       store.add(
         scope,
@@ -304,6 +317,7 @@ describe("idle gate", () => {
         now,
       );
       const run = store.runNow(scope, "quota-watch", now);
+
       if (!run) throw new Error("Fixture run missing");
       expect(store.claimEvaluation(run.id)).toBe(true);
       expect(await checkIdle(input("gateway"))).toEqual({
@@ -367,18 +381,20 @@ describe("idle gate", () => {
       roots: [],
       piMembers: [],
     };
+
     const state = await CrewState.open(
       real.stateDirectory,
       real.namespace,
       "fingerprint",
     );
+
     try {
       const peer = state.reservePeer("chief");
       const first = state.enqueue(peer, "captain", "first");
       const second = state.enqueue(peer, "captain", "second");
       const gate = () => checkIdle({ ...input(), crews: [real] });
       // An ordinary assignment starts only via stargate_crew status/wait, inside
-      // a captain turn, which the gate sees as an active session.
+      // A captain turn, which the gate sees as an active session.
       expect(await gate()).toEqual({ idle: true });
       expect(state.cancelQueued(first.id, "captain")).toBe(true);
       expect(state.cancelQueued(second.id, "captain")).toBe(true);
@@ -398,19 +414,24 @@ describe("idle gate", () => {
       piMembers: [],
       captainSessionID: "ses_pinned",
     };
+
     const state = await CrewState.open(
       real.stateDirectory,
       real.namespace,
       "fingerprint",
     );
+
     try {
       const chief = state.reservePeer("chief");
+
       const rows = Array.from({ length: 5 }, (_, i) =>
         state.enqueue(chief, "ses_e49d787old", `secret task text ${i}`),
       );
+
       for (const row of rows.slice(0, 4))
         expect(state.cancelQueued(row.id, "ses_e49d787old")).toBe(true);
       const queued = rows[4];
+
       if (!queued) throw new Error("no queued task");
       expect(await checkIdle({ ...input(), crews: [real] })).toEqual({
         idle: true,
@@ -457,20 +478,24 @@ describe("idle gate", () => {
       roots: [],
       piMembers: ["twiki"],
     };
+
     const state = await CrewState.open(
       real.stateDirectory,
       real.namespace,
       "fingerprint",
     );
+
     try {
       const capture = state.reporting.start("ses_captain", "req-1", "twiki");
       state.reporting.finish(capture);
+
       const report = state.enqueue(
         state.reservePeer("twiki"),
         "ses_captain",
         "summary prompt",
         capture.id,
       );
+
       expect(state.reporting.isReport(report.id)).toBe(true);
       expect(await checkIdle({ ...input(), crews: [real] })).toEqual({
         idle: false,
@@ -488,6 +513,7 @@ describe("idle gate", () => {
     const horizon =
       Schema.decodeUnknownSync(maintenanceSchema)({}).idle.cronHorizonMinutes *
       60_000;
+
     const cron = join(data, "cron.sqlite");
     const at = (time: string) => Date.parse(`2026-11-12T${time}Z`);
     // `15 * * * *`, as on Galactica: a run is never more than an hour away.
@@ -497,10 +523,12 @@ describe("idle gate", () => {
        VALUES ('hourly','k','C1','U1','n','15 * * * *','UTC','p',${at("00:15:00")},0)`,
     );
     let time = now;
+
     const clock = {
       now: () => time,
       async sleep(ms: number) {
         time += ms;
+
         // The gateway claims the 00:15 run and finishes it two minutes later.
         if (time >= at("00:15:00") && time < at("00:17:00"))
           exec(
@@ -508,16 +536,19 @@ describe("idle gate", () => {
             `UPDATE cron_schedules SET nextAt=${at("01:15:00")};
              INSERT OR IGNORE INTO cron_runs (id,scheduleId,dueAt) VALUES ('r1','hourly',${at("00:15:00")})`,
           );
+
         if (time >= at("00:17:00"))
           exec(cron, "UPDATE cron_runs SET status='done' WHERE id='r1'");
       },
     };
+
     const result = await waitForIdle(
       { ...input(), cronHorizonMs: horizon },
       at("00:50:00"),
       30_000,
       clock,
     );
+
     expect(result).toEqual({ idle: true });
     expect(time).toBeGreaterThanOrEqual(at("00:17:00"));
     expect(time).toBeLessThan(at("00:20:00"));
@@ -527,6 +558,7 @@ describe("idle gate", () => {
     const horizon =
       Schema.decodeUnknownSync(maintenanceSchema)({}).idle.cronHorizonMinutes *
       60_000;
+
     expect(horizon).toBeLessThan(60 * 60_000);
     expect(horizon).toBeGreaterThanOrEqual(
       bounds.openCodeRestart + bounds.openCodeVerify,
@@ -539,6 +571,7 @@ describe("idle gate", () => {
 
   test("crew tasks, queued report tasks, controllers and Pi tasks block", async () => {
     const path = crewDatabase(crew);
+
     for (const sql of [
       "UPDATE tasks SET status='running'",
       // A queued activity-report task (the engine's marker row).
@@ -551,6 +584,7 @@ describe("idle gate", () => {
         reason: "busy-crew",
       });
     }
+
     exec(path, "DELETE FROM worker_controls");
     exec(piDatabase(crew, "twiki"), "UPDATE tasks SET status='running'");
     expect(await checkIdle(input())).toEqual({
@@ -569,11 +603,13 @@ describe("idle gate", () => {
 
   test("every Stargate-owned OpenCode session blocks while it runs or waits for input", async () => {
     const busy = { idle: false, reason: "busy-opencode" } as const;
+
     // A gateway session mapping and a crew peer.
     for (const session of ["ses_captain", "ses_chief"]) {
       opencode.active = [session];
       expect(await checkIdle(input())).toEqual(busy);
     }
+
     // An operator-pinned captain session.
     opencode.active = ["ses_pinned"];
     expect((await checkIdle(input())).idle).toBe(true);
@@ -688,13 +724,16 @@ describe("idle gate", () => {
 
   test("waits until idle, or defers at the deadline without touching work", async () => {
     let time = now;
+
     const clock = {
       now: () => time,
       sleep: async (ms: number) => {
         time += ms;
+
         if (time >= now + 60_000) opencode.active = [];
       },
     };
+
     opencode.active = ["ses_chief"];
     const { now: _, ...rest } = input();
     expect(await waitForIdle(rest, now + 600_000, 30_000, clock)).toEqual({
@@ -703,12 +742,14 @@ describe("idle gate", () => {
     expect(time).toBe(now + 60_000);
     opencode.active = ["ses_captain"];
     time = now;
+
     const busy = await waitForIdle(rest, now + 60_000, 30_000, {
       now: () => time,
       sleep: async (ms: number) => {
         time += ms;
       },
     });
+
     expect(busy).toEqual({ idle: false, reason: "busy-opencode" });
   });
 });

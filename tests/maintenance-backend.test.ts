@@ -5,6 +5,7 @@ import { backendSchema } from "../src/config";
 
 test("maintenance RPC pins session, request, notice and captain location", async () => {
   const calls: { path: string; location: string | null; body: unknown }[] = [];
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -15,6 +16,7 @@ test("maintenance RPC pins session, request, notice and captain location", async
         location: url.searchParams.get("location[directory]"),
         body: await request.json(),
       });
+
       return Response.json({
         output: url.pathname.endsWith("/read")
           ? {
@@ -27,12 +29,14 @@ test("maintenance RPC pins session, request, notice and captain location", async
       });
     },
   });
+
   try {
     const config = Schema.decodeUnknownSync(backendSchema)({
       type: "opencode",
       url: server.url.href,
       directory: "/captain",
     });
+
     if (config.type !== "opencode") throw new Error("Wrong fixture");
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;

@@ -102,7 +102,9 @@ export class IrcSessions {
         )
         .get()?.seq ??
       0;
+
     if (input.after === undefined) return { items: [], latest };
+
     const items = this.db
       .query<
         {
@@ -128,6 +130,7 @@ export class IrcSessions {
         text: row.text,
         created: row.created,
       }));
+
     return { items, latest };
   }
 
@@ -154,6 +157,7 @@ export class IrcSessions {
     this.db
       .query("INSERT OR IGNORE INTO irc_sessions VALUES (?,?)")
       .run(sessionID, crewID);
+
     return this.crewID(sessionID) === crewID;
   }
 }

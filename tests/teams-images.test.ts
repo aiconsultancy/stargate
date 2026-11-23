@@ -16,18 +16,22 @@ function chunk(type: string, content: Buffer): Buffer {
   header.write(type, 4, "ascii");
   const crc = Buffer.alloc(4);
   crc.writeUInt32BE(crc32(Buffer.concat([header.subarray(4), content])));
+
   return Buffer.concat([header, content, crc]);
 }
+
 function png(width = 1, height = 1, padding = 0): Buffer {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width);
   header.writeUInt32BE(height, 4);
   header[8] = 8;
   header[9] = 2;
+
   const parts = [
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     chunk("IHDR", header),
   ];
+
   if (padding)
     parts.push(
       chunk(
@@ -44,17 +48,21 @@ function png(width = 1, height = 1, padding = 0): Buffer {
     ),
     chunk("IEND", Buffer.alloc(0)),
   );
+
   return Buffer.concat(parts);
 }
+
 const JPEG = Buffer.from(
   "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAH/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCfAA//2Q==",
   "base64",
 );
+
 const file = (data = png(), mime = "image/png"): Attachment => ({
   name: "screenshot.png",
   mime,
   data,
 });
+
 const signal = () => new AbortController().signal;
 
 test("screenshot inspection accepts PNG/JPEG and reports bounded dimensions", () => {
@@ -74,6 +82,7 @@ test("screenshot inspection accepts PNG/JPEG and reports bounded dimensions", ()
 test("screenshots reject bad signatures, damaged chunks and incomplete framing", () => {
   const damaged = png();
   damaged[18] = (damaged[18] ?? 0) ^ 1;
+
   for (const bytes of [
     Buffer.from("GIF89a"),
     Buffer.from("<svg></svg>"),
@@ -136,11 +145,13 @@ test("oversized/zero dimensions and oversized input fail before image decoding",
 
 test("activity bounds include base64, escaped caption, UTF-16 and reply metadata", () => {
   const image = inspectScreenshot(png(1, 1, 20_000));
+
   const activity = screenshotActivity(
     image,
     "A screenshot",
     "original-message",
   );
+
   expect(activity.attachments?.[0]?.contentUrl).toBe(
     `data:image/png;base64,${image.bytes.toString("base64")}`,
   );
@@ -168,12 +179,14 @@ test("image upload is pure encoding; publication retains the exact bound channel
     activity: OutgoingActivity;
     signal: AbortSignal;
   }[] = [];
+
   const adapter = teamsImageTransport(
     async (channel, thread, activity, signal, allowed) => {
       expect(allowed?.() ?? true).toBe(true);
       sends.push({ channel, thread, activity, signal });
     },
   );
+
   expect(adapter.publishOnce).toBe(true);
   const receipt = await adapter.upload(file(), signal());
   expect(sends).toHaveLength(0);
@@ -217,9 +230,11 @@ test("image upload is pure encoding; publication retains the exact bound channel
 
 test("image upload rejects MIME mismatch, unsupported bytes and encoded activity overflow", async () => {
   let sends = 0;
+
   const adapter = teamsImageTransport(async () => {
     sends++;
   });
+
   for (const attachment of [
     file(png(), "image/jpeg"),
     file(JPEG, "image/png"),
@@ -235,9 +250,11 @@ test("image upload rejects MIME mismatch, unsupported bytes and encoded activity
 
 test("link accepts only validated canonical local receipts and never fetches a URL", async () => {
   let sends = 0;
+
   const adapter = teamsImageTransport(async () => {
     sends++;
   });
+
   const malformed = [
     "https://example.com/screenshot.png",
     "file:///private/image.png",
@@ -247,6 +264,7 @@ test("link accepts only validated canonical local receipts and never fetches a U
     `data:image/jpeg;base64,${png().toString("base64")}`,
     `data:image/png;base64,${png().toString("base64")}\n`,
   ];
+
   for (const receipt of malformed)
     await expect(
       adapter.link("channel", "thread", receipt, "caption", signal()),
@@ -256,10 +274,12 @@ test("link accepts only validated canonical local receipts and never fetches a U
 
 test("abort/access revocation prevent publication and provider failures expose no image payload", async () => {
   let sends = 0;
+
   const adapter = teamsImageTransport(async () => {
     sends++;
     throw new Error("sensitive-base64-provider-payload");
   });
+
   const receipt = await adapter.upload(file(), signal());
   const stopped = AbortSignal.abort();
   await expect(adapter.upload(file(), stopped)).rejects.toThrow();

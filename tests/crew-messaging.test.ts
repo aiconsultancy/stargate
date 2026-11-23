@@ -17,10 +17,12 @@ const diskIntegrationTimeoutMs = 30_000;
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "stargate-mail-receipt-"));
+
   const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
     crew: [{ id: "worker", role: "Builder", permissionProfile: "coding" }],
   });
+
   const options: CrewOptions = {
     namespace: "mail-recovery",
     stateDirectory: join(directory, "state"),
@@ -30,10 +32,13 @@ async function fixture() {
     team,
     mesijCommand: "/unused",
   };
+
   let wakes = 0;
+
   const sessions: CrewSessions = {
     async get({ sessionID }) {
       const captain = sessionID.startsWith("ses_captain");
+
       return {
         id: sessionID,
         agent: captain ? "captain" : "worker",
@@ -66,13 +71,17 @@ async function fixture() {
       throw new Error("Unexpected native interruption");
     },
   };
+
   const events: MesijMessage[] = [];
   const keys = new Map<string, MesijMessage>();
   let onSend: ((key: string) => Promise<void>) | undefined;
+
   let onStored:
     | ((event: MesijMessage, key: string) => Promise<void>)
     | undefined;
+
   let loseReceipt = true;
+
   const mailer: Pick<MesijClient, "register" | "send" | "inbox"> = {
     async register() {
       return { id: "0".repeat(32), sequence: 0 };
@@ -80,6 +89,7 @@ async function fixture() {
     async send(input) {
       await onSend?.(input.key);
       let event = keys.get(input.key);
+
       if (!event) {
         event = {
           id: (events.length + 1).toString(16).padStart(32, "0"),
@@ -94,11 +104,14 @@ async function fixture() {
         keys.set(input.key, event);
         events.push(event);
       }
+
       await onStored?.(event, input.key);
+
       if (loseReceipt) {
         loseReceipt = false;
         throw new Error("Mesij stored the event; response was lost");
       }
+
       return { id: event.id, sequence: event.sequence };
     },
     async inbox(input) {
@@ -112,15 +125,18 @@ async function fixture() {
         .slice(0, input.limit ?? 100);
     },
   };
+
   let engine = await CrewEngine.open(options, sessions, mailer);
   const peer = engine.state.reservePeer("worker");
   engine.state.readyPeer("worker");
+
   const caller = (sessionID: string, agent: string): CrewCaller => ({
     sessionID,
     agent,
     id: "host-call",
     signal: new AbortController().signal,
   });
+
   return {
     get engine() {
       return engine;
@@ -155,12 +171,14 @@ async function fixture() {
 
 test("lost Mesij receipt survives reopen and cannot create an invisible acknowledged message", async () => {
   const f = await fixture();
+
   const input = {
     op: "send",
     to: "worker",
     text: "Check interface token=private-secret",
     key: "same-key",
   };
+
   try {
     expect(await f.engine.dm(input, f.captain())).toMatchObject({
       stored: "uncertain",
@@ -172,6 +190,7 @@ test("lost Mesij receipt survives reopen and cannot create an invisible acknowle
     const page = await f.engine.mail({ op: "inbox" }, f.worker());
     expect(page.messages).toMatchObject([{ text: input.text }]);
     const event = f.events[0];
+
     if (!event) throw new Error("Missing stored event");
     expect(f.engine.state.mailRoutes.get(event.id)).toMatchObject({
       sender: f.captain().sessionID,
@@ -214,21 +233,25 @@ for (const field of [
 ] as const) {
   test(`route recovery refuses a forged ${field} and does not block legitimate mail`, async () => {
     const f = await fixture();
+
     try {
       await f.engine.mail(
         { op: "send", to: "worker", text: "Legitimate", key: "original" },
         f.captain(),
       );
       const original = f.events[0];
+
       if (!original) throw new Error("Missing stored event");
       const envelope: Record<string, unknown> = JSON.parse(original.text);
       envelope[field] = "forged-other-context";
+
       const forged = {
         ...original,
         id: "f".repeat(32),
         sequence: 2,
         text: JSON.stringify(envelope),
       };
+
       f.events.push(forged);
       const page = await f.engine.mail({ op: "inbox" }, f.worker());
       expect(page.messages).toMatchObject([
@@ -251,12 +274,14 @@ for (const field of [
 
 test("recovered mail preserves current-task captain filtering", async () => {
   const f = await fixture();
+
   try {
     const task = f.engine.state.reserveTask(
       f.peer,
       f.captain().sessionID,
       "Existing assignment",
     );
+
     if (!task) throw new Error("Missing task");
     await f.engine.mail(
       { op: "send", to: "worker", text: "Other captain mail", key: "other" },
@@ -277,12 +302,14 @@ test("recovered mail preserves current-task captain filtering", async () => {
 test("a failed proven route repair holds ACKs across reopen, including caller-supplied after", async () => {
   const f = await fixture();
   const db = new Database(f.engine.state.path);
+
   try {
     await f.engine.mail(
       { op: "send", to: "worker", text: "Must remain visible", key: "retry" },
       f.captain(),
     );
     const original = f.events[0];
+
     if (!original) throw new Error("Missing stored event");
     db.exec(`CREATE TRIGGER fail_mail_route BEFORE INSERT ON mail_routes
       BEGIN SELECT RAISE(ABORT, 'Route write unavailable'); END;`);
@@ -295,10 +322,12 @@ test("a failed proven route repair holds ACKs across reopen, including caller-su
     ).toEqual({ count: 1 });
     db.exec("DROP TRIGGER fail_mail_route");
     await f.reopen();
+
     const repaired = await f.engine.mail(
       { op: "inbox", after: original.sequence + 1000 },
       f.worker(),
     );
+
     expect(repaired.messages).toMatchObject([
       { id: original.id, text: "Must remain visible" },
     ]);
@@ -329,6 +358,7 @@ test("a failed proven route repair holds ACKs across reopen, including caller-su
 for (const lost of [false, true]) {
   test(`an intent bound by ${lost ? "recovery" : "send"} rejects a copied new event ID`, async () => {
     const f = await fixture();
+
     try {
       if (!lost) f.keepNextReceipt();
       await f.engine.mail(
@@ -336,7 +366,9 @@ for (const lost of [false, true]) {
         f.captain(),
       );
       const original = f.events[0];
+
       if (!original) throw new Error("Missing stored event");
+
       if (lost) await f.engine.mail({ op: "inbox" }, f.worker());
       const copy = { ...original, id: "c".repeat(32), sequence: 2 };
       f.events.push(copy);
@@ -364,14 +396,17 @@ test.each([false, true])(
   "identical authorized keys bind separate receipts, lost=%s",
   async (lost) => {
     const f = await fixture();
+
     try {
       if (!lost) f.keepNextReceipt();
       const send = { op: "send", to: "worker", text: "Same content" };
       await f.engine.mail({ ...send, key: "first" }, f.captain());
+
       if (lost) f.loseNextReceipt();
       await f.engine.mail({ ...send, key: "second" }, f.captain());
       expect(f.events).toHaveLength(2);
       const original = f.events[0];
+
       if (!original) throw new Error("Missing stored event");
       const copy = { ...original, id: "b".repeat(32), sequence: 3 };
       f.events.push(copy);
@@ -391,19 +426,23 @@ test.each([false, true])(
 test("receipt binding refuses a different ID or captain context", async () => {
   const f = await fixture();
   const db = new Database(f.engine.state.path);
+
   try {
     f.keepNextReceipt();
     await f.engine.mail(
       { op: "send", to: "worker", text: "Authorized", key: "original" },
       f.captain(),
     );
+
     const intent = db
       .query<{ key: string; receiptID: string }, []>(
         "SELECT key,receiptID FROM mail_intents",
       )
       .get();
+
     if (!intent) throw new Error("Missing bound intent");
     const route = f.engine.state.mailRoutes.get(intent.receiptID);
+
     if (!route) throw new Error("Missing route");
     expect(() =>
       f.engine.state.mailRoutes.save(
@@ -450,6 +489,7 @@ test("concurrent identical text correlates out-of-order receipts before local ro
   });
   f.onStored(async (event, key) => {
     receipts.set(key, event.id);
+
     if (event.sequence === 1) secondStored.resolve();
     else bothStored.resolve();
     await (event.sequence === 1 ? secondReceipt.promise : firstReceipt.promise);
@@ -457,6 +497,7 @@ test("concurrent identical text correlates out-of-order receipts before local ro
   const input = { op: "send", to: "worker", text: "Identical human text" };
   const first = f.engine.mail({ ...input, key: "first" }, f.captain());
   let second: ReturnType<CrewEngine["mail"]> | undefined;
+
   try {
     await firstEntered.promise;
     second = f.engine.mail({ ...input, key: "second" }, f.captain());
@@ -481,20 +522,24 @@ test("concurrent identical text correlates out-of-order receipts before local ro
     expect(await second).toMatchObject({ stored: true });
     firstReceipt.resolve();
     expect(await first).toMatchObject({ stored: true });
+
     for (const row of db
       .query<{ key: string; receiptID: string }, []>(
         "SELECT key,receiptID FROM mail_intents",
       )
       .all()) {
       const receipt = receipts.get(row.key);
+
       if (!receipt) throw new Error("Missing native receipt");
       expect(row.receiptID).toBe(receipt);
       const event = f.events.find(({ id }) => id === row.receiptID);
+
       if (!event) throw new Error("Missing correlated event");
       const envelope: Record<string, unknown> = JSON.parse(event.text);
       expect(envelope["intentKey"]).toBe(row.key);
       expect(envelope["text"]).toBe(input.text);
     }
+
     f.onSend(undefined);
     f.onStored(undefined);
     expect(
@@ -514,13 +559,16 @@ test("concurrent identical text correlates out-of-order receipts before local ro
 
 test("route recovery binds native sender identity and does not trust matching JSON alone", async () => {
   const f = await fixture();
+
   try {
     await f.engine.mail(
       { op: "send", to: "worker", text: "Legitimate", key: "original" },
       f.captain(),
     );
     const original = f.events[0];
+
     if (!original) throw new Error("Missing stored event");
+
     const forged = {
       ...original,
       id: "e".repeat(32),
@@ -528,13 +576,16 @@ test("route recovery binds native sender identity and does not trust matching JS
       actor: "forged-actor",
       sessionID: "ses_forged",
     };
+
     f.events.push(forged);
+
     const malformed = {
       ...original,
       id: "d".repeat(32),
       sequence: 3,
       text: "{",
     };
+
     f.events.push(malformed);
     const page = await f.engine.mail({ op: "inbox" }, f.worker());
     expect(page.messages).toMatchObject([{ id: original.id }]);
@@ -558,6 +609,7 @@ test("route recovery binds native sender identity and does not trust matching JS
 
 test("a conflicting retry cannot overwrite the authorized intent", async () => {
   const f = await fixture();
+
   try {
     const original = {
       op: "send",
@@ -565,6 +617,7 @@ test("a conflicting retry cannot overwrite the authorized intent", async () => {
       text: "Original",
       key: "immutable",
     };
+
     await f.engine.mail(original, f.captain());
     expect(
       await f.engine.mail({ ...original, text: "Changed" }, f.captain()),
@@ -584,15 +637,19 @@ test("a conflicting retry cannot overwrite the authorized intent", async () => {
 
 test("lost reply receipts recover the original captain route without cross-captain delivery", async () => {
   const f = await fixture();
+
   try {
     await f.engine.mail(
       { op: "send", to: "worker", text: "Question", key: "question" },
       f.captain(),
     );
+
     const question = (await f.engine.mail({ op: "inbox" }, f.worker()))
       .messages?.[0];
+
     if (!question) throw new Error("Missing validated question");
     f.loseNextReceipt();
+
     const reply = {
       op: "send",
       to: "captain",
@@ -600,6 +657,7 @@ test("lost reply receipts recover the original captain route without cross-capta
       key: "reply",
       replyTo: question.id,
     };
+
     expect(await f.engine.mail(reply, f.worker())).toMatchObject({
       stored: "uncertain",
     });
@@ -622,8 +680,9 @@ test("lost reply receipts recover the original captain route without cross-capta
 
 test("crew mail refuses a crew agent session that is not the member's session", async () => {
   // A Stargate IRC session uses the crew agent but is a separate root session:
-  // it cannot send Mesij mail as that member.
+  // It cannot send Mesij mail as that member.
   const f = await fixture();
+
   try {
     const irc: CrewCaller = {
       sessionID: "ses_irc_worker",
@@ -631,6 +690,7 @@ test("crew mail refuses a crew agent session that is not the member's session", 
       id: "host-call",
       signal: new AbortController().signal,
     };
+
     await expect(
       f.engine.mail({ op: "send", to: "captain", text: "From IRC" }, irc),
     ).rejects.toThrow("Only the configured captain or assigned worker");

@@ -11,6 +11,7 @@ import { messagePortableSchema as portable } from "../messaging/message-tool-inp
 import type { CrewTask } from "../execution/state";
 
 const id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
+
 const binding = settingsStruct({
   task: id,
   captain: id,
@@ -21,24 +22,30 @@ const binding = settingsStruct({
   directory: Schema.String.check(Schema.isMaxLength(4096)),
   agent: id,
 });
+
 const form = {
   form: id,
   fingerprint: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
 };
+
 const value = Schema.String.check(Schema.isMaxLength(4000));
+
 const answer = Schema.NullOr(
   Schema.Record(
     id,
     Schema.Union([value, Schema.Array(value).check(Schema.isMaxLength(20))]),
   ),
 );
+
 const action = Schema.Union([
   settingsStruct({ kind: Schema.Literal("list") }),
   settingsStruct({ kind: Schema.Literal("check"), ...form }),
   settingsStruct({ kind: Schema.Literal("outcome"), ...form }),
   settingsStruct({ kind: Schema.Literal("write"), ...form, answer }),
 ]);
+
 const command = settingsStruct({ id, owner: binding, action });
+
 const receipt = settingsStruct({
   status: Schema.Literals([
     "ok",
@@ -50,11 +57,12 @@ const receipt = settingsStruct({
   ]),
   // Reuse the native question codec on both sides of the transport.
   forms: Schema.optional(
-    Schema.Array(Schema.String.check(Schema.isMaxLength(96000))).check(
+    Schema.Array(Schema.String.check(Schema.isMaxLength(96_000))).check(
       Schema.isMaxLength(16),
     ),
   ),
 });
+
 export const CrewQuestionRpc = Rpc.define({
   id: "stargate.crew.questions",
   events: {},
@@ -73,9 +81,13 @@ export const CrewQuestionRpc = Rpc.define({
     },
   },
 });
+
 type Action = typeof action.Type;
+
 export type CrewQuestionWork = typeof command.Type;
+
 export type CrewQuestionReceipt = typeof receipt.Type;
+
 type Pending = {
   work: CrewQuestionWork;
   taken: boolean;
@@ -104,15 +116,18 @@ export class CrewQuestionHandoff {
 
   route(preference?: boolean, externalHistory = false) {
     if (preference === false) return "direct";
+
     if (preference || this.hasConsumer()) return "gateway";
+
     // A configured history service may be read-only. Its URL and credentials
-    // do not establish authority to read the exact form or submit an answer.
+    // Do not establish authority to read the exact form or submit an answer.
     return this.captain && externalHistory ? "unavailable" : "direct";
   }
 
   take(captain: string) {
     if (captain !== this.captain) return { work: null };
     this.lastTake = this.now();
+
     for (const entry of this.pending.values()) {
       if (
         entry.work.owner.captain !== captain ||
@@ -121,13 +136,16 @@ export class CrewQuestionHandoff {
       )
         continue;
       entry.taken = true;
+
       return { work: entry.work };
     }
+
     return { work: null };
   }
 
   confirm(captain: string, id: string) {
     const entry = this.pending.get(id);
+
     if (
       !entry ||
       entry.work.owner.captain !== captain ||
@@ -138,16 +156,19 @@ export class CrewQuestionHandoff {
     )
       return { approved: false };
     entry.confirmed = true;
+
     return { approved: true };
   }
 
   finish(captain: string, id: string, result: CrewQuestionReceipt) {
     const entry = this.pending.get(id);
+
     if (!entry || entry.work.owner.captain !== captain || !entry.taken)
       return { received: false };
     entry.finish(
       entry.confirmed || entry.current() ? result : { status: "failed" },
     );
+
     return { received: true };
   }
 
@@ -167,16 +188,20 @@ export class CrewQuestionHandoff {
       input: task.inputID,
       crew: task.crewID,
     };
+
     const request = async (action: Action, signal: AbortSignal) => {
       if (!current() || this.pending.size >= 64)
         throw new Error("Crew question handoff unavailable");
       const deadline = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
       deadline.throwIfAborted();
       const id = randomUUID();
+
       const { promise, resolve, reject } =
         Promise.withResolvers<CrewQuestionReceipt>();
+
       const abort = () =>
         reject(new Error("Crew question handoff interrupted"));
+
       this.pending.set(id, {
         work: { id, owner, action },
         taken: false,
@@ -185,22 +210,28 @@ export class CrewQuestionHandoff {
         finish: resolve,
       });
       deadline.addEventListener("abort", abort, { once: true });
+
       try {
         const result = await promise;
+
         if (result.status === "failed")
           throw new Error("Crew question handoff unavailable");
+
         return result;
       } finally {
         deadline.removeEventListener("abort", abort);
         this.pending.delete(id);
       }
     };
+
     return {
       async pendingQuestions(session: string, signal: AbortSignal) {
         if (session !== owner.session) return [];
         const result = await request({ kind: "list" }, signal);
+
         if (result.status !== "ok" || !result.forms)
           throw new Error("Crew question list unavailable");
+
         return result.forms
           .map((raw) =>
             Schema.decodeUnknownSync(nativeQuestionSchema)(JSON.parse(raw)),
@@ -243,6 +274,7 @@ export class CrewQuestionHandoff {
           { kind: "outcome", form, fingerprint },
           signal,
         );
+
         return status === "answered" || status === "cancelled"
           ? status
           : undefined;

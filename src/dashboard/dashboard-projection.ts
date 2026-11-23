@@ -6,14 +6,18 @@ export function dashboardCrewMembers(
   status: CrewStatus,
 ): DashboardCrewMember[] {
   const people = new Map<string, DashboardCrewMember>();
+
   for (const context of status.members) {
     let person = people.get(context.id);
+
     if (!person) {
       person = { id: context.id, name: context.name, contexts: [] };
       people.set(context.id, person);
     }
+
     person.contexts.push(context);
   }
+
   return [...people.values()];
 }
 
@@ -22,6 +26,7 @@ export function dashboardCrewSummary(
   status: CrewStatus,
 ): NonNullable<ShipSummary["crew"]> {
   const people = dashboardCrewMembers(status);
+
   return {
     total: status.total,
     busy:

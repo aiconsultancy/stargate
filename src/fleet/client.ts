@@ -10,6 +10,7 @@ export function fleetRequest(
   return new Promise((resolve, reject) => {
     signal.throwIfAborted();
     const body = JSON.stringify(input);
+
     const req = request(
       {
         socketPath,
@@ -27,6 +28,7 @@ export function fleetRequest(
         let bytes = 0;
         response.on("data", (chunk: Buffer) => {
           bytes += chunk.length;
+
           if (bytes > 1_000_000) {
             req.destroy();
             reject(
@@ -48,9 +50,12 @@ export function fleetRequest(
             const value: unknown = JSON.parse(
               Buffer.concat(chunks).toString("utf8"),
             );
+
             if (typeof value !== "object" || value === null) throw new Error();
+
             if ("error" in value && typeof value.error === "string")
               throw new FleetError(value.error);
+
             if (response.statusCode !== 200 || !("result" in value))
               throw new Error();
             resolve(value.result);
@@ -66,6 +71,7 @@ export function fleetRequest(
         });
       },
     );
+
     req.once("timeout", () => req.destroy());
     req.once("error", () =>
       reject(

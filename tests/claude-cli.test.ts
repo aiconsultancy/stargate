@@ -31,7 +31,9 @@ afterEach(async () => {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
   }
+
   saved.clear();
+
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
@@ -49,6 +51,7 @@ const body = z.object({
     .array(z.object({ role: z.string(), content: z.unknown() }))
     .default([]),
 });
+
 const toolResult = z.object({
   type: z.literal("tool_result"),
   tool_use_id: z.string(),
@@ -72,8 +75,10 @@ function fixture(script: Reply[] = []) {
     tools?: string[];
     results?: { id: string; error: boolean; text: string }[];
   }[] = [];
+
   const event = (type: string, data: object) =>
     `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+
   const blocks = (reply: Reply) =>
     "text" in reply
       ? event("content_block_start", {
@@ -107,6 +112,7 @@ function fixture(script: Reply[] = []) {
               event("content_block_stop", { index }),
           )
           .join("");
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -130,6 +136,7 @@ function fixture(script: Reply[] = []) {
               results: (Array.isArray(last?.content) ? last.content : [])
                 .flatMap((block) => {
                   const result = toolResult.safeParse(block);
+
                   return result.success ? [result.data] : [];
                 })
                 .map((result) => ({
@@ -140,9 +147,11 @@ function fixture(script: Reply[] = []) {
             }
           : {}),
       });
+
       if (url.pathname !== "/v1/messages")
         return Response.json({}, { status: 404 });
       const reply = script.shift() ?? { text: "Fixture reply" };
+
       return new Response(
         event("message_start", {
           message: {
@@ -165,7 +174,9 @@ function fixture(script: Reply[] = []) {
       );
     },
   });
+
   cleanup.push(async () => server.stop(true));
+
   return { requests, baseURL: `http://127.0.0.1:${server.port}/v1` };
 }
 
@@ -213,9 +224,11 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
       },
     }),
   );
+
   const before = (await readdir(home)).concat(
     await readdir(join(home, ".claude")),
   );
+
   const { requests, baseURL } = fixture();
   setEnv({
     HOME: home,
@@ -223,9 +236,11 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
     ANTHROPIC_API_KEY: `sk-ant-api03-${canary}`,
     CLAUDE_CODE_OAUTH_TOKEN: `sk-ant-oat01-${canary}`,
   });
+
   const open = async (extra: Record<string, unknown>, name: string) => {
     const dataDirectory = join(data, name);
     await mkdir(dataDirectory);
+
     const backend = await ClaudeBackend.open(
       Schema.decodeUnknownSync(claudeBackendSchema)({
         type: "claude",
@@ -236,17 +251,22 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
       }),
       { dataDirectory },
     );
+
     cleanup.push(() => backend.close());
+
     return backend;
   };
+
   const signal = () => AbortSignal.timeout(60_000);
 
   const closed = await open({}, "closed");
+
   const id = await closed.createSession({
     key: "k",
     title: "T",
     signal: signal(),
   });
+
   const previews: string[] = [];
   expect(
     await closed.prompt(id, "Say hi", signal(), (text) => previews.push(text)),
@@ -258,6 +278,7 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
   );
   const first = requests.filter(({ path }) => path === "/v1/messages");
   expect(first.length).toBe(2);
+
   for (const request of first) {
     expect(request.model).toBe("claude-sonnet-5-5");
     expect(request.tools).toEqual([]);
@@ -265,11 +286,12 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
   }
 
   // Project settings load only when selected. They cannot add tools, run
-  // hooks or redirect the endpoint.
+  // Hooks or redirect the endpoint.
   const allowed = await open(
     { allowedTools: ["Read"], settingSources: ["project"] },
     "allowed",
   );
+
   expect(
     await allowed.prompt(
       await allowed.createSession({ key: "k", title: "T", signal: signal() }),
@@ -280,6 +302,7 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
   const last = requests.at(-1);
   expect(last?.memory).toBe(true);
   expect(last?.tools).toContain("Read");
+
   for (const tool of ["Bash", "Write", "Edit", "Agent", "WebFetch"])
     expect(last?.tools).not.toContain(tool);
   expect(requests.filter(({ path }) => path === "/v1/messages").length).toBe(3);
@@ -290,6 +313,7 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
     expect(request.apiKey).toBe(false);
     expect(request.canary).toBe(false);
   }
+
   expect(
     (await readdir(home)).concat(await readdir(join(home, ".claude"))),
   ).toEqual(before);
@@ -304,6 +328,7 @@ test("real Claude Code CLI runs only the allowed tool names", async () => {
   await mkdir(data);
   await writeFile(join(project, "allowed", "ok.txt"), "STARGATEALLOWED");
   await writeFile(join(project, "forbidden.txt"), "STARGATEFORBIDDEN");
+
   const { requests, baseURL } = fixture([
     {
       tools: [
@@ -326,7 +351,9 @@ test("real Claude Code CLI runs only the allowed tool names", async () => {
     },
     { text: "Tools done" },
   ]);
+
   setEnv({ [apiKeyEnv]: key });
+
   const open = async (allowedTools: string[]) =>
     ClaudeBackend.open(
       Schema.decodeUnknownSync(claudeBackendSchema)({
@@ -338,17 +365,20 @@ test("real Claude Code CLI runs only the allowed tool names", async () => {
       }),
       { dataDirectory: data },
     );
+
   // A path scope would not bind the CLI: Read inside the working directory
-  // is always allowed. Stargate accepts bare tool names only.
+  // Is always allowed. Stargate accepts bare tool names only.
   await expect(open(["Read(./allowed/**)"])).rejects.toThrow();
   const backend = await open(["Read"]);
   cleanup.push(() => backend.close());
   const signal = AbortSignal.timeout(60_000);
   const id = await backend.createSession({ key: "k", title: "T", signal });
   expect(await backend.prompt(id, "Use tools", signal)).toBe("Tools done");
+
   const results = new Map(
     (requests.at(-1)?.results ?? []).map((result) => [result.id, result]),
   );
+
   // The allowed tool name runs without a scope; others never run.
   expect(results.get("toolu_read")?.error).toBe(false);
   expect(results.get("toolu_read")?.text).toContain("STARGATEFORBIDDEN");
@@ -373,6 +403,7 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
 `,
     { mode: 0o700 },
   );
+
   const tools = [
     {
       name: "save_issue",
@@ -386,21 +417,28 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
       },
     },
   ];
+
   const httpCalls: { method: string; arguments?: unknown }[] = [];
+
   const mcp = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       if (request.headers.get("authorization") !== `Bearer ${bearer}`)
         return new Response(null, { status: 401 });
+
       if (request.method !== "POST") return new Response(null, { status: 405 });
+
       const { id, method, params } = (await request.json()) as {
         id?: unknown;
         method: string;
         params?: { protocolVersion?: unknown; arguments?: unknown };
       };
+
       httpCalls.push({ method, arguments: params?.arguments });
+
       if (id === undefined) return new Response(null, { status: 202 });
+
       const result =
         method === "initialize"
           ? {
@@ -413,9 +451,11 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
             : {
                 content: [{ type: "text", text: "dependency saved" }],
               };
+
       return Response.json({ jsonrpc: "2.0", id, result });
     },
   });
+
   cleanup.push(async () => mcp.stop(true));
 
   const stdio = join(root, "stdio.ts");
@@ -454,7 +494,9 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
     },
     { text: "Tools done" },
   ]);
+
   setEnv({ [apiKeyEnv]: key });
+
   const backend = await ClaudeBackend.open(
     Schema.decodeUnknownSync(claudeBackendSchema)({
       type: "claude",
@@ -472,6 +514,7 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
     }),
     { dataDirectory },
   );
+
   cleanup.push(() => backend.close());
   const signal = AbortSignal.timeout(60_000);
   const id = await backend.createSession({ key: "k", title: "T", signal });
@@ -482,9 +525,11 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
   expect(
     first?.tools?.filter((name) => name !== "DeferredToolPlaceholder").sort(),
   ).toEqual(["mcp__kirk__cloudflare_access", "mcp__linear__save_issue"]);
+
   const results = new Map(
     (requests.at(-1)?.results ?? []).map((r) => [r.id, r]),
   );
+
   expect(results.get("toolu_dep")?.error).toBe(false);
   expect(results.get("toolu_dep")?.text).toContain("dependency saved");
   expect(results.get("toolu_policy")?.error).toBe(false);
@@ -505,9 +550,10 @@ test("no Bash process of the real CLI outlives its turn", async () => {
   await mkdir(data);
   const record = join(root, "pid");
   const background = join(root, "background");
+
   // Claude Code runs Bash in its own session. The first command leaves a
   // SIGTERM-ignoring process behind after its own call has finished; the
-  // second is a background task that keeps the CLI alive after its result.
+  // Second is a background task that keeps the CLI alive after its result.
   const { baseURL } = fixture([
     {
       tools: [
@@ -532,7 +578,9 @@ test("no Bash process of the real CLI outlives its turn", async () => {
     },
     { text: "Left one behind" },
   ]);
+
   setEnv({ [apiKeyEnv]: key });
+
   const backend = await ClaudeBackend.open(
     Schema.decodeUnknownSync(claudeBackendSchema)({
       type: "claude",
@@ -544,29 +592,36 @@ test("no Bash process of the real CLI outlives its turn", async () => {
     { dataDirectory: data },
     { graceMs: 500 },
   );
+
   cleanup.push(() => backend.close());
   const signal = AbortSignal.timeout(60_000);
   const id = await backend.createSession({ key: "k", title: "T", signal });
   expect(await backend.prompt(id, "Run it", signal)).toBe("Left one behind");
+
   const pids = await Promise.all(
     [record, background].map(async (path) =>
       Number((await readFile(path, "utf8")).trim()),
     ),
   );
+
   const alive = (pid: number) => {
     try {
       process.kill(pid, 0);
+
       return true;
     } catch {
       return false;
     }
   };
+
   cleanup.push(async () => {
     for (const pid of pids) if (alive(pid)) process.kill(pid, "SIGKILL");
   });
+
   for (const pid of pids) expect(pid).toBeGreaterThan(1);
   // A killed process can stay a zombie for a moment until it is reaped.
   const deadline = Date.now() + 3000;
+
   while (pids.some(alive) && Date.now() < deadline) await Bun.sleep(25);
   expect(pids.filter(alive)).toEqual([]);
 }, 120_000);
