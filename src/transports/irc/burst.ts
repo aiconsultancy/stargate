@@ -1,6 +1,9 @@
 import { Schema } from "effect";
-import { settingsStartsWith, settingsStruct } from "../config/settings-schema";
-import type { Incoming } from "../gateway/store-types";
+import {
+  settingsStartsWith,
+  settingsStruct,
+} from "../../config/settings-schema";
+import type { Incoming } from "../../gateway/store-types";
 import { validMsgid } from "./protocol";
 import type { IrcBurstMessage } from "./store-contract";
 

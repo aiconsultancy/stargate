@@ -5,7 +5,7 @@ import {
   type IrcMessage,
   parseMessage,
   utf8Bytes,
-} from "../src/irc/protocol";
+} from "../src/transports/irc/protocol";
 
 type Client = {
   socket: Socket<{ id: number }>;

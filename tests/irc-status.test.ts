@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { IrcStatus, type StatusResult } from "../src/irc/status";
+import { IrcStatus, type StatusResult } from "../src/transports/irc/status";
 import { waitingPhrase } from "../src/gateway/waiting";
 
 type Attempt = {

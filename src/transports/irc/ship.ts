@@ -1,30 +1,33 @@
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
-import { type PromptSourceContext, sourceLine } from "../backends/backend";
-import { operatorControl } from "../questions/question-settings";
+import { type PromptSourceContext, sourceLine } from "../../backends/backend";
+import { operatorControl } from "../../questions/question-settings";
 import {
   type BackendConfig,
   type IrcConfig,
   effectiveIrcConfig,
   secret,
-} from "../config";
-import { type OutboxPage, outboxMaxAgeMs } from "../crew/messaging/irc-rpc";
+} from "../../config";
+import { type OutboxPage, outboxMaxAgeMs } from "../../crew/messaging/irc-rpc";
 import {
   dispatchRequestTurn,
   ircDispatchOffer,
   isRearAdmiral,
-} from "../dispatch/irc";
-import { dispatchTag } from "../dispatch/protocol";
-import type { DispatchOffer, FleetSource } from "../fleet/protocol";
-import { fleetAuthority, fleetInstructions } from "../fleet/fleet-policy";
-import { fleetSourceReference } from "../fleet/fleet-source";
-import type { GatewayConfig } from "../gateway/gateway";
-import type { GatewayTransport } from "../gateway/ports";
-import { questionControl, questionFingerprint } from "../questions/questions";
-import { type Identity, backendFingerprint } from "../gateway/routing";
-import type { Incoming, Store } from "../gateway/store";
-import { turnProgressText } from "../shared/turn-progress";
+} from "../../dispatch/irc";
+import { dispatchTag } from "../../dispatch/protocol";
+import type { DispatchOffer, FleetSource } from "../../fleet/protocol";
+import { fleetAuthority, fleetInstructions } from "../../fleet/fleet-policy";
+import { fleetSourceReference } from "../../fleet/fleet-source";
+import type { GatewayConfig } from "../../gateway/gateway";
+import type { GatewayTransport } from "../../gateway/ports";
+import {
+  questionControl,
+  questionFingerprint,
+} from "../../questions/questions";
+import { type Identity, backendFingerprint } from "../../gateway/routing";
+import type { Incoming, Store } from "../../gateway/store";
+import { turnProgressText } from "../../shared/turn-progress";
 import { IrcAudit, ctcp, sensitive, serviceNick } from "./audit";
 import { ircBurstEligible } from "./burst";
 import {

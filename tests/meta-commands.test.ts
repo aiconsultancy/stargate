@@ -14,7 +14,7 @@ import type { MetaRecords } from "../src/meta-commands/store";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";
 import { notificationKey } from "../src/notifications/preferences/notifications";
 import { PeerDirectory } from "../src/gateway/peers";
-import { handleSlackRequest } from "../src/slack/slack";
+import { handleSlackRequest } from "../src/transports/slack/slack";
 import { openStore } from "../src/app/open-store";
 import { resolveWaiting, waitingSettingsPath } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";

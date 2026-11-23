@@ -36,8 +36,8 @@ import {
   ReloadRejected,
   readReloadCandidate,
 } from "./config-reload";
-import type { CrewUIApi } from "../slack/crew-ui";
-import { CrewUI } from "../slack/crew-ui";
+import type { CrewUIApi } from "../transports/slack/crew-ui";
+import { CrewUI } from "../transports/slack/crew-ui";
 import {
   type CronDelivery,
   CronScheduler,
@@ -62,8 +62,8 @@ import { sendFleetAssignment } from "../fleet/fleet-irc";
 import { Gateway } from "../gateway/gateway";
 import type { TransportDelivery } from "../gateway/ports";
 import { createHealthReader } from "../health/health";
-import { controlInteractions } from "../slack/interactions";
-import { type IrcRegistration, IrcShip, ircKey } from "../irc/ship";
+import { controlInteractions } from "../transports/slack/interactions";
+import { type IrcRegistration, IrcShip, ircKey } from "../transports/irc/ship";
 import { templatesDirectory } from "../lib/installation-paths";
 import { DrainRuntime } from "../maintenance/maintenance-drain";
 import { discoverCrews } from "../maintenance/nightly/crews";
@@ -93,7 +93,7 @@ import {
   type NotificationSlack,
   slackNotificationSink,
 } from "../notifications/ingest/slack";
-import { PairingUI } from "../slack/pairing";
+import { PairingUI } from "../transports/slack/pairing";
 import { PeerDirectory } from "../gateway/peers";
 import { QuotaReader } from "../quota/quota";
 import { QuotaWatch } from "../quota/quota-watch";
@@ -103,10 +103,13 @@ import {
   botKey,
   isAllowedChannel,
 } from "../gateway/routing";
-import { SlackConnection, type SlackInteractions } from "../slack/slack";
+import {
+  SlackConnection,
+  type SlackInteractions,
+} from "../transports/slack/slack";
 import { openStore } from "./open-store";
 import { type Store } from "../gateway/store";
-import { TeamsRegistration } from "../teams/registration";
+import { TeamsRegistration } from "../transports/teams/registration";
 import { createTranscriber } from "../transcription/startup";
 import {
   type UpdateReceipt,

@@ -35,7 +35,7 @@ import { sendFleetAssignment } from "../src/fleet/fleet-irc";
 import {
   authenticateActivityRequest,
   BotFrameworkKeyStore,
-} from "../src/teams/botframework-auth";
+} from "../src/transports/teams/botframework-auth";
 import {
   APP_ID,
   activity,

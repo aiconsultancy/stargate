@@ -8,7 +8,7 @@ import type {
   FleetReviewEvidence,
   NativeMaker,
 } from "../fleet/protocol";
-import { validMsgid } from "../irc/protocol";
+import { validMsgid } from "../transports/irc/protocol";
 import type { MaintenanceWatch } from "../maintenance/maintenance";
 import type { MaintenanceDrain } from "../maintenance/maintenance-drain";
 import type {

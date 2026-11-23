@@ -9,12 +9,15 @@ import { openStore } from "../src/app/open-store";
 import {
   BOT_FRAMEWORK_ISSUER,
   BOT_FRAMEWORK_OPENID_URL,
-} from "../src/teams/botframework-auth";
-import type { ConnectorClient, OutgoingActivity } from "../src/teams/connector";
+} from "../src/transports/teams/botframework-auth";
+import type {
+  ConnectorClient,
+  OutgoingActivity,
+} from "../src/transports/teams/connector";
 import {
   type TeamsActivity,
   TeamsRegistration,
-} from "../src/teams/registration";
+} from "../src/transports/teams/registration";
 
 export const APP_ID = "11111111-2222-4333-8444-555555555555";
 export const TENANT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";

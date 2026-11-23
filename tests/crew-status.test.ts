@@ -13,7 +13,7 @@ import {
 import { MemberActivityStore } from "../src/crew/reporting/member-activity";
 import { teamSchema } from "../src/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
-import { CrewUI, crewStatusView } from "../src/slack/crew-ui";
+import { CrewUI, crewStatusView } from "../src/transports/slack/crew-ui";
 import type { CronView, SlackAck } from "../src/cron/ui";
 import { bot, identity } from "./fixtures";
 import {

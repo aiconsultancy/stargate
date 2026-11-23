@@ -8,7 +8,7 @@ import {
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { PromptNotSubmitted } from "../src/shared/request-failure";
-import { handleSlackRequest } from "../src/slack/slack";
+import { handleSlackRequest } from "../src/transports/slack/slack";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";
 import { ThreadContextUnavailable } from "../src/gateway/thread-context";

@@ -3,7 +3,7 @@ import { OpenCode } from "@opencode/client";
 import { Schema } from "effect";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
-import { CrewQuestionGateway } from "../src/irc/crew-question-gateway";
+import { CrewQuestionGateway } from "../src/transports/irc/crew-question-gateway";
 
 const cleanup: (() => unknown)[] = [];
 

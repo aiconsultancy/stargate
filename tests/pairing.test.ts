@@ -4,7 +4,7 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { botSchema } from "../src/config";
 import type { CronView } from "../src/cron/ui";
-import { PairingUI } from "../src/slack/pairing";
+import { PairingUI } from "../src/transports/slack/pairing";
 import { bot, identity } from "./fixtures";
 
 function fixture(deadline?: () => AbortSignal) {

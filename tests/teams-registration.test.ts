@@ -3,9 +3,15 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { dirname, join } from "node:path";
 import { Result, Schema } from "effect";
 import { teamsSchema } from "../src/config";
-import type { OutgoingActivity as Outgoing } from "../src/teams/connector";
-import { TeamsPresence, type TeamsWaiting } from "../src/teams/presence";
-import { allowedActivity, TeamsRegistration } from "../src/teams/registration";
+import type { OutgoingActivity as Outgoing } from "../src/transports/teams/connector";
+import {
+  TeamsPresence,
+  type TeamsWaiting,
+} from "../src/transports/teams/presence";
+import {
+  allowedActivity,
+  TeamsRegistration,
+} from "../src/transports/teams/registration";
 import type { TurnProgress as Progress } from "../src/shared/turn-progress";
 import { saveWaitingDelay, waitingPhrase } from "../src/gateway/waiting";
 import {
@@ -844,7 +850,7 @@ test("a Teams connector that declines informative updates still gets typing and 
       sendToConversation: async (
         _service: string,
         _channel: string,
-        activity: import("../src/teams/connector").OutgoingActivity,
+        activity: import("../src/transports/teams/connector").OutgoingActivity,
       ) => {
         if (activity.entities) throw new Error("Informative streams disabled");
 
@@ -854,14 +860,14 @@ test("a Teams connector that declines informative updates still gets typing and 
 
     const spy = spyOn(connector, "sendToConversation");
 
-    const presence = new (await import("../src/teams/presence")).TeamsPresence(
-      5,
-    );
+    const presence = new (
+      await import("../src/transports/teams/presence")
+    ).TeamsPresence(5);
 
     const abort = new AbortController();
 
     const send = (
-      activity: import("../src/teams/connector").OutgoingActivity,
+      activity: import("../src/transports/teams/connector").OutgoingActivity,
     ) => connector.sendToConversation(SERVICE_URL, job.channel, activity);
 
     const work = presence.working(

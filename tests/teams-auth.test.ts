@@ -10,7 +10,7 @@ import {
   MIN_UNKNOWN_KEY_REFRESH_MS,
   signingKeyResolver,
   verifyBotFrameworkToken,
-} from "../src/teams/botframework-auth";
+} from "../src/transports/teams/botframework-auth";
 import {
   APP_ID,
   botFrameworkKeys,

@@ -1,4 +1,4 @@
-import { markdownChunks } from "../slack/markdown-chunks";
+import { markdownChunks } from "../transports/slack/markdown-chunks";
 
 const nonempty = (items: Inline[]) =>
   items.filter((item) => !("text" in item) || item.text !== "");

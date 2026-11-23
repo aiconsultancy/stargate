@@ -10,7 +10,7 @@ import { ConfigReload, readReloadCandidate } from "../src/app/config-reload";
 import { readReady } from "../src/maintenance/nightly/update/ready";
 import { NotifyStore } from "../src/notifications/ingest/store";
 import { lockInstance, serve } from "../src/app/runtime";
-import { SlackConnection } from "../src/slack/slack";
+import { SlackConnection } from "../src/transports/slack/slack";
 import {
   envelope,
   producerToken,

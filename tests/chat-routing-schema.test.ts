@@ -4,14 +4,14 @@ import {
   configActionSchema,
   configSnapshotSchema,
 } from "../src/meta-commands/config-panel";
-import { ircBurstMessageSchema } from "../src/irc/burst";
+import { ircBurstMessageSchema } from "../src/transports/irc/burst";
 import type { QuestionSettings } from "../src/questions/question-settings";
 import {
   nativeQuestionSchema,
   questionAnswer,
 } from "../src/questions/questions";
 import { envelopeSchema } from "../src/gateway/routing";
-import { activitySchema } from "../src/teams/registration";
+import { activitySchema } from "../src/transports/teams/registration";
 import { activity } from "./teams-support";
 
 test("chat admission, question and stored interaction roots use native codecs", () => {

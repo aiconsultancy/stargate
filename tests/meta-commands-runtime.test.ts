@@ -11,7 +11,7 @@ import {
   type SlackApp,
   serve,
 } from "../src/app/runtime";
-import type { SlackInteractions } from "../src/slack/slack";
+import type { SlackInteractions } from "../src/transports/slack/slack";
 import { resolveWaiting } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 

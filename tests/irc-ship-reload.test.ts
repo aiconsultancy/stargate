@@ -6,7 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
 import pino from "pino";
 import { ircSchema } from "../src/config";
-import { type IrcRegistration, IrcShip } from "../src/irc/ship";
+import { type IrcRegistration, IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 

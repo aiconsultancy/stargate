@@ -21,7 +21,10 @@ import {
   profileTeam,
   teamSchema,
 } from "../crew/team";
-import { ircCrewInstructions, ircInstructions } from "../irc/routing";
+import {
+  ircCrewInstructions,
+  ircInstructions,
+} from "../transports/irc/routing";
 import {
   installationDirectory,
   templatesDirectory,

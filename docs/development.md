@@ -121,7 +121,7 @@ The gate applies these type-contract rules in `src`, `scripts` and
 `perf`, with these exceptions:
 
 - `typescript/no-unnecessary-boolean-literal-compare` is off for
-  `src/slack/slack.ts` only: `result.ok === true` checks an untrusted Slack
+  `src/transports/slack/slack.ts` only: `result.ok === true` checks an untrusted Slack
   Web API response, whose declared `boolean` type is not proved at run time.
 - `anti-slop/no-chained-type-assertions` is off for
   `src/maintenance/maintenance-drain.ts` only: one cast covers the gap between
@@ -196,7 +196,7 @@ These rules are off only for the files listed in `.oxlintrc.json`, because
 the repair would change behaviour there. Keep each list as short as it is;
 remove a file when its places are repaired.
 
-- `typescript/await-thenable` in `src/teams/registration.ts`: removing the
+- `typescript/await-thenable` in `src/transports/teams/registration.ts`: removing the
   `await` of `allowed()` removes a microtask turn before a Teams post.
 - `unicorn/prefer-top-level-await` in `scripts/irc-question-smoke.ts`:
   top-level await changes when the smoke module finishes evaluating.

@@ -384,7 +384,11 @@
       "src/background-questions.ts",
       "src/questions/background-questions.ts"
     ],
-    "src/bot-web.ts": ["src/bot-web.ts", "src/slack/bot-web.ts"],
+    "src/bot-web.ts": [
+      "src/bot-web.ts",
+      "src/slack/bot-web.ts",
+      "src/transports/slack/bot-web.ts"
+    ],
     "src/cancellation.ts": [
       "src/cancellation.ts",
       "src/gateway/cancellation.ts"
@@ -409,7 +413,11 @@
     ],
     "src/credentials.ts": ["src/credentials.ts", "src/lib/credentials.ts"],
     "src/crew-status.ts": ["src/crew-status.ts", "src/shared/crew-status.ts"],
-    "src/crew-ui.ts": ["src/crew-ui.ts", "src/slack/crew-ui.ts"],
+    "src/crew-ui.ts": [
+      "src/crew-ui.ts",
+      "src/slack/crew-ui.ts",
+      "src/transports/slack/crew-ui.ts"
+    ],
     "src/cron-advanced.ts": ["src/cron-advanced.ts", "src/cron/advanced.ts"],
     "src/cron-control.ts": ["src/cron-control.ts", "src/cron/control.ts"],
     "src/cron-decision.ts": ["src/cron-decision.ts", "src/cron/decision.ts"],
@@ -464,7 +472,51 @@
       "src/input-origin.ts",
       "src/backends/opencode/input-origin.ts"
     ],
-    "src/interactions.ts": ["src/interactions.ts", "src/slack/interactions.ts"],
+    "src/interactions.ts": [
+      "src/interactions.ts",
+      "src/slack/interactions.ts",
+      "src/transports/slack/interactions.ts"
+    ],
+    "src/irc/audit.ts": ["src/irc/audit.ts", "src/transports/irc/audit.ts"],
+    "src/irc/burst.ts": ["src/irc/burst.ts", "src/transports/irc/burst.ts"],
+    "src/irc/client-pem.ts": [
+      "src/irc/client-pem.ts",
+      "src/transports/irc/client-pem.ts"
+    ],
+    "src/irc/client.ts": ["src/irc/client.ts", "src/transports/irc/client.ts"],
+    "src/irc/config.ts": ["src/irc/config.ts", "src/transports/irc/config.ts"],
+    "src/irc/crew-link.ts": [
+      "src/irc/crew-link.ts",
+      "src/transports/irc/crew-link.ts"
+    ],
+    "src/irc/crew-question-gateway.ts": [
+      "src/irc/crew-question-gateway.ts",
+      "src/transports/irc/crew-question-gateway.ts"
+    ],
+    "src/irc/delivery.ts": [
+      "src/irc/delivery.ts",
+      "src/transports/irc/delivery.ts"
+    ],
+    "src/irc/filehost.ts": [
+      "src/irc/filehost.ts",
+      "src/transports/irc/filehost.ts"
+    ],
+    "src/irc/protocol.ts": [
+      "src/irc/protocol.ts",
+      "src/transports/irc/protocol.ts"
+    ],
+    "src/irc/routing.ts": [
+      "src/irc/routing.ts",
+      "src/transports/irc/routing.ts"
+    ],
+    "src/irc/ship.ts": ["src/irc/ship.ts", "src/transports/irc/ship.ts"],
+    "src/irc/status.ts": ["src/irc/status.ts", "src/transports/irc/status.ts"],
+    "src/irc/store-contract.ts": [
+      "src/irc/store-contract.ts",
+      "src/transports/irc/store-contract.ts"
+    ],
+    "src/irc/store.ts": ["src/irc/store.ts", "src/transports/irc/store.ts"],
+    "src/irc/text.ts": ["src/irc/text.ts", "src/transports/irc/text.ts"],
     "src/loopback.ts": ["src/loopback.ts", "src/lib/loopback.ts"],
     "src/maintenance-delivery.ts": [
       "src/maintenance-delivery.ts",
@@ -480,7 +532,8 @@
     ],
     "src/markdown-chunks.ts": [
       "src/markdown-chunks.ts",
-      "src/slack/markdown-chunks.ts"
+      "src/slack/markdown-chunks.ts",
+      "src/transports/slack/markdown-chunks.ts"
     ],
     "src/mentions.ts": ["src/mentions.ts", "src/shared/mentions.ts"],
     "src/meta-commands.ts": [
@@ -539,7 +592,11 @@
       "src/notify/subscriptions.ts",
       "src/notifications/ingest/subscriptions.ts"
     ],
-    "src/pairing.ts": ["src/pairing.ts", "src/slack/pairing.ts"],
+    "src/pairing.ts": [
+      "src/pairing.ts",
+      "src/slack/pairing.ts",
+      "src/transports/slack/pairing.ts"
+    ],
     "src/peers.ts": ["src/peers.ts", "src/gateway/peers.ts"],
     "src/pi-model.ts": [
       "src/pi-model.ts",
@@ -578,9 +635,14 @@
     "src/setup.ts": ["src/setup.ts", "src/app/setup.ts"],
     "src/slack-connection.ts": [
       "src/slack-connection.ts",
-      "src/slack/slack-connection.ts"
+      "src/slack/slack-connection.ts",
+      "src/transports/slack/slack-connection.ts"
     ],
-    "src/slack-files.ts": ["src/slack-files.ts", "src/slack/slack-files.ts"],
+    "src/slack-files.ts": [
+      "src/slack-files.ts",
+      "src/slack/slack-files.ts",
+      "src/transports/slack/slack-files.ts"
+    ],
     "src/slack-format.ts": [
       "src/slack-format.ts",
       "src/shared/slack-format.ts"
@@ -589,16 +651,50 @@
       "src/slack-questions.ts",
       "src/questions/slack-questions.ts"
     ],
-    "src/slack.ts": ["src/slack.ts", "src/slack/slack.ts"],
+    "src/slack.ts": [
+      "src/slack.ts",
+      "src/slack/slack.ts",
+      "src/transports/slack/slack.ts"
+    ],
     "src/status-report.ts": [
       "src/status-report.ts",
       "src/app/status-report.ts"
     ],
     "src/store.ts": ["src/store.ts", "src/gateway/store.ts"],
     "src/streaming.ts": ["src/streaming.ts", "src/gateway/streaming.ts"],
+    "src/teams/botframework-auth.ts": [
+      "src/teams/botframework-auth.ts",
+      "src/transports/teams/botframework-auth.ts"
+    ],
+    "src/teams/connector.ts": [
+      "src/teams/connector.ts",
+      "src/transports/teams/connector.ts"
+    ],
     "src/teams/http-util.ts": [
       "src/teams/http-util.ts",
       "src/lib/http-util.ts"
+    ],
+    "src/teams/http.ts": ["src/teams/http.ts", "src/transports/teams/http.ts"],
+    "src/teams/images.ts": [
+      "src/teams/images.ts",
+      "src/transports/teams/images.ts"
+    ],
+    "src/teams/log.ts": ["src/teams/log.ts", "src/transports/teams/log.ts"],
+    "src/teams/presence.ts": [
+      "src/teams/presence.ts",
+      "src/transports/teams/presence.ts"
+    ],
+    "src/teams/registration.ts": [
+      "src/teams/registration.ts",
+      "src/transports/teams/registration.ts"
+    ],
+    "src/teams/service-url.ts": [
+      "src/teams/service-url.ts",
+      "src/transports/teams/service-url.ts"
+    ],
+    "src/teams/teams.ts": [
+      "src/teams/teams.ts",
+      "src/transports/teams/teams.ts"
     ],
     "src/teams/unix-socket.ts": [
       "src/teams/unix-socket.ts",

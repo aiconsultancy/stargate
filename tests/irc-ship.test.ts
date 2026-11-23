@@ -11,8 +11,8 @@ import type {
 } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
-import { utf8Bytes } from "../src/irc/protocol";
-import { IrcShip } from "../src/irc/ship";
+import { utf8Bytes } from "../src/transports/irc/protocol";
+import { IrcShip } from "../src/transports/irc/ship";
 import { serve } from "../src/app/runtime";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";

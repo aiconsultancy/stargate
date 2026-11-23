@@ -60,7 +60,7 @@ New:
 Existing bounded integration:
 
 - `src/config.ts`, `src/app/setup.ts`, `src/app/config-reload.ts`, `src/app/cli.ts`.
-- `src/app/runtime.ts`, `src/slack/slack.ts`; task-01 route composition signature only
+- `src/app/runtime.ts`, `src/transports/slack/slack.ts`; task-01 route composition signature only
   if its actual consumer needs a small correction.
 - Existing runtime, reload, config, CLI, setup and Slack tests as needed;
   their exact paths are in the regression command below.

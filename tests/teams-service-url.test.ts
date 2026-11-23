@@ -1,6 +1,9 @@
 import { describe, test } from "bun:test";
 import assert from "node:assert/strict";
-import { isAllowedServiceUrl, serviceUrlBase } from "../src/teams/service-url";
+import {
+  isAllowedServiceUrl,
+  serviceUrlBase,
+} from "../src/transports/teams/service-url";
 
 describe("Bot Connector service URL allow-list", () => {
   test("accepts the Teams and Bot Framework hosts over https", () => {

@@ -1226,7 +1226,7 @@ channel and posts one entry per DM:
   of any other IRC registration, on any server: host names and ports do not
   prove two servers distinct. The comparison uses one key that is at least
   as coarse as every CASEMAPPING Stargate knows (`widestFold` in
-  `src/irc/protocol.ts`, built on the runtime `unicode` fold): Unicode
+  `src/transports/irc/protocol.ts`, built on the runtime `unicode` fold): Unicode
   compatibility forms, lower, upper and lower case again, then rfc1459.
   So `#Ärger` equals `#ärger`, and `#STRAẞE`, `#straße` and `#STRASSE`
   are one name.
@@ -1372,7 +1372,7 @@ crew) is a **ship message**:
 ### Breakout channels (future)
 
 Captain-created task channels are not implemented. The extension point is
-`IrcShip` (`src/irc/ship.ts`): a runtime grant set beside
+`IrcShip` (`src/transports/irc/ship.ts`): a runtime grant set beside
 `crew[].channels`, filled only by a captain action, which then uses the
 same join, invite and invite-ignore rules. Grants must stay captain-owned
 and auditable, and the `length(1)` rule on `crew[].channels` would become
@@ -1524,7 +1524,7 @@ other instruction changes.
 
 ## Implementation
 
-`src/irc/client.ts` is a small client on Bun's TCP/TLS sockets, not a
+`src/transports/irc/client.ts` is a small client on Bun's TCP/TLS sockets, not a
 library. The maintained JavaScript option, `irc-framework`, targets Node
 `net`/`tls`, lists `labeled-response` and message IDs outside its stable
 support, and owns reconnect and SASL internally behind an untyped event

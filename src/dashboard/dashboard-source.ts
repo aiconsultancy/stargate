@@ -19,7 +19,7 @@ import {
   dashboardCrewMembers,
   dashboardCrewSummary,
 } from "./dashboard-projection";
-import type { IrcRegistration } from "../irc/ship";
+import type { IrcRegistration } from "../transports/irc/ship";
 import { createReadSlot, readWithDeadline } from "../lib/read-deadline";
 import { type Identity, backendFingerprint } from "../shared/registration";
 import {

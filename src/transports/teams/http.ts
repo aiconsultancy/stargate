@@ -9,7 +9,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import type { VerifiedToken } from "./botframework-auth";
 import { AuthError } from "./botframework-auth";
-import { BodyTooLargeError, readBody, sendJson } from "../lib/http-util";
+import { BodyTooLargeError, readBody, sendJson } from "../../lib/http-util";
 import type { Logger } from "./log";
 import { describeError } from "./log";
 

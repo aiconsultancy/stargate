@@ -7,9 +7,9 @@ import { createServer } from "node:tls";
 import { Schema } from "effect";
 import pino from "pino";
 import { ircSchema } from "../src/config";
-import { IrcClient } from "../src/irc/client";
-import { clientPem } from "../src/irc/client-pem";
-import { IrcShip, ircKey } from "../src/irc/ship";
+import { IrcClient } from "../src/transports/irc/client";
+import { clientPem } from "../src/transports/irc/client-pem";
+import { IrcShip, ircKey } from "../src/transports/irc/ship";
 import { checkCredentials } from "../src/app/setup";
 import { openStore } from "../src/app/open-store";
 

@@ -7,7 +7,10 @@ import {
 } from "../src/attachments/attachments";
 import { claudeInputContent } from "../src/backends/claude";
 import { codexInput } from "../src/backends/codex";
-import { SlackFiles, type SlackFilesFetch } from "../src/slack/slack-files";
+import {
+  SlackFiles,
+  type SlackFilesFetch,
+} from "../src/transports/slack/slack-files";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 

@@ -12,9 +12,12 @@ import {
   ircBurstLimits,
   ircBurstMessageSchema,
   ircBurstText,
-} from "../irc/burst";
-import { validMsgid } from "../irc/protocol";
-import type { IrcBurstMessage, IrcOperations } from "../irc/store-contract";
+} from "../transports/irc/burst";
+import { validMsgid } from "../transports/irc/protocol";
+import type {
+  IrcBurstMessage,
+  IrcOperations,
+} from "../transports/irc/store-contract";
 import { FleetRecords } from "../fleet/store";
 import { type StoredJob, decodeJob, decodeStoredJob } from "./row-codec";
 import { TranscriptRecords } from "./transcript-store";

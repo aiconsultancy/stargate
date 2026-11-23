@@ -9,7 +9,7 @@ import { Schema } from "effect";
 import pino from "pino";
 import { ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
-import { IrcShip } from "../src/irc/ship";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer } from "../tests/irc-fixture";
 

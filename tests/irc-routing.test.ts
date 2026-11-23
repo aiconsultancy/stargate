@@ -11,7 +11,7 @@ import {
   fold,
   formatMessage,
   parseMessage,
-} from "../src/irc/protocol";
+} from "../src/transports/irc/protocol";
 import {
   type IrcMember,
   ircAllowed,
@@ -22,8 +22,8 @@ import {
   ircResultJobAllowed,
   routeIrcMessage,
   withinLimits,
-} from "../src/irc/routing";
-import { IrcShip, ircKey } from "../src/irc/ship";
+} from "../src/transports/irc/routing";
+import { IrcShip, ircKey } from "../src/transports/irc/ship";
 import { checkCredentials } from "../src/app/setup";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";

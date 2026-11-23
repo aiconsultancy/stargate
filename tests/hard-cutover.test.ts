@@ -25,7 +25,7 @@ import {
 import { configSchema, loadConfig } from "../src/config";
 import { crewFingerprint } from "../src/crew/execution/identity";
 import { defaultTeam } from "../src/crew/team";
-import { ircKey } from "../src/irc/ship";
+import { ircKey } from "../src/transports/irc/ship";
 import { botKey, conversationKey } from "../src/gateway/routing";
 import { bot, identity } from "./fixtures";
 

@@ -8,7 +8,7 @@ import { Schema } from "effect";
 import { Service } from "@opencode/client/service";
 import { crewFingerprint } from "../src/crew/execution/identity";
 import { CrewState } from "../src/crew/execution/state";
-import { CrewQuestionGateway } from "../src/irc/crew-question-gateway";
+import { CrewQuestionGateway } from "../src/transports/irc/crew-question-gateway";
 import {
   questionSettingsPath,
   saveQuestionSettings,

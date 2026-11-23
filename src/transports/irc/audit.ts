@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
-import { containsCredential } from "../lib/credentials";
+import { containsCredential } from "../../lib/credentials";
 import {
   type IrcClient,
   IrcSendExpired,

@@ -13,8 +13,12 @@ import { cronjobsSchema } from "../cron/config";
 import { validateFleetPermissions } from "../fleet/permissions";
 import { fleetPolicySchema } from "../fleet/fleet-policy";
 import { healthConfigSchema } from "../health/config";
-import { createIrcConfig, ircAccount, ircChannel } from "../irc/config";
-import { fold, widestFold } from "../irc/protocol";
+import {
+  createIrcConfig,
+  ircAccount,
+  ircChannel,
+} from "../transports/irc/config";
+import { fold, widestFold } from "../transports/irc/protocol";
 import { textMentionRuleSchema } from "../shared/mentions";
 import { maintenanceSchema } from "../maintenance/nightly/config";
 import { notifyConfigError } from "../notifications/ingest/binding";
@@ -213,7 +217,10 @@ export const botSchema = settingsStruct({
     .pipe(settingsDefault(1_800_000)),
 });
 
-export { defaultAllCallWords, ircFeatureDefaults } from "../irc/config";
+export {
+  defaultAllCallWords,
+  ircFeatureDefaults,
+} from "../transports/irc/config";
 
 export const { ircSchema, ircFeedbackDefaults, effectiveIrcConfig } =
   createIrcConfig({

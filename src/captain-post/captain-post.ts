@@ -30,7 +30,7 @@ import {
   preparedAttachmentSchema,
   readPreparedAttachment,
 } from "../attachments/attachments";
-import { botToken, botWebClient } from "../slack/bot-web";
+import { botToken, botWebClient } from "../transports/slack/bot-web";
 import { type BotConfig, loadConfig } from "../config";
 import { isAllowedChannel } from "../shared/registration";
 import {
@@ -39,7 +39,10 @@ import {
   settingsPattern,
   settingsStruct,
 } from "../config/settings-schema";
-import { SlackFiles, type SlackFilesFetch } from "../slack/slack-files";
+import {
+  SlackFiles,
+  type SlackFilesFetch,
+} from "../transports/slack/slack-files";
 import { slackContent } from "../shared/slack-format";
 
 /** One Slack message: the plain-text fallback section holds 3000 characters. */

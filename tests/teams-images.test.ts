@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
 import { crc32, deflateSync } from "node:zlib";
 import type { Attachment } from "../src/attachments/attachments";
-import type { OutgoingActivity } from "../src/teams/connector";
+import type { OutgoingActivity } from "../src/transports/teams/connector";
 import {
   inspectScreenshot,
   MAX_IMAGE_BYTES,
   screenshotActivity,
   teamsImageTransport,
-} from "../src/teams/images";
-import { TEAMS_SAFE_MESSAGE_BYTES } from "../src/teams/teams";
+} from "../src/transports/teams/images";
+import { TEAMS_SAFE_MESSAGE_BYTES } from "../src/transports/teams/teams";
 
 function chunk(type: string, content: Buffer): Buffer {
   const header = Buffer.alloc(8);

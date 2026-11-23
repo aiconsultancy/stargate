@@ -8,7 +8,7 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { effectiveIrcConfig, ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
-import { IrcShip } from "../src/irc/ship";
+import { IrcShip } from "../src/transports/irc/ship";
 import {
   nativeQuestionSchema,
   type QuestionAnswer,

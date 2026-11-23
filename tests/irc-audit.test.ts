@@ -15,15 +15,15 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { configSchema, ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
-import { auditLine } from "../src/irc/audit";
-import { IrcClient, type IrcTiming } from "../src/irc/client";
+import { auditLine } from "../src/transports/irc/audit";
+import { IrcClient, type IrcTiming } from "../src/transports/irc/client";
 import {
   type Casemapping,
   fold,
   parseMessage,
   utf8Bytes,
-} from "../src/irc/protocol";
-import { IrcShip } from "../src/irc/ship";
+} from "../src/transports/irc/protocol";
+import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";
 import { FakeIrcServer, lineOf, until as pollUntil } from "./irc-fixture";
