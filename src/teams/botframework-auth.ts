@@ -60,7 +60,7 @@ async function getJson(
   if (!res.ok) throw new Error(`GET ${url} returned HTTP ${res.status}`);
   const body = (await res.json()) as unknown;
 
-  if (!body || typeof body !== "object")
+  if (body === null || typeof body !== "object")
     throw new Error(`GET ${url} did not return a JSON object`);
 
   return body as Record<string, unknown>;

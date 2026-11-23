@@ -603,7 +603,7 @@ export class Gateway {
         (this.bot
           ? this.bot.slack.steerThreadFollowUps
           : "steerThreadFollowUps" in this.config &&
-            this.config.steerThreadFollowUps) === true &&
+            this.config.steerThreadFollowUps) &&
         this.store.ownsFollowUp(receipt);
 
       const native: SteerInput | undefined = source
@@ -664,7 +664,8 @@ export class Gateway {
           state === "queued" &&
           this.store.jobByEvent(input.botKey, input.eventId);
 
-        if (queued) this.notificationDispatch(queued);
+        if (queued !== false && queued !== null)
+          this.notificationDispatch(queued);
         this.store.notifiedFollowUp(receipt);
         continue;
       }
@@ -869,7 +870,8 @@ export class Gateway {
       );
     const question = this.slackQuestions?.receive(body, current);
 
-    if (question && (await question)) return false;
+    if (question !== undefined && question !== false && (await question))
+      return false;
     const meta = this.meta.receive(body, bot, this.identity, current);
 
     if (meta !== false) {
@@ -1464,7 +1466,7 @@ export class Gateway {
             "",
         ) !== null;
 
-      if (error instanceof TranscriptUnavailable && !awaitingInput) {
+      if (error instanceof TranscriptUnavailable && awaitingInput !== true) {
         // Keep the mapping and cursor; the next request re-anchors.
         if (!this.unavailable.has(conversation))
           this.log.warn("Transcript unavailable; background catch-up stopped");
@@ -1758,11 +1760,11 @@ export class Gateway {
     const mention = snapshot.bot?.transcription?.spokenMentions;
     const timeoutMs = snapshot.bot?.transcription?.timeoutMs ?? 120_000;
 
-    const ignore = (message: string) => {
+    const ignore = (message: string): undefined => {
       this.log.info({ job: job.id }, message);
       this.store.discard(job.id);
 
-      return undefined;
+      return;
     };
 
     if (

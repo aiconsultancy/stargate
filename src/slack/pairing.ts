@@ -261,7 +261,7 @@ export class PairingUI {
 
     // Invalid envelopes cannot select a modal. Duplicate actions do nothing,
     // Preserving any already-delivered code instead of overwriting it.
-    if (!owned || !data || !pending) return;
+    if (!owned) return;
 
     try {
       if (!valid || pending.expires <= this.monotonicNow()) {

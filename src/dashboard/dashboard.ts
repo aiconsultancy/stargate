@@ -168,12 +168,18 @@ function createDashboard(options: Options) {
       return error(404, "Not found");
     }
 
-    const allowed =
-      kind === "sessions"
-        ? ["parent", "cursor"]
-        : kind === "entries"
-          ? ["session", "cursor", "order", "detail", "limit"]
-          : [];
+    let allowed: string[];
+
+    switch (kind) {
+      case "sessions":
+        allowed = ["parent", "cursor"];
+        break;
+      case "entries":
+        allowed = ["session", "cursor", "order", "detail", "limit"];
+        break;
+      default:
+        allowed = [];
+    }
 
     for (const key of url.searchParams.keys()) {
       if (!allowed.includes(key) || url.searchParams.getAll(key).length !== 1) {
@@ -260,7 +266,7 @@ function createDashboard(options: Options) {
           return options.source.ship(id, signal);
       }
 
-      return undefined;
+      return;
     });
 
     pending.add(work);
@@ -445,7 +451,7 @@ async function socketStat(path: string) {
     return await lstat(path);
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT")
-      return undefined;
+      return;
     throw error;
   }
 }

@@ -14,18 +14,25 @@ function family(address: string): "ipv4" | "ipv6" | undefined {
   if (address.includes("%")) return undefined;
   const version = isIP(address);
 
-  return version === 4 ? "ipv4" : version === 6 ? "ipv6" : undefined;
+  switch (version) {
+    case 4:
+      return "ipv4";
+    case 6:
+      return "ipv6";
+    default:
+      return undefined;
+  }
 }
 
 function parseNetwork(cidr: string) {
   const [address, suffix, extra] = cidr.split("/");
 
   if (!address || !suffix || extra !== undefined || !/^\d{1,3}$/.test(suffix))
-    return undefined;
+    return;
   const type = family(address);
   const prefix = Number(suffix);
 
-  if (!type || prefix > (type === "ipv4" ? 32 : 128)) return undefined;
+  if (!type || prefix > (type === "ipv4" ? 32 : 128)) return;
 
   return { address, type, prefix };
 }
@@ -66,8 +73,12 @@ export function isPrivateNetwork(cidr: string) {
 export function parseApiListen(listen: string) {
   const match = /^(?:\[([^\]]+)\]|([^:]*)):(\d{1,5})$/.exec(listen);
 
-  if (!match) return undefined;
-  const hostname = match[1] ?? (match[2] || "127.0.0.1");
+  if (!match) return;
+
+  const hostname =
+    match[1] ??
+    (match[2] === undefined || match[2] === "" ? "127.0.0.1" : match[2]);
+
   const port = Number(match[3]);
   const type = family(hostname);
 
@@ -81,17 +92,17 @@ export function parseApiListen(listen: string) {
     port < 1 ||
     port > 65_535
   )
-    return undefined;
+    return;
 
   return { hostname, port };
 }
 
 /** Normalize IPv4-mapped clients to the same identity used by IPv4 peers. */
 export function peerAddress(address: string | undefined) {
-  if (!address) return undefined;
+  if (!address) return;
   const type = family(address);
 
-  if (!type) return undefined;
+  if (!type) return;
 
   if (type === "ipv4") return address;
   const canonical = new URL(`http://[${address}]`).hostname.slice(1, -1);

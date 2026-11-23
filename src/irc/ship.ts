@@ -1063,20 +1063,32 @@ export class IrcShip {
                 root &&
                 this.store.jobByEvent(identity.key, `${channel}:${root}`);
 
-              const anchor = requested
-                ? root
-                : root &&
-                  this.store.irc.ircRequestAnchor(identity.key, channel, root);
+              const anchor =
+                requested !== undefined &&
+                requested !== null &&
+                requested !== ""
+                  ? root
+                  : root &&
+                    this.store.irc.ircRequestAnchor(
+                      identity.key,
+                      channel,
+                      root,
+                    );
 
               const job =
-                requested ||
-                (anchor &&
-                  this.store.jobByEvent(identity.key, `${channel}:${anchor}`));
+                requested === undefined ||
+                requested === null ||
+                requested === ""
+                  ? anchor &&
+                    this.store.jobByEvent(identity.key, `${channel}:${anchor}`)
+                  : requested;
 
               let text = "Reply to your original request to check its status.";
 
               if (
-                job &&
+                job !== undefined &&
+                job !== null &&
+                job !== "" &&
                 anchor &&
                 job.channel === channel &&
                 job.user === user
@@ -1118,7 +1130,10 @@ export class IrcShip {
             client.fold(actor) === client.fold(operator);
 
           if (
-            privateControl &&
+            privateControl !== undefined &&
+            privateControl !== null &&
+            privateControl !== false &&
+            privateControl !== "" &&
             (isOperator ||
               this.store.backgroundCases.find(
                 key,

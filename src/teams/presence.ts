@@ -17,7 +17,7 @@ export type TeamsWaiting = WaitingSettings & { name: string };
 type Label = { text: string; generic: boolean };
 
 function label(progress?: TurnProgress): Label {
-  if (progress && "disconnected" in progress && progress.disconnected === true)
+  if (progress && "disconnected" in progress && progress.disconnected)
     return { text: "Connection interrupted", generic: false };
   const stage: string | undefined = progress?.stage;
 

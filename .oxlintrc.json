@@ -385,6 +385,32 @@
           {
             "capIsNewExceptionPattern": "^(?:Schema|Data|Context)\\."
           }
+        ],
+        "anti-slop/no-unknown-type-aliases": "error",
+        "typescript/non-nullable-type-assertion-style": "error",
+        "anti-slop/no-reflect-get": "error",
+        "typescript/no-dynamic-delete": "error",
+        "typescript/no-deprecated": "error",
+        "typescript/prefer-nullish-coalescing": "error",
+        "anti-slop-effect/no-manual-tag-comparison": "error",
+        "anti-slop-effect/no-manual-effect-error-tag": "error",
+        "typescript/no-unnecessary-boolean-literal-compare": "error",
+        "anti-slop/no-chained-type-assertions": "error",
+        "anti-slop-effect/no-service-constructor-imports": "error",
+        "unicorn/no-useless-undefined": [
+          "error",
+          {
+            "checkArguments": false
+          }
+        ],
+        "anti-slop-effect/prefer-effect-match": "error",
+        "typescript/strict-boolean-expressions": [
+          "error",
+          {
+            "allowNullableBoolean": true,
+            "allowNullableString": true,
+            "allowNullableNumber": true
+          }
         ]
       },
       "env": {
@@ -795,6 +821,37 @@
       "files": ["src/notifications/ingest/notifications.ts"],
       "rules": {
         "eslint/no-unmodified-loop-condition": "off"
+      }
+    },
+    {
+      "files": ["src/slack/slack.ts"],
+      "rules": {
+        "typescript/no-unnecessary-boolean-literal-compare": "off"
+      }
+    },
+    {
+      "files": ["src/maintenance/maintenance-drain.ts"],
+      "rules": {
+        "anti-slop/no-chained-type-assertions": "off"
+      }
+    },
+    {
+      "files": ["src/app/runtime.ts"],
+      "rules": {
+        "anti-slop-effect/no-service-constructor-imports": "off"
+      }
+    },
+    {
+      "files": [
+        "scripts/crew-question-smoke.ts",
+        "scripts/irc-question-smoke.ts",
+        "src/backends/opencode/opencode-history.ts",
+        "src/backends/opencode/opencode.ts",
+        "src/cron/index.ts",
+        "src/gateway/gateway.ts"
+      ],
+      "rules": {
+        "typescript/strict-boolean-expressions": "off"
       }
     }
   ]

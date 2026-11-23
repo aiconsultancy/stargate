@@ -41,7 +41,7 @@ export type JournalEntry = {
 /** Append-only milestones, independent of temporary Slack captures. */
 export class JournalStore {
   public constructor(private readonly db: Database) {
-    db.exec(`CREATE TABLE IF NOT EXISTS journal (
+    db.run(`CREATE TABLE IF NOT EXISTS journal (
       id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER NOT NULL,
       member TEXT NOT NULL, captainID TEXT NOT NULL, taskID TEXT,
       kind TEXT NOT NULL, text TEXT NOT NULL, replayKey TEXT NOT NULL,

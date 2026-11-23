@@ -600,7 +600,7 @@ export class CodexBackend implements AgentBackend {
         JSON.parse(await readFile(join(this.threads, `${id}.json`), "utf8")),
       ).thread;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw new CodexTurnError("Codex thread mapping is unreadable");
     }
   }

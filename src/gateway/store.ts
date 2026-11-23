@@ -157,7 +157,7 @@ export class Store {
     this.db = new Database(path, { create: true, strict: true });
     this.backgroundCases = new BackgroundCases(this.db);
     this.updateNotices = new UpdateNotices(this.db);
-    this.db.exec(`
+    this.db.run(`
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS sessions (
@@ -267,7 +267,7 @@ export class Store {
           .all()
           .some((column) => column.name === name)
       ) {
-        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+        this.db.run(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
 
         return true;
       }
@@ -311,7 +311,7 @@ export class Store {
     )
       // Existing offers may have been seen despite a lost ACK. Preserve their
       // Original expiry rather than restarting their window on this migration.
-      this.db.exec("UPDATE native_questions SET publicationStarted=1");
+      this.db.run("UPDATE native_questions SET publicationStarted=1");
     column("irc_thread_messages", "request", "TEXT");
 
     for (const table of [
@@ -322,36 +322,36 @@ export class Store {
     ]) {
       if (column(table, "recorded", "INTEGER NOT NULL DEFAULT 0"))
         this.db.query(`UPDATE ${table} SET recorded=?`).run(Date.now());
-      this.db.exec(
+      this.db.run(
         `CREATE INDEX IF NOT EXISTS ${table}_retention ON ${table}(botKey,recorded)`,
       );
     }
 
-    this.db.exec(
+    this.db.run(
       "CREATE INDEX IF NOT EXISTS jobs_irc_root ON jobs(botKey,channel,CAST(COALESCE(replyParent,thread) AS TEXT),status)",
     );
-    this.db.exec(
+    this.db.run(
       "CREATE INDEX IF NOT EXISTS native_questions_job ON native_questions(botKey,jobID)",
     );
-    this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_fleet_assignment
+    this.db.run(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_fleet_assignment
       ON jobs(botKey,json_extract(fleet_context,'$.dispatchID'))
       WHERE json_extract(fleet_context,'$.kind')='assignment'`);
-    this.db.exec(
+    this.db.run(
       "CREATE INDEX IF NOT EXISTS jobs_received ON jobs(sender,received) WHERE received IS NOT NULL",
     );
-    this.db.exec(`CREATE INDEX IF NOT EXISTS jobs_activity_ts
+    this.db.run(`CREATE INDEX IF NOT EXISTS jobs_activity_ts
       ON jobs(botKey,channel,json_extract(activity,'$.ts')) WHERE activity IS NOT NULL`);
 
     // Preserve source-first context and legacy ownership; keep statuses intact.
     if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
-      this.db.exec(`UPDATE jobs SET started=1 WHERE started=0
+      this.db.run(`UPDATE jobs SET started=1 WHERE started=0
       AND status!='queued' AND failure IS NOT 'context'
       AND failure IS NOT 'cancelled' AND text!='';`);
-    this.db.exec("CREATE INDEX IF NOT EXISTS jobs_input ON jobs(botKey,input)");
+    this.db.run("CREATE INDEX IF NOT EXISTS jobs_input ON jobs(botKey,input)");
     // Newest native message accounted for in Slack; NULL needs a baseline.
     column("sessions", "cursor", "TEXT");
     // Server-wide settle events look up mappings by native session ID.
-    this.db.exec(
+    this.db.run(
       "CREATE INDEX IF NOT EXISTS sessions_session ON sessions(session_id)",
     );
     this.questions = new QuestionRecords(this.db);
@@ -431,7 +431,7 @@ export class Store {
       if (
         this.db
           .query("SELECT 1 FROM thread_followups WHERE botKey=? AND eventId=?")
-          .get(input.botKey, input.eventId) ||
+          .get(input.botKey, input.eventId) !== null ||
         this.jobByEvent(input.botKey, input.eventId)
       )
         return false;
@@ -442,7 +442,7 @@ export class Store {
         )
         .get(input.botKey);
 
-      if (!owner) return undefined;
+      if (!owner) return;
 
       const root = (message: Pick<Incoming, "thread" | "replyParent">) =>
         transport === "irc"

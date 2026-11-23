@@ -177,10 +177,12 @@ export class CrewProjects {
   }
 
   public owner(sessionID: string): string | undefined {
-    const contexts = [...this.contexts].filter(
-      ([, engine]) =>
-        engine.state.peerBySession(sessionID) || engine.ircMember(sessionID),
-    );
+    const contexts = [...this.contexts].filter(([, engine]) => {
+      if (engine.state.peerBySession(sessionID) !== null) return true;
+      const member = engine.ircMember(sessionID);
+
+      return member !== undefined && member !== "";
+    });
 
     if (contexts.length > 1)
       throw new CrewError(

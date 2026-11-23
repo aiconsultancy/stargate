@@ -76,7 +76,7 @@ export class CronjobManager {
       return this.resolveModel(input, signal);
     }
 
-    return undefined;
+    return;
   }
 
   public async sync(now: number, signal = new AbortController().signal) {

@@ -358,12 +358,10 @@ export class PiDurableBackend implements AgentBackend {
           requestId,
         );
 
-        if (receipt?.type !== "input" || receipt.status !== "done")
-          return undefined;
+        if (receipt?.type !== "input" || receipt.status !== "done") return;
         const answer = await tx.entry(AssistantEntry, receipt.answer);
 
-        if (!answer || answer.conversationId !== conversation.id)
-          return undefined;
+        if (!answer || answer.conversationId !== conversation.id) return;
 
         return (answer.model ?? [])
           .flatMap((message) =>
@@ -400,7 +398,7 @@ export class PiDurableBackend implements AgentBackend {
               async beforeRequest(request, api) {
                 const id = String(api.conversationId);
 
-                if (!agreement.owns(id)) return undefined;
+                if (!agreement.owns(id)) return;
                 const changed = await notice(id);
 
                 return changed
@@ -512,7 +510,7 @@ export class PiDurableBackend implements AgentBackend {
             if (agent?.instructions === reportInstructions)
               return { decline: true };
 
-            return undefined;
+            return;
           },
         }),
       ],
@@ -632,7 +630,7 @@ export class PiDurableBackend implements AgentBackend {
         async (tx) => (await tx.doc(ProviderDoc, conversation.id)).sessionId,
         context,
       )
-      .catch(() => undefined);
+      .catch(() => {});
 
     if (provider) providerCalls.set(provider, calls);
     let latestView: ConversationView | undefined;

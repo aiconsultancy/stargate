@@ -101,7 +101,7 @@ export function currentWindow(now: number, spec: WindowSpec, jitter: number) {
     if (window.opens <= now && now < window.closes) return window;
   }
 
-  return undefined;
+  return;
 }
 
 /** The next window whose planned start is after `now`. */

@@ -100,11 +100,7 @@ export function fleetInstructions(
       : []),
     "stargate_mail and stargate_dm address your configured captain/crew team, not other ships or a rear admiral.",
     "When crew need the status of another member's task, have them ask their own captain. The captain checks the task with the existing crew tools and relays the relevant status or blocker. Keep detailed session contents private.",
-    policy.role === "captain"
-      ? "Tag or dispatch the rear admiral only for a specific action they can take, a decision within their role or cross-ship coordination. State the issue, the ask and why it needs the rear admiral. Put FYIs, routine progress, review results and completion evidence on the issue. Ask the human directly when it is their decision."
-      : policy.role === "rear_admiral"
-        ? "A peer FYI or acknowledgement without an action for you needs no reply, tool call or forwarding. For IRC, return [[stargate:silent]]. For an actionable request, reply once with the decision, action or blocker. Use the correlated result for formal assignments and avoid tagged acknowledgements."
-        : "",
+    rolePolicyLine(policy.role),
     ...(policy.capabilities.includes("dispatch")
       ? [
           "Read fleet_status for configured fleet targets, then use fleet_dispatch with a retained source reference and stable request ID for authorised cross-fleet contact. A transport unknown requires inspection, never a new-ID resend.",
@@ -187,4 +183,15 @@ export function fleetPermissions(
       effect: "deny",
     })),
   ];
+}
+
+function rolePolicyLine(role: string) {
+  switch (role) {
+    case "captain":
+      return "Tag or dispatch the rear admiral only for a specific action they can take, a decision within their role or cross-ship coordination. State the issue, the ask and why it needs the rear admiral. Put FYIs, routine progress, review results and completion evidence on the issue. Ask the human directly when it is their decision.";
+    case "rear_admiral":
+      return "A peer FYI or acknowledgement without an action for you needs no reply, tool call or forwarding. For IRC, return [[stargate:silent]]. For an actionable request, reply once with the decision, action or blocker. Use the correlated result for formal assignments and avoid tagged acknowledgements.";
+    default:
+      return "";
+  }
 }

@@ -127,16 +127,24 @@ export class AgentDispatcher {
 
     // The last branch is a pending write: every timer run retries it, so
     // Never spin for it.
-    const at =
-      tracked.state === "asking"
-        ? offer && tracked.closedOffer === offer.id
-          ? this.now()
-          : offer?.deadline
-        : tracked.state === "waiting"
-          ? (tracked.nextRoundAt ?? this.now())
-          : tracked.state === "done"
-            ? undefined
-            : this.now() + this.settings.pollIntervalMs;
+    let at: number | undefined;
+
+    switch (tracked.state) {
+      case "asking":
+        at =
+          offer && tracked.closedOffer === offer.id
+            ? this.now()
+            : offer?.deadline;
+        break;
+      case "waiting":
+        at = tracked.nextRoundAt ?? this.now();
+        break;
+      case "done":
+        at = undefined;
+        break;
+      default:
+        at = this.now() + this.settings.pollIntervalMs;
+    }
 
     const retry = this.retryAt.get(tracked.issue);
 

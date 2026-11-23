@@ -42,16 +42,23 @@ function unescapeTag(value: string) {
     const next = value[++i];
 
     if (next === undefined) break;
-    result +=
-      next === ":"
-        ? ";"
-        : next === "s"
-          ? " "
-          : next === "r"
-            ? "\r"
-            : next === "n"
-              ? "\n"
-              : next;
+
+    switch (next) {
+      case ":":
+        result += ";";
+        break;
+      case "s":
+        result += " ";
+        break;
+      case "r":
+        result += "\r";
+        break;
+      case "n":
+        result += "\n";
+        break;
+      default:
+        result += next;
+    }
   }
 
   return result;

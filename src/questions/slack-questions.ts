@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import type { BotConfig } from "../config";
 import {
   type NativeQuestion,
@@ -524,12 +524,12 @@ export class SlackQuestionControls {
     const candidate = actionCandidate(raw);
 
     if (
-      candidate._tag === "None" ||
+      Option.isNone(candidate) ||
       !candidate.value.actions.some((entry) => {
         const action = actionID(entry);
 
         return (
-          action._tag === "Some" && action.value.action_id.startsWith(prefix)
+          Option.isSome(action) && action.value.action_id.startsWith(prefix)
         );
       })
     )
@@ -553,7 +553,7 @@ export class SlackQuestionControls {
     const parsed = decodeAction(raw);
     const bot = this.bot();
 
-    if (parsed._tag === "None" || !bot) return;
+    if (Option.isNone(parsed) || !bot) return;
     const body = parsed.value;
     const action = body.actions[0];
 
@@ -654,7 +654,7 @@ export class SlackQuestionControls {
           ],
         );
 
-        if (selection._tag === "None") return;
+        if (Option.isNone(selection)) return;
 
         for (const selected of selection.value.selected_options) {
           const index = /^([a-f0-9]{32}):([0-8]):([0-9]|1[0-9])$/.exec(
@@ -700,7 +700,7 @@ export class SlackQuestionControls {
   public receive(raw: unknown, open: () => boolean): Promise<boolean> | false {
     const candidate = decodeTextCandidate(raw);
 
-    if (candidate._tag === "None") return false;
+    if (Option.isNone(candidate)) return false;
 
     const match = new RegExp(
       `^\\s*<@${this.identity.user}>\\s+answer\\s+([a-f0-9]{32})(?::([0-8]))?(?:\\s+([\\s\\S]+))?\\s*$`,
@@ -736,7 +736,7 @@ export class SlackQuestionControls {
     const parsed = decodeReply(raw);
     const bot = this.bot();
 
-    if (parsed._tag === "None" || !bot || !text || text.length > 4000) return;
+    if (Option.isNone(parsed) || !bot || !text || text.length > 4000) return;
     const body = parsed.value;
 
     if (

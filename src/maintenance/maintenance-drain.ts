@@ -248,7 +248,7 @@ async function locked<T>(directory: string, work: () => Promise<T>) {
   const lock = new Database(path, { create: true });
 
   try {
-    lock.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE;");
+    lock.run("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE;");
   } catch {
     lock.close();
     throw new Error("Maintenance drain control is busy");
@@ -361,12 +361,17 @@ export async function registerDrainParticipant(
 
   return {
     update(patch) {
-      const next: Record<string, unknown> = { ...current };
+      const removed = new Set(
+        Object.entries(patch)
+          .filter(([, value]) => value === undefined)
+          .map(([key]) => key),
+      );
 
-      for (const [key, value] of Object.entries(patch))
-        if (value === undefined) delete next[key];
-        else next[key] = value;
-      current = next as DrainParticipant;
+      current = Object.fromEntries(
+        Object.entries({ ...current, ...patch }).filter(
+          ([key]) => !removed.has(key),
+        ),
+      ) as DrainParticipant;
 
       return write();
     },

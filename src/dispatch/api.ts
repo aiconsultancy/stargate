@@ -457,7 +457,7 @@ export class SubspaceApi implements DispatchApi {
           : undefined;
       }
 
-      return undefined;
+      return;
     };
 
     const projects = new Set<string>();
@@ -497,7 +497,7 @@ export class SubspaceApi implements DispatchApi {
       signal,
     );
 
-    if (status === 404) return undefined;
+    if (status === 404) return;
 
     if (status === 409)
       throw new DispatchApiError(status, `The Subspace API answered ${status}`);

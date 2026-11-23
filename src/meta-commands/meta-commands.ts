@@ -333,8 +333,7 @@ const commands: readonly Command[] = [
     },
     async run(context, match) {
       return changeQuestions(context, {
-        timeoutMs:
-          match[1] === "5m" ? 300_000 : match[1] === "1h" ? 3_600_000 : 900_000,
+        timeoutMs: questionTimeoutMs(match[1]),
       });
     },
   },
@@ -772,7 +771,7 @@ export class MetaCommands {
       body.team_id !== identity.team ||
       event.bot_id !== undefined ||
       event.subtype !== undefined ||
-      event.hidden ||
+      Boolean(event.hidden) ||
       event.user === identity.user ||
       !isAllowedUser(bot, event.user) ||
       !isAllowedChannel(bot, event.channel) ||
@@ -923,5 +922,16 @@ export class MetaCommands {
       receipt.reply ?? unconfirmed,
     );
     this.store.deliverMeta(registration, message);
+  }
+}
+
+function questionTimeoutMs(choice: string | undefined) {
+  switch (choice) {
+    case "5m":
+      return 300_000;
+    case "1h":
+      return 3_600_000;
+    default:
+      return 900_000;
   }
 }

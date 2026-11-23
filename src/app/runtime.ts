@@ -119,7 +119,7 @@ export async function loadEnvironment(configPath: string) {
 
   if (await file.exists()) {
     for (const [key, value] of Object.entries(parseEnv(await file.text()))) {
-      if (process.env[key] === undefined) process.env[key] = value;
+      process.env[key] ??= value;
     }
   }
 }
@@ -128,7 +128,7 @@ export function lockInstance(path: string) {
   const lock = new Database(path, { create: true });
 
   try {
-    lock.exec("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE;");
+    lock.run("PRAGMA busy_timeout=0; BEGIN EXCLUSIVE;");
 
     return lock;
   } catch {
@@ -455,13 +455,7 @@ export function serve(
       ) =>
         abortable(work).pipe(
           Effect.catchCause(() => {
-            botLog.error(
-              worker === "gateway"
-                ? "Worker stopped unexpectedly"
-                : worker === "cron"
-                  ? "Cron worker stopped unexpectedly"
-                  : "Transport stopped unexpectedly",
-            );
+            botLog.error(workerStoppedMessage(worker));
 
             return Deferred.fail(stopped, new RuntimeStopped({ worker }));
           }),
@@ -1665,7 +1659,7 @@ export function serve(
                   backend.sessionID &&
                   backend.queueUpdateNotice &&
                   backend.updateNoticeContext &&
-                  updateSnapshot
+                  updateSnapshot !== undefined
                 ) {
                   const selected = await backend.updateNoticeContext(
                     backend.sessionID,
@@ -1694,7 +1688,7 @@ export function serve(
                 if (
                   backend.sessionID &&
                   backend.crewUpdateNotice &&
-                  updateSnapshot
+                  updateSnapshot !== undefined
                 )
                   updateReceipts.push(
                     ...(await backend.crewUpdateNotice(updateSnapshot, signal)),
@@ -1884,5 +1878,16 @@ export async function start(configPath: string) {
     reload.close();
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
+  }
+}
+
+function workerStoppedMessage(worker: string) {
+  switch (worker) {
+    case "gateway":
+      return "Worker stopped unexpectedly";
+    case "cron":
+      return "Cron worker stopped unexpectedly";
+    default:
+      return "Transport stopped unexpectedly";
   }
 }

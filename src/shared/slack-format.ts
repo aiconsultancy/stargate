@@ -111,7 +111,11 @@ function controls(elements: Inline[]): Inline[] {
           !token.includes("<") &&
           token.split("|").length <= 2
         ) {
-          replacement = { type: "link", url, text: label || url };
+          replacement = {
+            type: "link",
+            url,
+            text: label === undefined || label === "" ? url : label,
+          };
         }
       }
 
@@ -388,7 +392,7 @@ function classifyReply(text: string) {
     return uncertainFences(text) || uncertainInline(block) ? undefined : block;
   } catch {
     // Parser/resource failures must not turn uncertain source into mentions.
-    return undefined;
+    return;
   }
 }
 
@@ -596,12 +600,16 @@ export function prepareSlackReply(
     used = 0;
   };
 
-  const inlineText = (element: Inline) =>
-    element.type === "user"
-      ? `<@${element.user_id}>`
-      : element.type === "channel"
-        ? `<#${element.channel_id}>`
-        : element.text;
+  const inlineText = (element: Inline) => {
+    switch (element.type) {
+      case "user":
+        return `<@${element.user_id}>`;
+      case "channel":
+        return `<#${element.channel_id}>`;
+      default:
+        return element.text;
+    }
+  };
 
   for (const unit of units) {
     let elements: Inline[] = [];

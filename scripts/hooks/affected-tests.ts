@@ -255,13 +255,20 @@ async function affected(existing: Set<string>) {
   }
 }
 
-const env = { ...process.env };
+let env: NodeJS.ProcessEnv = { ...process.env };
 let tests: string[] | undefined;
 let total: number | undefined;
 
 try {
-  for (const name of git(["rev-parse", "--local-env-vars"]).split(/\s+/))
-    if (name) delete env[name];
+  const local = new Set(
+    git(["rev-parse", "--local-env-vars"])
+      .split(/\s+/)
+      .filter((name) => name),
+  );
+
+  env = Object.fromEntries(
+    Object.entries(env).filter(([name]) => !local.has(name)),
+  );
 
   const existing = new Set(
     git(["ls-files", "--cached", "-z"])
@@ -289,8 +296,9 @@ try {
           : "Running selected tests only; the full suite runs in hosted Quality checks."),
     );
 } catch {
-  for (const name of Object.keys(env))
-    if (name.startsWith("GIT_")) delete env[name];
+  env = Object.fromEntries(
+    Object.entries(env).filter(([name]) => !name.startsWith("GIT_")),
+  );
   console.error(
     `affected-tests: ${total ?? "all"} test files selected of ${total ?? "unknown"} ` +
       "(computation error; running full suite)",

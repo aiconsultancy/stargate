@@ -29,7 +29,7 @@ function role(value: string): "captain" | "crew" {
  */
 export class IrcSessions {
   public constructor(private readonly db: Database) {
-    db.exec(`CREATE TABLE IF NOT EXISTS irc_sessions (
+    db.run(`CREATE TABLE IF NOT EXISTS irc_sessions (
       sessionID TEXT PRIMARY KEY, crewID TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS irc_dm_outbox (

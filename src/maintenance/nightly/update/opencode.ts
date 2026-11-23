@@ -54,8 +54,8 @@ export const openCodeCallMs = 10_000;
 
 export async function connectOpenCode(): Promise<OpenCodeControl> {
   const endpoint = await Promise.race([
-    Service.discover().catch(() => undefined),
-    Bun.sleep(openCodeCallMs).then(() => undefined),
+    Service.discover().catch(() => {}),
+    Bun.sleep(openCodeCallMs).then(() => {}),
   ]);
 
   if (!endpoint) throw new StepError("health-failed");

@@ -554,9 +554,7 @@ async function openRegular(path: string, signal?: AbortSignal) {
       throw new AttachmentUnavailable("size");
 
     // A parent directory can be swapped after realpath; bind the descriptor.
-    const linked = await readlink(`/proc/self/fd/${handle.fd}`).catch(
-      () => undefined,
-    );
+    const linked = await readlink(`/proc/self/fd/${handle.fd}`).catch(() => {});
 
     if (linked !== undefined) {
       if (linked !== path) throw new AttachmentUnavailable("denied");

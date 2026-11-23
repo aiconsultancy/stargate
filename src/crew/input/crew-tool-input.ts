@@ -92,11 +92,10 @@ const crewBranchDecoders = new Map<
 // Acknowledgement behind a root error. Delegate to the known branch first.
 export const crewInputSchema = Schema.Unknown.check(
   Schema.makeFilter((raw) => {
-    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string")
-      return undefined;
+    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string") return;
     const decode = crewBranchDecoders.get(raw["op"]);
 
-    if (!decode) return undefined;
+    if (!decode) return;
     const result = decode(raw);
 
     return Result.isFailure(result) ? result.failure.issue : undefined;

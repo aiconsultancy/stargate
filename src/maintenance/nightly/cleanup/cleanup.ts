@@ -166,7 +166,8 @@ export async function cleanupPathUse(
 
   try {
     const stopped = () =>
-      signal?.aborted || (deadline !== undefined && Date.now() >= deadline);
+      signal?.aborted === true ||
+      (deadline !== undefined && Date.now() >= deadline);
 
     const isolated = view.uid !== undefined && (await privatePath(path, view));
     let count = 0;
@@ -896,7 +897,7 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       else
         for (const name of listed) {
           check();
-          const info = await lstat(join(raw, name)).catch(() => undefined);
+          const info = await lstat(join(raw, name)).catch(() => {});
 
           // A plain file is never a candidate; it takes no place in a batch.
           if (info && (info.isDirectory() || info.isSymbolicLink()))

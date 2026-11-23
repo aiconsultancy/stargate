@@ -234,7 +234,7 @@ export class NotifyStore {
             )
             .all();
 
-          if (probe.query("PRAGMA foreign_key_check").get())
+          if (probe.query("PRAGMA foreign_key_check").get() !== null)
             throw new StoreUnavailable();
 
           for (const row of probe
@@ -262,14 +262,14 @@ export class NotifyStore {
       )
         throw new StoreUnavailable();
       database = new Database(absolute, { create: true, strict: true });
-      database.exec(
+      database.run(
         "PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;",
       );
 
       if (original.size === 0)
         database
           .transaction(() => {
-            database?.exec(`
+            database?.run(`
           CREATE TABLE notify_dedup (
             scope TEXT NOT NULL, signature TEXT NOT NULL, admittedAt INTEGER NOT NULL,
             PRIMARY KEY(scope,signature)
@@ -359,7 +359,7 @@ export class NotifyStore {
       if (
         this.db
           .query("SELECT 1 FROM notify_dedup WHERE scope=? AND signature=?")
-          .get(scope, sig)
+          .get(scope, sig) !== null
       )
         return { duplicate: true, evicted: 0 };
       const selected = new Map<string, Destination>();

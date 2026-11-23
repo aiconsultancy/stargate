@@ -241,12 +241,18 @@ const role = (registration: Registration) =>
 function model({ config }: Registration) {
   const backend = config.backend;
 
-  const id =
-    backend.type === "opencode"
-      ? backend.model && `${backend.model.providerID}/${backend.model.id}`
-      : backend.type === "module"
-        ? undefined
-        : backend.model;
+  let id;
+
+  switch (backend.type) {
+    case "opencode":
+      id = backend.model && `${backend.model.providerID}/${backend.model.id}`;
+      break;
+    case "module":
+      id = undefined;
+      break;
+    default:
+      id = backend.model;
+  }
 
   return id ? redactCredentials(id, 200) : null;
 }
@@ -451,7 +457,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
               } catch {
                 reading.throwIfAborted();
 
-                return undefined;
+                return;
               }
             }),
           ),
@@ -505,7 +511,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   ) {
     signal.throwIfAborted();
 
-    if (!snapshot) return undefined;
+    if (!snapshot) return;
     const { id } = registration.config;
     const repositories = deps.config().api?.pullRequestRepositories;
     const { view, metadata } = snapshot;
@@ -521,7 +527,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       crewMember(id, person, at, text, metadata, view.sessions),
     );
 
-    if (only && !crewMembers.length) return undefined;
+    if (only && !crewMembers.length) return;
 
     // Every emitted child belongs to one of this ship's dashboard-owned crew roots.
     const roots = view.sessions
@@ -583,7 +589,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   ) {
     const result = await detail(registration, snapshot, signal);
 
-    if (!result) return undefined;
+    if (!result) return;
     const { officer, view, metadata, crewMembers } = result;
 
     const summary = await shipSummary(
@@ -725,7 +731,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     async ship(id, signal) {
       const registration = configuredShip(id, signal);
 
-      if (!registration) return undefined;
+      if (!registration) return;
 
       return shipDetail(
         registration,
@@ -734,10 +740,10 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       );
     },
     async crew(ship, member, signal) {
-      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(member)) return undefined;
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(member)) return;
       const registration = configuredShip(ship, signal);
 
-      if (!registration) return undefined;
+      if (!registration) return;
 
       const result = await detail(
         registration,

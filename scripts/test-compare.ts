@@ -357,12 +357,9 @@ export async function sampleLoad(): Promise<LoadAverage> {
 }
 
 function environment(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-
-  for (const key of Object.keys(env))
-    if (key.startsWith("GIT_")) delete env[key];
-
-  return env;
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+  );
 }
 
 function git(cwd: string, ...args: string[]): string {
@@ -381,7 +378,7 @@ function git(cwd: string, ...args: string[]): string {
 
   if (result.status !== 0)
     throw new Error(
-      `Git failed: ${result.stderr || result.error?.message || args[0]}`,
+      `Git failed: ${result.stderr || (result.error === undefined || result.error.message === "" ? args[0] : result.error.message)}`,
     );
 
   return result.stdout.trimEnd();
@@ -1247,7 +1244,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
           ? 143
           : errorMessage
             ? 2
-            : options.failIfCandidateWorse && worse
+            : options.failIfCandidateWorse && worse === true
               ? 1
               : 0,
     ...(errorMessage ? { error: errorMessage } : {}),

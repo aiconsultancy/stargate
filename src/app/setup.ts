@@ -174,7 +174,7 @@ export async function checkCredentials(
     for (const path of pemFiles) await clientPem(path);
     const ca = registration.server.caFile;
 
-    if (ca && !(await lstat(ca).catch(() => undefined))?.isFile())
+    if (ca && !(await lstat(ca).catch(() => {}))?.isFile())
       throw new Error("IRC caFile is not a readable file.");
   }
 

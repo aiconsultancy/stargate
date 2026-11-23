@@ -84,17 +84,15 @@ export function upgradeRef(
   return next ? formatRef({ ...ref, id: next }) : null;
 }
 
-type Json = unknown;
-
-const isObject = (value: Json): value is Record<string, Json> =>
+const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Rewrites must not reformat a file; a different layout is refused. */
-function parseCanonical(text: string): Json {
-  let parsed: Json;
+function parseCanonical(text: string): unknown {
+  let parsed: unknown;
 
   try {
-    parsed = JSON.parse(text) as Json;
+    parsed = JSON.parse(text) as unknown;
   } catch {
     throw new StepError("config-format");
   }
@@ -106,7 +104,7 @@ function parseCanonical(text: string): Json {
 }
 
 function setString(
-  owner: Record<string, Json>,
+  owner: Record<string, unknown>,
   key: string,
   pointer: string,
   upgrades: Upgrades,
@@ -125,7 +123,7 @@ function setString(
 
 /** Captain.model and OpenCode crew models; Pi `backend` entries are never touched. */
 function upgradeTeamObject(
-  team: Json,
+  team: unknown,
   pointer: string,
   upgrades: Upgrades,
   providers: readonly string[],
@@ -217,7 +215,7 @@ export function upgradeOpenCodeProfile(
 export function modelRefs(text: string) {
   const refs: ModelRef[] = [];
 
-  const walk = (value: Json, key?: string) => {
+  const walk = (value: unknown, key?: string) => {
     if (key === "backend" && isObject(value) && value["type"] === "pi-durable")
       return;
 
@@ -312,14 +310,14 @@ export async function readProfiles(root: string): Promise<ProfilesSnapshot> {
 
 type Route = { name: string; model: string };
 
-function routesOf(manifest: Json): Route[] {
+function routesOf(manifest: unknown): Route[] {
   if (!isObject(manifest)) throw new StepError("config-format");
 
   const list =
     manifest["version"] === 1
       ? manifest["routes"]
       : manifest["version"] === 2 && Array.isArray(manifest["tiers"])
-        ? manifest["tiers"].flatMap((tier): Json[] =>
+        ? manifest["tiers"].flatMap((tier): unknown[] =>
             isObject(tier) && Array.isArray(tier["routes"])
               ? tier["routes"]
               : [],
@@ -437,7 +435,7 @@ export function upgradeProfiles(
   const folderRoutes: Record<string, Route[]> = {};
 
   for (const [folderName, folder] of Object.entries(snapshot.folders)) {
-    const manifest = JSON.parse(folder.routesText) as Json;
+    const manifest = JSON.parse(folder.routesText) as unknown;
     const routes = routesOf(manifest);
     folderRoutes[folderName] = routes;
     let changed = false;

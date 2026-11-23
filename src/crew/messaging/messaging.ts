@@ -164,7 +164,7 @@ type MailIntent = Omit<MailRoute, "id"> & { fingerprint: string };
 
 export class MailRoutes {
   public constructor(private readonly db: Database) {
-    db.exec(`CREATE TABLE IF NOT EXISTS mail_routes (
+    db.run(`CREATE TABLE IF NOT EXISTS mail_routes (
       id TEXT PRIMARY KEY, sender TEXT NOT NULL, recipient TEXT NOT NULL,
       captainID TEXT NOT NULL, sourceTaskID TEXT, targetTaskID TEXT
     );

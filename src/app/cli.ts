@@ -298,53 +298,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
   const allowed = new Set([
     "config",
     ...(command === "api" ? ["rotate"] : []),
-    ...(command === "bot"
-      ? p[1] === "provision"
-        ? ["plan", "apply", "journal", "record-app", "json"]
-        : botOptions
-      : command === "status"
-        ? ["bot", "log", "json"]
-        : command === "cron"
-          ? ["bot", "input", "name", "id"]
-          : command === "crew"
-            ? [
-                "directory",
-                "project",
-                "worktrees",
-                "team",
-                "id",
-                "session-id",
-                "base",
-                "mesij-command",
-                "proxy-url",
-                "proxy-key-file",
-                "cron-config",
-                "cron-bot",
-                "maintenance-config",
-              ]
-            : command === "maintenance"
-              ? [
-                  "json",
-                  ...(p[1] === "cleanup" ? ["plan"] : []),
-                  ...(p[1] === "update"
-                    ? ["plan", "now", "foreground", "retry-failed"]
-                    : []),
-                  "name",
-                  "print",
-                  "release",
-                  "version",
-                  "outside-window",
-                  "after-run",
-                  "accept-current",
-                  "yes",
-                ]
-              : command === "manifest"
-                ? ["name", "json"]
-                : command === "service"
-                  ? ["name"]
-                  : command === "config"
-                    ? ["schema-only"]
-                    : []),
+    ...commandOptions(command, p[1], botOptions),
   ]);
 
   if (Object.keys(v).some((key) => !allowed.has(key)))
@@ -422,7 +376,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
       const input = await readCronFile(resolve(v.input));
 
       if (
-        !input ||
+        input === null ||
         typeof input !== "object" ||
         Array.isArray(input) ||
         "op" in input
@@ -478,16 +432,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
       worktreeDirectory: resolve(v.worktrees),
       ...(v["workspace-mode"]
         ? {
-            workspaceMode:
-              v["workspace-mode"] === "clone"
-                ? ("clone" as const)
-                : v["workspace-mode"] === "worktree"
-                  ? ("worktree" as const)
-                  : (() => {
-                      throw new Error(
-                        "--workspace-mode must be clone or worktree",
-                      );
-                    })(),
+            workspaceMode: workspaceMode(v["workspace-mode"]),
           }
         : {}),
       mesijCommand: resolve(mesijCommand),
@@ -567,7 +512,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
     p.length === 2 &&
     ["install", "start", "stop", "status", "uninstall"].includes(p[1] ?? "")
   ) {
-    await manageService(p[1] as string, configPath, v.name);
+    await manageService(p[1] ?? "", configPath, v.name);
   } else if (command === "bot" && p[1] === "add" && p.length === 2) {
     if (!Object.keys(v).some((key) => botOptions.includes(key)))
       await setupWizard(configPath);
@@ -654,7 +599,7 @@ async function readMaintenanceWindow(path: string) {
 
   const maintenance = config.maintenance;
 
-  if (!maintenance?.enabled) return undefined;
+  if (!maintenance?.enabled) return;
   const { start, end, timeZone } = maintenance.window;
 
   return { start, end, timeZone };
@@ -704,5 +649,73 @@ async function readCronFile(path: string): Promise<unknown> {
     throw new Error(
       "Cannot load cron input. Use a JSON file at most 64 KiB without credentials.",
     );
+  }
+}
+
+function commandOptions(
+  command: string | undefined,
+  sub: string | undefined,
+  botOptions: readonly string[],
+) {
+  switch (command) {
+    case "bot":
+      return sub === "provision"
+        ? ["plan", "apply", "journal", "record-app", "json"]
+        : botOptions;
+    case "status":
+      return ["bot", "log", "json"];
+    case "cron":
+      return ["bot", "input", "name", "id"];
+    case "crew":
+      return [
+        "directory",
+        "project",
+        "worktrees",
+        "team",
+        "id",
+        "session-id",
+        "base",
+        "mesij-command",
+        "proxy-url",
+        "proxy-key-file",
+        "cron-config",
+        "cron-bot",
+        "maintenance-config",
+      ];
+    case "maintenance":
+      return [
+        "json",
+        ...(sub === "cleanup" ? ["plan"] : []),
+        ...(sub === "update"
+          ? ["plan", "now", "foreground", "retry-failed"]
+          : []),
+        "name",
+        "print",
+        "release",
+        "version",
+        "outside-window",
+        "after-run",
+        "accept-current",
+        "yes",
+      ];
+    case "manifest":
+      return ["name", "json"];
+    case "service":
+      return ["name"];
+    case "config":
+      return ["schema-only"];
+    default:
+      return [];
+  }
+}
+
+function workspaceMode(mode: string | undefined): "clone" | "worktree" {
+  switch (mode) {
+    case "clone":
+      return "clone";
+    case "worktree":
+      return "worktree";
+    default:
+      throw new Error("--workspace-mode must be clone or worktree");
   }
 }

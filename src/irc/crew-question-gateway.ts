@@ -59,7 +59,7 @@ export class CrewQuestionGateway {
       worker.fork ||
       worker.location.directory !== owner.directory ||
       worker.agent !== owner.agent ||
-      !identity ||
+      identity === null ||
       typeof identity !== "object" ||
       Array.isArray(identity) ||
       identity["namespace"] !== owner.namespace ||

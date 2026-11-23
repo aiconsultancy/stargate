@@ -14,6 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { ErrorCode } from "@slack/web-api";
 import {
   Effect,
+  Predicate,
   Result,
   Schema,
   SchemaGetter,
@@ -103,10 +104,11 @@ export const postInputSchema = Schema.Unknown.pipe(
       decodePostInput(input, options).pipe(
         Effect.catch((issue) => {
           if (
-            issue._tag === "Composite" &&
+            Predicate.isTagged(issue, "Composite") &&
             issue.issues.some(
               (child) =>
-                child._tag === "Filter" && child.filter === broadcastCheck,
+                Predicate.isTagged(child, "Filter") &&
+                child.filter === broadcastCheck,
             )
           )
             return Effect.fail(issue);
@@ -227,7 +229,7 @@ export class CaptainPostStore {
     }
 
     this.db = new Database(path, { create: true, strict: true });
-    this.db.exec(`
+    this.db.run(`
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS captain_posts (
@@ -250,7 +252,7 @@ export class CaptainPostStore {
           .map(({ name }) => name);
 
         if (!columns.includes("uploadOwner"))
-          this.db.exec(`
+          this.db.run(`
             ALTER TABLE captain_posts ADD COLUMN uploadOwner TEXT;
             ALTER TABLE captain_posts ADD COLUMN uploadLeaseUntil INTEGER;
           `);
@@ -909,7 +911,7 @@ export async function runCaptainPost(
     if (row.status === "posted" && row.ts) {
       const link = await web(signal)
         .chat.getPermalink({ channel: row.channel, message_ts: row.ts })
-        .catch(() => undefined);
+        .catch(() => {});
 
       if (typeof link?.permalink === "string" && link.permalink.length < 2048) {
         row.permalink = link.permalink;

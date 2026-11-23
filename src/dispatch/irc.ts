@@ -101,7 +101,7 @@ export class IrcDispatchMessenger implements DispatchMessenger {
       if (error instanceof IrcUnavailable || !this.client.registered)
         throw error;
 
-      return undefined;
+      return;
     }
   }
 

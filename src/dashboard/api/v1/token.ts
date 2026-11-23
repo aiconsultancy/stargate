@@ -15,7 +15,7 @@ async function readToken(path: string) {
     if (!hasCode(error, "ENOENT")) throw error;
   });
 
-  if (!file) return undefined;
+  if (!file) return;
 
   try {
     const info = await file.stat();

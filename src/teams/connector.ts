@@ -83,7 +83,7 @@ async function readError(
         typeof error === "object" ? error?.["message"] : undefined,
         body["error_description"],
         body["message"],
-      ].filter((part) => typeof part === "string" && part);
+      ].filter((part) => typeof part === "string" && part !== "");
 
       return {
         ...(code ? { code } : {}),

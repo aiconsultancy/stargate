@@ -23,7 +23,7 @@ import type {
   SessionPromptInput,
   SessionSyntheticInput,
 } from "@opencode/client";
-import { Result, Schema } from "effect";
+import { Predicate, Result, Schema } from "effect";
 import type { CrewStatus, CrewStatusInput } from "../../shared/crew-status";
 import {
   type MaintenanceDrain,
@@ -353,8 +353,7 @@ function notFound(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
-    "_tag" in error &&
-    error._tag === "Session.NotFoundError"
+    Predicate.isTagged(error, "Session.NotFoundError")
   );
 }
 
@@ -2735,7 +2734,7 @@ export class CrewEngine {
         withdrawn: false,
       };
 
-      const queued = await queuedResumes().catch(() => undefined);
+      const queued = await queuedResumes().catch(() => {});
 
       if (!queued || (queued.length && !api?.session.inbox.cancel))
         return stopUnconfirmed;
@@ -2744,7 +2743,7 @@ export class CrewEngine {
         await api?.session.inbox
           .cancel?.({ sessionID: peer.sessionID, inboxID: id }, { signal })
           .catch(() => {});
-      const remaining = await queuedResumes().catch(() => undefined);
+      const remaining = await queuedResumes().catch(() => {});
 
       if (!remaining || remaining.length) return stopUnconfirmed;
     }

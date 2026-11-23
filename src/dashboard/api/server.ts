@@ -488,7 +488,7 @@ export async function startApiServer(options: Options) {
   const address = server.address();
   const url = new URL("http://localhost/");
 
-  if (address && typeof address !== "string") {
+  if (address !== null && typeof address !== "string") {
     url.hostname =
       address.family === "IPv6" ? `[${address.address}]` : address.address;
     url.port = String(address.port);

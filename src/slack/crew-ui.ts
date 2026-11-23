@@ -82,7 +82,7 @@ function age(time: number | null, now: number) {
 }
 
 function taskLine(task: CrewStatusTask) {
-  return `${task.kind === "report" ? "Report" : task.kind === "assignment" ? "Assignment" : "Task"}: ${task.summary || "Summary unavailable"}\n${task.id}: ${task.status}${task.phase !== task.status ? ` (${task.phase})` : ""}`;
+  return `${taskKindLabel(task.kind)}: ${task.summary || "Summary unavailable"}\n${task.id}: ${task.status}${task.phase !== task.status ? ` (${task.phase})` : ""}`;
 }
 
 function timing(task: CrewStatusTask, now: number) {
@@ -324,5 +324,16 @@ export class CrewUI {
 
   public async interactive(_body: unknown, ack: SlackAck) {
     await ack();
+  }
+}
+
+function taskKindLabel(kind: string) {
+  switch (kind) {
+    case "report":
+      return "Report";
+    case "assignment":
+      return "Assignment";
+    default:
+      return "Task";
   }
 }

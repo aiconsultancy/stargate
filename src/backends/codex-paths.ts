@@ -128,8 +128,8 @@ async function walk(
     if (!cache.has(next))
       cache.set(
         next,
-        await lstat(next).catch((error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return undefined;
+        await lstat(next).catch((error: NodeJS.ErrnoException): undefined => {
+          if (error.code === "ENOENT") return;
           throw error;
         }),
       );
@@ -305,7 +305,7 @@ export const searchDirectories = ["/usr/local/bin", "/usr/bin", "/bin"];
 async function systemDirectory(
   path: string,
 ): Promise<{ path: string } | { reason: string }> {
-  if (!(await lstat(path).catch(() => undefined))) return { reason: "missing" };
+  if (!(await lstat(path).catch(() => {}))) return { reason: "missing" };
   const cache = new Map<string, Stats | undefined>();
 
   if (!(await rootChain(path, cache))) return { reason: "not root-controlled" };
@@ -352,7 +352,7 @@ export async function systemDirectories(
 async function extraDirectory(path: string, roots: readonly string[]) {
   const real = await trustedPath(path, roots);
 
-  if (!(await stat(real).catch(() => undefined))?.isDirectory())
+  if (!(await stat(real).catch(() => {}))?.isDirectory())
     throw new Error("Codex extraPath entries must be existing directories");
 
   const inside = (candidate: string) =>
@@ -453,7 +453,7 @@ export async function trustedUtilities(
     for (const directory of directories) {
       const candidate = join(directory, name);
 
-      if (!(await lstat(candidate).catch(() => undefined))) continue;
+      if (!(await lstat(candidate).catch(() => {}))) continue;
       const real = await realpath(candidate);
 
       if (

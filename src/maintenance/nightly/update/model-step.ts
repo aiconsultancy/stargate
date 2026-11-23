@@ -110,7 +110,7 @@ export async function readModelInputs(input: {
 
   for (const document of documents) refs.push(...modelRefs(document.text));
   const live: ModelInputs["live"] = [];
-  const opencode = await input.connect().catch(() => undefined);
+  const opencode = await input.connect().catch(() => {});
 
   if (opencode)
     for (const session of input.sessions.slice(0, 500)) {
@@ -214,7 +214,7 @@ export async function selectModelUpgrades(input: {
     });
 
   const opencode = chosen.size
-    ? await input.connect().catch(() => undefined)
+    ? await input.connect().catch(() => {})
     : undefined;
 
   const locations = [

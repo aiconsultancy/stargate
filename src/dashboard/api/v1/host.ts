@@ -16,7 +16,7 @@ import type { V1Host } from "./types";
 export function memAvailableBytes(meminfo: string) {
   const match = /^MemAvailable:[ \t]+(\d+)[ \t]+kB[ \t]*$/m.exec(meminfo);
 
-  if (!match) return undefined;
+  if (!match) return;
   const bytes = Number(match[1]) * 1024;
 
   return Number.isSafeInteger(bytes) ? bytes : undefined;
@@ -62,7 +62,7 @@ async function disk(path: string) {
       },
     };
   } catch {
-    return undefined;
+    return;
   }
 }
 
@@ -70,7 +70,7 @@ async function availableMemory() {
   if (process.platform === "linux") {
     const available = await readFile("/proc/meminfo", "utf8").then(
       memAvailableBytes,
-      () => undefined,
+      () => {},
     );
 
     if (available !== undefined) return available;
