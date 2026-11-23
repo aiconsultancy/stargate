@@ -39,7 +39,7 @@ import {
   settingsURL,
   settingsUUID,
 } from "./settings-schema";
-import { transcriptionSchema } from "../transcription/transcription";
+import { transcriptionSchema } from "../transcription/config";
 import { waitingSchema } from "./waiting";
 
 import { opencodeBackendSchema } from "../backends/opencode/config";

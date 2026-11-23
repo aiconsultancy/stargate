@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema, SchemaGetter } from "effect";
-import type { Transcriber, TranscriptionConfig } from "./transcription";
+import type { TranscriptionConfig } from "./config";
+import type { Transcriber } from "./transcription";
 
 type Fetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
 

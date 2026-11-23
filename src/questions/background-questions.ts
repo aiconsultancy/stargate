@@ -19,12 +19,6 @@ export interface OperatorRoute {
   send(text: string, allowed: () => boolean): Promise<void>;
 }
 
-export function operatorControl(text: string) {
-  return /^(show|answer)\s+(Q[0-9a-f]{10})(?:\s+([^\r\n]+))?$/i.exec(
-    text.trim(),
-  );
-}
-
 export class BackgroundCases {
   public constructor(private readonly db: Database) {
     db.exec(`CREATE TABLE IF NOT EXISTS background_questions (

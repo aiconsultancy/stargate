@@ -14,8 +14,8 @@ import {
   spokenMention,
   spokenMentionNote,
   type Transcriber,
-  transcriptionSchema,
 } from "../src/transcription/transcription";
+import { transcriptionSchema } from "../src/transcription/config";
 import { identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

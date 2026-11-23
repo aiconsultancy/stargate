@@ -3,8 +3,8 @@ import { Schema } from "effect";
 import {
   type BackgroundCases,
   type OperatorRoute,
-  operatorControl,
 } from "./background-questions";
+import { operatorControl } from "./question-settings";
 import { containsCredential } from "../lib/credentials";
 import {
   settingsCheck,

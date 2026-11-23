@@ -1198,9 +1198,15 @@
       "files": [
         "src/transcribers/azure-openai.ts",
         "src/transcription.ts",
-        "src/transcription/startup.ts"
+        "src/transcription/startup.ts",
+        "src/transcription/config.ts"
       ],
-      "public": ["src/transcription.ts", "src/transcription/startup.ts"],
+      "public": [
+        "src/transcription.ts",
+        "src/transcription/startup.ts",
+        "src/transcription/config.ts"
+      ],
+      "contracts": ["src/transcription/config.ts"],
       "neighbours": ["attachments", "config", "lib", "shared"]
     },
     "health": {

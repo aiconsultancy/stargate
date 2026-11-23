@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
-import { stopBlock } from "../src/gateway/cancellation";
+import { stopBlock } from "../src/slack/slack";
 import { crewStatusView } from "../src/slack/crew-ui";
 import { handleSlackRequest, SlackConnection } from "../src/slack/slack";
 import { replyText, type SlackPanelContent } from "../src/shared/slack-format";

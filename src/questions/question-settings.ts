@@ -155,3 +155,9 @@ export async function saveQuestionSettings(
     await rm(temporary, { force: true });
   }
 }
+
+export function operatorControl(text: string) {
+  return /^(show|answer)\s+(Q[0-9a-f]{10})(?:\s+([^\r\n]+))?$/i.exec(
+    text.trim(),
+  );
+}

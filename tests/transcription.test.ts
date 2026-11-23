@@ -16,8 +16,8 @@ import {
   type Transcriber,
   TranscriptionUnavailable,
   transcribeMedia,
-  transcriptionSchema,
 } from "../src/transcription/transcription";
+import { transcriptionSchema } from "../src/transcription/config";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];
