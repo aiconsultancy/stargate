@@ -25,6 +25,7 @@ import {
   reconcileInputSchema,
   resumeInputSchema,
 } from "../execution/reconciliation";
+import { quotaInputSchema } from "../../quota/quota";
 import { agentIDSchema } from "../team";
 import { workspaceInputSchemas } from "../workspace/workspace";
 
@@ -287,4 +288,105 @@ export function crewPiParameters() {
     }
 
   return { $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12, ...json };
+}
+
+const decodeQuotaInput = Schema.decodeUnknownResult(quotaInputSchema, {
+  errors: "all",
+});
+
+const decodeProjectKey = Schema.decodeUnknownResult(effectProjectKeySchema, {
+  errors: "all",
+});
+
+// The tool reads fields as the host passes them, inherited ones included.
+const decodeToolObject = Schema.decodeUnknownResult(
+  Schema.declare(
+    (input): input is Record<string, unknown> =>
+      Predicate.isObject(input) && !Array.isArray(input),
+    { expected: "object" },
+  ),
+);
+
+/** The stargate_quota tool input: an optional project key and nothing else,
+ * advertised as before. The quota decoder then checks the remaining fields.
+ */
+export function quotaToolInput(): StandardSchemaV1<Record<string, unknown>> &
+  StandardJSONSchemaV1<Record<string, unknown>> {
+  const json = {
+    type: "object",
+    properties: {
+      project: settingsInputAdvertisement(
+        effectProjectKeySchema.annotate({
+          description:
+            "Configured repository key, never a path. Captain omission uses default; worker omission uses its persisted native context.",
+        }),
+      ),
+    },
+    additionalProperties: false,
+  };
+
+  const project = ({ target }: { target: StandardJSONSchemaV1.Target }) => {
+    if (target === "draft-2020-12")
+      return structuredClone({
+        $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12,
+        ...json,
+      });
+
+    if (target === "draft-07")
+      return structuredClone({
+        $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
+        ...json,
+      });
+    throw new Error(`Unsupported quota schema target: ${target}`);
+  };
+
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "effect",
+      jsonSchema: { input: project, output: project },
+      validate: (raw) => {
+        const object = decodeToolObject(raw);
+
+        if (Result.isFailure(object))
+          return settingsIssues(object.failure.issue);
+        const input = object.success;
+        const issues: StandardSchemaV1.Issue[] = [];
+        const value: Record<string, unknown> = {};
+
+        if ("project" in input) {
+          value["project"] = input["project"];
+
+          if (input["project"] !== undefined) {
+            const key = decodeProjectKey(input["project"]);
+
+            if (Result.isFailure(key))
+              for (const issue of settingsIssues(key.failure.issue).issues)
+                issues.push({
+                  ...issue,
+                  path: ["project", ...(issue.path ?? [])],
+                });
+          }
+        }
+
+        const unknown: string[] = [];
+
+        for (const key in input) if (key !== "project") unknown.push(key);
+
+        if (unknown.length > 0)
+          issues.push({
+            path: [],
+            message: `Unrecognized key${unknown.length === 1 ? "" : "s"}: ${unknown.map((key) => JSON.stringify(key)).join(", ")}`,
+          });
+
+        if (issues.length > 0) return { issues };
+        const { project: _project, ...rest } = input;
+        const quota = decodeQuotaInput(rest);
+
+        return Result.isFailure(quota)
+          ? settingsIssues(quota.failure.issue)
+          : { value };
+      },
+    },
+  };
 }

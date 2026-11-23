@@ -1,4 +1,5 @@
 import { join, resolve } from "node:path";
+import { Result, Schema } from "effect";
 import { botToken, botWebClient } from "../../slack/bot-web";
 import { type BotConfig, loadConfig } from "../../config";
 import {
@@ -49,9 +50,9 @@ export async function runNotificationOperation(
   signal: AbortSignal,
   dependencies: NotificationDependencies = defaults,
 ): Promise<unknown> {
-  const parsed = notificationInputSchema.safeParse(raw);
+  const parsed = Schema.decodeUnknownResult(notificationInputSchema)(raw);
 
-  if (!parsed.success)
+  if (Result.isFailure(parsed))
     throw new NotificationControlError(
       "Invalid notification operation; use explicit C/G targets.",
     );
@@ -69,7 +70,7 @@ export async function runNotificationOperation(
       throw new NotificationControlError(
         "Notification binding does not match this pinned Slack captain.",
       );
-    const input = parsed.data;
+    const input = parsed.success;
 
     if ("channel" in input && !isAllowedChannel(bot, input.channel))
       throw new NotificationControlError(

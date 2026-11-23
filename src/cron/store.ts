@@ -8,7 +8,7 @@ import {
   openSync,
 } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { Result, Schema, SchemaTransformation } from "effect";
+import { Option, Result, Schema, SchemaTransformation } from "effect";
 import {
   type CronAdvanced,
   type CronEvaluation,
@@ -749,21 +749,24 @@ export class CronStore {
   ): CronRun[] {
     checkBotKey(botKey);
     checkTime(now);
-    const parsed = quotaObservationSchema.safeParse(snapshot);
+    const parsed = Schema.decodeUnknownOption(quotaObservationSchema)(snapshot);
 
-    if (!parsed.success || !["ok", "partial"].includes(parsed.data.status))
+    if (
+      Option.isNone(parsed) ||
+      !["ok", "partial"].includes(parsed.value.status)
+    )
       return [];
 
     const fresh = (observedAt: number) =>
       observedAt <= now && now - observedAt <= 120_000;
 
-    if (!fresh(parsed.data.observedAt)) return [];
+    if (!fresh(parsed.value.observedAt)) return [];
 
     return this.db
       .transaction(() => {
         const claimed: CronRun[] = [];
 
-        for (const account of parsed.data.accounts) {
+        for (const account of parsed.value.accounts) {
           // Alias fallback supports legacy observations. Runtime readers supply
           // A stable private identity, so display order never changes receipts.
           const accountKey = account.identity ?? account.account;

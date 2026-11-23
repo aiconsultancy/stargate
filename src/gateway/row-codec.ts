@@ -37,7 +37,7 @@ export function decodeStoredJob(row: StoredJob): Job {
       ),
     }),
     ...(notification_context && {
-      notification: notificationContextSchema.parse(
+      notification: Schema.decodeUnknownSync(notificationContextSchema)(
         JSON.parse(notification_context),
       ),
     }),

@@ -1,9 +1,7 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
-import { z } from "zod";
 import { crewStatusSchema } from "../../shared/crew-status";
 import { exactStruct } from "../../shared/session-history";
-import { legacySetting } from "../../config/settings-legacy";
 import { effectProjectKeySchema } from "../input/project-options";
 import { agentIDSchema } from "../team";
 
@@ -11,6 +9,7 @@ const directory = Schema.String.check(
   Schema.isBetweenCodePoints(1, 4096),
   Schema.makeFilter((path) => isAbsolute(path) && !path.includes("\0")),
 );
+
 const metadata = exactStruct({
   projectDirectory: directory,
   contexts: Schema.Array(
@@ -28,8 +27,10 @@ const metadata = exactStruct({
 export const fleetCrewStatusInputSchema = exactStruct({
   member: Schema.optional(agentIDSchema),
 });
-export const fleetCrewStatusSchema = z.strictObject({
+
+export const fleetCrewStatusSchema = exactStruct({
   status: crewStatusSchema,
-  metadata: legacySetting(metadata),
+  metadata,
 });
-export type FleetCrewStatus = z.infer<typeof fleetCrewStatusSchema>;
+
+export type FleetCrewStatus = typeof fleetCrewStatusSchema.Type;

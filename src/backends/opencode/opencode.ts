@@ -1071,7 +1071,7 @@ export class OpenCodeBackend implements AgentBackend {
     try {
       signal.throwIfAborted();
 
-      const result = crewStatusSchema.parse(
+      const result = Schema.decodeUnknownSync(crewStatusSchema)(
         await this.client.rpc(CrewReporting).status(input, {
           location: { directory: this.config.directory },
           signal,
@@ -1152,7 +1152,7 @@ export class OpenCodeBackend implements AgentBackend {
     const result = probe
       .then((status): FleetCrewStatus | undefined => {
         if (controller.signal.aborted || failureCounted) return;
-        const result = fleetCrewStatusSchema.parse(status);
+        const result = Schema.decodeUnknownSync(fleetCrewStatusSchema)(status);
         this.fleetStatusFailures = 0;
 
         return result;
@@ -1270,7 +1270,7 @@ export class OpenCodeBackend implements AgentBackend {
     try {
       signal.throwIfAborted();
 
-      const result = quotaSnapshotSchema.parse(
+      const result = Schema.decodeUnknownSync(quotaSnapshotSchema)(
         await this.client.rpc(CrewReporting).quota(
           {},
           {
@@ -1294,7 +1294,7 @@ export class OpenCodeBackend implements AgentBackend {
     try {
       signal.throwIfAborted();
 
-      const result = quotaObservationSchema.parse(
+      const result = Schema.decodeUnknownSync(quotaObservationSchema)(
         await this.client
           .rpc(CrewReporting)
           .cronQuota(

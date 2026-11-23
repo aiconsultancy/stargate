@@ -541,7 +541,7 @@ export class CrewEngine {
   public async quota(input: unknown, caller: CrewCaller) {
     await this.authorize(caller);
 
-    if (!quotaInputSchema.safeParse(input).success)
+    if (Result.isFailure(Schema.decodeUnknownResult(quotaInputSchema)(input)))
       throw new CrewError(
         "Quota accepts no URL, credentials or other arguments.",
       );

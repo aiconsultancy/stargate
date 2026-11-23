@@ -267,7 +267,7 @@ export class CrewUI {
       signal.throwIfAborted();
 
       if (usage && this.backend.quota) {
-        const snapshot = quotaSnapshotSchema.parse(
+        const snapshot = Schema.decodeUnknownSync(quotaSnapshotSchema)(
           await this.backend.quota(signal),
         );
 
@@ -281,7 +281,7 @@ export class CrewUI {
 
       if (!this.backend.crewStatus) return;
 
-      const status = crewStatusSchema.parse(
+      const status = Schema.decodeUnknownSync(crewStatusSchema)(
         await this.backend.crewStatus(member ? { member } : {}, signal),
       );
 

@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -102,7 +103,7 @@ test("cron identities survive credential reordering, disabling, removal and rest
     const initialReader = reader();
 
     // Exercise the private JSON transport used by the cron RPC.
-    const initial = quotaObservationSchema.parse(
+    const initial = Schema.decodeUnknownSync(quotaObservationSchema)(
       JSON.parse(JSON.stringify(await initialReader.readForCron(signal))),
     );
 
@@ -116,7 +117,9 @@ test("cron identities survive credential reordering, disabling, removal and rest
       cached: true,
     });
     const publicSnapshot = await initialReader.read(signal);
-    expect(quotaSnapshotSchema.parse(publicSnapshot)).toEqual(publicSnapshot);
+    expect(
+      Schema.decodeUnknownSync(quotaSnapshotSchema)(publicSnapshot),
+    ).toEqual(publicSnapshot);
     expect(JSON.stringify(publicSnapshot)).not.toMatch(
       /identity|sha256|example|private|fixture|aaaaaaaa|bbbbbbbb/,
     );

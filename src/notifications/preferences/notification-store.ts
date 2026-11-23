@@ -9,105 +9,159 @@ import {
   openSync,
 } from "node:fs";
 import { dirname } from "node:path";
-import { z } from "zod";
+import { Result, Schema, SchemaTransformation } from "effect";
+import { settingsPattern } from "../../config/settings-schema";
+import { exactStruct } from "../../shared/session-history";
 
-const channelSchema = z
-  .string()
-  .max(64)
-  .regex(/^[CG][A-Z0-9]+$/);
-const threadSchema = z.string().regex(/^\d{1,16}\.\d{1,6}$/);
-const reasonSchema = z.string().max(200);
-const expirySchema = z.iso
-  .datetime({ offset: true })
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/)
-  .refine((value) => Number.isFinite(Date.parse(value)))
-  .transform((value) => new Date(value).toISOString());
-const channelTargetSchema = z.strictObject({
-  scope: z.literal("channel"),
+// Zod's string bounds counted code points; keep that unit at this boundary.
+const channelSchema = Schema.String.check(
+  Schema.isMaxCodePoints(64),
+  settingsPattern(/^[CG][A-Z0-9]+$/),
+);
+
+const threadSchema = Schema.String.check(
+  settingsPattern(/^\d{1,16}\.\d{1,6}$/),
+);
+
+const reasonSchema = Schema.String.check(Schema.isMaxCodePoints(200));
+
+// The installed Zod 4.6.7 ISO date-time with offset, then the stricter
+// Spelling check; the decoded value is the UTC spelling of the instant.
+const expirySchema = Schema.String.check(
+  settingsPattern(
+    /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$/,
+  ),
+  settingsPattern(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/,
+  ),
+  Schema.makeFilter((value) => Number.isFinite(Date.parse(value))),
+).pipe(
+  Schema.decodeTo(
+    Schema.String,
+    SchemaTransformation.transform({
+      decode: (value) => new Date(value).toISOString(),
+      encode: (value) => value,
+    }),
+  ),
+);
+
+const channelTarget = {
+  scope: Schema.Literal("channel"),
   channel: channelSchema,
-});
-const threadTargetSchema = z.strictObject({
-  scope: z.literal("thread"),
+};
+
+const threadTarget = {
+  scope: Schema.Literal("thread"),
   channel: channelSchema,
   thread_ts: threadSchema,
-});
-const targetSchema = z.union([channelTargetSchema, threadTargetSchema]);
-export type NotificationTarget = z.infer<typeof targetSchema>;
+};
+
+const targetSchema = Schema.Union([
+  exactStruct(channelTarget),
+  exactStruct(threadTarget),
+]);
+
+export type NotificationTarget = typeof targetSchema.Type;
 
 /** Explicit Slack targets only. Identity and authority come from the host. */
-export const notificationInputSchema = z.union([
-  channelTargetSchema.extend({
-    op: z.literal("mute"),
-    mute_until: expirySchema.optional(),
-    reason: reasonSchema.optional(),
+export const notificationInputSchema = Schema.Union([
+  exactStruct({
+    ...channelTarget,
+    op: Schema.Literal("mute"),
+    mute_until: Schema.optional(expirySchema),
+    reason: Schema.optional(reasonSchema),
   }),
-  threadTargetSchema.extend({
-    op: z.literal("mute"),
-    mute_until: expirySchema.optional(),
-    reason: reasonSchema.optional(),
+  exactStruct({
+    ...threadTarget,
+    op: Schema.Literal("mute"),
+    mute_until: Schema.optional(expirySchema),
+    reason: Schema.optional(reasonSchema),
   }),
-  channelTargetSchema.extend({
-    op: z.literal("unmute"),
-    reason: reasonSchema.optional(),
+  exactStruct({
+    ...channelTarget,
+    op: Schema.Literal("unmute"),
+    reason: Schema.optional(reasonSchema),
   }),
-  threadTargetSchema.extend({
-    op: z.literal("unmute"),
-    reason: reasonSchema.optional(),
+  exactStruct({
+    ...threadTarget,
+    op: Schema.Literal("unmute"),
+    reason: Schema.optional(reasonSchema),
   }),
-  channelTargetSchema.extend({ op: z.literal("status") }),
-  threadTargetSchema.extend({ op: z.literal("status") }),
-  z.strictObject({
-    op: z.literal("clear_all"),
-    reason: reasonSchema.optional(),
+  exactStruct({ ...channelTarget, op: Schema.Literal("status") }),
+  exactStruct({ ...threadTarget, op: Schema.Literal("status") }),
+  exactStruct({
+    op: Schema.Literal("clear_all"),
+    reason: Schema.optional(reasonSchema),
   }),
-  z.strictObject({
-    op: z.literal("list"),
-    cursor: z.string().min(1).max(1024).optional(),
+  exactStruct({
+    op: Schema.Literal("list"),
+    cursor: Schema.optional(
+      Schema.String.check(
+        Schema.isMinCodePoints(1),
+        Schema.isMaxCodePoints(1024),
+      ),
+    ),
   }),
 ]);
-export type NotificationInput = z.infer<typeof notificationInputSchema>;
 
-const settingSchema = z.strictObject({
-  state: z.enum(["absent", "active", "expired"]),
-  mute_until: expirySchema.nullable(),
-  reason: reasonSchema.optional(),
+export type NotificationInput = typeof notificationInputSchema.Type;
+
+const settingSchema = exactStruct({
+  state: Schema.Literals(["absent", "active", "expired"]),
+  mute_until: Schema.NullOr(expirySchema),
+  reason: Schema.optional(reasonSchema),
 });
-export type NotificationSetting = z.infer<typeof settingSchema>;
-const snapshotSchema = z.strictObject({
-  mode: z.enum(["normal", "addressed-only"]),
+
+export type NotificationSetting = typeof settingSchema.Type;
+
+const snapshotSchema = exactStruct({
+  mode: Schema.Literals(["normal", "addressed-only"]),
   channel: settingSchema,
   thread: settingSchema,
 });
-export type NotificationSnapshot = z.infer<typeof snapshotSchema>;
 
-const countsSchema = z.strictObject({
-  thread: z.number().int().nonnegative(),
-  channel: z.number().int().nonnegative(),
+export type NotificationSnapshot = typeof snapshotSchema.Type;
+
+const countsSchema = exactStruct({
+  thread: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  channel: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
+
+type NotificationCounts = typeof countsSchema.Type;
+
 const identity = (max: number) =>
-  z
-    .string()
-    .max(max)
-    .refine((value) => value.trim() !== "" && !value.includes("\0"));
+  Schema.String.check(
+    Schema.isMaxCodePoints(max),
+    Schema.makeFilter((value) => value.trim() !== "" && !value.includes("\0")),
+  );
+
 const registrationSchema = identity(2048);
-const contextSchema = z.object({ id: identity(255), caller: identity(256) });
-const receiptSchema = z.strictObject({
+
+const contextSchema = Schema.Struct({
   id: identity(255),
-  action: z.enum(["mute", "unmute", "clear_all"]),
   caller: identity(256),
-  at: z.number().int(),
-  reason: reasonSchema.nullable(),
-  target: targetSchema.nullable(),
-  changed: z.boolean(),
-  cleared: countsSchema.optional(),
-  snapshot: snapshotSchema.optional(),
 });
-export type NotificationReceipt = z.infer<typeof receiptSchema>;
+
+const receiptSchema = exactStruct({
+  id: identity(255),
+  action: Schema.Literals(["mute", "unmute", "clear_all"]),
+  caller: identity(256),
+  at: Schema.Int,
+  reason: Schema.NullOr(reasonSchema),
+  target: Schema.NullOr(targetSchema),
+  changed: Schema.Boolean,
+  cleared: Schema.optional(countsSchema),
+  snapshot: Schema.optional(snapshotSchema),
+});
+
+export type NotificationReceipt = typeof receiptSchema.Type;
+
 export type NotificationPage = {
   settings: { target: NotificationTarget; setting: NotificationSetting }[];
   cursor: string | null;
-  counts: z.infer<typeof countsSchema>;
+  counts: NotificationCounts;
 };
+
 export type NotificationResult =
   | { op: "status"; target: NotificationTarget; current: NotificationSnapshot }
   | ({ op: "list" } & NotificationPage)
@@ -121,30 +175,39 @@ export type NotificationResult =
     }
   | {
       op: "clear_all";
-      cleared: z.infer<typeof countsSchema>;
+      cleared: NotificationCounts;
       current: NotificationPage;
       changed: boolean;
       receipt: NotificationReceipt;
       replay: boolean;
     };
 
-const savedSchema = z.strictObject({
+const savedSchema = exactStruct({
   channel: channelSchema,
-  thread: z.union([z.literal(""), threadSchema]),
-  mute_until: expirySchema.nullable(),
-  reason: reasonSchema.nullable(),
+  thread: Schema.Union([Schema.Literal(""), threadSchema]),
+  mute_until: Schema.NullOr(expirySchema),
+  reason: Schema.NullOr(reasonSchema),
 });
-type SavedSetting = z.infer<typeof savedSchema>;
-const cursorSchema = z.strictObject({
-  version: z.literal(1),
-  registration: z.string().regex(/^[a-f0-9]{64}$/),
+
+type SavedSetting = typeof savedSchema.Type;
+
+const decodeSaved = Schema.decodeUnknownSync(savedSchema);
+
+const cursorSchema = exactStruct({
+  version: Schema.Literal(1),
+  registration: Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/)),
   channel: channelSchema,
-  thread: z.union([z.literal(""), threadSchema]),
+  thread: Schema.Union([Schema.Literal(""), threadSchema]),
 });
+
+const isRegistration = Schema.is(registrationSchema);
+const isChannel = Schema.is(channelSchema);
+const isThread = Schema.is(threadSchema);
 const pageSize = 50;
 
 /** Only these fixed messages may cross the control boundary. */
 class NotificationStoreError extends Error {}
+
 function safe<T>(
   operation: () => T,
   message = "Notification store operation failed.",
@@ -156,49 +219,63 @@ function safe<T>(
     throw new NotificationStoreError(message);
   }
 }
+
 function invalid(): never {
   throw new NotificationStoreError("Invalid notification request.");
 }
+
 function checkRead(registration: string, now: number) {
   if (
-    !registrationSchema.safeParse(registration).success ||
+    !isRegistration(registration) ||
     !Number.isSafeInteger(now) ||
     !Number.isFinite(new Date(now).getTime())
   )
     invalid();
 }
+
 function registrationHash(registration: string) {
   return createHash("sha256").update(registration).digest("hex");
 }
+
 function readCursor(cursor: string | undefined, registration: string) {
   if (cursor === undefined) return { channel: "", thread: "" };
+
   try {
     const bytes = Buffer.from(cursor, "base64url");
+
     if (bytes.toString("base64url") !== cursor) invalid();
-    const parsed = cursorSchema.parse(JSON.parse(bytes.toString("utf8")));
+
+    const parsed = Schema.decodeUnknownSync(cursorSchema)(
+      JSON.parse(bytes.toString("utf8")),
+    );
+
     if (parsed.registration !== registrationHash(registration)) invalid();
+
     return parsed;
   } catch {
     return invalid();
   }
 }
+
 function targetOf(row: SavedSetting): NotificationTarget {
   return row.thread
     ? { scope: "thread", channel: row.channel, thread_ts: row.thread }
     : { scope: "channel", channel: row.channel };
 }
+
 function settingOf(
   row: SavedSetting | undefined,
   now: number,
 ): NotificationSetting {
   if (!row) return { state: "absent", mute_until: null };
+
   return {
     state:
       row.mute_until === null || now < Date.parse(row.mute_until)
         ? "active"
         : "expired",
     mute_until: row.mute_until,
-    ...(row.reason === null ? {} : { reason: row.reason }),
+    ...(row.reason !== null && { reason: row.reason }),
   };
 }
 
@@ -206,26 +283,31 @@ function settingOf(
 export class NotificationStore {
   private readonly db: Database;
 
-  constructor(path: string) {
+  public constructor(path: string) {
     this.db = safe(() => {
       if (path !== ":memory:") {
         mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+
         // Establish privacy before SQLite creates WAL/SHM; refuse final symlinks.
         const fd = openSync(
           path,
           constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW,
           0o600,
         );
+
         try {
-          if (!fstatSync(fd).isFile()) throw new Error();
+          if (!fstatSync(fd).isFile())
+            throw new Error("Notification store path is not a regular file");
           fchmodSync(fd, 0o600);
         } finally {
           closeSync(fd);
         }
       }
+
       const db = new Database(path, { create: true, strict: true });
+
       try {
-        db.exec(`
+        db.run(`
           PRAGMA journal_mode = WAL;
           PRAGMA busy_timeout = 5000;
           CREATE TABLE IF NOT EXISTS notification_settings (
@@ -240,6 +322,7 @@ export class NotificationStore {
             PRIMARY KEY (registration,id)
           );
         `);
+
         return db;
       } catch (error) {
         db.close();
@@ -248,11 +331,13 @@ export class NotificationStore {
     }, "Notification store unavailable.");
   }
 
-  close() {
-    safe(() => this.db.close());
+  public close() {
+    safe(() => {
+      this.db.close();
+    });
   }
 
-  status(
+  public status(
     registration: string,
     channel: string,
     thread?: string,
@@ -260,11 +345,10 @@ export class NotificationStore {
   ): NotificationSnapshot {
     return safe(() => {
       checkRead(registration, now);
-      if (
-        !channelSchema.safeParse(channel).success ||
-        (thread !== undefined && !threadSchema.safeParse(thread).success)
-      )
+
+      if (!isChannel(channel) || (thread !== undefined && !isThread(thread)))
         invalid();
+
       // A single SELECT keeps overlapping scopes in the same SQLite snapshot.
       const rows = this.db
         .query<SavedSetting, [string, string, string]>(`
@@ -272,15 +356,18 @@ export class NotificationStore {
         WHERE registration=? AND channel=? AND thread IN ('',?)
       `)
         .all(registration, channel, thread ?? "")
-        .map((row) => savedSchema.parse(row));
+        .map((row) => decodeSaved(row));
+
       const channelSetting = settingOf(
         rows.find((row) => row.thread === ""),
         now,
       );
+
       const threadSetting = settingOf(
         rows.find((row) => row.thread !== ""),
         now,
       );
+
       return {
         mode:
           channelSetting.state === "active" || threadSetting.state === "active"
@@ -292,7 +379,7 @@ export class NotificationStore {
     });
   }
 
-  operate(
+  public operate(
     registration: string,
     raw: NotificationInput,
     context: { id: string; caller: string; now: number | (() => number) },
@@ -301,16 +388,22 @@ export class NotificationStore {
       const readTime = () => {
         const now =
           typeof context.now === "function" ? context.now() : context.now;
+
         checkRead(registration, now);
+
         return now;
       };
-      const parsed = notificationInputSchema.safeParse(raw);
-      if (!parsed.success) invalid();
-      const input = parsed.data;
+
+      const parsed = Schema.decodeUnknownResult(notificationInputSchema)(raw);
+
+      if (Result.isFailure(parsed)) invalid();
+      const input = parsed.success;
+
       if (input.op === "list") {
         return this.db
           .transaction(() => {
             const now = readTime();
+
             return {
               op: "list" as const,
               ...this.list(registration, now, input.cursor),
@@ -318,16 +411,16 @@ export class NotificationStore {
           })
           .deferred();
       }
+
       const target =
         "scope" in input
-          ? targetSchema.parse({
+          ? Schema.decodeUnknownSync(targetSchema)({
               scope: input.scope,
               channel: input.channel,
-              ...(input.scope === "thread"
-                ? { thread_ts: input.thread_ts }
-                : {}),
+              ...(input.scope === "thread" && { thread_ts: input.thread_ts }),
             })
           : null;
+
       if (input.op === "status" && target)
         return {
           op: "status",
@@ -339,13 +432,16 @@ export class NotificationStore {
             readTime(),
           ),
         };
-      if (input.op === "status" || !contextSchema.safeParse(context).success)
+
+      if (input.op === "status" || !Schema.is(contextSchema)(context))
         invalid();
+
       return this.db
         .transaction(() => {
           // Read the host clock after BEGIN IMMEDIATE acquires the write lock.
           const now = readTime();
           const canonical = JSON.stringify(input);
+
           const existing = this.db
             .query<
               {
@@ -359,7 +455,9 @@ export class NotificationStore {
           WHERE registration=? AND id=?
         `)
             .get(registration, context.id);
+
           let receipt: NotificationReceipt;
+
           if (existing) {
             if (
               existing.input !== canonical ||
@@ -368,7 +466,9 @@ export class NotificationStore {
               throw new NotificationStoreError(
                 "Notification operation identity conflict.",
               );
-            receipt = receiptSchema.parse(JSON.parse(existing.receipt));
+            receipt = Schema.decodeUnknownSync(receiptSchema)(
+              JSON.parse(existing.receipt),
+            );
           } else {
             // Check elapsed time only after receipt lookup, inside the write lock.
             if (
@@ -380,7 +480,8 @@ export class NotificationStore {
                 "Notification mute expiry has elapsed.",
               );
             let changed: boolean;
-            let cleared: z.infer<typeof countsSchema> | undefined;
+            let cleared: NotificationCounts | undefined;
+
             if (input.op === "clear_all") {
               cleared = this.counts(registration);
               changed =
@@ -392,6 +493,7 @@ export class NotificationStore {
             } else {
               if (!target) invalid();
               const thread = target.scope === "thread" ? target.thread_ts : "";
+
               if (input.op === "unmute") {
                 changed =
                   this.db
@@ -415,6 +517,7 @@ export class NotificationStore {
                     ).changes > 0;
               }
             }
+
             receipt = {
               id: context.id,
               action: input.op,
@@ -423,17 +526,15 @@ export class NotificationStore {
               reason: input.reason ?? null,
               target,
               changed,
-              ...(cleared ? { cleared } : {}),
-              ...(target
-                ? {
-                    snapshot: this.status(
-                      registration,
-                      target.channel,
-                      target.scope === "thread" ? target.thread_ts : undefined,
-                      now,
-                    ),
-                  }
-                : {}),
+              ...(cleared && { cleared }),
+              ...(target && {
+                snapshot: this.status(
+                  registration,
+                  target.channel,
+                  target.scope === "thread" ? target.thread_ts : undefined,
+                  now,
+                ),
+              }),
             };
             this.db
               .query(`INSERT INTO notification_receipts
@@ -449,8 +550,11 @@ export class NotificationStore {
                 JSON.stringify(receipt),
               );
           }
+
           if (input.op === "clear_all") {
-            if (!receipt.cleared) throw new Error();
+            if (!receipt.cleared)
+              throw new Error("Notification clear receipt has no counts");
+
             return {
               op: input.op,
               changed: receipt.changed,
@@ -460,7 +564,9 @@ export class NotificationStore {
               current: this.list(registration, now),
             };
           }
+
           if (!target) invalid();
+
           return {
             op: input.op,
             target,
@@ -480,7 +586,7 @@ export class NotificationStore {
   }
 
   private counts(registration: string) {
-    return countsSchema.parse(
+    return Schema.decodeUnknownSync(countsSchema)(
       this.db
         .query<
           {
@@ -501,6 +607,7 @@ export class NotificationStore {
     cursor?: string,
   ): NotificationPage {
     const after = readCursor(cursor, registration);
+
     const rows = this.db
       .query<SavedSetting, [string, string, string]>(`
       SELECT channel,thread,mute_until,reason FROM notification_settings
@@ -508,9 +615,11 @@ export class NotificationStore {
       ORDER BY channel,thread LIMIT ${pageSize + 1}
     `)
       .all(registration, after.channel, after.thread)
-      .map((row) => savedSchema.parse(row));
+      .map((row) => decodeSaved(row));
+
     const page = rows.slice(0, pageSize);
     const last = page.at(-1);
+
     return {
       settings: page.map((row) => ({
         target: targetOf(row),

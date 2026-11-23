@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
@@ -650,4 +657,79 @@ test("unavailable ticket fields stay explicit and ownership duration uses starte
     expect(gateway).toContain(field);
   expect(await read("opencode")).toContain("unit started unknown");
   expect(await read("proxy")).toContain("unit started unknown");
+});
+
+test("default sources read the host, OpenCode, reports, alert and Starfleet files", async () => {
+  const dataDirectory = await mkdtemp(join(tmpdir(), "health-defaults-"));
+  const snapshot = join(dataDirectory, "starfleet.json");
+
+  try {
+    await writeFile(snapshot, JSON.stringify(await sources.starfleet()), {
+      mode: 0o600,
+    });
+    await mkdir(join(dataDirectory, "maintenance"), { recursive: true });
+    await writeFile(join(dataDirectory, "maintenance", "ALERT.json"), "{}");
+    const registration = bot();
+
+    if (registration.backend.type !== "opencode")
+      throw new Error("Invalid fixture");
+    // A closed local port: the read fails at once and stays unknown.
+    registration.backend = {
+      ...registration.backend,
+      url: "http://127.0.0.1:9",
+    };
+
+    const configured = {
+      ...registration,
+      health: Schema.decodeUnknownSync(healthConfigSchema)({
+        starfleetSnapshotFile: snapshot,
+      }),
+    };
+
+    const read = createHealthReader({
+      bot: () => configured,
+      dataDirectory,
+      backend: {},
+      env: {},
+      now: () => now,
+      sources: { drain: async () => null, uptime: () => 50 },
+    });
+
+    expect(await read("host")).toContain("cores ");
+    expect(await read("host")).not.toContain("load/cores/uptime unknown");
+    expect(await read("opencode")).toContain("⚠ backend read unknown");
+    const stargate = await read("stargate");
+    expect(stargate).toContain("last alert present; state unknown");
+    expect(stargate).toContain("last maintenance unknown");
+    expect(stargate).toContain("version unknown; ready unknown");
+    expect(await read("starfleet")).toContain("✗ stargate failed");
+
+    const unconfigured = createHealthReader({
+      bot: () => registration,
+      dataDirectory,
+      backend: {},
+      now: () => now,
+      sources: { drain: async () => null },
+    });
+
+    expect(await unconfigured("starfleet")).toContain(
+      "current state unknown (missing, invalid, future or stale snapshot)",
+    );
+  } finally {
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
+test("an inactive drain and a failing schedule store stay unknown", async () => {
+  const read = reader({
+    sources: { ...sources, drain: async () => null },
+    schedules: () => {
+      throw new Error(canary);
+    },
+  });
+
+  const stargate = await read("stargate");
+  expect(stargate).toContain("⚠ restart drain inactive or unknown");
+  expect(stargate).not.toContain(canary);
+  expect(await read()).toContain("cron failed unknown");
 });

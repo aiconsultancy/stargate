@@ -1,9 +1,13 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { z } from "zod";
 import { postInputSchema } from "../src/captain-post/captain-post";
-import { crewOpenCodeInput } from "../src/crew/input/crew-tool-input";
+import {
+  crewOpenCodeInput,
+  quotaToolInput,
+} from "../src/crew/input/crew-tool-input";
 import { crewInputSchema } from "../src/crew/execution/engine";
 import {
   historyInputBranches,
@@ -24,15 +28,10 @@ import {
 } from "../src/crew/controls/models";
 import { projectToolInput } from "../src/crew/input/project-options";
 import * as toolInputs from "../src/crew/input/tool-input";
-import { objectToolInput } from "../src/crew/input/tool-input";
 import { cronToolInput } from "../src/crew/cron/cron";
+import { notificationToolInput } from "../src/crew/controls/notifications";
 import { cronOperationSchema } from "../src/cron/control";
 import { notificationInputSchema } from "../src/notifications/preferences/notification-store";
-import { quotaInputSchema } from "../src/quota/quota";
-
-const schemas = {
-  stargate_notifications: notificationInputSchema,
-};
 
 test("native post SDK input keeps defaults, raw text and its input advertisement", async () => {
   const input = messagePortableSchema(postInputSchema);
@@ -249,19 +248,6 @@ test("Effect struct advertisements keep required fields and resolvable definitio
 });
 
 test("all Stargate union tools advertise an object root with their fields", () => {
-  for (const schema of Object.values(schemas)) {
-    const json = z.toJSONSchema(objectToolInput(schema));
-    expect(json.type).toBe("object");
-
-    for (const key of ["oneOf", "anyOf", "allOf"])
-      expect(json).not.toHaveProperty(key);
-    expect(json.required).toContain("op");
-
-    for (const option of schema.options)
-      for (const name of Object.keys(option.shape))
-        expect(json.properties).toHaveProperty(name);
-  }
-
   const cron = cronToolInput()["~standard"].jsonSchema.input({
     target: "draft-2020-12",
   });
@@ -273,8 +259,43 @@ test("all Stargate union tools advertise an object root with their fields", () =
   expect(cron["required"]).toEqual(["op"]);
 });
 
-test("notification union keeps explicit scoped requirements and input expiry representation", () => {
-  const schema = objectToolInput(notificationInputSchema);
+test("notification and quota tool advertisements keep their frozen bytes", () => {
+  // SHA-256 of the exact JSON text of the Zod tool inputs (base ab4a2f27).
+  // Input and output are equal in both targets that the base answers.
+  const frozen = {
+    stargate_notifications: {
+      "draft-2020-12":
+        "5d0652647598858061350cc4ce99140ff943f9a8a0f61f59a6e083ba8862b96c",
+      "draft-07":
+        "e87394a7fcd48726bee7e8513962358fcfb04d97fb53790d48ffbcc591e79a08",
+    },
+    stargate_quota: {
+      "draft-2020-12":
+        "ab215471e73439fea4ff4e924aedf879d6b2f491c4ea60fb500b36e4fc41b73e",
+      "draft-07":
+        "ba59dd4957ce096231b027bd0d3108e02b40a41bfd38ee3d4337f6a13ac6ebbd",
+    },
+  } as const;
+
+  const tools = [
+    ["stargate_notifications", notificationToolInput()],
+    ["stargate_quota", quotaToolInput()],
+  ] as const;
+
+  for (const [name, tool] of tools)
+    for (const target of ["draft-2020-12", "draft-07"] as const)
+      for (const side of ["input", "output"] as const)
+        expect(
+          createHash("sha256")
+            .update(
+              JSON.stringify(tool["~standard"].jsonSchema[side]({ target })),
+            )
+            .digest("hex"),
+        ).toBe(frozen[name][target]);
+});
+
+test("notification union keeps explicit scoped requirements and input expiry representation", async () => {
+  const schema = notificationToolInput()["~standard"];
 
   for (const input of [
     { op: "mute", scope: "thread", channel: "C123" },
@@ -287,7 +308,12 @@ test("notification union keeps explicit scoped requirements and input expiry rep
       mute_until: "2026-11-18T10:00:00Z",
     },
   ])
-    expect(schema.safeParse(input).success).toBe(false);
+    expect(await schema.validate(input)).toHaveProperty("issues");
+
+  const missing = await schema.validate({ scope: "channel", channel: "C123" });
+
+  if (!missing.issues) throw new Error("Missing operation accepted");
+  expect(missing.issues).toEqual([{ path: ["op"], message: "Invalid input" }]);
 
   const input = {
     op: "mute",
@@ -297,7 +323,14 @@ test("notification union keeps explicit scoped requirements and input expiry rep
     mute_until: "2026-11-18T12:00:00+02:00",
   };
 
-  expect(notificationInputSchema.parse(schema.parse(input))).toMatchObject({
+  // The tool input keeps the raw value; the handler's decode normalizes it.
+  const checked = await schema.validate(input);
+
+  if (checked.issues) throw new Error("Valid mute rejected");
+  expect(checked.value).toEqual(input);
+  expect(
+    Schema.decodeUnknownSync(notificationInputSchema)(checked.value),
+  ).toMatchObject({
     mute_until: "2026-11-18T10:00:00.000Z",
   });
 });
@@ -363,12 +396,14 @@ test("Zod project helper preserves required operation fields after separating pr
   );
 });
 
-test("remaining quota Zod project helper stays strict and validates project keys", () => {
-  const schema = projectToolInput(quotaInputSchema);
-  expect(schema.parse({})).toEqual({});
-  expect(schema.parse({ project: undefined })).toEqual({ project: undefined });
-  expect(schema.parse({ project: "stargate" })).toEqual({
-    project: "stargate",
+test("native quota tool input stays strict and validates project keys", async () => {
+  const schema = quotaToolInput()["~standard"];
+  expect(await schema.validate({})).toEqual({ value: {} });
+  expect(await schema.validate({ project: undefined })).toEqual({
+    value: { project: undefined },
+  });
+  expect(await schema.validate({ project: "stargate" })).toEqual({
+    value: { project: "stargate" },
   });
 
   for (const raw of [
@@ -378,8 +413,16 @@ test("remaining quota Zod project helper stays strict and validates project keys
     { project: "../foreign" },
     { project: "constructor" },
     { op: "inbox" },
+    Object.create({ inherited: 1 }),
   ])
-    expect(schema.safeParse(raw).success).toBe(false);
+    expect(await schema.validate(raw)).toHaveProperty("issues");
+
+  const unknown = await schema.validate({ a: 1, b: 2 });
+
+  if (!unknown.issues) throw new Error("Unknown keys accepted");
+  expect(unknown.issues).toEqual([
+    { path: [], message: 'Unrecognized keys: "a", "b"' },
+  ]);
 });
 
 test("optional envelope fields do not inject another operation's defaults", async () => {

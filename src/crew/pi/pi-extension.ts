@@ -1,8 +1,7 @@
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Effect, Predicate, Schema } from "effect";
-import { z } from "zod";
 import { quotaInputSchema } from "../../quota/quota";
-import { crewPiParameters, crewInputSchema } from "../input/crew-tool-input";
+import { crewInputSchema, crewPiParameters } from "../input/crew-tool-input";
 import { journalInputSchema } from "../reporting/journal";
 import { messagePiParameters } from "../messaging/message-tool-input";
 import {
@@ -25,8 +24,9 @@ export type PiCrewBinding = {
     signal: AbortSignal,
   ): Promise<unknown>;
 };
+
 // Pi validates JavaScript arguments before execute. A structural JSON schema
-// rejects undefined cursor values there; opaque MutableJson advertises {}.
+// Rejects undefined cursor values there; opaque MutableJson advertises {}.
 const historyJson: Schema.Codec<Schema.MutableJson> = Schema.suspend(() =>
   Schema.Union([
     Schema.String,
@@ -37,25 +37,31 @@ const historyJson: Schema.Codec<Schema.MutableJson> = Schema.suspend(() =>
     Schema.Record(Schema.String, historyJson),
   ]),
 );
+
 const history = Schema.Struct({
   limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 })).pipe(
     Schema.withDecodingDefault(Effect.succeed(20)),
   ),
   cursor: Schema.optional(Schema.Record(Schema.String, historyJson)),
 });
+
 const decodeHistory = Schema.decodeUnknownSync(history, {
   onExcessProperty: "error",
 });
+
 const decodeJournal = Schema.decodeUnknownSync(journalInputSchema, {
   onExcessProperty: "error",
 });
+
 // Resolve the circular engine import only when this crew tool is invoked.
 const decodeCrew = (raw: unknown) =>
   Schema.decodeUnknownSync(crewInputSchema)(raw);
+
 const decodeMail = Schema.decodeUnknownSync(mailInputSchema);
 const decodeDM = Schema.decodeUnknownSync(dmInputSchema);
+
 // Pi's legacy advertisement required defaulted fields. Handler defaults do not
-// authorize accepting their omission at the native JSON Schema boundary.
+// Authorize accepting their omission at the native JSON Schema boundary.
 const historyParameters = effectParameters(
   Schema.Struct(
     effectToolInputFields(
@@ -66,7 +72,18 @@ const historyParameters = effectParameters(
     ),
   ),
 );
+
 const journalParameters = journalToolParameters();
+
+// The legacy Zod advertisement of the argument-free quota tool, unchanged.
+const quotaParameters = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+
+const decodeQuota = Schema.decodeUnknownSync(quotaInputSchema);
 
 /** Thin native bindings. Each invocation is tied to the saved member conversation. */
 export function piCrewToolDefinitions() {
@@ -118,18 +135,9 @@ export function piCrewExtension(
     signal: AbortSignal,
   ) => Promise<unknown>,
 ) {
-  const tools = piCrewToolDefinitions().map(({ name, schema, description }) => {
-    const parameters = Schema.isSchema(schema)
-      ? name === "pi_history"
-        ? historyParameters
-        : name === "stargate_crew"
-          ? crewPiParameters()
-          : name === "stargate_mail"
-            ? messagePiParameters(mailInputBranches)
-            : name === "stargate_dm"
-              ? messagePiParameters(dmInputSchema)
-              : journalParameters
-      : z.toJSONSchema(schema);
+  const tools = piCrewToolDefinitions().map(({ name, description }) => {
+    const parameters = piParameters(name);
+
     return defineTool({
       name,
       description,
@@ -139,6 +147,7 @@ export function piCrewExtension(
         try {
           binding.authorize(String(api.conversationId));
           const signal = context.abortSignal ?? new AbortController().signal;
+
           const result =
             name === "pi_history"
               ? await readHistory(
@@ -148,22 +157,17 @@ export function piCrewExtension(
                 )
               : await binding.run(
                   name,
-                  Schema.isSchema(schema)
-                    ? name === "stargate_crew"
-                      ? decodeCrew(raw)
-                      : name === "stargate_mail"
-                        ? decodeMail(raw)
-                        : name === "stargate_dm"
-                          ? decodeDM(raw)
-                          : decodeJournal(raw)
-                    : schema.parse(raw),
+                  decodeToolInput(name, raw),
                   String(api.conversationId),
                   String(api.taskId),
                   signal,
                 );
+
           const text = JSON.stringify(result);
+
           if (Buffer.byteLength(text, "utf8") > outputLimit)
             throw new CrewError("result too large, retry with a smaller limit");
+
           return { output: [{ type: "text" as const, text }] };
         } catch (error) {
           return {
@@ -183,13 +187,47 @@ export function piCrewExtension(
       outputLimits: { maxBytes: outputLimit, maxLines: 200 },
     });
   });
+
   return defineExtension({ name: "stargate.crew", tools });
+}
+
+function piParameters(name: string) {
+  switch (name) {
+    case "pi_history":
+      return historyParameters;
+    case "stargate_crew":
+      return crewPiParameters();
+    case "stargate_mail":
+      return messagePiParameters(mailInputBranches);
+    case "stargate_dm":
+      return messagePiParameters(dmInputSchema);
+    case "stargate_quota":
+      return quotaParameters;
+    default:
+      return journalParameters;
+  }
+}
+
+function decodeToolInput(name: string, raw: unknown) {
+  switch (name) {
+    case "stargate_crew":
+      return decodeCrew(raw);
+    case "stargate_mail":
+      return decodeMail(raw);
+    case "stargate_dm":
+      return decodeDM(raw);
+    case "stargate_quota":
+      return decodeQuota(raw);
+    default:
+      return decodeJournal(raw);
+  }
 }
 
 function effectParameters(schema: Schema.Constraint) {
   const document = Schema.toJsonSchemaDocument(schema, {
     onExcessProperty: "error",
   });
+
   return { ...document.schema, $defs: document.definitions };
 }
 
@@ -210,21 +248,27 @@ function journalToolParameters() {
       ),
     ),
   );
+
   const document = Schema.toJsonSchemaDocument(schema, {
     onExcessProperty: "error",
   });
-  const branches = document.schema["anyOf"];
-  const append = Array.isArray(branches) ? branches[0] : undefined;
+
+  const branches: unknown = document.schema["anyOf"];
+  const append: unknown = Array.isArray(branches) ? branches[0] : undefined;
+
   const properties = Predicate.isObject(append)
     ? append["properties"]
     : undefined;
+
   const text = Predicate.isObject(properties) ? properties["text"] : undefined;
+
   if (!Predicate.isObject(text))
     throw new Error(
       "Journal tool advertisement requires an append text schema.",
     );
   // Zod advertised trim's length bounds but no whitespace restriction. Keep
-  // the decoded bounds/required fields; only the handler applies trimming.
+  // The decoded bounds/required fields; only the handler applies trimming.
   delete text["pattern"];
+
   return { ...document.schema, $defs: document.definitions };
 }
