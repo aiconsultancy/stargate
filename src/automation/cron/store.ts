@@ -22,7 +22,7 @@ import { type CronInput, validateCronInput } from "./input";
 import {
   type QuotaObservation,
   quotaObservationSchema,
-} from "../../quota/quota";
+} from "../../backends/quota/quota";
 import {
   settingsPattern,
   settingsStruct,

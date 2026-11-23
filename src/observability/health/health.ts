@@ -27,7 +27,7 @@ import {
   readySchema,
 } from "../../automation/maintenance/nightly/update/ready";
 import { reportOutcomes } from "../../automation/maintenance/nightly/reports/report";
-import { quotaSnapshotSchema } from "../../quota/quota";
+import { quotaSnapshotSchema } from "../../backends/quota/quota";
 import { botStatusReport } from "../../app/status-report";
 import { settingsPattern } from "../../config/settings-schema";
 import { exactStruct } from "../../shared/session-history";

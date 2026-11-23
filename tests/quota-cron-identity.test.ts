@@ -8,7 +8,7 @@ import {
   QuotaReader,
   quotaObservationSchema,
   quotaSnapshotSchema,
-} from "../src/quota/quota";
+} from "../src/backends/quota/quota";
 
 test("cron identities survive credential reordering, disabling, removal and restart without leaking into public quota", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-quota-identity-"));

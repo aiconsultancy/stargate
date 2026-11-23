@@ -5,7 +5,7 @@ import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { CrewUI, quotaStatusView } from "../src/transports/slack/crew-ui";
 import type { CronView } from "../src/automation/cron/ui";
-import type { QuotaSnapshot } from "../src/quota/quota";
+import type { QuotaSnapshot } from "../src/backends/quota/quota";
 import { bot, identity } from "./fixtures";
 
 const snapshot: QuotaSnapshot = {

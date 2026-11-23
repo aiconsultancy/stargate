@@ -13,7 +13,7 @@ import {
   type QuotaSnapshot,
   formatQuota,
   quotaSnapshotSchema,
-} from "../../quota/quota";
+} from "../../backends/quota/quota";
 import {
   type Identity,
   isAllowedChannel,

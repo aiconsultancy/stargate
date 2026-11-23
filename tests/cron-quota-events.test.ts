@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CronInput } from "../src/automation/cron/input";
 import { CronStore } from "../src/automation/cron/store";
-import type { QuotaSnapshot } from "../src/quota/quota";
+import type { QuotaSnapshot } from "../src/backends/quota/quota";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
 const hour = 3_600_000;

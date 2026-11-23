@@ -7,7 +7,7 @@ import type { Logger } from "pino";
 import {
   atomicWrite,
   readOptional,
-} from "../automation/maintenance/nightly/files";
+} from "../../automation/maintenance/nightly/files";
 import {
   type QuotaReader,
   type QuotaSnapshot,
@@ -18,7 +18,7 @@ import {
   settingsPattern,
   settingsRefine,
   settingsStruct,
-} from "../config/settings-schema";
+} from "../../config/settings-schema";
 
 const providers = ["claude", "codex"] as const;
 const providerSchema = Schema.Literals(providers);

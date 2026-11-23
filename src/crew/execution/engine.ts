@@ -35,7 +35,7 @@ import {
   QuotaReader,
   quotaConfigSchema,
   quotaInputSchema,
-} from "../../quota/quota";
+} from "../../backends/quota/quota";
 import {
   settingsCheck,
   settingsDefault,

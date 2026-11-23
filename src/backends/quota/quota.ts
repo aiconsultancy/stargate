@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { Option, Schema } from "effect";
-import { isLoopbackAddress } from "../lib/loopback";
+import { isLoopbackAddress } from "../../lib/loopback";
 import {
   settingsEmail,
   settingsPattern,
@@ -11,7 +11,7 @@ import {
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../config/settings-schema";
+} from "../../config/settings-schema";
 
 const accountEmails = Schema.mutable(Schema.Array(settingsEmail))
   .check(Schema.isMinLength(1))

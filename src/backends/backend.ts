@@ -16,7 +16,7 @@ import type {
   PendingQuestion,
   QuestionAnswer,
 } from "../questions/questions";
-import type { QuotaObservation, QuotaSnapshot } from "../quota/quota";
+import type { QuotaObservation, QuotaSnapshot } from "./quota/quota";
 import type { InboundReaction } from "../shared/reactions";
 import type { SessionHistory } from "../shared/session-history";
 import type { TurnProgress } from "../shared/turn-progress";
