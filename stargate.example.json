@@ -26,6 +26,20 @@
     },
     "subscriptions": [{ "topic": "release.*", "to": ["release-log"] }]
   },
+  "subspaceAgents": {
+    "enabled": false,
+    "api": { "baseUrl": "https://subspace.internal.example" },
+    "enrolment": { "tokenFile": "/etc/stargate/subspace-enrolment-token" },
+    "officers": [
+      {
+        "name": "example-captain",
+        "rank": "captain",
+        "ship": "example-ship",
+        "model": "example-model",
+        "ircNick": "example-captain"
+      }
+    ]
+  },
   "agentDispatch": {
     "enabled": false,
     "fleet": "example-fleet",

@@ -54,6 +54,7 @@ import {
 } from "../observability/dashboard/dashboard-source";
 import { sendDispatchAnswer } from "../dispatch/irc";
 import { startAgentDispatch } from "../dispatch/start";
+import type { SubspaceAgentsHost } from "../subspace/start";
 import { abortable } from "../lib/effect";
 import { FleetControl } from "../coordination/fleet/control";
 import { fleetRequestAction } from "../coordination/fleet/permissions";
@@ -177,6 +178,8 @@ export type RuntimeDependencies = {
   drain?: { directory?: string };
   /** Tests only: agent dispatch's Subspace API transport and environment. */
   agentDispatch?: { fetch?: typeof fetch; env?: NodeJS.ProcessEnv };
+  /** Tests only: Subspace agent identity's API transport and environment. */
+  subspaceAgents?: Pick<SubspaceAgentsHost, "fetch" | "env">;
   /** Isolated notification fixtures only; not operator configuration. */
   notification?: {
     environment?: NodeJS.ProcessEnv;
@@ -254,6 +257,36 @@ export function listenForReload(
   };
 }
 
+/** Outage and observation timings outside tests. */
+const defaultConnectionTiming = { outageMs: 600_000, pollMs: 250 } as const;
+
+/**
+ * Officers' Subspace API identity, only when `subspaceAgents.enabled` is
+ * true: the module is loaded then and not otherwise. Absent or disabled,
+ * nothing is created, opened, logged or contacted.
+ */
+function subspaceAgents(
+  config: ServeConfig,
+  log: Logger,
+  dependencies: RuntimeDependencies,
+) {
+  const section = config.subspaceAgents;
+
+  if (!section?.enabled) return Effect.void;
+
+  return Effect.acquireRelease(
+    Effect.promise(async () =>
+      (await import("../subspace/start")).startSubspaceAgents({
+        config: section,
+        dataDirectory: config.dataDirectory,
+        log,
+        ...dependencies.subspaceAgents,
+      }),
+    ),
+    (started) => Effect.promise(() => started.close()),
+  );
+}
+
 /**
  * Process ownership as one scope. Workers start only after every bot has
  * connected. Finalizers run in reverse order: one shared gate closes Slack
@@ -272,6 +305,9 @@ export function serve(
   reload?: ConfigReload,
 ) {
   let started = false;
+
+  const connectionTiming =
+    dependencies.connectionTiming ?? defaultConnectionTiming;
 
   const program = Effect.scoped(
     Effect.gen(function* () {
@@ -310,11 +346,6 @@ export function serve(
       const transportSnapshot = () =>
         transportSources.flatMap((read) => read());
 
-      const connectionTiming = dependencies.connectionTiming ?? {
-        outageMs: 600_000,
-        pollMs: 250,
-      };
-
       const store = yield* Effect.acquireRelease(
         Effect.sync(() =>
           openStore(join(config.dataDirectory, "stargate.sqlite")),
@@ -324,6 +355,9 @@ export function serve(
             store.close();
           }),
       );
+
+      // Officers' Subspace API keys, only when that section is enabled.
+      yield* subspaceAgents(config, log, dependencies);
 
       // Registered before any worker starts; a failure never stops the gateway.
       const drain = dependencies.drain

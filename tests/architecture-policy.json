@@ -1127,6 +1127,7 @@
         "quota",
         "shared",
         "slack",
+        "subspace",
         "teams",
         "transcription"
       ]
@@ -1442,6 +1443,19 @@
       "files": ["src/quota-watch.ts", "src/quota.ts"],
       "public": ["src/quota-watch.ts", "src/quota.ts"],
       "neighbours": ["config", "lib", "maintenance"]
+    },
+    "subspace": {
+      "layer": "slices",
+      "files": [
+        "src/subspace/certificate.ts",
+        "src/subspace/cli.ts",
+        "src/subspace/enrol.ts",
+        "src/subspace/files.ts",
+        "src/subspace/start.ts",
+        "src/subspace/upstream.ts"
+      ],
+      "public": ["src/subspace/cli.ts", "src/subspace/start.ts"],
+      "neighbours": ["config", "lib"]
     },
     "fleet": {
       "layer": "slices",

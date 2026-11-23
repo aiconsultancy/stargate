@@ -46,6 +46,7 @@ Commands:
   cron              List, add, run, remove, or report cronjobs
   config check      Validate config, Slack token and IRC credential references
   api token         Print the Fleet API bearer token
+  subspace          Optional officer keys for the Subspace API
   maintenance       Nightly self-update and host maintenance (plan/run/timer)
   manifest          Print Slack manifest JSON and prefilled creation URL
   status            Read-only capability and recent incident report
@@ -155,6 +156,14 @@ List and report accept no input or job selector. Output is JSON.
 Uses configured cronjobs directory and destination; no prompt CLI arguments.
 ${common}`,
   maintenance: `${maintenanceHelp}\n${common}`,
+  subspace: `Usage: stargate subspace enrol [--config PATH] [--name OFFICER] [--rotate]
+Optional Subspace API agent identity. Nothing here runs unless
+subspaceAgents.enabled is true in the configuration.
+Gives each configured officer a private key and certificate and enrols it
+with the API, using the configured one-time enrolment token. An officer
+already enrolled with its bundle is left alone. --rotate enrols a new key,
+replaces the bundle and reports the old fingerprint so an administrator can
+revoke it. Prints JSON; never key material or tokens.\n${common}`,
   manifest: `Usage: stargate manifest [--name NAME] [--json]
 --name NAME  Slack app display name (default: Stargate; 1–80 characters)
 --json       Print only JSON for scripts; otherwise include prefilled URL
@@ -488,6 +497,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
         config.notify,
         config.dataDirectory,
         config.agentDispatch,
+        config.subspaceAgents,
       );
       await checkCodexConfiguration(config, configPath);
     }
@@ -505,6 +515,19 @@ export async function runCli(args: string[]): Promise<CliResult> {
     );
 
     process.stdout.write(`${token}\n`);
+  } else if (command === "subspace" && p.length >= 2) {
+    // Loaded only for this command: nothing of it runs otherwise.
+    const { subspaceCli } = await import("../subspace/cli");
+
+    const code = await subspaceCli({
+      operation: p[1],
+      positionals: p.slice(2),
+      configPath,
+      name: v.name,
+      rotate: v.rotate,
+    });
+
+    if (code !== 0) process.exitCode = code;
   } else if (command === "manifest" && p.length === 1) {
     console.log(JSON.stringify(buildManifest(v.name), null, 2));
 
@@ -654,6 +677,10 @@ async function readCronFile(path: string): Promise<unknown> {
   }
 }
 
+const subspaceOptions: Record<string, readonly string[]> = {
+  enrol: ["name", "rotate"],
+};
+
 function commandOptions(
   command: string | undefined,
   sub: string | undefined,
@@ -702,6 +729,8 @@ function commandOptions(
       ];
     case "manifest":
       return ["name", "json"];
+    case "subspace":
+      return subspaceOptions[sub ?? ""] ?? [];
     case "service":
       return ["name"];
     case "config":
