@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { Result, Schema } from "effect";
 import type { ActivitySnapshot } from "../../../activity/activity";
 import { redactCredentials } from "../../../lib/credentials";
 import { JournalStore } from "./journal";
@@ -71,9 +72,77 @@ type Capture = {
   summarySeq: number;
 };
 
+const feedbackTitleLimit = 120;
+const feedbackSummaryLimit = 480;
+const feedbackEvidenceLimit = 600;
+const feedbackCapacity = 1000;
+
+const feedbackText = (max: number) =>
+  Schema.Trim.check(Schema.isMinCodePoints(1), Schema.isMaxCodePoints(max));
+
+export const feedbackInput = Schema.Struct({
+  title: feedbackText(feedbackTitleLimit),
+  expected: feedbackText(feedbackSummaryLimit),
+  observed: feedbackText(feedbackSummaryLimit),
+  evidence: Schema.optional(feedbackText(feedbackEvidenceLimit)),
+});
+
+export const feedbackReviewInput = Schema.Struct({
+  after: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  limit: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 })),
+  ),
+});
+
+const decodeFeedback = Schema.decodeUnknownResult(feedbackInput, {
+  onExcessProperty: "error",
+});
+
+const decodeFeedbackReview = Schema.decodeUnknownResult(feedbackReviewInput, {
+  onExcessProperty: "error",
+});
+
+const validCallPart = Schema.is(
+  Schema.Trim.check(Schema.isMinCodePoints(1), Schema.isMaxCodePoints(512)),
+);
+
+type FeedbackCall = { sessionID: string; messageID: string; id: string };
+
+export function feedbackCallIdentity({
+  sessionID,
+  messageID,
+  id,
+}: FeedbackCall) {
+  const identity = [sessionID, messageID, id];
+
+  if (!identity.every((part) => validCallPart(part)))
+    throw new CrewError("Feedback requires the full host tool-call identity.");
+
+  return identity;
+}
+
+type FeedbackEntry = Omit<typeof feedbackInput.Type, "evidence"> & {
+  id: number;
+  created: number;
+  member: string;
+  project: string;
+  evidence: string | null;
+};
+
+function safeFeedbackText(text: string, maximum: number) {
+  return redactCredentials(
+    text
+      .replace(/\s/gu, " ")
+      .replace(/[\p{Cc}\p{Cf}]/gu, "")
+      .replace(/(\b[a-z][a-z\d+.-]*:\/\/)[^/\s?#]+@/gi, "$1[REDACTED]@"),
+    maximum,
+  );
+}
+
 /** Private tables share crew identity, transaction, and file permissions. */
 export class ReportingStore {
   private names = new Map<string, string>();
+  private feedbackReady = false;
   public readonly journal: JournalStore;
 
   public constructor(
@@ -120,6 +189,122 @@ export class ReportingStore {
       if (!columns.some((column) => column.name === name))
         db.run(`ALTER TABLE activity_captures ADD COLUMN ${name} ${type}`);
     }
+  }
+
+  private prepareFeedback() {
+    if (this.feedbackReady) return;
+    this.db.run(`CREATE TABLE IF NOT EXISTS feedback_inbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER NOT NULL,
+      member TEXT NOT NULL, project TEXT NOT NULL, callKey TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL, expected TEXT NOT NULL, observed TEXT NOT NULL, evidence TEXT
+    )`);
+    this.feedbackReady = true;
+  }
+
+  /** Host-only source. The owning ship selects this database before calling. */
+  public submitFeedback(
+    raw: unknown,
+    source: FeedbackCall & { member: string; project: string },
+  ) {
+    const { member, project } = source;
+    const identity = feedbackCallIdentity(source);
+    const parsed = decodeFeedback(raw);
+
+    if (Result.isFailure(parsed))
+      throw new CrewError("Invalid feedback input.");
+    const input = parsed.success;
+
+    const callKey = createHash("sha256")
+      .update(JSON.stringify(identity))
+      .digest("hex");
+
+    this.prepareFeedback();
+
+    return this.db
+      .transaction(() => {
+        const before = this.db
+          .query<{ id: number }, [string]>(
+            "SELECT id FROM feedback_inbox WHERE callKey=?",
+          )
+          .get(callKey);
+
+        if (before) return { status: "stored", id: before.id };
+
+        const count = this.db
+          .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM feedback_inbox")
+          .get();
+
+        if (!count || count.n >= feedbackCapacity)
+          throw new CrewError(
+            "This ship's feedback inbox is full. No new report was stored.",
+          );
+
+        const row = this.db
+          .query<
+            { id: number },
+            [
+              number,
+              string,
+              string,
+              string,
+              string,
+              string,
+              string,
+              string | null,
+            ]
+          >(
+            `INSERT INTO feedback_inbox (created,member,project,callKey,title,expected,observed,evidence)
+         VALUES (?,?,?,?,?,?,?,?) RETURNING id`,
+          )
+          .get(
+            Date.now(),
+            member,
+            project,
+            callKey,
+            safeFeedbackText(input.title, feedbackTitleLimit),
+            safeFeedbackText(input.expected, feedbackSummaryLimit),
+            safeFeedbackText(input.observed, feedbackSummaryLimit),
+            input.evidence === undefined
+              ? null
+              : safeFeedbackText(input.evidence, feedbackEvidenceLimit),
+          );
+
+        if (!row) throw new Error("Feedback insert unavailable");
+
+        return { status: "stored", id: row.id };
+      })
+      .immediate();
+  }
+
+  public reviewFeedback(raw: unknown) {
+    const parsed = decodeFeedbackReview(raw);
+
+    if (Result.isFailure(parsed))
+      throw new CrewError("Invalid feedback review input.");
+    const { after = 0, limit = 10 } = parsed.success;
+
+    if (
+      !this.feedbackReady &&
+      this.db
+        .query<{ present: number }, []>(
+          "SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='feedback_inbox'",
+        )
+        .get() === null
+    )
+      return { entries: [], nextAfter: after, truncated: false };
+
+    const entries = this.db
+      .query<FeedbackEntry, [number, number]>(
+        `SELECT id,created,member,project,title,expected,observed,evidence FROM feedback_inbox
+       WHERE id>? ORDER BY id LIMIT ?`,
+      )
+      .all(after, limit + 1);
+
+    const truncated = entries.length > limit;
+
+    if (truncated) entries.pop();
+
+    return { entries, nextAfter: entries.at(-1)?.id ?? after, truncated };
   }
 
   public configureNames(members: { id: string; name?: string | undefined }[]) {

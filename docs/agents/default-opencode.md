@@ -599,8 +599,10 @@ an occupied task does not become a free-worker wake if collection races delivery
 Child agents use their own standard tools, never Stargate tools or prefixed names,
 and do not start children. Crew reply on IRC only when tagged, asked directly,
 or once per all-call.
-New tools reuse existing permission actions (`stargate_journal`: `stargate_crew`,
-`stargate_dm`: `stargate_mail`), without replacing stored session permissions.
+The journal and DM tools reuse `stargate_crew` and `stargate_mail` without
+replacing stored session permissions. The optional [ship feedback inbox](../crew-coordination.md#stargate-product-feedback)
+uses separate exact submit and review permissions. It is off unless the ship
+explicitly enables it; it does not grant access or open tickets.
 
 Captain maintains `<captainDirectory>/WAYS_OF_WORKING.md`. Initialization only
 creates it if absent. All definitions and Pi member instructions reference this

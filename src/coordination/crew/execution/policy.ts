@@ -20,6 +20,8 @@ export function crewPermissions(
   if (access === "direct") {
     return [
       allow("*"),
+      { action: "stargate_feedback", resource: "*", effect: "deny" },
+      { action: "stargate_feedback_review", resource: "*", effect: "deny" },
       ...["*.env", "*.env.*", "*.key", "*.pem"].map((resource): Rule => ({
         action: "read",
         resource,

@@ -143,6 +143,16 @@ test("direct trusted team tools do not require individual connector grants", asy
 
   for (const role of ["captain", "coding", "research"] as const) {
     const rules = crewPermissions(role, "direct");
+
+    for (const action of ["stargate_feedback", "stargate_feedback_review"]) {
+      expect(rules).toContainEqual({ action, resource: "*", effect: "deny" });
+      expect(
+        crewPermissions(role).some(
+          (rule) => rule.action === action && rule.effect === "allow",
+        ),
+      ).toBe(false);
+    }
+
     expect(rules[0]).toEqual({ action: "*", resource: "*", effect: "allow" });
     expect(rules.at(-1)).toEqual({
       action: "read",
