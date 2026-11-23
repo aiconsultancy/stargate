@@ -1,7 +1,12 @@
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import type { Config } from "../../../config";
+import {
+  settingsOffsetDatetime,
+  settingsStruct,
+  settingsUUID,
+} from "../../../config/settings-schema";
 import { discoverCrews } from "../crews";
 import type { CommandRunner } from "../exec";
 import { proxyModels } from "../update/host";
@@ -11,9 +16,9 @@ import { maintenanceDirectory } from "../paths";
 import { readReady, readyProcessAlive } from "../update/ready";
 import { linkedRelease } from "../update/release";
 import {
+  type Report,
   alertSchemaID,
   listReports,
-  type Report,
   reportSchema,
 } from "../reports/report";
 import { readState } from "../state";
@@ -43,9 +48,12 @@ const unitStates = [
   "not-found",
   "unknown",
 ] as const;
+
 export type UnitState = (typeof unitStates)[number];
+
 export const runningUnit = (state: UnitState) =>
   state === "active" || state === "reloading" || state === "refreshing";
+
 const busyUnit = (state: UnitState) =>
   runningUnit(state) || state === "activating" || state === "deactivating";
 
@@ -68,21 +76,27 @@ async function showUnit(
       { timeoutMs: 15_000 },
     )
     .catch(() => null);
+
   if (result?.code !== 0) return null;
   const values: Record<string, string> = {};
+
   for (const line of result.stdout.split("\n")) {
     const equals = line.indexOf("=");
     const key = line.slice(0, equals);
+
     if (equals > 0 && properties.includes(key))
       values[key] = line.slice(equals + 1).trim();
   }
+
   return values;
 }
 
 function unitState(values: Record<string, string> | null): UnitState {
   if (!values) return "unknown";
+
   if (values["LoadState"] === "not-found") return "not-found";
   const state = values["ActiveState"] ?? "";
+
   return (unitStates as readonly string[]).includes(state)
     ? (state as UnitState)
     : "unknown";
@@ -95,12 +109,14 @@ export async function readUnit(runner: CommandRunner, unit: string) {
 /** `@<seconds>` (systemctl --timestamp=unix) to ISO; anything else: null. */
 function unixTime(value: string | undefined) {
   const match = /^@(\d{1,12})$/.exec(value ?? "");
+
   return match ? new Date(Number(match[1]) * 1000).toISOString() : null;
 }
 
 /** OpenCode's unit, when its restart command is a plain systemctl restart. */
 function openCodeUnit(command: readonly string[]) {
   const [tool, scope, action, unit] = command;
+
   return command.length === 4 &&
     tool === "systemctl" &&
     scope === "--user" &&
@@ -123,30 +139,38 @@ const cleaner =
       .slice(0, max)
       .join("");
 
-const alertSchema = z.strictObject({
-  schema: z.literal(alertSchemaID),
-  runID: z.string().max(100),
-  at: z.iso.datetime({ offset: true }),
-  outcome: z.string().max(50),
-  reason: z.string().max(50).optional(),
-  report: z.string().max(200).nullable(),
-  journal: z.boolean(),
-});
+const decodeAlert = Schema.decodeUnknownResult(
+  settingsStruct({
+    schema: Schema.Literal(alertSchemaID),
+    runID: Schema.String.check(Schema.isMaxCodePoints(100)),
+    at: settingsOffsetDatetime,
+    outcome: Schema.String.check(Schema.isMaxCodePoints(50)),
+    reason: Schema.optional(Schema.String.check(Schema.isMaxCodePoints(50))),
+    report: Schema.NullOr(Schema.String.check(Schema.isMaxCodePoints(200))),
+    journal: Schema.Boolean,
+  }),
+);
+
+const decodeLastRun = Schema.decodeUnknownResult(
+  Schema.Struct({ runID: settingsUUID }),
+);
 
 /** One report reduced to what explains the night; bounded. */
 export function digestReport(name: string, report: Report, scrub: Scrub) {
   const clean = cleaner(scrub);
   const models = { applied: 0, rolledBack: 0, failed: 0, skipped: 0 };
+
   for (const change of report.models)
     if (change.status === "applied") models.applied++;
     else if (change.status === "rolled-back") models.rolledBack++;
     else if (change.status === "failed") models.failed++;
     else if (change.status === "skipped") models.skipped++;
+
   return {
     name: clean(name),
     startedAt: report.startedAt,
     outcome: report.outcome,
-    ...(report.reason ? { reason: report.reason } : {}),
+    ...(report.reason && { reason: report.reason }),
     changed: report.components
       .filter((c) => c.status !== "unchanged")
       .slice(0, 12)
@@ -155,14 +179,14 @@ export function digestReport(name: string, report: Report, scrub: Scrub) {
         status: c.status,
         before: c.before === null ? null : clean(c.before, 40),
         after: c.after === null ? null : clean(c.after, 40),
-        ...(c.reason ? { reason: c.reason } : {}),
+        ...(c.reason && { reason: c.reason }),
       })),
     failedSteps: report.steps
       .filter((s) => s.status === "failed")
       .slice(0, 8)
       .map((s) => ({
         name: clean(s.name, 60),
-        ...(s.reason ? { reason: s.reason } : {}),
+        ...(s.reason && { reason: s.reason }),
       })),
     rollbacks: report.rollbacks.slice(0, 8).map((r) => ({
       component: clean(r.component, 80),
@@ -174,6 +198,7 @@ export function digestReport(name: string, report: Report, scrub: Scrub) {
     models,
   };
 }
+
 export type ReportDigest = ReturnType<typeof digestReport>;
 
 /** Newest first; unreadable or foreign reports are counted, not shown. */
@@ -182,9 +207,11 @@ export async function readReports(
   limit: number,
   scrub: Scrub,
 ) {
-  const names = (await listReports(dataDirectory)).slice(-limit).reverse();
+  const names = (await listReports(dataDirectory)).slice(-limit).toReversed();
+
   const reports: ReportDigest[] = [];
   let unreadable = 0;
+
   for (const name of names) {
     try {
       const parsed = reportSchema.safeParse(
@@ -195,12 +222,14 @@ export async function readReports(
           ),
         ),
       );
+
       if (parsed.success) reports.push(digestReport(name, parsed.data, scrub));
       else unreadable++;
     } catch {
       unreadable++;
     }
   }
+
   return { reports, unreadable };
 }
 
@@ -215,6 +244,7 @@ export async function collectFacts(input: {
   const clean = cleaner(input.scrub);
   const { config, runner, now } = input;
   const m = config.maintenance;
+
   if (!m) throw new Error("No maintenance section in configuration.");
   const droid = m.droid;
   const data = config.dataDirectory;
@@ -223,6 +253,7 @@ export async function collectFacts(input: {
   const last = previousWindow(now, m.window, jitter);
   const next = nextWindow(now, m.window, jitter);
   const timerName = droid?.timer ?? "stargate-maintenance";
+
   const timerValues = await showUnit(runner, `${timerName}.timer`, [
     "LoadState",
     "ActiveState",
@@ -231,6 +262,7 @@ export async function collectFacts(input: {
     "Result",
     "ActiveEnterTimestamp",
   ]);
+
   const run = await readUnit(runner, `${timerName}.service`);
   const gateway = await readUnit(runner, m.services.gateway);
   const proxyUnit = m.cliproxyapi?.unit;
@@ -240,59 +272,69 @@ export async function collectFacts(input: {
   const crewQueue = await discoverCrews(config).then(queuedCrewTasks, () => []);
   const journal = await Journal.read(config);
   const state = await readState(data);
+
   const current = m.stargate
     ? ((await linkedRelease(m.stargate.root, "current"))?.metadata.version ??
       null)
     : null;
+
   const alertText = await readFile(
     join(maintenanceDirectory(data), "ALERT.json"),
     "utf8",
   ).catch(() => null);
+
   const alert =
     alertText === null
       ? null
       : (() => {
           try {
-            const parsed = alertSchema.safeParse(JSON.parse(alertText));
-            return parsed.success
+            const parsed = decodeAlert(JSON.parse(alertText));
+
+            return Result.isSuccess(parsed)
               ? {
-                  runID: clean(parsed.data.runID, 100),
-                  at: parsed.data.at,
-                  outcome: clean(parsed.data.outcome, 50),
-                  ...(parsed.data.reason
-                    ? { reason: clean(parsed.data.reason, 50) }
-                    : {}),
-                  report: parsed.data.report && clean(parsed.data.report),
-                  journal: parsed.data.journal,
+                  runID: clean(parsed.success.runID, 100),
+                  at: parsed.success.at,
+                  outcome: clean(parsed.success.outcome, 50),
+                  ...(parsed.success.reason && {
+                    reason: clean(parsed.success.reason, 50),
+                  }),
+                  report: parsed.success.report && clean(parsed.success.report),
+                  journal: parsed.success.journal,
                 }
               : { unreadable: true as const };
           } catch {
             return { unreadable: true as const };
           }
         })();
+
   const lastRunPath = join(maintenanceDirectory(data), "last-run.json");
+
   const lastRun = await Promise.all([
     readFile(lastRunPath, "utf8"),
     stat(lastRunPath),
   ])
     .then(([text, info]) => {
-      const parsed = z.object({ runID: z.uuid() }).safeParse(JSON.parse(text));
-      return parsed.success
-        ? { runID: parsed.data.runID, startedAt: info.mtime.toISOString() }
+      const parsed = decodeLastRun(JSON.parse(text));
+
+      return Result.isSuccess(parsed)
+        ? { runID: parsed.success.runID, startedAt: info.mtime.toISOString() }
         : null;
     })
     .catch(() => null);
+
   const { reports, unreadable } = await readReports(
     data,
     droid?.reports ?? 7,
     input.scrub,
   );
+
   const proxyHealthy = m.proxy
     ? await proxyModels(m.proxy, AbortSignal.timeout(20_000)).then(
         () => true,
         () => false,
       )
     : null;
+
   return {
     now: new Date(now).toISOString(),
     enabled: m.enabled,
@@ -315,22 +357,18 @@ export async function collectFacts(input: {
     },
     units: {
       gateway: { unit: m.services.gateway, state: gateway },
-      ...(proxyUnit
-        ? {
-            proxy: {
-              unit: proxyUnit,
-              state: await readUnit(runner, proxyUnit),
-            },
-          }
-        : {}),
-      ...(openCode
-        ? {
-            openCode: {
-              unit: openCode,
-              state: await readUnit(runner, openCode),
-            },
-          }
-        : {}),
+      ...(proxyUnit && {
+        proxy: {
+          unit: proxyUnit,
+          state: await readUnit(runner, proxyUnit),
+        },
+      }),
+      ...(openCode && {
+        openCode: {
+          unit: openCode,
+          state: await readUnit(runner, openCode),
+        },
+      }),
     },
     ready: ready
       ? {
@@ -376,6 +414,7 @@ export async function collectFacts(input: {
     crewQueue,
   };
 }
+
 export type DroidFacts = Awaited<ReturnType<typeof collectFacts>>;
 
 export const findingCodes = [
@@ -391,12 +430,17 @@ export const findingCodes = [
   "known-bad",
   "reports-unreadable",
 ] as const;
+
 export type Finding = {
   code: (typeof findingCodes)[number];
   text: string;
   /** Operator commands, deterministic; the droid never runs them. */
   commands: string[];
 };
+
+const status = (unit: string) => `systemctl --user status ${unit}`;
+
+const logs = (unit: string) => `journalctl --user -u ${unit} -n 50`;
 
 /**
  * The deterministic problem list. Authoritative: the post always carries it,
@@ -408,12 +452,13 @@ export function findings(
   settings: { configPath: string; failedNights: number },
 ): Finding[] {
   const list: Finding[] = [];
+
   const stargate = (operation: string, extra = "") =>
     `stargate maintenance ${operation} --config ${settings.configPath}${extra}`;
-  const status = (unit: string) => `systemctl --user status ${unit}`;
-  const logs = (unit: string) => `journalctl --user -u ${unit} -n 50`;
+
   const { timer } = facts;
   const running = timer.runActive;
+
   if (facts.enabled) {
     if (!runningUnit(timer.state))
       list.push({
@@ -431,6 +476,7 @@ export function findings(
       const planned = Date.parse(facts.window.lastPlannedStart);
       const since = timer.activeSince ? Date.parse(timer.activeSince) : null;
       const fired = timer.lastTrigger ? Date.parse(timer.lastTrigger) : null;
+
       if (
         !running &&
         since !== null &&
@@ -445,6 +491,7 @@ export function findings(
         });
     }
   }
+
   if (facts.alert)
     list.push({
       code: "alert",
@@ -454,12 +501,14 @@ export function findings(
           : `ALERT.json: run ${facts.alert.runID} ended ${facts.alert.outcome}${facts.alert.reason ? ` (${facts.alert.reason})` : ""}${facts.alert.journal ? " and left a journal" : ""}. Review the report, then delete ALERT.json.`,
       commands: [`cat ${facts.alertPath}`],
     });
+
   if (!running && facts.journal.state === "present")
     list.push({
       code: "journal",
       text: `An interrupted run left a journal (${facts.journal.entries.join(", ")}). The next run recovers it after its idle gate.`,
       commands: [stargate("recover")],
     });
+
   if (facts.journal.state === "corrupt")
     list.push({
       code: "journal-corrupt",
@@ -467,6 +516,7 @@ export function findings(
       commands: [stargate("recover", " --accept-current journal")],
     });
   const gateway = facts.units.gateway;
+
   if (!running && (!runningUnit(gateway.state) || !facts.ready?.alive))
     list.push({
       code: "gateway-down",
@@ -476,6 +526,7 @@ export function findings(
       commands: [status(gateway.unit), logs(gateway.unit)],
     });
   const openCode = facts.units.openCode;
+
   if (!running && openCode && !runningUnit(openCode.state))
     list.push({
       code: "opencode-down",
@@ -483,6 +534,7 @@ export function findings(
       commands: [status(openCode.unit), logs(openCode.unit)],
     });
   const proxy = facts.units.proxy;
+
   if (
     !running &&
     (facts.proxyHealthy === false || (proxy && !runningUnit(proxy.state)))
@@ -493,6 +545,7 @@ export function findings(
       commands: proxy ? [status(proxy.unit), logs(proxy.unit)] : [],
     });
   const recent = facts.reports.slice(0, settings.failedNights);
+
   if (
     recent.length === settings.failedNights &&
     recent.every((r) => r.outcome === "failed" || r.outcome === "deferred")
@@ -502,17 +555,20 @@ export function findings(
       text: `The last ${recent.length} run(s) ended ${recent.map((r) => `${r.outcome}${r.reason ? ` (${r.reason})` : ""}`).join(", ")}.`,
       commands: [stargate("plan")],
     });
-  if (facts.release.knownBad.length)
+
+  if (facts.release.knownBad.length > 0)
     list.push({
       code: "known-bad",
       text: `Known-bad Stargate release(s) newer than the current ${facts.release.current ?? "release"}: ${facts.release.knownBad.map((r) => `${r.version} (${r.reason})`).join(", ")}. Updates wait for a newer release.`,
       commands: [],
     });
+
   if (facts.unreadableReports)
     list.push({
       code: "reports-unreadable",
       text: `${facts.unreadableReports} recent report(s) cannot be read or have an unknown schema.`,
       commands: [],
     });
+
   return list;
 }

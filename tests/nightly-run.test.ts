@@ -1143,11 +1143,20 @@ describe("nightly maintenance run", () => {
     );
 
     expect(after.ok).toBe(false);
+    // The recover message names each undo event: a deferred step here.
+    expect(after.message).toBe(
+      "Recovery paused at an idle check; the journal is kept for the next idle boundary: stopped before opencode: host busy (busy-cron).",
+    );
     expect(gatewayRestarts()).toBe(1);
     expect(fixture.openCodeRestarts).toBe(1);
     // The cron run finishes; recovery then completes.
     sql("UPDATE cron_runs SET status='done' WHERE id='r1'");
-    expect((await recoverInterruptedRun(config, deps())).ok).toBe(true);
+    const recovered = await recoverInterruptedRun(config, deps());
+    expect(recovered.ok).toBe(true);
+    // Restart events.
+    expect(recovered.message).toBe(
+      "Recovered an interrupted run: opencode restart ok; gateway restart ok.",
+    );
     expect(fixture.openCodeRestarts).toBe(2);
     expect(gatewayRestarts()).toBe(2);
     const state = await live();
@@ -3731,6 +3740,10 @@ describe("journal recovery", () => {
     await writeFile(teamPath(), "operator\n");
     const result = await recoverInterruptedRun(config, deps());
     expect(result.message).toContain("external-change");
+    // A component event.
+    expect(result.message).toBe(
+      "Recovery incomplete; the journal is kept: models → previous failed (external-change). See recover --accept-current <entry>.",
+    );
     expect(await readFile(captain, "utf8")).toBe(upgraded);
     expect(await readFile(teamPath(), "utf8")).toBe("operator\n");
   });

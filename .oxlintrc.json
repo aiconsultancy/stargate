@@ -428,8 +428,6 @@
         "perf/**/*.ts"
       ],
       "excludeFiles": [
-        "scripts/bootstrap-stargate.ts",
-        "scripts/migrate-stargate-state.ts",
         "src/app/status-report.ts",
         "src/config/settings-legacy.ts",
         "src/crew/input/project-options.ts",
@@ -442,23 +440,13 @@
         "src/maintenance/maintenance.ts",
         "src/maintenance/nightly/cleanup/cleanup-config.ts",
         "src/maintenance/nightly/cli.ts",
-        "src/maintenance/nightly/crews.ts",
-        "src/maintenance/nightly/droid/droid-agent.ts",
-        "src/maintenance/nightly/droid/droid-facts.ts",
-        "src/maintenance/nightly/droid/droid.ts",
         "src/maintenance/nightly/journal.ts",
         "src/maintenance/nightly/reports/report.ts",
-        "src/maintenance/nightly/run.ts",
         "src/maintenance/nightly/state.ts",
-        "src/maintenance/nightly/update/cooloff.ts",
-        "src/maintenance/nightly/update/host.ts",
-        "src/maintenance/nightly/update/plugin-digest.ts",
         "src/maintenance/nightly/update/ready.ts",
-        "src/maintenance/nightly/update/release.ts",
         "src/maintenance/update-notice.ts",
         "src/notifications/preferences/notification-store.ts",
         "src/notifications/preferences/notifications.ts",
-        "src/ops/agent-profile-switch.ts",
         "src/quota/quota-watch.ts",
         "src/quota/quota.ts",
         "src/shared/crew-status.ts"
@@ -907,7 +895,8 @@
         "src/gateway/gateway.ts",
         "src/irc/config.ts",
         "src/irc/ship.ts",
-        "src/maintenance/nightly/cleanup/cleanup.ts"
+        "src/maintenance/nightly/cleanup/cleanup.ts",
+        "src/maintenance/nightly/run.ts"
       ],
       "rules": {
         "eslint/max-lines-per-function": [
@@ -931,7 +920,9 @@
         "src/gateway/gateway.ts",
         "src/irc/client.ts",
         "src/irc/routing.ts",
-        "src/irc/ship.ts"
+        "src/irc/ship.ts",
+        "src/maintenance/nightly/run.ts",
+        "src/ops/agent-profile-switch.ts"
       ],
       "rules": { "eslint/max-statements": ["error", { "max": 185 }] }
     },
@@ -983,6 +974,7 @@
         "src/irc/config.ts",
         "src/irc/routing.ts",
         "src/irc/ship.ts",
+        "src/maintenance/nightly/run.ts",
         "src/maintenance/nightly/update/archive.ts",
         "src/meta-commands/meta-commands.ts",
         "src/questions/questions.ts",
@@ -1499,6 +1491,7 @@
         "src/backends/pi/pi-history.ts",
         "src/crew/history/history-rpc.ts",
         "src/gateway/gateway.ts",
+        "src/maintenance/nightly/droid/droid.ts",
         "src/meta-commands/meta-commands.ts",
         "src/teams/images.ts"
       ],

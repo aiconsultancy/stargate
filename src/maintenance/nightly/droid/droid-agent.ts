@@ -8,16 +8,21 @@ import {
 import {
   AssistantEntry,
   type ConversationId,
+  Harness,
+  type HarnessSettings,
   createRegistry,
   defineExtension,
   defineTool,
-  Harness,
-  type HarnessSettings,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import { piModels } from "../../../backends/pi/pi-durable";
 import type { PiModelSettings } from "../../../backends/pi/config";
+import {
+  settingsDefault,
+  settingsPattern,
+  settingsStruct,
+} from "../../../config/settings-schema";
 import { atomicWrite, readOptional } from "../files";
 
 /**
@@ -63,14 +68,47 @@ Rules:
 - After a run: say what changed, or why nothing changed, and what needs attention. In a health check: say what is wrong and how urgent it is.`;
 
 const outputLimit = 24_000;
-const noInput = z.strictObject({});
-const reportsInput = z.strictObject({
-  limit: z.number().int().min(1).max(14).default(3),
-});
 
-const conversationFile = z.strictObject({
-  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  id: z.string().regex(/^\d+$/),
+/** A strict empty object: no argument, no extra key. */
+const noInput = {
+  schema: Schema.Record(Schema.String, Schema.Never),
+  // The installed Zod 4.6.7 converter's advertisement, byte for byte.
+  parameters: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+};
+
+const reportsInput = {
+  schema: settingsStruct({
+    limit: Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(14),
+    ).pipe(settingsDefault(3)),
+  }),
+  parameters: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    properties: {
+      limit: { default: 3, type: "integer", minimum: 1, maximum: 14 },
+    },
+    required: ["limit"],
+    additionalProperties: false,
+  },
+};
+
+const decodeConversationFile = Schema.decodeUnknownResult(
+  settingsStruct({
+    day: Schema.String.check(settingsPattern(/^\d{4}-\d{2}-\d{2}$/)),
+    id: Schema.String.check(settingsPattern(/^\d+$/)),
+  }),
+);
+
+const fail = (text: string) => ({
+  isError: true,
+  output: [{ type: "text" as const, text }],
 });
 
 /** Open the droid's own Pi Durable store; only the droid tools are installed. */
@@ -81,34 +119,37 @@ export async function openPiDroid(
 ): Promise<DroidAgent> {
   const models = piModels(settings);
   let active: { conversation: string; tools: DroidTools } | undefined;
-  const tool = <T extends z.ZodType>(
+
+  const tool = <T extends Schema.Codec<unknown, unknown>>(
     name: string,
     description: string,
-    schema: T,
+    input: { schema: T; parameters: Record<string, unknown> },
     replay: "safe" | "unsafe",
-    run: (input: z.infer<T>, tools: DroidTools) => Promise<unknown>,
+    run: (input: T["Type"], tools: DroidTools) => Promise<unknown>,
   ) =>
     defineTool({
       name,
       description,
-      parameters: z.toJSONSchema(schema),
+      parameters: input.parameters,
       replay,
       executionMode: "sequential",
       async execute(raw, api) {
-        const fail = (text: string) => ({
-          isError: true,
-          output: [{ type: "text" as const, text }],
-        });
         const bound = active;
+
         // Leftover runs of an earlier check or day can never act.
         if (!bound || String(api.conversationId) !== bound.conversation)
           return fail("No maintenance check is in progress; nothing was done.");
-        const input = schema.safeParse(raw);
-        if (!input.success) return fail("Invalid arguments; nothing was done.");
+        const decoded = Schema.decodeUnknownResult(input.schema)(raw);
+
+        if (Result.isFailure(decoded))
+          return fail("Invalid arguments; nothing was done.");
+
         try {
-          const result = await run(input.data, bound.tools);
+          const result = await run(decoded.success, bound.tools);
+
           const text =
             typeof result === "string" ? result : JSON.stringify(result);
+
           return {
             output: [
               { type: "text" as const, text: text.slice(0, outputLimit) },
@@ -120,6 +161,7 @@ export async function openPiDroid(
       },
       outputLimits: { maxBytes: outputLimit, maxLines: 400 },
     });
+
   const tools = [
     tool(
       "maintenance_status",
@@ -150,22 +192,25 @@ export async function openPiDroid(
       (_input, bound) => bound.recover(),
     ),
   ];
+
   const extension = defineExtension({
     name: "stargate.maintenance-droid",
     tools,
   });
+
   const registry = createRegistry();
   registry.install(extension);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const storage = await openNodeSqliteStorage(join(directory, "pi.sqlite"));
   let harness: Harness;
+
   try {
     harness = await Harness.open(
       storage,
       {
         models,
         registry,
-        ...(options.harness ? { settings: options.harness } : {}),
+        ...(options.harness && { settings: options.harness }),
       },
       BACKGROUND_CONTEXT,
     );
@@ -173,6 +218,7 @@ export async function openPiDroid(
     await storage.close(BACKGROUND_CONTEXT);
     throw error;
   }
+
   const [provider, ...rest] = settings.model.split("/");
   const statePath = join(directory, "conversation.json");
 
@@ -180,16 +226,19 @@ export async function openPiDroid(
     day: string,
     context: typeof BACKGROUND_CONTEXT,
   ) {
-    const stored = conversationFile.safeParse(
+    const stored = decodeConversationFile(
       JSON.parse((await readOptional(statePath).catch(() => null)) ?? "null"),
     );
-    if (stored.success && stored.data.day === day) {
+
+    if (Result.isSuccess(stored) && stored.success.day === day) {
       const existing = await harness.conversation(
-        Number(stored.data.id) as ConversationId,
+        Number(stored.success.id) as ConversationId,
         context,
       );
+
       if (existing) return existing;
     }
+
     const created = await harness.createConversation(
       {
         ownership: { kind: "ownerless" },
@@ -204,11 +253,13 @@ export async function openPiDroid(
       },
       context,
     );
+
     await atomicWrite(
       statePath,
       `${JSON.stringify({ day, id: String(created.id) })}\n`,
       0o600,
     );
+
     return created;
   }
 
@@ -216,14 +267,17 @@ export async function openPiDroid(
     async ask({ prompt, day, tools: bound, signal }) {
       const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
       // Live work here is left over from an interrupted check: stop it
-      // before anything can be scheduled again.
+      // Before anything can be scheduled again.
       const inspection = await harness.inspect(context);
+
       for (const submission of inspection.submissions)
         await harness.abortSubmission(submission.id, context);
+
       for (const task of inspection.tasks)
         await harness.abortTask(task.record.id, context);
       const conversation = await conversationFor(day, context);
       active = { conversation: String(conversation.id), tools: bound };
+
       try {
         const submission = await conversation.submit(
           {
@@ -234,13 +288,17 @@ export async function openPiDroid(
           },
           context,
         );
+
         const completed = await submission.wait(context);
+
         if (completed.status !== "done" || completed.type !== "input")
           throw new Error("The droid's model gave no answer.");
+
         const entry = await conversation.commit(
           (tx) => tx.entry(AssistantEntry, completed.answer),
           context,
         );
+
         return (entry?.model ?? [])
           .flatMap((message) =>
             message.role === "assistant"

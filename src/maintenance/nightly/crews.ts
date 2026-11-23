@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import type { Config } from "../../config";
-import { projectKeySchema } from "../../crew/input/project-options";
+import {
+  settingsDefault,
+  settingsPlainRecord,
+} from "../../config/settings-schema";
+import { effectProjectKeySchema } from "../../crew/input/project-options";
 import { StepError } from "./exec";
 
 /**
@@ -18,6 +22,7 @@ export type CrewRoot = {
   /** Plugin `package` path that OpenCode must report as active. */
   pluginPackage: string;
 };
+
 export type Crew = {
   namespace: string;
   captainDirectory: string;
@@ -31,26 +36,43 @@ export type Crew = {
   captainSessionID?: string;
 };
 
-const pluginOptions = z.object({
-  namespace: z.string().min(1),
-  stateDirectory: z.string().min(1),
-  captainDirectory: z.string().min(1),
-  worktrees: z.record(z.string(), z.string()),
-  captainSessionID: z.string().optional(),
-  projects: z.unknown().optional(),
-  team: z
-    .object({
-      crew: z.array(
-        z.object({ id: z.string(), backend: z.unknown().optional() }),
-      ),
-    })
-    .optional(),
+const nonEmpty = Schema.String.check(Schema.isMinCodePoints(1));
+const directories = settingsPlainRecord(Schema.String, Schema.String);
+
+const crewMember = Schema.Struct({
+  id: Schema.String,
+  backend: Schema.optional(Schema.Unknown),
 });
-const profile = z.object({
-  plugins: z
-    .array(z.object({ package: z.string().optional(), options: z.unknown() }))
-    .default([]),
-});
+
+const decodePluginOptions = Schema.decodeUnknownResult(
+  Schema.Struct({
+    namespace: nonEmpty,
+    stateDirectory: nonEmpty,
+    captainDirectory: nonEmpty,
+    worktrees: directories,
+    captainSessionID: Schema.optional(Schema.String),
+    projects: Schema.optional(Schema.Unknown),
+    team: Schema.optional(Schema.Struct({ crew: Schema.Array(crewMember) })),
+  }),
+);
+
+const decodeProfile = Schema.decodeUnknownResult(
+  Schema.Struct({
+    plugins: Schema.Array(
+      Schema.Struct({
+        package: Schema.optional(Schema.String),
+        options: Schema.Unknown,
+      }),
+    ).pipe(settingsDefault([])),
+  }),
+);
+
+const decodeProjects = Schema.decodeUnknownResult(
+  settingsPlainRecord(
+    effectProjectKeySchema,
+    Schema.Struct({ worktrees: directories }),
+  ),
+);
 
 const unknown = () => new StepError("idle-unknown");
 
@@ -62,24 +84,30 @@ const unknown = () => new StepError("idle-unknown");
 export async function profilePath(directory: string) {
   for (const relative of [".agents/opco", ".opencode"]) {
     const path = join(directory, relative, "opencode.json");
+
     // Only a path that does not exist at all is "no profile"; a dangling
-    // or unreadable link is unknown state.
+    // Or unreadable link is unknown state.
     try {
       await lstat(path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
       throw unknown();
     }
+
     let info: Awaited<ReturnType<typeof stat>>;
+
     try {
       info = await stat(await realpath(path));
     } catch {
       throw unknown();
     }
+
     if (!info.isFile()) throw unknown();
+
     return path;
   }
-  return undefined;
+
+  return;
 }
 
 const looksLikeStargate = (options: unknown) =>
@@ -92,20 +120,27 @@ const looksLikeStargate = (options: unknown) =>
 /** The Stargate crew plugin entry, or undefined when the profile has none. */
 async function readPlugin(path: string) {
   let raw: unknown;
+
   try {
     raw = JSON.parse(await readFile(path, "utf8"));
   } catch {
     throw unknown();
   }
-  const parsed = profile.safeParse(raw);
-  if (!parsed.success) throw unknown();
-  for (const plugin of parsed.data.plugins) {
+
+  const parsed = decodeProfile(raw);
+
+  if (Result.isFailure(parsed)) throw unknown();
+
+  for (const plugin of parsed.success.plugins) {
     if (!looksLikeStargate(plugin.options)) continue;
-    const options = pluginOptions.safeParse(plugin.options);
-    if (!options.success || !plugin.package) throw unknown();
-    return { pluginPackage: plugin.package, options: options.data };
+    const options = decodePluginOptions(plugin.options);
+
+    if (Result.isFailure(options) || !plugin.package) throw unknown();
+
+    return { pluginPackage: plugin.package, options: options.success };
   }
-  return undefined;
+
+  return;
 }
 
 /**
@@ -118,20 +153,25 @@ export async function discoverCrews(
 ): Promise<Crew[]> {
   const crews: Crew[] = [];
   const seen = new Set<string>();
+
   for (const bot of draining
     ? [...config.bots, ...(config.teams ?? []), ...(config.irc ?? [])]
     : config.bots) {
     if (bot.backend.type !== "opencode") continue;
     const captainPath = await profilePath(bot.backend.directory);
+
     if (!captainPath) continue;
     const captain = await readPlugin(captainPath);
+
     if (!captain || seen.has(captain.options.namespace)) continue;
     seen.add(captain.options.namespace);
+
     const pi = new Set(
       (captain.options.team?.crew ?? [])
         .filter((member) => member.backend !== undefined)
         .map((member) => member.id),
     );
+
     const contexts = [
       {
         namespace: captain.options.namespace,
@@ -139,21 +179,20 @@ export async function discoverCrews(
         worktrees: captain.options.worktrees,
       },
     ];
+
     if (draining && captain.options.projects !== undefined) {
-      const parsed = z
-        .record(
-          projectKeySchema,
-          z.object({ worktrees: z.record(z.string(), z.string()) }),
-        )
-        .safeParse(captain.options.projects);
-      if (!parsed.success) throw unknown();
-      for (const [key, project] of Object.entries(parsed.data))
+      const parsed = decodeProjects(captain.options.projects);
+
+      if (Result.isFailure(parsed)) throw unknown();
+
+      for (const [key, project] of Object.entries(parsed.success))
         contexts.push({
           namespace: `${captain.options.namespace}:project:${key}`,
           stateDirectory: join(captain.options.stateDirectory, "projects", key),
           worktrees: project.worktrees,
         });
     }
+
     for (const context of contexts) {
       const roots: CrewRoot[] = [
         {
@@ -162,10 +201,12 @@ export async function discoverCrews(
           pluginPackage: captain.pluginPackage,
         },
       ];
+
       for (const [id, directory] of Object.entries(context.worktrees)) {
         if (pi.has(id)) continue;
         const path = await profilePath(directory);
         const plugin = path ? await readPlugin(path) : undefined;
+
         if (!path || !plugin) throw unknown();
         roots.push({
           directory,
@@ -173,6 +214,7 @@ export async function discoverCrews(
           pluginPackage: plugin.pluginPackage,
         });
       }
+
       const pin = captain.options.captainSessionID ?? bot.backend.sessionID;
       crews.push({
         namespace: context.namespace,
@@ -181,10 +223,11 @@ export async function discoverCrews(
         roots,
         worktreeDirectories: Object.values(context.worktrees),
         piMembers: [...pi],
-        ...(pin ? { captainSessionID: pin } : {}),
+        ...(pin && { captainSessionID: pin }),
       });
     }
   }
+
   return crews;
 }
 
