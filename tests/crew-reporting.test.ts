@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { expect, setSystemTime, test } from "bun:test";
 import { access, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { fixtureRoot } from "./fixture-root";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
@@ -26,8 +27,8 @@ import { openStore } from "../src/app/open-store";
 
 const diskIntegrationTimeoutMs = 30_000;
 
-async function fixture(safeReports = true) {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-reporting-"));
+async function fixture(safeReports = true, root = fixtureRoot()) {
+  const directory = await mkdtemp(join(root, "stargate-reporting-"));
 
   const team = Schema.decodeUnknownSync(teamSchema)({
     ...defaultTeam,
@@ -268,7 +269,7 @@ async function fixture(safeReports = true) {
 }
 
 test("reporting is opt-in; state stays private and inactive dispatch collects nothing", async () => {
-  const f = await fixture();
+  const f = await fixture(true, tmpdir());
 
   try {
     const task = await f.dispatch("Private assignment");
@@ -539,7 +540,7 @@ test("active capture read renews its lease beyond five minutes", async () => {
 test(
   "captures assignments, validated messages, urgency, results, and configured names only",
   async () => {
-    const f = await fixture();
+    const f = await fixture(true, tmpdir());
 
     try {
       const historical = await f.dispatch("Earlier turn", "luigi");
@@ -676,7 +677,7 @@ test("exact capture ownership rejects other captains, workers, child sessions, a
 test(
   "busy reporter is skipped; facts remain visible and unrelated maintenance continues",
   async () => {
-    const f = await fixture();
+    const f = await fixture(true, tmpdir());
 
     try {
       const maintenanceStarted = f.started();
@@ -1360,7 +1361,7 @@ function completion(content: string, toolCall?: object) {
 }
 
 test("real Pi reporting uses fresh context and no tools; maintenance conversation stays unchanged", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-report-sdk-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-report-sdk-"));
   const apiKeyEnv = "STARGATE_REPORTING_PROXY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
@@ -1444,7 +1445,10 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
 });
 
 test("malicious report tool call cannot execute maintenance", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-report-tool-deny-"));
+  const directory = await mkdtemp(
+    join(fixtureRoot(), "stargate-report-tool-deny-"),
+  );
+
   const apiKeyEnv = "STARGATE_REPORTING_DENY_TEST_KEY";
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "fixture-only";
