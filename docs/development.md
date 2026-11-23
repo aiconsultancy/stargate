@@ -438,6 +438,15 @@ The quality gate is the root `.oxlintrc.json`; the vendored anti-slop rules
 and code-size thresholds live in the advisory `tools/oxlint/oxlint.config.ts`
 run by `mise run oxlint`.
 
+All seven Oxlint category switches are on in `.oxlintrc.json`: `correctness`,
+`suspicious`, `pedantic`, `style`, `perf`, `restriction` and `nursery`. Each
+rule that is off has the value `"off"` in the config. Its reason is in this
+document or on the lint issues (NET-1817 holds the list of off rules with
+their reasons). When a later Oxlint version adds a rule to a category, that
+rule comes on automatically, and the update PR must decide it. The 408 rules of
+the Oxlint plugins that are not enabled (for example `import`, `promise` and
+`jest`) are outside these switches.
+
 ## Architecture inventory refresh
 
 After source changes reduce the recorded architecture inventory, preview the
