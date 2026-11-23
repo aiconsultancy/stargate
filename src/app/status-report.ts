@@ -2,23 +2,56 @@ import { constants } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { parseEnv } from "node:util";
 import { OpenCode } from "@opencode/client";
-import { z } from "zod";
+import { Option, Schema } from "effect";
 import type { BotConfig } from "../config";
 import { backendFailureKinds } from "../shared/request-failure";
 import { readConfiguration } from "./setup";
+import { settingsRecord } from "../config/settings-schema";
 
 const maxLogBytes = 2 * 1024 * 1024;
 const windowMs = 24 * 60 * 60 * 1000;
-const sessionSchema = z.object({
-  id: z.string(),
-  parentID: z.string().optional(),
-  fork: z.unknown().optional(),
-  agent: z.string().optional(),
-  location: z.object({ directory: z.string() }),
-});
+
+const decodeSession = Schema.decodeUnknownSync(
+  Schema.Struct({
+    id: Schema.String,
+    parentID: Schema.optional(Schema.String),
+    fork: Schema.optional(Schema.Unknown),
+    agent: Schema.optional(Schema.String),
+    location: Schema.Struct({ directory: Schema.String }),
+  }),
+);
+
+const decodeVersion = Schema.decodeUnknownOption(
+  Schema.String.check(Schema.isPattern(/^[0-9][0-9A-Za-z.+-]{0,79}$/)),
+);
+
+const decodeRecord = Schema.decodeUnknownSync(
+  settingsRecord(Schema.String, Schema.Unknown),
+);
+
+const decodeList = Schema.decodeUnknownSync(Schema.Array(Schema.Unknown));
+
+const decodeMcp = Schema.decodeUnknownSync(
+  Schema.Array(
+    Schema.Struct({
+      status: Schema.Struct({
+        status: Schema.Literals([
+          "connected",
+          "pending",
+          "disabled",
+          "failed",
+          "needs_auth",
+        ]),
+      }),
+    }),
+  ),
+);
+
 type Check = { state: "available" | "failed" | "unknown"; reason: string };
+
 const unknown = (reason: string): Check => ({ state: "unknown", reason });
 const available = (reason: string): Check => ({ state: "available", reason });
+
 async function check(
   work: (signal: AbortSignal) => Promise<boolean>,
 ): Promise<Check> {
@@ -40,6 +73,14 @@ export type OpenCodeHealth = {
   mcpFailed: number | null;
 };
 
+async function count(work: (signal: AbortSignal) => Promise<number>) {
+  try {
+    return await work(AbortSignal.timeout(5000));
+  } catch {
+    return null;
+  }
+}
+
 async function capabilities(
   bot: BotConfig,
   env: NodeJS.ProcessEnv,
@@ -53,18 +94,24 @@ async function capabilities(
     delivery: unknown("delivery not tested; inspect incident evidence"),
     failureReporting: unknown("inspect incident evidence"),
   };
+
   if (bot.backend.type !== "opencode") return checks;
   const config = bot.backend;
   checks.crewReporting = unknown("atomic loaded-only read unavailable");
   const headers: Record<string, string> = {};
+
   for (const [header, name] of Object.entries(config.headersEnv)) {
     const value = env[name];
+
     if (!value?.trim()) {
       checks.backendRead = unknown("backend credentials unavailable");
+
       return checks;
     }
+
     headers[header] = value;
   }
+
   const client = OpenCode.make({
     baseUrl: config.url,
     headers,
@@ -74,74 +121,50 @@ async function capabilities(
       { preconnect: fetch.preconnect },
     ),
   });
+
   checks.backendRead = await check(async (signal) => {
     const info = await client.server.info({ signal });
+
     if (details) {
-      const version = z
-        .string()
-        .regex(/^[0-9][0-9A-Za-z.+-]{0,79}$/)
-        .safeParse(info.version);
-      details.version = version.success ? version.data : null;
+      details.version = Option.getOrNull(decodeVersion(info.version));
     }
+
     return true;
   });
+
   if (details && checks.backendRead.state === "available") {
-    const count = async (work: (signal: AbortSignal) => Promise<number>) => {
-      try {
-        return await work(AbortSignal.timeout(5000));
-      } catch {
-        return null;
-      }
-    };
     const location = { location: { directory: config.directory } };
+
     const [active, forms, permissions, mcp] = await Promise.all([
       count(
         async (signal) =>
-          Object.keys(
-            z
-              .record(z.string(), z.unknown())
-              .parse(await client.session.active({ signal })),
+          Object.keys(decodeRecord(await client.session.active({ signal })))
+            .length,
+      ),
+      count(
+        async (signal) =>
+          decodeList((await client.form.list(location, { signal })).data)
+            .length,
+      ),
+      count(
+        async (signal) =>
+          decodeList(
+            (await client.permission.request.list(location, { signal })).data,
           ).length,
-      ),
-      count(
-        async (signal) =>
-          z
-            .array(z.unknown())
-            .parse((await client.form.list(location, { signal })).data).length,
-      ),
-      count(
-        async (signal) =>
-          z
-            .array(z.unknown())
-            .parse(
-              (await client.permission.request.list(location, { signal })).data,
-            ).length,
       ),
       (async () => {
         try {
           const result = await client.mcp.list(location, {
             signal: AbortSignal.timeout(5000),
           });
-          return z
-            .array(
-              z.object({
-                status: z.object({
-                  status: z.enum([
-                    "connected",
-                    "pending",
-                    "disabled",
-                    "failed",
-                    "needs_auth",
-                  ]),
-                }),
-              }),
-            )
-            .parse(result.data);
+
+          return decodeMcp(result.data);
         } catch {
           return null;
         }
       })(),
     ]);
+
     details.activeSessions = active;
     details.pendingForms = forms;
     details.pendingPermissions = permissions;
@@ -155,17 +178,20 @@ async function capabilities(
           server.status.status === "needs_auth",
       ).length ?? null;
   }
+
   if (checks.backendRead.state === "available")
     checks.backendRead.reason =
       "server metadata read succeeded; request execution not tested";
+
   if (config.sessionID)
     checks.pinnedSession = await check(async (signal) => {
-      const session = sessionSchema.parse(
+      const session = decodeSession(
         await client.session.get(
           { sessionID: config.sessionID ?? "" },
           { signal },
         ),
       );
+
       return (
         session.id === config.sessionID &&
         session.parentID === undefined &&
@@ -174,6 +200,7 @@ async function capabilities(
         (config.agent === undefined || session.agent === config.agent)
       );
     });
+
   return checks;
 }
 
@@ -189,6 +216,7 @@ type Incident = {
   ticket: null;
   jobs: number[];
 };
+
 const categories: Record<
   string,
   { category: string; capability: string; impact: string }
@@ -224,6 +252,7 @@ const categories: Record<
     impact: "job transition refused",
   },
 };
+
 const failures = new Set<string>([
   ...backendFailureKinds,
   "backend",
@@ -237,6 +266,17 @@ const failures = new Set<string>([
   "pending-question",
 ]);
 
+function logTime(value: unknown): number {
+  switch (typeof value) {
+    case "number":
+      return value;
+    case "string":
+      return Date.parse(value);
+    default:
+      return NaN;
+  }
+}
+
 export function summarizeLog(
   text: string,
   bot: string,
@@ -247,52 +287,64 @@ export function summarizeLog(
   let malformed = 0;
   let earliest = Infinity;
   let ambiguous = false;
+
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     let value: unknown;
+
     try {
       value = JSON.parse(line);
     } catch {
       malformed++;
       continue;
     }
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
       malformed++;
       continue;
     }
+
     const record = value as Record<string, unknown>;
-    const time =
-      typeof record["time"] === "number"
-        ? record["time"]
-        : typeof record["time"] === "string"
-          ? Date.parse(record["time"])
-          : NaN;
+
+    const time = logTime(record["time"]);
+
     if (!Number.isFinite(time)) {
       malformed++;
       continue;
     }
+
     earliest = Math.min(earliest, time);
+
     if (time < now - windowMs || time > now) continue;
     const message = record["msg"];
+
     const category =
       typeof message === "string" && Object.hasOwn(categories, message)
         ? categories[message]
         : undefined;
+
     if (!category) continue;
+
     if (typeof record["bot"] === "string" && record["bot"] !== bot) continue;
     const scope = record["bot"] === bot ? "selected-bot" : "unattributed";
+
     if (scope === "unattributed") ambiguous = true;
     const failure = record["failure"];
+
     const categoryName =
       category.category === "agent-failure"
         ? `agent-failure:${typeof failure === "string" && failures.has(failure) ? failure : "unknown"}`
         : category.category;
+
     const key = `${categoryName}:${category.capability}:${scope}`;
     const date = new Date(time).toISOString();
     const previous = groups.get(key);
+
     if (previous) {
       previous.count++;
+
       if (date < previous.first) previous.first = date;
+
       if (date > previous.last) previous.last = date;
     } else
       groups.set(key, {
@@ -308,6 +360,7 @@ export function summarizeLog(
       });
     const group = groups.get(key);
     const job = record["job"];
+
     if (
       group &&
       typeof job === "number" &&
@@ -318,6 +371,7 @@ export function summarizeLog(
     )
       group.jobs.push(job);
   }
+
   return {
     state: "incomplete" as const,
     reasons: [
@@ -333,6 +387,7 @@ export function summarizeLog(
     incidents: [...groups.values()],
   };
 }
+
 async function incidents(path: string | undefined, bot: string, now: number) {
   if (!path)
     return {
@@ -340,15 +395,19 @@ async function incidents(path: string | undefined, bot: string, now: number) {
       reasons: ["log path not supplied"],
       incidents: [],
     };
+
   try {
     const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+
     try {
       const stat = await file.stat();
-      if (!stat.isFile()) throw new Error();
+
+      if (!stat.isFile()) throw new Error("Log path is not a regular file");
       const start = Math.max(0, stat.size - maxLogBytes);
       const bytes = Buffer.alloc(stat.size - start);
       const { bytesRead } = await file.read(bytes, 0, bytes.length, start);
       const text = bytes.subarray(0, bytesRead).toString("utf8");
+
       return summarizeLog(
         start ? text.slice(text.indexOf("\n") + 1) : text,
         bot,
@@ -366,6 +425,7 @@ async function incidents(path: string | undefined, bot: string, now: number) {
     };
   }
 }
+
 export async function statusReport(
   configPath: string,
   botID: string,
@@ -374,19 +434,24 @@ export async function statusReport(
 ) {
   const config = await readConfiguration(configPath);
   const bot = config.bots.find((item) => item.id === botID);
+
   if (!bot) throw new Error("Bot not found in configuration.");
   let env: NodeJS.ProcessEnv;
+
   try {
     let companion = {};
+
     try {
       companion = parseEnv(await readFile(`${configPath}.env`, "utf8"));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+
     env = { ...companion, ...process.env };
   } catch {
     env = {};
   }
+
   return botStatusReport(bot, env, logPath, now);
 }
 
@@ -408,12 +473,15 @@ export async function botStatusReport(
         mcpFailed: null,
       }
     : undefined;
+
   const [checks, history] = await Promise.all([
     capabilities(bot, env, openCode),
     incidents(logPath, bot.id, now),
   ]);
+
   if (history.state !== "unknown")
     checks.failureReporting = available("log readable; coverage incomplete");
+
   return {
     generatedAt: new Date(now).toISOString(),
     bot: bot.id,
@@ -422,7 +490,7 @@ export async function botStatusReport(
       to: new Date(now).toISOString(),
     },
     checks,
-    ...(openCode ? { openCode } : {}),
+    ...(openCode && { openCode }),
     history,
   };
 }

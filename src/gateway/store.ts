@@ -403,7 +403,9 @@ export class Store {
           $textMention: input.textMention ?? null,
           $notification: input.notification
             ? JSON.stringify(
-                notificationContextSchema.parse(input.notification),
+                Schema.decodeUnknownSync(notificationContextSchema)(
+                  input.notification,
+                ),
               )
             : null,
           $slackReaction: input.slackReaction

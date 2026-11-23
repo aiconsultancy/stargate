@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import {
@@ -764,8 +765,12 @@ test("captain recovers idle uncertain slots without replay, promotion or result 
       (await f.engine.run({ op: "status", taskID: bosun.id }, f.captain()))
         .status,
     ).toBe("abandoned");
+
     // Read-only status view: no current blocker, known terminal outcome.
-    const view = crewStatusSchema.parse(f.engine.status({ member: "bosun" }));
+    const view = Schema.decodeUnknownSync(crewStatusSchema)(
+      f.engine.status({ member: "bosun" }),
+    );
+
     expect(view.members[0]).toMatchObject({
       current: null,
       observed: false,

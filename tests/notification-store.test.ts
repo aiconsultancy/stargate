@@ -1,3 +1,4 @@
+import { Result, Schema } from "effect";
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
@@ -70,27 +71,39 @@ describe("notificationInputSchema", () => {
   test("accepts explicit targets and normalizes equivalent offset instants", () => {
     for (const target of [thread, channel]) {
       expect(
-        notificationInputSchema.parse({ op: "status", ...target }),
+        Schema.decodeUnknownSync(notificationInputSchema)({
+          op: "status",
+          ...target,
+        }),
       ).toEqual({
         op: "status",
         ...target,
       });
       expect(
-        notificationInputSchema.parse({
+        Schema.decodeUnknownSync(notificationInputSchema)({
           op: "mute",
           ...target,
           mute_until: "2026-11-17T15:00:00+02:00",
         }),
       ).toEqual({ op: "mute", ...target, mute_until: until });
       expect(
-        notificationInputSchema.safeParse({ op: "unmute", ...target }).success,
+        Result.isSuccess(
+          Schema.decodeUnknownResult(notificationInputSchema)({
+            op: "unmute",
+            ...target,
+          }),
+        ),
       ).toBe(true);
     }
 
-    expect(notificationInputSchema.parse({ op: "list" })).toEqual({
+    expect(
+      Schema.decodeUnknownSync(notificationInputSchema)({ op: "list" }),
+    ).toEqual({
       op: "list",
     });
-    expect(notificationInputSchema.parse({ op: "clear_all" })).toEqual({
+    expect(
+      Schema.decodeUnknownSync(notificationInputSchema)({ op: "clear_all" }),
+    ).toEqual({
       op: "clear_all",
     });
   });
@@ -118,13 +131,19 @@ describe("notificationInputSchema", () => {
       { op: "mute", ...channel, configPath: "/secret" },
       { op: "mute", ...channel, sessionID: "other" },
     ])
-      expect(notificationInputSchema.safeParse(input).success).toBe(false);
+      expect(
+        Result.isSuccess(
+          Schema.decodeUnknownResult(notificationInputSchema)(input),
+        ),
+      ).toBe(false);
     expect(
-      notificationInputSchema.safeParse({
-        op: "mute",
-        ...thread,
-        thread_ts: "1234567890123456.123456",
-      }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(notificationInputSchema)({
+          op: "mute",
+          ...thread,
+          thread_ts: "1234567890123456.123456",
+        }),
+      ),
     ).toBe(true);
   });
 
@@ -140,11 +159,13 @@ describe("notificationInputSchema", () => {
       "2026-11-17T13:00Z",
     ])
       expect(
-        notificationInputSchema.safeParse({
-          op: "mute",
-          ...channel,
-          mute_until: value,
-        }).success,
+        Result.isSuccess(
+          Schema.decodeUnknownResult(notificationInputSchema)({
+            op: "mute",
+            ...channel,
+            mute_until: value,
+          }),
+        ),
       ).toBe(false);
 
     for (const input of [
@@ -154,8 +175,12 @@ describe("notificationInputSchema", () => {
       { op: "clear_all" },
     ])
       expect(
-        notificationInputSchema.safeParse({ ...input, mute_until: until })
-          .success,
+        Result.isSuccess(
+          Schema.decodeUnknownResult(notificationInputSchema)({
+            ...input,
+            mute_until: until,
+          }),
+        ),
       ).toBe(false);
   });
 });
@@ -239,7 +264,7 @@ describe("NotificationStore", () => {
   test("rejects elapsed deadline at commit rather than schema parse", () => {
     const store = open();
 
-    const input = notificationInputSchema.parse({
+    const input = Schema.decodeUnknownSync(notificationInputSchema)({
       op: "mute",
       ...thread,
       mute_until: until,
@@ -669,7 +694,12 @@ describe("NotificationStore", () => {
       ),
     ).toThrow("Invalid notification request.");
     expect(
-      notificationInputSchema.safeParse({ op: "list", cursor: "" }).success,
+      Result.isSuccess(
+        Schema.decodeUnknownResult(notificationInputSchema)({
+          op: "list",
+          cursor: "",
+        }),
+      ),
     ).toBe(false);
   });
 

@@ -167,11 +167,15 @@ function fixture() {
     },
     now: () => now,
     control: (input: unknown) =>
-      preferences.operate(key, notificationInputSchema.parse(input), {
-        id: `op-${++operation}`,
-        caller: "captain",
-        now,
-      }),
+      preferences.operate(
+        key,
+        Schema.decodeUnknownSync(notificationInputSchema)(input),
+        {
+          id: `op-${++operation}`,
+          caller: "captain",
+          now,
+        },
+      ),
     run: async () => gateway.process(next(), new AbortController().signal),
   };
 }

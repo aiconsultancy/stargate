@@ -132,7 +132,11 @@ test("read-only roster shows Pi/OpenCode/unprovisioned, stale running and bounde
 
     try {
       const before = db.serialize();
-      const roster = crewStatusSchema.parse(f.engine.status());
+
+      const roster = Schema.decodeUnknownSync(crewStatusSchema)(
+        f.engine.status(),
+      );
+
       expect(roster.members.map(({ backend }) => backend)).toEqual([
         "opencode",
         "pi-durable",

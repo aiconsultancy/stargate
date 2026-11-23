@@ -428,21 +428,10 @@
         "perf/**/*.ts"
       ],
       "excludeFiles": [
-        "src/app/status-report.ts",
         "src/config/settings-legacy.ts",
         "src/crew/input/project-options.ts",
         "src/crew/input/tool-input.ts",
-        "src/crew/pi/pi-extension.ts",
-        "src/crew/reporting/fleet-status.ts",
-        "src/dashboard/api/v1/config.ts",
-        "src/health/health-host.ts",
-        "src/health/health.ts",
-        "src/maintenance/update-notice.ts",
-        "src/notifications/preferences/notification-store.ts",
-        "src/notifications/preferences/notifications.ts",
-        "src/quota/quota-watch.ts",
-        "src/quota/quota.ts",
-        "src/shared/crew-status.ts"
+        "src/maintenance/update-notice.ts"
       ],
       "rules": {
         "anti-slop/no-module-mocking": "error",

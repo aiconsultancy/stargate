@@ -647,7 +647,7 @@ test("status and history identify all project contexts while legacy output stays
       "stargate",
     ]);
 
-    const fleet = fleetCrewStatusSchema.parse(
+    const fleet = Schema.decodeUnknownSync(fleetCrewStatusSchema)(
       projects.fleetStatus({ member: "worker" }),
     );
 
@@ -701,18 +701,26 @@ test("aggregate activity includes busy workers after the twenty-row project page
       },
       f.captain(),
     );
-    const status = crewStatusSchema.parse(projects.status());
+
+    const status = Schema.decodeUnknownSync(crewStatusSchema)(
+      projects.status(),
+    );
+
     expect(status.total).toBe(36);
     expect(status.members).toHaveLength(20);
     expect(status.truncated).toBe(true);
     expect(status.members.filter((member) => member.current)).toHaveLength(0);
     expect(status.busy).toBe(1);
-    expect(crewStatusSchema.safeParse({ ...status, busy: 37 }).success).toBe(
-      false,
-    );
-    expect(crewStatusSchema.safeParse({ ...status, busy: 51 }).success).toBe(
-      false,
-    );
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(crewStatusSchema)({ ...status, busy: 37 }),
+      ),
+    ).toBe(false);
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(crewStatusSchema)({ ...status, busy: 51 }),
+      ),
+    ).toBe(false);
   } finally {
     await projects.close();
     await f.close();
@@ -743,7 +751,11 @@ test("engine aggregate counts member twenty-one before its own page limit and re
       true,
     );
     expect(projects.default.status({}, { aggregate: true }).busy).toBe(1);
-    const status = crewStatusSchema.parse(projects.status());
+
+    const status = Schema.decodeUnknownSync(crewStatusSchema)(
+      projects.status(),
+    );
+
     expect(status.total).toBe(42);
     expect(status.members).toHaveLength(20);
     expect(status.members.every((member) => member.current === null)).toBe(

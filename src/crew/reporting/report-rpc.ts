@@ -140,8 +140,14 @@ export const CrewReporting = Rpc.define({
         ),
       ),
     },
-    quota: { input: quotaInputSchema, output: quotaSnapshotSchema },
-    cronQuota: { input: quotaInputSchema, output: quotaObservationSchema },
+    quota: {
+      input: portable(quotaInputSchema),
+      output: portable(quotaSnapshotSchema),
+    },
+    cronQuota: {
+      input: portable(quotaInputSchema),
+      output: portable(quotaObservationSchema),
+    },
     cronModel: {
       input: portable(cronModelInputSchema),
       output: portable(settingsStruct({ model: cronModelSchema })),
@@ -150,10 +156,13 @@ export const CrewReporting = Rpc.define({
       input: portable(cronEvaluateInputSchema),
       output: portable(cronEvaluationSchema),
     },
-    status: { input: crewStatusInputSchema, output: crewStatusSchema },
+    status: {
+      input: portable(crewStatusInputSchema),
+      output: portable(crewStatusSchema),
+    },
     fleetStatus: {
       input: portable(fleetCrewStatusInputSchema),
-      output: fleetCrewStatusSchema,
+      output: portable(fleetCrewStatusSchema),
     },
     // Read-only operator history. Roots list every provisioned crew member.
     // Describe, children and entries serve only this team's `pi:` sessions;

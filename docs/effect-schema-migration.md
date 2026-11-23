@@ -145,7 +145,8 @@ Completed:
 - [Files and delivery](https://github.com/aiconsultancy/stargate/pull/84).
 - [Cron operations and records](https://github.com/aiconsultancy/stargate/pull/211).
 - [Maintenance execution and offline scripts](https://github.com/aiconsultancy/stargate/pull/212).
-- Maintenance records and readiness (batch 16).
+- [Maintenance records and readiness](https://github.com/aiconsultancy/stargate/pull/213).
+- Status, quota, notifications and health (batch 15).
 
 The first batch-6 timing pair failed at +18.27%. Its diagnostic pair measured
 +2.63% with retained coverage; this is not a performance repair. The earlier
@@ -153,18 +154,15 @@ batch-4 first-pair +10.9% failure also remains recorded.
 
 ## Remaining component batches
 
-The numbers include the sixteen completed PRs. The landing order of the rest
-is 15, 18.
+Seventeen batches are complete. Batch 18 removes the direct dependency.
 File names identify primary scope, not a restriction against updating a coupled
 consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
 
-15. Status, quota and notifications. Migrate `crew-status.ts`, `status-report.ts`,
-    `quota.ts`, `quota-watch.ts`, `health.ts`, `health-host.ts`,
-    `notification-store.ts` and `notifications.ts`. Include report/UI consumers.
+15. Status, quota, notifications, Fleet API configuration and health: merged
+    (see Completed). The tools keep the previous JSON Schema advertisement.
 16. Maintenance records and readiness: merged (see Completed). The `maintenance
     schema` output keeps the Zod 4.6.7 report advertisement byte for byte.
-    `health.ts` changes through a declared edit and stays on Zod until batch 15;
     `droid-facts.ts` decodes reports with the native report schema.
 17. Maintenance execution and migration scripts: merged (see Completed).
 18. Dependency removal. Check for residual first-party Zod use in production,
@@ -193,6 +191,7 @@ Remove each bridge with its owning container:
   their four bridges with the actual parents.
 - Batch 14 composes the cron destination, advanced options, evaluation and
   quota-event settings natively and removes their bridges.
+- Batch 15 removes the Fleet status metadata and pull-request repository bridges.
 - Batch 16 removes the cleanup-path bridge. The maintenance result record
   composes the native path setting directly.
 
@@ -234,9 +233,10 @@ decoders; native argument coercion still precedes handler trimming. Mesij text
 remains untrimmed with a 65,536-code-point limit, distinct from crew send's
 trimmed 64,000-code-point limit. Strict old task envelopes and loose modern
 text envelopes remain separate. IRC/local-report RPC retain structured output
-and native nested-strict decoding/encoding. Quota's Zod project helper remains
-until batch 15; the unused project-selection alias is removed with IRC's native
-consumer. Batch 18 must retain/move the pure projectors these adapters use.
+and native nested-strict decoding/encoding. Batch 15 moves the quota tool to
+the native project envelope; the unused project-selection alias is removed
+with IRC's native consumer. Batch 18 must retain/move the pure projectors
+these adapters use.
 
 Fleet runtime codecs preserve strict nested decode/encode behavior and schema
 field order. The tool registrations keep their original object/union forms

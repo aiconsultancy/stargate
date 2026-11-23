@@ -16,12 +16,10 @@ import {
   maintenancePlanSchema,
 } from "../maintenance/maintenance";
 import { activeMaintenanceDrain } from "../maintenance/maintenance-drain";
-import { notificationInputSchema } from "../notifications/preferences/notification-store";
-import { quotaInputSchema } from "../quota/quota";
 import { noticeTools } from "../maintenance/update-notice";
 import { connectHistoryAPI, historyVisible } from "./history/api";
 import { compactOnServer } from "./history/compaction";
-import { crewOpenCodeInput } from "./input/crew-tool-input";
+import { crewOpenCodeInput, quotaToolInput } from "./input/crew-tool-input";
 import { CrewCron, cronToolInput } from "./cron/cron";
 import { CrewCronExecution } from "./cron/cron-execution";
 import { CrewEngine } from "./execution/engine";
@@ -37,12 +35,12 @@ import {
 import { dmInputSchema, mailInputBranches } from "./messaging/messaging";
 import { CrewModels, modelToolInputSchema } from "./controls/models";
 import { nativeWait } from "./execution/native-wait";
-import { CrewNotifications } from "./controls/notifications";
-import { CrewPost } from "./controls/post";
 import {
-  effectProjectToolInput,
-  projectToolInput,
-} from "./input/project-options";
+  CrewNotifications,
+  notificationToolInput,
+} from "./controls/notifications";
+import { CrewPost } from "./controls/post";
+import { effectProjectToolInput } from "./input/project-options";
 import { CrewProjects } from "./workspace/projects";
 import {
   CrewQuestionHandoff,
@@ -53,7 +51,6 @@ import { CrewQuestions, crewQuestionInputSchema } from "./questions/questions";
 import { CrewRecovery, runRecoveryOperator } from "./execution/recovery-rpc";
 import { CrewReporting } from "./reporting/report-rpc";
 import { CrewError } from "./execution/state";
-import { objectToolInput } from "./input/tool-input";
 import { CrewWaiting, waitingInputSchema } from "./controls/waiting";
 
 // Greybeard: configured shared workers; only explicit DM wakes a captain.
@@ -610,7 +607,7 @@ const plugin = Plugin.define({
           name: "stargate_notifications",
           description:
             "Captain-only persistent Slack notification mutes for this bound registration. Use explicit C/G channel and root thread_ts from the CURRENT s=slack source line; never infer a thread from this shared session. Thread mute is the coordination default; channel mute needs operator direction. Ops mute/unmute/status require explicit scope and target; list is paginated. Optional mute_until on mute only: absolute RFC3339 with timezone, normalized UTC; omit for indefinite. clear_all clears only this captain's preferences and requires an explicit human request to clear all mutes, not a quoted/peer phrase. Direct bot-ID tags and explicitly approved human broadcast aliases wake one message without unmuting. Existing access/peer rules still apply. Expiry/unmute never replays ignored or dispatch-suppressed jobs. Legacy queued jobs are grandfathered; running work, cron, native controls, replies and transcript output are unaffected. Mutations commit an atomic host-tool-ID receipt; retry returns the original receipt plus current state, never reapplies a stale mute/clear. No DM targets, session/history deletion, service restart or permission changes. Count only persisted success as muted; no peer acknowledgement chatter.",
-          input: objectToolInput(notificationInputSchema),
+          input: notificationToolInput(),
           options: { codemode: false, permission: "stargate_crew" },
           execute: (input, context) =>
             guard(
@@ -625,7 +622,7 @@ const plugin = Plugin.define({
           name: "stargate_quota",
           description:
             "Read Claude/Codex subscription quota used/remaining percentages, scopes, reset times and observation timestamps. Not token totals. Cached up to 60 seconds; missing or inactive limits and reset-passed observations are not evidence of available quota or exact model entitlement. No model, session or allowance changes. Accepts no arguments; credentials and raw account metadata stay server-side.",
-          input: projectToolInput(quotaInputSchema),
+          input: quotaToolInput(),
           options: { codemode: false, permission: "stargate_crew" },
           execute: (input, context) =>
             guard(

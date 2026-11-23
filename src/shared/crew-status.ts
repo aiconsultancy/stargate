@@ -1,78 +1,101 @@
-import { z } from "zod";
+import { Schema } from "effect";
+import { exactStruct } from "./session-history";
 
-export const crewStatusInputSchema = z.strictObject({
-  member: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)
-    .optional(),
+// Zod's string bounds counted code points; keep that unit at this boundary.
+const maxCodePoints = (maximum: number) =>
+  Schema.String.check(Schema.isMaxCodePoints(maximum));
+
+const count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+// Decoded statuses stay mutable records, as their callers use them.
+const field = Schema.mutableKey;
+
+export const crewStatusInputSchema = exactStruct({
+  member: field(
+    Schema.optional(
+      Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+    ),
+  ),
 });
-const time = z.number().int().nonnegative().nullable();
-const task = z.strictObject({
-  id: z.string().max(100),
-  status: z.enum([
-    "queued",
-    "cancelled",
-    "dispatching",
-    "running",
-    "completed",
-    "cancelling",
-    "uncertain",
-    "abandoned",
-  ]),
-  kind: z.enum(["assignment", "report", "unknown"]),
-  summary: z.string().max(180),
-  phase: z.string().max(80),
-  progress: z.string().max(400),
+
+const time = field(Schema.NullOr(count));
+
+const task = exactStruct({
+  id: field(maxCodePoints(100)),
+  status: field(
+    Schema.Literals([
+      "queued",
+      "cancelled",
+      "dispatching",
+      "running",
+      "completed",
+      "cancelling",
+      "uncertain",
+      "abandoned",
+    ]),
+  ),
+  kind: field(Schema.Literals(["assignment", "report", "unknown"])),
+  summary: field(maxCodePoints(180)),
+  phase: field(maxCodePoints(80)),
+  progress: field(maxCodePoints(400)),
   createdAt: time,
   startedAt: time,
   updatedAt: time,
   finishedAt: time,
 });
-export const crewStatusSchema = z
-  .strictObject({
-    members: z
-      .array(
-        z.strictObject({
-          id: z.string().max(64),
-          /** Configured repository context; absent for the legacy single project. */
-          project: z
-            .string()
-            .regex(/^[a-z][a-z0-9_-]{0,47}$/)
-            .optional(),
-          name: z.string().max(100),
-          backend: z.enum(["opencode", "pi-durable"]),
-          provisioned: z.enum(["unprovisioned", "pending", "ready"]),
-          observed: z.boolean(),
-          current: task.nullable(),
-          queuedCount: z.number().int().nonnegative(),
-          queued: z.array(task).max(5),
-          lastOutcome: task.nullable(),
-          recent: z.array(task).max(8),
-          recentCount: z.number().int().nonnegative(),
-        }),
-      )
-      .max(20),
-    total: z.number().int().nonnegative(),
-    truncated: z.boolean(),
-    /** Exact aggregate across every context, including rows after the page limit. */
-    busy: z.number().int().min(0).max(50).optional(),
-  })
-  .superRefine((status, context) => {
-    const visible = status.members.filter((member) => member.current).length;
-    if (
-      status.busy !== undefined &&
+
+const member = exactStruct({
+  id: field(maxCodePoints(64)),
+  /** Configured repository context; absent for the legacy single project. */
+  project: field(
+    Schema.optional(
+      Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]{0,47}$/)),
+    ),
+  ),
+  name: field(maxCodePoints(100)),
+  backend: field(Schema.Literals(["opencode", "pi-durable"])),
+  provisioned: field(Schema.Literals(["unprovisioned", "pending", "ready"])),
+  observed: field(Schema.Boolean),
+  current: field(Schema.NullOr(task)),
+  queuedCount: field(count),
+  queued: field(
+    Schema.mutable(Schema.Array(task)).check(Schema.isMaxLength(5)),
+  ),
+  lastOutcome: field(Schema.NullOr(task)),
+  recent: field(
+    Schema.mutable(Schema.Array(task)).check(Schema.isMaxLength(8)),
+  ),
+  recentCount: field(count),
+});
+
+export const crewStatusSchema = exactStruct({
+  members: field(
+    Schema.mutable(Schema.Array(member)).check(Schema.isMaxLength(20)),
+  ),
+  total: field(count),
+  truncated: field(Schema.Boolean),
+  /** Exact aggregate across every context, including rows after the page limit. */
+  busy: field(Schema.optional(count.check(Schema.isLessThanOrEqualTo(50)))),
+}).check(
+  Schema.makeFilter((status) => {
+    const visible = status.members.filter((item) => item.current).length;
+
+    return status.busy !== undefined &&
       (status.busy > status.total || status.busy < visible)
-    )
-      context.addIssue({
-        code: "custom",
-        path: ["busy"],
-        message:
-          "Busy count must include visible activity and cannot exceed total members.",
-      });
-  });
-export type CrewStatus = z.infer<typeof crewStatusSchema>;
-export type CrewStatusInput = z.infer<typeof crewStatusInputSchema>;
-export type CrewStatusTask = z.infer<typeof task>;
+      ? {
+          path: ["busy"],
+          issue:
+            "Busy count must include visible activity and cannot exceed total members.",
+        }
+      : undefined;
+  }),
+);
+
+export type CrewStatus = typeof crewStatusSchema.Type;
+
+export type CrewStatusInput = typeof crewStatusInputSchema.Type;
+
+export type CrewStatusTask = typeof task.Type;
 
 /** Multi-project dispatch adds a worktree preamble for the worker, outside
  * the assignment itself. Older retained summaries may end inside it. */
@@ -84,5 +107,6 @@ export function crewAssignmentText(text: string): string {
   )
     return text;
   const start = text.indexOf("\n\n");
-  return start < 0 ? "Project assignment" : text.slice(start + 2);
+
+  return start === -1 ? "Project assignment" : text.slice(start + 2);
 }
