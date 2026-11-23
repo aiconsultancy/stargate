@@ -281,7 +281,7 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
   expect(unknown.failure.message).toContain('["op"]');
 });
 
-test("profile rendering retains captured legacy JSON bytes after package-root normalization", async () => {
+test("profile rendering matches the captured default and direct-access JSON", async () => {
   const options = {
     directory: "/fixture/captain",
     projectDirectory: "/fixture/project",
@@ -315,7 +315,8 @@ test("profile rendering retains captured legacy JSON bytes after package-root no
     [
       explicit,
       "worker",
-      "699d2f4a549a2b3780310495b4a74664a40e9219d54a3fad577bd03d59cf5646",
+      // The direct-access profile adds explicit denies for both feedback tools.
+      "e43a822d8d3abe13644204dd09eeb23e99e7e9eb27b0f860d781bd1aa6f000f2",
     ],
   ] as const) {
     const config = await renderProfile(input, role);

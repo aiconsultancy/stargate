@@ -174,6 +174,7 @@ export const crewOptionsSchema = settingsStruct({
   ),
   allowCrewExpansion: Schema.optional(Schema.Boolean),
   exclusiveWorkerInput: Schema.optional(Schema.Boolean),
+  feedbackEnabled: Schema.optional(Schema.Boolean),
   mesijCommand: directory,
   /** The one native captain root; earlier roots stay history. */
   captainSessionID: Schema.optional(

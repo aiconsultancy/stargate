@@ -4,6 +4,10 @@
 
 ### Feature flags
 
+- New flag: OpenCode `stargate.crew` plugin option `feedbackEnabled` defaults
+  off. It enables the private ship feedback inbox for pinned teams. Submit
+  and captain review require separate native permissions.
+
 - New flag: `agentDispatch.enabled` defaults off. When on, the rear admiral's
   IRC gateway polls the Subspace API, tells a captain about an issue assigned
   to it and offers issues flagged _Ready for agents_ to the fleet's captains

@@ -17,8 +17,12 @@ concise milestones at task boundaries, not every turn. Write checks, blockers
 and outcomes through stargate_journal, not every
 tool call. Host supplies ID, timestamp, member and task. Distinguish verified
 facts from assumptions. Record Stargate limitations and useful authenticated native
-workarounds as ordinary journal notes. Use the shared task-boundary improvement
-procedure; do not create a feedback tracker or automatic background loop.
+workarounds as ordinary journal notes. For a Stargate product issue, use
+stargate_feedback only when available and permitted in OpenCode. Send a short,
+already sanitized summary. OpenCode may retain arguments before inbox redaction;
+never send raw logs, prompts, transcripts, private text or secrets. Use the
+shared task-boundary improvement procedure for ordinary notes. Do not create
+a ticket tracker or automatic background loop.
 Prefer Stargate tools when adequate; native self-service stays within existing
 scope and authentication, without another storage owner or uncertain replay.
 Append reusable

@@ -851,8 +851,11 @@ test("changing a registered worktree cannot rebind persisted project workers or 
   }
 });
 
-test("actual OpenCode V2 plugin routes the configured project and retains native permission/source checks", async () => {
-  const f = await fixture();
+async function nativeHost(
+  f: Awaited<ReturnType<typeof fixture>>,
+  options: CrewOptions = f.options,
+  permit: (request: unknown) => boolean = () => true,
+) {
   const scope = Effect.runSync(Scope.make());
 
   type Registered = {
@@ -875,8 +878,8 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
   };
 
   const methods = new Map<string, unknown>([
-    ["location", { directory: f.base.captainDirectory }],
-    ["options", f.options],
+    ["location", { directory: options.captainDirectory }],
+    ["options", options],
     ["rpc.register", () => Effect.succeed(registration)],
     ["session.hook", () => Effect.succeed(registration)],
     [
@@ -884,7 +887,7 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
       (request: unknown) => {
         assertions.push(request);
 
-        return deny
+        return deny || !permit(request)
           ? Effect.fail(new Tool.Error({ message: "Denied" }))
           : Effect.void;
       },
@@ -938,12 +941,36 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
     });
   }
 
+  const close = () => Effect.runPromise(Scope.close(scope, Exit.void));
+
   try {
     await Effect.runPromise(
       plugin
         .effect(stub("") as EffectPlugin.Context)
         .pipe(Scope.provide(scope)),
     );
+
+    return {
+      tools,
+      assertions,
+      unexpected,
+      close,
+      deny: () => {
+        deny = true;
+      },
+    };
+  } catch (error) {
+    await close();
+    throw error;
+  }
+}
+
+test("actual OpenCode V2 plugin routes the configured project and retains native permission/source checks", async () => {
+  const f = await fixture();
+  const host = await nativeHost(f);
+  const { tools, assertions, unexpected } = host;
+
+  try {
     const tool = tools.get("stargate_crew");
 
     if (!tool) throw new Error("Missing registered native tool");
@@ -1005,7 +1032,7 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
       entries: [{ text: "Project note" }],
     });
     expect(() => parseJournal({ op: "read", text: "wrong branch" })).toThrow();
-    deny = true;
+    host.deny();
     await expect(
       Effect.runPromise(
         tool.execute({ op: "roster", project: "stargate" }, context),
@@ -1015,7 +1042,334 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
     expect(f.prompts).toHaveLength(0);
     expect(unexpected).toEqual([]);
   } finally {
-    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await host.close();
+    await f.close();
+  }
+});
+
+function feedbackContext(
+  sessionID: string,
+  agent: string,
+  id = "call_fixture",
+  message = "msg_feedback",
+): Tool.Context {
+  return {
+    sessionID: Session.ID.make(sessionID),
+    agent: Agent.ID.make(agent),
+    messageID: SessionMessage.ID.make(message),
+    id: Tool.CallID.make(id),
+    progress: () => Effect.void,
+  };
+}
+
+const feedback = {
+  title: "Fixture issue",
+  expected: "One row",
+  observed: "Two rows",
+  evidence: "HTTP status 409",
+};
+
+function feedbackTools(host: Awaited<ReturnType<typeof nativeHost>>) {
+  const submit = host.tools.get("stargate_feedback");
+  const review = host.tools.get("stargate_feedback_review");
+
+  if (!submit || !review) throw new Error("Feedback tools not registered");
+
+  return {
+    submit: async (input: unknown, context: Tool.Context) =>
+      JSON.parse(
+        String(
+          (await Effect.runPromise(submit.execute(input, context))).content,
+        ),
+      ),
+    review: async (input: unknown, context: Tool.Context) =>
+      JSON.parse(
+        String(
+          (await Effect.runPromise(review.execute(input, context))).content,
+        ),
+      ),
+  };
+}
+
+test("feedback tools require an enabled pinned ship and native permission", async () => {
+  const f = await fixture();
+
+  try {
+    for (const options of [
+      f.options,
+      { ...f.options, feedbackEnabled: true, captainSessionID: undefined },
+    ]) {
+      const host = await nativeHost(f, options);
+
+      try {
+        expect(host.tools.has("stargate_feedback")).toBe(false);
+        expect(host.tools.has("stargate_feedback_review")).toBe(false);
+      } finally {
+        await host.close();
+      }
+    }
+
+    const host = await nativeHost(
+      f,
+      { ...f.options, feedbackEnabled: true },
+      () => false,
+    );
+
+    try {
+      const { submit, review } = feedbackTools(host);
+      const captain = feedbackContext("ses_captain", "build");
+      await expect(submit(feedback, captain)).rejects.toThrow("Denied");
+      await expect(review({}, captain)).rejects.toThrow("Denied");
+      expect(host.assertions).toMatchObject([
+        {
+          action: "stargate_feedback",
+          resources: ["submit"],
+          source: {
+            type: "tool",
+            messageID: "msg_feedback",
+            id: "call_fixture",
+          },
+        },
+        { action: "stargate_feedback_review", resources: ["review"] },
+      ]);
+    } finally {
+      await host.close();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("feedback persists redacted original and binds review to the ship across projects and reopen", async () => {
+  const f = await fixture();
+  const options = { ...f.options, feedbackEnabled: true };
+  let host: Awaited<ReturnType<typeof nativeHost>> | undefined;
+
+  try {
+    const projects = await CrewProjects.open(f.options, f.factory);
+    let peer;
+
+    try {
+      peer = (
+        await projects
+          .get("stargate")
+          .run({ op: "ensure", crew: "worker" }, f.captain())
+      ).peers?.[0];
+    } finally {
+      await projects.close();
+    }
+
+    if (!peer) throw new Error("Missing worker fixture");
+    const worker = feedbackContext(peer.sessionID, "crew-worker");
+    const captain = feedbackContext("ses_captain", "build");
+    host = await nativeHost(f, options);
+    const { submit, review } = feedbackTools(host);
+
+    for (const invalid of [
+      { ...feedback, namespace: "another-ship" },
+      { ...feedback, project: "default" },
+      { ...feedback, evidence: "x".repeat(601) },
+      { ...feedback, title: " " },
+    ]) {
+      await expect(submit(invalid, worker)).rejects.toThrow(
+        "Invalid feedback input",
+      );
+    }
+
+    await expect(
+      submit(feedback, { ...worker, id: Tool.CallID.make("") }),
+    ).rejects.toThrow();
+    const withoutMessage = { ...worker };
+    Reflect.deleteProperty(withoutMessage, "messageID");
+    await expect(submit(feedback, withoutMessage)).rejects.toThrow();
+    await expect(
+      submit(feedback, feedbackContext("ses_foreign", "crew-worker")),
+    ).rejects.toThrow();
+    await expect(review({}, worker)).rejects.toThrow("captain");
+    await expect(
+      review({}, { ...captain, id: Tool.CallID.make("") }),
+    ).rejects.toThrow("full host tool-call identity");
+    await expect(
+      review({}, feedbackContext("ses_foreign", "build")),
+    ).rejects.toThrow("configured");
+    await expect(review({ ship: "another-ship" }, captain)).rejects.toThrow(
+      "Invalid feedback review input",
+    );
+    await expect(review({ limit: 21 }, captain)).rejects.toThrow(
+      "Invalid feedback review input",
+    );
+    expect(await review({}, captain)).toEqual({
+      entries: [],
+      nextAfter: 0,
+      truncated: false,
+    });
+
+    const path = join(
+      f.base.stateDirectory,
+      `crew-${new Bun.CryptoHasher("sha256").update(f.base.namespace).digest("hex")}.sqlite`,
+    );
+
+    const empty = new Database(path, { readonly: true });
+
+    try {
+      expect(
+        empty
+          .query("SELECT 1 FROM sqlite_schema WHERE name='feedback_inbox'")
+          .get(),
+      ).toBeNull();
+    } finally {
+      empty.close();
+    }
+
+    const since = Date.now();
+
+    const receipt = await submit(
+      {
+        title: "Fixture issue xoxb-fixture-token",
+        expected: "Token: 'expected-secret'",
+        observed: "Bearer observed-secret",
+        evidence:
+          "URL https://user:fixture-password@fixture-tail@example.test/api",
+      },
+      worker,
+    );
+
+    expect(receipt).toEqual({ status: "stored", id: 1 });
+    expect(await submit(feedback, captain)).toEqual({
+      status: "stored",
+      id: 2,
+    });
+    await host.close();
+    host = undefined;
+    host = await nativeHost(f, options);
+    const reopened = feedbackTools(host);
+    expect(
+      await reopened.submit(
+        { ...feedback, title: "Must not overwrite" },
+        worker,
+      ),
+    ).toEqual(receipt);
+    expect(
+      await reopened.submit(feedback, {
+        ...worker,
+        messageID: SessionMessage.ID.make("msg_another"),
+      }),
+    ).toEqual({ status: "stored", id: 3 });
+    const first: unknown = await reopened.review({ limit: 1 }, captain);
+    expect(first).toMatchObject({
+      entries: [
+        {
+          id: 1,
+          created: expect.any(Number),
+          member: "worker",
+          project: "stargate",
+          title: "Fixture issue [REDACTED]",
+          expected: "Token: [REDACTED]",
+          observed: "[REDACTED AUTHORIZATION]",
+          evidence: "URL https://[REDACTED]@example.test/api",
+        },
+      ],
+      nextAfter: 1,
+      truncated: true,
+    });
+    expect(JSON.stringify(first)).not.toContain("Must not overwrite");
+    expect(await reopened.review({ after: 1 }, captain)).toMatchObject({
+      entries: [
+        { id: 2, member: "captain", project: "default" },
+        { id: 3, member: "worker", project: "stargate" },
+      ],
+      nextAfter: 3,
+      truncated: false,
+    });
+
+    const db = new Database(path, { readonly: true });
+
+    try {
+      const row = db
+        .query<
+          {
+            created: number;
+            title: string;
+            expected: string;
+            observed: string;
+            evidence: string;
+          },
+          []
+        >(
+          "SELECT created,title,expected,observed,evidence FROM feedback_inbox WHERE id=1",
+        )
+        .get();
+
+      expect(row?.created ?? 0).toBeGreaterThanOrEqual(since);
+
+      for (const secret of [
+        "xoxb-fixture-token",
+        "expected-secret",
+        "observed-secret",
+        "fixture-password",
+        "fixture-tail",
+      ])
+        expect(JSON.stringify(row)).not.toContain(secret);
+    } finally {
+      db.close();
+    }
+
+    // Fill through the same local database in one transaction, then check
+    // The boundary for new admission and replay at capacity.
+    const seed = new Database(path);
+
+    try {
+      seed.run(`WITH RECURSIVE slots(n) AS (SELECT 4 UNION ALL SELECT n+1 FROM slots WHERE n<1000)
+        INSERT INTO feedback_inbox (created,member,project,callKey,title,expected,observed)
+        SELECT 1,'worker','stargate','fixture:' || n,'Fixture','Before','After' FROM slots`);
+    } finally {
+      seed.close();
+    }
+
+    await expect(
+      reopened.submit(feedback, {
+        ...worker,
+        id: Tool.CallID.make("call_at_cap"),
+      }),
+    ).rejects.toThrow("inbox is full");
+    expect(await reopened.submit(feedback, worker)).toEqual(receipt);
+    expect(await reopened.review({ after: 999 }, captain)).toMatchObject({
+      entries: [{ id: 1000 }],
+      nextAfter: 1000,
+      truncated: false,
+    });
+    expect(f.prompts).toEqual([]);
+    expect(host.unexpected).toEqual([]);
+
+    const otherDirectory = join(f.root, "other-captain");
+    await mkdir(otherDirectory);
+
+    const other = {
+      ...f.rootSession,
+      id: "ses_other",
+      location: { directory: otherDirectory },
+    };
+
+    f.native.set(other.id, other);
+
+    const foreign = await nativeHost(f, {
+      ...options,
+      namespace: "other-ship",
+      captainDirectory: otherDirectory,
+      captainSessionID: other.id,
+    });
+
+    try {
+      const otherReview = feedbackTools(foreign).review;
+      await expect(otherReview({}, captain)).rejects.toThrow("configured");
+      expect(await otherReview({}, feedbackContext(other.id, "build"))).toEqual(
+        { entries: [], nextAfter: 0, truncated: false },
+      );
+    } finally {
+      await foreign.close();
+    }
+  } finally {
+    await host?.close();
     await f.close();
   }
 });
