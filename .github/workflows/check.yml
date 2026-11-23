@@ -25,8 +25,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # Full history: the touched-Zod ratchet diffs the PR against its
-          # base and needs the merge base that a shallow checkout lacks.
+          # Full history for the architecture baseline and provenance checks.
           fetch-depth: 0
       - name: Verify dependency commit provenance
         if: github.event.pull_request.user.login == 'dependabot[bot]'
@@ -79,14 +78,6 @@ jobs:
       # for the hosted Quality gate: run typecheck, lint and the entire suite.
       - name: Run full quality checks
         run: mise run check
-      # Touched-Zod: migrate or revert substantive edits. Only verified
-      # mechanical import/path moves may retain existing imports.
-      # Only pull requests have a comparison base.
-      - name: Enforce the touched-Zod policy
-        if: github.event_name == 'pull_request'
-        run: |
-          git fetch --no-tags origin +${{ github.event.pull_request.base.sha }}:refs/remotes/base/pr-base
-          mise exec -- scripts/hooks/touched-zod.sh "${{ github.event.pull_request.base.sha }}"
       # Self-updates test a release with a minimal environment and a hidden
       # TMPDIR; a test that only passes with the developer's environment
       # would block every update.

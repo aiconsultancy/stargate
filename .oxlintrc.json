@@ -427,12 +427,7 @@
         "scripts/**/*.ts",
         "perf/**/*.ts"
       ],
-      "excludeFiles": [
-        "src/config/settings-legacy.ts",
-        "src/crew/input/project-options.ts",
-        "src/crew/input/tool-input.ts",
-        "src/maintenance/update-notice.ts"
-      ],
+      "excludeFiles": [],
       "rules": {
         "anti-slop/no-module-mocking": "error",
         "anti-slop/no-reduce-accumulator-copy": "error",
@@ -474,7 +469,23 @@
         "eslint/no-regex-spaces": "error",
         "eslint/no-restricted-exports": "error",
         "eslint/no-restricted-globals": "error",
-        "eslint/no-restricted-imports": "error",
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "zod",
+                "message": "Use Effect Schema in first-party code."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["zod/*", "zod/**"],
+                "message": "Use Effect Schema in first-party code."
+              }
+            ]
+          }
+        ],
         "eslint/no-restricted-properties": "error",
         "eslint/no-return-assign": "error",
         "eslint/no-script-url": "error",
@@ -913,7 +924,6 @@
     },
     {
       "files": [
-        "scripts/hooks/touched-zod.ts",
         "src/app/setup.ts",
         "src/backends/claude.ts",
         "src/backends/codex.ts",

@@ -15,7 +15,6 @@ import { SessionMessage } from "@opencode/schema/session-message";
 import { Tool } from "@opencode/schema/tool";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import { z } from "zod";
 import { ircSchema } from "../src/config";
 import { fleetRequest } from "../src/fleet/client";
 import { FleetControl, type FleetControlOptions } from "../src/fleet/control";
@@ -332,20 +331,20 @@ async function world(
   }
 
   async function start(reviewID: string, agent = "gpt") {
-    return z
-      .object({
-        id: z.string(),
-        state: z.string(),
-        sessionID: z.string(),
-        inputID: z.string(),
-      })
-      .parse(
-        await call("peer", "review", {
-          op: "start",
-          reviewID,
-          reviewerAgent: agent,
-        }),
-      );
+    return Schema.decodeUnknownSync(
+      Schema.Struct({
+        id: Schema.String,
+        state: Schema.String,
+        sessionID: Schema.String,
+        inputID: Schema.String,
+      }),
+    )(
+      await call("peer", "review", {
+        op: "start",
+        reviewID,
+        reviewerAgent: agent,
+      }),
+    );
   }
 
   async function proofs(ship = "author", head = target.headSHA) {

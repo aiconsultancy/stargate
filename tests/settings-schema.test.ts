@@ -4,7 +4,6 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Predicate, Result, Schema } from "effect";
-import { z } from "zod";
 import { crewActivitySchema } from "../src/activity/activity";
 import { captainPostSchema } from "../src/captain-post/config";
 import {
@@ -35,7 +34,7 @@ import { piModelSchema, piProviderSchema } from "../src/backends/pi/config";
 import { quotaConfigSchema } from "../src/quota/quota";
 import { quotaWatchSchema } from "../src/quota/quota-watch";
 import { decodeSettings } from "../src/config/settings-errors";
-import { legacySetting } from "../src/config/settings-legacy";
+import { settingsAdvertisement } from "../src/config/settings-legacy";
 import {
   settingsCheck,
   settingsDefault,
@@ -52,6 +51,7 @@ import {
 } from "./settings-cases";
 import {
   cronAdvertisementHash,
+  nightlyWindowAdvertisementHash,
   piCrewAdvertisementHash,
   settingsGolden,
 } from "./settings-schema-golden";
@@ -86,8 +86,10 @@ const codecs = {
 test("review: configuration records preserve legacy shallow key handling", () => {
   const first = settingsSeeds["botSchema"]?.[0] as object;
 
-  for (const options of settingsRecordCases) {
-    const expected = z.record(z.string(), z.unknown()).parse(options);
+  for (const [input, expected] of settingsRecordCases) {
+    const options: unknown = JSON.parse(input);
+
+    if (!Predicate.isObject(options)) throw new Error("Invalid record fixture");
 
     const result = Schema.decodeUnknownSync(configSchema)({
       bots: [
@@ -102,13 +104,13 @@ test("review: configuration records preserve legacy shallow key handling", () =>
       JSON.stringify({
         type: "module",
         module: "/workspace/module.ts",
-        options: expected,
+        options: JSON.parse(expected),
       }),
     );
     const backend = result.bots[0]?.backend;
 
     if (backend?.type !== "module") throw new Error("Unexpected backend");
-    expect(backend.options["nested"]).toBe(expected["nested"]);
+    expect(backend.options["nested"]).toBe(options["nested"]);
     expect(Object.hasOwn(options as object, "__proto__")).toBe(true);
   }
 
@@ -378,10 +380,11 @@ test("otherwise-valid configuration failures retain actionable paths and safe me
   }
 });
 
-test("temporary mixed-schema bridges delegate defaults and reject invalid settings", () => {
-  const worker = legacySetting(piCrewBackendSchema);
+test("Pi crew worker settings keep defaults and reject invalid settings", () => {
+  const parse = Schema.decodeUnknownSync(piCrewBackendSchema);
+  const check = Schema.decodeUnknownResult(piCrewBackendSchema);
   expect(
-    worker.parse({ type: "pi-durable", model: "anthropic/claude-haiku-5-5" }),
+    parse({ type: "pi-durable", model: "anthropic/claude-haiku-5-5" }),
   ).toEqual({
     type: "pi-durable",
     model: "anthropic/claude-haiku-5-5",
@@ -389,19 +392,19 @@ test("temporary mixed-schema bridges delegate defaults and reject invalid settin
     tools: "none",
   });
   expect(
-    worker.safeParse({
+    check({
       type: "pi-durable",
       model: "anthropic/claude-haiku-5-5",
       tools: "unsafe",
-    }).success,
-  ).toBe(false);
+    })._tag,
+  ).toBe("Failure");
   expect(
-    worker.safeParse({
+    check({
       type: "pi-durable",
       model: "anthropic/claude-haiku-5-5",
       unexpected: true,
-    }).success,
-  ).toBe(false);
+    })._tag,
+  ).toBe("Failure");
 });
 
 test("legacy defaults bypass input transforms and shallow-copy only their containers", () => {
@@ -454,19 +457,24 @@ test("installed OpenCode cron tool advertisement matches its supported fields", 
   expect(
     createHash("sha256").update(JSON.stringify(advertisement)).digest("hex"),
   ).toBe(cronAdvertisementHash);
-  expect(
-    createHash("sha256")
-      .update(
-        settingsCanonical(z.toJSONSchema(legacySetting(piCrewBackendSchema))),
-      )
-      .digest("hex"),
-  ).toBe(piCrewAdvertisementHash);
-  expect(z.toJSONSchema(legacySetting(nightlyWindowSchema))).toMatchObject({
-    properties: {
-      start: { pattern: "^([01]\\d|2[0-3]):[0-5]\\d$" },
-      end: { pattern: "^([01]\\d|2[0-3]):[0-5]\\d$" },
-    },
-  });
+});
+
+test("native worker and maintenance window advertisements match frozen Zod bytes", () => {
+  for (const [codec, expected] of [
+    [piCrewBackendSchema, piCrewAdvertisementHash],
+    [nightlyWindowSchema, nightlyWindowAdvertisementHash],
+  ] as const) {
+    const advertisement = {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      ...settingsAdvertisement(codec),
+    };
+
+    expect(
+      createHash("sha256")
+        .update(settingsCanonical(advertisement))
+        .digest("hex"),
+    ).toBe(expected);
+  }
 });
 
 test("public config errors retain dependent custom diagnostics and independent field paths", async () => {

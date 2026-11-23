@@ -9,8 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Schema } from "effect";
-import { z } from "zod";
+import { Effect, Result, Schema } from "effect";
 import { ClaudeBackend } from "../src/backends/claude";
 import { claudeBackendSchema } from "../src/config";
 
@@ -44,20 +43,29 @@ function setEnv(values: Record<string, string>) {
   }
 }
 
-const body = z.object({
-  model: z.string(),
-  tools: z.array(z.object({ name: z.string() })).default([]),
-  messages: z
-    .array(z.object({ role: z.string(), content: z.unknown() }))
-    .default([]),
-});
+// Zod's `.default([])` filled a missing or undefined key.
+const emptyList = Effect.succeed([]);
 
-const toolResult = z.object({
-  type: z.literal("tool_result"),
-  tool_use_id: z.string(),
-  is_error: z.boolean().optional(),
-  content: z.unknown(),
-});
+const decodeBody = Schema.decodeUnknownResult(
+  Schema.Struct({
+    model: Schema.String,
+    tools: Schema.Array(Schema.Struct({ name: Schema.String })).pipe(
+      Schema.withDecodingDefault(emptyList),
+    ),
+    messages: Schema.Array(
+      Schema.Struct({ role: Schema.String, content: Schema.Unknown }),
+    ).pipe(Schema.withDecodingDefault(emptyList)),
+  }),
+);
+
+const decodeToolResult = Schema.decodeUnknownResult(
+  Schema.Struct({
+    type: Schema.Literal("tool_result"),
+    tool_use_id: Schema.String,
+    is_error: Schema.optional(Schema.Boolean),
+    content: Schema.Unknown,
+  }),
+);
 
 /** One scripted model response: text, or tool calls the CLI must handle. */
 type Reply =
@@ -119,8 +127,12 @@ function fixture(script: Reply[] = []) {
     async fetch(request) {
       const url = new URL(request.url);
       const text = request.method === "POST" ? await request.text() : "";
-      const parsed = body.safeParse(text ? JSON.parse(text) : {});
-      const last = parsed.success ? parsed.data.messages.at(-1) : undefined;
+      const parsed = decodeBody(text ? JSON.parse(text) : {});
+
+      const last = Result.isSuccess(parsed)
+        ? parsed.success.messages.at(-1)
+        : undefined;
+
       requests.push({
         path: url.pathname,
         bearer: request.headers.get("authorization") === `Bearer ${key}`,
@@ -129,15 +141,15 @@ function fixture(script: Reply[] = []) {
           canary,
         ),
         memory: text.includes(memory),
-        ...(parsed.success
+        ...(Result.isSuccess(parsed)
           ? {
-              model: parsed.data.model,
-              tools: parsed.data.tools.map(({ name }) => name),
+              model: parsed.success.model,
+              tools: parsed.success.tools.map(({ name }) => name),
               results: (Array.isArray(last?.content) ? last.content : [])
                 .flatMap((block) => {
-                  const result = toolResult.safeParse(block);
+                  const result = decodeToolResult(block);
 
-                  return result.success ? [result.data] : [];
+                  return Result.isSuccess(result) ? [result.success] : [];
                 })
                 .map((result) => ({
                   id: result.tool_use_id,

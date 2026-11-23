@@ -427,7 +427,7 @@ and confirm the write with the operator before running this command:
 
 ```sh
 mise exec -- bun -e '
-import { z } from "zod";
+import { Schema } from "effect";
 import { buildManifest } from "./src/app/setup.ts";
 
 const token = process.env.SLACK_APP_CONFIG_TOKEN;
@@ -440,11 +440,11 @@ const response = await fetch("https://slack.com/api/apps.manifest.create", {
   }),
   signal: AbortSignal.timeout(30_000),
 });
-const result = z.object({
-  ok: z.boolean(),
-  app_id: z.string().regex(/^A[A-Z0-9]+$/).optional(),
-  error: z.string().regex(/^[a-z_]+$/).optional(),
-}).parse(await response.json());
+const result = Schema.decodeUnknownSync(Schema.Struct({
+  ok: Schema.Boolean,
+  app_id: Schema.optional(Schema.String.check(Schema.isPattern(/^A[A-Z0-9]+$/))),
+  error: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-z_]+$/))),
+}))(await response.json());
 if (!response.ok || !result.ok || !result.app_id) {
   throw new Error(`Slack app creation failed: ${result.error ?? response.status}`);
 }

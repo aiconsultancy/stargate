@@ -50,8 +50,6 @@ const format = () => bun("run", "format");
 const diff = () => git("diff", "--no-ext-diff", "--no-textconv", "--binary");
 const index = git("write-tree");
 
-bun("scripts/check-zod-exclusions.ts");
-
 format();
 
 const first = diff();

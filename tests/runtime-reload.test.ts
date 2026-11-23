@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { Writable } from "node:stream";
 import { Effect, Schema } from "effect";
 import pino from "pino";
-import { z } from "zod";
 import { apiToken } from "../src/dashboard/api/v1/token";
 import type { AgentBackend } from "../src/backends/backend";
 import { type Config, configSchema, ircSchema } from "../src/config";
@@ -611,9 +610,11 @@ test("dashboard follows IRC access reload and committed crew addition/removal wi
     });
 
   const fleet = async () =>
-    z
-      .object({ ships: z.array(z.object({ id: z.string() })) })
-      .parse(await (await get("/api/fleet")).json())
+    Schema.decodeUnknownSync(
+      Schema.Struct({
+        ships: Schema.Array(Schema.Struct({ id: Schema.String })),
+      }),
+    )(await (await get("/api/fleet")).json())
       .ships.map((s) => s.id)
       .sort();
 
@@ -629,16 +630,18 @@ test("dashboard follows IRC access reload and committed crew addition/removal wi
   expect((await f.reload.request()).status).toBe("applied");
   expect(await fleet()).toEqual(["fleet", "fleet-chief", "helper"]);
 
-  const detail = z
-    .object({
-      bot: z.object({
-        transport: z.object({
-          kind: z.literal("irc"),
-          access: z.object({ allowedAccounts: z.array(z.string()) }),
+  const detail = Schema.decodeUnknownSync(
+    Schema.Struct({
+      bot: Schema.Struct({
+        transport: Schema.Struct({
+          kind: Schema.Literal("irc"),
+          access: Schema.Struct({
+            allowedAccounts: Schema.Array(Schema.String),
+          }),
         }),
       }),
-    })
-    .parse(await (await get("/api/ships/fleet")).json());
+    }),
+  )(await (await get("/api/ships/fleet")).json());
 
   expect(detail.bot.transport.access.allowedAccounts).toEqual(["new-human"]);
   expect(f.built).toEqual(["helper", "fleet", "fleet-chief"]);

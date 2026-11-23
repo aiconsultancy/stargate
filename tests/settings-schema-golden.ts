@@ -182,3 +182,6 @@ export const legacyProvisionDecoded = {
 
 export const piCrewAdvertisementHash =
   "e677f37f70bcf5ea3b4f29d5421c2a9f8ee2f5d85a1cc536db5333073380b3fc";
+
+export const nightlyWindowAdvertisementHash =
+  "3ca4aece0dde3260ef5b1b0dafaf924c53f460f6a949d0e820884d5e9839cd8c";

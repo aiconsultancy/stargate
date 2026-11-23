@@ -21,20 +21,12 @@ const readers = [
     tests: /^tests\/architecture\.test\.ts$/,
   },
   {
-    path: /^scripts\/hooks\/(?!.*\.(?:[cm]?[jt]s|[jt]sx|sh)$).+$/,
-    tests: /^tests\/touched-zod-.*\.test\.ts$/,
-  },
-  {
     path: /^(docs\/.*\.md|AGENTS\.md|README\.md|CONTRIBUTING\.md)$/,
     tests: /^tests\/architecture\.test\.ts$/,
   },
   {
     path: /^docs\/api\.md$/,
     tests: /^tests\/api-v1-git-status\.test\.ts$/,
-  },
-  {
-    path: /^scripts\/hooks\/touched-zod\.(ts|sh)$/,
-    tests: /^tests\/touched-zod-.*\.test\.ts$/,
   },
   {
     path: /^scripts\/hooks\/affected-tests\.ts$/,

@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { Predicate, Schema } from "effect";
-import { z } from "zod";
 import { redactCredentials } from "../lib/credentials";
 import { metaCommandSyntax } from "../meta-commands/meta-command-syntax";
 import { compareVersions, parseVersion } from "./nightly/update/versions";
@@ -10,6 +9,7 @@ const digest = (value: unknown) =>
   createHash("sha256")
     .update(JSON.stringify(value) ?? "null")
     .digest("hex");
+
 const flagPaths = [
   "notifications.updateNotice",
   "maintenance.enabled",
@@ -20,13 +20,16 @@ const flagPaths = [
   "maintenance.components.models",
   "dashboard",
 ] as const;
-const readPath = (value: unknown, path: string): unknown =>
-  path
-    .split(".")
-    .reduce<unknown>(
-      (node, key) => (Predicate.isObject(node) ? node[key] : undefined),
-      value,
-    );
+
+const readPath = (value: unknown, path: string): unknown => {
+  let node = value;
+
+  for (const key of path.split("."))
+    node = Predicate.isObject(node) ? node[key] : undefined;
+
+  return node;
+};
+
 export const updateSnapshotSchema = Schema.Struct({
   version: Schema.NullOr(
     Schema.String.check(Schema.isPattern(/^\d+\.\d+\.\d+$/)),
@@ -54,7 +57,9 @@ export const updateSnapshotSchema = Schema.Struct({
     ),
   ),
 });
+
 export type UpdateSnapshot = typeof updateSnapshotSchema.Type;
+
 export type UpdateReceipt = {
   sessionID: string;
   status: "queued" | "mail" | "unchanged" | "uncertain";
@@ -69,15 +74,19 @@ export function buildUpdateSnapshot(
   const flags = Object.fromEntries(
     flagPaths.map((path) => [path, readPath(config, path) === true]),
   );
+
   let section = version;
   const changes = [];
-  for (const line of redactCredentials(changelog, 12000).split("\n")) {
+
+  for (const line of redactCredentials(changelog, 12_000).split("\n")) {
     const heading = /^## (?:v)?(\d+\.\d+\.\d+)/.exec(line);
+
     if (heading?.[1]) section = heading[1];
     else if (line === "## Unreleased") section = version;
     else if (line.startsWith("- ") && changes.length < 40)
       changes.push({ version: section, text: line.slice(2, 302) });
   }
+
   const registrations = ["bots", "irc", "teams"]
     .map((name) => readPath(config, name))
     .flatMap((items) =>
@@ -90,6 +99,7 @@ export function buildUpdateSnapshot(
           }))
         : [],
     );
+
   return {
     version,
     flags,
@@ -106,18 +116,18 @@ export function noticeTools(
   return Object.fromEntries(
     tools
       .filter((tool) => /^stargate_[a-z0-9_]+$/.test(tool.id))
-      .sort((a, b) => a.id.localeCompare(b.id))
+      .toSorted((a, b) => a.id.localeCompare(b.id))
       .map((tool) => {
         let input: unknown;
+
         try {
           input = Schema.isSchema(tool.input)
             ? Schema.toJsonSchemaDocument(tool.input)
-            : tool.input instanceof z.ZodType
-              ? z.toJSONSchema(tool.input)
-              : tool.input;
+            : tool.input;
         } catch {
           input = "unavailable";
         }
+
         return [
           tool.id,
           digest({ description: tool.description ?? "", input }),
@@ -142,29 +152,40 @@ function noticeText(
   previous: UpdateSnapshot | undefined,
   next: UpdateSnapshot,
 ) {
-  const tools = Object.keys(next.tools ?? {}).sort();
+  const tools = Object.keys(next.tools ?? {}).toSorted();
   const added = tools.filter((name) => !previous?.tools?.[name]);
-  const changed = tools.filter(
-    (name) =>
-      previous?.tools?.[name] && previous.tools[name] !== next.tools?.[name],
-  );
+
+  const changed = tools.filter((name) => {
+    const before = previous?.tools?.[name];
+
+    return (
+      before !== undefined && before !== "" && before !== next.tools?.[name]
+    );
+  });
+
   const removed = Object.keys(previous?.tools ?? {}).filter(
     (name) => !next.tools?.[name],
   );
+
   const commands = next.commands.filter(
     (name) => !previous?.commands.includes(name),
   );
+
   const lines = [
     `[Stargate update notice: ${previous?.version ?? "initial"} → ${next.version ?? "checkout"}]`,
     "Context only. Do not interrupt, repeat or resume assigned work, change settings, or send an acknowledgement.",
   ];
-  if (added.length) lines.push(`New tools: ${added.join(", ")}`);
-  if (changed.length) lines.push(`Changed tools: ${changed.join(", ")}`);
-  if (removed.length) lines.push(`Removed tools: ${removed.join(", ")}`);
+
+  if (added.length > 0) lines.push(`New tools: ${added.join(", ")}`);
+
+  if (changed.length > 0) lines.push(`Changed tools: ${changed.join(", ")}`);
+
+  if (removed.length > 0) lines.push(`Removed tools: ${removed.join(", ")}`);
   lines.push(
     "Use the host's registered tool listing for current names and schemas; permissions remain authoritative.",
   );
-  if (commands.length)
+
+  if (commands.length > 0)
     lines.push(
       `Meta commands (captain-addressed Slack): ${commands.join(", ")}`,
     );
@@ -173,10 +194,12 @@ function noticeText(
       ([name, on]) => `${name}: ${on ? "on" : "off"}`,
     ),
   );
+
   if (previous && previous.configDigest !== next.configDigest)
     lines.push(
       "Effective tools, permissions, flags or models changed. Re-read their current settings; no new authority is granted.",
     );
+
   if (!previous || previous.version !== next.version)
     lines.push(
       ...next.changes
@@ -192,10 +215,12 @@ function noticeText(
         .slice(0, 10)
         .map((change) => `Change: ${change.text}`),
     );
+
   if (next.version && /^\d+\.\d+\.\d+$/.test(next.version))
     lines.push(
       `Release notes: https://github.com/aiconsultancy/stargate/releases/tag/v${next.version}`,
     );
+
   return redactCredentials(lines.join("\n"), 6000);
 }
 
@@ -207,19 +232,20 @@ type Row = {
   text: string;
   status: string;
 };
+
 /** Receipt tables share their existing gateway/crew database owner. No mail copy or worker queue. */
 export class UpdateNotices {
-  constructor(private readonly db: Database) {
-    db.exec(
+  public constructor(private readonly db: Database) {
+    db.run(
       "CREATE TABLE IF NOT EXISTS update_notice_state (scope TEXT NOT NULL, sessionID TEXT NOT NULL, id TEXT NOT NULL, token TEXT NOT NULL, snapshot TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, acknowledged TEXT, PRIMARY KEY(scope,sessionID))",
     );
-    db.exec(
+    db.run(
       "CREATE TABLE IF NOT EXISTS update_notice_context (id TEXT PRIMARY KEY, scope TEXT NOT NULL, sessionID TEXT NOT NULL, text TEXT NOT NULL)",
     );
   }
 
   /** Local context queue, not a native inbox input: never affects task lineage or idle guards. */
-  queueExternalContext(
+  public queueExternalContext(
     sessionID: string,
     id: string,
     text: string,
@@ -232,7 +258,7 @@ export class UpdateNotices {
       .run(id, scope, sessionID, text);
   }
 
-  queueContext(sessionID: string, id: string, scope: string) {
+  public queueContext(sessionID: string, id: string, scope: string) {
     this.db
       .transaction(() => {
         const written = this.db
@@ -240,6 +266,7 @@ export class UpdateNotices {
             "INSERT OR IGNORE INTO update_notice_context SELECT id,scope,sessionID,text FROM update_notice_state WHERE scope=? AND sessionID=? AND id=?",
           )
           .run(scope, sessionID, id);
+
         if (written.changes !== 1)
           throw new Error("Update context intent missing");
         this.db
@@ -251,7 +278,7 @@ export class UpdateNotices {
       .immediate();
   }
 
-  consumeContext(
+  public consumeContext(
     sessionID: string,
     scope: string,
     append: (text: string) => void,
@@ -263,6 +290,7 @@ export class UpdateNotices {
             "SELECT id,text FROM update_notice_context WHERE scope=? AND sessionID=? ORDER BY rowid LIMIT 10",
           )
           .all(scope, sessionID);
+
         for (const notice of pending) {
           append(notice.text);
           this.db
@@ -272,7 +300,7 @@ export class UpdateNotices {
       })
       .immediate();
   }
-  async deliver(
+  public async deliver(
     sessionID: string,
     snapshot: UpdateSnapshot,
     mode: "queued" | "mail",
@@ -286,26 +314,31 @@ export class UpdateNotices {
             "SELECT * FROM update_notice_state WHERE scope=? AND sessionID=?",
           )
           .get(scope, sessionID);
+
         const previous = old?.acknowledged
           ? Schema.decodeUnknownSync(updateSnapshotSchema)(
               JSON.parse(old.acknowledged),
             )
           : undefined;
+
         const known = old
           ? Schema.decodeUnknownSync(updateSnapshotSchema)(
               JSON.parse(old.snapshot),
             )
           : undefined;
+
         const next = {
           ...snapshot,
           tools: snapshot.tools ?? known?.tools ?? null,
         };
+
         const token = digest({
           version: next.version,
           config: next.configDigest,
           tools: next.tools,
           commands: next.commands,
         });
+
         if (old?.token === token)
           return {
             id: old.id,
@@ -329,14 +362,17 @@ export class UpdateNotices {
             "uncertain",
             old?.acknowledged ?? null,
           );
+
         return { id, text, status: "uncertain", send: true };
       })
       .immediate();
+
     if (!intent.send)
       return {
         sessionID,
         status: intent.status === "uncertain" ? "uncertain" : "unchanged",
       };
+
     try {
       await queue(intent.id, intent.text);
       this.db
@@ -344,6 +380,7 @@ export class UpdateNotices {
           "UPDATE update_notice_state SET status=?,acknowledged=snapshot WHERE scope=? AND sessionID=? AND id=?",
         )
         .run(mode, scope, sessionID, intent.id);
+
       return { sessionID, status: mode };
     } catch {
       return { sessionID, status: "uncertain" };

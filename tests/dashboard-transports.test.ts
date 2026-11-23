@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { Writable } from "node:stream";
 import { Effect, Result, Schema } from "effect";
 import pino from "pino";
-import { z } from "zod";
 import type { AgentBackend } from "../src/backends/backend";
 import { configSchema } from "../src/config";
 import { type IrcRegistration, IrcShip } from "../src/irc/ship";
@@ -206,11 +205,13 @@ for (const transport of ["irc", "teams", "both"] as const)
   test(`${transport} runtime dashboard uses real transports without extra backends, sessions or Slack`, async () => {
     const f = await runtime(transport);
 
-    const data = z
-      .object({
-        ships: z.array(z.object({ id: z.string(), transport: z.string() })),
-      })
-      .parse(await (await f.get("/api/fleet")).json());
+    const data = Schema.decodeUnknownSync(
+      Schema.Struct({
+        ships: Schema.Array(
+          Schema.Struct({ id: Schema.String, transport: Schema.String }),
+        ),
+      }),
+    )(await (await f.get("/api/fleet")).json());
 
     expect(data.ships.map((s) => s.id).sort()).toEqual(
       transport === "both"
@@ -222,15 +223,15 @@ for (const transport of ["irc", "teams", "both"] as const)
     expect(f.built).toHaveLength(transport === "both" ? 2 : 1);
 
     for (const ship of data.ships) {
-      const detail = z
-        .object({
-          bot: z.object({
-            slack: z.unknown().optional(),
-            transport: z.object({ kind: z.string() }),
+      const detail = Schema.decodeUnknownSync(
+        Schema.Struct({
+          bot: Schema.Struct({
+            slack: Schema.optional(Schema.Unknown),
+            transport: Schema.Struct({ kind: Schema.String }),
           }),
-          sessions: z.array(z.object({ id: z.string() })),
-        })
-        .parse(await (await f.get("/api/ships/" + ship.id)).json());
+          sessions: Schema.Array(Schema.Struct({ id: Schema.String })),
+        }),
+      )(await (await f.get("/api/ships/" + ship.id)).json());
 
       expect(detail.bot.slack).toBeUndefined();
       expect(detail.bot.transport.kind).toBe(ship.transport);
@@ -284,11 +285,13 @@ for (const transport of ["irc", "teams", "both"] as const)
         store.close();
       }
 
-      const own = z
-        .object({
-          queue: z.object({ counts: z.object({ failed: z.number() }) }),
-        })
-        .parse(await (await f.get("/api/ships/captain")).json());
+      const own = Schema.decodeUnknownSync(
+        Schema.Struct({
+          queue: Schema.Struct({
+            counts: Schema.Struct({ failed: Schema.Finite }),
+          }),
+        }),
+      )(await (await f.get("/api/ships/captain")).json());
 
       expect(own.queue.counts.failed).toBe(1);
       expect(
