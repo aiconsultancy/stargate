@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { fixtureRoot } from "./fixture-root";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -1966,9 +1967,10 @@ async function fixture(
   waitOptions?: CrewWaitOptions,
   pin = false,
   seededSchema = true,
+  root = fixtureRoot(),
 ) {
   const definition = team ?? defaultTeam;
-  const directory = await mkdtemp(join(tmpdir(), "stargate-crew-"));
+  const directory = await mkdtemp(join(root, "stargate-crew-"));
 
   const options: CrewOptions = {
     namespace: "bowser-one",
@@ -2389,7 +2391,7 @@ test("worker reads its own task status without captain mediation or execution", 
       ),
     ).rejects.toThrow();
   } finally {
-    await f.engine.close();
+    await f.close();
   }
 });
 
@@ -2436,7 +2438,7 @@ test("waiting changes reject children, foreign roots and worker impersonation", 
 });
 
 test("crew reuses four bot-wide roots across captains and reopening", async () => {
-  const f = await fixture();
+  const f = await fixture(undefined, undefined, false, true, tmpdir());
 
   try {
     const first = await f.engine.run({ op: "ensure" }, f.captain());
@@ -2655,8 +2657,8 @@ test("worker control reserves across instances without blocking other slots", as
 test(
   "two teams sharing one server isolate roots, results, mail and urgency",
   async () => {
-    const a = await fixture(customTeam);
-    const b = await fixture(customTeam);
+    const a = await fixture(customTeam, undefined, false, true, tmpdir());
+    const b = await fixture(customTeam, undefined, false, true, tmpdir());
     const otherOptions = { ...b.options, namespace: "other-team" };
 
     const other = await CrewEngine.open(
