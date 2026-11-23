@@ -256,15 +256,21 @@ export function droidScrubber(config: Config, env: NodeJS.ProcessEnv) {
     })
     .toArray();
 
+  const prefixes = (input: string) => {
+    let clean = input;
+
+    for (const cut of cuts) clean = clean.replace(cut, "[REDACTED]");
+
+    return clean;
+  };
+
   const text = (input: string) => {
     let clean = input;
 
     for (const value of values) clean = clean.replaceAll(value, "[REDACTED]");
     clean = redactCredentials(clean, 64_000);
 
-    for (const cut of cuts) clean = clean.replace(cut, "[REDACTED]");
-
-    return clean;
+    return prefixes(clean);
   };
 
   const value = (input: unknown): unknown =>
@@ -288,7 +294,20 @@ export function droidScrubber(config: Config, env: NodeJS.ProcessEnv) {
       max,
     );
 
-  return { text, value, post };
+  /**
+   * The last step before a post leaves: cut to `max` code points (the unit
+   * the notice check counts) after every redaction. A secret prefix that
+   * the cut leaves at its end is removed too, which only shortens the text.
+   */
+  const fit = (input: string, max: number) => {
+    const points = Array.from(input);
+
+    return points.length > max
+      ? prefixes(`${points.slice(0, max - 1).join("")}…`)
+      : input;
+  };
+
+  return { text, value, post, fit };
 }
 
 type Scrubber = ReturnType<typeof droidScrubber>;
@@ -602,14 +621,12 @@ function composePost(input: {
 
   const room = Math.max(200, 2800 - header.length - tail.length - 4);
 
-  return cut(
-    [
-      input.scrub.text(header),
-      input.scrub.post(input.body, Math.min(1800, room)),
-      tail,
-    ].join("\n"),
-    2800,
-  );
+  // Not cut here: the caller cuts with `fit` after its last redaction.
+  return [
+    input.scrub.text(header),
+    input.scrub.post(input.body, Math.min(1800, room)),
+    tail,
+  ].join("\n");
 }
 
 export type DroidResult = {
@@ -692,15 +709,18 @@ export async function runDroid(
       findings: codes,
       posted: false,
       model: false,
-      text: composePost({
-        trigger,
-        facts,
-        list,
-        body: fallbackBody(trigger, facts, list),
-        actions: [],
-        now,
-        scrub,
-      }),
+      text: scrub.fit(
+        composePost({
+          trigger,
+          facts,
+          list,
+          body: fallbackBody(trigger, facts, list),
+          actions: [],
+          now,
+          scrub,
+        }),
+        2800,
+      ),
     };
 
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -809,18 +829,21 @@ export async function runDroid(
         status: "fallback",
       });
 
-    const text = scrub.text(
-      composePost({
-        trigger,
-        facts,
-        list,
-        body: model
-          ? body
-          : scrub.post(fallbackBody(trigger, facts, list), 1800),
-        actions: actions.done,
-        now,
-        scrub,
-      }),
+    const text = scrub.fit(
+      scrub.text(
+        composePost({
+          trigger,
+          facts,
+          list,
+          body: model
+            ? body
+            : scrub.post(fallbackBody(trigger, facts, list), 1800),
+          actions: actions.done,
+          now,
+          scrub,
+        }),
+      ),
+      2800,
     );
 
     const stamp = new Date(now).toISOString().replace(/[^0-9TZ]/g, "");
