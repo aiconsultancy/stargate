@@ -55,6 +55,26 @@ jobs:
           printf 'TMPDIR=%s\nXDG_CACHE_HOME=%s/cache\n' "$test_tmp" "$test_tmp" >> "$GITHUB_ENV"
       - name: Run pre-commit checks
         run: mise run hooks
+      # Compares the checked-out tree with its first parent: for a PR the
+      # merge ref against the target tip, for a push the commit against
+      # github.event.before. See docs/development.md.
+      - name: Compare architecture baseline with its Git parent
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) set -- --pr-head "$PR_HEAD_SHA" ;;
+            push) set -- --push-before "$PUSH_BEFORE_SHA" ;;
+            *)
+              echo "::error::architecture comparison: unsupported event $EVENT_NAME"
+              exit 1
+              ;;
+          esac
+          mise exec -- bun scripts/check-architecture-baseline.ts --root "$PWD" "$@"
       # --all-files has no staged diff. Do not rely on affected-test selection
       # for the hosted Quality gate: run typecheck, lint and the entire suite.
       - name: Run full quality checks

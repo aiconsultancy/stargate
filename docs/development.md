@@ -398,18 +398,118 @@ provenance checks are narrower than the approved rule, not wider.
 Body identity and initialization order remain reviewer evidence. Closure,
 root, cycle, size and other exception guards remain required.
 
+### Base-aware hosted baseline comparison
+
+The hosted Quality job checks the tree it checked out against that commit's
+first parent. For a PR this is GitHub's merge commit (`refs/pull/N/merge`)
+against the current target tip. For a push to main it is the pushed commit
+against `github.event.before`. The step fails with a named `event:` error
+when the merge commit's second parent is not the PR head, when `before` is
+empty or zero, or when `before` is not the first parent (a push of several
+commits: each commit must be checked against its own parent). Checkout keeps
+full history (`fetch-depth: 0`).
+
+The step runs the refresh tool as a preview against the parent and requires
+the complete preview, including informational counters, to equal the
+checked-out baseline as JSON data. It does not write the baseline.
+
+`tests/architecture-change.json` declares the refresh arguments for one
+change. Example:
+
+```json
+{
+  "baselineSha256": "<sha256 of the baseline on current main>",
+  "closureAdditions": ["FILE"],
+  "rekeyExceptions": [{ "oldKey": "OLD_KEY", "newKey": "NEW_KEY" }]
+}
+```
+
+`pruneStale: true` supplies `--prune-stale`, each `closureAdditions` file
+supplies `--allow-closure-addition FILE`, and each `rekeyExceptions` pair
+supplies `--rekey-exception OLD_KEY NEW_KEY`. Unknown fields and repeated
+keys fail. The file grants no general exception, size entry or closure growth.
+The path must be a regular file of at most 64 KiB: a symbolic link
+(`declaration:symlink`), a directory or another special file
+(`declaration:not-regular-file`) and a larger file (`declaration:too-large`)
+fail. The limit allows about 400 rekey pairs.
+
+A declaration applies only to the change that writes it: if its bytes equal
+the parent's, it is inherited and inactive. An active declaration with an
+allowance must name `baselineSha256`, the SHA-256 of the parent's
+`tests/architecture-baseline.json` bytes. Compute it on current main before
+regenerating, for example
+`git show origin/main:tests/architecture-baseline.json | sha256sum`.
+The binding is to the baseline content, not to a commit:
+
+- A PR that is behind main by commits that did not change the baseline stays
+  valid, both as merge commit and as squash on main.
+- On a PR, a declaration bound to another baseline fails with
+  `declaration:stale-baseline`: regenerate the baseline and the declaration on
+  current main. A left-over declaration can never make a PR pass.
+- `main` does not require branches to be up to date. A PR with an earlier
+  passing run can still merge after another change rewrote the baseline, for
+  example a prune written with `--write` that does not touch the declaration
+  file. On that push, the step validates the declared allowances against the
+  actual parent instead of failing on the hash. If every allowance is valid
+  there and the preview equals the committed baseline, the step passes with a
+  warning annotation: "declaration was bound to an older baseline; allowances
+  re-validated against the parent", followed by the allowances in full.
+  Otherwise it fails with `declaration:stale-baseline`. The repository
+  setting "require branches to be up to date before merging" would remove
+  this case. That setting is the owner's choice.
+- Two PRs that both edit the declaration file conflict on it, and GitHub
+  creates no merge commit until the later one is updated.
+- After merge, the file on main names the old baseline hash. It is inactive.
+  No clean-up commit is needed. The next change may leave the file, or
+  overwrite it with `{}` or with its own declaration.
+
+On success the step prints every active allowance in full as a notice
+annotation and in the step summary. The reader verifies each one; the tool
+cannot:
+
+- Closure addition: the named file holds only code that the crew plugin
+  closure already loaded (moved bodies, no new package).
+- Exception rekey: the importing code moved unchanged into the new file; the
+  tool already requires equal kind and target.
+- Prune stale: entries are only removed. The notice lists the exceptions and
+  size entries that the commit removed against the parent.
+
+Reverts:
+
+- A revert of a PR that removed exceptions re-adds them. No declaration can
+  allow that, so such a revert fails the step. It needs an owner decision
+  (for example an admin merge, with main red until the exceptions go again).
+- A revert of an allowance PR restores the previous declaration bytes, which
+  name an older baseline. Write `{}` into the declaration in the revert.
+
+The check uses the candidate's tool, graph reader, policy and workflow. A PR
+that weakens these can weaken the check; baseline edits alone cannot disable
+it. Trusted review remains necessary for changes to the check and its inputs.
+In particular, the policy is read from the commit under test, so an edit to
+`tests/architecture-policy.json` is itself a permission. A new import plus a
+policy line that makes its target a public contract passes with no
+allowances. The step then prints the notice "policy changed in this commit:
+the reader checks every changed line", with the added and removed line count,
+also in the step summary. The second reader is the control for every policy
+line.
+Running the base tool instead requires an isolated trusted copy, compatible
+dependencies and staged rollout of new arguments, and still needs a trusted
+workflow to select it. No pre-push hook is included.
+
 ### Strict baseline freshness
 
 The architecture guard rejects stale-high inventories as well as growth.
 Keep `largestCycle`, `cycleComponents`, `cyclicEdges`, `crewPlugin.members`
 and physical `rootFiles` current in the same PR as the structural change.
-Component/member order does not matter; identities do. A dependency replacement
-can need a refresh even if its closure count stays the same. Single-file
-self-loops count as cyclic components.
+The architecture test ignores component/member order; the hosted preview also
+requires the tool's inventory order. A dependency replacement can need a refresh
+even if its closure count stays the same. Single-file self-loops count as cyclic
+components.
 
-`sourceFiles`, `sourceEdges`, `sourceCommit` and `measurementStatus` remain
-informational. Their changes do not require a baseline edit. Existing policy,
-exception and source-size checks keep their behavior.
+`sourceFiles` and `sourceEdges` remain informational, not permissions, but the
+hosted comparison requires their current measured values. `sourceCommit` and
+`measurementStatus` remain preserved provenance. Existing policy, exception and
+source-size rules keep their behavior.
 
 For stale inventories, run the exact refresh command printed by the test.
 Inspect and commit the lowered JSON with the source change. No environment
