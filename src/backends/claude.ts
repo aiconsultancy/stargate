@@ -843,11 +843,11 @@ export class ClaudeBackend implements AgentBackend {
         uuid: input,
       };
 
-      async function* messages() {
+      const messages = async function* () {
         yield message;
         // Closing input after the result lets the CLI exit cleanly.
         await answered.promise;
-      }
+      };
 
       const options: Options = {
         abortController: run.controller,

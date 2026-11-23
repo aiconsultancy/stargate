@@ -14,6 +14,20 @@ import {
   saveQuestionSettings,
 } from "../src/questions/question-settings";
 
+const chunk = (
+  value: Readonly<Record<string, unknown>>,
+  reason: string | null,
+) =>
+  "data: " +
+  JSON.stringify({
+    id: "fixture",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "fixture",
+    choices: [{ index: 0, delta: value, finish_reason: reason }],
+  }) +
+  "\n\n";
+
 const standalone = process.argv.includes("--standalone");
 const loseAck = process.argv.includes("--lose-ack");
 
@@ -105,17 +119,6 @@ const model = Bun.serve({
             },
           ],
         };
-
-    const chunk = (value: object, reason: string | null) =>
-      "data: " +
-      JSON.stringify({
-        id: "fixture",
-        object: "chat.completion.chunk",
-        created: 1,
-        model: "fixture",
-        choices: [{ index: 0, delta: value, finish_reason: reason }],
-      }) +
-      "\n\n";
 
     return new Response(
       chunk({ role: "assistant" }, null) +

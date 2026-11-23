@@ -31,6 +31,10 @@ import {
 import { API } from "typescript/unstable/async";
 import { createVirtualFileSystem } from "typescript/unstable/fs";
 
+const value = (text: string) => BigInt(text.replaceAll("_", "").slice(0, -1));
+
+const shebang = (text: string) => /^#![^\r\n]*/.exec(text)?.[0] ?? "";
+
 type Difference = { reason: string; before: string; after: string };
 
 type Result = { equal: boolean; reasons: string[]; differences: Difference[] };
@@ -194,9 +198,6 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
     }
 
     if (isBigIntLiteral(a) && isBigIntLiteral(b)) {
-      const value = (text: string) =>
-        BigInt(text.replaceAll("_", "").slice(0, -1));
-
       if (value(x) !== value(y)) difference("bigint value", x, y);
       else if (x !== y) reasons.add("numeric form");
 
@@ -252,8 +253,6 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
       });
     }
   }
-
-  const shebang = (text: string) => /^#![^\r\n]*/.exec(text)?.[0] ?? "";
 
   const before = shebang(left.text);
   const after = shebang(right.text);

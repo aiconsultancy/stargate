@@ -1,5 +1,11 @@
 import { slackContent } from "./slack-format";
 
+const plain = (text: string) => ({
+  type: "plain_text" as const,
+  text,
+  emoji: false,
+});
+
 export const cancellationNotice =
   "Stargate received your stop request. Work may have run; existing effects may remain. The request was not repeated. Check agent state before trying again.";
 
@@ -265,12 +271,6 @@ export function failureText(cause: RequestFailure): string {
 
 export function failureContent(cause: RequestFailure) {
   const { title, text } = describe(cause);
-
-  const plain = (text: string) => ({
-    type: "plain_text" as const,
-    text,
-    emoji: false,
-  });
 
   return {
     text: slackContent(`Request status — ${title}\n\n${text}`, "plain").text,

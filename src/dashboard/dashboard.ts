@@ -18,6 +18,8 @@ import {
   unlinkOwnSocket,
 } from "../lib/unix-socket";
 
+const noop = () => {};
+
 const decodeChildren = Schema.decodeUnknownOption(historyChildrenInputSchema);
 const decodeEntries = Schema.decodeUnknownOption(historyEntriesInputSchema);
 
@@ -275,7 +277,7 @@ function createDashboard(options: Options) {
       () => pending.delete(work),
       () => pending.delete(work),
     );
-    let onAbort = () => {};
+    let onAbort = noop;
 
     const aborted = new Promise<never>((_resolve, reject) => {
       onAbort = () => reject(signal.reason);

@@ -1,6 +1,9 @@
 import { Result, Schema } from "effect";
 import { commentBody, dispatchRoutes, issueEdit } from "./routes";
 
+/** A PATCH body built by `issueEdit`. */
+type IssueEdit = ReturnType<(typeof issueEdit)[keyof typeof issueEdit]>;
+
 export type AgentRank = "rearAdmiral" | "captain" | "crew";
 
 export type FleetAgent = {
@@ -507,7 +510,7 @@ export class SubspaceApi implements DispatchApi {
 
   private async edit(
     reference: string,
-    body: object,
+    body: IssueEdit,
     signal: AbortSignal,
   ): Promise<EditResult> {
     const { status, text } = await this.request(

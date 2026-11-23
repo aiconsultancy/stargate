@@ -69,6 +69,43 @@ When a file no longer imports Zod after migration, remove its path from the
 inspect the diff and run `bun run lint`. If a guarded file moves and retains Zod,
 update its path in the same change, subject to the touched-Zod policy.
 
+Seven ceiling rules apply outside `tests/**`, the Zod paths and the four fixed
+entry files: at most 250 lines in a function (blank lines and comments not
+counted), 60 statements, 6 parameters, block depth 6, complexity 40, nested
+calls 6 and 3 classes in a file. For each rule, one override in
+`.oxlintrc.json` lists the files that already exceed the limit, with literal
+sorted paths, and sets that rule to the largest value in its files. These
+ceiling lists may only shrink. `eslint/max-lines` stays off: the architecture
+size guard owns file length (non-blank lines, limit 1,000, with its own list).
+A file that leaves the Zod exclusion list must meet the ceiling limits or be
+added to the list of each rule it exceeds; for example, `src/health/health.ts`
+has complexity 212.
+
+An exception list is an override that turns one or more rules off for literal,
+sorted file paths, because those files hold places that must stay as they are.
+Exception lists may also only shrink.
+
+`bun run lint` runs `scripts/check-lint-lists.ts`. It puts every override in
+`.oxlintrc.json` into exactly one kind and fails on an override of no kind:
+
+- the general set: the one override with `excludeFiles` (the Zod paths);
+- the `tests/**` and fixed-entry overrides, matched by their exact `files` in
+  `structuralOverrides` in the script; they may only turn rules off, and they
+  must turn all seven ceiling rules off;
+- a ceiling list: exactly one ceiling rule, not off;
+- an exception list: every rule off, no ceiling rule, each rule on in the
+  general set.
+
+The check fails when a ceiling list file no longer exceeds the general limit,
+when a list maximum is above the largest value of its files (the message gives
+the value), when an exception list file has no finding of its rule with the
+rule on, and when a listed path does not exist, is a pattern, or is a test, a
+fixed entry or a Zod file. When a change brings a file under a limit or removes
+its last finding of a listed rule, remove the file from that list in the same
+change. A new file or a file that is not listed must meet the general rules.
+The check also fails when Oxlint fails, gives no output, or reports fewer files
+or rules than it was given; it never reads a missing result as "no finding".
+
 For a bulk sweep, use `bun scripts/regenerate-hard-mode.ts` from a clean feature
 checkout that contains the tooling. For the initial bundle, run the supplied
 script with `--tool-patch /absolute/path/to/tool.patch` from a clean feature

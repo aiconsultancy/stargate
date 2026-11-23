@@ -16,6 +16,13 @@ import {
 import type { SlackContent, SlackPanelContent } from "../shared/slack-format";
 import type { Job, Store } from "../gateway/store";
 
+const button = (action: string, value: string, label: string) => ({
+  type: "button" as const,
+  action_id: `${prefix}${action}`,
+  value,
+  text: plain(short(label, 75)),
+});
+
 type QuestionDelivery = {
   post(
     channel: string,
@@ -218,13 +225,6 @@ export function buildQuestionBlocks(
     SlackPanelContent["blocks"][number],
     { type: "actions" }
   >["elements"] = [];
-
-  const button = (action: string, value: string, label: string) => ({
-    type: "button" as const,
-    action_id: `${prefix}${action}`,
-    value,
-    text: plain(short(label, 75)),
-  });
 
   if (field.type === "multiselect" && field.options.length) {
     for (let start = 0; start < field.options.length; start += 10)

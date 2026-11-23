@@ -4,6 +4,8 @@ import {
   runningVersion,
 } from "../../../maintenance/nightly/update/ready";
 
+const noop = () => {};
+
 const releaseTag = /^v(\d+\.\d+\.\d+)$/;
 
 /** The release tag at HEAD of a git checkout, without its `v`; else null. */
@@ -88,7 +90,7 @@ async function probeVersion(
     AbortSignal.timeout(versionDeadlineMs),
   ]);
 
-  let abort = () => {};
+  let abort = noop;
 
   try {
     const deadline = new Promise<null>((resolve) => {

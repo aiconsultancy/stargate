@@ -17,6 +17,9 @@ export type {
   CleanupResult,
 } from "./cleanup-config";
 
+const gone = (error: unknown) =>
+  (error as NodeJS.ErrnoException).code === "ENOENT";
+
 export type CleanupInput = {
   settings: CleanupSettings;
   plan: boolean;
@@ -155,9 +158,6 @@ export async function cleanupPathUse(
   deadline?: number,
   view: ProcessView = systemView,
 ): Promise<"unused" | "in-use" | "unknown"> {
-  const gone = (error: unknown) =>
-    (error as NodeJS.ErrnoException).code === "ENOENT";
-
   const uses = (target: string, candidate = path) => {
     const name = target.replace(/ \(deleted\)$/, "");
 
@@ -1129,37 +1129,33 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
         }
 
         const item: CleanupItem = { ...base, branch, tip, reason: "merged" };
+
+        const validate = async () => {
+          await allowed(repo, false);
+          await clean(repo);
+
+          if (["main", "master"].includes(branch)) refuse("protected");
+
+          const trees = worktrees(
+            await git(repo, "worktree", "list", "--porcelain", "-z"),
+          );
+
+          if (trees.some((tree) => tree.branch === branch))
+            refuse("checked-out");
+
+          if ((await git(repo, "rev-parse", "--verify", full)).trim() !== tip)
+            refuse("changed");
+
+          const main = (
+            await git(repo, "rev-parse", "--verify", "refs/remotes/origin/main")
+          ).trim();
+
+          if (!sha.test(main) || !(await remoteTips(repo)).includes(main))
+            refuse("git-unknown");
+          await contained(repo, tip, [main]);
+        };
+
         await attempt(item, async () => {
-          const validate = async () => {
-            await allowed(repo, false);
-            await clean(repo);
-
-            if (["main", "master"].includes(branch)) refuse("protected");
-
-            const trees = worktrees(
-              await git(repo, "worktree", "list", "--porcelain", "-z"),
-            );
-
-            if (trees.some((tree) => tree.branch === branch))
-              refuse("checked-out");
-
-            if ((await git(repo, "rev-parse", "--verify", full)).trim() !== tip)
-              refuse("changed");
-
-            const main = (
-              await git(
-                repo,
-                "rev-parse",
-                "--verify",
-                "refs/remotes/origin/main",
-              )
-            ).trim();
-
-            if (!sha.test(main) || !(await remoteTips(repo)).includes(main))
-              refuse("git-unknown");
-            await contained(repo, tip, [main]);
-          };
-
           await validate();
           await perform(item, validate, async () => {
             const output = await command(repo, ["branch", "-d", "--", branch]);

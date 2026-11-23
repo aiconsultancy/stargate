@@ -11,6 +11,16 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { mainEntrypoint } from "../lib/installation-paths";
 
+const systemctl = async (...args: string[]) => {
+  try {
+    return await exec("systemctl", ["--user", ...args]);
+  } catch {
+    throw new Error(
+      "systemctl --user failed. Check that systemd and your user session bus are available.",
+    );
+  }
+};
+
 const marker = "# Managed by Stargate CLI";
 const exec = promisify(execFile);
 
@@ -74,16 +84,6 @@ export async function manageService(
     throw new Error("User services require Linux with systemd.");
   const unit = serviceName(name);
   const path = join(homedir(), ".config/systemd/user", unit);
-
-  const systemctl = async (...args: string[]) => {
-    try {
-      return await exec("systemctl", ["--user", ...args]);
-    } catch {
-      throw new Error(
-        "systemctl --user failed. Check that systemd and your user session bus are available.",
-      );
-    }
-  };
 
   if (action === "install") {
     await mkdir(dirname(path), { recursive: true });

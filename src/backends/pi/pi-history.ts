@@ -30,6 +30,18 @@ import {
   historyEntriesInputSchema,
 } from "../../shared/session-history";
 
+const safe = async <T>(signal: AbortSignal, read: () => Promise<T>) => {
+  try {
+    signal.throwIfAborted();
+    const result = await read();
+    signal.throwIfAborted();
+
+    return result;
+  } catch {
+    throw new Error(unavailable);
+  }
+};
+
 const unavailable = "Pi history unavailable or cancelled.";
 const decodeDescribe = Schema.decodeUnknownSync(historyDescribeInputSchema);
 const decodeChildren = Schema.decodeUnknownSync(historyChildrenInputSchema);
@@ -238,18 +250,6 @@ export function piSessionHistory(
       decodeNumericID(id) as ConversationId,
       withAbortSignal(signal, BACKGROUND_CONTEXT),
     );
-  };
-
-  const safe = async <T>(signal: AbortSignal, read: () => Promise<T>) => {
-    try {
-      signal.throwIfAborted();
-      const result = await read();
-      signal.throwIfAborted();
-
-      return result;
-    } catch {
-      throw new Error(unavailable);
-    }
   };
 
   return {

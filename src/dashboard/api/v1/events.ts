@@ -13,6 +13,8 @@ import type {
   V1Snapshot,
 } from "./types";
 
+const noop = () => {};
+
 export type ApiV1Diff = (
   previous: V1EventSnapshot | undefined,
   next: V1EventSnapshot,
@@ -499,7 +501,7 @@ export function createEventStreams(
         return;
       active ??= startPolling();
       const session = active;
-      let cleanup = () => {};
+      let cleanup = noop;
 
       return new ReadableStream<Uint8Array>(
         {
