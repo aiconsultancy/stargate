@@ -15,7 +15,7 @@ import {
   type CronAdvanced,
   type CronEvaluation,
   cronModelSchema,
-} from "../../cron/advanced";
+} from "../../automation/cron/advanced";
 import {
   cronDecision,
   cronDecisionInstructions,
@@ -25,7 +25,7 @@ import {
   cronObservationInstructions,
   cronPublicText,
   cronRisk,
-} from "../../cron/decision";
+} from "../../automation/cron/decision";
 import type { CrewCaller, CrewSession } from "../execution/engine";
 import { CrewError } from "../execution/state";
 import { type Team, defaultModelProviders } from "../team";

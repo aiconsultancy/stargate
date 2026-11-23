@@ -9,7 +9,7 @@ import { codexBackendSchema } from "../backends/codex/config";
 import { crewActivitySchema } from "../activity/activity";
 import { apiV1ConfigSchema } from "../observability/dashboard/api/v1/config";
 import { captainPostSchema } from "../captain-post/config";
-import { cronjobsSchema } from "../cron/config";
+import { cronjobsSchema } from "../automation/cron/config";
 import { validateFleetPermissions } from "../fleet/permissions";
 import { fleetPolicySchema } from "../fleet/fleet-policy";
 import { healthConfigSchema } from "../observability/health/config";
@@ -20,7 +20,7 @@ import {
 } from "../transports/irc/config";
 import { fold, widestFold } from "../transports/irc/protocol";
 import { textMentionRuleSchema } from "../shared/mentions";
-import { maintenanceSchema } from "../maintenance/nightly/config";
+import { maintenanceSchema } from "../automation/maintenance/nightly/config";
 import { notifyConfigError } from "../notifications/ingest/binding";
 import { notifySchema } from "../notifications/ingest/config";
 import {

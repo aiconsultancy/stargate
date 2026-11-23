@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { loadConfig } from "../src/config";
 import { settingsPattern } from "../src/config/settings-schema";
-import { processRunner } from "../src/maintenance/nightly/exec";
+import { processRunner } from "../src/automation/maintenance/nightly/exec";
 import {
   githubHeaders,
   githubToken,
@@ -12,7 +12,7 @@ import {
   stageRelease,
   switchCurrent,
   verifyOrigin,
-} from "../src/maintenance/nightly/update/release";
+} from "../src/automation/maintenance/nightly/update/release";
 import { loadEnvironment } from "../src/app/runtime";
 
 const decodeCommit = Schema.decodeUnknownSync(

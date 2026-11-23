@@ -3,7 +3,7 @@ import { CrewMaintenance } from "../src/crew/controls/maintenance";
 import {
   maintenanceWindowMs,
   TurnBudget,
-} from "../src/maintenance/maintenance";
+} from "../src/automation/maintenance/maintenance";
 
 const plan = {
   plan: "Restart Stargate",

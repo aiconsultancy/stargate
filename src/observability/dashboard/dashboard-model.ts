@@ -1,5 +1,5 @@
 import type { CrewStatus } from "../../shared/crew-status";
-import type { CronReportRow, CronRun } from "../../cron/store";
+import type { CronReportRow, CronRun } from "../../automation/cron/store";
 import type {
   HistoryEntriesInput,
   HistoryEntryPage,

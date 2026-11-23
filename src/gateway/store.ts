@@ -30,7 +30,7 @@ import { type RequestFailure, failureText } from "../shared/request-failure";
 import type { ReplyChunk } from "../shared/slack-format";
 import { type Incoming, type Job, type JobStatus } from "./store-types";
 import type { TurnProgress } from "../shared/turn-progress";
-import { UpdateNotices } from "../maintenance/update-notice";
+import { UpdateNotices } from "../automation/maintenance/update-notice";
 
 export { jobStatuses } from "./store-types";
 

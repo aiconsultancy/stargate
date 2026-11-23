@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { AgentBackend } from "../src/backends/backend";
 import type { CrewStatus } from "../src/shared/crew-status";
-import { CronStore } from "../src/cron/store";
+import { CronStore } from "../src/automation/cron/store";
 import {
   type DashboardShip,
   dashboardSource,

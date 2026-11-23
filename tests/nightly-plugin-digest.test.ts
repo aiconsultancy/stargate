@@ -14,7 +14,7 @@ import {
   pluginDigestFile,
   readPluginDigest,
   writePluginDigest,
-} from "../src/maintenance/nightly/update/plugin-digest";
+} from "../src/automation/maintenance/nightly/update/plugin-digest";
 
 const base = await mkdtemp(join(tmpdir(), "stargate-plugin-digest-"));
 

@@ -15,7 +15,7 @@ import {
   readStarfleetSnapshot,
 } from "../src/observability/health/health";
 import { healthConfigSchema } from "../src/observability/health/config";
-import { maintenanceSchema } from "../src/maintenance/nightly/config";
+import { maintenanceSchema } from "../src/automation/maintenance/nightly/config";
 import { bot } from "./fixtures";
 
 const now = Date.parse("2026-11-18T12:00:00Z");

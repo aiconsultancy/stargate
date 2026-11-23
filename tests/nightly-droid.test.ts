@@ -16,34 +16,34 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
 import { CrewState } from "../src/crew/execution/state";
-import { maintenanceSchema } from "../src/maintenance/nightly/config";
+import { maintenanceSchema } from "../src/automation/maintenance/nightly/config";
 import {
   type DroidDependencies,
   droidDirectory,
   droidScrubber,
   runDroid,
-} from "../src/maintenance/nightly/droid/droid";
+} from "../src/automation/maintenance/nightly/droid/droid";
 import type {
   DroidAgent,
   DroidTools,
-} from "../src/maintenance/nightly/droid/droid-agent";
-import { openPiDroid } from "../src/maintenance/nightly/droid/droid-agent";
-import { digestReport } from "../src/maintenance/nightly/droid/droid-facts";
+} from "../src/automation/maintenance/nightly/droid/droid-agent";
+import { openPiDroid } from "../src/automation/maintenance/nightly/droid/droid-agent";
+import { digestReport } from "../src/automation/maintenance/nightly/droid/droid-facts";
 import type {
   CommandResult,
   CommandRunner,
-} from "../src/maintenance/nightly/exec";
-import type { OpenCodeControl } from "../src/maintenance/nightly/update/opencode";
+} from "../src/automation/maintenance/nightly/exec";
+import type { OpenCodeControl } from "../src/automation/maintenance/nightly/update/opencode";
 import {
   type Report,
   noticeSchemaID,
   queueNotice,
   writeAlert,
   writeReport,
-} from "../src/maintenance/nightly/reports/report";
-import { updateState } from "../src/maintenance/nightly/state";
-import { buildDroidUnits } from "../src/maintenance/nightly/schedule/timer";
-import { stableJitter } from "../src/maintenance/nightly/schedule/window";
+} from "../src/automation/maintenance/nightly/reports/report";
+import { updateState } from "../src/automation/maintenance/nightly/state";
+import { buildDroidUnits } from "../src/automation/maintenance/nightly/schedule/timer";
+import { stableJitter } from "../src/automation/maintenance/nightly/schedule/window";
 import { openStore } from "../src/app/open-store";
 import { nightlyStoreFixture } from "./fixtures/database-reuse";
 

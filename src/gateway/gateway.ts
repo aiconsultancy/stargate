@@ -36,15 +36,18 @@ import type {
   RequestOutcome,
   TransportDelivery,
 } from "./ports";
-import { TurnBudget, maintenanceText } from "../maintenance/maintenance";
-import { startMaintenanceDelivery } from "../maintenance/maintenance-delivery";
+import {
+  TurnBudget,
+  maintenanceText,
+} from "../automation/maintenance/maintenance";
+import { startMaintenanceDelivery } from "../automation/maintenance/maintenance-delivery";
 import {
   type DrainControl,
   type MaintenanceDrain,
   drainNoticeID,
   drainNoticePhase,
   drainNoticeText,
-} from "../maintenance/maintenance-drain";
+} from "../automation/maintenance/maintenance-drain";
 import { textMentionNote } from "../shared/mentions";
 import {
   MetaCommands,
@@ -114,7 +117,7 @@ import {
   transcribeMedia,
 } from "../transcription/transcription";
 import { type TurnProgress, turnProgressText } from "../shared/turn-progress";
-import type { UpdateReceipt } from "../maintenance/update-notice";
+import type { UpdateReceipt } from "../automation/maintenance/update-notice";
 import { resolveWaiting } from "./waiting";
 import { botDisplayName, waitingPhrase } from "../shared/waiting";
 

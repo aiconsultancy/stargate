@@ -879,12 +879,12 @@
         "src/activity/activity-delivery.ts",
         "src/app/cli.ts",
         "src/app/runtime.ts",
+        "src/automation/maintenance/nightly/cleanup/cleanup.ts",
+        "src/automation/maintenance/nightly/journal.ts",
+        "src/automation/maintenance/nightly/run.ts",
         "src/backends/opencode/opencode.ts",
         "src/crew/messaging/messaging.ts",
         "src/gateway/gateway.ts",
-        "src/maintenance/nightly/cleanup/cleanup.ts",
-        "src/maintenance/nightly/journal.ts",
-        "src/maintenance/nightly/run.ts",
         "src/observability/dashboard/api/server.ts",
         "src/observability/dashboard/api/v1/events.ts",
         "src/observability/dashboard/api/v1/projection.ts",
@@ -906,15 +906,15 @@
         "src/app/cli.ts",
         "src/app/runtime.ts",
         "src/attachments/attachment-delivery.ts",
+        "src/automation/maintenance/nightly/cli.ts",
+        "src/automation/maintenance/nightly/journal.ts",
+        "src/automation/maintenance/nightly/run.ts",
         "src/backends/claude.ts",
         "src/backends/codex.ts",
         "src/backends/opencode/opencode.ts",
         "src/captain-post/captain-post.ts",
         "src/crew/messaging/messaging.ts",
         "src/gateway/gateway.ts",
-        "src/maintenance/nightly/cli.ts",
-        "src/maintenance/nightly/journal.ts",
-        "src/maintenance/nightly/run.ts",
         "src/ops/agent-profile-switch.ts",
         "src/transports/irc/client.ts",
         "src/transports/irc/routing.ts",
@@ -925,12 +925,12 @@
     {
       "files": [
         "src/app/setup.ts",
+        "src/automation/cron/index.ts",
         "src/backends/claude.ts",
         "src/backends/codex.ts",
         "src/backends/opencode/opencode.ts",
         "src/crew/execution/engine.ts",
         "src/crew/pi/pi-worker.ts",
-        "src/cron/index.ts",
         "src/gateway/gateway.ts",
         "src/observability/dashboard/api/v1/git.ts",
         "src/observability/dashboard/api/v1/projection.ts",
@@ -955,6 +955,10 @@
         "src/app/cli.ts",
         "src/app/runtime.ts",
         "src/attachments/attachment-delivery.ts",
+        "src/automation/maintenance/nightly/cli.ts",
+        "src/automation/maintenance/nightly/journal.ts",
+        "src/automation/maintenance/nightly/run.ts",
+        "src/automation/maintenance/nightly/update/archive.ts",
         "src/backends/claude.ts",
         "src/backends/codex.ts",
         "src/backends/opencode/opencode.ts",
@@ -965,10 +969,6 @@
         "src/fleet/protocol.ts",
         "src/gateway/gateway.ts",
         "src/gateway/routing.ts",
-        "src/maintenance/nightly/cli.ts",
-        "src/maintenance/nightly/journal.ts",
-        "src/maintenance/nightly/run.ts",
-        "src/maintenance/nightly/update/archive.ts",
         "src/meta-commands/meta-commands.ts",
         "src/questions/questions.ts",
         "src/questions/slack-questions.ts",
@@ -981,10 +981,10 @@
     },
     {
       "files": [
+        "src/automation/maintenance/nightly/config.ts",
         "src/backends/pi/pi-durable.ts",
         "src/gateway/cancellation.ts",
         "src/gateway/routing.ts",
-        "src/maintenance/nightly/config.ts",
         "src/questions/questions.ts",
         "src/transports/irc/config.ts",
         "src/transports/irc/delivery.ts"
@@ -1414,7 +1414,7 @@
       }
     },
     {
-      "files": ["src/maintenance/maintenance-drain.ts"],
+      "files": ["src/automation/maintenance/maintenance-drain.ts"],
       "rules": {
         "anti-slop/no-chained-type-assertions": "off"
       }
@@ -1429,9 +1429,9 @@
       "files": [
         "scripts/crew-question-smoke.ts",
         "scripts/irc-question-smoke.ts",
+        "src/automation/cron/index.ts",
         "src/backends/opencode/opencode-history.ts",
         "src/backends/opencode/opencode.ts",
-        "src/cron/index.ts",
         "src/gateway/gateway.ts"
       ],
       "rules": {
@@ -1470,8 +1470,8 @@
     },
     {
       "files": [
-        "src/maintenance/nightly/cleanup/cleanup.ts",
-        "src/maintenance/nightly/update/model-step.ts",
+        "src/automation/maintenance/nightly/cleanup/cleanup.ts",
+        "src/automation/maintenance/nightly/update/model-step.ts",
         "src/observability/dashboard/api/server.ts"
       ],
       "rules": {
@@ -1482,13 +1482,13 @@
       "files": [
         "scripts/crew-question-smoke.ts",
         "scripts/irc-question-smoke.ts",
+        "src/automation/maintenance/nightly/droid/droid.ts",
         "src/backends/claude.ts",
         "src/backends/codex.ts",
         "src/backends/pi/pi-durable.ts",
         "src/backends/pi/pi-history.ts",
         "src/crew/history/history-rpc.ts",
         "src/gateway/gateway.ts",
-        "src/maintenance/nightly/droid/droid.ts",
         "src/meta-commands/meta-commands.ts",
         "src/transports/teams/images.ts"
       ],

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { type Config, configSchema } from "../src/config";
-import { discoverCrews } from "../src/maintenance/nightly/crews";
+import { discoverCrews } from "../src/automation/maintenance/nightly/crews";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-crews-"));
 

@@ -42,9 +42,9 @@ import {
   type CronDelivery,
   CronScheduler,
   type CronServices,
-} from "../cron/index";
-import { CronStore } from "../cron/store";
-import { CronUI, type CronUIApi } from "../cron/ui";
+} from "../automation/cron/index";
+import { CronStore } from "../automation/cron/store";
+import { CronUI, type CronUIApi } from "../automation/cron/ui";
 import { startDashboard } from "../observability/dashboard/dashboard";
 import {
   type DashboardShip,
@@ -65,15 +65,15 @@ import { createHealthReader } from "../observability/health/health";
 import { controlInteractions } from "../transports/slack/interactions";
 import { type IrcRegistration, IrcShip, ircKey } from "../transports/irc/ship";
 import { templatesDirectory } from "../lib/installation-paths";
-import { DrainRuntime } from "../maintenance/maintenance-drain";
-import { discoverCrews } from "../maintenance/nightly/crews";
-import { MaintenanceOutbox } from "../maintenance/nightly/reports/outbox";
-import type { Ready } from "../maintenance/nightly/update/ready";
+import { DrainRuntime } from "../automation/maintenance/maintenance-drain";
+import { discoverCrews } from "../automation/maintenance/nightly/crews";
+import { MaintenanceOutbox } from "../automation/maintenance/nightly/reports/outbox";
+import type { Ready } from "../automation/maintenance/nightly/update/ready";
 import {
   packageDirectory,
   runningVersion,
   writeReady,
-} from "../maintenance/nightly/update/ready";
+} from "../automation/maintenance/nightly/update/ready";
 import { NotificationStore } from "../notifications/preferences/notification-store";
 import { notificationKey } from "../notifications/preferences/notifications";
 import {
@@ -115,7 +115,7 @@ import {
   type UpdateReceipt,
   type UpdateSnapshot,
   buildUpdateSnapshot,
-} from "../maintenance/update-notice";
+} from "../automation/maintenance/update-notice";
 
 export async function loadEnvironment(configPath: string) {
   const file = Bun.file(`${configPath}.env`);

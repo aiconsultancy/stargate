@@ -30,7 +30,7 @@ import {
   drainNoticeID,
   drainNoticePhase,
   drainNoticeText,
-} from "../../maintenance/maintenance-drain";
+} from "../../automation/maintenance/maintenance-drain";
 import {
   QuotaReader,
   quotaConfigSchema,
@@ -50,7 +50,7 @@ import {
   type UpdateSnapshot,
   noticeTools,
   scopedUpdate,
-} from "../../maintenance/update-notice";
+} from "../../automation/maintenance/update-notice";
 import {
   type CrewInput,
   crewInputSchema,

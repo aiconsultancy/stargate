@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { quote as serviceQuote } from "../src/app/service";
-import { quote as timerQuote } from "../src/maintenance/nightly/schedule/timer";
+import { quote as timerQuote } from "../src/automation/maintenance/nightly/schedule/timer";
 
 const root = join(import.meta.dir, "..");
 
@@ -15,9 +15,9 @@ async function quoteSource(path: string) {
 }
 
 test("the nightly timer's systemd quote copy matches the service copy", async () => {
-  expect(await quoteSource("src/maintenance/nightly/schedule/timer.ts")).toBe(
-    await quoteSource("src/app/service.ts"),
-  );
+  expect(
+    await quoteSource("src/automation/maintenance/nightly/schedule/timer.ts"),
+  ).toBe(await quoteSource("src/app/service.ts"));
 
   for (const [value, command] of [
     ["/usr/bin/bun", true],

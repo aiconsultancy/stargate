@@ -7,8 +7,14 @@ import { apiToken } from "../observability/dashboard/api/v1/token";
 import { checkCodexConfiguration } from "../backends/codex-paths";
 import { loadConfig } from "../config";
 import { teamSchema } from "../crew/team";
-import { cronOperationSchema, runCronOperation } from "../cron/control";
-import { maintenanceCli, maintenanceHelp } from "../maintenance/nightly/cli";
+import {
+  cronOperationSchema,
+  runCronOperation,
+} from "../automation/cron/control";
+import {
+  maintenanceCli,
+  maintenanceHelp,
+} from "../automation/maintenance/nightly/cli";
 import { initializeProfile } from "./profile";
 import { provisionBots } from "./provision";
 import { manageService } from "./service";

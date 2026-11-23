@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { redactCredentials } from "../../lib/credentials";
-import { UpdateNotices } from "../../maintenance/update-notice";
+import { UpdateNotices } from "../../automation/maintenance/update-notice";
 import { canExpandCrew } from "./identity";
 import { IrcSessions } from "../messaging/irc";
 import { MemberActivityStore } from "../reporting/member-activity";

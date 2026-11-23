@@ -14,9 +14,9 @@ import { abortable, resourceScope } from "../lib/effect";
 import {
   MaintenanceRPC,
   maintenancePlanSchema,
-} from "../maintenance/maintenance";
-import { activeMaintenanceDrain } from "../maintenance/maintenance-drain";
-import { noticeTools } from "../maintenance/update-notice";
+} from "../automation/maintenance/maintenance";
+import { activeMaintenanceDrain } from "../automation/maintenance/maintenance-drain";
+import { noticeTools } from "../automation/maintenance/update-notice";
 import { connectHistoryAPI, historyVisible } from "./history/api";
 import { compactOnServer } from "./history/compaction";
 import { crewOpenCodeInput, quotaToolInput } from "./input/crew-tool-input";

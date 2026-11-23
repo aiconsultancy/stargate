@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { configSchema } from "../src/config";
-import { maintenanceSchema } from "../src/maintenance/nightly/config";
+import { maintenanceSchema } from "../src/automation/maintenance/nightly/config";
 import {
   recoveryBudgetMs,
   undoBounds,
-} from "../src/maintenance/nightly/journal";
-import { MaintenanceOutbox } from "../src/maintenance/nightly/reports/outbox";
+} from "../src/automation/maintenance/nightly/journal";
+import { MaintenanceOutbox } from "../src/automation/maintenance/nightly/reports/outbox";
 import {
   limits,
   queueNotice,
@@ -18,13 +18,13 @@ import {
   reportSchema,
   summary,
   writeReport,
-} from "../src/maintenance/nightly/reports/report";
+} from "../src/automation/maintenance/nightly/reports/report";
 import {
   buildMaintenanceUnits,
   buildUpdateCommand,
   startTimeoutMinutes,
-} from "../src/maintenance/nightly/schedule/timer";
-import { occurrence } from "../src/maintenance/nightly/schedule/window";
+} from "../src/automation/maintenance/nightly/schedule/timer";
+import { occurrence } from "../src/automation/maintenance/nightly/schedule/window";
 
 const root = await mkdtemp(join(tmpdir(), "stargate-report-"));
 

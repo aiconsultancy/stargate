@@ -5,22 +5,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { CrewState } from "../src/crew/execution/state";
-import { type CronRun, CronStore } from "../src/cron/store";
-import { maintenanceSchema } from "../src/maintenance/nightly/config";
+import { type CronRun, CronStore } from "../src/automation/cron/store";
+import { maintenanceSchema } from "../src/automation/maintenance/nightly/config";
 import {
   type Crew,
   crewDatabase,
   piDatabase,
-} from "../src/maintenance/nightly/crews";
+} from "../src/automation/maintenance/nightly/crews";
 import {
   checkIdle,
   describeRunningWork,
   type IdleInput,
   queuedCrewTasks,
   waitForIdle,
-} from "../src/maintenance/nightly/schedule/idle";
-import type { OpenCodeControl } from "../src/maintenance/nightly/update/opencode";
-import { bounds } from "../src/maintenance/nightly/run";
+} from "../src/automation/maintenance/nightly/schedule/idle";
+import type { OpenCodeControl } from "../src/automation/maintenance/nightly/update/opencode";
+import { bounds } from "../src/automation/maintenance/nightly/run";
 import { openStore } from "../src/app/open-store";
 import { jobStatuses } from "../src/gateway/store";
 

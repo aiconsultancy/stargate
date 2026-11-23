@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
-import { CronScheduler } from "../src/cron/index";
-import { CronStore } from "../src/cron/store";
+import { CronScheduler } from "../src/automation/cron/index";
+import { CronStore } from "../src/automation/cron/store";
 import { Gateway } from "../src/gateway/gateway";
 import { openStore } from "../src/app/open-store";
 import { bot, identity } from "./fixtures";

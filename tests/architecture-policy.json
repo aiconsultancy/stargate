@@ -118,162 +118,196 @@
     "src/nightly/archive.ts": [
       "src/nightly/archive.ts",
       "src/maintenance/nightly/archive.ts",
-      "src/maintenance/nightly/update/archive.ts"
+      "src/maintenance/nightly/update/archive.ts",
+      "src/automation/maintenance/nightly/update/archive.ts"
     ],
     "src/nightly/catalog.ts": [
       "src/nightly/catalog.ts",
       "src/maintenance/nightly/catalog.ts",
-      "src/maintenance/nightly/update/catalog.ts"
+      "src/maintenance/nightly/update/catalog.ts",
+      "src/automation/maintenance/nightly/update/catalog.ts"
     ],
     "src/nightly/cleanup-config.ts": [
       "src/nightly/cleanup-config.ts",
       "src/maintenance/nightly/cleanup-config.ts",
-      "src/maintenance/nightly/cleanup/cleanup-config.ts"
+      "src/maintenance/nightly/cleanup/cleanup-config.ts",
+      "src/automation/maintenance/nightly/cleanup/cleanup-config.ts"
     ],
     "src/nightly/cleanup-protection.ts": [
       "src/nightly/cleanup-protection.ts",
       "src/maintenance/nightly/cleanup-protection.ts",
-      "src/maintenance/nightly/cleanup/cleanup-protection.ts"
+      "src/maintenance/nightly/cleanup/cleanup-protection.ts",
+      "src/automation/maintenance/nightly/cleanup/cleanup-protection.ts"
     ],
     "src/nightly/cleanup.ts": [
       "src/nightly/cleanup.ts",
       "src/maintenance/nightly/cleanup.ts",
-      "src/maintenance/nightly/cleanup/cleanup.ts"
+      "src/maintenance/nightly/cleanup/cleanup.ts",
+      "src/automation/maintenance/nightly/cleanup/cleanup.ts"
     ],
     "src/nightly/cli.ts": [
       "src/nightly/cli.ts",
-      "src/maintenance/nightly/cli.ts"
+      "src/maintenance/nightly/cli.ts",
+      "src/automation/maintenance/nightly/cli.ts"
     ],
     "src/nightly/config.ts": [
       "src/nightly/config.ts",
-      "src/maintenance/nightly/config.ts"
+      "src/maintenance/nightly/config.ts",
+      "src/automation/maintenance/nightly/config.ts"
     ],
     "src/nightly/cooloff.ts": [
       "src/nightly/cooloff.ts",
       "src/maintenance/nightly/cooloff.ts",
-      "src/maintenance/nightly/update/cooloff.ts"
+      "src/maintenance/nightly/update/cooloff.ts",
+      "src/automation/maintenance/nightly/update/cooloff.ts"
     ],
     "src/nightly/crews.ts": [
       "src/nightly/crews.ts",
-      "src/maintenance/nightly/crews.ts"
+      "src/maintenance/nightly/crews.ts",
+      "src/automation/maintenance/nightly/crews.ts"
     ],
     "src/nightly/drain.ts": [
       "src/nightly/drain.ts",
       "src/maintenance/nightly/drain.ts",
-      "src/maintenance/nightly/schedule/drain.ts"
+      "src/maintenance/nightly/schedule/drain.ts",
+      "src/automation/maintenance/nightly/schedule/drain.ts"
     ],
     "src/nightly/droid-agent.ts": [
       "src/nightly/droid-agent.ts",
       "src/maintenance/nightly/droid-agent.ts",
-      "src/maintenance/nightly/droid/droid-agent.ts"
+      "src/maintenance/nightly/droid/droid-agent.ts",
+      "src/automation/maintenance/nightly/droid/droid-agent.ts"
     ],
     "src/nightly/droid-facts.ts": [
       "src/nightly/droid-facts.ts",
       "src/maintenance/nightly/droid-facts.ts",
-      "src/maintenance/nightly/droid/droid-facts.ts"
+      "src/maintenance/nightly/droid/droid-facts.ts",
+      "src/automation/maintenance/nightly/droid/droid-facts.ts"
     ],
     "src/nightly/droid.ts": [
       "src/nightly/droid.ts",
       "src/maintenance/nightly/droid.ts",
-      "src/maintenance/nightly/droid/droid.ts"
+      "src/maintenance/nightly/droid/droid.ts",
+      "src/automation/maintenance/nightly/droid/droid.ts"
     ],
     "src/nightly/exec.ts": [
       "src/nightly/exec.ts",
-      "src/maintenance/nightly/exec.ts"
+      "src/maintenance/nightly/exec.ts",
+      "src/automation/maintenance/nightly/exec.ts"
     ],
     "src/nightly/files.ts": [
       "src/nightly/files.ts",
-      "src/maintenance/nightly/files.ts"
+      "src/maintenance/nightly/files.ts",
+      "src/automation/maintenance/nightly/files.ts"
     ],
     "src/nightly/host.ts": [
       "src/nightly/host.ts",
       "src/maintenance/nightly/host.ts",
-      "src/maintenance/nightly/update/host.ts"
+      "src/maintenance/nightly/update/host.ts",
+      "src/automation/maintenance/nightly/update/host.ts"
     ],
     "src/nightly/idle.ts": [
       "src/nightly/idle.ts",
       "src/maintenance/nightly/idle.ts",
-      "src/maintenance/nightly/schedule/idle.ts"
+      "src/maintenance/nightly/schedule/idle.ts",
+      "src/automation/maintenance/nightly/schedule/idle.ts"
     ],
     "src/nightly/instructions.ts": [
       "src/nightly/instructions.ts",
-      "src/maintenance/nightly/instructions.ts"
+      "src/maintenance/nightly/instructions.ts",
+      "src/automation/maintenance/nightly/instructions.ts"
     ],
     "src/nightly/journal.ts": [
       "src/nightly/journal.ts",
-      "src/maintenance/nightly/journal.ts"
+      "src/maintenance/nightly/journal.ts",
+      "src/automation/maintenance/nightly/journal.ts"
     ],
     "src/nightly/model-step.ts": [
       "src/nightly/model-step.ts",
       "src/maintenance/nightly/model-step.ts",
-      "src/maintenance/nightly/update/model-step.ts"
+      "src/maintenance/nightly/update/model-step.ts",
+      "src/automation/maintenance/nightly/update/model-step.ts"
     ],
     "src/nightly/models.ts": [
       "src/nightly/models.ts",
       "src/maintenance/nightly/models.ts",
-      "src/maintenance/nightly/update/models.ts"
+      "src/maintenance/nightly/update/models.ts",
+      "src/automation/maintenance/nightly/update/models.ts"
     ],
     "src/nightly/opencode.ts": [
       "src/nightly/opencode.ts",
       "src/maintenance/nightly/opencode.ts",
-      "src/maintenance/nightly/update/opencode.ts"
+      "src/maintenance/nightly/update/opencode.ts",
+      "src/automation/maintenance/nightly/update/opencode.ts"
     ],
     "src/nightly/outbox.ts": [
       "src/nightly/outbox.ts",
       "src/maintenance/nightly/outbox.ts",
-      "src/maintenance/nightly/reports/outbox.ts"
+      "src/maintenance/nightly/reports/outbox.ts",
+      "src/automation/maintenance/nightly/reports/outbox.ts"
     ],
     "src/nightly/paths.ts": [
       "src/nightly/paths.ts",
-      "src/maintenance/nightly/paths.ts"
+      "src/maintenance/nightly/paths.ts",
+      "src/automation/maintenance/nightly/paths.ts"
     ],
     "src/nightly/plugin-digest.ts": [
       "src/nightly/plugin-digest.ts",
       "src/maintenance/nightly/plugin-digest.ts",
-      "src/maintenance/nightly/update/plugin-digest.ts"
+      "src/maintenance/nightly/update/plugin-digest.ts",
+      "src/automation/maintenance/nightly/update/plugin-digest.ts"
     ],
     "src/nightly/ready.ts": [
       "src/nightly/ready.ts",
       "src/maintenance/nightly/ready.ts",
-      "src/maintenance/nightly/update/ready.ts"
+      "src/maintenance/nightly/update/ready.ts",
+      "src/automation/maintenance/nightly/update/ready.ts"
     ],
     "src/nightly/release.ts": [
       "src/nightly/release.ts",
       "src/maintenance/nightly/release.ts",
-      "src/maintenance/nightly/update/release.ts"
+      "src/maintenance/nightly/update/release.ts",
+      "src/automation/maintenance/nightly/update/release.ts"
     ],
     "src/nightly/report.ts": [
       "src/nightly/report.ts",
       "src/maintenance/nightly/report.ts",
-      "src/maintenance/nightly/reports/report.ts"
+      "src/maintenance/nightly/reports/report.ts",
+      "src/automation/maintenance/nightly/reports/report.ts"
     ],
     "src/nightly/run.ts": [
       "src/nightly/run.ts",
-      "src/maintenance/nightly/run.ts"
+      "src/maintenance/nightly/run.ts",
+      "src/automation/maintenance/nightly/run.ts"
     ],
     "src/nightly/state.ts": [
       "src/nightly/state.ts",
-      "src/maintenance/nightly/state.ts"
+      "src/maintenance/nightly/state.ts",
+      "src/automation/maintenance/nightly/state.ts"
     ],
     "src/nightly/timer.ts": [
       "src/nightly/timer.ts",
       "src/maintenance/nightly/timer.ts",
-      "src/maintenance/nightly/schedule/timer.ts"
+      "src/maintenance/nightly/schedule/timer.ts",
+      "src/automation/maintenance/nightly/schedule/timer.ts"
     ],
     "src/nightly/update.ts": [
       "src/nightly/update.ts",
       "src/maintenance/nightly/update.ts",
-      "src/maintenance/nightly/update/update.ts"
+      "src/maintenance/nightly/update/update.ts",
+      "src/automation/maintenance/nightly/update/update.ts"
     ],
     "src/nightly/versions.ts": [
       "src/nightly/versions.ts",
       "src/maintenance/nightly/versions.ts",
-      "src/maintenance/nightly/update/versions.ts"
+      "src/maintenance/nightly/update/versions.ts",
+      "src/automation/maintenance/nightly/update/versions.ts"
     ],
     "src/nightly/window.ts": [
       "src/nightly/window.ts",
       "src/maintenance/nightly/window.ts",
-      "src/maintenance/nightly/schedule/window.ts"
+      "src/maintenance/nightly/schedule/window.ts",
+      "src/automation/maintenance/nightly/schedule/window.ts"
     ],
     "src/activity-delivery.ts": [
       "src/activity-delivery.ts",
@@ -445,22 +479,56 @@
       "src/slack/crew-ui.ts",
       "src/transports/slack/crew-ui.ts"
     ],
-    "src/cron-advanced.ts": ["src/cron-advanced.ts", "src/cron/advanced.ts"],
-    "src/cron-control.ts": ["src/cron-control.ts", "src/cron/control.ts"],
-    "src/cron-decision.ts": ["src/cron-decision.ts", "src/cron/decision.ts"],
-    "src/cron-input.ts": ["src/cron-input.ts", "src/cron/input.ts"],
-    "src/cron-store.ts": ["src/cron-store.ts", "src/cron/store.ts"],
-    "src/cron-ui.ts": ["src/cron-ui.ts", "src/cron/ui.ts"],
-    "src/cron.ts": ["src/cron.ts", "src/cron/index.ts"],
+    "src/cron-advanced.ts": [
+      "src/cron-advanced.ts",
+      "src/cron/advanced.ts",
+      "src/automation/cron/advanced.ts"
+    ],
+    "src/cron-control.ts": [
+      "src/cron-control.ts",
+      "src/cron/control.ts",
+      "src/automation/cron/control.ts"
+    ],
+    "src/cron-decision.ts": [
+      "src/cron-decision.ts",
+      "src/cron/decision.ts",
+      "src/automation/cron/decision.ts"
+    ],
+    "src/cron-input.ts": [
+      "src/cron-input.ts",
+      "src/cron/input.ts",
+      "src/automation/cron/input.ts"
+    ],
+    "src/cron-store.ts": [
+      "src/cron-store.ts",
+      "src/cron/store.ts",
+      "src/automation/cron/store.ts"
+    ],
+    "src/cron-ui.ts": [
+      "src/cron-ui.ts",
+      "src/cron/ui.ts",
+      "src/automation/cron/ui.ts"
+    ],
+    "src/cron.ts": [
+      "src/cron.ts",
+      "src/cron/index.ts",
+      "src/automation/cron/index.ts"
+    ],
     "src/cronjob-config.ts": [
       "src/cronjob-config.ts",
       "src/cron/job-config.ts",
-      "src/cron/config.ts"
+      "src/cron/config.ts",
+      "src/automation/cron/config.ts"
     ],
-    "src/cronjob-files.ts": ["src/cronjob-files.ts", "src/cron/job-files.ts"],
+    "src/cronjob-files.ts": [
+      "src/cronjob-files.ts",
+      "src/cron/job-files.ts",
+      "src/automation/cron/job-files.ts"
+    ],
     "src/cronjob-manager.ts": [
       "src/cronjob-manager.ts",
-      "src/cron/job-manager.ts"
+      "src/cron/job-manager.ts",
+      "src/automation/cron/job-manager.ts"
     ],
     "src/dashboard-branding.ts": [
       "src/dashboard-branding.ts",
@@ -564,15 +632,22 @@
     "src/loopback.ts": ["src/loopback.ts", "src/lib/loopback.ts"],
     "src/maintenance-delivery.ts": [
       "src/maintenance-delivery.ts",
-      "src/maintenance/maintenance-delivery.ts"
+      "src/maintenance/maintenance-delivery.ts",
+      "src/automation/maintenance/maintenance-delivery.ts"
     ],
     "src/maintenance-drain.ts": [
       "src/maintenance-drain.ts",
-      "src/maintenance/maintenance-drain.ts"
+      "src/maintenance/maintenance-drain.ts",
+      "src/automation/maintenance/maintenance-drain.ts"
     ],
     "src/maintenance.ts": [
       "src/maintenance.ts",
-      "src/maintenance/maintenance.ts"
+      "src/maintenance/maintenance.ts",
+      "src/automation/maintenance/maintenance.ts"
+    ],
+    "src/maintenance/nightly/journal-records.ts": [
+      "src/maintenance/nightly/journal-records.ts",
+      "src/automation/maintenance/nightly/journal-records.ts"
     ],
     "src/markdown-chunks.ts": [
       "src/markdown-chunks.ts",
@@ -759,7 +834,8 @@
     ],
     "src/update-notice.ts": [
       "src/update-notice.ts",
-      "src/maintenance/update-notice.ts"
+      "src/maintenance/update-notice.ts",
+      "src/automation/maintenance/update-notice.ts"
     ],
     "src/waiting.ts": ["src/waiting.ts", "src/gateway/waiting.ts"],
     "src/transcribers/azure-openai.ts": [

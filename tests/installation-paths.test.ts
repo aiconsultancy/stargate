@@ -10,7 +10,7 @@ import {
   packageManifest,
   templatesDirectory,
 } from "../src/lib/installation-paths";
-import { packageDirectory } from "../src/maintenance/nightly/update/ready";
+import { packageDirectory } from "../src/automation/maintenance/nightly/update/ready";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 

@@ -3,7 +3,7 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
-import type { MaintenanceNotice } from "../src/maintenance/maintenance";
+import type { MaintenanceNotice } from "../src/automation/maintenance/maintenance";
 import { handleSlackRequest } from "../src/transports/slack/slack";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";

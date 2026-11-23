@@ -51,7 +51,7 @@ import { openStore } from "../src/app/open-store";
 import {
   buildUpdateSnapshot,
   noticeTools,
-} from "../src/maintenance/update-notice";
+} from "../src/automation/maintenance/update-notice";
 import { waitingSettingsPath } from "../src/gateway/waiting";
 import { bot, event, identity } from "./fixtures";
 import { copyCrewDatabase } from "./fixtures/database-reuse";

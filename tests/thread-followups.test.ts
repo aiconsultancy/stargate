@@ -6,7 +6,7 @@ import pino from "pino";
 import type { AgentBackend, SteerResult } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
-import type { DrainControl } from "../src/maintenance/maintenance-drain";
+import type { DrainControl } from "../src/automation/maintenance/maintenance-drain";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";
 import { bot, event, identity } from "./fixtures";

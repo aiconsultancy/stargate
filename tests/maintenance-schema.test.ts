@@ -8,14 +8,14 @@ import { messagePortableSchema } from "../src/crew/messaging/message-tool-input"
 import {
   maintenanceNoticeSchema,
   maintenancePlanSchema,
-} from "../src/maintenance/maintenance";
-import { cleanupItemSchema } from "../src/maintenance/nightly/cleanup/cleanup-config";
+} from "../src/automation/maintenance/maintenance";
+import { cleanupItemSchema } from "../src/automation/maintenance/nightly/cleanup/cleanup-config";
 import {
   noticeSchema,
   reportJsonSchema,
-} from "../src/maintenance/nightly/reports/report";
-import { readState } from "../src/maintenance/nightly/state";
-import { readySchema } from "../src/maintenance/nightly/update/ready";
+} from "../src/automation/maintenance/nightly/reports/report";
+import { readState } from "../src/automation/maintenance/nightly/state";
+import { readySchema } from "../src/automation/maintenance/nightly/update/ready";
 
 // Batch 16 (NET-1806): parity points frozen from the Zod 4.6.7 schemas.
 const root = await mkdtemp(join(tmpdir(), "stargate-maintenance-schema-"));

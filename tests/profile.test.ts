@@ -23,7 +23,7 @@ import {
   teamSchema,
 } from "../src/crew/team";
 import { textMentionInstructions } from "../src/shared/mentions";
-import { nightlyInstructions } from "../src/maintenance/nightly/instructions";
+import { nightlyInstructions } from "../src/automation/maintenance/nightly/instructions";
 import { peerInstructions } from "../src/gateway/peers";
 import { initializeProfile, renderProfile } from "../src/app/profile";
 import { reactionInstructions } from "../src/shared/reactions";
