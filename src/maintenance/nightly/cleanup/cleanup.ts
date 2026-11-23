@@ -45,7 +45,9 @@ const inside = (path: string, root: string) =>
 const overlaps = (a: string, b: string) => inside(a, b) || inside(b, a);
 
 const hasControls = (value: string) =>
-  [...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127);
+  Array.from(value).some(
+    (c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
+  );
 
 class Refusal extends Error {
   public constructor(public readonly reason: CleanupReason) {

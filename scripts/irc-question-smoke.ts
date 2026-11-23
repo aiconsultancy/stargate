@@ -21,11 +21,19 @@ if (!binary) throw new Error("Pass the OpenCode 2.2.7 binary path");
 const home = await mkdtemp(join(tmpdir(), "stargate-question-"));
 let modelCalls = 0;
 
+const isModelRequest = Schema.is(
+  Schema.Struct({
+    messages: Schema.Array(Schema.Struct({ role: Schema.String })),
+  }),
+);
+
 const model = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   async fetch(req) {
-    const body = await req.json();
+    const body: unknown = await req.json();
+
+    if (!isModelRequest(body)) throw new Error("Unexpected model request body");
 
     const answered = body.messages.some(
       (m: { role: string }) => m.role === "tool",
@@ -107,7 +115,7 @@ await writeFile(
       fixture: {
         package: "@opencode/ai/providers/openai-compatible",
         name: "Fixture",
-        settings: { baseURL: model.url + "v1", apiKey: "fixture" },
+        settings: { baseURL: model.url.href + "v1", apiKey: "fixture" },
         models: { fixture: { name: "fixture" } },
       },
     },

@@ -381,7 +381,11 @@ export class PiDurableBackend implements AgentBackend {
     }
   }
 
-  public static async open(config: Config, context: BackendContext) {
+  public static async open(
+    this: void,
+    config: Config,
+    context: BackendContext,
+  ) {
     const models = piModels(config);
     const registry = createRegistry();
 

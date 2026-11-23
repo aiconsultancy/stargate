@@ -241,7 +241,9 @@ export function modelRefs(text: string) {
 
   try {
     walk(JSON.parse(text));
-  } catch {}
+  } catch {
+    // Invalid text keeps the references found before the failure.
+  }
 
   return refs;
 }
@@ -317,7 +319,7 @@ function routesOf(manifest: Json): Route[] {
     manifest["version"] === 1
       ? manifest["routes"]
       : manifest["version"] === 2 && Array.isArray(manifest["tiers"])
-        ? manifest["tiers"].flatMap((tier) =>
+        ? manifest["tiers"].flatMap((tier): Json[] =>
             isObject(tier) && Array.isArray(tier["routes"])
               ? tier["routes"]
               : [],

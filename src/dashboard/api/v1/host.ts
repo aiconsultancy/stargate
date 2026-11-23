@@ -148,7 +148,7 @@ export function startHostMetrics(dataDirectory: string) {
       clearInterval(sampler);
     },
     snapshot: () => latest ?? snapshot(),
-    read() {
+    read(this: void) {
       return (
         reads.pending ??
         reads.start(lifetime.signal, async (signal) => {

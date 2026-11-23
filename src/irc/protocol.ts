@@ -140,7 +140,7 @@ export function formatMessage(
   const entries = tags instanceof Map ? [...tags] : Object.entries(tags);
 
   const tagText = entries
-    .map(([key, value]) => {
+    .map(([key, value]: readonly [string, string]) => {
       if (!tagKey.test(key) || value.includes("\0"))
         throw new Error("Invalid IRC tag");
 

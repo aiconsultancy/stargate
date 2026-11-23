@@ -472,7 +472,7 @@ export class IrcDelivery implements TransportDelivery {
     let name = cleanText(title).trim() || "File";
 
     while (name && utf8Bytes(name) > room)
-      name = [...name].slice(0, -1).join("");
+      name = Array.from(name).slice(0, -1).join("");
 
     if (!name || utf8Bytes(url) > budget)
       throw new Error("IRC file link does not fit one line");

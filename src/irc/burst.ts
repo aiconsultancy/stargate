@@ -47,7 +47,9 @@ export function ircBurstEligible(input: Incoming): boolean {
     !input.gate &&
     !input.deferDelivery &&
     validMsgid(input.thread) &&
-    (input.replyParent == null || validMsgid(input.replyParent))
+    (input.replyParent === null ||
+      input.replyParent === undefined ||
+      validMsgid(input.replyParent))
   );
 }
 

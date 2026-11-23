@@ -94,7 +94,9 @@ modelProperties["op"] = {
     if (!Array.isArray(values) || values.length !== 1)
       throw new Error("Invalid model operation advertisement");
 
-    return { type: "string", const: values[0] };
+    const value: unknown = values[0];
+
+    return { type: "string", const: value };
   }),
 };
 
@@ -103,7 +105,8 @@ for (const [key, property] of Object.entries(modelProperties)) {
     Predicate.isObject(property) &&
     Array.isArray(property["anyOf"]) &&
     property["anyOf"].length === 1 &&
-    property["anyOf"][0]?.type === "boolean"
+    Predicate.isObject(property["anyOf"][0]) &&
+    property["anyOf"][0]["type"] === "boolean"
   )
     modelProperties[key] = property["anyOf"][0];
 }

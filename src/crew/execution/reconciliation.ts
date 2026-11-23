@@ -471,7 +471,8 @@ function verifyInput(message: EvidenceMessage, task: CrewTask): string {
   try {
     const payload = taskEnvelopePayload(message.text);
 
-    if (payload === undefined) throw new Error();
+    if (payload === undefined)
+      throw new Error("Task envelope payload is missing");
 
     const envelope = Schema.decodeUnknownSync(envelopeSchema)(
       JSON.parse(payload),
@@ -492,7 +493,7 @@ function verifyInput(message: EvidenceMessage, task: CrewTask): string {
       metadata.originCaptainID !== task.originCaptainID ||
       message.text === undefined
     )
-      throw new Error();
+      throw new Error("Task envelope does not match the task");
 
     return sha256(message.text);
   } catch {

@@ -122,7 +122,9 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
   const fields = new Map<string, Schema.Constraint[]>();
 
   for (const member of crewInputBranches.members)
-    for (const [key, field] of Object.entries(member.fields)) {
+    for (const [key, field] of Object.entries<Schema.Constraint>(
+      member.fields,
+    )) {
       const variants = fields.get(key) ?? [];
       variants.push(
         Object.hasOwn(field.ast.annotations ?? {}, "default")

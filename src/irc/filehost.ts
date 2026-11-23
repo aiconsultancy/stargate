@@ -81,7 +81,7 @@ function fileName(disposition: string | null, url: URL) {
     name = "";
   }
 
-  const safe = [...name]
+  const safe = Array.from(name)
     .filter(
       (char) =>
         char.charCodeAt(0) >= 32 &&

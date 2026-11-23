@@ -677,7 +677,8 @@ async function readCronFile(path: string): Promise<unknown> {
     try {
       const stat = await file.stat();
 
-      if (!stat.isFile() || stat.size > 65_536) throw new Error();
+      if (!stat.isFile() || stat.size > 65_536)
+        throw new Error("Cron input is not a regular file of at most 64 KiB");
       const buffer = Buffer.alloc(65_537);
       let length = 0;
 
@@ -693,7 +694,7 @@ async function readCronFile(path: string): Promise<unknown> {
         length += bytesRead;
       }
 
-      if (length > 65_536) throw new Error();
+      if (length > 65_536) throw new Error("Cron input exceeds 64 KiB");
 
       return JSON.parse(buffer.subarray(0, length).toString("utf8"));
     } finally {

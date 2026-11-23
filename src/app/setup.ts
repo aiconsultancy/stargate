@@ -226,7 +226,15 @@ export async function readConfiguration(
 
   const apiIssues = settingsIssues(parsed.failure.issue).issues.flatMap(
     ({ path, message }) =>
-      path?.[0] === "api" ? [`${path.join(".")}: ${message}`] : [],
+      path?.[0] === "api"
+        ? [
+            `${path
+              .map((segment) =>
+                typeof segment === "object" ? segment.key : segment,
+              )
+              .join(".")}: ${message}`,
+          ]
+        : [],
   );
 
   throw new Error(apiIssues.length ? apiIssues.join("\n") : invalid);
@@ -352,7 +360,7 @@ export async function setupWizard(configPath: string) {
   let hidden = false;
 
   const output = new Writable({
-    write(chunk, _encoding, callback) {
+    write(chunk: Buffer, _encoding, callback) {
       if (!hidden) process.stdout.write(chunk);
       callback();
     },

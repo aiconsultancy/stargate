@@ -50,7 +50,7 @@ export type IrcRouteContext = {
   replay?: boolean;
   now(): number;
   /** Case folding under the server's CASEMAPPING. */
-  fold(value: string): string;
+  fold(this: void, value: string): string;
   /** Current FILEHOST upload URL; its links become attachments. */
   filehost?: URL | undefined;
 };
@@ -636,7 +636,7 @@ export function ircDispatchAnswerAllowed(
 
 /** Emoji compare without variation selector or skin tone. */
 export function reactionKey(value: string) {
-  return value.replace(/[\u{FE0F}\u{1F3FB}-\u{1F3FF}]/gu, "");
+  return value.replace(/\u{FE0F}|\p{Emoji_Modifier}/gu, "");
 }
 
 export type IrcStopContext = Pick<

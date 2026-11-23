@@ -212,7 +212,7 @@ export class BotFrameworkKeyStore {
       ? metadata["id_token_signing_alg_values_supported"]
       : [];
 
-    const algorithms = offered.filter((alg) => alg === "RS256");
+    const algorithms = offered.filter((alg): alg is "RS256" => alg === "RS256");
 
     if (!algorithms.length)
       throw new Error("OpenID metadata does not offer RS256 signing");

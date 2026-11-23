@@ -470,7 +470,7 @@ function checkedPath(path: string, root?: string) {
       .slice(1)
       .split("/")
       .some((segment) => !segment || segment === "." || segment === "..") ||
-    [...path].some((character) => {
+    Array.from(path).some((character) => {
       const code = character.charCodeAt(0);
 
       return code < 0x20 || code === 0x7f || character === "\\";
@@ -485,7 +485,7 @@ function checkedPath(path: string, root?: string) {
 
 function attachmentName(path: string) {
   let name = basename(path).replace(/[\\/]/g, "_");
-  name = [...name]
+  name = Array.from(name)
     .map((character) => {
       const code = character.charCodeAt(0);
 

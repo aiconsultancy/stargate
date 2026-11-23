@@ -167,7 +167,7 @@ export type RuntimeDependencies = {
     context: BackendContext,
   ): Promise<AgentBackend>;
   /** IRC ship connections; tests shorten the timings. */
-  irc?(config: IrcConfig, store: Store, log: Logger): Promise<IrcShip>;
+  irc?: (config: IrcConfig, store: Store, log: Logger) => Promise<IrcShip>;
   /** Short test-only outage/observation timings; never a host flag. */
   connectionTiming?: { outageMs: number; pollMs: number };
   /** Host maintenance drain. Absent in tests, so nothing touches host state. */

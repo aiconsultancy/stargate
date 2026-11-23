@@ -379,7 +379,8 @@ export class OpenCodeHistory implements SessionHistory {
 
       return decodeSessionPage({
         sessions: page.data.map(sessionInfo),
-        ...(page.cursor.next != null && { cursor: page.cursor.next }),
+        ...(page.cursor.next !== null &&
+          page.cursor.next !== undefined && { cursor: page.cursor.next }),
       });
     });
   }
@@ -414,7 +415,8 @@ export class OpenCodeHistory implements SessionHistory {
 
           return result ? [result] : [];
         }),
-        ...(page.cursor.next != null && { cursor: page.cursor.next }),
+        ...(page.cursor.next !== null &&
+          page.cursor.next !== undefined && { cursor: page.cursor.next }),
       });
     });
   }

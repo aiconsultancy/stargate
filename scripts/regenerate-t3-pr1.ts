@@ -3,7 +3,18 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type * as HardModeConfig from "./hard-mode-config";
+import { Schema } from "effect";
+
+/** Any function can be called with any arguments; its result is unchecked. */
+const callable = (value: unknown): value is (...args: unknown[]) => unknown =>
+  typeof value === "function";
+
+const isHardModeConfig = Schema.is(
+  Schema.Struct({
+    zod: Schema.Array(Schema.String),
+    ignorePatterns: Schema.optional(Schema.Array(Schema.String)),
+  }),
+);
 
 type Finding = { filename: string; labels: [{ span: { offset: number } }] };
 
@@ -157,11 +168,22 @@ async function regenerate(): Promise<void> {
     git("apply", "--index", "--", patch);
   }
 
-  const { hardModeConfig }: typeof HardModeConfig = await import(
-    resolve("scripts/hard-mode-config.ts")
-  );
+  const loaded: unknown = await import(resolve("scripts/hard-mode-config.ts"));
 
-  const { zod, ignorePatterns } = await hardModeConfig();
+  if (
+    typeof loaded !== "object" ||
+    loaded === null ||
+    !("hardModeConfig" in loaded) ||
+    !callable(loaded.hardModeConfig)
+  )
+    throw new Error("scripts/hard-mode-config.ts must export hardModeConfig");
+
+  const config: unknown = await loaded.hardModeConfig();
+
+  if (!isHardModeConfig(config))
+    throw new Error("hardModeConfig returned an unexpected shape");
+
+  const { zod, ignorePatterns } = config;
   const protectedPaths = [...zod, ...fixed];
 
   const protectedBefore = new Map(

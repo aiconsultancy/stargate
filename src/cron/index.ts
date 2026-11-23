@@ -56,10 +56,11 @@ export interface CronDelivery {
 }
 
 export interface CronServices {
-  now?(): number;
+  now?(this: void): number;
   quota?(signal: AbortSignal): Promise<QuotaObservation>;
   model?: CronModelResolver;
   evaluate?(
+    this: void,
     input: { id: string; prompt: string } & Pick<
       CronAdvanced,
       "model" | "arbiter"
@@ -296,7 +297,8 @@ export class CronScheduler {
           signal,
         );
 
-        if (!/^\d+\.\d+$/.test(thread)) throw new Error();
+        if (!/^\d+\.\d+$/.test(thread))
+          throw new Error("Slack returned an invalid thread timestamp");
       } catch {
         this.store.finish(run.id, "failed");
         this.log.warn(
