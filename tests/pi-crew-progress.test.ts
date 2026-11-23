@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type {
@@ -19,6 +18,7 @@ import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi/pi-worker";
 import { CrewState, type CrewTask } from "../src/crew/execution/state";
 import { teamSchema } from "../src/crew/team";
+import { fixtureRoot } from "./fixture-root";
 
 class Clock {
   private now = 0;
@@ -80,7 +80,7 @@ function assistant(
 }
 
 async function fixture(report = false) {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-progress-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-pi-progress-"));
   const state = await CrewState.open(directory, "progress", "identity");
   const clock = new Clock();
 

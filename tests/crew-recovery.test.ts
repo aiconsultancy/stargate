@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CrewEngine,
@@ -11,11 +10,13 @@ import {
 import type { MesijMessage } from "../src/crew/messaging/mesij";
 import type { ResultAPI, ResultMessage } from "../src/crew/execution/result";
 import type { CrewTask } from "../src/crew/execution/state";
+import { tmpdir } from "node:os";
+import { fixtureRoot } from "./fixture-root";
 
 const diskIntegrationTimeoutMs = 30_000;
 
-async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-recovery-"));
+async function fixture(root = fixtureRoot()) {
+  const directory = await mkdtemp(join(root, "stargate-recovery-"));
 
   const options = {
     namespace: "recovery",
@@ -555,7 +556,7 @@ test("notification reservation prevents slot reuse while the ended turn is colle
 test(
   "completion after the busy probe keeps admitted steer task-marked and never resumes it",
   async () => {
-    const f = await fixture();
+    const f = await fixture(tmpdir());
 
     try {
       const task = await f.dispatch();

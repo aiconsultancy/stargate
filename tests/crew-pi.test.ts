@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import type { TextSink } from "../src/backends/backend";
@@ -25,6 +24,7 @@ import {
   type PiWorkerFactory,
 } from "../src/crew/pi/pi-worker";
 import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
+import { fixtureRoot } from "./fixture-root";
 
 function twikiTeam(): Team {
   return Schema.decodeUnknownSync(teamSchema)({
@@ -47,7 +47,7 @@ function twikiTeam(): Team {
 }
 
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-crew-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-pi-crew-"));
   const team = twikiTeam();
 
   const options: CrewOptions = {

@@ -1,12 +1,12 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readInputOrigin } from "../src/crew/execution/origin";
 import type { ResultAPI, ResultMessage } from "../src/crew/execution/result";
 import { CrewState } from "../src/crew/execution/state";
 import { inputBoundary } from "../src/backends/opencode/input-boundary";
+import { fixtureRoot } from "./fixture-root";
 
 const message = (
   id: string,
@@ -319,7 +319,7 @@ test("crew ancestry bounds unique history pages without walking past the ceiling
 });
 
 test("crew queued origin survives restart and promotion without changing identity", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-origin-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-origin-"));
   let state = await CrewState.open(directory, "origin", "identity");
 
   try {
@@ -359,7 +359,10 @@ test("crew queued origin survives restart and promotion without changing identit
 });
 
 test("crew origin migration leaves original task and pending rows untagged", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-origin-migrate-"));
+  const directory = await mkdtemp(
+    join(fixtureRoot(), "stargate-origin-migrate-"),
+  );
+
   let state = await CrewState.open(directory, "origin", "identity");
 
   try {

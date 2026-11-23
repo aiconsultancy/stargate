@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import {
@@ -14,11 +13,12 @@ import { IrcSessions } from "../src/crew/messaging/irc";
 import type { MesijClient, MesijMessage } from "../src/crew/messaging/mesij";
 import { teamSchema } from "../src/crew/team";
 import { outboxFixture, outboxNow } from "./fixtures/irc-outbox";
+import { fixtureRoot } from "./fixture-root";
 
 const pin = "ses_captainpin";
 
 async function fixture(options: { pinned?: boolean } = {}) {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-crew-irc-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-crew-irc-"));
 
   const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "captain" },
@@ -432,7 +432,7 @@ test("crew irc outbox: every stored stargate_dm is listed once, in order; mail i
 });
 
 test("crew irc outbox: bounded by count and age", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-outbox-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-outbox-"));
   await copyFile(outboxFixture, join(directory, "outbox.sqlite"));
 
   const db = new Database(join(directory, "outbox.sqlite"), {

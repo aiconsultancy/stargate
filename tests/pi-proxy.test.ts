@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BACKGROUND_CONTEXT,
@@ -27,6 +26,7 @@ import { PiCrewWorkers, type PiWorkerFactory } from "../src/crew/pi/pi-worker";
 import { CrewState, type CrewTask } from "../src/crew/execution/state";
 import { teamSchema } from "../src/crew/team";
 import { BackendFailure } from "../src/shared/request-failure";
+import { fixtureRoot } from "./fixture-root";
 
 const apiKeyEnv = "STARGATE_PI_PROXY_TEST_KEY";
 const model = "openai/opencode-go/deepseek-v4.1-flash";
@@ -103,7 +103,7 @@ function completion(text = "Proxy answer") {
 }
 
 test("Pi proxy sends chat tools, safe auth and persisted conversation headers", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-proxy-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-pi-proxy-"));
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "local-proxy-test-only";
 
@@ -258,7 +258,7 @@ test("Pi proxy fails closed on missing auth or unsupported model", async () => {
 });
 
 test("Pi cancellation closes the underlying proxy stream", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-cancel-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-pi-cancel-"));
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "local-proxy-test-only";
   const started = Promise.withResolvers<void>();
@@ -325,7 +325,10 @@ for (const cancelQueued of [false, true]) {
       ? "Pi queued cancellation preserves the prior native run"
       : "Pi queued follow-up streams and returns only its own answer",
     async () => {
-      const directory = await mkdtemp(join(tmpdir(), "stargate-pi-follow-up-"));
+      const directory = await mkdtemp(
+        join(fixtureRoot(), "stargate-pi-follow-up-"),
+      );
+
       const previous = process.env[apiKeyEnv];
       process.env[apiKeyEnv] = "local-proxy-test-only";
       const priorStarted = Promise.withResolvers<void>();
@@ -493,7 +496,10 @@ for (const cancelQueued of [false, true]) {
 for (const placement of ["queued", "placed", "unreadable"] as const) {
   for (const aborted of [false, true]) {
     test(`Pi recovers ${placement} admission after ${aborted ? "abort" : "lost handle"}`, async () => {
-      const directory = await mkdtemp(join(tmpdir(), "stargate-pi-admission-"));
+      const directory = await mkdtemp(
+        join(fixtureRoot(), "stargate-pi-admission-"),
+      );
+
       const previous = process.env[apiKeyEnv];
       process.env[apiKeyEnv] = "local-proxy-test-only";
       const started = Promise.withResolvers<void>();
@@ -638,7 +644,10 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
 
 for (const report of [false, true]) {
   test(`Pi ${report ? "report" : "maintenance"} recovers committed answer after lost crew completion without opening runtime`, async () => {
-    const directory = await mkdtemp(join(tmpdir(), "stargate-pi-receipt-"));
+    const directory = await mkdtemp(
+      join(fixtureRoot(), "stargate-pi-receipt-"),
+    );
+
     const previous = process.env[apiKeyEnv];
     process.env[apiKeyEnv] = "local-test-only";
     let state = await CrewState.open(directory, "receipt", "identity");
@@ -798,7 +807,7 @@ for (const report of [false, true]) {
 }
 
 test("Pi receipt inspection leaves placed, queued and unanswered native work unchanged", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-readonly-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-pi-readonly-"));
   const path = `${directory}/pi.sqlite`;
   const storage = await openNodeSqliteStorage(path);
 
@@ -943,7 +952,7 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
 });
 
 test("Pi maps the proxy's answer to one shared failure category", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-failure-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-pi-failure-"));
   const previous = process.env[apiKeyEnv];
   process.env[apiKeyEnv] = "local-proxy-test-only";
   // The next answers of the proxy: a status, "tool" for a tool call, or

@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import pino from "pino";
@@ -22,13 +21,16 @@ import {
   historyTaskID,
   statusHistoryFixture,
 } from "./fixtures/database-reuse";
+import { fixtureRoot } from "./fixture-root";
 
 export type CrewUIAckCompatibility<
   T extends SlackAck = Parameters<CrewUI["command"]>[1],
 > = T;
 
 async function fixture(history = false) {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-member-status-"));
+  const directory = await mkdtemp(
+    join(fixtureRoot(), "stargate-member-status-"),
+  );
 
   const team = Schema.decodeUnknownSync(teamSchema)({
     captain: { id: "adama" },

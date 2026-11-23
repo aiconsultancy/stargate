@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { CrewHistoryRPC } from "../src/crew/history/history-rpc";
@@ -12,13 +11,15 @@ import {
   historySessionPageSchema,
   type SessionHistory,
 } from "../src/shared/session-history";
+import { tmpdir } from "node:os";
+import { fixtureRoot } from "./fixture-root";
 
 const signal = () => new AbortController().signal;
 const unavailable = "Pi history unavailable or cancelled.";
 const diskIntegrationTimeoutMs = 30_000;
 
-async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-crew-history-"));
+async function fixture(parent = fixtureRoot()) {
+  const directory = await mkdtemp(join(parent, "stargate-crew-history-"));
   const state = await CrewState.open(directory, "history", "identity");
 
   const team = Schema.decodeUnknownSync(teamSchema)({
@@ -257,7 +258,7 @@ test("history RPC authorizes every describe, children and entry ID before reads"
 test(
   "history RPC pages recorded task/report children, excludes main and duplicates",
   async () => {
-    const f = await fixture();
+    const f = await fixture(tmpdir());
 
     try {
       const before = f.snapshot();
@@ -427,7 +428,10 @@ test("history RPC abort uses fixed errors and never reads state or transcripts",
 });
 
 test("Pi history reuses the shared live pool and never opens a second runtime", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-live-history-"));
+  const directory = await mkdtemp(
+    join(fixtureRoot(), "stargate-live-history-"),
+  );
+
   const state = await CrewState.open(directory, "history-pool", "identity");
 
   const member: CrewMember = {
@@ -514,7 +518,10 @@ test("Pi history reuses the shared live pool and never opens a second runtime", 
 });
 
 test("Pi history owner shutdown cancels active reads without interrupting work", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-history-cancel-"));
+  const directory = await mkdtemp(
+    join(fixtureRoot(), "stargate-history-cancel-"),
+  );
+
   const state = await CrewState.open(directory, "history-cancel", "identity");
 
   const member = Schema.decodeUnknownSync(teamSchema)({

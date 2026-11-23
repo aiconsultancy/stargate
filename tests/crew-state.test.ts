@@ -3,13 +3,14 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { fixtureRoot } from "./fixture-root";
 import { join } from "node:path";
 import { CrewState, pendingTaskLimit } from "../src/crew/execution/state";
 
 const diskIntegrationTimeoutMs = 30_000;
 
 test("worker locations observe a gateway poll only for the same daemon and pinned captain", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-crew-state-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-crew-state-"));
 
   const options = [
     directory,
@@ -48,7 +49,7 @@ test("worker locations observe a gateway poll only for the same daemon and pinne
 });
 
 test("legacy state upgrades identity without replacing peers, results or cursors", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "stargate-crew-state-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-crew-state-"));
   const namespace = "legacy";
 
   const path = join(

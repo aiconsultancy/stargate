@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { crewOpenCodeInput } from "../src/crew/input/crew-tool-input";
@@ -21,6 +20,7 @@ import { profileTeam, teamSchema } from "../src/crew/team";
 import { workspaceInputSchemas } from "../src/crew/workspace/workspace";
 import { renderProfile } from "../src/app/profile";
 import { decodeSettings } from "../src/config/settings-errors";
+import { fixtureRoot } from "./fixture-root";
 
 const rawTeam = {
   captain: { id: "cain" },
@@ -105,7 +105,10 @@ test("crew decoding preserves legacy fingerprint bytes and persisted identity", 
   });
 
   expect(actual).toBe(fingerprint);
-  const directory = await mkdtemp(join(tmpdir(), "stargate-identity-schema-"));
+
+  const directory = await mkdtemp(
+    join(fixtureRoot(), "stargate-identity-schema-"),
+  );
 
   try {
     const before = await CrewState.open(directory, "fixture", fingerprint);

@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CrewCaller } from "../src/crew/execution/engine";
 import { CrewQuestions } from "../src/crew/questions/questions";
@@ -11,6 +10,7 @@ import type {
   NativeQuestion,
   QuestionAnswer,
 } from "../src/questions/questions";
+import { fixtureRoot } from "./fixture-root";
 
 const cleanup: (() => Promise<void>)[] = [];
 
@@ -21,7 +21,7 @@ afterEach(async () => {
 const signal = new AbortController().signal;
 
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "crew-questions-"));
+  const directory = await mkdtemp(join(fixtureRoot(), "crew-questions-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   let state = await CrewState.open(directory, "questions", "identity");
   cleanup.push(async () => state.close());

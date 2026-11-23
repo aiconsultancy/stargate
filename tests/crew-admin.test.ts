@@ -9,6 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { fixtureRoot } from "./fixture-root";
 import { join } from "node:path";
 import {
   CrewEngine,
@@ -56,7 +57,10 @@ function git(directory: string, ...args: string[]) {
 async function fixture(
   options: { repository?: boolean; exclusiveWorkerInput?: boolean } = {},
 ) {
-  const base = await mkdtemp(join(tmpdir(), "stargate-admin-"));
+  const base = await mkdtemp(
+    join(options.repository ? tmpdir() : fixtureRoot(), "stargate-admin-"),
+  );
+
   const project = join(base, "project");
 
   const worktrees = Object.fromEntries(
@@ -1467,7 +1471,7 @@ test("workspace mutation is blocked by active work, held controls, slot races an
 });
 
 test("Pi status adopts only the bound committed answer after restart; abandoned tasks stay released", async () => {
-  const base = await mkdtemp(join(tmpdir(), "stargate-admin-pi-"));
+  const base = await mkdtemp(join(fixtureRoot(), "stargate-admin-pi-"));
   const answers = new Map<string, string>();
   const requests: string[] = [];
 
