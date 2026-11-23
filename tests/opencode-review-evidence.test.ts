@@ -6,8 +6,11 @@ import { backendSchema } from "../src/config";
 import {
   type FleetReviewBinding,
   reviewBindingSchema,
-} from "../src/fleet/protocol";
-import { reviewContextPrompt, reviewNativePrompt } from "../src/fleet/reviews";
+} from "../src/coordination/fleet/protocol";
+import {
+  reviewContextPrompt,
+  reviewNativePrompt,
+} from "../src/coordination/fleet/reviews";
 import { zodStringRecord } from "./fixtures/zod-string-record";
 
 const diff =

@@ -1,6 +1,6 @@
 import { Option, Schema } from "effect";
-import { isNativeInstructionContext } from "../../crew/instruction-context";
-import { crewMessageMetadataKey } from "../../crew/message-protocol";
+import { isNativeInstructionContext } from "../../coordination/crew/instruction-context";
+import { crewMessageMetadataKey } from "../../coordination/crew/message-protocol";
 
 const decodeCrewOrigin = Schema.decodeUnknownOption(
   Schema.Struct({

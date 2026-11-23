@@ -6,7 +6,7 @@ import {
   type TeamsConfig,
   effectiveIrcConfig,
 } from "../../config";
-import type { FleetCrewStatus } from "../../crew/reporting/fleet-status";
+import type { FleetCrewStatus } from "../../coordination/crew/reporting/fleet-status";
 import type { CrewStatus, CrewStatusInput } from "../../shared/crew-status";
 import type {
   DashboardCaptain,

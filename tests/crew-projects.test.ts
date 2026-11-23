@@ -14,24 +14,27 @@ import type { Plugin as EffectPlugin } from "@opencode/plugin/effect";
 import { Agent, Session, SessionMessage } from "@opencode/schema";
 import { Tool } from "@opencode/schema/tool";
 import { Effect, Exit, Result, Schema, Scope } from "effect";
-import { crewOpenCodeInput } from "../src/crew/input/crew-tool-input";
+import { crewOpenCodeInput } from "../src/coordination/crew/input/crew-tool-input";
 import {
   CrewEngine,
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/execution/engine";
-import { fleetCrewStatusSchema } from "../src/crew/reporting/fleet-status";
-import { journalInputSchema } from "../src/crew/reporting/journal";
-import type { MesijClient, MesijMessage } from "../src/crew/messaging/mesij";
+} from "../src/coordination/crew/execution/engine";
+import { fleetCrewStatusSchema } from "../src/coordination/crew/reporting/fleet-status";
+import { journalInputSchema } from "../src/coordination/crew/reporting/journal";
+import type {
+  MesijClient,
+  MesijMessage,
+} from "../src/coordination/crew/messaging/mesij";
 import plugin from "../src/crew/plugin";
 import {
   effectProjectKeySchema,
   effectProjectToolInput,
   projectsSchema,
-} from "../src/crew/input/project-options";
-import { CrewProjects } from "../src/crew/workspace/projects";
-import { teamSchema } from "../src/crew/team";
+} from "../src/coordination/crew/input/project-options";
+import { CrewProjects } from "../src/coordination/crew/workspace/projects";
+import { teamSchema } from "../src/coordination/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
 import { CronStore } from "../src/automation/cron/store";
 import { dashboardSource } from "../src/observability/dashboard/dashboard-source";

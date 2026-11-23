@@ -12,9 +12,9 @@ import {
   type CronArbiterFactory,
   type CronExecutionAPI,
   type CronExecutionAuthority,
-} from "../src/crew/cron/cron-execution";
-import type { CrewSession } from "../src/crew/execution/engine";
-import { defaultTeam } from "../src/crew/team";
+} from "../src/coordination/crew/cron/cron-execution";
+import type { CrewSession } from "../src/coordination/crew/execution/engine";
+import { defaultTeam } from "../src/coordination/crew/team";
 import {
   cronDecision,
   cronEvaluateInputSchema,

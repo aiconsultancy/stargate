@@ -10,7 +10,7 @@ import type {
   StandardSchemaV1,
 } from "effect/StandardSchema";
 import { installFleetTools } from "../src/fleet/plugin";
-import * as protocol from "../src/fleet/protocol";
+import * as protocol from "../src/coordination/fleet/protocol";
 import { settingsIssues } from "../src/config/settings-schema";
 import { openStore } from "../src/app/open-store";
 

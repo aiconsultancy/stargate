@@ -10,7 +10,7 @@ import { JsonSchema, Schema } from "effect";
 import type { StandardJSONSchemaV1 } from "effect/StandardSchema";
 import { settingsInputAdvertisement } from "../config/settings-legacy";
 import { settingsDefault, settingsStruct } from "../config/settings-schema";
-import { fleetRequest } from "./client";
+import { fleetRequest } from "../coordination/fleet/client";
 import {
   callerSchema,
   dispatchInputSchema,
@@ -21,7 +21,7 @@ import {
   reviewInputSchema,
   statusInputSchema,
   verifyInputSchema,
-} from "./protocol";
+} from "../coordination/fleet/protocol";
 
 const optionsSchema = settingsStruct({
   socketPath: Schema.String.check(

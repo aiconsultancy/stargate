@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
-import { connectHistoryAPI, historyVisible } from "../src/crew/history/api";
-import { defaultTeam, profileTeam } from "../src/crew/team";
+import {
+  connectHistoryAPI,
+  historyVisible,
+} from "../src/coordination/crew/history/api";
+import { defaultTeam, profileTeam } from "../src/coordination/crew/team";
 
 test("history scope excludes other teams and requires explicit project access", () => {
   const options = {

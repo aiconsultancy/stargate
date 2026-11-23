@@ -9,21 +9,25 @@ import {
   type CrewOptions,
   type CrewSession,
   type CrewSessions,
-} from "../src/crew/execution/engine";
-import { canExpandCrew } from "../src/crew/execution/identity";
-import { piDefinitionPath } from "../src/crew/instructions";
+} from "../src/coordination/crew/execution/engine";
+import { canExpandCrew } from "../src/coordination/crew/execution/identity";
+import { piDefinitionPath } from "../src/coordination/crew/instructions";
 import type {
   MesijInbox,
   MesijMessage,
   MesijSend,
-} from "../src/crew/messaging/mesij";
-import type { PiCrewBinding } from "../src/crew/pi/pi-extension";
+} from "../src/coordination/crew/messaging/mesij";
+import type { PiCrewBinding } from "../src/coordination/crew/pi/pi-extension";
 import {
   PiCrewWorkers,
   type PiWorkerBackend,
   type PiWorkerFactory,
-} from "../src/crew/pi/pi-worker";
-import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
+} from "../src/coordination/crew/pi/pi-worker";
+import {
+  defaultTeam,
+  type Team,
+  teamSchema,
+} from "../src/coordination/crew/team";
 import { fixtureRoot } from "./fixture-root";
 
 function twikiTeam(): Team {

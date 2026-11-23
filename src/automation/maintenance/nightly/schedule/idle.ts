@@ -1,7 +1,10 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { queuedPendingTask, reportTask } from "../../../../crew/pending";
+import {
+  queuedPendingTask,
+  reportTask,
+} from "../../../../coordination/crew/pending";
 import { activeRuns } from "../../../cron/store";
 import type { MaintenanceDrain } from "../../maintenance-drain";
 import { unfinishedJobs } from "../../../../gateway/store";

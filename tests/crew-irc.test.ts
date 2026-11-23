@@ -8,10 +8,13 @@ import {
   CrewEngine,
   type CrewOptions,
   type CrewSessions,
-} from "../src/crew/execution/engine";
-import { IrcSessions } from "../src/crew/messaging/irc";
-import type { MesijClient, MesijMessage } from "../src/crew/messaging/mesij";
-import { teamSchema } from "../src/crew/team";
+} from "../src/coordination/crew/execution/engine";
+import { IrcSessions } from "../src/coordination/crew/messaging/irc";
+import type {
+  MesijClient,
+  MesijMessage,
+} from "../src/coordination/crew/messaging/mesij";
+import { teamSchema } from "../src/coordination/crew/team";
 import { outboxFixture, outboxNow } from "./fixtures/irc-outbox";
 import { fixtureRoot } from "./fixture-root";
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { piMemberDefinition } from "../src/crew/instructions";
+import { piMemberDefinition } from "../src/coordination/crew/instructions";
 
 test("OpenCode and Pi crew definitions include the two short coordination rules", async () => {
   const template = await readFile(

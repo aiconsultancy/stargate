@@ -9,9 +9,9 @@ import {
   CrewEngine,
   type CrewOptions,
   type CrewSessions,
-} from "../src/crew/execution/engine";
-import { MemberActivityStore } from "../src/crew/reporting/member-activity";
-import { teamSchema } from "../src/crew/team";
+} from "../src/coordination/crew/execution/engine";
+import { MemberActivityStore } from "../src/coordination/crew/reporting/member-activity";
+import { teamSchema } from "../src/coordination/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
 import { CrewUI, crewStatusView } from "../src/transports/slack/crew-ui";
 import type { CronView, SlackAck } from "../src/automation/cron/ui";

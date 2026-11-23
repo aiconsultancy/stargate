@@ -9,16 +9,25 @@ import {
   effectiveIrcConfig,
   secret,
 } from "../../config";
-import { type OutboxPage, outboxMaxAgeMs } from "../../crew/messaging/irc-rpc";
+import {
+  type OutboxPage,
+  outboxMaxAgeMs,
+} from "../../coordination/crew/messaging/irc-rpc";
 import {
   dispatchRequestTurn,
   ircDispatchOffer,
   isRearAdmiral,
 } from "../../dispatch/irc";
 import { dispatchTag } from "../../dispatch/protocol";
-import type { DispatchOffer, FleetSource } from "../../fleet/protocol";
-import { fleetAuthority, fleetInstructions } from "../../fleet/fleet-policy";
-import { fleetSourceReference } from "../../fleet/fleet-source";
+import type {
+  DispatchOffer,
+  FleetSource,
+} from "../../coordination/fleet/protocol";
+import {
+  fleetAuthority,
+  fleetInstructions,
+} from "../../coordination/fleet/fleet-policy";
+import { fleetSourceReference } from "../../coordination/fleet/fleet-source";
 import type { GatewayConfig } from "../../gateway/gateway";
 import type { GatewayTransport } from "../../gateway/ports";
 import {

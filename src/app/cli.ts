@@ -6,7 +6,7 @@ import { Result, Schema } from "effect";
 import { apiToken } from "../observability/dashboard/api/v1/token";
 import { checkCodexConfiguration } from "../backends/codex-paths";
 import { loadConfig } from "../config";
-import { teamSchema } from "../crew/team";
+import { teamSchema } from "../coordination/crew/team";
 import {
   cronOperationSchema,
   runCronOperation,

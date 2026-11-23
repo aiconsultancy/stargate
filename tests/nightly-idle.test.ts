@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { CrewState } from "../src/crew/execution/state";
+import { CrewState } from "../src/coordination/crew/execution/state";
 import { type CronRun, CronStore } from "../src/automation/cron/store";
 import { maintenanceSchema } from "../src/automation/maintenance/nightly/config";
 import {

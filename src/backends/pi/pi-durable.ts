@@ -38,8 +38,8 @@ import type { Attachment } from "../../attachments/attachments";
 import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import { type BackendConfig, secret } from "../../config";
 import { redactCredentials } from "../../lib/credentials";
-import { workingAgreementNotice } from "../../crew/instructions";
-import { piCrewExtension } from "../../crew/pi/pi-extension";
+import { workingAgreementNotice } from "../../coordination/crew/instructions";
+import { piCrewExtension } from "../../coordination/crew/pi/pi-extension";
 import {
   type PiModelSettings,
   piClaudeProxyModel,

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Predicate, Result, Schema } from "effect";
 import { crewActivitySchema } from "../src/activity/activity";
-import { captainPostSchema } from "../src/captain-post/config";
+import { captainPostSchema } from "../src/coordination/captain/config";
 import {
   backendSchema,
   botSchema,
@@ -18,10 +18,10 @@ import {
   piDurableBackendSchema,
   teamsSchema,
 } from "../src/config";
-import { cronToolInput } from "../src/crew/cron/cron";
+import { cronToolInput } from "../src/coordination/crew/cron/cron";
 import { cronjobsSchema } from "../src/automation/cron/config";
-import { fleetControlSchema } from "../src/fleet/protocol";
-import { fleetPolicySchema } from "../src/fleet/fleet-policy";
+import { fleetControlSchema } from "../src/coordination/fleet/protocol";
+import { fleetPolicySchema } from "../src/coordination/fleet/fleet-policy";
 import { healthConfigSchema } from "../src/observability/health/config";
 import {
   mentionNameSchema,

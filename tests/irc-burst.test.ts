@@ -8,9 +8,9 @@ import type {
   PromptSourceContext,
 } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
-import { FleetLedger } from "../src/fleet/ledger";
-import { fleetOrigin } from "../src/fleet/results";
-import { fleetSourceReference } from "../src/fleet/fleet-source";
+import { FleetLedger } from "../src/coordination/fleet/ledger";
+import { fleetOrigin } from "../src/coordination/fleet/results";
+import { fleetSourceReference } from "../src/coordination/fleet/fleet-source";
 import { Gateway } from "../src/gateway/gateway";
 import { ircBurstLimits } from "../src/transports/irc/burst";
 import {

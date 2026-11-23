@@ -1,5 +1,8 @@
 import { Schema } from "effect";
-import { fleetJobSchema, nativeMakerSchema } from "../fleet/protocol";
+import {
+  fleetJobSchema,
+  nativeMakerSchema,
+} from "../coordination/fleet/protocol";
 import { notificationContextSchema } from "../notifications/preferences/notifications";
 import { inboundReactionSchema } from "../shared/reactions";
 import type { Job } from "./store-types";

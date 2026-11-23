@@ -4,9 +4,9 @@ import {
   fleetRequestAction,
   fleetRequestAllowed,
   validateFleetPermissions,
-} from "../src/fleet/permissions";
-import type { FleetRequest } from "../src/fleet/protocol";
-import { fleetPermissions } from "../src/fleet/fleet-policy";
+} from "../src/coordination/fleet/permissions";
+import type { FleetRequest } from "../src/coordination/fleet/protocol";
+import { fleetPermissions } from "../src/coordination/fleet/fleet-policy";
 
 const caller = {
   sessionID: "ses_agent",

@@ -35,10 +35,10 @@ import { redactCredentials } from "../../lib/credentials";
 import {
   type FleetCrewStatus,
   fleetCrewStatusSchema,
-} from "../../crew/reporting/fleet-status";
-import { isNativeInstructionContext } from "../../crew/instruction-context";
-import { crewMessageMetadataKey } from "../../crew/message-protocol";
-import { CrewReporting } from "../../crew/reporting/report-rpc";
+} from "../../coordination/crew/reporting/fleet-status";
+import { isNativeInstructionContext } from "../../coordination/crew/instruction-context";
+import { crewMessageMetadataKey } from "../../coordination/crew/message-protocol";
+import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
 import {
   type CrewStatusInput,
   crewStatusSchema,
@@ -51,8 +51,11 @@ import type {
   FleetReviewBinding,
   FleetReviewEvidence,
   NativeMaker,
-} from "../../fleet/protocol";
-import { reviewContextPrompt, reviewNativePrompt } from "../../fleet/reviews";
+} from "../../coordination/fleet/protocol";
+import {
+  reviewContextPrompt,
+  reviewNativePrompt,
+} from "../../coordination/fleet/reviews";
 import {
   InputBoundaryFold,
   type InputBoundaryRecord,

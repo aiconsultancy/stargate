@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 import { Result, Schema } from "effect";
-import { crewPermissions } from "../src/crew/execution/policy";
-import { defaultTeam, type Team, teamSchema } from "../src/crew/team";
+import { crewPermissions } from "../src/coordination/crew/execution/policy";
+import {
+  defaultTeam,
+  type Team,
+  teamSchema,
+} from "../src/coordination/crew/team";
 
 const team = {
   captain: { id: "galactica-captain", name: "Galactica Captain" },

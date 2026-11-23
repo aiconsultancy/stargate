@@ -4,116 +4,163 @@
   "aliases": {
     "src/crew/messaging.ts": [
       "src/crew/messaging.ts",
-      "src/crew/messaging/messaging.ts"
+      "src/crew/messaging/messaging.ts",
+      "src/coordination/crew/messaging/messaging.ts"
     ],
     "src/crew/message-tool-input.ts": [
       "src/crew/message-tool-input.ts",
-      "src/crew/messaging/message-tool-input.ts"
+      "src/crew/messaging/message-tool-input.ts",
+      "src/coordination/crew/messaging/message-tool-input.ts"
     ],
-    "src/crew/mesij.ts": ["src/crew/mesij.ts", "src/crew/messaging/mesij.ts"],
-    "src/crew/irc.ts": ["src/crew/irc.ts", "src/crew/messaging/irc.ts"],
+    "src/crew/mesij.ts": [
+      "src/crew/mesij.ts",
+      "src/crew/messaging/mesij.ts",
+      "src/coordination/crew/messaging/mesij.ts"
+    ],
+    "src/crew/irc.ts": [
+      "src/crew/irc.ts",
+      "src/crew/messaging/irc.ts",
+      "src/coordination/crew/messaging/irc.ts"
+    ],
     "src/crew/irc-rpc.ts": [
       "src/crew/irc-rpc.ts",
-      "src/crew/messaging/irc-rpc.ts"
+      "src/crew/messaging/irc-rpc.ts",
+      "src/coordination/crew/messaging/irc-rpc.ts"
     ],
     "src/crew/pi-worker.ts": [
       "src/crew/pi-worker.ts",
-      "src/crew/pi/pi-worker.ts"
+      "src/crew/pi/pi-worker.ts",
+      "src/coordination/crew/pi/pi-worker.ts"
     ],
     "src/crew/pi-extension.ts": [
       "src/crew/pi-extension.ts",
-      "src/crew/pi/pi-extension.ts"
+      "src/crew/pi/pi-extension.ts",
+      "src/coordination/crew/pi/pi-extension.ts"
     ],
-    "src/crew/state.ts": ["src/crew/state.ts", "src/crew/execution/state.ts"],
+    "src/crew/state.ts": [
+      "src/crew/state.ts",
+      "src/crew/execution/state.ts",
+      "src/coordination/crew/execution/state.ts"
+    ],
     "src/crew/shell-context.ts": [
       "src/crew/shell-context.ts",
-      "src/crew/execution/shell-context.ts"
+      "src/crew/execution/shell-context.ts",
+      "src/coordination/crew/execution/shell-context.ts"
     ],
     "src/crew/result.ts": [
       "src/crew/result.ts",
-      "src/crew/execution/result.ts"
+      "src/crew/execution/result.ts",
+      "src/coordination/crew/execution/result.ts"
     ],
     "src/crew/recovery-rpc.ts": [
       "src/crew/recovery-rpc.ts",
-      "src/crew/execution/recovery-rpc.ts"
+      "src/crew/execution/recovery-rpc.ts",
+      "src/coordination/crew/execution/recovery-rpc.ts"
     ],
     "src/crew/reconciliation.ts": [
       "src/crew/reconciliation.ts",
-      "src/crew/execution/reconciliation.ts"
+      "src/crew/execution/reconciliation.ts",
+      "src/coordination/crew/execution/reconciliation.ts"
     ],
     "src/crew/policy.ts": [
       "src/crew/policy.ts",
-      "src/crew/execution/policy.ts"
+      "src/crew/execution/policy.ts",
+      "src/coordination/crew/execution/policy.ts"
     ],
     "src/crew/origin.ts": [
       "src/crew/origin.ts",
-      "src/crew/execution/origin.ts"
+      "src/crew/execution/origin.ts",
+      "src/coordination/crew/execution/origin.ts"
     ],
     "src/crew/native-wait.ts": [
       "src/crew/native-wait.ts",
-      "src/crew/execution/native-wait.ts"
+      "src/crew/execution/native-wait.ts",
+      "src/coordination/crew/execution/native-wait.ts"
     ],
     "src/crew/identity.ts": [
       "src/crew/identity.ts",
-      "src/crew/execution/identity.ts"
+      "src/crew/execution/identity.ts",
+      "src/coordination/crew/execution/identity.ts"
     ],
     "src/crew/engine.ts": [
       "src/crew/engine.ts",
-      "src/crew/execution/engine.ts"
+      "src/crew/execution/engine.ts",
+      "src/coordination/crew/execution/engine.ts"
     ],
     "src/crew/reporting.ts": [
       "src/crew/reporting.ts",
-      "src/crew/reporting/reporting.ts"
+      "src/crew/reporting/reporting.ts",
+      "src/coordination/crew/reporting/reporting.ts"
     ],
     "src/crew/report-rpc.ts": [
       "src/crew/report-rpc.ts",
-      "src/crew/reporting/report-rpc.ts"
+      "src/crew/reporting/report-rpc.ts",
+      "src/coordination/crew/reporting/report-rpc.ts"
     ],
     "src/crew/member-activity.ts": [
       "src/crew/member-activity.ts",
-      "src/crew/reporting/member-activity.ts"
+      "src/crew/reporting/member-activity.ts",
+      "src/coordination/crew/reporting/member-activity.ts"
     ],
     "src/crew/journal.ts": [
       "src/crew/journal.ts",
-      "src/crew/reporting/journal.ts"
+      "src/crew/reporting/journal.ts",
+      "src/coordination/crew/reporting/journal.ts"
     ],
     "src/crew/fleet-status.ts": [
       "src/crew/fleet-status.ts",
-      "src/crew/reporting/fleet-status.ts"
+      "src/crew/reporting/fleet-status.ts",
+      "src/coordination/crew/reporting/fleet-status.ts"
     ],
     "src/crew/questions.ts": [
       "src/crew/questions.ts",
-      "src/crew/questions/questions.ts"
+      "src/crew/questions/questions.ts",
+      "src/coordination/crew/questions/questions.ts"
     ],
     "src/crew/question-handoff.ts": [
       "src/crew/question-handoff.ts",
-      "src/crew/questions/question-handoff.ts"
+      "src/crew/questions/question-handoff.ts",
+      "src/coordination/crew/questions/question-handoff.ts"
     ],
     "src/crew/tool-input.ts": [
       "src/crew/tool-input.ts",
-      "src/crew/input/tool-input.ts"
+      "src/crew/input/tool-input.ts",
+      "src/coordination/crew/input/tool-input.ts"
     ],
     "src/crew/project-options.ts": [
       "src/crew/project-options.ts",
-      "src/crew/input/project-options.ts"
+      "src/crew/input/project-options.ts",
+      "src/coordination/crew/input/project-options.ts"
     ],
     "src/crew/crew-tool-input.ts": [
       "src/crew/crew-tool-input.ts",
-      "src/crew/input/crew-tool-input.ts"
+      "src/crew/input/crew-tool-input.ts",
+      "src/coordination/crew/input/crew-tool-input.ts"
     ],
     "src/crew/waiting.ts": [
       "src/crew/waiting.ts",
-      "src/crew/controls/waiting.ts"
+      "src/crew/controls/waiting.ts",
+      "src/coordination/crew/controls/waiting.ts"
     ],
-    "src/crew/post.ts": ["src/crew/post.ts", "src/crew/controls/post.ts"],
+    "src/crew/post.ts": [
+      "src/crew/post.ts",
+      "src/crew/controls/post.ts",
+      "src/coordination/crew/controls/post.ts"
+    ],
     "src/crew/notifications.ts": [
       "src/crew/notifications.ts",
-      "src/crew/controls/notifications.ts"
+      "src/crew/controls/notifications.ts",
+      "src/coordination/crew/controls/notifications.ts"
     ],
-    "src/crew/models.ts": ["src/crew/models.ts", "src/crew/controls/models.ts"],
+    "src/crew/models.ts": [
+      "src/crew/models.ts",
+      "src/crew/controls/models.ts",
+      "src/coordination/crew/controls/models.ts"
+    ],
     "src/crew/maintenance.ts": [
       "src/crew/maintenance.ts",
-      "src/crew/controls/maintenance.ts"
+      "src/crew/controls/maintenance.ts",
+      "src/coordination/crew/controls/maintenance.ts"
     ],
     "src/nightly/archive.ts": [
       "src/nightly/archive.ts",
@@ -457,11 +504,13 @@
     "src/captain-post-config.ts": [
       "src/captain-post-config.ts",
       "src/captain-post/captain-post-config.ts",
-      "src/captain-post/config.ts"
+      "src/captain-post/config.ts",
+      "src/coordination/captain/config.ts"
     ],
     "src/captain-post.ts": [
       "src/captain-post.ts",
-      "src/captain-post/captain-post.ts"
+      "src/captain-post/captain-post.ts",
+      "src/coordination/captain/captain-post.ts"
     ],
     "src/cli.ts": ["src/cli.ts", "src/app/cli.ts"],
     "src/config-panel.ts": [
@@ -556,9 +605,21 @@
       "src/observability/dashboard/dashboard.ts"
     ],
     "src/effect.ts": ["src/effect.ts", "src/lib/effect.ts"],
-    "src/fleet-irc.ts": ["src/fleet-irc.ts", "src/fleet/fleet-irc.ts"],
-    "src/fleet-policy.ts": ["src/fleet-policy.ts", "src/fleet/fleet-policy.ts"],
-    "src/fleet-source.ts": ["src/fleet-source.ts", "src/fleet/fleet-source.ts"],
+    "src/fleet-irc.ts": [
+      "src/fleet-irc.ts",
+      "src/fleet/fleet-irc.ts",
+      "src/coordination/fleet/fleet-irc.ts"
+    ],
+    "src/fleet-policy.ts": [
+      "src/fleet-policy.ts",
+      "src/fleet/fleet-policy.ts",
+      "src/coordination/fleet/fleet-policy.ts"
+    ],
+    "src/fleet-source.ts": [
+      "src/fleet-source.ts",
+      "src/fleet/fleet-source.ts",
+      "src/coordination/fleet/fleet-source.ts"
+    ],
     "src/gateway.ts": ["src/gateway.ts", "src/gateway/gateway.ts"],
     "src/health-config.ts": [
       "src/health-config.ts",
@@ -860,29 +921,92 @@
     ],
     "src/crew/projects.ts": [
       "src/crew/projects.ts",
-      "src/crew/workspace/projects.ts"
+      "src/crew/workspace/projects.ts",
+      "src/coordination/crew/workspace/projects.ts"
     ],
     "src/crew/workspace.ts": [
       "src/crew/workspace.ts",
-      "src/crew/workspace/workspace.ts"
+      "src/crew/workspace/workspace.ts",
+      "src/coordination/crew/workspace/workspace.ts"
     ],
-    "src/crew/api.ts": ["src/crew/api.ts", "src/crew/history/api.ts"],
+    "src/crew/api.ts": [
+      "src/crew/api.ts",
+      "src/crew/history/api.ts",
+      "src/coordination/crew/history/api.ts"
+    ],
     "src/crew/compaction.ts": [
       "src/crew/compaction.ts",
-      "src/crew/history/compaction.ts"
+      "src/crew/history/compaction.ts",
+      "src/coordination/crew/history/compaction.ts"
     ],
     "src/crew/history-rpc.ts": [
       "src/crew/history-rpc.ts",
-      "src/crew/history/history-rpc.ts"
+      "src/crew/history/history-rpc.ts",
+      "src/coordination/crew/history/history-rpc.ts"
     ],
     "src/crew/history.ts": [
       "src/crew/history.ts",
-      "src/crew/history/history.ts"
+      "src/crew/history/history.ts",
+      "src/coordination/crew/history/history.ts"
     ],
-    "src/crew/cron.ts": ["src/crew/cron.ts", "src/crew/cron/cron.ts"],
+    "src/crew/cron.ts": [
+      "src/crew/cron.ts",
+      "src/crew/cron/cron.ts",
+      "src/coordination/crew/cron/cron.ts"
+    ],
     "src/crew/cron-execution.ts": [
       "src/crew/cron-execution.ts",
-      "src/crew/cron/cron-execution.ts"
+      "src/crew/cron/cron-execution.ts",
+      "src/coordination/crew/cron/cron-execution.ts"
+    ],
+    "src/crew/instruction-context.ts": [
+      "src/crew/instruction-context.ts",
+      "src/coordination/crew/instruction-context.ts"
+    ],
+    "src/crew/instructions.ts": [
+      "src/crew/instructions.ts",
+      "src/coordination/crew/instructions.ts"
+    ],
+    "src/crew/message-protocol.ts": [
+      "src/crew/message-protocol.ts",
+      "src/coordination/crew/message-protocol.ts"
+    ],
+    "src/crew/pending.ts": [
+      "src/crew/pending.ts",
+      "src/coordination/crew/pending.ts"
+    ],
+    "src/crew/team.ts": ["src/crew/team.ts", "src/coordination/crew/team.ts"],
+    "src/fleet/client.ts": [
+      "src/fleet/client.ts",
+      "src/coordination/fleet/client.ts"
+    ],
+    "src/fleet/control.ts": [
+      "src/fleet/control.ts",
+      "src/coordination/fleet/control.ts"
+    ],
+    "src/fleet/ledger.ts": [
+      "src/fleet/ledger.ts",
+      "src/coordination/fleet/ledger.ts"
+    ],
+    "src/fleet/permissions.ts": [
+      "src/fleet/permissions.ts",
+      "src/coordination/fleet/permissions.ts"
+    ],
+    "src/fleet/protocol.ts": [
+      "src/fleet/protocol.ts",
+      "src/coordination/fleet/protocol.ts"
+    ],
+    "src/fleet/results.ts": [
+      "src/fleet/results.ts",
+      "src/coordination/fleet/results.ts"
+    ],
+    "src/fleet/reviews.ts": [
+      "src/fleet/reviews.ts",
+      "src/coordination/fleet/reviews.ts"
+    ],
+    "src/fleet/store.ts": [
+      "src/fleet/store.ts",
+      "src/coordination/fleet/store.ts"
     ]
   },
   "slices": {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { managedPrompt } from "../src/crew/instructions";
+import { managedPrompt } from "../src/coordination/crew/instructions";
 
 test("managed prompts use one valid HTML comment boundary pair", () => {
   expect(

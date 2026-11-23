@@ -6,8 +6,8 @@ import { join, resolve } from "node:path";
 import { OpenCode } from "@opencode/client";
 import { Schema } from "effect";
 import { Service } from "@opencode/client/service";
-import { crewFingerprint } from "../src/crew/execution/identity";
-import { CrewState } from "../src/crew/execution/state";
+import { crewFingerprint } from "../src/coordination/crew/execution/identity";
+import { CrewState } from "../src/coordination/crew/execution/state";
 import { CrewQuestionGateway } from "../src/transports/irc/crew-question-gateway";
 import {
   questionSettingsPath,

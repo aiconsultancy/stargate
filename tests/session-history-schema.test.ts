@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { OpenCode } from "@opencode/client";
 import { Effect, Exit, Predicate, Schema } from "effect";
 import { OpenCodeHistory } from "../src/backends/opencode/opencode-history";
-import { CrewReporting } from "../src/crew/reporting/report-rpc";
+import { CrewReporting } from "../src/coordination/crew/reporting/report-rpc";
 import {
   HISTORY_PAGE,
   HISTORY_PARTS,

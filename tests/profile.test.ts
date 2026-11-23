@@ -15,13 +15,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { runCli } from "../src/app/cli";
-import { crewPermissions } from "../src/crew/execution/policy";
+import { crewPermissions } from "../src/coordination/crew/execution/policy";
 import {
   defaultTeam,
   profileTeam,
   type Team,
   teamSchema,
-} from "../src/crew/team";
+} from "../src/coordination/crew/team";
 import { textMentionInstructions } from "../src/shared/mentions";
 import { nightlyInstructions } from "../src/automation/maintenance/nightly/instructions";
 import { peerInstructions } from "../src/gateway/peers";

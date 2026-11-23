@@ -10,7 +10,7 @@ import {
   type OpenCodeHistoryClient,
   type OpenCodeHistoryReporting,
 } from "../src/backends/opencode/opencode-history";
-import { CrewReporting } from "../src/crew/reporting/report-rpc";
+import { CrewReporting } from "../src/coordination/crew/reporting/report-rpc";
 import {
   HISTORY_PARTS,
   HISTORY_TEXT,

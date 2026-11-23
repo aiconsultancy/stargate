@@ -29,7 +29,7 @@ import {
 import { cancellationTarget } from "./cancellation";
 import type { BotConfig } from "../config";
 import { abortable, runAbortable } from "../lib/effect";
-import { fleetResultSource } from "../fleet/results";
+import { fleetResultSource } from "../coordination/fleet/results";
 import type {
   GatewayAccessContext,
   GatewayTransport,

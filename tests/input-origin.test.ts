@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
-import { readInputOrigin } from "../src/crew/execution/origin";
-import type { ResultAPI, ResultMessage } from "../src/crew/execution/result";
+import { readInputOrigin } from "../src/coordination/crew/execution/origin";
+import type {
+  ResultAPI,
+  ResultMessage,
+} from "../src/coordination/crew/execution/result";
 import { InputBoundaryReader } from "../src/backends/opencode/input-origin";
 
 const record = (id: string, type: ResultMessage["type"]): ResultMessage => ({

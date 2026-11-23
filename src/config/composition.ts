@@ -8,10 +8,10 @@ import {
 import { codexBackendSchema } from "../backends/codex/config";
 import { crewActivitySchema } from "../activity/activity";
 import { apiV1ConfigSchema } from "../observability/dashboard/api/v1/config";
-import { captainPostSchema } from "../captain-post/config";
+import { captainPostSchema } from "../coordination/captain/config";
 import { cronjobsSchema } from "../automation/cron/config";
-import { validateFleetPermissions } from "../fleet/permissions";
-import { fleetPolicySchema } from "../fleet/fleet-policy";
+import { validateFleetPermissions } from "../coordination/fleet/permissions";
+import { fleetPolicySchema } from "../coordination/fleet/fleet-policy";
 import { healthConfigSchema } from "../observability/health/config";
 import {
   createIrcConfig,

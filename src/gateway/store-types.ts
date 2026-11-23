@@ -1,4 +1,4 @@
-import type { FleetJob, NativeMaker } from "../fleet/protocol";
+import type { FleetJob, NativeMaker } from "../coordination/fleet/protocol";
 import type { NotificationContext } from "../notifications/preferences/notifications";
 import type { InboundReaction } from "../shared/reactions";
 import type { RequestFailure } from "../shared/request-failure";

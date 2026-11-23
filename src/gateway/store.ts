@@ -6,7 +6,7 @@ import type { PublishedFile } from "../attachments/attachments";
 import { AttachmentRecords } from "../attachments/store";
 import { BackgroundCases } from "../questions/background-questions";
 import { cancellationNotice } from "./cancellation";
-import { fleetJobSchema } from "../fleet/protocol";
+import { fleetJobSchema } from "../coordination/fleet/protocol";
 import {
   ircBurstEligible,
   ircBurstLimits,
@@ -18,7 +18,7 @@ import type {
   IrcBurstMessage,
   IrcOperations,
 } from "../transports/irc/store-contract";
-import { FleetRecords } from "../fleet/store";
+import { FleetRecords } from "../coordination/fleet/store";
 import { type StoredJob, decodeJob, decodeStoredJob } from "./row-codec";
 import { TranscriptRecords } from "./transcript-store";
 import { MetaRecords } from "../meta-commands/store";

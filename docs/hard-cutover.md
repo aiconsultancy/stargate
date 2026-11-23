@@ -73,7 +73,8 @@ Never normalize the old input with the new schema.
   Include both Slack registrations and IRC captain/crew registrations. Do
   not recompute the hash from the bot ID alone.
 - Crew `identity.value` is JSON, not a hash. Supply its **exact** original and
-  new serialized values. `crewFingerprint` in `src/crew/execution/identity.ts` is the
+  new serialized values. `crewFingerprint` in
+  `src/coordination/crew/execution/identity.ts` is the
   new runtime's shared version-2 serializer. Use the normalized new plugin
   options, including worker backend credential-reference names/defaults, to
   construct it. The converter checks the original DB value before changing it.

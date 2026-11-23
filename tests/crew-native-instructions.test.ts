@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
-import { isNativeInstructionContext } from "../src/crew/instruction-context";
+import { isNativeInstructionContext } from "../src/coordination/crew/instruction-context";
 import {
   type CrewInspectionAPI,
   type EvidenceMessage,
   observePlacement,
   sha256,
   verifyResult,
-} from "../src/crew/execution/reconciliation";
-import { readTaskResult } from "../src/crew/execution/result";
-import type { CrewTask } from "../src/crew/execution/state";
+} from "../src/coordination/crew/execution/reconciliation";
+import { readTaskResult } from "../src/coordination/crew/execution/result";
+import type { CrewTask } from "../src/coordination/crew/execution/state";
 
 const task: CrewTask = {
   id: "task_fixture",
