@@ -128,7 +128,7 @@ function gaps(node: Node, source: SourceFile, descendants: Node[]) {
   // Array hole it may differ solely because the emitter wrapped the literal.
   if (
     close &&
-    descendants.length &&
+    descendants.length > 0 &&
     descendants.at(-1)?.kind !== SyntaxKind.OmittedExpression &&
     tail[0] === "," &&
     tail[1] === close &&
@@ -228,7 +228,7 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
       return;
     }
 
-    if (!ac.length) {
+    if (ac.length === 0) {
       if (x !== y) difference("token text", x, y);
 
       return;
@@ -265,11 +265,12 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
   return {
     equal: differences.length === 0,
     differences,
-    reasons: reasons.size
-      ? [...reasons].sort()
-      : differences.length
-        ? []
-        : ["layout"],
+    reasons:
+      reasons.size > 0
+        ? [...reasons].toSorted()
+        : differences.length > 0
+          ? []
+          : ["layout"],
   };
 }
 
@@ -317,8 +318,8 @@ async function comparePair({ path, before, after }: Pair): Promise<Result> {
         throw new Error(`Parser input mismatch: ${path}`);
 
       if (
-        (await program.getSyntacticDiagnostics(left)).length ||
-        (await program.getSyntacticDiagnostics(right)).length
+        (await program.getSyntacticDiagnostics(left)).length > 0 ||
+        (await program.getSyntacticDiagnostics(right)).length > 0
       ) {
         return {
           equal: false,
@@ -407,7 +408,7 @@ async function capture(output: string) {
 async function main() {
   const [, , a, b, ...extra] = process.argv;
 
-  if (!a || !b || extra.length)
+  if (!a || !b || extra.length > 0)
     throw new Error(
       "Usage: bun scripts/compare-js-emit.ts --capture OUT_DIR | BEFORE_DIR AFTER_DIR",
     );
@@ -418,11 +419,11 @@ async function main() {
     return;
   }
 
-  const before = (await listDirectory(a)).sort();
+  const before = (await listDirectory(a)).toSorted();
   const after = new Set(await listDirectory(b));
 
   if (
-    !before.length ||
+    before.length === 0 ||
     before.length !== after.size ||
     before.some((path) => !after.has(path))
   ) {

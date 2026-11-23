@@ -253,7 +253,7 @@ const inventory = {
 const violations = [
   ...boundaryViolations(graph, policy),
   ...(await documentationViolations(root, await architectureDocuments(root))),
-].sort();
+].toSorted();
 
 const errors: string[] = [];
 
@@ -276,7 +276,7 @@ if (new Set(working.exceptions).size !== working.exceptions.length)
 const approvedExceptions = [...working.exceptions];
 const allowedWorkingExceptions = [...baseline.exceptions];
 
-if (exceptionRekeys.length) {
+if (exceptionRekeys.length > 0) {
   const previous = await rekeyBase();
   const paths = sourceIdentities(source.keys(), policy);
 
@@ -385,10 +385,10 @@ const currentMembers = new Set(inventory.crewPlugin.members);
 
 const removedMembers = baseline.crewPlugin.members
   .filter((file) => !currentMembers.has(file))
-  .sort();
+  .toSorted();
 
 const identities =
-  addedMembers.length || allowedClosureFiles.length
+  addedMembers.length > 0 || allowedClosureFiles.length > 0
     ? sourceIdentities(source.keys(), policy)
     : new Map<string, string>();
 
@@ -412,7 +412,7 @@ const closureAdditions = [];
 const closureReviewRequired =
   "Not checked: that bodies are moved, not new, or that packages were already used by the closure. Put this proof in the PR for the reviewer to verify.";
 
-for (const file of [...allowedClosureFiles].sort()) {
+for (const file of [...allowedClosureFiles].toSorted()) {
   const identity = identities.get(file);
 
   if (!identity) {
@@ -422,7 +422,7 @@ for (const file of [...allowedClosureFiles].sort()) {
 
   if (!addedMembers.includes(identity))
     errors.push(`closure-addition:not-added:${file}`);
-  const imports = [...(graph.get(identity) ?? [])].sort();
+  const imports = [...(graph.get(identity) ?? [])].toSorted();
 
   for (const target of imports)
     if (!previousMembers.has(target))
@@ -440,15 +440,15 @@ for (const file of [...allowedClosureFiles].sort()) {
 }
 
 if (
-  !allowedClosureFiles.length &&
+  allowedClosureFiles.length === 0 &&
   inventory.crewPlugin.members.length > closureCap
 )
   errors.push(
     `crew-closure:${inventory.crewPlugin.members.length} > ${closureCap}`,
   );
 
-if (errors.length)
-  throw new Error(JSON.stringify({ errors: errors.sort() }, null, 2));
+if (errors.length > 0)
+  throw new Error(JSON.stringify({ errors: errors.toSorted() }, null, 2));
 
 const measuredExceptions = new Set(violations);
 
@@ -530,23 +530,23 @@ const result = {
   root,
   base,
   write: flags.has("--write"),
-  flags: [...flags].sort(),
+  flags: [...flags].toSorted(),
   inventory,
   cycleComponents,
   exceptions,
-  ...(flags.has("--prune-stale")
-    ? { largeFiles, prunedExceptions, prunedLargeFiles }
-    : {}),
-  ...(allowedClosureFiles.length
-    ? {
-        closureAdditions,
-        closureRemovals: removedMembers,
-        closureReviewRequired,
-      }
-    : {}),
+  ...(flags.has("--prune-stale") && {
+    largeFiles,
+    prunedExceptions,
+    prunedLargeFiles,
+  }),
+  ...(allowedClosureFiles.length > 0 && {
+    closureAdditions,
+    closureRemovals: removedMembers,
+    closureReviewRequired,
+  }),
   violations,
   errors,
-  ...(exceptionRekeys.length ? { exceptionRekeys } : {}),
+  ...(exceptionRekeys.length > 0 && { exceptionRekeys }),
 };
 
 if (output)
@@ -563,17 +563,17 @@ console.log(
     cyclicEdges: inventory.cyclicEdges.length,
     crewClosure: inventory.crewPlugin.members.length,
     exceptions: exceptions.length,
-    ...(flags.has("--prune-stale")
-      ? { largeFiles: largeFiles.length, prunedExceptions, prunedLargeFiles }
-      : {}),
-    ...(allowedClosureFiles.length
-      ? {
-          closureAdditions,
-          closureRemovals: removedMembers,
-          closureReviewRequired,
-        }
-      : {}),
+    ...(flags.has("--prune-stale") && {
+      largeFiles: largeFiles.length,
+      prunedExceptions,
+      prunedLargeFiles,
+    }),
+    ...(allowedClosureFiles.length > 0 && {
+      closureAdditions,
+      closureRemovals: removedMembers,
+      closureReviewRequired,
+    }),
     errors,
-    ...(exceptionRekeys.length ? { exceptionRekeys } : {}),
+    ...(exceptionRekeys.length > 0 && { exceptionRekeys }),
   }),
 );

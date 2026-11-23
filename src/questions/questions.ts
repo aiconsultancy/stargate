@@ -179,12 +179,12 @@ export type QuestionOffer = {
 /** Hash the native form, not just the text selected for display. */
 export function questionFingerprint(value: unknown): string {
   const canonical = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(canonical);
+    if (Array.isArray(v)) return v.map((item) => canonical(item));
 
     if (v !== null && typeof v === "object")
       return Object.fromEntries(
         Object.entries(v)
-          .sort(([a], [b]) => a.localeCompare(b))
+          .toSorted(([a], [b]) => a.localeCompare(b))
           .map(([k, item]) => [k, canonical(item)]),
       );
 
@@ -238,9 +238,9 @@ export function questionControl(text: string): QuestionControl | undefined {
     target: (match[1] ?? "").replace(/^@/, ""),
     token: match[3]?.toLowerCase() ?? "",
     answer: match[2]?.toLowerCase() === "answer" ? match[4] : null,
-    ...(match[2]?.toLowerCase() === "renew-question"
-      ? { renew: true as const }
-      : {}),
+    ...(match[2]?.toLowerCase() === "renew-question" && {
+      renew: true as const,
+    }),
   };
 }
 
@@ -340,11 +340,12 @@ function questionFields(question: NativeQuestion) {
     lines.push(
       `${f.key}: ${[f.title, f.description].filter(Boolean).join(" — ")}`,
     );
-    f.options?.forEach((o, index) => {
+
+    for (const [index, o] of (f.options ?? []).entries()) {
       lines.push(
         `${index + 1}. ${o.label} (value ${JSON.stringify(o.value)})${o.description ? ` — ${o.description}` : ""}`,
       );
-    });
+    }
   }
 
   return lines;
@@ -364,11 +365,11 @@ export function questionText(
     lines.push(
       "For multiple choices use comma-separated numbers; a JSON answer uses native option values.",
     );
-  lines.push(`Or: ${account}: cancel-question ${token}`);
   lines.push(
+    `Or: ${account}: cancel-question ${token}`,
     `After expiry, only you may request a fresh offer here: ${account}: renew-question ${token}`,
+    "Valid for 30 minutes. Never send credentials.",
   );
-  lines.push("Valid for 30 minutes. Never send credentials.");
   const text = lines.join("\n");
 
   if (Buffer.byteLength(text) > 16_000)
@@ -870,7 +871,9 @@ export class Questions {
 
   public async poll(signal: AbortSignal) {
     await Promise.all([
-      this.checkBackground(signal).catch(() => signal.throwIfAborted()),
+      this.checkBackground(signal).catch(() => {
+        signal.throwIfAborted();
+      }),
       this.pollOwned(signal),
     ]);
   }
@@ -890,7 +893,7 @@ export class Questions {
         ),
         ...offers.map((o) => o.sessionID),
       ]),
-    ].sort();
+    ].toSorted();
 
     for (const session of this.failures.keys())
       if (!sessions.includes(session)) this.failures.delete(session);
@@ -898,7 +901,7 @@ export class Questions {
     for (const session of this.missing.keys())
       if (!sessions.includes(session)) this.missing.delete(session);
 
-    if (!sessions.length) return;
+    if (sessions.length === 0) return;
 
     const selected = Array.from(
       { length: Math.min(16, sessions.length) },

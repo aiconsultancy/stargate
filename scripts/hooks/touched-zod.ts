@@ -498,7 +498,7 @@ async function check(base: string): Promise<void> {
 
   const declared = declarations(ancestor, baseFiles, headFiles);
 
-  if (!touched.length) return;
+  if (touched.length === 0) return;
   const sources: Record<string, string> = {};
 
   function addSource(rev: string, path: string) {
@@ -547,7 +547,7 @@ async function check(base: string): Promise<void> {
     try {
       const program = snapshot.getProjects()[0]?.program;
 
-      if (!program || (await program.getSyntacticDiagnostics()).length)
+      if (!program || (await program.getSyntacticDiagnostics()).length > 0)
         throw new Error("cannot parse changed source; refusing to verify.");
       const violations: string[] = [];
 
@@ -594,7 +594,7 @@ async function check(base: string): Promise<void> {
           violations.push(pair.path);
       }
 
-      if (violations.length)
+      if (violations.length > 0)
         throw new Error(
           `this change touches files that still import zod:\n  ${violations.join("\n  ")}\n` +
             "Each touched file must migrate its Zod schemas to Effect Schema, or the touch must be reverted.\n" +

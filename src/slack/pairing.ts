@@ -326,7 +326,7 @@ export class PairingUI {
             `Single use across all URLs: redeeming any one invalidates all aliases. Server lifetime: ${result.expiresIn} seconds from generation. Use before ${new Date(expires).toISOString()} (conservative local estimate; server expiry is authoritative). Copy a URL into the trusted device's browser; do not share it.`,
           ),
           // Literal plain_text only: no markdown, link button or unfurl.
-          ...urls.map(section),
+          ...urls.map((item) => section(item)),
           section(
             `After pairing, find your conversation in OpenCode. New sessions here use the title: ${botDisplayName(this.config)} (slack ${pending.channel}). Separate threads can share this title; existing titles stay unchanged. Pairing does not create a session. Closing this modal does not revoke an issued code or paired device.`,
           ),

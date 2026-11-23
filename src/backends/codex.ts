@@ -236,10 +236,8 @@ export function codexConfig(config: Config): CodexConfig {
         requires_openai_auth: false,
       },
     },
-    ...(config.projectDocs ? {} : { project_doc_max_bytes: 0 }),
-    ...(config.systemPrompt
-      ? { developer_instructions: config.systemPrompt }
-      : {}),
+    ...(!config.projectDocs && { project_doc_max_bytes: 0 }),
+    ...(config.systemPrompt && { developer_instructions: config.systemPrompt }),
     skills: { include_instructions: false },
     agents: { enabled: false },
     features: {
@@ -284,9 +282,9 @@ export function codexThreadOptions(config: Config): ThreadOptions {
     skipGitRepoCheck: true,
     networkAccessEnabled: config.network,
     webSearchMode: "disabled",
-    ...(config.reasoningEffort
-      ? { modelReasoningEffort: config.reasoningEffort }
-      : {}),
+    ...(config.reasoningEffort && {
+      modelReasoningEffort: config.reasoningEffort,
+    }),
   };
 }
 
@@ -616,8 +614,13 @@ export class CodexBackend implements AgentBackend {
     onProgress?: (value: TurnProgress) => void,
   ): Promise<string> {
     const stage = onProgress
-      ? (value: TurnStage) =>
-          onProgress({ stage: value, observedAt: Date.now(), backend: "codex" })
+      ? (value: TurnStage) => {
+          onProgress({
+            stage: value,
+            observedAt: Date.now(),
+            backend: "codex",
+          });
+        }
       : undefined;
 
     signal.throwIfAborted();
@@ -648,7 +651,11 @@ export class CodexBackend implements AgentBackend {
     this.runs.set(id, run);
     const finished = Promise.withResolvers<void>();
     run.done = finished.promise;
-    const stop = () => run.controller.abort();
+
+    const stop = () => {
+      run.controller.abort();
+    };
+
     signal.addEventListener("abort", stop, { once: true });
     /**
      * The SDK's signal, aborted only while its event stream is open. Once
@@ -685,7 +692,9 @@ export class CodexBackend implements AgentBackend {
         .then(() =>
           delay(Math.min(this.grace, 1000), undefined, { ref: false }),
         )
-        .then(() => abandon.resolve("abandon"));
+        .then(() => {
+          abandon.resolve("abandon");
+        });
     };
 
     run.controller.signal.addEventListener("abort", cancel, { once: true });

@@ -31,15 +31,14 @@ export function dashboardCrewSummary(
     total: status.total,
     busy:
       status.busy ?? status.members.filter((member) => member.current).length,
-    ...(status.busy === undefined && status.truncated
-      ? { busyPartial: true as const }
-      : {}),
+    ...(status.busy === undefined &&
+      status.truncated && { busyPartial: true as const }),
     people: {
       total: people.length,
       busy: people.filter((person) =>
         person.contexts.some((context) => context.current),
       ).length,
-      ...(status.truncated ? { partial: true as const } : {}),
+      ...(status.truncated && { partial: true as const }),
     },
   };
 }

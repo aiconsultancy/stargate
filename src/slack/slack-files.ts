@@ -338,10 +338,10 @@ export class SlackFiles {
             data,
             source: {
               id: file.id,
-              ...(file.duration_ms !== undefined
-                ? { durationMs: file.duration_ms }
-                : {}),
-              ...(transcript !== undefined ? { transcript } : {}),
+              ...(file.duration_ms !== undefined && {
+                durationMs: file.duration_ms,
+              }),
+              ...(transcript !== undefined && { transcript }),
             },
           });
           total += data.byteLength;

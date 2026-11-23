@@ -271,7 +271,9 @@ try {
       },
       [],
       undefined,
-      (v) => stages.push(v.stage),
+      (v) => {
+        stages.push(v.stage);
+      },
     )
     .catch(() => {});
 
@@ -303,7 +305,9 @@ try {
       undefined,
       [],
       undefined,
-      (v) => unconfirmed.push(v.stage),
+      (v) => {
+        unconfirmed.push(v.stage);
+      },
     ),
   );
   discardPrompt = false;

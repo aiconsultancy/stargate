@@ -29,7 +29,7 @@ export function exactStruct<const Fields extends Schema.Struct.Fields>(
           issue: new SchemaIssue.UnexpectedKey(ast, input[key]),
         });
 
-    return issues.length ? issues : undefined;
+    return issues.length > 0 ? issues : undefined;
   });
 
   return Schema.flip(

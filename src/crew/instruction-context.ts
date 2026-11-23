@@ -97,7 +97,7 @@ export function isNativeInstructionContext(
       const marker = `\n\n${header}`;
       const found = message.text.indexOf(marker, cursor);
 
-      if (found < 0) return false;
+      if (found === -1) return false;
       cursor = found + marker.length;
     }
   }

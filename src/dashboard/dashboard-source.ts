@@ -63,29 +63,28 @@ export function ircDashboardShip(
       host: config.server.host,
       port: config.server.port,
       tls: config.server.tls,
-      ...(config.server.network ? { network: config.server.network } : {}),
+      ...(config.server.network && { network: config.server.network }),
       account: registration.account,
       nick: registration.nick,
       channels: [...registration.channels],
       access: {
-        ...(config.access.allowedAccounts
-          ? { allowedAccounts: [...config.access.allowedAccounts] }
-          : {}),
+        ...(config.access.allowedAccounts && {
+          allowedAccounts: [...config.access.allowedAccounts],
+        }),
         deniedAccounts: [...config.access.deniedAccounts],
         deniedChannels: [...config.access.deniedChannels],
-        ...(config.access.channelRequests
-          ? { channelRequests: config.access.channelRequests }
-          : {}),
-        ...(config.access.wakeChannels
-          ? { wakeChannels: [...config.access.wakeChannels] }
-          : {}),
-        ...(registration.role === "captain" && config.access.humanWakeChannels
-          ? {
-              humanWakeChannels: config.access.humanWakeChannels.map(
-                (rule) => ({ ...rule }),
-              ),
-            }
-          : {}),
+        ...(config.access.channelRequests && {
+          channelRequests: config.access.channelRequests,
+        }),
+        ...(config.access.wakeChannels && {
+          wakeChannels: [...config.access.wakeChannels],
+        }),
+        ...(registration.role === "captain" &&
+          config.access.humanWakeChannels && {
+            humanWakeChannels: config.access.humanWakeChannels.map((rule) => ({
+              ...rule,
+            })),
+          }),
         peerCaptains: [...config.access.peerCaptains],
       },
     },
@@ -228,11 +227,11 @@ export function dashboardSource(
       // Keep ambiguous same-kind/tenant registrations separate defensively.
       if (
         members.length < 2 ||
-        new Set(members.map(kind)).size !== members.length
+        new Set(members.map((item) => kind(item))).size !== members.length
       )
         continue;
 
-      const ordered = [...members].sort((a, b) =>
+      const ordered = [...members].toSorted((a, b) =>
         a.bot.id.localeCompare(b.bot.id),
       );
 
@@ -468,7 +467,9 @@ export function dashboardSource(
     let gateway: HistorySession[] = [];
 
     try {
-      const described = ids.length ? await history.describe(ids, signal) : [];
+      const described =
+        ids.length > 0 ? await history.describe(ids, signal) : [];
+
       // Keep gateway order; the backend may answer in any order.
       gateway = ids.flatMap((id) => {
         const session = described.find((item) => item.id === id);
@@ -504,7 +505,7 @@ export function dashboardSource(
     return {
       sessions: [...captain, ...members, ...others],
       sessionsMore,
-      ...(error ? { sessionsError: error } : {}),
+      ...(error && { sessionsError: error }),
     };
   }
 
@@ -575,6 +576,7 @@ export function dashboardSource(
 
     const summaries = await Promise.all(
       ships
+        .values()
         .filter((ship) => !selected || selected.has(ship.bot.id))
         .map(async (ship) => {
           const { backend } = ship;
@@ -586,29 +588,26 @@ export function dashboardSource(
             id: ship.bot.id,
             name: name(ship),
             backend: ship.bot.backend.type,
-            ...(ship.transport ? { transport: ship.transport.kind } : {}),
-            ...(named ? { agent: named } : {}),
+            ...(ship.transport && { transport: ship.transport.kind }),
+            ...(named && { agent: named }),
             crew: read.status && dashboardCrewSummary(read.status),
-            ...(captainView ? { captain: captainView } : {}),
+            ...(captainView && { captain: captainView }),
             queue: store.queueCounts(ship.key),
             cronjobs: cronStore.report(ship.key).length,
           };
 
           return {
             summary,
-            ...(selected && read.status
-              ? { members: dashboardCrewMembers(read.status) }
-              : {}),
-            ...(read.error ? { error: read.error } : {}),
-            ...(read.metadata ? { metadata: read.metadata } : {}),
-            ...(selected
-              ? {
-                  readDetail: (reading: AbortSignal) =>
-                    find(ship.bot.id)?.backend === backend
-                      ? readShip(ship.bot.id, reading, {}, read)
-                      : Promise.resolve(undefined),
-                }
-              : {}),
+            ...(selected &&
+              read.status && { members: dashboardCrewMembers(read.status) }),
+            ...(read.error && { error: read.error }),
+            ...(read.metadata && { metadata: read.metadata }),
+            ...(selected && {
+              readDetail: (reading: AbortSignal) =>
+                find(ship.bot.id)?.backend === backend
+                  ? readShip(ship.bot.id, reading, {}, read)
+                  : Promise.resolve(undefined),
+            }),
           };
         }),
     );
@@ -661,38 +660,36 @@ export function dashboardSource(
       name: name(ship),
       bot: {
         id: bot.id,
-        ...(bot.slack
-          ? { slack: { appId: bot.slack.appId, ...ship.identity } }
-          : {}),
-        ...(ship.transport ? { transport: ship.transport } : {}),
-        ...(bot.access
-          ? {
-              access: {
-                users: bot.access.users,
-                channels: bot.access.channels,
-                deniedUsers: bot.access.deniedUsers,
-                deniedChannels: bot.access.deniedChannels,
-                ...(bot.access.mentionOnly !== undefined
-                  ? { mentionOnly: bot.access.mentionOnly }
-                  : {}),
-              },
-            }
-          : {}),
+        ...(bot.slack && {
+          slack: { appId: bot.slack.appId, ...ship.identity },
+        }),
+        ...(ship.transport && { transport: ship.transport }),
+        ...(bot.access && {
+          access: {
+            users: bot.access.users,
+            channels: bot.access.channels,
+            deniedUsers: bot.access.deniedUsers,
+            deniedChannels: bot.access.deniedChannels,
+            ...(bot.access.mentionOnly !== undefined && {
+              mentionOnly: bot.access.mentionOnly,
+            }),
+          },
+        }),
         backend: {
           type: bot.backend.type,
-          ...(bot.backend.type === "module"
-            ? {}
-            : { directory: bot.backend.directory }),
-          ...(named ? { agent: named } : {}),
-          ...(model ? { model } : {}),
+          ...(bot.backend.type !== "module" && {
+            directory: bot.backend.directory,
+          }),
+          ...(named && { agent: named }),
+          ...(model && { model }),
         },
         concurrency: bot.concurrency,
         turnTimeoutMs: bot.turnTimeoutMs,
       },
       crew: status,
-      ...(status ? { crewMembers: dashboardCrewMembers(status) } : {}),
-      ...(captainView ? { captain: captainView } : {}),
-      ...(error ? { crewError: error } : {}),
+      ...(status && { crewMembers: dashboardCrewMembers(status) }),
+      ...(captainView && { captain: captainView }),
+      ...(error && { crewError: error }),
       queue: {
         counts: store.queueCounts(ship.key),
         recent: store.recentJobs(ship.key, RECENT).map((job) => ({
@@ -701,21 +698,20 @@ export function dashboardSource(
           channel: job.channel,
           thread: job.thread,
           user: job.user,
-          ...(job.failure ? { failure: job.failure } : {}),
+          ...(job.failure && { failure: job.failure }),
           deferred: job.deferDelivery === 1,
         })),
       },
       cron: {
         fileBacked: bot.cronjobs !== undefined,
-        ...(bot.cronjobs && report
-          ? {
-              dailyReport: {
-                channel: report.channel ?? bot.cronjobs.channel,
-                time: report.time,
-                timezone: report.timezone,
-              },
-            }
-          : {}),
+        ...(bot.cronjobs &&
+          report && {
+            dailyReport: {
+              channel: report.channel ?? bot.cronjobs.channel,
+              time: report.time,
+              timezone: report.timezone,
+            },
+          }),
         jobs: cronStore.report(ship.key),
         runs: cronStore.recentRuns(ship.key, RECENT),
       },
@@ -725,7 +721,7 @@ export function dashboardSource(
     return {
       view,
       metadata,
-      ...(observedAt !== undefined ? { crewObservedAt: observedAt } : {}),
+      ...(observedAt !== undefined && { crewObservedAt: observedAt }),
     };
   }
 
@@ -784,10 +780,10 @@ export function dashboardSource(
         {
           parentID: input.parentID,
           limit: input.limit ?? HISTORY_PAGE,
-          ...(input.updatedSince !== undefined
-            ? { updatedSince: input.updatedSince }
-            : {}),
-          ...(input.cursor ? { cursor: input.cursor } : {}),
+          ...(input.updatedSince !== undefined && {
+            updatedSince: input.updatedSince,
+          }),
+          ...(input.cursor && { cursor: input.cursor }),
         },
         signal,
       );

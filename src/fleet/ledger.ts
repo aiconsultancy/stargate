@@ -310,15 +310,11 @@ export class FleetLedger {
           senderAccount: input.senderAccount,
           state: "unknown",
           humanApproval: false,
-          ...(input.origin
-            ? {
-                dispatchID: createHash("sha256")
-                  .update(
-                    JSON.stringify([input.ownerSessionID, input.requestID]),
-                  )
-                  .digest("hex"),
-              }
-            : {}),
+          ...(input.origin && {
+            dispatchID: createHash("sha256")
+              .update(JSON.stringify([input.ownerSessionID, input.requestID]))
+              .digest("hex"),
+          }),
         };
 
         if (input.review) {
@@ -541,7 +537,7 @@ export class FleetLedger {
   ) {
     const completion = Schema.decodeUnknownSync(fleetCompletionSchema)(value);
 
-    return this.db
+    this.db
       .transaction(() => {
         const row = this.db
           .query<
@@ -584,7 +580,7 @@ export class FleetLedger {
 
         if (
           completion.outcome === "completed" &&
-          (!completion.inputID || !completion.makers.length)
+          (!completion.inputID || completion.makers.length === 0)
         )
           throw new FleetError(
             "Completed fleet work needs native input and maker evidence",
@@ -699,13 +695,11 @@ export class FleetLedger {
         JSON.parse(row.binding),
       ),
       state: row.state,
-      ...(row.proof
-        ? {
-            proof: Schema.decodeUnknownSync(reviewProofSchema)(
-              JSON.parse(row.proof),
-            ),
-          }
-        : {}),
+      ...(row.proof && {
+        proof: Schema.decodeUnknownSync(reviewProofSchema)(
+          JSON.parse(row.proof),
+        ),
+      }),
     };
   }
 

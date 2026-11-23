@@ -37,18 +37,15 @@ export function crewPermissions(
     allow("stargate_crew"),
     allow("stargate_mail"),
     allow("stargate_history"),
-  ];
-
-  rules.push(allow("stargate_model", profile === "captain" ? "*" : "get"));
-  // Specialisms guide assignments, not host-tool access in this trusted profile.
-  rules.push(
+    allow("stargate_model", profile === "captain" ? "*" : "get"),
+    // Specialisms guide assignments, not host-tool access in this trusted profile.
     allow("subagent"),
     allow("edit"),
     allow("shell"),
     allow("browser"),
     allow("execute"),
-  );
-  rules.push(allow("linear_*"));
+    allow("linear_*"),
+  ];
 
   for (const resource of ["*.env", "*.env.*", "*.key", "*.pem"]) {
     rules.push({ action: "read", resource, effect: "deny" });

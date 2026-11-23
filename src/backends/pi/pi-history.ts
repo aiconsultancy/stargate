@@ -128,7 +128,7 @@ export function mapPiHistory(
           else if (block.type === "thinking")
             parts.push({
               type: "reasoning",
-              ...(detail === "full" ? clipBody(block.thinking) : {}),
+              ...(detail === "full" && clipBody(block.thinking)),
             });
           else {
             const input =
@@ -140,12 +140,10 @@ export function mapPiHistory(
               type: "tool",
               name: block.name.slice(0, 200),
               status: "pending",
-              ...(input
-                ? {
-                    input: input.text,
-                    ...(input.truncated ? { truncated: true } : {}),
-                  }
-                : {}),
+              ...(input && {
+                input: input.text,
+                ...(input.truncated && { truncated: true }),
+              }),
             };
 
             parts.push(part);
@@ -174,12 +172,10 @@ export function mapPiHistory(
           type: "tool",
           name: message.toolName.slice(0, 200),
           status: message.isError ? "error" : "completed",
-          ...(output
-            ? {
-                output: output.text,
-                ...(output.truncated ? { truncated: true } : {}),
-              }
-            : {}),
+          ...(output && {
+            output: output.text,
+            ...(output.truncated && { truncated: true }),
+          }),
         };
 
         parts.push(part);
@@ -225,15 +221,15 @@ export function mapPiHistory(
   return entries.flatMap((entry) => {
     const parts = entry.parts.filter((part) => !paired.has(part));
 
-    if (entry.role === "tool" && !parts.length) return [];
+    if (entry.role === "tool" && parts.length === 0) return [];
 
     return [
       {
         ...entry,
         parts: parts.slice(0, HISTORY_PARTS),
-        ...(parts.length > HISTORY_PARTS
-          ? { omittedParts: parts.length - HISTORY_PARTS }
-          : {}),
+        ...(parts.length > HISTORY_PARTS && {
+          omittedParts: parts.length - HISTORY_PARTS,
+        }),
       },
     ];
   });
@@ -319,16 +315,14 @@ export function piSessionHistory(
 
         return {
           entries: mapPiHistory(page.items, input.detail),
-          ...(page.next
-            ? {
-                cursor: Buffer.from(
-                  JSON.stringify({
-                    sessionID: input.sessionID,
-                    page: page.next,
-                  }),
-                ).toString("base64url"),
-              }
-            : {}),
+          ...(page.next && {
+            cursor: Buffer.from(
+              JSON.stringify({
+                sessionID: input.sessionID,
+                page: page.next,
+              }),
+            ).toString("base64url"),
+          }),
         };
       }),
   };

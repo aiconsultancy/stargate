@@ -261,7 +261,7 @@ export class SlackConnection implements TransportDelivery {
 
     const result = await this.web.chat.postMessage({
       channel,
-      ...(thread ? { thread_ts: thread } : {}),
+      ...(thread && { thread_ts: thread }),
       ...content,
       blocks: [
         ...content.blocks,

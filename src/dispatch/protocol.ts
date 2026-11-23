@@ -33,13 +33,13 @@ export type DispatchMarker =
 const offerPattern = /^offer-[a-f0-9]{16}$/;
 const issuePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/;
 
-const outcomes: readonly string[] = [
+const outcomes: ReadonlySet<string> = new Set([
   "accepted",
   "timeout",
   "withdrawn",
   "taken",
   "retrying",
-];
+]);
 
 export function isOfferID(value: string): boolean {
   return offerPattern.test(value);
@@ -70,7 +70,7 @@ export function parseDispatchMarker(
   if (value === undefined) return;
   const [kind, argument, issue, ...rest] = value.split(",");
 
-  if (kind === undefined || argument === undefined || rest.length) return;
+  if (kind === undefined || argument === undefined || rest.length > 0) return;
 
   if (kind === "offer")
     return issue !== undefined &&
@@ -89,7 +89,7 @@ export function parseDispatchMarker(
   if (kind === "accept" || kind === "decline")
     return { kind, offerID: argument };
 
-  if (outcomes.includes(kind))
+  if (outcomes.has(kind))
     return { kind: kind as DispatchOutcome, offerID: argument };
 
   return;

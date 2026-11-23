@@ -236,7 +236,7 @@ export async function startApiV1Server(options: Options) {
     server = await startApiServer({
       listen,
       routes,
-      ...(options.timing ? { timing: options.timing } : {}),
+      ...(options.timing && { timing: options.timing }),
       signal: AbortSignal.any([lifetime.signal, options.signal]),
       async fleet(request, remoteAddress) {
         const headers = responseHeaders();

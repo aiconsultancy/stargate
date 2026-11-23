@@ -279,17 +279,14 @@ export async function provisionBots(
       resolve(dirname(configPath), ".local/provision/bots.json"),
   );
 
-  const reserved = [
+  const reserved = new Set([
     planPath,
     configPath,
     `${configPath}.env`,
     `${configPath}.lock`,
-  ];
+  ]);
 
-  if (
-    reserved.includes(journalPath) ||
-    reserved.includes(`${journalPath}.lock`)
-  )
+  if (reserved.has(journalPath) || reserved.has(`${journalPath}.lock`))
     throw new Error("Provision journal must use a separate path.");
   let plan: Plan;
 
@@ -318,8 +315,8 @@ export async function provisionBots(
       return {
         ...entry,
         slack: {
-          ...(steerThreadFollowUps ? { steerThreadFollowUps } : {}),
-          ...(inboundReactions ? { inboundReactions } : {}),
+          ...(steerThreadFollowUps && { steerThreadFollowUps }),
+          ...(inboundReactions && { inboundReactions }),
           ...legacySlack,
         },
       };
@@ -344,9 +341,7 @@ export async function provisionBots(
               bots: plan.bots.map((entry) => ({
                 id: entry.id,
                 state: entry.app.mode === "reuse" ? "recorded" : "pending",
-                ...(entry.app.mode === "reuse"
-                  ? { appId: entry.app.appId }
-                  : {}),
+                ...(entry.app.mode === "reuse" && { appId: entry.app.appId }),
               })),
             };
     } catch {
@@ -445,7 +440,7 @@ export async function provisionBots(
         return {
           id: entry.id,
           name: entry.name,
-          ...(state.appId ? { appId: state.appId } : {}),
+          ...(state.appId && { appId: state.appId }),
           app:
             entry.app.mode === "reuse"
               ? "reused"
@@ -465,14 +460,12 @@ export async function provisionBots(
             : state.state === "outcome_unknown"
               ? "https://api.slack.com/apps"
               : manifestUrl(entry.name),
-          ...(state.retryAt !== undefined
-            ? {
-                retryAfterSeconds: Math.max(
-                  0,
-                  Math.ceil((state.retryAt - now()) / 1000),
-                ),
-              }
-            : {}),
+          ...(state.retryAt !== undefined && {
+            retryAfterSeconds: Math.max(
+              0,
+              Math.ceil((state.retryAt - now()) / 1000),
+            ),
+          }),
         };
       }),
     );

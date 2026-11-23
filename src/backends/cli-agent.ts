@@ -40,16 +40,16 @@ export function inherited(parent: NodeJS.ProcessEnv) {
   return env;
 }
 
-const textTypes = [
+const textTypes = new Set([
   "application/json",
   "application/xml",
   "application/yaml",
   "application/javascript",
-];
+]);
 
 /** True for MIME types read as UTF-8 text. */
 export function isTextAttachment(file: Attachment) {
-  return file.mime.startsWith("text/") || textTypes.includes(file.mime);
+  return file.mime.startsWith("text/") || textTypes.has(file.mime);
 }
 
 /** The attachment as a labelled text block; refuses invalid or binary text. */
@@ -97,7 +97,9 @@ export type ProcessTable = {
 export const systemProcesses: ProcessTable = {
   root: "/proc",
   uid: process.getuid?.(),
-  kill: (pid, signal) => process.kill(pid, signal),
+  kill: (pid, signal) => {
+    process.kill(pid, signal);
+  },
 };
 
 /** A process found for a turn: its PID and start time pin its identity. */
@@ -214,7 +216,7 @@ export async function turnProcesses(
     }),
   );
 
-  return found.sort((a, b) => a.pid - b.pid);
+  return found.toSorted((a, b) => a.pid - b.pid);
 }
 
 /**

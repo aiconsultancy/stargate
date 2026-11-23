@@ -50,7 +50,7 @@ export async function readInputOrigin(
 
       const record = await boundaries.record(message);
 
-      if (chain.length && closesBoundaryContext(record)) {
+      if (chain.length > 0 && closesBoundaryContext(record)) {
         chain.push(record);
 
         return origin();
@@ -58,7 +58,8 @@ export async function readInputOrigin(
 
       if (record.input === undefined) continue;
 
-      if (!chain.length && record.type !== "synthetic") return record.input;
+      if (chain.length === 0 && record.type !== "synthetic")
+        return record.input;
       chain.push(record);
     }
 

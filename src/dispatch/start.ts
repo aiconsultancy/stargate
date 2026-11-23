@@ -80,8 +80,8 @@ export function startAgentDispatch(
       baseUrl: dispatch.api.baseUrl,
       tokenEnv: dispatch.api.tokenEnv,
       headersEnv: dispatch.api.headersEnv,
-      ...(host.fetch ? { fetch: host.fetch } : {}),
-      ...(host.env ? { env: host.env } : {}),
+      ...(host.fetch && { fetch: host.fetch }),
+      ...(host.env && { env: host.env }),
     }),
     messenger: new IrcDispatchMessenger(
       client,
@@ -105,9 +105,9 @@ export function startAgentDispatch(
     );
 
     if (answer)
-      void dispatcher
-        .answer(answer)
-        .catch(() => log.warn("Agent dispatch answer failed"));
+      void dispatcher.answer(answer).catch(() => {
+        log.warn("Agent dispatch answer failed");
+      });
   };
 
   ship.dispatchListener = listener;

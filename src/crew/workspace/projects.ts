@@ -54,7 +54,7 @@ export class CrewProjects {
     const { projects, ...base } = parsed.success;
     const configurations = new Map<string, CrewOptions>([["default", base]]);
 
-    if (projects && Object.keys(projects).length) {
+    if (projects && Object.keys(projects).length > 0) {
       const team = base.team ?? defaultTeam;
 
       if ((Object.keys(projects).length + 1) * team.crew.length > HISTORY_PAGE)
@@ -298,7 +298,7 @@ export class CrewProjects {
           project: project === "default" ? null : (project ?? null),
           directory,
           role: member.role,
-          ...(model ? { model: model.slice(0, 200) } : {}),
+          ...(model && { model: model.slice(0, 200) }),
         },
       ];
     });
@@ -382,7 +382,7 @@ export class CrewProjects {
 
   public async close() {
     const results = await Promise.allSettled(
-      [...this.contexts.values()].reverse().map((engine) => engine.close()),
+      [...this.contexts.values()].toReversed().map((engine) => engine.close()),
     );
 
     const failed = results.find((result) => result.status === "rejected");

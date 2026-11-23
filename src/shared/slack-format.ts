@@ -80,7 +80,7 @@ function controls(elements: Inline[]): Inline[] {
         element.text.includes("`"),
     )
   )
-    return elements.map(clean);
+    return elements.map((item) => clean(item));
   let inAngle = false;
 
   return elements.flatMap((element): Inline[] => {
@@ -142,7 +142,7 @@ function controls(elements: Inline[]): Inline[] {
         });
       result.push({
         ...replacement,
-        ...(element.style ? { style: element.style } : {}),
+        ...(element.style && { style: element.style }),
       });
       start = match.index + match[0].length;
     }
@@ -241,7 +241,7 @@ function structuredMarkdown(text: string) {
               ? [{ type: "text" as const, text: "\n" }, node]
               : [node];
           })
-          .map(put)
+          .map((item) => put(item))
           .join("");
 
         return (
@@ -250,7 +250,7 @@ function structuredMarkdown(text: string) {
               ? ""
               : put({ type: "text", text: meta.checked ? "☑ " : "☐ " })) +
               content,
-          ) + nested.map(put).join("")
+          ) + nested.map((item) => put(item)).join("")
         );
       },
       list: (children, meta) => {
@@ -259,12 +259,12 @@ function structuredMarkdown(text: string) {
         let result = "";
 
         const flush = () => {
-          if (!sections.length) return;
+          if (sections.length === 0) return;
           result += put({
             type: "rich_text_list",
             style: meta.ordered ? "ordered" : "bullet",
             indent: Math.min(meta.depth, 8),
-            ...(meta.ordered ? { offset } : {}),
+            ...(meta.ordered && { offset }),
             elements: sections,
           });
           offset += sections.length;
@@ -305,7 +305,13 @@ function structuredMarkdown(text: string) {
       th: (children) =>
         styled(children, { bold: true }) + put({ type: "text", text: " | " }),
       td: (children) => children + put({ type: "text", text: " | " }),
-      tr: (children) => section(parts(children).slice(0, -1).map(put).join("")),
+      tr: (children) =>
+        section(
+          parts(children)
+            .slice(0, -1)
+            .map((item) => put(item))
+            .join(""),
+        ),
       hr: () => section(put({ type: "text", text: "———" })),
     },
     { noHtmlBlocks: true, noHtmlSpans: true },
@@ -328,12 +334,12 @@ function structuredMarkdown(text: string) {
           }))
           .filter((item) => item.elements.length);
 
-        return items.length ? [{ ...element, elements: items }] : [];
+        return items.length > 0 ? [{ ...element, elements: items }] : [];
       }
 
       const content = nonempty(element.elements);
 
-      return content.length
+      return content.length > 0
         ? [
             {
               ...element,
@@ -366,8 +372,7 @@ function uncertainFences(text: string) {
     if (!active && !(marker.startsWith("`") && info.includes("`")))
       active = { marker, prefix };
     else if (
-      active &&
-      prefix === active.prefix &&
+      prefix === active?.prefix &&
       marker[0] === active.marker[0] &&
       marker.length >= active.marker.length &&
       !info.trim()
@@ -497,7 +502,7 @@ export function replySource(chunks: ReplyChunk[]) {
           typeof chunk === "string" ? chunk : (chunk.source ?? chunk.text),
         )
         .join("")
-    : chunks.map(replyText).join("\n");
+    : chunks.map((item) => replyText(item)).join("\n");
 }
 
 /** Split literal source, without interpreting code state in any chunk. */
@@ -573,9 +578,9 @@ export function prepareSlackReply(
       return part.elements.map((item, index) => ({
         part: {
           ...part,
-          ...(part.style === "ordered"
-            ? { offset: (part.offset ?? 0) + index }
-            : {}),
+          ...(part.style === "ordered" && {
+            offset: (part.offset ?? 0) + index,
+          }),
           elements: [item],
         },
         elements: item.elements,
@@ -598,7 +603,7 @@ export function prepareSlackReply(
   let used = 0;
 
   const flush = () => {
-    if (!current.length) return;
+    if (current.length === 0) return;
     result.push({
       text: fallback,
       content: {
@@ -615,7 +620,7 @@ export function prepareSlackReply(
     let elements: Inline[] = [];
 
     const append = () => {
-      if (!elements.length) return;
+      if (elements.length === 0) return;
 
       const part: RichPart =
         unit.part.type === "rich_text_list"
@@ -674,7 +679,7 @@ export function prepareSlackReply(
 
   flush();
 
-  return result.length
+  return result.length > 0
     ? result.map((chunk, index) =>
         typeof chunk === "string"
           ? chunk

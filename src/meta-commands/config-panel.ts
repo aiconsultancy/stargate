@@ -102,7 +102,7 @@ export function buildConfigPanel(
       },
     });
 
-    if (row.actions.length) {
+    if (row.actions.length > 0) {
       blocks.push({
         type: "actions",
         block_id: `${block}:actions`,

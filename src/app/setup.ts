@@ -237,7 +237,7 @@ export async function readConfiguration(
         : [],
   );
 
-  throw new Error(apiIssues.length ? apiIssues.join("\n") : invalid);
+  throw new Error(apiIssues.length > 0 ? apiIssues.join("\n") : invalid);
 }
 
 async function atomicWrite(path: string, contents: string) {
@@ -267,10 +267,12 @@ async function exists(path: string) {
 }
 
 export async function addBot(
-  path: string,
+  pathInput: string,
   input: unknown,
   tokens?: { app: string; bot: string },
 ) {
+  let path = pathInput;
+
   const bot = validBot(input);
 
   if (
@@ -401,9 +403,9 @@ export async function setupWizard(configPath: string) {
           detached: true,
         });
 
-        browser.on("error", () =>
-          console.log("Open the printed Slack link manually."),
-        );
+        browser.on("error", () => {
+          console.log("Open the printed Slack link manually.");
+        });
         browser.unref();
       } else console.log("Open the printed Slack link manually.");
     }
@@ -469,8 +471,8 @@ export async function setupWizard(configPath: string) {
         type,
         directory,
         url,
-        ...(model ? { model } : {}),
-        ...(sessionID ? { sessionID } : {}),
+        ...(model && { model }),
+        ...(sessionID && { sessionID }),
       };
       console.log(
         "OpenCode tool permissions default to deny; edit backend.permissions explicitly if needed.",

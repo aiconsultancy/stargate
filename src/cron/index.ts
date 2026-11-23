@@ -133,7 +133,7 @@ export class CronScheduler {
         this.definitionErrors = await this.files.sync(now, signal);
         this.syncAfter = now + 10_000;
 
-        if (this.definitionErrors.length)
+        if (this.definitionErrors.length > 0)
           this.log.warn(
             { bot: this.config.id, count: this.definitionErrors.length },
             "Invalid cronjob definitions; execution disabled for affected files",
@@ -222,7 +222,9 @@ export class CronScheduler {
     }
   }
 
-  private async process(run: CronRun, now: number, signal: AbortSignal) {
+  private async process(runInput: CronRun, now: number, signal: AbortSignal) {
+    let run = runInput;
+
     if (usesAdvancedCron(run) && !this.config.cronjobs?.advanced) {
       this.store.finish(run.id, "failed");
 

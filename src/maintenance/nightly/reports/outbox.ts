@@ -29,7 +29,7 @@ export class MaintenanceOutbox {
     try {
       names = (await readdir(directory))
         .filter((name) => name.endsWith(".json"))
-        .sort();
+        .toSorted();
     } catch {
       return 0;
     }

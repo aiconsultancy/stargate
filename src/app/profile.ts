@@ -200,7 +200,7 @@ export async function renderProfile(input: Options, role: string) {
     default_agent: agent.agent ?? role,
     agents: {
       [agent.agent ?? agent.id]: {
-        ...(agent.model ? { model: agent.model } : {}),
+        ...(agent.model && { model: agent.model }),
         permissions: crewPermissions(profile, options.team.toolAccess),
       },
     },
@@ -209,10 +209,10 @@ export async function renderProfile(input: Options, role: string) {
         package: installationDirectory,
         options: {
           namespace: options.namespace,
-          ...(options.cron ? { cron: options.cron } : {}),
-          ...(options.captainSessionID
-            ? { captainSessionID: options.captainSessionID }
-            : {}),
+          ...(options.cron && { cron: options.cron }),
+          ...(options.captainSessionID && {
+            captainSessionID: options.captainSessionID,
+          }),
           team: options.team,
           captainDirectory: options.directory,
           stateDirectory: join(options.directory, ".local", "stargate-crew"),
@@ -340,7 +340,7 @@ async function excludeGenerated(
     (pattern) => !previous.split("\n").includes(pattern),
   );
 
-  if (!missing.length) return;
+  if (missing.length === 0) return;
   await mkdir(dirname(path), { recursive: true });
   const file = await open(path, "a", 0o600);
 
@@ -622,9 +622,7 @@ export async function initializeProfile(input: Options) {
     stateDirectory: state,
     namespace: options.namespace,
     agent: options.team.captain.agent ?? options.team.captain.id,
-    ...(options.captainSessionID
-      ? { sessionID: options.captainSessionID }
-      : {}),
+    ...(options.captainSessionID && { sessionID: options.captainSessionID }),
     permissions: crewPermissions("captain", options.team.toolAccess),
   };
 }

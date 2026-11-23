@@ -29,7 +29,7 @@ function text(block: Uint8Array, start: number, length: number) {
   const field = block.subarray(start, start + length);
   const end = field.indexOf(0);
 
-  return new TextDecoder().decode(end < 0 ? field : field.subarray(0, end));
+  return new TextDecoder().decode(end === -1 ? field : field.subarray(0, end));
 }
 
 function octal(block: Uint8Array, start: number, length: number) {
@@ -57,13 +57,13 @@ function checksum(block: Uint8Array) {
 function paxRecords(data: Uint8Array) {
   const records: Record<string, string> = {};
 
-  if (data[data.length - 1] !== 10) throw invalid();
+  if (data.at(-1) !== 10) throw invalid();
   let offset = 0;
 
   while (offset < data.length) {
     const space = data.indexOf(32, offset);
 
-    if (space < 0) throw invalid();
+    if (space === -1) throw invalid();
 
     const length = Number(
       new TextDecoder().decode(data.subarray(offset, space)),
@@ -82,7 +82,7 @@ function paxRecords(data: Uint8Array) {
 
     const equals = record.indexOf("=");
 
-    if (equals < 0) throw invalid();
+    if (equals === -1) throw invalid();
     const key = record.slice(0, equals);
 
     if (Object.hasOwn(records, key)) throw invalid();
@@ -212,7 +212,7 @@ export function validateArchive(
   entries: readonly ArchiveEntry[],
   root?: string,
 ) {
-  if (!entries.length) throw invalid();
+  if (entries.length === 0) throw invalid();
   const seen = new Map<string, ArchiveEntry["type"]>();
 
   for (const entry of entries) {

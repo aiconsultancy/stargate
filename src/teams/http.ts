@@ -97,12 +97,18 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
   ): Promise<void> {
     const path = (req.url ?? "").split("?")[0];
 
-    if (path !== MESSAGES_PATH) return refuse(req, res, 404);
+    if (path !== MESSAGES_PATH) {
+      refuse(req, res, 404);
+
+      return;
+    }
 
     if (req.method !== "POST") {
       res.setHeader("allow", "POST");
 
-      return refuse(req, res, 405);
+      refuse(req, res, 405);
+
+      return;
     }
 
     // 1. Signature, issuer, audience and expiry, before anything else.
@@ -111,33 +117,45 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
     try {
       token = await options.verifyToken(req.headers.authorization);
     } catch (err) {
-      return reject(req, res, err);
+      reject(req, res, err);
+
+      return;
     }
 
-    if (!/^application\/json\b/i.test(req.headers["content-type"] ?? ""))
-      return refuse(req, res, 415);
+    if (!/^application\/json\b/i.test(req.headers["content-type"] ?? "")) {
+      refuse(req, res, 415);
+
+      return;
+    }
+
     let activity: unknown;
 
     try {
       activity = JSON.parse(await readBody(req, maxBytes));
     } catch (err) {
-      return err instanceof BodyTooLargeError
-        ? refuse(req, res, 413)
-        : sendJson(res, 400);
+      if (err instanceof BodyTooLargeError) refuse(req, res, 413);
+      else sendJson(res, 400);
+
+      return;
     }
 
     if (
       activity === null ||
       typeof activity !== "object" ||
       Array.isArray(activity)
-    )
-      return sendJson(res, 400);
+    ) {
+      sendJson(res, 400);
+
+      return;
+    }
 
     // 2. The token's serviceUrl claim and channel endorsement must match the activity.
     try {
       options.checkActivity(token, activity as Record<string, unknown>);
     } catch (err) {
-      return reject(req, res, err);
+      reject(req, res, err);
+
+      return;
     }
 
     // 3. Tenant, sender allow-list and forwarding happen in the channel.

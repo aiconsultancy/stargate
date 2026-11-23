@@ -82,15 +82,15 @@ export function parseMessage(line: string): IrcMessage | undefined {
   if (rest.startsWith("@")) {
     const space = rest.indexOf(" ");
 
-    if (space < 0) return;
+    if (space === -1) return;
 
     for (const item of rest.slice(1, space).split(";")) {
       if (!item) continue;
       const equals = item.indexOf("=");
-      const key = equals < 0 ? item : item.slice(0, equals);
+      const key = equals === -1 ? item : item.slice(0, equals);
 
       if (!tagKey.test(key)) continue;
-      tags.set(key, equals < 0 ? "" : unescapeTag(item.slice(equals + 1)));
+      tags.set(key, equals === -1 ? "" : unescapeTag(item.slice(equals + 1)));
     }
 
     rest = rest.slice(space + 1).replace(/^ +/, "");
@@ -101,16 +101,16 @@ export function parseMessage(line: string): IrcMessage | undefined {
   if (rest.startsWith(":")) {
     const space = rest.indexOf(" ");
 
-    if (space < 0) return;
+    if (space === -1) return;
     source = rest.slice(1, space);
     rest = rest.slice(space + 1).replace(/^ +/, "");
   }
 
   const space = rest.indexOf(" ");
-  const command = (space < 0 ? rest : rest.slice(0, space)).toUpperCase();
+  const command = (space === -1 ? rest : rest.slice(0, space)).toUpperCase();
 
   if (!/^(?:[A-Z]+|\d{3})$/.test(command)) return;
-  rest = space < 0 ? "" : rest.slice(space + 1);
+  rest = space === -1 ? "" : rest.slice(space + 1);
   const params: string[] = [];
 
   while (rest) {
@@ -121,7 +121,7 @@ export function parseMessage(line: string): IrcMessage | undefined {
 
     const next = rest.indexOf(" ");
 
-    if (next < 0) {
+    if (next === -1) {
       params.push(rest);
       break;
     }
@@ -130,7 +130,7 @@ export function parseMessage(line: string): IrcMessage | undefined {
     rest = rest.slice(next + 1);
   }
 
-  return { tags, ...(source ? { source } : {}), command, params };
+  return { tags, ...(source && { source }), command, params };
 }
 
 /**
@@ -173,7 +173,7 @@ export function formatMessage(
 
 /** Bytes of the `@tags ` prefix that `formatMessage` writes for these tags. */
 export function tagBytes(tags: Record<string, string>) {
-  return Object.keys(tags).length
+  return Object.keys(tags).length > 0
     ? utf8Bytes(formatMessage("PING", [], tags)) - "PING".length
     : 0;
 }
@@ -183,7 +183,7 @@ export function sourceNick(source: string | undefined) {
   if (!source) return "";
   const bang = source.indexOf("!");
 
-  return bang < 0 ? source : source.slice(0, bang);
+  return bang === -1 ? source : source.slice(0, bang);
 }
 
 /** ISUPPORT CASEMAPPING families; `unicode` covers rfc8265/precis. */
@@ -255,8 +255,8 @@ export function parseCapabilities(text: string) {
     if (!item) continue;
     const equals = item.indexOf("=");
     caps.set(
-      equals < 0 ? item : item.slice(0, equals),
-      equals < 0 ? "" : item.slice(equals + 1),
+      equals === -1 ? item : item.slice(0, equals),
+      equals === -1 ? "" : item.slice(equals + 1),
     );
   }
 

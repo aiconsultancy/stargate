@@ -202,7 +202,7 @@ function jpeg(bytes: Buffer): Omit<Screenshot, "bytes"> {
 }
 
 export function inspectScreenshot(bytes: Buffer): Screenshot {
-  if (!bytes.length || bytes.length > MAX_IMAGE_BYTES)
+  if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES)
     throw new Error(
       `screenshot must contain at most ${MAX_IMAGE_BYTES} bytes. ${SMALLER_IMAGE_HINT}`,
     );
@@ -229,8 +229,8 @@ export function screenshotActivity(
 
   const activity: OutgoingActivity = {
     type: "message",
-    ...(caption ? { text: caption, textFormat: "markdown" as const } : {}),
-    ...(replyToId ? { replyToId } : {}),
+    ...(caption && { text: caption, textFormat: "markdown" as const }),
+    ...(replyToId && { replyToId }),
     attachments: [
       {
         contentType: image.contentType,

@@ -35,7 +35,7 @@ function failure(status: number, code: string) {
       headers: {
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
-        ...(status === 503 ? { "Retry-After": "1" } : {}),
+        ...(status === 503 && { "Retry-After": "1" }),
       },
     },
   );
@@ -90,12 +90,19 @@ function readBody(
       reject(error);
     };
 
-    const onAbort = () => onError(new Error("API request aborted"));
+    const onAbort = () => {
+      onError(new Error("API request aborted"));
+    };
 
     const onData = (chunk: Buffer) => {
       size += chunk.length;
 
-      if (size > maxBytes) return onError(new BodyLimit());
+      if (size > maxBytes) {
+        onError(new BodyLimit());
+
+        return;
+      }
+
       chunks.push(chunk);
     };
 
@@ -185,7 +192,7 @@ async function writeResponse(
 export async function startApiServer(options: Options) {
   const routes = apiRoutes(options.routes ?? []);
 
-  if (routes.length && !("unix" in options.listen))
+  if (routes.length > 0 && !("unix" in options.listen))
     throw new Error("Additional API routes require private Unix mode");
   const headersMs = deadline(options.timing?.headersMs, 10_000);
   const requestMs = deadline(options.timing?.requestMs, apiRequestMs);
@@ -223,7 +230,9 @@ export async function startApiServer(options: Options) {
       });
 
       work.add(running);
-      void running.finally(() => work.delete(running));
+      void running.finally(() => {
+        work.delete(running);
+      });
     },
   );
 
@@ -237,7 +246,10 @@ export async function startApiServer(options: Options) {
       return;
     }
 
-    const timer = setTimeout(() => socket.destroy(), headersMs);
+    const timer = setTimeout(() => {
+      socket.destroy();
+    }, headersMs);
+
     sockets.set(socket, timer);
     socket.on("error", () => {});
     socket.once("close", () => {
@@ -245,7 +257,9 @@ export async function startApiServer(options: Options) {
       sockets.delete(socket);
     });
   });
-  server.on("clientError", (_error, socket) => socket.destroy());
+  server.on("clientError", (_error, socket) => {
+    socket.destroy();
+  });
   // Do not send 100 Continue before route authorization and limits.
   server.on("checkContinue", (request, output) => {
     server.emit("request", request, output);
@@ -258,7 +272,10 @@ export async function startApiServer(options: Options) {
   async function handle(request: IncomingMessage, output: ServerResponse) {
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, lifetime.signal]);
-    const disconnected = () => controller.abort();
+
+    const disconnected = () => {
+      controller.abort();
+    };
 
     const closed = () => {
       if (!output.writableFinished) disconnected();
@@ -473,7 +490,10 @@ export async function startApiServer(options: Options) {
     try {
       if (server.listening)
         await new Promise<void>((resolve, reject) => {
-          server.close((error) => (error ? reject(error) : resolve()));
+          server.close((error) => {
+            if (error) reject(error);
+            else resolve();
+          });
         });
 
       if ("unix" in options.listen)
@@ -501,7 +521,10 @@ export async function startApiServer(options: Options) {
     stopping = (async () => {
       try {
         await new Promise<void>((resolve, reject) => {
-          server.close((error) => (error ? reject(error) : resolve()));
+          server.close((error) => {
+            if (error) reject(error);
+            else resolve();
+          });
         });
 
         if ("unix" in options.listen)

@@ -14,7 +14,7 @@ export class FleetRecords<TStored, TJob> {
         "SELECT * FROM jobs WHERE botKey=? AND json_extract(fleet_context,'$.kind')='assignment' AND fleet_exported=0 ORDER BY id LIMIT 100",
       )
       .all(botKey)
-      .map(this.decodeStoredJob);
+      .map((item) => this.decodeStoredJob(item));
   }
 
   public fleetPublished(id: number) {

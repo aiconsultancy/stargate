@@ -115,7 +115,7 @@ function parseModel(value: string): ModelRef {
   return {
     providerID: value.slice(0, separator),
     id,
-    ...(variant ? { variant } : {}),
+    ...(variant && { variant }),
   };
 }
 

@@ -119,10 +119,13 @@ export class FleetResults {
         inputID: job.input ?? null,
         channel: delegation.target.channel,
         outcome:
-          !job.failure && job.input && makers.length
+          !job.failure && job.input && makers.length > 0
             ? "completed"
             : "uncertain",
-        text: output.map(replyText).join("\n\n").slice(0, 12_000),
+        text: output
+          .map((item) => replyText(item))
+          .join("\n\n")
+          .slice(0, 12_000),
         makers,
         humanApproval: false,
       };
@@ -173,7 +176,7 @@ export class FleetResults {
         conversation: original.conversation,
         channel: original.channel,
         thread: original.thread,
-        ...(original.replyParent ? { replyParent: original.replyParent } : {}),
+        ...(original.replyParent && { replyParent: original.replyParent }),
         // Retained recipient for delivery ACLs; model source is the agent.
         // Approval intake explicitly refuses this continuation.
         user: original.user,

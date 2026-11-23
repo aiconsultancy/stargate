@@ -32,12 +32,12 @@ export function containsCredential(text: string) {
  * truncation, inference and publication. At most 64,000 characters are read.
  */
 export function redactCredentials(text: string, limit = 1500): string {
-  return credentialRules
-    .reduce(
-      (redacted, [pattern, replacement]) =>
-        redacted.replace(pattern, replacement),
-      text.slice(0, 64_000),
-    )
+  let redacted = text.slice(0, 64_000);
+
+  for (const [pattern, replacement] of credentialRules)
+    redacted = redacted.replace(pattern, replacement);
+
+  return redacted
     .replace(/\p{Cc}/gu, (character) =>
       ["\n", "\r", "\t"].includes(character) ? character : "",
     )

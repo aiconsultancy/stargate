@@ -24,9 +24,9 @@ export function crewFingerprint(options: {
         id,
         permissionProfile,
         directory: resolve(options.worktrees[id] ?? ""),
-        ...(backend ? { backend } : {}),
+        ...(backend && { backend }),
       }))
-      .sort((a, b) => a.id.localeCompare(b.id)),
+      .toSorted((a, b) => a.id.localeCompare(b.id)),
   });
 }
 

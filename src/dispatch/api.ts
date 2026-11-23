@@ -289,7 +289,7 @@ export class SubspaceApi implements DispatchApi {
       response = await this.fetcher(`${this.base}${path}`, {
         method,
         headers: this.headers(body !== undefined),
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(body !== undefined && { body: JSON.stringify(body) }),
         redirect: "error",
         signal: AbortSignal.any([
           signal,
@@ -480,7 +480,7 @@ export class SubspaceApi implements DispatchApi {
     cursor: string | undefined,
     signal: AbortSignal,
   ) {
-    if (!assignees.length) return { items: [], next: undefined };
+    if (assignees.length === 0) return { items: [], next: undefined };
 
     return this.issueListing(
       (page) => dispatchRoutes.assignedIssues(assignees, updatedSince, page),

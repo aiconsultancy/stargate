@@ -40,7 +40,7 @@ export const processRunner: CommandRunner = {
   async run(command, options) {
     try {
       const child = Bun.spawn([...command], {
-        ...(options.cwd ? { cwd: options.cwd } : {}),
+        ...(options.cwd && { cwd: options.cwd }),
         env:
           options.inheritEnv === false
             ? { ...options.env }
@@ -172,7 +172,7 @@ export async function request(url: string, options: RequestOptions = {}) {
       response = await fetch(target, {
         method: options.method ?? "GET",
         headers,
-        ...(options.body !== undefined ? { body: options.body } : {}),
+        ...(options.body !== undefined && { body: options.body }),
         redirect: "manual",
         signal,
       });

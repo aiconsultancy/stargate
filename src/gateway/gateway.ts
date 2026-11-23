@@ -142,6 +142,7 @@ function transcriptSilent(entries: readonly TranscriptEntry[]) {
 /** Settled public text without reply controls; never applies a reaction. */
 export function transcriptReply(entries: readonly TranscriptEntry[]) {
   return entries
+    .values()
     .map((entry) =>
       parseAttachments(parseReactionReply(entry.text).text).text.replace(
         /^(?:\r?\n)+|(?:\r?\n)+$/g,
@@ -149,6 +150,7 @@ export function transcriptReply(entries: readonly TranscriptEntry[]) {
       ),
     )
     .filter((text) => text.trim())
+    .toArray()
     .join("\n\n");
 }
 
@@ -245,7 +247,7 @@ export function slackTransport(
         thread: job.thread,
         message,
         user: job.user,
-        ...(job.sender === "captain" ? { sender: "captain" as const } : {}),
+        ...(job.sender === "captain" && { sender: "captain" as const }),
       };
     },
     note: (job) =>
@@ -306,13 +308,11 @@ export class Gateway {
     this.meta = new MetaCommands(store.meta, slack, metaOptions);
     drain?.attach({
       broadcast: (record, signal) => this.broadcastDrain(record, signal),
-      ...(backend.resumeMaintenance
-        ? {
-            resume: (signal) =>
-              backend.resumeMaintenance?.(signal) ??
-              Promise.resolve({ remaining: 0 }),
-          }
-        : {}),
+      ...(backend.resumeMaintenance && {
+        resume: (signal) =>
+          backend.resumeMaintenance?.(signal) ??
+          Promise.resolve({ remaining: 0 }),
+      }),
     });
     this.bot = "slack" in config ? config : undefined;
 
@@ -384,7 +384,9 @@ export class Gateway {
         this.backend,
         () => this.questionPort(),
         (job) => this.allowed(job),
-        (session) => this.settle(session),
+        (session) => {
+          this.settle(session);
+        },
         this.questionLifetime.signal,
       );
   }
@@ -803,16 +805,14 @@ export class Gateway {
         notification: {
           wake: job.notification.wake,
           ...(state.mode === "addressed-only" &&
-          job.notification.wake !== "ordinary"
-            ? {
-                note: notificationNote(
-                  job.channel,
-                  job.thread,
-                  job.notification.wake,
-                  state,
-                ),
-              }
-            : {}),
+            job.notification.wake !== "ordinary" && {
+              note: notificationNote(
+                job.channel,
+                job.thread,
+                job.notification.wake,
+                state,
+              ),
+            }),
         },
       };
     } catch {
@@ -1023,9 +1023,7 @@ export class Gateway {
           conversation: conversationKey(this.key, channel, root),
           thread: root,
           text: `Slack reaction :${name}: ${action}.`,
-          ...(notification
-            ? { notification: { wake: "ordinary" as const } }
-            : {}),
+          ...(notification && { notification: { wake: "ordinary" as const } }),
         };
       });
 
@@ -1065,11 +1063,11 @@ export class Gateway {
             AbortSignal.timeout(5000),
           ]),
         )
-        .catch(() =>
+        .catch(() => {
           this.log.warn(
             "Recovered native Stop outcome unavailable; not replayed",
-          ),
-        );
+          );
+        });
 
     return true;
   }
@@ -1163,7 +1161,10 @@ export class Gateway {
    * restart Stargate instead of leaving a silent, half-stopped worker.
    */
   public async work(signal: AbortSignal) {
-    const stopQuestions = () => this.questionLifetime.abort();
+    const stopQuestions = () => {
+      this.questionLifetime.abort();
+    };
+
     signal.addEventListener("abort", stopQuestions, { once: true });
 
     try {
@@ -1212,7 +1213,9 @@ export class Gateway {
           yield* Effect.forkScoped(
             abortable((signal) =>
               watch(
-                (session) => this.settle(session),
+                (session) => {
+                  this.settle(session);
+                },
                 signal,
                 this.transport.questions?.operator
                   ? () => this.questions?.reconcileBackground()
@@ -1220,7 +1223,9 @@ export class Gateway {
               ),
             ).pipe(
               Effect.catchCause(() =>
-                Effect.sync(() => this.log.warn("Transcript watch stopped")),
+                Effect.sync(() => {
+                  this.log.warn("Transcript watch stopped");
+                }),
               ),
             ),
           );
@@ -1349,12 +1354,12 @@ export class Gateway {
           slot,
           abortable((signal) => this.process(job, signal)).pipe(
             Effect.catchCause(() =>
-              Effect.sync(() =>
+              Effect.sync(() => {
                 this.log.error(
                   { job: job.id },
                   "Worker failed; request will need recovery",
-                ),
-              ),
+                );
+              }),
             ),
           ),
           { startImmediately: true },
@@ -1732,7 +1737,7 @@ export class Gateway {
     return {
       ...anchored,
       anchored: true,
-      ...(from === undefined ? {} : { gap: true }),
+      ...(from !== undefined && { gap: true }),
     };
   }
 
@@ -1771,8 +1776,12 @@ export class Gateway {
       !mention?.channels.includes(job.channel) ||
       !snapshot.transcriber ||
       !this.slack.files
-    )
-      return ignore("Voice message ignored: spoken mentions not configured");
+    ) {
+      ignore("Voice message ignored: spoken mentions not configured");
+
+      return;
+    }
+
     let heard: Awaited<ReturnType<typeof transcribeMedia>>;
 
     try {
@@ -1789,8 +1798,12 @@ export class Gateway {
 
       checkAttachments(files);
 
-      if (!files.some(isMedia))
-        return ignore("Message without media or mention ignored");
+      if (!files.some((item) => isMedia(item))) {
+        ignore("Message without media or mention ignored");
+
+        return;
+      }
+
       heard = await transcribeMedia(
         files,
         snapshot.transcriber,
@@ -1800,11 +1813,16 @@ export class Gateway {
     } catch {
       if (shutdown.aborted) return;
 
-      return ignore("Voice message not transcribed; ignored without a reply");
+      ignore("Voice message not transcribed; ignored without a reply");
+
+      return;
     }
 
-    if (!spokenMention(heard.transcripts, mention.names))
-      return ignore("Voice message without spoken mention ignored");
+    if (!spokenMention(heard.transcripts, mention.names)) {
+      ignore("Voice message without spoken mention ignored");
+
+      return;
+    }
 
     return this.store.admitSpoken(job.id) ? heard : undefined;
   }
@@ -1824,13 +1842,15 @@ export class Gateway {
     this.turnPolicies.set(held.id, transport);
 
     try {
-      return await this.processTurn(held, shutdown, {
+      await this.processTurn(held, shutdown, {
         config,
         bot,
         transcriber,
         transport,
         allowed,
       });
+
+      return;
     } finally {
       this.active--;
       this.turnPolicies.delete(held.id);
@@ -1908,9 +1928,9 @@ export class Gateway {
         const timestamp = job.eventId.slice(job.channel.length + 1);
         await this.slack
           .readReceipt?.(job.channel, timestamp, active)
-          .catch(() =>
-            this.log.warn({ job: job.id }, "Slack read receipt unavailable"),
-          );
+          .catch(() => {
+            this.log.warn({ job: job.id }, "Slack read receipt unavailable");
+          });
       }
     };
 
@@ -2021,9 +2041,9 @@ export class Gateway {
             .then(() => {
               reactionDelivered = true;
             })
-            .catch(() =>
-              this.log.warn({ job: job.id }, "Slack reaction unavailable"),
-            );
+            .catch(() => {
+              this.log.warn({ job: job.id }, "Slack reaction unavailable");
+            });
         }
 
         return parseAttachments(parsed.text, complete).text;
@@ -2189,13 +2209,13 @@ export class Gateway {
 
           // A spoken-mention gate already transcribed this message.
           if (heard) {
-            if (heard.files.length && !this.backend.supportsAttachments)
+            if (heard.files.length > 0 && !this.backend.supportsAttachments)
               throw new AttachmentInputUnavailable();
             inputFiles = heard.files;
             text = [text, spokenMentionNote, ...heard.blocks]
               .filter(Boolean)
               .join("\n\n");
-          } else if (fileIDs.length) {
+          } else if (fileIDs.length > 0) {
             try {
               if (
                 job.deferDelivery ||
@@ -2218,7 +2238,7 @@ export class Gateway {
               // Refuse before any audio leaves: speech alone needs no file input.
               if (
                 !this.backend.supportsAttachments &&
-                !inputFiles.every(isMedia)
+                !inputFiles.every((item) => isMedia(item))
               )
                 throw new Error("Backend accepts no files");
             } catch {
@@ -2229,7 +2249,7 @@ export class Gateway {
             signal.throwIfAborted();
 
             // Speech becomes prompt text before admission; the media is dropped.
-            if (transcriber && inputFiles.some(isMedia)) {
+            if (transcriber && inputFiles.some((item) => isMedia(item))) {
               const spoken = await transcribeMedia(
                 inputFiles,
                 transcriber,
@@ -2250,15 +2270,19 @@ export class Gateway {
 
           this.store.started(job.id);
           admitted = true;
-          await this.updateNotice?.(session, signal).catch(() =>
-            this.log.warn("Update notice unavailable"),
-          );
+          await this.updateNotice?.(session, signal).catch(() => {
+            this.log.warn("Update notice unavailable");
+          });
 
           const streamed = await this.backend.prompt(
             session,
             text,
             signal,
-            live ? (text) => live.push(reply(text, false)) : undefined,
+            live
+              ? (text) => {
+                  live.push(reply(text, false));
+                }
+              : undefined,
             pinned ||
               (this.questions &&
                 (this.transport.questions || this.slackQuestions))
@@ -2374,14 +2398,13 @@ export class Gateway {
               job: job.id,
               backend: config.backend.type,
               failure: detail?.kind ?? failure,
-              ...(failure === "timeout" && progress
-                ? {
-                    lastStage: progress.stage,
-                    lastStageAgeMs: Date.now() - progress.observedAt,
-                  }
-                : {}),
-              ...(detail?.status ? { status: detail.status } : {}),
-              ...(detail ? { ran: detail.ran } : {}),
+              ...(failure === "timeout" &&
+                progress && {
+                  lastStage: progress.stage,
+                  lastStageAgeMs: Date.now() - progress.observedAt,
+                }),
+              ...(detail?.status && { status: detail.status }),
+              ...(detail && { ran: detail.ran }),
             },
             "Agent request failed or timed out",
           );
@@ -2451,11 +2474,12 @@ export class Gateway {
         try {
           output = this.store.respond(job.id, output, failure, {
             keep,
-            ...(captainCommit ? { captain: captainCommit } : {}),
+            ...(captainCommit && { captain: captainCommit }),
             files,
-            ...(transcript && !this.backend.sessionID
-              ? { transcript: { from, cursor: transcript.cursor } }
-              : {}),
+            ...(transcript &&
+              !this.backend.sessionID && {
+                transcript: { from, cursor: transcript.cursor },
+              }),
           });
         } catch (error) {
           if (!(error instanceof TranscriptConflict)) throw error;
@@ -2604,8 +2628,11 @@ export class Gateway {
 
         const slackTs = this.bot ? posted : undefined;
 
-        if (!this.store.sent(job.id, i + 1, slackTs))
-          return this.refused(job, "sent");
+        if (!this.store.sent(job.id, i + 1, slackTs)) {
+          this.refused(job, "sent");
+
+          return;
+        }
       }
 
       await deliverAttachments(
@@ -2656,6 +2683,8 @@ export class Gateway {
       )
         this.refused(job, "retry");
     }
+
+    return;
   }
 
   public async close() {

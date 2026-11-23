@@ -185,7 +185,9 @@ export function createEventStreams(
       return ++rosterGeneration;
     }
 
-    function publishFleet(next: V1Fleet) {
+    function publishFleet(nextInput: V1Fleet) {
+      let next = nextInput;
+
       const previous = fleet;
       next = { ...next, host: newestHost(next.host) };
       fleet = next;
@@ -237,7 +239,7 @@ export function createEventStreams(
           ? {
               ...prior,
               available: summary.available && detail?.available !== false,
-              ...(error ? { error } : {}),
+              ...(error && { error }),
               detailStale: true,
             }
           : {
@@ -269,9 +271,9 @@ export function createEventStreams(
       const key = shipKey(id);
 
       const shared = shipReads.get(key) ?? {
-        slot: createReadSlot<V1ShipDetail | undefined>(readMs, () =>
-          shipReads.delete(key),
-        ),
+        slot: createReadSlot<V1ShipDetail | undefined>(readMs, () => {
+          shipReads.delete(key);
+        }),
       };
 
       let attempt = shared.slot.pending ? shared.attempt : undefined;
@@ -377,9 +379,9 @@ export function createEventStreams(
             async (signal) => {
               const reads = new Map<string, V1ShipRead>();
 
-              const overview = await options.fleet(signal, (id, read) =>
-                reads.set(id, read),
-              );
+              const overview = await options.fleet(signal, (id, read) => {
+                reads.set(id, read);
+              });
 
               return { generation, overview, reads };
             },
@@ -506,12 +508,15 @@ export function createEventStreams(
       return new ReadableStream<Uint8Array>(
         {
           start(controller) {
-            const aborted = () => client.close();
+            const aborted = () => {
+              client.close();
+            };
+
             cleanup = () => {
               if (!session.clients.delete(client)) return;
               signal.removeEventListener("abort", aborted);
 
-              if (!session.clients.size) {
+              if (session.clients.size === 0) {
                 active = undefined;
                 session.stop();
               }
@@ -542,7 +547,9 @@ export function createEventStreams(
             signal.addEventListener("abort", aborted, { once: true });
             session.add(client);
           },
-          cancel: () => cleanup(),
+          cancel: () => {
+            cleanup();
+          },
         },
         new ByteLengthQueuingStrategy({ highWaterMark: bufferBytes }),
       );

@@ -340,7 +340,7 @@ export class CrewHistory {
                 (needle === undefined ||
                   session.title?.toLowerCase().includes(needle)),
             )
-            .map(summary),
+            .map((item) => summary(item)),
           ...continuation(nextCursor(page)),
         };
       }

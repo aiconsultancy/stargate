@@ -394,7 +394,7 @@ export class DispatchPolling {
   private noteReadyField(issues: readonly DispatchIssue[]) {
     if (issues.some((issue) => issue.readyForAgents === undefined))
       this.markReadyUnsupported();
-    else if (issues.length && this.readySupported === undefined)
+    else if (issues.length > 0 && this.readySupported === undefined)
       this.readySupported = true;
   }
 
@@ -417,12 +417,12 @@ export class DispatchPolling {
 
     if (!roster) return;
     const { ledger } = this.options;
-    const ids = [...roster.captains.keys()].sort();
+    const ids = [...roster.captains.keys()].toSorted();
     const first = !ledger.initialised;
 
     // First start ends with the first read of captains' assignments: a fleet
     // That gains its first captain later still records before it notifies.
-    if (!ids.length) return;
+    if (ids.length === 0) return;
     const saved = ledger.assignmentWalk;
 
     // The API cursor is bound to the filter: a changed roster starts again.
@@ -467,7 +467,7 @@ export class DispatchPolling {
     let newest = walk.newest;
     let hold = walk.hold;
 
-    const ordered = [...issues].sort(
+    const ordered = [...issues].toSorted(
       (a, b) =>
         Date.parse(a.updatedAt) - Date.parse(b.updatedAt) ||
         a.id.localeCompare(b.id),

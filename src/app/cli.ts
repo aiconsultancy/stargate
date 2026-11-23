@@ -324,21 +324,21 @@ export async function runCli(args: string[]): Promise<CliResult> {
 
     const code = await maintenanceCli(p[1], {
       configPath,
-      ...(v.plan === true ? { plan: true } : {}),
-      ...(v.json ? { json: true } : {}),
-      ...(v.name ? { name: v.name } : {}),
-      ...(v.print ? { print: true } : {}),
-      ...(v.release ? { release: v.release } : {}),
-      ...(v.version ? { version: v.version } : {}),
-      ...(v["outside-window"] ? { outsideWindow: true } : {}),
-      ...(v["after-run"] ? { afterRun: true } : {}),
-      ...(v["accept-current"] !== undefined
-        ? { acceptCurrent: v["accept-current"] }
-        : {}),
-      ...(v.yes ? { yes: true } : {}),
-      ...(v.now ? { now: true } : {}),
-      ...(v.foreground ? { foreground: true } : {}),
-      ...(v["retry-failed"] ? { retryFailed: true } : {}),
+      ...(v.plan === true && { plan: true }),
+      ...(v.json && { json: true }),
+      ...(v.name && { name: v.name }),
+      ...(v.print && { print: true }),
+      ...(v.release && { release: v.release }),
+      ...(v.version && { version: v.version }),
+      ...(v["outside-window"] && { outsideWindow: true }),
+      ...(v["after-run"] && { afterRun: true }),
+      ...(v["accept-current"] !== undefined && {
+        acceptCurrent: v["accept-current"],
+      }),
+      ...(v.yes && { yes: true }),
+      ...(v.now && { now: true }),
+      ...(v.foreground && { foreground: true }),
+      ...(v["retry-failed"] && { retryFailed: true }),
     });
 
     if (code !== 0) process.exitCode = code;
@@ -366,7 +366,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
       (v.id !== undefined && op !== "remove") ||
       (op === "run" || op === "remove"
         ? selectors.length !== 1
-        : selectors.length !== 0)
+        : selectors.length > 0)
     )
       throw new Error("Invalid cron options. Use cron --help.");
     let raw: unknown = { op };
@@ -430,26 +430,23 @@ export async function runCli(args: string[]): Promise<CliResult> {
       directory: resolve(v.directory),
       projectDirectory: resolve(v.project),
       worktreeDirectory: resolve(v.worktrees),
-      ...(v["workspace-mode"]
-        ? {
-            workspaceMode: workspaceMode(v["workspace-mode"]),
-          }
-        : {}),
+      ...(v["workspace-mode"] && {
+        workspaceMode: workspaceMode(v["workspace-mode"]),
+      }),
       mesijCommand: resolve(mesijCommand),
       team,
-      ...(v.id ? { namespace: v.id } : {}),
-      ...(v["session-id"] ? { captainSessionID: v["session-id"] } : {}),
-      ...(v.base ? { base: v.base } : {}),
-      ...(maintenanceWindow ? { maintenanceWindow } : {}),
-      ...(v["proxy-url"] ? { proxyURL: v["proxy-url"] } : {}),
-      ...(v["proxy-key-file"]
-        ? { apiKeyReference: `{file:${resolve(v["proxy-key-file"])}}` }
-        : {}),
-      ...(v["cron-config"] && v["cron-bot"]
-        ? {
-            cron: { configPath: resolve(v["cron-config"]), bot: v["cron-bot"] },
-          }
-        : {}),
+      ...(v.id && { namespace: v.id }),
+      ...(v["session-id"] && { captainSessionID: v["session-id"] }),
+      ...(v.base && { base: v.base }),
+      ...(maintenanceWindow && { maintenanceWindow }),
+      ...(v["proxy-url"] && { proxyURL: v["proxy-url"] }),
+      ...(v["proxy-key-file"] && {
+        apiKeyReference: `{file:${resolve(v["proxy-key-file"])}}`,
+      }),
+      ...(v["cron-config"] &&
+        v["cron-bot"] && {
+          cron: { configPath: resolve(v["cron-config"]), bot: v["cron-bot"] },
+        }),
     });
 
     console.log(JSON.stringify(result, null, 2));
@@ -460,9 +457,9 @@ export async function runCli(args: string[]): Promise<CliResult> {
     const result = await provisionBots({
       planPath: resolve(v.plan),
       apply: v.apply ?? false,
-      ...(v.config ? { configPath } : {}),
-      ...(v.journal ? { journalPath: resolve(v.journal) } : {}),
-      ...(v["record-app"] ? { recordApp: v["record-app"] } : {}),
+      ...(v.config && { configPath }),
+      ...(v.journal && { journalPath: resolve(v.journal) }),
+      ...(v["record-app"] && { recordApp: v["record-app"] }),
     });
 
     if (v.json) console.log(JSON.stringify(result, null, 2));
@@ -543,11 +540,10 @@ export async function runCli(args: string[]): Promise<CliResult> {
               type: "opencode",
               directory: resolve(v.directory),
               url: v.url ?? "http://localhost:4096",
-              ...(v.provider && v.model
-                ? { model: { providerID: v.provider, id: v.model } }
-                : {}),
-              ...(v.agent ? { agent: v.agent } : {}),
-              ...(v["session-id"] ? { sessionID: v["session-id"] } : {}),
+              ...(v.provider &&
+                v.model && { model: { providerID: v.provider, id: v.model } }),
+              ...(v.agent && { agent: v.agent }),
+              ...(v["session-id"] && { sessionID: v["session-id"] }),
             }
           : {
               type: v.backend,

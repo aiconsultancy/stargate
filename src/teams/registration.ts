@@ -106,7 +106,7 @@ export function allowedActivity(config: TeamsConfig, activity: TeamsActivity) {
     user &&
     (!config.fleetPolicy ||
       fleetAuthority(config.fleetPolicy, user) === "human") &&
-    tenants.length &&
+    tenants.length > 0 &&
     tenants.every(
       (tenant) => tenant.toLowerCase() === config.tenantId.toLowerCase(),
     ) &&
@@ -198,18 +198,16 @@ export class TeamsRegistration {
       });
     const presence = config.livePresence ? new TeamsPresence() : undefined;
     this.transport = {
-      ...(presence
-        ? {
-            turnStatus: (job) =>
-              !job.fleet &&
-              !job.sender &&
-              job.eventId === `${job.channel}:${job.thread}` &&
-              job.received &&
-              Math.abs(Date.now() - job.received) <= 120_000
-                ? ("notice" as const)
-                : ("quiet" as const),
-          }
-        : {}),
+      ...(presence && {
+        turnStatus: (job) =>
+          !job.fleet &&
+          !job.sender &&
+          job.eventId === `${job.channel}:${job.thread}` &&
+          job.received &&
+          Math.abs(Date.now() - job.received) <= 120_000
+            ? ("notice" as const)
+            : ("quiet" as const),
+      }),
       name: "teams",
       key: this.key,
       allowed: (user, channel) => this.allowed(user, channel),
@@ -224,69 +222,63 @@ export class TeamsRegistration {
           thread: job.thread,
           message: job.eventId.slice(job.channel.length + 1),
           user: job.user,
-          ...(this.sourceRecorder
-            ? {
-                reference: fleetSourceReference(
-                  "teams",
-                  this.key,
-                  job.channel,
-                  job.eventId.slice(job.channel.length + 1),
-                ),
-              }
-            : {}),
-          ...(config.fleetPolicy ? { authority: "human" as const } : {}),
+          ...(this.sourceRecorder && {
+            reference: fleetSourceReference(
+              "teams",
+              this.key,
+              job.channel,
+              job.eventId.slice(job.channel.length + 1),
+            ),
+          }),
+          ...(config.fleetPolicy && { authority: "human" as const }),
         };
       },
       note: () => {},
-      ...(config.fleetPolicy
-        ? {
-            instructions: () =>
-              config.fleetPolicy ? fleetInstructions(config.fleetPolicy) : "",
-          }
-        : {}),
+      ...(config.fleetPolicy && {
+        instructions: () =>
+          config.fleetPolicy ? fleetInstructions(config.fleetPolicy) : "",
+      }),
     };
     this.delivery = {
-      ...(presence
-        ? {
-            working: async (channel, thread, signal, allowed, mode, read) => {
-              const ref = this.reference(channel);
+      ...(presence && {
+        working: async (channel, thread, signal, allowed, mode, read) => {
+          const ref = this.reference(channel);
 
-              if (mode !== "notice" || !ref || !allowed) return;
+          if (mode !== "notice" || !ref || !allowed) return;
 
-              const active = () =>
-                allowed() &&
-                this.allowed(ref.user, channel) &&
-                this.reference(channel)?.service === ref.service;
+          const active = () =>
+            allowed() &&
+            this.allowed(ref.user, channel) &&
+            this.reference(channel)?.service === ref.service;
 
-              // The same settings and captain override as Slack, read once
-              // Per turn; an active turn keeps its initial values.
-              const waiting = {
-                ...(await resolveWaiting(config)),
-                name: botDisplayName(config),
-              };
+          // The same settings and captain override as Slack, read once
+          // Per turn; an active turn keeps its initial values.
+          const waiting = {
+            ...(await resolveWaiting(config)),
+            name: botDisplayName(config),
+          };
 
-              await presence.working(
+          await presence.working(
+            channel,
+            thread,
+            AbortSignal.any([signal, this.abort.signal]),
+            active,
+            read ?? (() => {}),
+            async (activity, signal) => {
+              if (!active())
+                throw new Error("Teams presence no longer available");
+
+              return this.connector.sendToConversation(
+                ref.service,
                 channel,
-                thread,
-                AbortSignal.any([signal, this.abort.signal]),
-                active,
-                read ?? (() => {}),
-                async (activity, signal) => {
-                  if (!active())
-                    throw new Error("Teams presence no longer available");
-
-                  return this.connector.sendToConversation(
-                    ref.service,
-                    channel,
-                    activity,
-                    { signal, retryServerErrors: false },
-                  );
-                },
-                waiting,
+                activity,
+                { signal, retryServerErrors: false },
               );
             },
-          }
-        : {}),
+            waiting,
+          );
+        },
+      }),
       files: teamsImageTransport(
         async (channel, _thread, activity, signal, allowed) => {
           const reference = this.reference(channel);
@@ -380,7 +372,7 @@ export class TeamsRegistration {
     const response = await this.connector.sendToConversation(
       reference.service,
       conversation,
-      { type: "message", text, ...(replyToId ? { replyToId } : {}) },
+      { type: "message", text, ...(replyToId && { replyToId }) },
       { signal: this.abort.signal, retryServerErrors: false },
     );
 
@@ -402,9 +394,9 @@ export class TeamsRegistration {
       text: activity.text,
       recipient: { id: activity.recipient.id },
       entities: (activity.entities ?? []).map((entity) => ({
-        ...(entity.type ? { type: entity.type } : {}),
-        ...(entity.text ? { text: entity.text } : {}),
-        ...(entity.mentioned ? { mentioned: { id: entity.mentioned.id } } : {}),
+        ...(entity.type && { type: entity.type }),
+        ...(entity.text && { text: entity.text }),
+        ...(entity.mentioned && { mentioned: { id: entity.mentioned.id } }),
       })),
     });
 
@@ -451,13 +443,11 @@ export class TeamsRegistration {
       conversation: JSON.stringify([this.key, conversation]),
       channel: conversation,
       thread: activity.id,
-      ...(this.config.livePresence
-        ? {
-            received: activity.timestamp
-              ? Date.parse(activity.timestamp)
-              : Date.now(),
-          }
-        : {}),
+      ...(this.config.livePresence && {
+        received: activity.timestamp
+          ? Date.parse(activity.timestamp)
+          : Date.now(),
+      }),
       user,
       text,
     });
@@ -720,11 +710,12 @@ export class TeamsRegistration {
           keyStore,
           appId: this.config.botClientId,
         }),
-      checkActivity: (token, activity) =>
+      checkActivity: (token, activity) => {
         checkActivityBinding(token, {
           serviceUrl: activity["serviceUrl"],
           channelId: activity["channelId"],
-        }),
+        });
+      },
       onActivity: async (activity) => {
         if (!open()) throw new Error("Teams intake stopped");
         await this.accept(activity);
@@ -738,9 +729,9 @@ export class TeamsRegistration {
     );
     this.loop = (async () => {
       while (!this.abort.signal.aborted) {
-        await this.pollApprovals().catch(() =>
-          this.log("Teams permission check unavailable"),
-        );
+        await this.pollApprovals().catch(() => {
+          this.log("Teams permission check unavailable");
+        });
         await delay(1000, undefined, { signal: this.abort.signal }).catch(
           () => {},
         );
@@ -752,7 +743,11 @@ export class TeamsRegistration {
     const server = this.server;
 
     if (server?.listening)
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
     unlinkOwnSocket(this.config.socketPath, this.socketIdentity);
     await this.loop;
     this.db.close();

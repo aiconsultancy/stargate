@@ -39,7 +39,15 @@ export interface Transcriber {
 }
 
 // Whisper container formats. Slack voice notes are audio/mp4 (.m4a).
-const extensions = ["m4a", "mp3", "mp4", "mpeg", "mpga", "wav", "webm"];
+const extensions = new Set([
+  "m4a",
+  "mp3",
+  "mp4",
+  "mpeg",
+  "mpga",
+  "wav",
+  "webm",
+]);
 
 const mimeExtensions: Record<string, string> = {
   "audio/mp4": "m4a",
@@ -63,9 +71,7 @@ export function isMedia(file: Pick<Attachment, "mime">) {
 function extension(file: Attachment) {
   const named = /\.([a-z0-9]+)$/i.exec(file.name)?.[1]?.toLowerCase();
 
-  return named && extensions.includes(named)
-    ? named
-    : mimeExtensions[file.mime];
+  return named && extensions.has(named) ? named : mimeExtensions[file.mime];
 }
 
 // One provider request at a time in this process, in arrival order.
@@ -85,7 +91,11 @@ async function exclusive<T>(signal: AbortSignal, run: () => Promise<T>) {
     () => {},
   );
   const aborted = Promise.withResolvers<never>();
-  const abort = () => aborted.reject(signal.reason);
+
+  const abort = () => {
+    aborted.reject(signal.reason);
+  };
+
   signal.addEventListener("abort", abort, { once: true });
 
   try {

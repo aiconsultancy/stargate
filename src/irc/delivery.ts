@@ -52,6 +52,11 @@ export type IrcPresence = {
   reactions?: boolean;
 };
 
+/** A fresh default object for each delivery: typing off. */
+function noPresence(): IrcPresence {
+  return { typing: false };
+}
+
 /** Persisted plan and progress of one stored chunk (see Store). */
 export type IrcProgress = {
   plan(unit: DeliveryUnit, plan: string): { plan: string; done: number };
@@ -107,7 +112,7 @@ export function packBatches(
       utf8Bytes(line.text) + (first || line.concat ? 0 : 1);
 
     if (
-      lines.length &&
+      lines.length > 0 &&
       (lines.length >= limits.maxLines ||
         bytes + cost(part, false) > limits.maxBytes)
     ) {
@@ -116,12 +121,12 @@ export function packBatches(
       bytes = 0;
     }
 
-    const line = lines.length ? part : { ...part, concat: false };
+    const line = lines.length > 0 ? part : { ...part, concat: false };
     bytes += cost(line, lines.length === 0);
     lines.push(line);
   }
 
-  if (lines.length) units.push({ lines });
+  if (lines.length > 0) units.push({ lines });
 
   return units;
 }
@@ -151,7 +156,7 @@ export class IrcDelivery implements TransportDelivery {
     private readonly readyMs = 30_000,
     private readonly hosted?: IrcFiles,
     private readonly progress?: IrcProgress,
-    private readonly presence: IrcPresence = { typing: false },
+    private readonly presence: IrcPresence = noPresence(),
     /** Thread roots resolve separately from their request/Stop identity. */
     private readonly replyParent?: (request: string) => string | undefined,
   ) {
@@ -319,9 +324,15 @@ export class IrcDelivery implements TransportDelivery {
   ) {
     if (!this.presence.typing || !this.client.hasCap("message-tags")) {
       if (!signal.aborted)
-        await new Promise<void>((resolve) =>
-          signal.addEventListener("abort", () => resolve(), { once: true }),
-        );
+        await new Promise<void>((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              resolve();
+            },
+            { once: true },
+          );
+        });
 
       return;
     }
@@ -442,13 +453,11 @@ export class IrcDelivery implements TransportDelivery {
 
         return hosted.files.download(urls, signal);
       },
-      ...(hosted.upload
-        ? {
-            upload: (file, signal) => hosted.files.upload(file, signal),
-            link: (channel, thread, url, title, _signal, allowed) =>
-              this.link(channel, thread, url, title, allowed),
-          }
-        : {}),
+      ...(hosted.upload && {
+        upload: (file, signal) => hosted.files.upload(file, signal),
+        link: (channel, thread, url, title, _signal, allowed) =>
+          this.link(channel, thread, url, title, allowed),
+      }),
     };
   }
 
@@ -678,6 +687,6 @@ function observedProgress(
   return {
     request,
     stage: progress?.stage ?? "received",
-    ...(progress?.disconnected ? { disconnected: true } : {}),
+    ...(progress?.disconnected && { disconnected: true }),
   };
 }

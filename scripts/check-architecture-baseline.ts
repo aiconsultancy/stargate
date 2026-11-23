@@ -190,7 +190,7 @@ const sha256 = (text: string) =>
 
 const atParent = async (path: string) =>
   (await command(["git", "ls-tree", "--name-only", parent, "--", path]))?.trim()
-    ? await command(["git", "show", `${parent}:${path}`])
+    ? command(["git", "show", `${parent}:${path}`])
     : undefined;
 
 const parentBaseline = await atParent(BASELINE);
@@ -359,10 +359,10 @@ const differences = Object.keys(expected).filter(
 if ((await readFile(join(root, BASELINE), "utf8")) !== baselineBytes)
   fail("baseline-changed-during-check");
 
-if (differences.length && stale)
+if (differences.length > 0 && stale)
   failStale(differences.map((key) => `baseline-diff:${key}`).join("\n"));
 
-if (differences.length)
+if (differences.length > 0)
   fail(
     "baseline-diff",
     differences.map((key) => `baseline-diff:${key}`).join("\n"),
@@ -459,7 +459,7 @@ for (const [kind, text] of notices) {
   console.log(`Architecture allowance: ${kind}: ${text}`);
 }
 
-if (notices.length && receipt.closureReviewRequired)
+if (notices.length > 0 && receipt.closureReviewRequired)
   console.log(`Tool: ${receipt.closureReviewRequired}`);
 
 console.log(
@@ -480,7 +480,7 @@ if (summary)
       ...(policyChange
         ? [`- **policy changed in this commit**: ${policyChange}`]
         : []),
-      ...(notices.length
+      ...(notices.length > 0
         ? notices.map(([kind, text]) => `- **${kind}**: \`${text}\``)
         : ["No allowances."]),
       "",

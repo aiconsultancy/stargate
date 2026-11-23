@@ -116,7 +116,7 @@ export function peerAddress(address: string | undefined) {
 }
 
 export function networkMatcher(networks: readonly string[]) {
-  if (!networks.every(isPrivateNetwork))
+  if (!networks.every((item) => isPrivateNetwork(item)))
     throw new Error("Fleet API is private-network only. Use private CIDRs.");
   const list = networkList(networks);
 

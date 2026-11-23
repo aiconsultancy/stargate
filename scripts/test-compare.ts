@@ -190,7 +190,7 @@ function processGroupSnapshot(pid: number): GroupSnapshot {
       }
     }
 
-    if (!snapshot.members.length && groupExists(pid))
+    if (snapshot.members.length === 0 && groupExists(pid))
       snapshot.errors.push(
         `group ${pid} exists but its membership is unreadable`,
       );
@@ -240,7 +240,7 @@ export function parseOptions(
   const values = new Map<string, string>();
   const switches = new Set<string>();
 
-  const names = [
+  const names = new Set([
     "base",
     "candidate",
     "file",
@@ -252,7 +252,7 @@ export function parseOptions(
     "timeout-ms",
     "output",
     "dependencies",
-  ];
+  ]);
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -260,7 +260,7 @@ export function parseOptions(
     if (arg === "--fail-if-candidate-worse") {
       if (switches.has(arg)) throw new Error(`Duplicate option: ${arg}`);
       switches.add(arg);
-    } else if (arg?.startsWith("--") && names.includes(arg.slice(2))) {
+    } else if (arg?.startsWith("--") && names.has(arg.slice(2))) {
       const value = args[++index];
 
       if (!value || value.startsWith("--") || values.has(arg))
@@ -315,7 +315,7 @@ export function parseOptions(
 
   return {
     cwd: resolve(cwd),
-    ...(base ? { base } : {}),
+    ...(base && { base }),
     candidate: values.get("--candidate") ?? cwd,
     file,
     runs,
@@ -323,13 +323,13 @@ export function parseOptions(
     maxLoad: number("--max-load", availableParallelism() * 1.5, false),
     timeoutMs,
     lockWait: number("--lock-wait", 300),
-    ...(lock ? { lock: resolve(cwd, lock) } : {}),
-    ...(values.has("--output")
-      ? { output: resolve(cwd, values.get("--output") ?? "") }
-      : {}),
-    ...(values.has("--dependencies")
-      ? { dependencies: resolve(cwd, values.get("--dependencies") ?? "") }
-      : {}),
+    ...(lock && { lock: resolve(cwd, lock) }),
+    ...(values.has("--output") && {
+      output: resolve(cwd, values.get("--output") ?? ""),
+    }),
+    ...(values.has("--dependencies") && {
+      dependencies: resolve(cwd, values.get("--dependencies") ?? ""),
+    }),
     failIfCandidateWorse,
   };
 }
@@ -605,10 +605,12 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
     });
 
     const done: Group["done"] = new Promise((resolveDone) => {
-      child.once("error", (error) =>
-        resolveDone({ code: null, signal: null, error: error.message }),
-      );
-      child.once("close", (code, signal) => resolveDone({ code, signal }));
+      child.once("error", (error) => {
+        resolveDone({ code: null, signal: null, error: error.message });
+      });
+      child.once("close", (code, signal) => {
+        resolveDone({ code, signal });
+      });
     });
 
     const group: Group = {
@@ -724,9 +726,9 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
       throw new Error(`group ${pid} ownership not proven: ${reason}`);
     };
 
-    if (snapshot.errors.length) refuse(snapshot.errors.join("; "));
+    if (snapshot.errors.length > 0) refuse(snapshot.errors.join("; "));
 
-    if (!snapshot.members.length) {
+    if (snapshot.members.length === 0) {
       group.signalDisposition = "not-needed";
 
       return;
@@ -798,15 +800,15 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
       return await Promise.race([
         promise,
         new Promise<never>((_, reject) => {
-          cancel = () =>
+          cancel = () => {
             reject(new Error(`Interrupted by ${interrupt ?? "signal"}`));
+          };
 
           if (!cleanup)
             controller.signal.addEventListener("abort", cancel, { once: true });
-          timer = setTimeout(
-            () => reject(new Error("Child or lock wait timed out")),
-            milliseconds,
-          );
+          timer = setTimeout(() => {
+            reject(new Error("Child or lock wait timed out"));
+          }, milliseconds);
 
           if (!cleanup && controller.signal.aborted) cancel();
         }),
@@ -837,10 +839,12 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
     lastHolder = holder;
 
     const ready = new Promise<void>((resolveReady, reject) => {
-      holder.child.stdout?.once("data", () => resolveReady());
-      void holder.done.then((status) =>
-        reject(new Error(`Lock holder exited: ${status.error ?? status.code}`)),
-      );
+      holder.child.stdout?.once("data", () => {
+        resolveReady();
+      });
+      void holder.done.then((status) => {
+        reject(new Error(`Lock holder exited: ${status.error ?? status.code}`));
+      });
     });
 
     await waitFor(ready, (options.lockWait + 1) * 1000);
@@ -885,7 +889,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
           const snapshot = processGroupSnapshot(lastHolder.child.pid);
           // Linux zombies have closed their descriptors even before collection.
           cleanup.lock.state =
-            !snapshot.errors.length &&
+            snapshot.errors.length === 0 &&
             snapshot.members.length > 0 &&
             snapshot.members.every(
               (member) => member.state === "Z" || member.state === "X",
@@ -909,7 +913,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
       version: 1,
       complete,
       cleanup,
-      ...(errorMessage ? { error: errorMessage } : {}),
+      ...(errorMessage && { error: errorMessage }),
       rule: verdictRule,
       file: options.file,
       runsPerTree: options.runs,
@@ -928,7 +932,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
         sha,
         snapshotTree,
       })),
-      ...(incompleteRun ? { incompleteRun } : {}),
+      ...(incompleteRun && { incompleteRun }),
       runs,
     };
 
@@ -995,7 +999,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
         throw new Error("Output must be outside source trees");
 
       if (await exists(target)) {
-        if ((await readdir(target)).length)
+        if ((await readdir(target)).length > 0)
           throw new Error("Output directory must be empty");
       } else await mkdir(target, { mode: 0o700 });
     } else target = await mkdtemp(join(temporary, "test-compare-results-"));
@@ -1215,7 +1219,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
       errorMessage = `Cleanup failed: ${error instanceof Error ? error.message : "unknown error"}`;
     }
 
-    if (!owned.size && workspace) {
+    if (owned.size === 0 && workspace) {
       try {
         await rm(workspace, { recursive: true, force: true });
       } catch (error) {
@@ -1249,7 +1253,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
             : options.failIfCandidateWorse && worse === true
               ? 1
               : 0,
-    ...(errorMessage ? { error: errorMessage } : {}),
+    ...(errorMessage && { error: errorMessage }),
     verdict: verdict(runs, complete),
   };
 }

@@ -241,11 +241,15 @@ export function isLiveSocket(
       resolve(live);
     };
 
-    socket.setTimeout(timeoutMs, () => done(true));
-    socket.once("connect", () => done(true));
-    socket.once("error", (err: NodeJS.ErrnoException) =>
-      done(!DEAD_SOCKET_CODES.has(err.code ?? "")),
-    );
+    socket.setTimeout(timeoutMs, () => {
+      done(true);
+    });
+    socket.once("connect", () => {
+      done(true);
+    });
+    socket.once("error", (err: NodeJS.ErrnoException) => {
+      done(!DEAD_SOCKET_CODES.has(err.code ?? ""));
+    });
   });
 }
 
@@ -348,20 +352,19 @@ function acquireKernelLock(
     let alive = true;
     let stderr = "";
 
-    const exited = new Promise<void>((done) =>
+    const exited = new Promise<void>((done) => {
       child.once("exit", () => {
         alive = false;
         done();
-      }),
-    );
+      });
+    });
 
     const release = async () => {
       child.stdin.end();
 
-      const timer = setTimeout(
-        () => child.kill("SIGKILL"),
-        LOCK_RELEASE_WAIT_MS,
-      );
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, LOCK_RELEASE_WAIT_MS);
 
       await exited;
       clearTimeout(timer);
@@ -378,23 +381,31 @@ function acquireKernelLock(
       } else resolve({ release, stillHeld: () => alive });
     };
 
-    const onAbort = () =>
+    const onAbort = () => {
       settle(new StartAbortedError(`stopped before ${lockPath} was taken`));
+    };
 
-    if (options.signal?.aborted) return onAbort();
+    if (options.signal?.aborted) {
+      onAbort();
+
+      return;
+    }
+
     options.signal?.addEventListener("abort", onAbort, { once: true });
     child.stdin.on("error", () => {});
     child.stderr.on("data", (chunk: Buffer) => {
       if (stderr.length < 500) stderr += chunk.toString("utf8");
     });
-    child.stdout.once("data", () => settle());
-    child.once("error", (err) =>
+    child.stdout.once("data", () => {
+      settle();
+    });
+    child.once("error", (err) => {
       settle(
         new Error(
           `cannot run ${command} for the start-up lock: ${err.message}`,
         ),
-      ),
-    );
+      );
+    });
     child.once("exit", (code) => {
       if (code === 1)
         settle(new SocketBusyError(`${lockPath} is held by another starter`));
@@ -480,7 +491,11 @@ export async function listenOnUnixSocket(
 
   if (options.signal?.aborted) {
     // Stopped while binding: undo it rather than leave a listener nobody will close.
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
     unlinkOwnSocket(path, identity, options);
     throw new StartAbortedError(`stopped while ${path} was being bound`);
   }
@@ -520,7 +535,11 @@ async function checkAndBind(
   const actualMode = Number(stats.mode) & 0o777;
 
   if (!stats.isSocket() || actualMode !== mode) {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
     throw new Error(
       `${path} was created with mode ${actualMode.toString(8)}, not ${mode.toString(8)}`,
     );
@@ -535,7 +554,11 @@ async function checkAndBind(
       renameSync(bindPath, path);
       stats = lstatSync(path, { bigint: true });
     } catch (error) {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
       throw error;
     }
   }

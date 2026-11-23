@@ -278,8 +278,7 @@ export class OpenCodeBackend implements AgentBackend {
 
     if (
       tools.length !== 1 ||
-      !tool ||
-      tool.type !== "tool" ||
+      tool?.type !== "tool" ||
       tool.name !== "question" ||
       tool.state.status !== "running" ||
       tool.time.completed !== undefined
@@ -405,7 +404,7 @@ export class OpenCodeBackend implements AgentBackend {
 
         const record = await boundaries.record(message);
 
-        if (chain.length && closesBoundaryContext(record)) {
+        if (chain.length > 0 && closesBoundaryContext(record)) {
           chain.push(record);
 
           return resolveBoundaryContext(chain);
@@ -413,7 +412,8 @@ export class OpenCodeBackend implements AgentBackend {
 
         if (record.input === undefined) continue;
 
-        if (!chain.length && record.type !== "synthetic") return record.input;
+        if (chain.length === 0 && record.type !== "synthetic")
+          return record.input;
         chain.push(record);
       }
 
@@ -660,7 +660,7 @@ export class OpenCodeBackend implements AgentBackend {
         {
           directory: reviewer.directory,
           limit: 100,
-          ...(cursor ? { cursor } : {}),
+          ...(cursor && { cursor }),
         },
         { signal },
       );
@@ -682,7 +682,7 @@ export class OpenCodeBackend implements AgentBackend {
           { signal },
         );
 
-        if (inbox.length)
+        if (inbox.length > 0)
           throw new Error("Configured review directory has queued native work");
       }
 
@@ -845,7 +845,7 @@ export class OpenCodeBackend implements AgentBackend {
 
           return {
             resultText,
-            makers: assistants.reverse().map((m) => m.maker),
+            makers: assistants.toReversed().map((m) => m.maker),
           };
         }
 
@@ -858,9 +858,7 @@ export class OpenCodeBackend implements AgentBackend {
               agent: message.agent,
               provider: message.model.providerID,
               model: message.model.id,
-              ...(message.model.variant
-                ? { variant: message.model.variant }
-                : {}),
+              ...(message.model.variant && { variant: message.model.variant }),
             },
             completed: message.time.completed !== undefined,
             failed: message.error !== undefined,
@@ -1510,7 +1508,10 @@ export class OpenCodeBackend implements AgentBackend {
         if (detail.state.status === "pending") return { status: "refused" };
       }
 
-      if ((await this.client.permission.list({ sessionID }, { signal })).length)
+      if (
+        (await this.client.permission.list({ sessionID }, { signal })).length >
+        0
+      )
         return { status: "refused" };
 
       if (!(await this.followsInput(sessionID, inputID, signal)))
@@ -1625,7 +1626,7 @@ export class OpenCodeBackend implements AgentBackend {
         Option.isSome(decodeQuestionOrigin(form.metadata)),
     );
 
-    if (!candidates.length) return false;
+    if (candidates.length === 0) return false;
     const active = await this.client.session.active({ signal });
 
     if (!active[sessionID]) return false;
@@ -1739,13 +1740,15 @@ export class OpenCodeBackend implements AgentBackend {
       if (phase.type !== "submitted" || !onText) return;
 
       const text = [...messages]
+        .values()
         .filter(([id]) => ownership.get(id) === "owned")
         .map(([, parts]) =>
           [...parts]
-            .sort(([a], [b]) => a - b)
+            .toSorted(([a], [b]) => a - b)
             .map(([, text]) => text)
             .join("\n"),
         )
+        .toArray()
         .join("\n\n");
 
       if (text) onText(text);
@@ -1967,7 +1970,9 @@ export class OpenCodeBackend implements AgentBackend {
               }
             })
             .catch(() => {})
-            .finally(() => checks.delete(check));
+            .finally(() => {
+              checks.delete(check);
+            });
 
           checks.add(check);
         }
@@ -2022,15 +2027,13 @@ export class OpenCodeBackend implements AgentBackend {
           id,
           text: context ? `${sourceLine(context)}\n\n${text}` : text,
           delivery: "queue",
-          ...(files.length
-            ? {
-                files: files.map((file) => ({
-                  name: file.name,
-                  uri: `data:${file.mime};base64,${Buffer.from(file.data).toString("base64")}`,
-                  source: { type: "inline" as const },
-                })),
-              }
-            : {}),
+          ...(files.length > 0 && {
+            files: files.map((file) => ({
+              name: file.name,
+              uri: `data:${file.mime};base64,${Buffer.from(file.data).toString("base64")}`,
+              source: { type: "inline" as const },
+            })),
+          }),
         },
         { signal },
       );
@@ -2069,30 +2072,26 @@ export class OpenCodeBackend implements AgentBackend {
         for (const message of page.data) {
           history.push({
             ...(await boundaries.record(message)),
-            ...(message.type === "assistant"
-              ? {
-                  reply: {
-                    succeeded:
-                      message.time?.completed !== undefined &&
-                      message.finish === "stop" &&
-                      message.error === undefined,
-                    // Status and type only: the message can quote a provider.
-                    ...(message.error
-                      ? {
-                          error: {
-                            type: message.error.type,
-                            status: message.error.status,
-                          },
-                        }
-                      : {}),
-                    tools: message.content.some((part) => part.type === "tool"),
-                    text: message.content
-                      .filter((part) => part.type === "text")
-                      .map((part) => part.text)
-                      .join("\n"),
+            ...(message.type === "assistant" && {
+              reply: {
+                succeeded:
+                  message.time?.completed !== undefined &&
+                  message.finish === "stop" &&
+                  message.error === undefined,
+                // Status and type only: the message can quote a provider.
+                ...(message.error && {
+                  error: {
+                    type: message.error.type,
+                    status: message.error.status,
                   },
-                }
-              : {}),
+                }),
+                tools: message.content.some((part) => part.type === "tool"),
+                text: message.content
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("\n"),
+              },
+            }),
           });
 
           if (message.id === input.id) {
@@ -2100,7 +2099,7 @@ export class OpenCodeBackend implements AgentBackend {
             let owner: string | undefined;
             const replies: Reply[] = [];
 
-            for (const record of history.reverse()) {
+            for (const record of history.toReversed()) {
               owner = fold.next(record) ?? owner;
 
               if (record.reply && owner === input.id)
@@ -2225,7 +2224,7 @@ export class OpenCodeBackend implements AgentBackend {
 
         const record = await boundaries.record(message);
 
-        if (chain.length && closesBoundaryContext(record)) {
+        if (chain.length > 0 && closesBoundaryContext(record)) {
           chain.push(record);
 
           return resolveBoundaryContext(chain) === input;
@@ -2233,7 +2232,7 @@ export class OpenCodeBackend implements AgentBackend {
 
         if (record.input === undefined) continue;
 
-        if (!chain.length && record.type !== "synthetic")
+        if (chain.length === 0 && record.type !== "synthetic")
           return record.input === input;
         chain.push(record);
       }
@@ -2292,19 +2291,15 @@ export class OpenCodeBackend implements AgentBackend {
             message.time.completed !== undefined ||
             message.error !== undefined ||
             (idle !== undefined && message.time.created <= idle),
-          ...(message.type === "assistant"
-            ? {
-                maker: {
-                  messageID: message.id,
-                  agent: message.agent,
-                  provider: message.model.providerID,
-                  model: message.model.id,
-                  ...(message.model.variant
-                    ? { variant: message.model.variant }
-                    : {}),
-                },
-              }
-            : {}),
+          ...(message.type === "assistant" && {
+            maker: {
+              messageID: message.id,
+              agent: message.agent,
+              provider: message.model.providerID,
+              model: message.model.id,
+              ...(message.model.variant && { variant: message.model.variant }),
+            },
+          }),
         });
 
         if (message.id !== inputID) continue;
@@ -2315,14 +2310,14 @@ export class OpenCodeBackend implements AgentBackend {
         let owner: string | undefined;
         const makers: NativeMaker[] = [];
 
-        for (const entry of messages.reverse()) {
+        for (const entry of messages.toReversed()) {
           owner = fold.next(entry) ?? owner;
 
           if (entry.maker && owner === inputID && entry.settled)
             makers.push(entry.maker);
         }
 
-        if (!makers.length || makers.length > 100)
+        if (makers.length === 0 || makers.length > 100)
           throw new Error(
             "Native fleet maker evidence is unavailable or exceeds bounds",
           );
@@ -2513,7 +2508,7 @@ export class OpenCodeBackend implements AgentBackend {
         newer.push({
           ...record,
           settled: settled(message),
-          ...(entry ? { entry } : {}),
+          ...(entry && { entry }),
         });
       }
 
@@ -2533,9 +2528,9 @@ export class OpenCodeBackend implements AgentBackend {
 
     // Keep the stored cursor; skipping unread history would lose replies.
     if (after && !reached) throw new TranscriptUnavailable("cursor");
-    const chronological = newer.reverse();
+    const chronological = newer.toReversed();
     const open = chronological.findIndex((message) => !message.settled);
-    const done = open < 0 ? chronological : chronological.slice(0, open);
+    const done = open === -1 ? chronological : chronological.slice(0, open);
     const head = done.at(-1)?.id;
     const fold = new InputBoundaryFold();
     let input: string | undefined;
@@ -2543,7 +2538,7 @@ export class OpenCodeBackend implements AgentBackend {
     const reanchor =
       context[0]?.id === after && context[0]?.type === "synthetic";
 
-    for (const message of context.reverse()) {
+    for (const message of context.toReversed()) {
       const boundary = fold.next(message);
 
       // Re-anchor cursor-only wakes, including an undelivered mixed batch.
@@ -2558,7 +2553,7 @@ export class OpenCodeBackend implements AgentBackend {
       if (message.entry)
         entries.push({
           ...message.entry,
-          ...(input !== undefined ? { input } : {}),
+          ...(input !== undefined && { input }),
         });
     }
 
@@ -2566,8 +2561,8 @@ export class OpenCodeBackend implements AgentBackend {
       return {
         cursor: head ?? after,
         entries,
-        ...(input !== undefined ? { input } : {}),
-        ...(open < 0 ? {} : { pending: true as const }),
+        ...(input !== undefined && { input }),
+        ...(open !== -1 && { pending: true as const }),
       };
 
     // A baseline never delivers earlier history.
@@ -2577,7 +2572,7 @@ export class OpenCodeBackend implements AgentBackend {
     return {
       cursor: head ?? "",
       entries: [],
-      ...(input !== undefined ? { input } : {}),
+      ...(input !== undefined && { input }),
     };
   }
 
@@ -2643,7 +2638,7 @@ export class OpenCodeBackend implements AgentBackend {
 
     const capture = Schema.decodeUnknownSync(activitySnapshotSchema)(
       await rpc.start(
-        { sessionID, requestID, ...(reporter ? { reporter } : {}) },
+        { sessionID, requestID, ...(reporter && { reporter }) },
         options(signal),
       ),
     );
@@ -2676,10 +2671,7 @@ export class OpenCodeBackend implements AgentBackend {
       id: capture,
       read: (signal, passive) =>
         snapshot(
-          rpc.read(
-            { ...owner, ...(passive ? { passive } : {}) },
-            options(signal),
-          ),
+          rpc.read({ ...owner, ...(passive && { passive }) }, options(signal)),
         ),
       finish: (signal) => snapshot(rpc.finish(owner, options(signal))),
       cancel: async (signal) => {

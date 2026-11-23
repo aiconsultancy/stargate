@@ -64,8 +64,11 @@ function fields(
   live: readonly string[],
   out: string[],
 ) {
-  if (!isRecord(current) || !isRecord(next))
-    return diff(current, next, path, out);
+  if (!isRecord(current) || !isRecord(next)) {
+    diff(current, next, path, out);
+
+    return;
+  }
 
   for (const key of new Set([...Object.keys(current), ...Object.keys(next)]))
     if (!live.includes(key))
@@ -115,8 +118,9 @@ export function restartRequired(
     "bots",
     current.config.bots,
     next.config.bots,
-    (path, before, after) =>
-      fields(before, after, path, ["access", "transcription"], out),
+    (path, before, after) => {
+      fields(before, after, path, ["access", "transcription"], out);
+    },
     "restart",
     out,
   );
@@ -130,7 +134,9 @@ export function restartRequired(
         `${path}.crew`,
         before.crew,
         after.crew,
-        (member, a, b) => diff(a, b, member, out),
+        (member, a, b) => {
+          diff(a, b, member, out);
+        },
         "live",
         out,
       );
@@ -143,7 +149,7 @@ export function restartRequired(
     if (value !== undefined && next.environment[name] !== value)
       out.push(`environment.${name}`);
 
-  return out.sort();
+  return out.toSorted();
 }
 
 const unchangedNote = "The running configuration is unchanged.";

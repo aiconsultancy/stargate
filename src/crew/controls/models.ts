@@ -386,7 +386,7 @@ export class CrewModels {
       const model: ModelRef = {
         providerID: input.providerID,
         id: input.id,
-        ...(input.variant ? { variant: input.variant } : {}),
+        ...(input.variant && { variant: input.variant }),
       };
 
       if (input.target === "captain") {

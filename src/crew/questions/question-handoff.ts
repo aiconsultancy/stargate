@@ -199,8 +199,9 @@ export class CrewQuestionHandoff {
       const { promise, resolve, reject } =
         Promise.withResolvers<CrewQuestionReceipt>();
 
-      const abort = () =>
+      const abort = () => {
         reject(new Error("Crew question handoff interrupted"));
+      };
 
       this.pending.set(id, {
         work: { id, owner, action },

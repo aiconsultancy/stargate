@@ -337,8 +337,8 @@ export class FleetControl {
       target,
       senderAccount: this.options.account,
       text: input.text,
-      ...(origin ? { origin } : {}),
-      ...(input.review ? { review: input.review } : {}),
+      ...(origin && { origin }),
+      ...(input.review && { review: input.review }),
     });
 
     if (!reserved.created) return reserved.result;
@@ -368,7 +368,9 @@ export class FleetControl {
     const server = createServer((request, response) => {
       const operation = (async () => {
         const disconnected = new AbortController();
-        request.once("aborted", () => disconnected.abort());
+        request.once("aborted", () => {
+          disconnected.abort();
+        });
         response.once("close", () => {
           if (!response.writableEnded) disconnected.abort();
         });
@@ -531,9 +533,9 @@ export class FleetControl {
                           account: this.options.account,
                           targets: this.options.config.targets,
                           humanApproval: false,
-                          ...(this.options.status
-                            ? { transport: await this.options.status() }
-                            : {}),
+                          ...(this.options.status && {
+                            transport: await this.options.status(),
+                          }),
                         };
 
           sendJson(response, 200, { result });

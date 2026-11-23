@@ -12,7 +12,7 @@ export function signature(source: Source, input: NotificationInput): string {
 
   if (!occurredAt) throw new InvalidNotification();
 
-  const tags = Object.entries(input.tags ?? {}).sort(([a], [b]) =>
+  const tags = Object.entries(input.tags ?? {}).toSorted(([a], [b]) =>
     a < b ? -1 : a > b ? 1 : 0,
   );
 

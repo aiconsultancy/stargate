@@ -184,14 +184,12 @@ const plan = {
         permissionProfile: "research" as const,
       },
     ],
-    ...(standalone
-      ? {}
-      : {
-          historyAPI: {
-            url: `http://127.0.0.1:${brokerPort ?? 9}`,
-            headersEnv: { Authorization: "FIXTURE_BROKER_AUTH" },
-          },
-        }),
+    ...(!standalone && {
+      historyAPI: {
+        url: `http://127.0.0.1:${brokerPort ?? 9}`,
+        headersEnv: { Authorization: "FIXTURE_BROKER_AUTH" },
+      },
+    }),
   },
 };
 

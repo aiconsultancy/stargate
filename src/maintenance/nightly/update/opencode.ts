@@ -23,7 +23,7 @@ const ref = (model: ModelRef | undefined) =>
     ? {
         providerID: model.providerID,
         id: model.id,
-        ...(model.variant ? { variant: model.variant } : {}),
+        ...(model.variant && { variant: model.variant }),
       }
     : null;
 
@@ -85,7 +85,7 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
     baseUrl: endpoint.url,
     headers: Service.headers({
       url: endpoint.url,
-      ...(endpoint.auth ? { auth: endpoint.auth } : {}),
+      ...(endpoint.auth && { auth: endpoint.auth }),
     }),
   });
 

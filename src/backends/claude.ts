@@ -194,7 +194,7 @@ export function claudeInputContent(
     );
   }
 
-  if (!files.length) return text;
+  if (files.length === 0) return text;
   const content: UserContent = [];
 
   if (text) content.push({ type: "text", text });
@@ -460,7 +460,7 @@ export class ClaudeTurn {
         block.type === "text" && block.text ? [block.text] : [],
       );
 
-      if (!texts.length) return false;
+      if (texts.length === 0) return false;
       this.complete.set(id, [...(this.complete.get(id) ?? []), ...texts]);
 
       return true;
@@ -479,7 +479,7 @@ export class ClaudeTurn {
         this.result = {
           ok: false,
           cause: knownCauses.has(cause) ? cause : "error",
-          ...(typeof status === "number" ? { status } : {}),
+          ...(typeof status === "number" && { status }),
         };
       }
     }
@@ -498,9 +498,11 @@ export class ClaudeTurn {
 
         const streamed = blocks
           ? [...blocks]
-              .sort(([a], [b]) => a - b)
+              .toSorted(([a], [b]) => a - b)
+              .values()
               .map(([, text]) => text)
               .filter(Boolean)
+              .toArray()
               .join("\n")
           : "";
 
@@ -532,8 +534,12 @@ class ClaudeProcess implements SpawnedProcess {
     private readonly child: ChildProcessByStdio<Writable, Readable, null>,
   ) {
     this.exited = new Promise((resolve) => {
-      child.once("exit", () => resolve());
-      child.once("error", () => resolve());
+      child.once("exit", () => {
+        resolve();
+      });
+      child.once("error", () => {
+        resolve();
+      });
     });
   }
 
@@ -736,12 +742,13 @@ export class ClaudeBackend implements AgentBackend {
     onProgress?: (value: TurnProgress) => void,
   ): Promise<string> {
     const stage = onProgress
-      ? (value: TurnStage) =>
+      ? (value: TurnStage) => {
           onProgress({
             stage: value,
             observedAt: Date.now(),
             backend: "claude",
-          })
+          });
+        }
       : undefined;
 
     signal.throwIfAborted();
@@ -813,7 +820,7 @@ export class ClaudeBackend implements AgentBackend {
         if (compareVersions(version, bundled.version) < 0) {
           mcpServersDelivery = "argv";
 
-          if (Object.keys(this.config.mcpServers ?? {}).length)
+          if (Object.keys(this.config.mcpServers ?? {}).length > 0)
             process.emitWarning(
               "Claude Code is older than the SDK bundled CLI; using MCP argv delivery. MCP environment and headers may be visible to other local users. Update Claude Code to use initialize delivery.",
               { code: "STARGATE_CLAUDE_MCP_ARGV_FALLBACK" },
@@ -883,14 +890,12 @@ export class ClaudeBackend implements AgentBackend {
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          ...(this.config.systemPrompt
-            ? { append: this.config.systemPrompt }
-            : {}),
+          ...(this.config.systemPrompt && { append: this.config.systemPrompt }),
         },
-        ...(this.config.effort ? { effort: this.config.effort } : {}),
+        ...(this.config.effort && { effort: this.config.effort }),
         ...(resume
           ? { resume: id }
-          : { sessionId: id, ...(title ? { title } : {}) }),
+          : { sessionId: id, ...(title && { title }) }),
         pathToClaudeCodeExecutable: executable,
         spawnClaudeCodeProcess: (spawn) => this.spawn(run, spawn),
       };

@@ -214,7 +214,7 @@ export class BotFrameworkKeyStore {
 
     const algorithms = offered.filter((alg): alg is "RS256" => alg === "RS256");
 
-    if (!algorithms.length)
+    if (algorithms.length === 0)
       throw new Error("OpenID metadata does not offer RS256 signing");
 
     const jwks = await getJson(this.#fetch, jwksUri);
@@ -245,7 +245,7 @@ export class BotFrameworkKeyStore {
       });
     }
 
-    if (!keys.size)
+    if (keys.size === 0)
       throw new Error(
         "the Bot Framework key document holds no RSA signing keys",
       );
@@ -321,7 +321,7 @@ export async function verifyBotFrameworkToken(
         algorithms: options.keyStore.algorithms,
         clockTolerance: CLOCK_TOLERANCE_SECONDS,
         requiredClaims: ["exp"],
-        ...(options.now ? { currentDate: new Date(options.now()) } : {}),
+        ...(options.now && { currentDate: new Date(options.now()) }),
       },
     );
 

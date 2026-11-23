@@ -113,7 +113,7 @@ export class IrcDispatchMessenger implements DispatchMessenger {
 
     return {
       [dispatchTag]: value,
-      ...(replyTo && validMsgid(replyTo) ? { "+draft/reply": replyTo } : {}),
+      ...(replyTo && validMsgid(replyTo) && { "+draft/reply": replyTo }),
     };
   }
 

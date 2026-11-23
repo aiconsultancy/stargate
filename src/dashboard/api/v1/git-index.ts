@@ -37,7 +37,7 @@ function sharedIndexName(path: string, format: "sha1" | "sha256") {
       while (suffix < end && (index[suffix] ?? 0) & 0x80) suffix++;
       const nul = index.indexOf(0, suffix + 1);
 
-      if (nul < 0 || nul >= end) throw invalid();
+      if (nul === -1 || nul >= end) throw invalid();
       offset = nul + 1;
     } else {
       const length = flags & 0xf_ff;

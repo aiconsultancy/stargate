@@ -51,14 +51,18 @@ function retryable(error: unknown, depth = 0): boolean {
 /** Cancel observation without leaving timers or unhandled SDK rejections. */
 function bounded<A>(work: Promise<A>, signal: AbortSignal): Promise<A> {
   return new Promise((resolve, reject) => {
-    const stop = () =>
+    const stop = () => {
       reject(
         Object.assign(new Error("Slack connection unavailable"), {
           code: "ETIMEDOUT",
         }),
       );
+    };
 
-    const done = () => signal.removeEventListener("abort", stop);
+    const done = () => {
+      signal.removeEventListener("abort", stop);
+    };
+
     signal.addEventListener("abort", stop, { once: true });
     work.then(
       (value) => {

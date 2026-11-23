@@ -107,7 +107,9 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
       if (Result.isFailure(subscriptions) || Result.isFailure(destinations))
         return yield* Effect.fail(new StoreUnavailable());
       yield* Effect.try({
-        try: () => store.recover(clock.now()),
+        try: () => {
+          store.recover(clock.now());
+        },
         catch: () => new StoreUnavailable(),
       });
 
@@ -241,7 +243,9 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
         const timeout = clock
           .wait(store.limits.attemptTimeoutMs, deadline.signal)
           .then(
-            () => controller.abort(),
+            () => {
+              controller.abort();
+            },
             () => {},
           );
 

@@ -173,7 +173,7 @@ export class FleetReviews {
         );
 
         if (
-          !makers.length ||
+          makers.length === 0 ||
           makers.length > 100 ||
           makers.some(
             (m) =>

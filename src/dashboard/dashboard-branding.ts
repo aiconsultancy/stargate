@@ -19,7 +19,9 @@ const favicons = new Set([
 ]);
 
 /** Keep the dashboard self-contained without copying or redrawing its logo. */
-export function dashboardBranding(html: string): string {
+export function dashboardBranding(htmlInput: string): string {
+  let html = htmlInput;
+
   for (const [token, image] of Object.entries(artwork))
     html = html.replaceAll(token, image);
 

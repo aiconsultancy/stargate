@@ -58,7 +58,7 @@ function replace(file: string, from: string, to: string): void {
   const text = readFileSync(file, "utf8");
   const at = text.indexOf(from);
 
-  if (at < 0 || text.includes(from, at + from.length))
+  if (at === -1 || text.includes(from, at + from.length))
     throw new Error(`Pattern drift: ${file}`);
   writeFileSync(file, text.slice(0, at) + to + text.slice(at + from.length));
 }
@@ -100,11 +100,11 @@ function moveInlineComments(findings: Finding[]): void {
       continue;
     }
 
-    for (const offset of offsets.sort((a, b) => b - a)) {
+    for (const offset of offsets.toSorted((a, b) => b - a)) {
       const at = bytes.subarray(0, offset).toString().length;
       const start = text.lastIndexOf("\n", at - 1) + 1;
       const following = text.indexOf("\n", at);
-      const end = following < 0 ? text.length : following;
+      const end = following === -1 ? text.length : following;
       const code = text.slice(start, at);
       const comment = text.slice(at, end);
       const indent = /^\s*/.exec(code)?.[0] ?? "";
@@ -137,7 +137,7 @@ async function regenerate(): Promise<void> {
     throw new Error("Use a feature branch from the repository root");
 
   if (
-    extra.length ||
+    extra.length > 0 ||
     (option && option !== "--tool-patch" && option !== "--staged-candidate") ||
     (option === "--tool-patch") !== Boolean(patch)
   ) {
@@ -240,7 +240,7 @@ async function regenerate(): Promise<void> {
   }
 
   function requireGreen(rule: string): void {
-    if (lint(rule).length)
+    if (lint(rule).length > 0)
       throw new Error(`Unresolved findings remain: ${rule}`);
   }
 
@@ -277,7 +277,7 @@ async function regenerate(): Promise<void> {
     const imports = "typescript/consistent-type-imports";
     const queries = lint(imports);
 
-    if (queries.length) {
+    if (queries.length > 0) {
       const file = "src/dashboard/api/v1/types.ts";
 
       if (

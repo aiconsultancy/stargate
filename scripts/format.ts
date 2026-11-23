@@ -58,16 +58,14 @@ function fixConfig(name: string, rules: string[]) {
     path,
     JSON.stringify({
       categories: { correctness: "off" },
-      ...(rules.includes(spacingRule)
-        ? {
-            jsPlugins: [
-              {
-                name: "anti-slop",
-                specifier: resolve("tools/oxlint/anti-slop/index.ts"),
-              },
-            ],
-          }
-        : {}),
+      ...(rules.includes(spacingRule) && {
+        jsPlugins: [
+          {
+            name: "anti-slop",
+            specifier: resolve("tools/oxlint/anti-slop/index.ts"),
+          },
+        ],
+      }),
       rules: Object.fromEntries(rules.map((rule) => [rule, "error"])),
     }),
   );

@@ -139,7 +139,9 @@ export class PiCrewWorkers {
     ) => {
       const timer = setTimeout(callback, 1000);
 
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+      };
     },
     private readonly binding?: (member: CrewMember) => PiCrewBinding,
     private readonly captainDirectory?: string,
@@ -239,37 +241,35 @@ export class PiCrewWorkers {
             },
             {
               dataDirectory,
-              ...(this.captainDirectory
-                ? {
-                    workingAgreement: {
-                      path: join(this.captainDirectory, "WAYS_OF_WORKING.md"),
-                      owns: (id: string) => {
-                        const owner = owners.values().next().value;
-                        const peer = owner?.state.peer(member.id);
+              ...(this.captainDirectory && {
+                workingAgreement: {
+                  path: join(this.captainDirectory, "WAYS_OF_WORKING.md"),
+                  owns: (id: string) => {
+                    const owner = owners.values().next().value;
+                    const peer = owner?.state.peer(member.id);
 
-                        return (
-                          !!peer &&
-                          owner?.state.piPeer(peer.sessionID)
-                            ?.conversationID === id
-                        );
-                      },
+                    return (
+                      !!peer &&
+                      owner?.state.piPeer(peer.sessionID)?.conversationID === id
+                    );
+                  },
+                },
+              }),
+              ...(this.binding &&
+                definition.tools === "coding" && {
+                  crew: {
+                    authorize: (id: string) => {
+                      current().authorize(id);
                     },
-                  }
-                : {}),
-              ...(this.binding && definition.tools === "coding"
-                ? {
-                    crew: {
-                      authorize: (id: string) => current().authorize(id),
-                      run: (
-                        name: string,
-                        input: unknown,
-                        id: string,
-                        call: string,
-                        signal: AbortSignal,
-                      ) => current().run(name, input, id, call, signal),
-                    },
-                  }
-                : {}),
+                    run: (
+                      name: string,
+                      input: unknown,
+                      id: string,
+                      call: string,
+                      signal: AbortSignal,
+                    ) => current().run(name, input, id, call, signal),
+                  },
+                }),
             },
           );
         })();
@@ -667,8 +667,9 @@ export class PiCrewWorkers {
           isReport && backend.promptReport
             ? await backend.promptReport(conversationID, text, signal, onText, {
                 requestId: task.inputID,
-                onConversation: (id) =>
-                  this.state.savePiTaskConversation(task.id, id),
+                onConversation: (id) => {
+                  this.state.savePiTaskConversation(task.id, id);
+                },
               })
             : await backend.prompt(
                 conversationID,
@@ -728,7 +729,7 @@ export class PiCrewWorkers {
         entry.owners.delete(this);
 
         // Other plugin instances still own this harness.
-        if (entry.owners.size) return;
+        if (entry.owners.size > 0) return;
         pool.delete(key);
 
         const closed = (async () => {

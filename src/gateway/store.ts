@@ -748,7 +748,7 @@ export class Store {
         "SELECT * FROM jobs WHERE botKey=? AND status='running' AND input IS NOT NULL ORDER BY id LIMIT 32",
       )
       .all(botKey)
-      .map(decodeStoredJob);
+      .map((item) => decodeStoredJob(item));
   }
 
   /** One cursor per pin. Old thread mappings and all outbox rows stay intact. */
@@ -1006,7 +1006,7 @@ export class Store {
       }
       ORDER BY id LIMIT ?`)
       .all(botKey, now, now, ...(serial ? [now] : []), limit)
-      .map(decodeStoredJob);
+      .map((item) => decodeStoredJob(item));
   }
 
   public running(id: number, expectedText?: string) {
@@ -1248,7 +1248,7 @@ export class Store {
             )
             .run(
               text,
-              files.length ? JSON.stringify(files) : null,
+              files.length > 0 ? JSON.stringify(files) : null,
               Math.max(deadline, input.notBefore ?? 0),
               latest.id,
             ).changes;
@@ -1636,7 +1636,7 @@ export class Store {
     this.db
       .query(`UPDATE jobs SET status='responding',response=CASE WHEN cancel_requested=1 THEN ? ELSE ? END,sent=0,
       failure=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE 'interrupted' END
-      WHERE botKey=? AND status='running'${retainedQuestionInputs.length ? ` AND (input IS NULL OR input NOT IN (${retainedQuestionInputs.map(() => "?").join(",")}))` : ""}`)
+      WHERE botKey=? AND status='running'${retainedQuestionInputs.length > 0 ? ` AND (input IS NULL OR input NOT IN (${retainedQuestionInputs.map(() => "?").join(",")}))` : ""}`)
       .run(
         JSON.stringify([cancellationNotice]),
         JSON.stringify([failureText("interrupted")]),

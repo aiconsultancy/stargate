@@ -227,30 +227,25 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
     thread: event.thread_ts ?? event.ts,
     user: event.user,
     text,
-    ...(notification
-      ? {
-          notification: {
-            wake,
-            ...(muted && wake !== "ordinary"
-              ? {
-                  note: notificationNote(
-                    event.channel,
-                    event.thread_ts ?? event.ts,
-                    wake,
-                    notification,
-                  ),
-                }
-              : {}),
-          },
-        }
-      : {}),
-    ...(config.slackReadReceipts ? { received: Number(event.ts) * 1000 } : {}),
-    ...(event.files?.length
-      ? { files: event.files.map((file) => file.id) }
-      : {}),
-    ...(captain ? { sender: "captain" as const } : {}),
-    ...(spoken ? { gate: "spoken" as const } : {}),
-    ...(named ? { textMention: named } : {}),
+    ...(notification && {
+      notification: {
+        wake,
+        ...(muted &&
+          wake !== "ordinary" && {
+            note: notificationNote(
+              event.channel,
+              event.thread_ts ?? event.ts,
+              wake,
+              notification,
+            ),
+          }),
+      },
+    }),
+    ...(config.slackReadReceipts && { received: Number(event.ts) * 1000 }),
+    ...(event.files?.length && { files: event.files.map((file) => file.id) }),
+    ...(captain && { sender: "captain" as const }),
+    ...(spoken && { gate: "spoken" as const }),
+    ...(named && { textMention: named }),
     startsConversation: mentioned || direct || named !== undefined,
   };
 }

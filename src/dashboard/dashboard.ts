@@ -209,21 +209,19 @@ function createDashboard(options: Options) {
 
     const children = decodeChildren({
       parentID: query["parent"],
-      ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
+      ...(query["cursor"] && { cursor: query["cursor"] }),
     });
 
     const entries = decodeEntries({
       sessionID: query["session"],
-      ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
-      ...(query["order"] !== undefined ? { order: query["order"] } : {}),
-      ...(query["detail"] !== undefined ? { detail: query["detail"] } : {}),
-      ...(query["limit"] !== undefined
-        ? {
-            limit: /^\d+$/.test(query["limit"])
-              ? Number(query["limit"])
-              : Number.NaN,
-          }
-        : {}),
+      ...(query["cursor"] && { cursor: query["cursor"] }),
+      ...(query["order"] !== undefined && { order: query["order"] }),
+      ...(query["detail"] !== undefined && { detail: query["detail"] }),
+      ...(query["limit"] !== undefined && {
+        limit: /^\d+$/.test(query["limit"])
+          ? Number(query["limit"])
+          : Number.NaN,
+      }),
     });
 
     if (
@@ -253,9 +251,9 @@ function createDashboard(options: Options) {
               id,
               {
                 parentID: children.value.parentID,
-                ...(children.value.cursor === undefined
-                  ? {}
-                  : { cursor: children.value.cursor }),
+                ...(children.value.cursor !== undefined && {
+                  cursor: children.value.cursor,
+                }),
               },
               signal,
             );
@@ -280,7 +278,10 @@ function createDashboard(options: Options) {
     let onAbort = noop;
 
     const aborted = new Promise<never>((_resolve, reject) => {
-      onAbort = () => reject(signal.reason);
+      onAbort = () => {
+        reject(signal.reason);
+      };
+
       signal.addEventListener("abort", onAbort, { once: true });
 
       if (signal.aborted) onAbort();
@@ -307,7 +308,7 @@ function createDashboard(options: Options) {
   return {
     fetch,
     drain: async () => {
-      await Promise.allSettled([...pending]);
+      await Promise.allSettled(pending);
     },
   };
 }

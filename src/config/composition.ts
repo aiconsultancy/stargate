@@ -403,7 +403,7 @@ export const teamsSchema = settingsStruct({
         message: "Approval users must be allowed human users",
       });
 
-    if (value.approvalUsers.length && value.backend.type !== "opencode")
+    if (value.approvalUsers.length > 0 && value.backend.type !== "opencode")
       context.addIssue({
         code: "custom",
         message: "Teams approvals require OpenCode",
@@ -566,15 +566,17 @@ const configCheck = (liveNotificationPolicy = false) =>
           : [],
       );
 
-      const slackPins = bots.flatMap((bot) =>
-        bot.backend.type === "opencode" && bot.backend.sessionID
-          ? [bot.backend.sessionID]
-          : [],
+      const slackPins = new Set(
+        bots.flatMap((bot) =>
+          bot.backend.type === "opencode" && bot.backend.sessionID
+            ? [bot.backend.sessionID]
+            : [],
+        ),
       );
 
       if (
         new Set(teamPins).size !== teamPins.length ||
-        teamPins.some((pin) => slackPins.includes(pin))
+        teamPins.some((pin) => slackPins.has(pin))
       )
         context.addIssue({
           code: "custom",
