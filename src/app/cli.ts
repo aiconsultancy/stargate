@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { Schema } from "effect";
+import { Result, Schema } from "effect";
 import { apiToken } from "../dashboard/api/v1/token";
 import { checkCodexConfiguration } from "../backends/codex-paths";
 import { loadConfig } from "../config";
@@ -388,7 +388,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
     } else if (op === "run") raw = { op, name: selectors[0] };
     else if (op === "remove") raw = { op, id: selectors[0] };
 
-    if (!cronOperationSchema.safeParse(raw).success)
+    if (Result.isFailure(Schema.decodeUnknownResult(cronOperationSchema)(raw)))
       throw new Error("Invalid cron input. Use cron --help.");
 
     const result = await runCronOperation(

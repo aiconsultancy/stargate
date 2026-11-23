@@ -10,7 +10,6 @@ import {
 import { Effect } from "effect";
 import { OpenCodeBackend } from "../backends/opencode/opencode";
 import { postInputSchema } from "../captain-post/captain-post";
-import { cronOperationSchema } from "../cron/control";
 import { abortable, resourceScope } from "../lib/effect";
 import {
   MaintenanceRPC,
@@ -23,7 +22,7 @@ import { noticeTools } from "../maintenance/update-notice";
 import { connectHistoryAPI, historyVisible } from "./history/api";
 import { compactOnServer } from "./history/compaction";
 import { crewOpenCodeInput } from "./input/crew-tool-input";
-import { CrewCron } from "./cron/cron";
+import { CrewCron, cronToolInput } from "./cron/cron";
 import { CrewCronExecution } from "./cron/cron-execution";
 import { CrewEngine } from "./execution/engine";
 import { CrewHistory, historyInputBranches } from "./history/history";
@@ -581,7 +580,7 @@ const plugin = Plugin.define({
           name: "stargate_cron",
           description:
             "Captain-only cronjobs: add, list, run, remove and report for the bound bot/workspace. Load stargate-cronjobs first. List/remove cover all bot destinations including DMs; optional exact channel/user filters do not default to the configured destination. Lists omit prompts unless both filters select a currently allowed destination. Five-field dates recur yearly unless once=true. Definitions live in cronjobs/<name>/CRONJOB.md; reference skills instead of copying prompts. Add requires a five-field schedule or a quota trigger and the intended Slack destination. The default-off cronjobs.advanced flag gates trigger, model, once and arbiter. A model uses provider/model#variant, validated against allowed providers and the active live catalogue; omitted means the captain's actual model. Explicit model or arbiter runs tools-off evaluation, never changes a durable session, and forwards only act/escalate to the captain; ignore stays private. Approval, credentials, destructive actions and owner decisions escalate. Once removes only after success, including a manual run. Failed or interrupted tools-off occurrences fail without replay; future occurrences remain eligible. Only uncertain captain admission remains held. Use enabled=false when timing is undecided. Report immediate posts configured results; daily retains them until the configured digest, and ignore is excluded. Report reads metadata, not settings. Admission is not completion. Preserve busy work; retry the same run with requestId (host tool-call ID by default). Scope-drift errors require operator configuration reconciliation, not state deletion or cross-namespace access. No permission expansion, duplicate OS updaters, blind self-restarts or live dependency updates.",
-          input: objectToolInput(cronOperationSchema),
+          input: cronToolInput(),
           options: { codemode: false, permission: "stargate_crew" },
           execute: (input, context) =>
             guard(

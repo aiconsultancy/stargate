@@ -25,12 +25,12 @@ import {
 import { projectToolInput } from "../src/crew/input/project-options";
 import * as toolInputs from "../src/crew/input/tool-input";
 import { objectToolInput } from "../src/crew/input/tool-input";
+import { cronToolInput } from "../src/crew/cron/cron";
 import { cronOperationSchema } from "../src/cron/control";
 import { notificationInputSchema } from "../src/notifications/preferences/notification-store";
 import { quotaInputSchema } from "../src/quota/quota";
 
 const schemas = {
-  stargate_cron: cronOperationSchema,
   stargate_notifications: notificationInputSchema,
 };
 
@@ -261,6 +261,16 @@ test("all Stargate union tools advertise an object root with their fields", () =
       for (const name of Object.keys(option.shape))
         expect(json.properties).toHaveProperty(name);
   }
+
+  const cron = cronToolInput()["~standard"].jsonSchema.input({
+    target: "draft-2020-12",
+  });
+
+  expect(cron["type"]).toBe("object");
+
+  for (const key of ["oneOf", "anyOf", "allOf"])
+    expect(cron).not.toHaveProperty(key);
+  expect(cron["required"]).toEqual(["op"]);
 });
 
 test("notification union keeps explicit scoped requirements and input expiry representation", () => {
@@ -334,7 +344,13 @@ test("native mail project envelope retains branch requirements and field paths",
 });
 
 test("Zod project helper preserves required operation fields after separating project", () => {
-  const schema = projectToolInput(cronOperationSchema);
+  const schema = projectToolInput(
+    z.discriminatedUnion("op", [
+      z.strictObject({ op: z.literal("report") }),
+      z.strictObject({ op: z.literal("run"), name: z.string().min(1) }),
+    ]),
+  );
+
   expect(schema.parse({ op: "report", project: "stargate" })).toEqual({
     op: "report",
     project: "stargate",
@@ -368,9 +384,13 @@ test("remaining quota Zod project helper stays strict and validates project keys
 
 test("optional envelope fields do not inject another operation's defaults", async () => {
   const cron = { op: "report" };
+  const adaptedCron = await cronToolInput()["~standard"].validate(cron);
+  expect(adaptedCron).toEqual({ value: cron });
+
+  if (adaptedCron.issues) throw new Error("Cron report rejected");
   expect(
-    cronOperationSchema.parse(objectToolInput(cronOperationSchema).parse(cron)),
-  ).toEqual(cronOperationSchema.parse(cron));
+    Schema.decodeUnknownSync(cronOperationSchema)(adaptedCron.value),
+  ).toEqual(Schema.decodeUnknownSync(cronOperationSchema)(cron));
 
   for (const [branches, original, input] of [
     [mailInputBranches, mailInputSchema, { op: "inbox" }],

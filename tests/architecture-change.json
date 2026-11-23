@@ -1,1 +1,4 @@
-{}
+{
+  "baselineSha256": "db7c8b618c98ebffda2c2404f59a805141a05772e64be7a02aa7756552b4b7e6",
+  "pruneStale": true
+}
