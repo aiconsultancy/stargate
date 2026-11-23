@@ -95,8 +95,8 @@ import {
 } from "../notifications/ingest/slack";
 import { PairingUI } from "../transports/slack/pairing";
 import { PeerDirectory } from "../gateway/peers";
-import { QuotaReader } from "../quota/quota";
-import { QuotaWatch } from "../quota/quota-watch";
+import { QuotaReader } from "../backends/quota/quota";
+import { QuotaWatch } from "../backends/quota/quota-watch";
 import {
   type Identity,
   backendFingerprint,

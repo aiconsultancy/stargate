@@ -74,7 +74,7 @@ import {
   nativeQuestionSchema,
   questionFingerprint,
 } from "../../questions/questions";
-import { quotaObservationSchema, quotaSnapshotSchema } from "../../quota/quota";
+import { quotaObservationSchema, quotaSnapshotSchema } from "../quota/quota";
 import { createReadSlot, readWithDeadline } from "../../lib/read-deadline";
 import {
   BackendFailure,

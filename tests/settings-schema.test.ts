@@ -31,8 +31,8 @@ import { cleanupSchema } from "../src/automation/maintenance/nightly/cleanup/cle
 import { maintenanceSchema } from "../src/automation/maintenance/nightly/config";
 import { nightlyWindowSchema } from "../src/automation/maintenance/nightly/instructions";
 import { piModelSchema, piProviderSchema } from "../src/backends/pi/config";
-import { quotaConfigSchema } from "../src/quota/quota";
-import { quotaWatchSchema } from "../src/quota/quota-watch";
+import { quotaConfigSchema } from "../src/backends/quota/quota";
+import { quotaWatchSchema } from "../src/backends/quota/quota-watch";
 import { decodeSettings } from "../src/config/settings-errors";
 import { settingsAdvertisement } from "../src/config/settings-legacy";
 import {

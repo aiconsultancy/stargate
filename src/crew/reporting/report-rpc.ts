@@ -16,7 +16,7 @@ import {
   quotaInputSchema,
   quotaObservationSchema,
   quotaSnapshotSchema,
-} from "../../quota/quota";
+} from "../../backends/quota/quota";
 import {
   exactStruct,
   historyChildrenInputSchema,

@@ -27,7 +27,7 @@ import {
   piCrewBackendSchema,
   piDurableBackendSchema,
 } from "../backends/pi/config";
-import { quotaWatchSchema } from "../quota/quota-watch";
+import { quotaWatchSchema } from "../backends/quota/quota-watch";
 import { decodeSettings } from "./settings-errors";
 import {
   absolutePath,

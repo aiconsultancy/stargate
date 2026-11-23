@@ -25,7 +25,7 @@ import {
   reconcileInputSchema,
   resumeInputSchema,
 } from "../execution/reconciliation";
-import { quotaInputSchema } from "../../quota/quota";
+import { quotaInputSchema } from "../../backends/quota/quota";
 import { agentIDSchema } from "../team";
 import { workspaceInputSchemas } from "../workspace/workspace";
 

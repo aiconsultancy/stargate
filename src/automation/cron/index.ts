@@ -12,7 +12,7 @@ import {
   CronjobManager,
   cronRuntimeBinding,
 } from "./job-manager";
-import type { QuotaObservation } from "../../quota/quota";
+import type { QuotaObservation } from "../../backends/quota/quota";
 import { readWithDeadline } from "../../lib/read-deadline";
 import {
   type Identity,

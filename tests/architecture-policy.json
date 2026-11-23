@@ -729,8 +729,16 @@
       "src/questions/question-settings.ts"
     ],
     "src/questions.ts": ["src/questions.ts", "src/questions/questions.ts"],
-    "src/quota-watch.ts": ["src/quota-watch.ts", "src/quota/quota-watch.ts"],
-    "src/quota.ts": ["src/quota.ts", "src/quota/quota.ts"],
+    "src/quota-watch.ts": [
+      "src/quota-watch.ts",
+      "src/quota/quota-watch.ts",
+      "src/backends/quota/quota-watch.ts"
+    ],
+    "src/quota.ts": [
+      "src/quota.ts",
+      "src/quota/quota.ts",
+      "src/backends/quota/quota.ts"
+    ],
     "src/reactions.ts": ["src/reactions.ts", "src/shared/reactions.ts"],
     "src/read-deadline.ts": [
       "src/read-deadline.ts",
