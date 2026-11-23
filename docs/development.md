@@ -19,13 +19,35 @@ fallthrough, unreachable code, unused labels, and unchecked side-effect imports.
 Oxlint treats warnings as failures and runs type-aware (backed by tsrs),
 checking promise handling, exhaustive switches, explicit `any`, non-null
 assertions, and `@ts-ignore`, across `src`, `tests`, `scripts` and `perf`.
-The deeper exceed-parity type-aware rules (unsafe returns, unbound methods,
-misused spreads and more) stay in the advisory `mise run oxlint` layer until
-triaged.
+The fault-check rules (unsafe returns, unbound methods, misused spreads and
+more) run in `src`, `scripts` and `perf`. These stay off, each for a reason:
+
+- `eslint/preserve-caught-error`: a `cause` would put raw file-system and
+  Slack SDK errors in logs.
+- `unicorn/prefer-type-error`: the repair changes the class of a thrown error.
+- `unicorn/custom-error-definition`: the repair changes error names and
+  renames exported classes.
+- `eslint/require-unicode-regexp`: with `u`, Effect exports schema patterns as
+  JSON Schema `pattern`, which changes the tool schemas sent.
+- `unicorn/throw-new-error`: it reports the `Schema.TaggedError` factory.
+- `eslint/no-redeclare`: it reports a value and a type with one name; the
+  compiler reports real redeclarations.
+- `eslint/no-useless-assignment`: it reports variables that the next loop
+  pass reads.
+- `unicorn/require-post-message-target-origin`: it reports Slack's
+  `chat.postMessage`, not `window.postMessage`.
+- `eslint/default-case`: a `default` branch hides the
+  `switch-exhaustiveness-check` result for unions, or does not compile.
+- `eslint/no-loop-func`: closures read live state on purpose.
+
+`eslint/no-unmodified-loop-condition` is off for
+`src/notifications/ingest/notifications.ts` only: its loops test `closing`,
+which the scope finalizer sets from another fiber.
 
 `make format` applies six supported Oxlint fixes, then the statement-spacing
 rule, then Oxfmt. It repeats until a round makes no changes. It does not apply
 suggestions, dangerous fixes, or fixes from the advisory configuration.
+The hand-work lint rules are off for `tests/**`; tests keep the bundle gate.
 The new lint rules and the formatter skip the explicit Zod paths in
 `.oxlintrc.json`. The previous lint and formatting checks still run on those
 paths. The approved bundle may apply tool-only form changes to the four fixed

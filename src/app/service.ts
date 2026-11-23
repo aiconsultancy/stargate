@@ -23,7 +23,7 @@ export function serviceName(name = "stargate") {
 
 export function quote(value: string, command = false) {
   if (
-    [...value].some(
+    Array.from(value).some(
       (character) =>
         character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
     )

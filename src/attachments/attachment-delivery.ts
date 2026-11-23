@@ -209,7 +209,7 @@ export async function deliverAttachments(
 
     if (file.prepared && !file.title) {
       file.title =
-        [...(file.caption || file.prepared.name)]
+        Array.from(file.caption || file.prepared.name)
           .map((char) =>
             char === "/" ||
             char === "\\" ||

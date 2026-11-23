@@ -333,7 +333,40 @@
         "unicorn/prefer-negative-index": "error",
         "unicorn/prefer-response-static-json": "error",
         "unicorn/prefer-structured-clone": "error",
-        "unicorn/relative-url-style": "error"
+        "unicorn/relative-url-style": "error",
+        "typescript/no-misused-spread": "error",
+        "typescript/no-base-to-string": "error",
+        "typescript/unbound-method": "error",
+        "typescript/no-unsafe-return": "error",
+        "typescript/no-unsafe-argument": "error",
+        "typescript/no-unsafe-assignment": "error",
+        "typescript/no-unsafe-call": "error",
+        "typescript/no-unsafe-member-access": "error",
+        "typescript/restrict-plus-operands": "error",
+        "typescript/prefer-promise-reject-errors": [
+          "error",
+          {
+            "allowThrowingAny": true,
+            "allowThrowingUnknown": true
+          }
+        ],
+        "unicorn/error-message": "error",
+        "eslint/eqeqeq": "error",
+        "eslint/no-eq-null": "error",
+        "eslint/no-empty": "error",
+        "oxc/bad-bitwise-operator": "error",
+        "eslint/no-misleading-character-class": "error",
+        "typescript/no-this-alias": "error",
+        "unicorn/no-this-assignment": "error",
+        "eslint/no-use-before-define": [
+          "error",
+          {
+            "functions": false,
+            "classes": false,
+            "variables": false
+          }
+        ],
+        "eslint/no-unmodified-loop-condition": "error"
       },
       "env": {
         "node": true,
@@ -737,6 +770,12 @@
         "unicorn/require-post-message-target-origin": "off",
         "unicorn/switch-case-braces": "off",
         "unicorn/throw-new-error": "off"
+      }
+    },
+    {
+      "files": ["src/notifications/ingest/notifications.ts"],
+      "rules": {
+        "eslint/no-unmodified-loop-condition": "off"
       }
     }
   ]

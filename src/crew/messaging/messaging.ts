@@ -329,7 +329,8 @@ export class MailRoutes {
       )
       .get(sessionID, holes, holes)?.sequence;
 
-    const ceiling = hole == null ? Number.MAX_SAFE_INTEGER : hole - 1;
+    const ceiling =
+      hole === null || hole === undefined ? Number.MAX_SAFE_INTEGER : hole - 1;
 
     if (after !== undefined)
       this.db

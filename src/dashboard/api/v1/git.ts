@@ -135,7 +135,7 @@ async function openStatusFile(source: string, roots: string[]) {
   const name = parts.pop();
 
   if (!name) return undefined;
-  const directoryFlags = metadataFlags | constants.O_DIRECTORY;
+  const directoryFlags = constants.O_DIRECTORY | metadataFlags;
   let parent = await open(sep, directoryFlags);
 
   try {
@@ -340,7 +340,7 @@ function statusDirectories(
   let temporaryRoot: ReturnType<typeof retainTemporaryStatusRoot> | undefined;
 
   return {
-    async snapshot(checkout: string) {
+    async snapshot(this: void, checkout: string) {
       const root = await realpath(checkout);
 
       // The snapshot would appear as untracked files inside the worktree.

@@ -167,7 +167,7 @@ export async function renderProfile(input: Options, role: string) {
 
   if (!profile) throw new Error("Missing team permission profile.");
 
-  const config = await Bun.file(
+  const config: unknown = await Bun.file(
     join(templatesDirectory, "opencode.json"),
   ).json();
 

@@ -32,7 +32,8 @@ function parseCatalog(text: string) {
   try {
     const config = decodeRecord(JSON.parse(text));
 
-    if (`${JSON.stringify(config, null, 2)}\n` !== text) throw new Error();
+    if (`${JSON.stringify(config, null, 2)}\n` !== text)
+      throw new Error("Model catalog is not canonical JSON");
     const providers = decodeRecord(config["providers"]);
 
     return { config, providers };

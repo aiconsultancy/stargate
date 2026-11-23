@@ -1175,26 +1175,24 @@ export class Gateway {
   }
 
   private supervise() {
-    const gateway = this;
-
     return Effect.scoped(
-      Effect.gen(function* () {
-        yield* abortable((signal) => gateway.recover(signal));
+      Effect.gen({ self: this }, function* () {
+        yield* abortable((signal) => this.recover(signal));
 
         if (
-          gateway.questions ||
-          (gateway.transport.name === "irc" && gateway.supportsQuestions)
+          this.questions ||
+          (this.transport.name === "irc" && this.supportsQuestions)
         )
           yield* Effect.forkScoped(
             abortable(async (signal) => {
               while (!signal.aborted) {
                 try {
-                  await gateway.questions?.poll(
+                  await this.questions?.poll(
                     AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
                   );
                 } catch {
                   if (!signal.aborted)
-                    gateway.log.warn("Native clarification check unavailable");
+                    this.log.warn("Native clarification check unavailable");
                 }
 
                 await delay(1000, undefined, { signal }).catch(() => {});
@@ -1202,33 +1200,31 @@ export class Gateway {
             }),
           );
         yield* Effect.addFinalizer(() =>
-          Effect.promise(() => gateway.activity.close()),
+          Effect.promise(() => this.activity.close()),
         );
-        const watch = gateway.backend.transcript && gateway.backend.watch;
+
+        const watch =
+          this.backend.transcript && this.backend.watch?.bind(this.backend);
 
         if (watch)
           yield* Effect.forkScoped(
             abortable((signal) =>
-              watch.call(
-                gateway.backend,
-                (session) => gateway.settle(session),
+              watch(
+                (session) => this.settle(session),
                 signal,
-                gateway.transport.questions?.operator
-                  ? () => gateway.questions?.reconcileBackground()
+                this.transport.questions?.operator
+                  ? () => this.questions?.reconcileBackground()
                   : undefined,
               ),
             ).pipe(
               Effect.catchCause(() =>
-                Effect.sync(() => gateway.log.warn("Transcript watch stopped")),
+                Effect.sync(() => this.log.warn("Transcript watch stopped")),
               ),
             ),
           );
         // Closes first: every turn and catch-up observes shutdown and settles.
         const slots = yield* FiberMap.make<string>();
-        yield* Effect.repeat(
-          gateway.poll(slots),
-          Schedule.spaced("200 millis"),
-        );
+        yield* Effect.repeat(this.poll(slots), Schedule.spaced("200 millis"));
       }),
     );
   }
@@ -1313,48 +1309,46 @@ export class Gateway {
 
   /** One pass: queued requests first, then catch-ups, in shared slots. */
   private poll(slots: FiberMap.FiberMap<string>) {
-    const gateway = this;
+    return Effect.gen({ self: this }, function* () {
+      this.drain?.tick();
 
-    return Effect.gen(function* () {
-      gateway.drain?.tick();
-
-      if (gateway.paused) return;
-      yield* abortable((signal) => gateway.pollFollowUps(signal));
+      if (this.paused) return;
+      yield* abortable((signal) => this.pollFollowUps(signal));
       const used = yield* FiberMap.size(slots);
       // Held: accepted jobs stay queued; responding deliveries may finish.
-      const hold = gateway.drain?.held() ?? false;
+      const hold = this.drain?.held() ?? false;
 
-      const jobs = gateway.store
+      const jobs = this.store
         .ready(
-          gateway.key,
+          this.key,
           Date.now(),
-          gateway.config.concurrency + used,
-          gateway.backend.sessionID !== undefined,
+          this.config.concurrency + used,
+          this.backend.sessionID !== undefined,
           hold,
         )
         .filter((job) => !hold || job.status !== "queued");
 
       for (const job of jobs) {
-        if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
+        if ((yield* FiberMap.size(slots)) >= this.config.concurrency) break;
 
         // One worker per job. A pinned turn holds the bot slot while it
         // Delivers; its `responding` row must not start again in the
         // Conversation slot, or every chunk and file is sent twice.
-        if (gateway.turnPolicies.has(job.id)) continue;
+        if (this.turnPolicies.has(job.id)) continue;
 
         const slot =
-          gateway.backend.sessionID && job.status === "queued"
-            ? gateway.key
+          this.backend.sessionID && job.status === "queued"
+            ? this.key
             : job.conversation;
 
         if (yield* FiberMap.has(slots, slot)) continue;
         yield* FiberMap.run(
           slots,
           slot,
-          abortable((signal) => gateway.process(job, signal)).pipe(
+          abortable((signal) => this.process(job, signal)).pipe(
             Effect.catchCause(() =>
               Effect.sync(() =>
-                gateway.log.error(
+                this.log.error(
                   { job: job.id },
                   "Worker failed; request will need recovery",
                 ),
@@ -1365,7 +1359,7 @@ export class Gateway {
         );
       }
 
-      yield* gateway.startCatchUps(slots);
+      yield* this.startCatchUps(slots);
     });
   }
 
@@ -1402,12 +1396,11 @@ export class Gateway {
 
   /** Start eligible catch-ups; resolves when they end. Public for tests. */
   public async catchUp(signal: AbortSignal) {
-    const gateway = this;
     await runAbortable(
       Effect.scoped(
-        Effect.gen(function* () {
+        Effect.gen({ self: this }, function* () {
           const slots = yield* FiberMap.make<string>();
-          yield* gateway.startCatchUps(slots);
+          yield* this.startCatchUps(slots);
           yield* FiberMap.awaitEmpty(slots);
         }),
       ),
@@ -1418,30 +1411,28 @@ export class Gateway {
   }
 
   private startCatchUps(slots: FiberMap.FiberMap<string>) {
-    const gateway = this;
-
-    return Effect.gen(function* () {
-      if (gateway.paused || gateway.drain?.held()) return;
+    return Effect.gen({ self: this }, function* () {
+      if (this.paused || this.drain?.held()) return;
       const now = Date.now();
 
-      for (const [conversation, retry] of gateway.settled) {
-        if ((yield* FiberMap.size(slots)) >= gateway.config.concurrency) break;
+      for (const [conversation, retry] of this.settled) {
+        if ((yield* FiberMap.size(slots)) >= this.config.concurrency) break;
 
         // A pending turn reads the same history; later replies wait for delivery.
         if (
           retry.at > now ||
           (yield* FiberMap.has(slots, conversation)) ||
-          (gateway.backend.sessionID
-            ? gateway.store.captainBusy(gateway.key)
-            : gateway.store.unfinished(conversation))
+          (this.backend.sessionID
+            ? this.store.captainBusy(this.key)
+            : this.store.unfinished(conversation))
         )
           continue;
-        gateway.settled.delete(conversation);
+        this.settled.delete(conversation);
         yield* FiberMap.run(
           slots,
           conversation,
           abortable((signal) =>
-            gateway.catchUpThread(conversation, retry, signal),
+            this.catchUpThread(conversation, retry, signal),
           ),
           { startImmediately: true },
         );
@@ -1905,7 +1896,8 @@ export class Gateway {
     const readReceipt = async (active: boolean) => {
       if (
         bot?.slackReadReceipts &&
-        job.received != null &&
+        job.received !== null &&
+        job.received !== undefined &&
         !job.slackReaction &&
         !job.sender &&
         !job.deferDelivery &&

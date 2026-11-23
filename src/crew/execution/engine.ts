@@ -573,10 +573,12 @@ export class CrewEngine {
 
     const physicalWorktrees = Object.fromEntries(
       await Promise.all(
-        Object.entries(options.worktrees).map(async ([id, path]) => [
-          id,
-          await physicalDirectory(resolve(path)),
-        ]),
+        Object.entries(options.worktrees).map(
+          async ([id, path]): Promise<[string, string]> => [
+            id,
+            await physicalDirectory(resolve(path)),
+          ],
+        ),
       ),
     );
 

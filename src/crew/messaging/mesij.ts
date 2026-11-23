@@ -32,7 +32,7 @@ const identity = Schema.String.check(
   Schema.makeFilter(
     (value) =>
       value.trim().length > 0 &&
-      [...value].every((character) => {
+      Array.from(value).every((character) => {
         const code = character.charCodeAt(0);
 
         return code > 31 && code !== 127;

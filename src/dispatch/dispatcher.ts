@@ -125,7 +125,8 @@ export class AgentDispatcher {
   private dueAt(tracked: TrackedIssue): number | undefined {
     const offer = tracked.offer;
 
-    // A pending write is retried by every timer run; never spin for it.
+    // The last branch is a pending write: every timer run retries it, so
+    // Never spin for it.
     const at =
       tracked.state === "asking"
         ? offer && tracked.closedOffer === offer.id

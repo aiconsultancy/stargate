@@ -25,7 +25,7 @@ export type NotificationDependencies = {
     configPath: string,
     signal: AbortSignal,
   ): Promise<Identity>;
-  now(): number;
+  now(this: void): number;
 };
 
 const defaults: NotificationDependencies = {

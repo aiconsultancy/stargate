@@ -16,7 +16,9 @@ export async function clientPem(path: string) {
         (stat.mode & 0o077) !== 0 ||
         stat.size > 64 * 1024
       )
-        throw new Error();
+        throw new Error(
+          "Client PEM is not a private regular file of at most 64 KiB",
+        );
       const pem = await file.readFile({ encoding: "utf8" });
 
       const certs = pem.match(
@@ -35,7 +37,7 @@ export async function clientPem(path: string) {
         !key ||
         !new X509Certificate(leaf).checkPrivateKey(createPrivateKey(key))
       )
-        throw new Error();
+        throw new Error("Client PEM has no matching certificate and key");
 
       return { cert: certs.join("\n"), key };
     } finally {

@@ -33,7 +33,7 @@ const displayTitle = Schema.String.check(
   Schema.isMinCodePoints(1),
   Schema.isMaxCodePoints(255),
   Schema.makeFilter((value) =>
-    [...value].every(
+    Array.from(value).every(
       (char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127,
     ),
   ),

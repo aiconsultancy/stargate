@@ -178,7 +178,7 @@ export function copyText(item: { id: string; text: string }) {
   let cut = marked;
 
   while (Buffer.byteLength(cut + suffix) > copyBytes)
-    cut = [...cut].slice(0, -64).join("");
+    cut = Array.from(cut).slice(0, -64).join("");
 
   return `${cut.trimEnd()}${suffix}`;
 }
@@ -406,7 +406,8 @@ function shipTransport(
 
   return {
     progressRequest: (job) =>
-      job.received != null &&
+      job.received !== null &&
+      job.received !== undefined &&
       job.eventId === `${job.channel}:${job.thread}` &&
       validMsgid(job.thread) &&
       !job.thread.startsWith("stargate-")
@@ -673,6 +674,7 @@ export class IrcShip {
 
   /** Reads the CA and client credentials without logging them. */
   public static async create(
+    this: void,
     config: IrcConfig,
     store: Store,
     log: Logger,

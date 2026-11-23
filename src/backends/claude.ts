@@ -103,7 +103,9 @@ function claudeCLI() {
         );
 
         if (existsSync(path)) return path;
-      } catch {}
+      } catch {
+        // This platform package is not installed; try the next candidate.
+      }
     }
 
     throw new ClaudeTurnError(versionFailure);
@@ -715,7 +717,9 @@ export class ClaudeBackend implements AgentBackend {
         await access(join(projects, directory, `${id}.jsonl`));
 
         return true;
-      } catch {}
+      } catch {
+        // Not in this project directory; check the next one.
+      }
     }
 
     return false;

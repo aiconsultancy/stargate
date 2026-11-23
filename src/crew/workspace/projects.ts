@@ -194,7 +194,7 @@ export class CrewProjects {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw))
       throw new CrewError("Invalid project tool input.");
 
-    if (![Object.prototype, null].includes(Object.getPrototypeOf(raw)))
+    if (![Object.prototype, null].includes(Reflect.getPrototypeOf(raw)))
       throw new CrewError("Project input requires own fields.");
     const record = raw as Record<string, unknown>;
 

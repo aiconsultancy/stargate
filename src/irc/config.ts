@@ -31,7 +31,8 @@ export const ircChannel = Schema.String.check(
   )
   .check(
     settingsRefine(
-      (name) => [...name].every((char) => char >= " " && char !== "\u007f"),
+      (name) =>
+        Array.from(name).every((char) => char >= " " && char !== "\u007f"),
       { message: "IRC channel names cannot contain control characters" },
     ),
   );

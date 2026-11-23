@@ -97,11 +97,11 @@ export function parseDispatchMarker(
 
 /** One line of untrusted issue text for chat: no controls, bounded. */
 export function chatTitle(title: string, maxCodePoints = 120): string {
-  const flat = [...title.replace(/\s+/g, " ").trim()]
+  const flat = Array.from(title.replace(/\s+/g, " ").trim())
     .filter((character) => !/\p{Cc}|\p{Cf}/u.test(character))
     .join("");
 
-  const points = [...flat];
+  const points = Array.from(flat);
 
   return points.length <= maxCodePoints
     ? flat

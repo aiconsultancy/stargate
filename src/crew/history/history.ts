@@ -205,7 +205,7 @@ export class HistoryError extends CrewError {}
 function nextCursor(page: Page<unknown>): string | undefined {
   const cursor = page.cursor.next;
 
-  if (cursor == null) return;
+  if (cursor === null || cursor === undefined) return;
 
   if (Result.isFailure(Schema.decodeUnknownResult(apiCursor)(cursor)))
     throw new HistoryError("Invalid history API response.");
@@ -265,14 +265,16 @@ function plainText(
 
 function decodeCursor(cursor: string, query: string): SearchPosition {
   try {
-    if (!/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error();
+    if (!/^[A-Za-z0-9_-]+$/.test(cursor))
+      throw new Error("History cursor is not base64url");
 
     const decoded = decodeSettings(
       searchCursor,
       JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")),
     );
 
-    if (decoded.query !== query) throw new Error();
+    if (decoded.query !== query)
+      throw new Error("History cursor belongs to another query");
     const position = decoded.position;
 
     return position.phase === "messages" && !("pendingSessionIDs" in position)

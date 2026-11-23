@@ -4,6 +4,10 @@ import type { BackendConfig } from "../config";
 import { OpenCodeBackend } from "./opencode/opencode";
 import { PiDurableBackend } from "./pi/pi-durable";
 
+/** Any function can be called with any arguments; its result is unchecked. */
+const callable = (value: unknown): value is (...args: unknown[]) => unknown =>
+  typeof value === "function";
+
 export async function createBackend(
   config: BackendConfig,
   context: BackendContext,
@@ -33,7 +37,7 @@ export async function createBackend(
         typeof plugin !== "object" ||
         !plugin ||
         !("createBackend" in plugin) ||
-        typeof plugin.createBackend !== "function"
+        !callable(plugin.createBackend)
       ) {
         throw new Error(
           "Backend module must export createBackend(options, context)",

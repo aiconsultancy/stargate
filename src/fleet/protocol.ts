@@ -373,7 +373,7 @@ export const dispatchInputSchema = settingsStruct({
     Schema.isMinCodePoints(1),
     Schema.isMaxCodePoints(1800),
     Schema.makeFilter((text) =>
-      [...text].every(
+      Array.from(text).every(
         (character) =>
           character === "\n" ||
           character === "\t" ||
@@ -402,7 +402,8 @@ export const offerAnswerInputSchema = settingsStruct({
       Schema.isMinCodePoints(1),
       Schema.isMaxCodePoints(200),
       Schema.makeFilter(
-        (text) => ![...text].some((character) => /\p{Cc}/u.test(character)),
+        (text) =>
+          !Array.from(text).some((character) => /\p{Cc}/u.test(character)),
       ),
     ),
   ),

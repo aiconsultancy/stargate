@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { OpenCode } from "@opencode/client";
+import { Schema } from "effect";
 import { Service } from "@opencode/client/service";
 import { crewFingerprint } from "../src/crew/execution/identity";
 import { CrewState } from "../src/crew/execution/state";
@@ -44,11 +45,23 @@ const auth = "Basic " + Buffer.from("opencode:fixture").toString("base64");
 let captainAnswers = 0;
 let modelCalls = 0;
 
+const isModelRequest = Schema.is(
+  Schema.Struct({
+    messages: Schema.Array(Schema.Struct({ role: Schema.String })),
+  }),
+);
+
+const isFormList = Schema.is(
+  Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) }),
+);
+
 const model = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   async fetch(req) {
-    const body = await req.json();
+    const body: unknown = await req.json();
+
+    if (!isModelRequest(body)) throw new Error("Unexpected model request body");
 
     const answered = body.messages.some(
       (m: { role: string }) => m.role === "tool",
@@ -228,7 +241,7 @@ await writeFile(
       fixture: {
         package: "@opencode/ai/providers/openai-compatible",
         name: "Fixture",
-        settings: { baseURL: model.url + "v1", apiKey: "fixture" },
+        settings: { baseURL: model.url.href + "v1", apiKey: "fixture" },
         models: { fixture: { name: "fixture" } },
       },
     },
@@ -352,9 +365,8 @@ try {
     const headers = { Authorization: auth };
     const list = await fetch(url, { headers });
     assert.equal(list.status, 200);
-    assert.ok(
-      (await list.json()).data.some((q: { id: string }) => q.id === form.id),
-    );
+    const listed: unknown = await list.json();
+    assert.ok(isFormList(listed) && listed.data.some((q) => q.id === form.id));
     assert.equal((await fetch(url + "/" + form.id, { headers })).status, 404);
     assert.equal(
       (await fetch(url + "/" + form.id + "/reply", { method: "POST", headers }))

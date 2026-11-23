@@ -65,9 +65,12 @@ const unitName = Schema.String.check(
 const argument = Schema.String.check(Schema.isMinCodePoints(1))
   .check(Schema.isMaxCodePoints(4096))
   .check(
-    settingsRefine((value) => ![...value].some((c) => c.charCodeAt(0) < 32), {
-      message: "No control characters",
-    }),
+    settingsRefine(
+      (value) => !Array.from(value).some((c) => c.charCodeAt(0) < 32),
+      {
+        message: "No control characters",
+      },
+    ),
   );
 
 const command = Schema.mutable(Schema.Array(argument))
