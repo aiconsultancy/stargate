@@ -1,36 +1,56 @@
 import { Rpc } from "@opencode/plugin/rpc";
-import { z } from "zod";
+import { Schema } from "effect";
+import { settingsStruct } from "../config/settings-schema";
 
 export const maintenanceWindowMs = 300_000;
-export const maintenancePlanSchema = z.strictObject({
-  plan: z.string().trim().min(1).max(1000),
-  impact: z.string().trim().min(1).max(500),
-  rollback: z.string().trim().min(1).max(500),
-});
-export const maintenanceNoticeSchema = maintenancePlanSchema.extend({
-  id: z.string().min(1).max(100),
-});
-export type MaintenanceNotice = z.infer<typeof maintenanceNoticeSchema>;
+
+// Zod trimmed first and counted code points; keep both for the plan text.
+const text = (maximum: number) =>
+  Schema.Trim.check(Schema.isMinCodePoints(1), Schema.isMaxCodePoints(maximum));
+
+const id = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(100),
+);
+
+const planFields = {
+  plan: text(1000),
+  impact: text(500),
+  rollback: text(500),
+};
+
+export const maintenancePlanSchema = settingsStruct(planFields);
+export const maintenanceNoticeSchema = settingsStruct({ ...planFields, id });
+
+export type MaintenanceNotice = typeof maintenanceNoticeSchema.Type;
+
 export interface MaintenanceWatch {
   read(signal: AbortSignal): Promise<MaintenanceNotice | null>;
   delivered(id: string, signal: AbortSignal): Promise<void>;
   close(signal: AbortSignal): Promise<void>;
 }
-const owner = z.strictObject({
-  sessionID: z.string().min(1).max(100),
-  id: z.string().min(1).max(100),
-});
+
+const ownerFields = { sessionID: id, id };
+const owner = settingsStruct(ownerFields);
+
+// Clients require Standard Schema definitions.
+// OpenCode decodes and encodes these Effect codecs without caller options.
+const portable = Schema.toStandardSchemaV1;
+
 export const MaintenanceRPC = Rpc.define({
   id: "stargate.maintenance",
   events: {},
   methods: {
-    open: { input: owner, output: z.boolean() },
-    read: { input: owner, output: maintenanceNoticeSchema.nullable() },
-    delivered: {
-      input: owner.extend({ noticeID: z.string().min(1).max(100) }),
-      output: z.boolean(),
+    open: { input: portable(owner), output: portable(Schema.Boolean) },
+    read: {
+      input: portable(owner),
+      output: portable(Schema.NullOr(maintenanceNoticeSchema)),
     },
-    close: { input: owner, output: z.boolean() },
+    delivered: {
+      input: portable(settingsStruct({ ...ownerFields, noticeID: id })),
+      output: portable(Schema.Boolean),
+    },
+    close: { input: portable(owner), output: portable(Schema.Boolean) },
   },
 });
 
@@ -40,17 +60,20 @@ export function maintenanceText(notice: MaintenanceNotice) {
 
 /** Only the confirmed opt-out wait is excluded from the normal turn budget. */
 export class TurnBudget {
-  readonly controller = new AbortController();
+  public readonly controller = new AbortController();
   private timer: (() => void) | undefined;
   private remaining: number;
   private started: number;
 
-  constructor(
+  public constructor(
     ms: number,
     private readonly now = () => performance.now(),
     private readonly schedule = (ms: number, expire: () => void) => {
       const timer = setTimeout(expire, ms);
-      return () => clearTimeout(timer);
+
+      return () => {
+        clearTimeout(timer);
+      };
     },
   ) {
     this.remaining = ms;
@@ -58,20 +81,22 @@ export class TurnBudget {
     this.resume();
   }
 
-  pause() {
+  public pause() {
     if (this.timer === undefined) return;
     this.timer();
     this.timer = undefined;
     this.remaining = Math.max(0, this.remaining - (this.now() - this.started));
   }
 
-  resume() {
+  public resume() {
     if (this.timer !== undefined || this.controller.signal.aborted) return;
     this.started = this.now();
-    this.timer = this.schedule(this.remaining, () => this.controller.abort());
+    this.timer = this.schedule(this.remaining, () => {
+      this.controller.abort();
+    });
   }
 
-  close() {
+  public close() {
     this.timer?.();
   }
 }

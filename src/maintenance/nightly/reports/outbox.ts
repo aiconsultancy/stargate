@@ -1,8 +1,11 @@
 import { readFile, readdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { Schema } from "effect";
 import type { Logger } from "pino";
 import { maintenanceDirectory, noticeSchema } from "./report";
+
+const decodeNotice = Schema.decodeUnknownSync(noticeSchema);
 
 /**
  * Gateway-side delivery of maintenance summaries through the configured
@@ -50,7 +53,7 @@ export class MaintenanceOutbox {
       let status = "failed";
 
       try {
-        const notice = noticeSchema.parse(
+        const notice = decodeNotice(
           JSON.parse(await readFile(claimed, "utf8")),
         );
 

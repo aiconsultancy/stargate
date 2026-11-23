@@ -1,8 +1,8 @@
 [
   {
     "path": "src/health/health.ts",
-    "issue": "NET-1791",
-    "reason": "Formatter-wrapped import of the droid move at 80 columns; names and schemas unchanged."
+    "issue": "NET-1806",
+    "reason": "Batch 16: decode readySchema natively and take the report outcomes from report.ts; Zod imports unchanged."
   },
   {
     "path": "src/maintenance/nightly/cli.ts",

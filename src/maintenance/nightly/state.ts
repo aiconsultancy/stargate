@@ -1,6 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "zod";
+import { Option, Schema } from "effect";
+import {
+  settingsDateTime,
+  settingsPattern,
+  settingsRecord,
+} from "../../config/settings-schema";
 import { atomicWrite, readOptional } from "./files";
 import { maintenanceDirectory } from "./paths";
 
@@ -12,28 +17,40 @@ import { maintenanceDirectory } from "./paths";
  * whose crew plugin OpenCode loaded when a later update restarted only the
  * gateway (its directory must stay until OpenCode restarts).
  */
-const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
+const sha256 = Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/));
+
+// Zod's plain objects stripped unknown keys; Effect structs do the same.
 const sections = {
-  npm: z.record(
-    z.string(),
-    z.object({ version: z.string(), before: z.iso.datetime({ offset: true }) }),
+  npm: settingsRecord(
+    Schema.String,
+    Schema.Struct({ version: Schema.String, before: settingsDateTime }),
   ),
-  cliproxyapi: z.record(
-    z.string(),
-    z.object({ asset: sha256, binary: sha256 }),
+  cliproxyapi: settingsRecord(
+    Schema.String,
+    Schema.Struct({ asset: sha256, binary: sha256 }),
   ),
-  failedReleases: z.record(
-    z.string(),
-    z.object({ reason: z.string(), at: z.iso.datetime({ offset: true }) }),
+  failedReleases: settingsRecord(
+    Schema.String,
+    Schema.Struct({ reason: Schema.String, at: settingsDateTime }),
   ),
   /** Null: OpenCode runs the plugin of the `current` release. */
-  openCodeRelease: z
-    .string()
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)
-    .nullable(),
+  openCodeRelease: Schema.NullOr(
+    Schema.String.check(settingsPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/)),
+  ),
 };
+
 export type State = {
-  [K in keyof typeof sections]: z.infer<(typeof sections)[K]>;
+  npm: Record<string, { version: string; before: string }>;
+  cliproxyapi: Record<string, { asset: string; binary: string }>;
+  failedReleases: Record<string, { reason: string; at: string }>;
+  openCodeRelease: string | null;
+};
+
+const decode = {
+  npm: Schema.decodeUnknownOption(sections.npm),
+  cliproxyapi: Schema.decodeUnknownOption(sections.cliproxyapi),
+  failedReleases: Schema.decodeUnknownOption(sections.failedReleases),
+  openCodeRelease: Schema.decodeUnknownOption(sections.openCodeRelease),
 };
 
 const statePath = (dataDirectory: string) =>
@@ -47,24 +64,33 @@ export async function readState(dataDirectory: string): Promise<State> {
     failedReleases: {},
     openCodeRelease: null,
   };
+
   const text = await readOptional(statePath(dataDirectory)).catch(() => null);
+
   if (!text) return state;
   let raw: unknown;
+
   try {
     raw = JSON.parse(text);
   } catch {
     return state;
   }
+
   if (typeof raw !== "object" || raw === null) return state;
   const record = raw as Record<string, unknown>;
-  const npm = sections.npm.safeParse(record["npm"]);
-  if (npm.success) state.npm = npm.data;
-  const proxy = sections.cliproxyapi.safeParse(record["cliproxyapi"]);
-  if (proxy.success) state.cliproxyapi = proxy.data;
-  const failed = sections.failedReleases.safeParse(record["failedReleases"]);
-  if (failed.success) state.failedReleases = failed.data;
-  const loaded = sections.openCodeRelease.safeParse(record["openCodeRelease"]);
-  if (loaded.success) state.openCodeRelease = loaded.data;
+  const npm = decode.npm(record["npm"]);
+
+  if (Option.isSome(npm)) state.npm = npm.value;
+  const proxy = decode.cliproxyapi(record["cliproxyapi"]);
+
+  if (Option.isSome(proxy)) state.cliproxyapi = proxy.value;
+  const failed = decode.failedReleases(record["failedReleases"]);
+
+  if (Option.isSome(failed)) state.failedReleases = failed.value;
+  const loaded = decode.openCodeRelease(record["openCodeRelease"]);
+
+  if (Option.isSome(loaded)) state.openCodeRelease = loaded.value;
+
   return state;
 }
 

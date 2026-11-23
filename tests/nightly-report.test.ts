@@ -3,7 +3,6 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
-import { z } from "zod";
 import { configSchema } from "../src/config";
 import { maintenanceSchema } from "../src/maintenance/nightly/config";
 import {
@@ -15,6 +14,7 @@ import {
   limits,
   queueNotice,
   type Report,
+  reportJsonSchema,
   reportSchema,
   summary,
   writeReport,
@@ -99,18 +99,18 @@ const report: Report = {
 
 describe("maintenance report", () => {
   test("schema is versioned, strict and closed over reason codes", () => {
-    expect(reportSchema.parse(report)).toEqual(report);
-    expect(reportSchema.safeParse({ ...report, extra: 1 }).success).toBe(false);
+    const decode = Schema.decodeUnknownResult(reportSchema);
+    const valid = (value: unknown) => Result.isSuccess(decode(value));
+    expect(Schema.decodeUnknownSync(reportSchema)(report)).toEqual(report);
+    expect(valid({ ...report, extra: 1 })).toBe(false);
     expect(
-      reportSchema.safeParse({
+      valid({
         ...report,
         schema: "stargate.maintenance.report.v2",
-      }).success,
+      }),
     ).toBe(false);
-    expect(
-      reportSchema.safeParse({ ...report, reason: "raw error text" }).success,
-    ).toBe(false);
-    const json = z.toJSONSchema(reportSchema) as { properties: object };
+    expect(valid({ ...report, reason: "raw error text" })).toBe(false);
+    const json = reportJsonSchema() as { properties: object };
     expect(Object.keys(json.properties)).toContain("components");
   });
 
@@ -388,7 +388,7 @@ describe("bounded reports", () => {
 
     const written = await writeReport(data, { ...report, models: many });
 
-    const saved = reportSchema.parse(
+    const saved = Schema.decodeUnknownSync(reportSchema)(
       JSON.parse(await readFile(written.path, "utf8")),
     );
 

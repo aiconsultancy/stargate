@@ -230,6 +230,17 @@ export const settingsStartsWith = (prefix: string) =>
     }),
   });
 
+/** Zod 4.6.7 `z.iso.datetime({ offset: true })`: calendar-checked, seconds
+ * required, fractional seconds allowed, `Z` or a `±hh:mm` offset. */
+const dateTime =
+  /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$/;
+
+export const settingsDateTime = Schema.String.check(
+  Schema.isPattern(dateTime, {
+    toJsonSchema: () => ({ format: "date-time", pattern: dateTime.source }),
+  }),
+);
+
 export const settingsUUID = Schema.String.check(
   settingsPattern(
     /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
