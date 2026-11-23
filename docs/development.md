@@ -220,9 +220,10 @@ remove a file when its places are repaired.
   lines by their exact text.
 - `unicorn/no-useless-spread` in three files: the loops copy a list or the
   header keys because they change it while they iterate.
-- `typescript/require-await` in ten files: each reported function returns a
+- `typescript/require-await` in eleven files: each reported function returns a
   promise that its callers use; removing `async` changes the return type and
   turns a rejection into a throw.
+  `src/maintenance/nightly/droid/droid.ts` joined when it left the Zod list (batch 17): its `status` and `reports` droid tools are this case.
 - `typescript/strict-void-return` in `src/app/service.ts` and
   `src/backends/claude.ts`: `promisify(execFile)` relies on the custom
   promisified `execFile`; a wrapper callback would lose it. The abort

@@ -79,6 +79,41 @@ export function settingsRecord<
   );
 }
 
+/** Zod's plain-object test: a null prototype, or a constructor whose prototype
+ * owns `isPrototypeOf`. Every JSON object passes; a `Date` or a class instance
+ * does not.
+ */
+function plainObject(input: unknown) {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    Array.isArray(input) ||
+    !Predicate.isObject(input)
+  )
+    return false;
+  const constructor = input.constructor;
+
+  if (typeof constructor !== "function") return true;
+  const prototype: unknown = constructor.prototype;
+
+  return (
+    typeof prototype === "object" &&
+    prototype !== null &&
+    !Array.isArray(prototype) &&
+    Object.hasOwn(prototype, "isPrototypeOf")
+  );
+}
+
+/** A Zod record, which also requires a plain object (see `settingsRecord`). */
+export function settingsPlainRecord<
+  K extends Schema.Record.Key,
+  V extends Schema.Constraint,
+>(key: K, value: V) {
+  return Schema.Unknown.check(Schema.makeFilter(plainObject)).pipe(
+    Schema.decodeTo(settingsRecord(key, value)),
+  );
+}
+
 /** Legacy defaults bypass the inner decoder and shallow-copy containers.
  * Effect's withDecodingDefaultType rechecks/clones the decoded default, which
  * changes shared nested defaults. Only undefined takes this trusted fallback;
@@ -198,6 +233,15 @@ export const settingsStartsWith = (prefix: string) =>
 export const settingsUUID = Schema.String.check(
   settingsPattern(
     /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/,
+  ),
+);
+
+/** Zod 4.6.7 `z.iso.datetime({ offset: true })`: a pattern only, with seconds,
+ * any fraction, `Z` or a `±HH:MM` offset.
+ */
+export const settingsOffsetDatetime = Schema.String.check(
+  settingsPattern(
+    /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$/,
   ),
 );
 

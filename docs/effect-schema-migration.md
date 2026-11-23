@@ -112,8 +112,8 @@ approval. Review and focused tests must establish scope and preserved behavior.
 
 ## PR budget and batch boundaries
 
-The revised target is **18 migration PRs in total**. Fourteen migration PRs
-are merged. That leaves four component batches. One contingency split can bring the
+The revised target is **18 migration PRs in total**. Fifteen migration PRs
+are merged. That leaves three component batches. One contingency split can bring the
 total to 19, still below 20. Report a proposed
 budget change before opening another PR; do not weaken verification to fit it.
 
@@ -143,7 +143,8 @@ Completed:
 - [Fleet protocols](https://github.com/aiconsultancy/stargate/pull/72).
 - [Chat routing and interaction envelopes](https://github.com/aiconsultancy/stargate/pull/77).
 - [Files and delivery](https://github.com/aiconsultancy/stargate/pull/84).
-- Cron operations and records (batch 14).
+- [Cron operations and records](https://github.com/aiconsultancy/stargate/pull/211).
+- Maintenance execution and offline scripts (batch 17).
 
 The first batch-6 timing pair failed at +18.27%. Its diagnostic pair measured
 +2.63% with retained coverage; this is not a performance repair. The earlier
@@ -151,8 +152,8 @@ batch-4 first-pair +10.9% failure also remains recorded.
 
 ## Remaining component batches
 
-The numbers include the fourteen completed PRs. The landing order of the rest
-is 17, 16, 15, 18.
+The numbers include the fifteen completed PRs. The landing order of the rest
+is 16, 15, 18.
 File names identify primary scope, not a restriction against updating a coupled
 consumer. Tests belong to the batch
 that owns their production boundary, rather than a separate test-only PR.
@@ -163,9 +164,9 @@ that owns their production boundary, rather than a separate test-only PR.
 16. Maintenance records and readiness. Migrate `maintenance.ts`,
     `maintenance/nightly/state.ts`, `maintenance/nightly/update/ready.ts`, `maintenance/nightly/journal.ts`,
     `maintenance/nightly/reports/report.ts` and remaining maintenance configuration/record schemas.
-17. Maintenance execution and migration scripts. Migrate the remaining
-    `maintenance/nightly/` validators and `scripts/bootstrap-stargate.ts` and
-    `scripts/migrate-stargate-state.ts`.
+    It also replaces the `reportSchema.safeParse` call that batch 17 left in
+    `maintenance/nightly/droid/droid-facts.ts`.
+17. Maintenance execution and migration scripts: merged (see Completed).
 18. Dependency removal. Check for residual first-party Zod use in production,
     tests and tooling. Remove obsolete bridges and the direct Zod dependency.
     Keep SDK-owned transitive Zod and dependency provenance checks.

@@ -1,5 +1,9 @@
-import { z } from "zod";
-import { fetchJSON, StepError } from "../exec";
+import { Result, Schema } from "effect";
+import {
+  settingsDefault,
+  settingsPlainRecord,
+} from "../../../config/settings-schema";
+import { StepError, fetchJSON } from "../exec";
 import { compareVersions, normalizeVersion, parseVersion } from "./versions";
 
 /**
@@ -13,28 +17,34 @@ export function eligible(
 ) {
   if (!published) return false;
   const at = Date.parse(published);
+
   return Number.isFinite(at) && at <= now - hours * 3_600_000;
 }
 
-const packument = z.object({
-  "dist-tags": z.record(z.string(), z.string()),
-  time: z.record(z.string(), z.string()),
-  versions: z.record(
-    z.string(),
-    z.object({ deprecated: z.unknown().optional() }),
+const packument = Schema.Struct({
+  "dist-tags": settingsPlainRecord(Schema.String, Schema.String),
+  time: settingsPlainRecord(Schema.String, Schema.String),
+  versions: settingsPlainRecord(
+    Schema.String,
+    Schema.Struct({ deprecated: Schema.optional(Schema.Unknown) }),
   ),
 });
+
+const decodePackument = Schema.decodeUnknownResult(packument);
 
 /**
  * Newest stable npm version, not above `dist-tags.latest`, not deprecated,
  * published at least `hours` ago. Null when none qualifies.
  */
 export function selectNpmVersion(raw: unknown, now: number, hours: number) {
-  const parsed = packument.safeParse(raw);
-  if (!parsed.success) throw new StepError("network");
-  const data = parsed.data;
+  const parsed = decodePackument(raw);
+
+  if (Result.isFailure(parsed)) throw new StepError("network");
+  const data = parsed.success;
   const latest = data["dist-tags"]["latest"];
+
   if (!latest || !parseVersion(latest)) return null;
+
   const candidates = Object.entries(data.versions)
     .filter(
       ([version, info]) =>
@@ -44,12 +54,14 @@ export function selectNpmVersion(raw: unknown, now: number, hours: number) {
         eligible(data.time[version], now, hours),
     )
     .map(([version]) => version)
-    .sort((a, b) => compareVersions(b, a));
+    .toSorted((a, b) => compareVersions(b, a));
+
   return candidates[0] ?? null;
 }
 
 export async function npmPackument(registry: string, name: string) {
   const base = registry.replace(/\/+$/, "");
+
   return fetchJSON(`${base}/${name.replace("/", "%2F")}`, {
     headers: { accept: "application/json" },
   });
@@ -66,38 +78,50 @@ export async function npmCandidate(
 
 /** Registry publication time of one version, if recorded. */
 export function publishedAt(raw: unknown, version: string) {
-  const parsed = packument.safeParse(raw);
-  const time = parsed.success ? parsed.data.time[version] : undefined;
+  const parsed = decodePackument(raw);
+
+  const time = Result.isSuccess(parsed)
+    ? parsed.success.time[version]
+    : undefined;
+
   return time && Number.isFinite(Date.parse(time)) ? time : null;
 }
 
-export const githubReleaseSchema = z.object({
-  id: z.number(),
-  tag_name: z.string(),
-  draft: z.boolean(),
-  prerelease: z.boolean(),
-  published_at: z.string().nullable(),
-  author: z
-    .object({ login: z.string(), type: z.string().optional() })
-    .nullable(),
-  assets: z
-    .array(
-      z.object({
-        id: z.number(),
-        name: z.string(),
-        size: z.number(),
-        url: z.string(),
-        browser_download_url: z.string().optional(),
-        created_at: z.string().optional(),
-        updated_at: z.string().optional(),
-        /** `sha256:<hex>` when GitHub computed it. */
-        digest: z.string().nullable().optional(),
-        uploader: z.object({ login: z.string() }).nullable().optional(),
-      }),
-    )
-    .default([]),
+export const githubReleaseSchema = Schema.Struct({
+  id: Schema.Finite,
+  tag_name: Schema.String,
+  draft: Schema.Boolean,
+  prerelease: Schema.Boolean,
+  published_at: Schema.NullOr(Schema.String),
+  author: Schema.NullOr(
+    Schema.Struct({
+      login: Schema.String,
+      type: Schema.optional(Schema.String),
+    }),
+  ),
+  assets: Schema.Array(
+    Schema.Struct({
+      id: Schema.Finite,
+      name: Schema.String,
+      size: Schema.Finite,
+      url: Schema.String,
+      browser_download_url: Schema.optional(Schema.String),
+      created_at: Schema.optional(Schema.String),
+      updated_at: Schema.optional(Schema.String),
+      /** `sha256:<hex>` when GitHub computed it. */
+      digest: Schema.optional(Schema.NullOr(Schema.String)),
+      uploader: Schema.optional(
+        Schema.NullOr(Schema.Struct({ login: Schema.String })),
+      ),
+    }),
+  ).pipe(settingsDefault([])),
 });
-export type GitHubRelease = z.infer<typeof githubReleaseSchema>;
+
+export type GitHubRelease = typeof githubReleaseSchema.Type;
+
+const decodeReleases = Schema.decodeUnknownResult(
+  Schema.Array(githubReleaseSchema),
+);
 
 /**
  * Newest stable, non-draft, non-prerelease GitHub release past the cool-off.
@@ -109,12 +133,15 @@ export function selectGitHubRelease(
   now: number,
   hours: number,
 ): (GitHubRelease & { version: string }) | null {
-  const parsed = z.array(githubReleaseSchema).safeParse(raw);
-  if (!parsed.success) throw new StepError("network");
+  const parsed = decodeReleases(raw);
+
+  if (Result.isFailure(parsed)) throw new StepError("network");
+
   return (
-    parsed.data
+    parsed.success
       .flatMap((release) => {
         const version = normalizeVersion(release.tag_name);
+
         return version &&
           !release.draft &&
           !release.prerelease &&
@@ -127,7 +154,7 @@ export function selectGitHubRelease(
           ? [{ ...release, version }]
           : [];
       })
-      .sort((a, b) => compareVersions(b.version, a.version))[0] ?? null
+      .toSorted((a, b) => compareVersions(b.version, a.version))[0] ?? null
   );
 }
 

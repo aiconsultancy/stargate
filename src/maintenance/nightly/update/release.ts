@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import {
   lstat,
   mkdir,
-  readdir,
   readFile,
+  readdir,
   readlink,
   rename,
   rm,
@@ -11,7 +11,12 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { z } from "zod";
+import { Result, Schema } from "effect";
+import {
+  settingsOffsetDatetime,
+  settingsPattern,
+  settingsStruct,
+} from "../../../config/settings-schema";
 import { inspectArchive, verifyExtracted } from "./archive";
 import {
   type GitHubRelease,
@@ -21,10 +26,10 @@ import {
 } from "./cooloff";
 import {
   type CommandRunner,
+  StepError,
   fetchJSON,
   must,
   request,
-  StepError,
 } from "../exec";
 import { replaceLink } from "../files";
 import { writePluginDigest } from "./plugin-digest";
@@ -40,24 +45,24 @@ import { compareVersions, normalizeVersion, parseVersion } from "./versions";
  * Only directories with `.stargate-release.json` are managed releases.
  */
 export const metadataFile = ".stargate-release.json";
-export const releaseMetadataSchema = z.strictObject({
-  schema: z.literal("stargate.release.v1"),
-  version: z.string().refine((value) => parseVersion(value) !== null),
-  tag: z.string().max(100).nullable(),
-  commit: z
-    .string()
-    .regex(/^[a-f0-9]{40}$/)
-    .nullable(),
-  sha256: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .nullable(),
-  installedAt: z.iso.datetime({ offset: true }),
+
+export const releaseMetadataSchema = settingsStruct({
+  schema: Schema.Literal("stargate.release.v1"),
+  version: Schema.String.check(
+    Schema.makeFilter((value) => parseVersion(value) !== null),
+  ),
+  tag: Schema.NullOr(Schema.String.check(Schema.isMaxCodePoints(100))),
+  commit: Schema.NullOr(Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/))),
+  sha256: Schema.NullOr(Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/))),
+  installedAt: settingsOffsetDatetime,
   /** `verified`: downloaded and checked by maintenance. `adopted`: migrated. */
-  verification: z.enum(["verified", "adopted"]),
-  tree: z.enum(["equal", "not-configured", "adopted"]),
+  verification: Schema.Literals(["verified", "adopted"]),
+  tree: Schema.Literals(["equal", "not-configured", "adopted"]),
 });
-export type ReleaseMetadata = z.infer<typeof releaseMetadataSchema>;
+
+export type ReleaseMetadata = typeof releaseMetadataSchema.Type;
+
+const decodeMetadata = Schema.decodeUnknownSync(releaseMetadataSchema);
 
 export function layout(root: string) {
   return {
@@ -70,7 +75,7 @@ export function layout(root: string) {
 
 export async function readMetadata(directory: string) {
   try {
-    return releaseMetadataSchema.parse(
+    return decodeMetadata(
       JSON.parse(await readFile(join(directory, metadataFile), "utf8")),
     );
   } catch {
@@ -84,11 +89,14 @@ export async function linkedRelease(
   which: "current" | "previous",
 ) {
   const paths = layout(root);
+
   try {
     const target = await readlink(paths[which]);
     const directory = resolve(root, target);
+
     if (dirname(directory) !== paths.releases) return null;
     const metadata = await readMetadata(directory);
+
     return metadata ? { name: basename(directory), directory, metadata } : null;
   } catch {
     return null;
@@ -101,16 +109,20 @@ export async function linkedRelease(
  */
 export async function switchCurrent(root: string, name: string) {
   const paths = layout(root);
+
   if (!(await readMetadata(join(paths.releases, name))))
     throw new StepError("switch-failed");
   const old = await linkedRelease(root, "current");
+
   try {
     await replaceLink(paths.current, `releases/${name}`);
+
     if (old && old.name !== name)
       await replaceLink(paths.previous, `releases/${old.name}`);
   } catch {
     throw new StepError("switch-failed");
   }
+
   return old?.name ?? null;
 }
 
@@ -134,25 +146,31 @@ export async function adoptRelease(
 ) {
   const paths = layout(root);
   const resolved = resolve(directory);
+
   if (dirname(resolved) !== paths.releases)
     throw new Error(
       `Release must be a directory directly under ${paths.releases}.`,
     );
+
   if (!parseVersion(version))
     throw new Error("Use a MAJOR.MINOR.PATCH version.");
-  const manifest = await Bun.file(join(resolved, "package.json"))
+
+  const manifest: unknown = await Bun.file(join(resolved, "package.json"))
     .json()
     .catch(() => null);
+
   if (
-    !manifest ||
+    manifest === null ||
     typeof manifest !== "object" ||
     !("name" in manifest) ||
     manifest.name !== "stargate" ||
     !(await Bun.file(join(resolved, "src", "main.ts")).exists())
   )
     throw new Error("Directory is not an unpacked Stargate release.");
+
   if (await readMetadata(resolved))
     throw new Error("Release is already managed.");
+
   const metadata: ReleaseMetadata = {
     schema: "stargate.release.v1",
     version: version.replace(/^v/, ""),
@@ -163,6 +181,7 @@ export async function adoptRelease(
     verification: "adopted",
     tree: "adopted",
   };
+
   await writeFile(
     join(resolved, metadataFile),
     `${JSON.stringify(metadata, null, 2)}\n`,
@@ -172,7 +191,9 @@ export async function adoptRelease(
     },
   );
   const exists = await lstat(paths.current).catch(() => null);
+
   if (!exists) await symlink(`releases/${basename(resolved)}`, paths.current);
+
   return { current: exists ? "unchanged" : `releases/${basename(resolved)}` };
 }
 
@@ -183,13 +204,18 @@ export async function githubToken(
 ) {
   if (tokenEnv) {
     const value = env[tokenEnv]?.trim();
+
     if (!value) throw new StepError("credentials-unavailable");
+
     return value;
   }
+
   const result = await runner.run(["gh", "auth", "token"], {
     timeoutMs: 15_000,
   });
+
   const token = result.stdout.trim();
+
   // An unauthenticated request still works for public repositories.
   return result.code === 0 && token && !/\s/.test(token) ? token : undefined;
 }
@@ -200,7 +226,7 @@ export function githubHeaders(
   return {
     accept: "application/vnd.github+json",
     "x-github-api-version": "2022-11-28",
-    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(token && { authorization: `Bearer ${token}` }),
   };
 }
 
@@ -217,6 +243,7 @@ export type StargateReleaseConfig = {
   installCommand: string[];
   testCommand: string[];
 };
+
 export type ReleaseCandidate = GitHubRelease & { version: string };
 
 /** Newest eligible release, or null when it is not newer than `current`. */
@@ -231,7 +258,9 @@ export async function newerRelease(
     now,
     config.coolOffHours,
   );
+
   if (!release) return null;
+
   return current && compareVersions(release.version, current) <= 0
     ? null
     : release;
@@ -248,7 +277,8 @@ export async function namedRelease(
   version: string,
 ): Promise<ReleaseCandidate> {
   if (normalizeVersion(version) !== version) throw new StepError("not-found");
-  const parsed = githubReleaseSchema.safeParse(
+
+  const parsed = decodeRelease(
     await fetchJSON(
       `${config.apiURL.replace(/\/+$/, "")}/repos/${config.repository}/releases/tags/v${version}`,
       {
@@ -260,23 +290,34 @@ export async function namedRelease(
       },
     ),
   );
-  if (!parsed.success) throw new StepError("network");
-  const found = parsed.data;
+
+  if (Result.isFailure(parsed)) throw new StepError("network");
+  const found = parsed.success;
+
   if (
     found.draft ||
     found.prerelease ||
     normalizeVersion(found.tag_name) !== version
   )
     throw new StepError("not-found");
+
   return { ...found, version };
 }
 
-const refSchema = z.object({
-  object: z.object({
-    type: z.string(),
-    sha: z.string().regex(/^[a-f0-9]{40}$/),
+const decodeRelease = Schema.decodeUnknownResult(githubReleaseSchema);
+
+const decodeRef = Schema.decodeUnknownResult(
+  Schema.Struct({
+    object: Schema.Struct({
+      type: Schema.String,
+      sha: Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/)),
+    }),
   }),
-});
+);
+
+const decodeComparison = Schema.decodeUnknownResult(
+  Schema.Struct({ status: Schema.String }),
+);
 
 /**
  * Release origin checks, all fail closed: the release and both assets come
@@ -289,9 +330,11 @@ export async function verifyOrigin(
   headers: Record<string, string>,
 ) {
   const names = assetNames(release.version);
+
   const assets = release.assets.filter((asset) =>
     [names.archive, names.checksum].includes(asset.name),
   );
+
   if (
     release.author?.login !== config.author ||
     assets.length !== 2 ||
@@ -300,7 +343,8 @@ export async function verifyOrigin(
   )
     throw new StepError("author-mismatch");
   const api = `${config.apiURL.replace(/\/+$/, "")}/repos/${config.repository}`;
-  const ref = refSchema.safeParse(
+
+  const ref = decodeRef(
     await fetchJSON(
       `${api}/git/ref/tags/${encodeURIComponent(release.tag_name)}`,
       {
@@ -308,35 +352,41 @@ export async function verifyOrigin(
       },
     ),
   );
-  if (!ref.success) throw new StepError("tag-not-on-branch");
-  let commit = ref.data.object;
+
+  if (Result.isFailure(ref)) throw new StepError("tag-not-on-branch");
+  let commit = ref.success.object;
+
   if (commit.type === "tag") {
-    const tag = refSchema.safeParse(
+    const tag = decodeRef(
       await fetchJSON(`${api}/git/tags/${commit.sha}`, { headers }),
     );
-    if (!tag.success) throw new StepError("tag-not-on-branch");
-    commit = tag.data.object;
+
+    if (Result.isFailure(tag)) throw new StepError("tag-not-on-branch");
+    commit = tag.success.object;
   }
+
   if (commit.type !== "commit") throw new StepError("tag-not-on-branch");
-  const comparison = z
-    .object({ status: z.string() })
-    .safeParse(
-      await fetchJSON(
-        `${api}/compare/${commit.sha}...${encodeURIComponent(config.branch)}`,
-        { headers },
-      ),
-    );
+
+  const comparison = decodeComparison(
+    await fetchJSON(
+      `${api}/compare/${commit.sha}...${encodeURIComponent(config.branch)}`,
+      { headers },
+    ),
+  );
+
   // `ahead` or `identical`: the branch contains the tagged commit.
   if (
-    !comparison.success ||
-    !["ahead", "identical"].includes(comparison.data.status)
+    Result.isFailure(comparison) ||
+    !["ahead", "identical"].includes(comparison.success.status)
   )
     throw new StepError("tag-not-on-branch");
+
   return commit.sha;
 }
 
 export function assetNames(version: string) {
   const archive = `stargate-v${version}.tar.gz`;
+
   return {
     prefix: `stargate-v${version}`,
     archive,
@@ -359,17 +409,20 @@ export async function downloadAsset(
 ) {
   if (new URL(url).origin !== new URL(apiURL).origin)
     throw new StepError("network");
+
   const response = await request(url, {
     headers: {
       accept: "application/octet-stream",
-      ...(headers["authorization"]
-        ? { authorization: headers["authorization"] }
-        : {}),
+      ...(headers["authorization"] && {
+        authorization: headers["authorization"],
+      }),
     },
     signal,
     timeoutMs: 300_000,
   });
+
   if (!response.ok || !response.body) throw new StepError("network");
+
   return writeBody(response, path);
 }
 
@@ -378,9 +431,11 @@ export async function writeBody(response: Response, path: string) {
   if (!response.body) throw new StepError("network");
   const out = Bun.file(path).writer();
   let size = 0;
+
   try {
     for await (const chunk of response.body) {
       size += chunk.byteLength;
+
       if (size > maxArchiveBytes) throw new StepError("archive-invalid");
       void out.write(chunk);
       await out.flush();
@@ -390,32 +445,39 @@ export async function writeBody(response: Response, path: string) {
   } finally {
     await out.end();
   }
+
   return size;
 }
 
 export async function sha256File(path: string) {
   const hash = createHash("sha256");
+
   for await (const chunk of Bun.file(path).stream()) hash.update(chunk);
+
   return hash.digest("hex");
 }
 
 /** `sha256sum` output for exactly the expected archive name. */
 export function parseChecksum(text: string, archive: string) {
   const lines = text.split("\n").filter((line) => line.trim());
+
   const match =
     lines.length === 1
       ? /^([a-f0-9]{64}) [ *]?(\S+)\s*$/.exec(lines[0] ?? "")
       : null;
+
   return match?.[2] === archive ? (match[1] ?? null) : null;
 }
 
 async function tree(directory: string) {
   const entries = new Map<string, string>();
+
   const walk = async (path: string) => {
     for (const entry of await readdir(path, { withFileTypes: true })) {
       const full = join(path, entry.name);
       const key = relative(directory, full).split(sep).join("/");
       const info = await lstat(full);
+
       if (info.isSymbolicLink()) entries.set(key, `l:${await readlink(full)}`);
       else if (info.isDirectory()) {
         entries.set(key, "d");
@@ -428,13 +490,16 @@ async function tree(directory: string) {
       else entries.set(key, "other");
     }
   };
+
   await walk(directory);
+
   return entries;
 }
 
 /** Same paths, types, executable bits, file contents and link targets. */
 export async function sameTree(left: string, right: string) {
   const [a, b] = await Promise.all([tree(left), tree(right)]);
+
   return (
     a.size === b.size && [...a].every(([key, value]) => b.get(key) === value)
   );
@@ -455,7 +520,9 @@ const minutes = (n: number) => n * 60_000;
 
 function budget(input: StageInput, cap: number) {
   const left = input.remaining();
+
   if (left < 30_000) throw new StepError("deadline");
+
   return Math.min(cap, left);
 }
 
@@ -465,6 +532,7 @@ export async function isolatedEnvironment(staging: string) {
   const temp = join(staging, "tmp");
   await mkdir(home, { recursive: true, mode: 0o700 });
   await mkdir(temp, { recursive: true, mode: 0o700 });
+
   return {
     PATH: [
       dirname(process.execPath),
@@ -493,11 +561,13 @@ export async function stageRelease(input: StageInput) {
   const names = assetNames(release.version);
   const target = join(paths.releases, release.version);
   const existing = await readMetadata(target);
+
   if (
     existing?.version === release.version &&
     existing.verification === "verified"
   )
     return { directory: target, metadata: existing, reused: true };
+
   // Attestations are unavailable: without the tree comparison, fail closed.
   if (config.requireTreeCheck && !config.checkout)
     throw new StepError("not-configured");
@@ -506,12 +576,16 @@ export async function stageRelease(input: StageInput) {
   const staging = join(paths.releases, `.staging-${input.runID}`);
   await mkdir(staging, { mode: 0o700 });
   let placed = false;
+
   try {
     const asset = (name: string) => {
       const found = release.assets.find((item) => item.name === name);
+
       if (!found) throw new StepError("not-found");
+
       return found;
     };
+
     const archive = join(staging, names.archive);
     const checksumPath = join(staging, names.checksum);
     await downloadAsset(
@@ -528,15 +602,18 @@ export async function stageRelease(input: StageInput) {
       archive,
       input.signal,
     );
+
     const expected = parseChecksum(
       await readFile(checksumPath, "utf8"),
       names.archive,
     );
+
     const actual = await sha256File(archive);
+
     if (!expected || expected !== actual)
       throw new StepError("checksum-mismatch");
     // Validate every header before tar runs: one real root directory, no
-    // escaping paths or links, no hard links or devices.
+    // Escaping paths or links, no hard links or devices.
     const entries = await inspectArchive(archive, names.prefix);
     const unpacked = join(staging, "unpacked");
     await mkdir(unpacked, { mode: 0o700 });
@@ -547,12 +624,14 @@ export async function stageRelease(input: StageInput) {
       "archive-invalid",
     );
     const root = await lstat(join(unpacked, names.prefix)).catch(() => null);
+
     if (!root?.isDirectory() || root.isSymbolicLink())
       throw new StepError("archive-invalid");
     // What tar actually wrote must be exactly what was validated.
     await verifyExtracted(unpacked, entries, names.prefix);
     const source = join(unpacked, names.prefix);
     let treeResult: ReleaseMetadata["tree"] = "not-configured";
+
     if (config.checkout) {
       await compareWithCheckout(
         input,
@@ -563,6 +642,7 @@ export async function stageRelease(input: StageInput) {
       );
       treeResult = "equal";
     }
+
     if (await lstat(target).catch(() => null))
       await rename(
         target,
@@ -571,8 +651,8 @@ export async function stageRelease(input: StageInput) {
     await rename(source, target);
     placed = true;
     // Release code runs with a minimal environment: no inherited tokens,
-    // proxy keys or session bus, and a private HOME/TMPDIR inside staging,
-    // so it cannot discover the live OpenCode service.
+    // Proxy keys or session bus, and a private HOME/TMPDIR inside staging,
+    // So it cannot discover the live OpenCode service.
     const env = await isolatedEnvironment(staging);
     await must(
       runner,
@@ -598,6 +678,7 @@ export async function stageRelease(input: StageInput) {
     );
     // What OpenCode would load from this tree, for gateway-only updates.
     await writePluginDigest(target);
+
     const metadata: ReleaseMetadata = {
       schema: "stargate.release.v1",
       version: release.version,
@@ -608,6 +689,7 @@ export async function stageRelease(input: StageInput) {
       verification: "verified",
       tree: treeResult,
     };
+
     await writeFile(
       join(target, metadataFile),
       `${JSON.stringify(metadata, null, 2)}\n`,
@@ -616,6 +698,7 @@ export async function stageRelease(input: StageInput) {
         mode: 0o600,
       },
     );
+
     return { directory: target, metadata, reused: false };
   } catch (error) {
     if (placed)
@@ -641,7 +724,9 @@ async function compareWithCheckout(
   staging: string,
 ) {
   const checkout = input.config.checkout;
+
   if (!checkout) return;
+
   const git = (
     args: string[],
     reason: "tree-mismatch" | "network" = "tree-mismatch",
@@ -654,6 +739,7 @@ async function compareWithCheckout(
       },
       reason,
     );
+
   // A local tag that differs from GitHub's is refused, never overwritten.
   const tagged = async (): Promise<string> =>
     (
@@ -670,7 +756,9 @@ async function compareWithCheckout(
         { timeoutMs: budget(input, minutes(1)) },
       )
     ).stdout.trim();
+
   let local = await tagged();
+
   if (!local) {
     await git(
       [
@@ -684,6 +772,7 @@ async function compareWithCheckout(
     );
     local = await tagged();
   }
+
   if (local !== commit) throw new StepError("tree-mismatch");
   const expectedTar = join(staging, "expected.tar");
   const prefix = basename(unpacked);
@@ -703,6 +792,7 @@ async function compareWithCheckout(
     { timeoutMs: budget(input, minutes(2)) },
     "tree-mismatch",
   );
+
   if (!(await sameTree(unpacked, join(expected, prefix))))
     throw new StepError("tree-mismatch");
 }
@@ -722,8 +812,10 @@ export async function pruneReleases(
   const previous = await linkedRelease(root, "previous");
   const managed: { name: string; version: string }[] = [];
   const removed: string[] = [];
+
   for (const entry of await readdir(paths.releases, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
+
     if (/^\.(staging|failed)-/.test(entry.name)) {
       await rm(join(paths.releases, entry.name), {
         recursive: true,
@@ -732,25 +824,36 @@ export async function pruneReleases(
       removed.push(entry.name);
       continue;
     }
+
     const metadata = await readMetadata(join(paths.releases, entry.name));
+
     if (metadata) managed.push({ name: entry.name, version: metadata.version });
   }
+
   const protectedNames = new Set(
     [current?.name, previous?.name, ...inUse].filter(Boolean),
   );
-  const ordered = managed.sort((a, b) => compareVersions(b.version, a.version));
+
+  const ordered = managed.toSorted((a, b) =>
+    compareVersions(b.version, a.version),
+  );
+
   let kept = protectedNames.size;
+
   for (const release of ordered) {
     if (protectedNames.has(release.name)) continue;
+
     if (kept < keep) {
       kept++;
       continue;
     }
+
     await rm(join(paths.releases, release.name), {
       recursive: true,
       force: true,
     });
     removed.push(release.name);
   }
+
   return removed;
 }

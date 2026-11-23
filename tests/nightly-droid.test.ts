@@ -982,8 +982,28 @@ describe("maintenance droid on Pi Durable", () => {
     expect(post?.text).toContain("Droid actions: recover finished.");
 
     const tools = JSON.parse(proxy.chats[0]?.body ?? "{}").tools as {
-      function: { name: string };
+      function: { name: string; parameters: unknown };
     }[];
+
+    // The advertisements on the wire stay the Zod 4.6.7 converter's output,
+    // Byte for byte (frozen when the schemas moved to Effect, batch 17).
+    const none =
+      '{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{},"additionalProperties":false}';
+
+    expect(
+      Object.fromEntries(
+        tools.map((t) => [
+          t.function.name,
+          JSON.stringify(t.function.parameters),
+        ]),
+      ),
+    ).toEqual({
+      maintenance_status: none,
+      maintenance_reports:
+        '{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"limit":{"default":3,"type":"integer","minimum":1,"maximum":14}},"required":["limit"],"additionalProperties":false}',
+      maintenance_plan: none,
+      maintenance_recover: none,
+    });
 
     expect(tools.map((t) => t.function.name).sort()).toEqual([
       "maintenance_plan",

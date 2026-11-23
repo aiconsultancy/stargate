@@ -10,7 +10,7 @@ import {
   rm,
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { z } from "zod";
+import { Result, Schema } from "effect";
 import { inspectArchive, verifyExtracted } from "./archive";
 import type { MaintenanceConfig } from "../config";
 import {
@@ -21,31 +21,55 @@ import {
   selectGitHubRelease,
   selectNpmVersion,
 } from "./cooloff";
-import { type CommandRunner, fetchOK, must, request, StepError } from "../exec";
+import { type CommandRunner, StepError, fetchOK, must, request } from "../exec";
 import { replaceLink } from "../files";
 import { sha256File, writeBody } from "./release";
 import { compareVersions, parseVersion } from "./versions";
 
 export type ProxyConfig = NonNullable<MaintenanceConfig["proxy"]>;
+
 export type CliProxyConfig = NonNullable<MaintenanceConfig["cliproxyapi"]>;
+
 export type AgentCliConfig = NonNullable<MaintenanceConfig["agentClis"]>;
 
 /** Read the proxy client key from a private file. Never log or return it. */
 export async function readClientKey(path: string) {
   try {
     const info = await lstat(path);
-    if (!info.isFile() || (info.mode & 0o077) !== 0) throw new Error();
+
+    if (!info.isFile() || (info.mode & 0o077) !== 0)
+      throw new Error("The client key file is not a private regular file");
     const key = (await readFile(path, "utf8")).trim();
-    if (!key || /\s/.test(key)) throw new Error();
+
+    if (!key || /\s/.test(key))
+      throw new Error("The client key is empty or contains white space");
+
     return key;
   } catch {
     throw new StepError("credentials-unavailable");
   }
 }
 
+const decodeModels = Schema.decodeUnknownResult(
+  Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) }),
+);
+
+const decodeProbe = Schema.decodeUnknownResult(
+  Schema.Union([
+    Schema.Struct({ content: Schema.Array(Schema.Unknown) }),
+    Schema.Struct({ output: Schema.Array(Schema.Unknown) }),
+    Schema.Struct({ status: Schema.Literals(["completed", "incomplete"]) }),
+  ]),
+);
+
+const decodeInstalled = Schema.decodeUnknownSync(
+  Schema.Struct({ version: Schema.String }),
+);
+
 /** `GET /v1/models`; returns model IDs. Fails unless the proxy answers. */
 export async function proxyModels(proxy: ProxyConfig, signal: AbortSignal) {
   const key = await readClientKey(proxy.clientKeyFile);
+
   const response = await fetchOK(`${proxy.url.replace(/\/+$/, "")}/v1/models`, {
     headers: { authorization: `Bearer ${key}` },
     signal,
@@ -53,12 +77,13 @@ export async function proxyModels(proxy: ProxyConfig, signal: AbortSignal) {
   }).catch(() => {
     throw new StepError("health-failed");
   });
-  const parsed = z
-    .object({ data: z.array(z.object({ id: z.string() })) })
-    .safeParse(await response.json().catch(() => null));
-  if (!parsed.success || parsed.data.data.length === 0)
+
+  const parsed = decodeModels(await response.json().catch(() => null));
+
+  if (Result.isFailure(parsed) || parsed.success.data.length === 0)
     throw new StepError("health-failed");
-  return parsed.data.data.map((model) => model.id);
+
+  return parsed.success.data.map((model) => model.id);
 }
 
 /**
@@ -76,6 +101,7 @@ export async function probeModel(
     const key = await readClientKey(proxy.clientKeyFile);
     const claude = model.startsWith("claude-");
     const prompt = "Reply with the single word OK.";
+
     const response = await fetchOK(
       `${proxy.url.replace(/\/+$/, "")}${claude ? "/v1/messages" : "/v1/responses"}`,
       {
@@ -84,7 +110,7 @@ export async function probeModel(
           authorization: `Bearer ${key}`,
           "x-api-key": key,
           "content-type": "application/json",
-          ...(claude ? { "anthropic-version": "2023-06-01" } : {}),
+          ...(claude && { "anthropic-version": "2023-06-01" }),
         },
         body: JSON.stringify(
           claude
@@ -99,23 +125,19 @@ export async function probeModel(
         timeoutMs: 60_000,
       },
     );
-    const body = z
-      .union([
-        z.object({ content: z.array(z.unknown()) }),
-        z.object({ output: z.array(z.unknown()) }),
-        z.object({ status: z.enum(["completed", "incomplete"]) }),
-      ])
-      .safeParse(await response.json());
-    return body.success;
+
+    return Result.isSuccess(decodeProbe(await response.json()));
   } catch {
     return false;
   }
 }
 
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 function binaryPattern(template: string) {
   const [before = "", after = ""] = template.split("{version}");
-  const escapeRegExp = (text: string) =>
-    text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
   return new RegExp(
     `^${escapeRegExp(before)}(\\d+\\.\\d+\\.\\d+)${escapeRegExp(after)}$`,
   );
@@ -132,6 +154,7 @@ export async function cliProxyCurrent(config: CliProxyConfig) {
   try {
     if (!(await lstat(config.link)).isSymbolicLink()) return null;
     const target = resolve(dirname(config.link), await readlink(config.link));
+
     return binaryPattern(config.binary).exec(target)?.[1] ?? null;
   } catch {
     return null;
@@ -158,11 +181,14 @@ export async function cliProxyCandidate(
     now,
     config.coolOffHours,
   );
+
   if (!release) return null;
   const name = config.asset.replaceAll("{version}", release.version);
   const asset = release.assets.find((item) => item.name === name);
   const digest = /^sha256:([a-f0-9]{64})$/.exec(asset?.digest ?? "")?.[1];
+
   if (!asset || !digest) throw new StepError("checksum-mismatch");
+
   return { version: release.version, asset, digest };
 }
 
@@ -180,19 +206,25 @@ export async function cliProxyPrepare(
 ) {
   if (!parseVersion(candidate.version)) throw new StepError("install-failed");
   const url = candidate.asset.browser_download_url;
+
   if (!url) throw new StepError("not-found");
   await mkdir(staging, { recursive: true, mode: 0o700 });
+
   try {
     const archive = join(staging, "asset.tar.gz");
     const response = await request(url, { signal, timeoutMs: 600_000 });
+
     if (!response.ok) throw new StepError("network");
     await writeBody(response, archive);
     const asset = await sha256File(archive);
+
     if (asset !== candidate.digest) throw new StepError("checksum-mismatch");
     const entries = await inspectArchive(archive);
+
     const executable = entries.filter(
       (entry) => entry.path === config.executable && entry.type === "file",
     );
+
     if (executable.length !== 1) throw new StepError("archive-invalid");
     const unpacked = join(staging, "unpacked");
     await mkdir(unpacked, { mode: 0o700 });
@@ -216,6 +248,7 @@ export async function cliProxyPrepare(
     const binary = await sha256File(extracted);
     const target = binaryPath(config, candidate.version);
     const existing = await lstat(target).catch(() => null);
+
     if (existing) {
       if (
         existing.isSymbolicLink() ||
@@ -230,13 +263,16 @@ export async function cliProxyPrepare(
       await chmod(temp, 0o700);
       await rename(temp, target);
     }
+
     const installed = await lstat(target);
+
     if (
       installed.isSymbolicLink() ||
       !installed.isFile() ||
       installed.nlink !== 1
     )
       throw new StepError("archive-invalid");
+
     return { asset, binary };
   } finally {
     await rm(staging, { recursive: true, force: true }).catch(() => {});
@@ -253,13 +289,15 @@ export async function cliProxySwitch(config: CliProxyConfig, version: string) {
 
 export async function npmInstalledVersion(prefix: string, name: string) {
   try {
-    const manifest = JSON.parse(
+    const manifest: unknown = JSON.parse(
       await readFile(
         join(prefix, "lib", "node_modules", name, "package.json"),
         "utf8",
       ),
     );
-    const version = z.object({ version: z.string() }).parse(manifest).version;
+
+    const version = decodeInstalled(manifest).version;
+
     return parseVersion(version) ? version : null;
   } catch {
     return null;
@@ -277,10 +315,12 @@ export type AgentPlan = {
 
 export async function agentCliPlan(config: AgentCliConfig, now: number) {
   const plans: AgentPlan[] = [];
+
   for (const item of config.packages) {
     const before = await npmInstalledVersion(config.prefix, item.name);
     let candidate: string | null = null;
     let beforePublished: string | null = null;
+
     try {
       const raw = await npmPackument(config.registry, item.name);
       candidate = selectNpmVersion(raw, now, config.coolOffHours);
@@ -288,8 +328,10 @@ export async function agentCliPlan(config: AgentCliConfig, now: number) {
     } catch {
       candidate = null;
     }
+
     plans.push({ ...item, before, candidate, beforePublished });
   }
+
   return plans;
 }
 
@@ -320,7 +362,7 @@ export function npmInstallCommand(
     "--registry",
     config.registry,
     `--before=${cutoff}`,
-    ...(config.allowScripts.length
+    ...(config.allowScripts.length > 0
       ? [
           `--allow-scripts=${config.allowScripts.join(",")}`,
           "--strict-allow-scripts",
@@ -337,7 +379,7 @@ export async function agentCliInstall(
   runner: CommandRunner,
   timeoutMs: number,
 ) {
-  if (!specs.length) return;
+  if (specs.length === 0) return;
   await must(
     runner,
     npmInstallCommand(config, specs, cutoff),
@@ -354,12 +396,14 @@ export async function agentCliVerify(
   runner: CommandRunner,
 ) {
   const installed = await npmInstalledVersion(config.prefix, plan.name);
+
   const result = await runner.run(
     [join(config.prefix, "bin", plan.command), "--version"],
     {
       timeoutMs: 30_000,
     },
   );
+
   return (
     installed === version &&
     result.code === 0 &&
