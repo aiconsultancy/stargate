@@ -220,7 +220,7 @@ function parsed<T, E>(schema: Schema.Codec<T, E>, value: unknown): T | null {
 }
 
 /** The twelve bounded reads of one health request, started together. */
-function readHealthSources(
+async function readHealthSources(
   input: HealthReaderInput,
   request: {
     bot: BotConfig;
@@ -259,7 +259,20 @@ function readHealthSources(
       ? restart[3]
       : undefined;
 
-  return Promise.all([
+  const [
+    host,
+    status,
+    crew,
+    quota,
+    ready,
+    reports,
+    alert,
+    snapshot,
+    gatewayState,
+    opencodeState,
+    proxyState,
+    drainState,
+  ] = await Promise.all([
     want("host") ? bounded(sources.host ?? readHost) : null,
     want("agents") || want("opencode")
       ? bounded(
@@ -329,6 +342,21 @@ function readHealthSources(
         )
       : null,
   ]);
+
+  return {
+    host,
+    status,
+    crew,
+    quota,
+    ready,
+    reports,
+    alert,
+    snapshot,
+    gatewayState,
+    opencodeState,
+    proxyState,
+    drainState,
+  };
 }
 
 type SectionText = { rows: string[]; summary: string };
@@ -644,7 +672,7 @@ export function createHealthReader(
     const want = (section: Section) =>
       requested === undefined || requested === section;
 
-    const [
+    const {
       host,
       status,
       crew,
@@ -657,7 +685,7 @@ export function createHealthReader(
       opencodeState,
       proxyState,
       drainState,
-    ] = await readHealthSources(input, {
+    } = await readHealthSources(input, {
       bot,
       config,
       now,
