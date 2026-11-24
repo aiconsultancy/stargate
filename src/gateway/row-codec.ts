@@ -20,6 +20,14 @@ export type StoredJob = Omit<
   slack_reaction: string | null;
 };
 
+const decodeReaction = Schema.decodeUnknownSync(inboundReactionSchema);
+const decodeNotification = Schema.decodeUnknownSync(notificationContextSchema);
+const decodeFleet = Schema.decodeUnknownSync(fleetJobSchema);
+
+const decodeMakers = Schema.decodeUnknownSync(
+  Schema.mutable(Schema.Array(nativeMakerSchema)),
+);
+
 export function decodeStoredJob(row: StoredJob): Job {
   const {
     fleet_context,
@@ -35,24 +43,16 @@ export function decodeStoredJob(row: StoredJob): Job {
     ...job,
     deferDelivery: row.deferDelivery === 1,
     ...(slack_reaction && {
-      slackReaction: Schema.decodeUnknownSync(inboundReactionSchema)(
-        JSON.parse(slack_reaction),
-      ),
+      slackReaction: decodeReaction(JSON.parse(slack_reaction)),
     }),
     ...(notification_context && {
-      notification: Schema.decodeUnknownSync(notificationContextSchema)(
-        JSON.parse(notification_context),
-      ),
+      notification: decodeNotification(JSON.parse(notification_context)),
     }),
     ...(fleet_context && {
-      fleet: Schema.decodeUnknownSync(fleetJobSchema)(
-        JSON.parse(fleet_context),
-      ),
+      fleet: decodeFleet(JSON.parse(fleet_context)),
     }),
     ...(makers && {
-      makers: Schema.decodeUnknownSync(
-        Schema.mutable(Schema.Array(nativeMakerSchema)),
-      )(JSON.parse(makers)),
+      makers: decodeMakers(JSON.parse(makers)),
     }),
   };
 }
