@@ -1,11 +1,7 @@
 import { createHash } from "node:crypto";
-import type { OpenCodeClient } from "@opencode/client";
+import type { MessageListInput, OpenCodeClient } from "@opencode/client";
 import { Option, Schema } from "effect";
 import { crewMessageMetadataKey } from "../../coordination/crew/message-protocol";
-import type {
-  ResultAPI,
-  ResultMessage,
-} from "../../coordination/crew/execution/result";
 import {
   InputBoundaryFold,
   type InputBoundaryRecord,
@@ -53,6 +49,22 @@ const digest = (command: string) =>
 
 type ShellReference = { id: string; command: string };
 
+type OriginMessage = Parameters<typeof boundaryRecord>[0] & {
+  content?: readonly unknown[];
+};
+
+type OriginHistory = {
+  message: {
+    list(
+      input: MessageListInput,
+      request: { signal: AbortSignal },
+    ): Promise<{
+      data: readonly OriginMessage[];
+      cursor: { next?: string | null };
+    }>;
+  };
+};
+
 type Compact = InputBoundaryRecord & {
   callback?: ShellReference;
   launches: ShellReference[];
@@ -66,17 +78,12 @@ export class InputBoundaryReader {
   private origins: Promise<Map<string, string>> | undefined;
 
   public constructor(
-    private readonly api: ResultAPI,
+    private readonly api: OriginHistory,
     private readonly sessionID: string,
     private readonly signal: AbortSignal,
   ) {}
 
-  public async record(
-    message: Pick<
-      ResultMessage,
-      "id" | "type" | "metadata" | "text" | "description"
-    >,
-  ): Promise<InputBoundaryRecord> {
+  public async record(message: OriginMessage): Promise<InputBoundaryRecord> {
     const record = boundaryRecord(message, this.sessionID);
 
     if (
@@ -92,7 +99,7 @@ export class InputBoundaryReader {
     };
   }
 
-  private compact(message: ResultMessage): Compact | undefined {
+  private compact(message: OriginMessage): Compact | undefined {
     const record: Compact = {
       ...boundaryRecord(message, this.sessionID),
       launches: [],
