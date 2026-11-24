@@ -77,7 +77,10 @@ Keep backend adapters independent of Slack and preserve session isolation.
 retains the fixed public exports.
 
 Source modules have a limit of 1,000 non-blank lines, except exact identities in
-the architecture baseline's `largeFiles`. The measure is textual: ignore
+the architecture baseline's `largeFiles` and the temporary, measured
+`braceMigrationFileLimits` in `tests/architecture-policy.json` from PR #336.
+Lower a brace cap when its file shrinks. Remove it at 1,000 lines or fewer.
+The measure is textual: ignore
 empty and whitespace-only lines, including inside template literals; count
 comments. LF and CRLF count equally, and a final newline adds no line. See
 [the size measure](docs/development.md#architecture-inventory-refresh).

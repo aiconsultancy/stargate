@@ -123,8 +123,8 @@ Tests stay flat in `tests/`.
 `gateway.ts` has a permanent exception to the limit of 1,000 non-blank lines.
 `braceMigrationFileLimits` in `tests/architecture-policy.json` records the
 four paths that crossed the limit when control statements gained braces.
-Each path is capped at its measured post-migration size. Remove its entry
-once the file returns to 1,000 lines or fewer.
+Each path was capped at its measured post-migration size in PR #336. Lower
+the cap when its file shrinks. Remove the entry at 1,000 lines or fewer.
 The O1 decision in [architecture review](architecture-review.md) is unchanged.
 
 `chat/` groups questions, attachments, transcription, meta commands, and activity.
