@@ -72,10 +72,8 @@ import {
   statusKind,
 } from "../../shared/request-failure";
 import type { TurnProgress, TurnStage } from "../../shared/turn-progress";
-import {
-  type UpdateSnapshot,
-  scopedUpdate,
-} from "../../automation/maintenance/update-notice";
+import type { UpdateSnapshot } from "../../automation/maintenance/update-notice";
+import { OpenCodeNotices } from "./notices";
 import { OpenCodeCrewStatus } from "./crew-status";
 import { OpenCodeHistory } from "./opencode-history";
 import { OpenCodeQuestions } from "./questions";
@@ -606,6 +604,7 @@ export class OpenCodeBackend implements AgentBackend {
   public readonly history: OpenCodeHistory;
   private readonly client;
   private readonly crewStatusProbe: OpenCodeCrewStatus;
+  private readonly notices: OpenCodeNotices;
   private readonly questions: OpenCodeQuestions;
   public readonly pendingQuestions;
   public readonly questionState;
@@ -636,6 +635,7 @@ export class OpenCodeBackend implements AgentBackend {
       this.client,
       () => config.directory,
     );
+    this.notices = new OpenCodeNotices(this.client, config);
     this.questions = new OpenCodeQuestions(this.client, this.sessionID);
     this.pendingQuestions = this.questions.pendingQuestions.bind(
       this.questions,
@@ -703,83 +703,33 @@ export class OpenCodeBackend implements AgentBackend {
     return this.crewStatusProbe.fleetCrewStatus(input, signal);
   }
 
-  public async updateNoticeContext(
+  public updateNoticeContext(
     sessionID: string,
     snapshot: UpdateSnapshot,
     signal: AbortSignal,
   ) {
-    const session = await this.client.session.get({ sessionID }, { signal });
-
-    if (
-      session.id !== sessionID ||
-      session.location.directory !== this.config.directory ||
-      (this.config.agent && session.agent !== this.config.agent)
-    )
-      throw new Error("Update notice session does not belong to this backend");
-
-    const tools = await this.client
-      .rpc(CrewReporting)
-      .updateTools(
-        {},
-        { location: { directory: this.config.directory }, signal },
-      )
-      .catch(() => null);
-
-    return scopedUpdate(snapshot, tools, {
-      model: session.model,
-      permissions: session.permissions,
-    });
+    return this.notices.updateNoticeContext(sessionID, snapshot, signal);
   }
 
-  public async queueUpdateNotice(
+  public queueUpdateNotice(
     sessionID: string,
     id: string,
     text: string,
     signal: AbortSignal,
   ) {
-    const receipt = await this.client
-      .rpc(CrewReporting)
-      .queueUpdateNotice(
-        { sessionID, id, text },
-        { location: { directory: this.config.directory }, signal },
-      );
-
-    if (receipt.id !== id || receipt.sessionID !== sessionID)
-      throw new Error("Update notice identity changed");
+    return this.notices.queueUpdateNotice(sessionID, id, text, signal);
   }
 
-  public async crewUpdateNotice(snapshot: UpdateSnapshot, signal: AbortSignal) {
-    const receipts = await this.client
-      .rpc(CrewReporting)
-      .updateNotice(snapshot, {
-        location: { directory: this.config.directory },
-        signal,
-      });
-
-    return [...receipts];
+  public crewUpdateNotice(snapshot: UpdateSnapshot, signal: AbortSignal) {
+    return this.notices.crewUpdateNotice(snapshot, signal);
   }
 
-  public async maintenanceNotice(
-    record: MaintenanceDrain,
-    signal: AbortSignal,
-  ) {
-    const receipts = await this.client
-      .rpc(CrewReporting)
-      .maintenanceNotice(record, {
-        location: { directory: this.config.directory },
-        signal,
-      });
-
-    return [...receipts];
+  public maintenanceNotice(record: MaintenanceDrain, signal: AbortSignal) {
+    return this.notices.maintenanceNotice(record, signal);
   }
 
-  public async resumeMaintenance(signal: AbortSignal) {
-    return this.client
-      .rpc(CrewReporting)
-      .resumeMaintenance(
-        {},
-        { location: { directory: this.config.directory }, signal },
-      );
+  public resumeMaintenance(signal: AbortSignal) {
+    return this.notices.resumeMaintenance(signal);
   }
 
   public async quota(signal: AbortSignal) {

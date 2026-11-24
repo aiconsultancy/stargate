@@ -1,4 +1,4 @@
 {
-  "baselineSha256": "c7ceea9c66beec57385c3624f9007c16bb122752a3a454374ff75886a3520b4e",
-  "closureAdditions": ["src/automation/cron/report-receipts.ts"]
+  "baselineSha256": "63b35d34f936f1cc451b457ebedb725fde0ba0737a29f2e19586a7f9ef99f5fd",
+  "closureAdditions": ["src/backends/opencode/notices.ts"]
 }
