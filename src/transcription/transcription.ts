@@ -106,12 +106,7 @@ async function exclusive<T>(signal: AbortSignal, run: () => Promise<T>) {
   }
 }
 
-function block(
-  file: Attachment,
-  provider: string,
-  spoken: string,
-  cut: boolean,
-) {
+function block(file: Attachment, provider: string, spoken: string) {
   const seconds = file.source?.durationMs;
 
   const facts = [
@@ -122,8 +117,8 @@ function block(
 
   return [
     `[Voice message transcript: ${facts}. These are the sender's own spoken words. The text can contain recognition errors.]`,
-    spoken || "[No speech detected]",
-    ...(cut
+    spoken.slice(0, maxTranscriptCharacters) || "[No speech detected]",
+    ...(spoken.length > maxTranscriptCharacters
       ? [`[Transcript cut at ${maxTranscriptCharacters} characters]`]
       : []),
     "[End of voice message transcript]",
@@ -172,10 +167,7 @@ export async function transcribeMedia(
 
       const spoken = text.trim();
       transcripts.push(spoken);
-      const cut = spoken.length > maxTranscriptCharacters;
-      blocks.push(
-        block(file, provider, spoken.slice(0, maxTranscriptCharacters), cut),
-      );
+      blocks.push(block(file, provider, spoken));
     }
   } catch {
     // Provider and transport errors can hold tokens, URLs or spoken text.
