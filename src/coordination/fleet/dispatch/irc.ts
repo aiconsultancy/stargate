@@ -1,8 +1,12 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
-import type { IrcConfig } from "../config";
-import { type IrcClient, IrcUnavailable } from "../transports/irc/client";
-import { type IrcMessage, fold, validMsgid } from "../transports/irc/protocol";
+import type { IrcConfig } from "../../../config";
+import { type IrcClient, IrcUnavailable } from "../../../transports/irc/client";
+import {
+  type IrcMessage,
+  fold,
+  validMsgid,
+} from "../../../transports/irc/protocol";
 import {
   type CaptainRef,
   type DispatchAnswerInput,

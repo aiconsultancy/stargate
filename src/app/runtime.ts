@@ -53,8 +53,8 @@ import {
   ircDashboardShip,
   teamsDashboardShip,
 } from "../observability/dashboard/dashboard-source";
-import { sendDispatchAnswer } from "../dispatch/irc";
-import { startAgentDispatch } from "../dispatch/start";
+import { sendDispatchAnswer } from "../coordination/fleet/dispatch/irc";
+import { startAgentDispatch } from "../coordination/fleet/dispatch/start";
 import type { SubspaceAgentsHost } from "../subspace/start";
 import { abortable } from "../lib/effect";
 import { FleetControl } from "../coordination/fleet/control";

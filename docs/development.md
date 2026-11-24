@@ -205,7 +205,7 @@ remove a file when its places are repaired.
   (NET-1822) found that this place is not a fault: `reconcileSteer` always
   resolves, so no rejection can skip the `catch`. `return await` there has the
   same behaviour, so the file can leave this list in a follow-up.
-- `oxc/no-accumulating-spread` in `src/dispatch/dispatcher.ts`: mutating the
+- `oxc/no-accumulating-spread` in `src/coordination/fleet/dispatch/dispatcher.ts`: mutating the
   tracked issue would alias the record that the caller holds.
 - `typescript/no-confusing-void-expression` in
   `scripts/hooks/affected-tests.ts`: its test rewrites the signal handler

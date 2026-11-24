@@ -19,11 +19,14 @@ import {
   isDispatchRequest,
   isRearAdmiral,
   sendDispatchAnswer,
-} from "../src/dispatch/irc";
-import { UndeliverableIssue } from "../src/dispatch/dispatcher";
-import { DispatchLedger } from "../src/dispatch/ledger";
-import { dispatchTag, parseDispatchMarker } from "../src/dispatch/protocol";
-import { startAgentDispatch } from "../src/dispatch/start";
+} from "../src/coordination/fleet/dispatch/irc";
+import { UndeliverableIssue } from "../src/coordination/fleet/dispatch/dispatcher";
+import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
+import {
+  dispatchTag,
+  parseDispatchMarker,
+} from "../src/coordination/fleet/dispatch/protocol";
+import { startAgentDispatch } from "../src/coordination/fleet/dispatch/start";
 import { fleetRequest } from "../src/coordination/fleet/client";
 import {
   FleetControl,

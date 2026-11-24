@@ -86,7 +86,7 @@ function moveInlineComments(findings: Finding[]): void {
       continue;
     }
 
-    if (file === "src/dispatch/dispatcher.ts") {
+    if (file === "src/coordination/fleet/dispatch/dispatcher.ts") {
       replace(
         file,
         '    const at =\n      tracked.state === "asking"',

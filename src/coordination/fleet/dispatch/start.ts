@@ -4,8 +4,8 @@ import {
   type AgentDispatchConfig,
   type IrcConfig,
   agentDispatchTarget,
-} from "../config";
-import type { IrcShip } from "../transports/irc/ship";
+} from "../../../config";
+import type { IrcShip } from "../../../transports/irc/ship";
 import { SubspaceApi } from "./api";
 import { AgentDispatcher } from "./dispatcher";
 import { IrcDispatchMessenger, ircDispatchAnswer } from "./irc";

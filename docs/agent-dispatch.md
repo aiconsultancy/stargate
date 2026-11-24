@@ -7,6 +7,9 @@ and writes requests to the fleet's command channel on IRC. No model decides
 whether a message goes out. It is off unless `agentDispatch.enabled` is
 `true`.
 
+Fleet owns the [dispatch implementation](../src/coordination/fleet/dispatch/start.ts)
+under `src/coordination/fleet/dispatch/`.
+
 ## What it does
 
 1. **Assigned to a captain.** When an issue is assigned to an agent whose rank
