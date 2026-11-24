@@ -112,6 +112,25 @@ export function agentFilesLocal(backend: BackendConfig) {
   );
 }
 
+function attachmentTitle(caption: string, name: string) {
+  return (
+    Array.from(caption || name)
+      .map((char) =>
+        char === "/" ||
+        char === "\\" ||
+        char.charCodeAt(0) < 32 ||
+        char.charCodeAt(0) === 127
+          ? " "
+          : char,
+      )
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 255)
+      .trim() || name
+  );
+}
+
 /** Only scratch descendants may bypass hidden ancestor segments. */
 function scratchRoot(path: string) {
   const root = opencodeScratchDirectory();
@@ -229,21 +248,7 @@ export async function deliverAttachments(
     }
 
     if (file.prepared && !file.title) {
-      file.title =
-        Array.from(file.caption || file.prepared.name)
-          .map((char) =>
-            char === "/" ||
-            char === "\\" ||
-            char.charCodeAt(0) < 32 ||
-            char.charCodeAt(0) === 127
-              ? " "
-              : char,
-          )
-          .join("")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, 255)
-          .trim() || file.prepared.name;
+      file.title = attachmentTitle(file.caption, file.prepared.name);
       save();
     }
 
