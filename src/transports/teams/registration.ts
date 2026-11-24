@@ -97,24 +97,27 @@ export const activitySchema = Schema.Struct({
 
 export type TeamsActivity = typeof activitySchema.Type;
 
+function activityTenantMatches(activity: TeamsActivity, expected: string) {
+  const conversation = activity.conversation.tenantId;
+  const channel = activity.channelData?.tenant?.id;
+  const tenant = expected.toLowerCase();
+
+  return (
+    (conversation !== undefined || channel !== undefined) &&
+    (conversation === undefined || conversation.toLowerCase() === tenant) &&
+    (channel === undefined || channel.toLowerCase() === tenant)
+  );
+}
+
 export function allowedActivity(config: TeamsConfig, activity: TeamsActivity) {
   const user = activity.from.aadObjectId?.toLowerCase();
-
-  const tenants = [
-    activity.conversation.tenantId,
-    activity.channelData?.tenant?.id,
-  ].filter((id): id is string => id !== undefined);
-
   const channel = activity.channelData?.channel?.id ?? activity.conversation.id;
 
   return Boolean(
     user &&
     (!config.fleetPolicy ||
       fleetAuthority(config.fleetPolicy, user) === "human") &&
-    tenants.length > 0 &&
-    tenants.every(
-      (tenant) => tenant.toLowerCase() === config.tenantId.toLowerCase(),
-    ) &&
+    activityTenantMatches(activity, config.tenantId) &&
     activity.from.id !== activity.recipient.id &&
     activity.from.role !== "bot" &&
     config.access.users.some((id) => id.toLowerCase() === user) &&
