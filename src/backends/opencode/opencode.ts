@@ -5,11 +5,10 @@ import {
   type OpenCodeClient,
   type SessionMessageInfo,
   isAgentNotFoundError,
-  isFormNotFoundError,
   isSessionNotFoundError,
 } from "@opencode/client";
 import { SessionMessage } from "@opencode/schema";
-import { Option, Result, Schema } from "effect";
+import { Schema } from "effect";
 import {
   type ActivityWatch,
   activitySnapshotSchema,
@@ -61,22 +60,15 @@ import {
   type InputBoundaryRecord,
   boundaryRecord,
   closesBoundaryContext,
-  resolveBoundaryContext,
 } from "./input-boundary";
-import { InputBoundaryReader } from "./input-origin";
+import { InputBoundaryReader, inputOwnership } from "./input-origin";
 import {
   MaintenanceRPC,
   type MaintenanceWatch,
   maintenanceNoticeSchema,
 } from "../../automation/maintenance/maintenance";
 import type { MaintenanceDrain } from "../../automation/maintenance/maintenance-drain";
-import {
-  type NativeQuestion,
-  type PendingQuestion,
-  type QuestionAnswer,
-  nativeQuestionSchema,
-  questionFingerprint,
-} from "../../questions/native-question";
+import type { NativeQuestion } from "../../questions/native-question";
 import { quotaObservationSchema, quotaSnapshotSchema } from "../quota/quota";
 import { createReadSlot, readWithDeadline } from "../../lib/read-deadline";
 import {
@@ -93,6 +85,7 @@ import {
   scopedUpdate,
 } from "../../automation/maintenance/update-notice";
 import { OpenCodeHistory } from "./opencode-history";
+import { OpenCodeQuestions } from "./questions";
 
 type Config = typeof opencodeBackendSchema.Type;
 
@@ -120,18 +113,6 @@ const readyAgentSchema = Schema.Struct({
 
 const decodePinnedSession = Schema.decodeUnknownSync(pinnedSessionSchema);
 const decodeReadyAgent = Schema.decodeUnknownSync(readyAgentSchema);
-
-const questionOriginSchema = Schema.Struct({
-  kind: Schema.Literal("question"),
-  tool: Schema.Struct({
-    messageID: Schema.NonEmptyString,
-    id: Schema.NonEmptyString,
-  }),
-});
-
-const decodeQuestionOrigin = Schema.decodeUnknownOption(questionOriginSchema, {
-  onExcessProperty: "error",
-});
 
 const agentReadyMs = 30_000;
 const agentReadyPollMs = 250;
@@ -229,211 +210,6 @@ export class OpenCodeBackend implements AgentBackend {
     waiters: number;
   };
 
-  // Native messages/form IDs are immutable. Recheck their live tool/input state,
-  // But do not traverse the entire session twice every second for the same form.
-  private readonly questionAncestry = new Map<
-    string,
-    { fingerprint: string; inputID: string }
-  >();
-  private async runningQuestion(
-    sessionID: string,
-    formID: string,
-    signal: AbortSignal,
-  ) {
-    if (this.sessionID !== undefined && sessionID !== this.sessionID) return;
-
-    const form = await this.client.session.form
-      .get({ sessionID, formID }, { signal })
-      .catch((error: unknown) => {
-        if (
-          (isFormNotFoundError(error) && error.id === formID) ||
-          (isSessionNotFoundError(error) && error.sessionID === sessionID)
-        )
-          return;
-        throw error;
-      });
-
-    if (
-      !form ||
-      form.id !== formID ||
-      form.sessionID !== sessionID ||
-      form.state.status !== "pending"
-    )
-      return;
-    const origin = decodeQuestionOrigin(form.metadata);
-
-    if (Option.isNone(origin)) return;
-
-    const message = await this.client.session.message.get(
-      { sessionID, messageID: origin.value.tool.messageID },
-      { signal },
-    );
-
-    if (
-      message.id !== origin.value.tool.messageID ||
-      message.type !== "assistant" ||
-      message.time.completed !== undefined
-    )
-      return;
-
-    const tools = message.content.filter(
-      (p) => p.type === "tool" && p.id === origin.value.tool.id,
-    );
-
-    const tool = tools[0];
-
-    if (
-      tools.length !== 1 ||
-      tool?.type !== "tool" ||
-      tool.name !== "question" ||
-      tool.state.status !== "running" ||
-      tool.time.completed !== undefined
-    )
-      return;
-
-    return { form, toolMessageID: message.id, toolCallID: tool.id };
-  }
-
-  private async nativeQuestion(
-    sessionID: string,
-    formID: string,
-    signal: AbortSignal,
-  ): Promise<PendingQuestion | undefined> {
-    const running = await this.runningQuestion(sessionID, formID, signal);
-
-    if (!running) return;
-    const { form, toolMessageID, toolCallID } = running;
-
-    const fingerprint = questionFingerprint({
-      id: form.id,
-      sessionID,
-      title: form.title,
-      metadata: form.metadata,
-      fields: form.fields,
-    });
-
-    const cacheKey = JSON.stringify([
-      sessionID,
-      form.id,
-      toolMessageID,
-      toolCallID,
-    ]);
-
-    const cached = this.questionAncestry.get(cacheKey);
-
-    let inputID =
-      cached?.fingerprint === fingerprint ? cached.inputID : undefined;
-
-    if (inputID) {
-      const input = await this.client.session.message.get(
-        { sessionID, messageID: inputID },
-        { signal },
-      );
-
-      if (
-        input.id !== inputID ||
-        boundaryRecord(input, sessionID).input !== inputID ||
-        (await this.client.session.inbox.list({ sessionID }, { signal })).some(
-          (v) => v.id === inputID,
-        )
-      )
-        return;
-    } else {
-      inputID = await this.questionInput(sessionID, toolMessageID, signal);
-
-      if (
-        inputID &&
-        (await this.followsInput(sessionID, inputID, signal, toolMessageID))
-      ) {
-        if (this.questionAncestry.size >= 128) {
-          const oldest = this.questionAncestry.keys().next().value;
-
-          if (oldest !== undefined) this.questionAncestry.delete(oldest);
-        }
-
-        this.questionAncestry.set(cacheKey, { fingerprint, inputID });
-      } else return;
-    }
-
-    if (!inputID) return;
-
-    const parsed = Schema.decodeUnknownResult(nativeQuestionSchema)({
-      id: form.id,
-      sessionID,
-      inputID,
-      toolMessageID,
-      toolCallID,
-      fingerprint,
-      title: form.title,
-      fields: form.fields,
-    });
-
-    return Result.isSuccess(parsed)
-      ? parsed.success
-      : {
-          id: form.id,
-          sessionID,
-          inputID,
-          toolMessageID,
-          toolCallID,
-          fingerprint,
-          unsupported: true,
-        };
-  }
-
-  /** Resolve the actual delivered input before this particular tool message. */
-  private async questionInput(
-    sessionID: string,
-    assistant: string,
-    signal: AbortSignal,
-  ): Promise<string | undefined> {
-    const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
-    let found = false;
-    let cursor: string | undefined;
-    const seen = new Set<string>();
-    const chain: InputBoundaryRecord[] = [];
-
-    for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
-      const page = await this.client.message.list(
-        cursor
-          ? { sessionID, limit: 100, cursor }
-          : { sessionID, limit: 100, order: "desc" },
-        { signal },
-      );
-
-      for (const message of page.data) {
-        if (!found) {
-          if (message.id === assistant && message.type === "assistant")
-            found = true;
-          continue;
-        }
-
-        const record = await boundaries.record(message);
-
-        if (chain.length > 0 && closesBoundaryContext(record)) {
-          chain.push(record);
-
-          return resolveBoundaryContext(chain);
-        }
-
-        if (record.input === undefined) continue;
-
-        if (chain.length === 0 && record.type !== "synthetic")
-          return record.input;
-        chain.push(record);
-      }
-
-      cursor = page.cursor.next ?? undefined;
-
-      if (!cursor) return resolveBoundaryContext(chain);
-
-      if (seen.has(cursor)) throw new Error("Question history cursor repeated");
-      seen.add(cursor);
-    }
-
-    throw new Error("Question ancestry exceeds history bound");
-  }
-
   public async pinnedBackgroundQuestions(signal: AbortSignal) {
     if (!this.sessionID) return [];
 
@@ -465,167 +241,6 @@ export class OpenCodeBackend implements AgentBackend {
     return verified;
   }
 
-  public async pendingQuestions(
-    sessionID: string,
-    signal: AbortSignal,
-  ): Promise<PendingQuestion[]> {
-    if (this.sessionID !== undefined && sessionID !== this.sessionID) return [];
-
-    const forms = await this.client.session.form
-      .list({ sessionID }, { signal })
-      .catch((error: unknown) => {
-        if (isSessionNotFoundError(error) && error.sessionID === sessionID)
-          return [];
-        throw error;
-      });
-
-    if (forms.length > 16) throw new Error("Too many native forms");
-    const questions: PendingQuestion[] = [];
-
-    for (const form of forms) {
-      if (form.sessionID !== sessionID) continue;
-      const question = await this.nativeQuestion(sessionID, form.id, signal);
-
-      if (question) questions.push(question);
-    }
-
-    return questions;
-  }
-
-  public async questionState(
-    sessionID: string,
-    formID: string,
-    signal: AbortSignal,
-  ): Promise<"pending" | "resolved" | "missing-session" | "unknown"> {
-    if (this.sessionID !== undefined && sessionID !== this.sessionID)
-      return "unknown";
-
-    try {
-      const form = await this.client.session.form.get(
-        { sessionID, formID },
-        { signal },
-      );
-
-      if (form.id !== formID || form.sessionID !== sessionID) return "unknown";
-
-      return form.state.status === "pending" ? "pending" : "resolved";
-    } catch (error) {
-      if (isFormNotFoundError(error) && error.id === formID) return "resolved";
-
-      if (isSessionNotFoundError(error) && error.sessionID === sessionID)
-        return "missing-session";
-      throw error;
-    }
-  }
-
-  public async questionBelongsToInput(
-    sessionID: string,
-    formID: string,
-    inputID: string,
-    fingerprint: string,
-    signal: AbortSignal,
-  ): Promise<boolean> {
-    const question = await this.nativeQuestion(sessionID, formID, signal);
-
-    return (
-      question?.inputID === inputID && question.fingerprint === fingerprint
-    );
-  }
-
-  public async backgroundOutcome(
-    sessionID: string,
-    formID: string,
-    fingerprint: string,
-    signal: AbortSignal,
-  ) {
-    if (sessionID !== this.sessionID) return;
-
-    const form = await this.client.session.form.get(
-      { sessionID, formID },
-      { signal },
-    );
-
-    if (
-      form.id !== formID ||
-      form.sessionID !== sessionID ||
-      questionFingerprint({
-        id: form.id,
-        sessionID,
-        title: form.title,
-        metadata: form.metadata,
-        fields: form.fields,
-      }) !== fingerprint
-    )
-      return;
-
-    if (form.state.status === "answered" || form.state.status === "cancelled")
-      return form.state.status;
-
-    return;
-  }
-
-  public async replyQuestion(
-    question: NativeQuestion,
-    answer: QuestionAnswer | null,
-    signal: AbortSignal,
-    allowed?: () => boolean,
-  ) {
-    const live = await this.nativeQuestion(
-      question.sessionID,
-      question.id,
-      signal,
-    );
-
-    if (
-      !live ||
-      "unsupported" in live ||
-      live.inputID !== question.inputID ||
-      live.fingerprint !== question.fingerprint
-    )
-      throw new Error("Native question is stale or has no owned input");
-    const input = { sessionID: question.sessionID, formID: question.id };
-
-    if (allowed && !allowed()) throw new Error("Question route changed");
-
-    if (answer === null)
-      await this.client.session.form.cancel(input, { signal });
-    else await this.client.session.form.reply({ ...input, answer }, { signal });
-  }
-
-  public async questionInputSettled(
-    sessionID: string,
-    inputID: string,
-    signal: AbortSignal,
-  ): Promise<boolean> {
-    if (this.sessionID !== undefined && sessionID !== this.sessionID)
-      return false;
-    const session = await this.client.session.get({ sessionID }, { signal });
-
-    if (
-      session.id !== sessionID ||
-      session.time.idle === undefined ||
-      session.time.idle < (session.time.busy ?? 0)
-    )
-      return false;
-
-    if ((await this.client.session.active({ signal }))[sessionID]) return false;
-
-    if (
-      (await this.client.session.inbox.list({ sessionID }, { signal })).some(
-        (v) => v.id === inputID,
-      )
-    )
-      return false;
-
-    const input = await this.client.session.message.get(
-      { sessionID, messageID: inputID },
-      { signal },
-    );
-
-    return (
-      input.id === inputID && boundaryRecord(input, sessionID).input === inputID
-    );
-  }
   /** One gateway-owned attempt; IDs/nonce were persisted before this call. */
   public async startReview(
     binding: FleetReviewBinding,
@@ -1011,6 +626,13 @@ export class OpenCodeBackend implements AgentBackend {
   public readonly supportsAttachments = true;
   public readonly history: OpenCodeHistory;
   private readonly client;
+  private readonly questions: OpenCodeQuestions;
+  public readonly pendingQuestions;
+  public readonly questionState;
+  public readonly questionBelongsToInput;
+  public readonly backgroundOutcome;
+  public readonly replyQuestion;
+  public readonly questionInputSettled;
   private readonly waitForIdle;
   private readonly serverClient;
   /** Each session's latest submitted input; re-anchors a lost cursor. */
@@ -1030,6 +652,22 @@ export class OpenCodeBackend implements AgentBackend {
     };
 
     this.client = verifiedClient ?? OpenCode.make(options);
+    this.questions = new OpenCodeQuestions(this.client, this.sessionID);
+    this.pendingQuestions = this.questions.pendingQuestions.bind(
+      this.questions,
+    );
+    this.questionState = this.questions.questionState.bind(this.questions);
+    this.questionBelongsToInput = this.questions.questionBelongsToInput.bind(
+      this.questions,
+    );
+    this.backgroundOutcome = this.questions.backgroundOutcome.bind(
+      this.questions,
+    );
+    this.replyQuestion = this.questions.replyQuestion.bind(this.questions);
+    this.questionInputSettled = this.questions.questionInputSettled.bind(
+      this.questions,
+    );
+
     // A quiet wait can exceed Bun's HTTP idle timeout. Keep the caller's
     // Stop/deadline signal; leave other requests and pairing policy unchanged.
     this.waitForIdle = OpenCode.make({
@@ -1619,41 +1257,6 @@ export class OpenCodeBackend implements AgentBackend {
     return { status: "uncertain" };
   }
 
-  /** A pending form from earlier work can hold the native queue indefinitely. */
-  private async waitingForAnswer(sessionID: string, signal: AbortSignal) {
-    const forms = await this.client.session.form.list(
-      { sessionID },
-      { signal },
-    );
-
-    const candidates = forms.filter(
-      (form) =>
-        form.sessionID === sessionID &&
-        Option.isSome(decodeQuestionOrigin(form.metadata)),
-    );
-
-    if (candidates.length === 0) return false;
-    const active = await this.client.session.active({ signal });
-
-    if (!active[sessionID]) return false;
-
-    for (const form of candidates) {
-      signal.throwIfAborted();
-
-      const running = await this.runningQuestion(
-        sessionID,
-        form.id,
-        signal,
-      ).catch(() => {});
-
-      signal.throwIfAborted();
-
-      if (running) return true;
-    }
-
-    return false;
-  }
-
   public async prompt(
     sessionId: string,
     text: string,
@@ -1675,9 +1278,9 @@ export class OpenCodeBackend implements AgentBackend {
     ) {
       const check = AbortSignal.any([signal, AbortSignal.timeout(2000)]);
 
-      const waiting = await this.waitingForAnswer(sessionId, check).catch(
-        () => false,
-      );
+      const waiting = await this.questions
+        .waitingForAnswer(sessionId, check)
+        .catch(() => false);
 
       if (signal.aborted)
         throw new PromptNotSubmitted("OpenCode admission check cancelled", {
@@ -1828,7 +1431,8 @@ export class OpenCodeBackend implements AgentBackend {
           const observedAt = Date.now();
           inspectingForms.set(form.id, order);
 
-          const check = this.nativeQuestion(sessionId, form.id, eventSignal)
+          const check = this.questions
+            .nativeQuestion(sessionId, form.id, eventSignal)
             .then((question) => {
               if (
                 inspectingForms.get(form.id) === order &&
@@ -1930,7 +1534,8 @@ export class OpenCodeBackend implements AgentBackend {
           const readSignal = AbortSignal.any([signal, stop.signal]);
 
           const readOwner = () =>
-            this.inputOwnership(
+            inputOwnership(
+              this.client,
               sessionId,
               current.input,
               readSignal,
@@ -2184,74 +1789,14 @@ export class OpenCodeBackend implements AgentBackend {
     assistant?: string,
   ) {
     return (
-      (await this.inputOwnership(sessionID, input, signal, assistant)) === true
+      (await inputOwnership(
+        this.client,
+        sessionID,
+        input,
+        signal,
+        assistant,
+      )) === true
     );
-  }
-
-  private async inputOwnership(
-    sessionID: string,
-    input: string,
-    signal: AbortSignal,
-    assistant?: string,
-  ) {
-    if (assistant !== undefined) {
-      // Inbox list is unpaginated in this SDK. Presence proves we still queue;
-      // Absence proves nothing, so delivered candidates still need history.
-      const inbox = await this.client.session.inbox.list(
-        { sessionID },
-        { signal },
-      );
-
-      if (inbox.some((item) => item.id === input)) return;
-    }
-
-    const boundaries = new InputBoundaryReader(this.client, sessionID, signal);
-    let found = assistant === undefined;
-    let cursor: string | undefined;
-    const cursors = new Set<string>();
-    const chain: InputBoundaryRecord[] = [];
-
-    do {
-      const page = await this.client.message.list(
-        cursor
-          ? { sessionID, limit: 100, cursor }
-          : { sessionID, order: "desc", limit: 100 },
-        { signal },
-      );
-
-      for (const message of page.data) {
-        if (!found) {
-          if (message.id === input) return;
-
-          if (message.id === assistant && message.type === "assistant")
-            found = true;
-          continue;
-        }
-
-        const record = await boundaries.record(message);
-
-        if (chain.length > 0 && closesBoundaryContext(record)) {
-          chain.push(record);
-
-          return resolveBoundaryContext(chain) === input;
-        }
-
-        if (record.input === undefined) continue;
-
-        if (chain.length === 0 && record.type !== "synthetic")
-          return record.input === input;
-        chain.push(record);
-      }
-
-      cursor = page.cursor.next ?? undefined;
-
-      if (cursor && cursors.has(cursor))
-        throw new Error("OpenCode history cursor repeated");
-
-      if (cursor) cursors.add(cursor);
-    } while (cursor);
-
-    return found ? resolveBoundaryContext(chain) === input : undefined;
   }
 
   public async close() {

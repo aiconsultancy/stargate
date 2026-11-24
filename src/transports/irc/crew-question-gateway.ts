@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { OpenCode, type OpenCodeClient } from "@opencode/client";
-import { OpenCodeBackend } from "../../backends/opencode/opencode";
+import { OpenCodeQuestions } from "../../backends/opencode/questions";
 import type { opencodeBackendSchema } from "../../backends/opencode/config";
 import { secret } from "../../lib/credentials";
 import {
@@ -68,17 +68,7 @@ export class CrewQuestionGateway {
     )
       return { status: "mismatch" };
 
-    const backend = new OpenCodeBackend(
-      {
-        type: "opencode",
-        url: this.captain.url,
-        directory: owner.directory,
-        sessionID: owner.session,
-        permissions: [],
-        headersEnv: {},
-      },
-      this.client,
-    );
+    const backend = new OpenCodeQuestions(this.client, owner.session);
 
     if (action.kind === "list") {
       const questions = await backend.pendingQuestions(owner.session, signal);

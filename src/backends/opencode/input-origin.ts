@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { OpenCodeClient } from "@opencode/client";
 import { Option, Schema } from "effect";
 import { crewMessageMetadataKey } from "../../coordination/crew/message-protocol";
 import type {
@@ -9,6 +10,8 @@ import {
   InputBoundaryFold,
   type InputBoundaryRecord,
   boundaryRecord,
+  closesBoundaryContext,
+  resolveBoundaryContext,
 } from "./input-boundary";
 
 const shellID = Schema.String.check(
@@ -220,4 +223,68 @@ export class InputBoundaryReader {
 
     return origins;
   }
+}
+
+export async function inputOwnership(
+  client: OpenCodeClient,
+  sessionID: string,
+  input: string,
+  signal: AbortSignal,
+  assistant?: string,
+) {
+  if (assistant !== undefined) {
+    // Inbox list is unpaginated in this SDK. Presence proves we still queue;
+    // Absence proves nothing, so delivered candidates still need history.
+    const inbox = await client.session.inbox.list({ sessionID }, { signal });
+
+    if (inbox.some((item) => item.id === input)) return;
+  }
+
+  const boundaries = new InputBoundaryReader(client, sessionID, signal);
+  let found = assistant === undefined;
+  let cursor: string | undefined;
+  const cursors = new Set<string>();
+  const chain: InputBoundaryRecord[] = [];
+
+  do {
+    const page = await client.message.list(
+      cursor
+        ? { sessionID, limit: 100, cursor }
+        : { sessionID, order: "desc", limit: 100 },
+      { signal },
+    );
+
+    for (const message of page.data) {
+      if (!found) {
+        if (message.id === input) return;
+
+        if (message.id === assistant && message.type === "assistant")
+          found = true;
+        continue;
+      }
+
+      const record = await boundaries.record(message);
+
+      if (chain.length > 0 && closesBoundaryContext(record)) {
+        chain.push(record);
+
+        return resolveBoundaryContext(chain) === input;
+      }
+
+      if (record.input === undefined) continue;
+
+      if (chain.length === 0 && record.type !== "synthetic")
+        return record.input === input;
+      chain.push(record);
+    }
+
+    cursor = page.cursor.next ?? undefined;
+
+    if (cursor && cursors.has(cursor))
+      throw new Error("OpenCode history cursor repeated");
+
+    if (cursor) cursors.add(cursor);
+  } while (cursor);
+
+  return found ? resolveBoundaryContext(chain) === input : undefined;
 }

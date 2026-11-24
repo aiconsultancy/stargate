@@ -1,4 +1,5 @@
 {
-  "baselineSha256": "9cfa2d98aecf3eae1691888f2a890161447acff3d51529fdf08160ab03aab085",
-  "closureAdditions": ["src/backends/config.ts"]
+  "baselineSha256": "c384b0ada3ad474eea023c01825eb2a23d9b69d3d917c81e58fbd005dd2aa787",
+  "pruneStale": true,
+  "closureAdditions": ["src/backends/opencode/questions.ts"]
 }
