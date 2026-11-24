@@ -10,9 +10,18 @@ import {
 import { type ApiRoute, apiRoutes } from "./route";
 
 type Options = {
-  listen: { hostname: string; port: number } | { unix: string };
+  /**
+   * TCP, the private owner-only (0600) socket, or, with `group`, a socket of
+   * mode 0660 that takes its setgid directory's group.
+   */
+  listen: { hostname: string; port: number } | { unix: string; group?: true };
   routes?: readonly ApiRoute[];
-  fleet(request: Request, address: string | undefined): Promise<Response>;
+  /** `target` is the request target exactly as sent, before URL parsing. */
+  fleet(
+    request: Request,
+    address: string | undefined,
+    target: string,
+  ): Promise<Response>;
   signal: AbortSignal;
   /** Test injection can shorten, never extend, production deadlines. */
   timing?: { headersMs?: number; requestMs?: number };
@@ -455,6 +464,7 @@ export async function startApiServer(options: Options) {
               signal,
             }),
             "unix" in options.listen ? undefined : request.socket.remoteAddress,
+            request.url ?? "",
           );
         }
       } else {
@@ -521,10 +531,13 @@ export async function startApiServer(options: Options) {
     options.signal.throwIfAborted();
 
     if ("unix" in options.listen) {
-      identity = await listenOnUnixSocket(server, options.listen.unix, {
-        mode: 0o600,
-        signal: options.signal,
-      });
+      identity = await listenOnUnixSocket(
+        server,
+        options.listen.unix,
+        options.listen.group
+          ? { signal: options.signal }
+          : { mode: 0o600, signal: options.signal },
+      );
     } else {
       const listen = options.listen;
       await new Promise<void>((resolve, reject) => {

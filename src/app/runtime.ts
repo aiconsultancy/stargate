@@ -24,6 +24,7 @@ import {
   type IrcConfig,
   secret,
 } from "../config";
+import { officerFleetSockets } from "../config/composition";
 import {
   ConfigReload,
   type ReloadCandidate,
@@ -1259,7 +1260,8 @@ export function serve(
 
       let fleetDashboard: ReturnType<typeof dashboardSource> | undefined;
 
-      if (config.api) {
+      // Officers' sockets serve it too, without the listener (docs/api.md#officers).
+      if (config.api || officerFleetSockets(config.subspaceAgents).length > 0) {
         // Like the dashboard: a bind failure is an ordinary startup failure.
         const api = config.api;
         const viewers = new AbortController();
@@ -1273,6 +1275,7 @@ export function serve(
           Effect.promise(async () =>
             startRuntimeApi({
               config: api,
+              log,
               dataDirectory: config.dataDirectory,
               projection: {
                 requests: (registration, at) => {
@@ -1328,7 +1331,6 @@ export function serve(
                   Effect.timeoutOption("5 seconds"),
                 ),
         );
-        log.info({ listen: api.listen }, "Fleet API listening");
       }
 
       // Dynamic backend resources close after worker interruption, before the

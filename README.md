@@ -88,7 +88,8 @@ permissions control what the agent can do on the host.
 - [CLIProxyAPI](docs/cliproxyapi.md), the [dashboard](docs/dashboard.md), and
   [nightly maintenance](docs/maintenance.md) each have separate setup.
 - The [Fleet API](docs/api.md) serves read-only fleet status and events to
-  Subspace over a private network.
+  Subspace over a private network, and to the fleet's own officers on their
+  own sockets.
 - Optional [agent dispatch](docs/agent-dispatch.md) lets a fleet's rear
   admiral poll Subspace issues and ask its captains, on IRC, to take them.
   It is off by default.

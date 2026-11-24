@@ -480,6 +480,37 @@ export const subspaceAgentsSchema = settingsStruct({
 
 export type SubspaceAgentsConfig = typeof subspaceAgentsSchema.Type;
 
+/**
+ * The file name of an officer's Fleet API socket, in its socket directory.
+ * Not `fleet.sock`: that is Fleet Control's socket (docs/fleet-tools.md).
+ */
+export const officerFleetSocketName = "fleet-api.sock";
+
+/**
+ * Each officer's read-only Fleet API socket (docs/api.md#officers): beside
+ * its Subspace socket, for every officer that has one. None when the section
+ * is absent or disabled.
+ */
+export function officerFleetSockets(
+  section: SubspaceAgentsConfig | undefined,
+): { officer: string; socketPath: string }[] {
+  return section?.enabled
+    ? section.officers.flatMap((officer) =>
+        officer.socketPath
+          ? [
+              {
+                officer: officer.name,
+                socketPath: join(
+                  dirname(officer.socketPath),
+                  officerFleetSocketName,
+                ),
+              },
+            ]
+          : [],
+      )
+    : [];
+}
+
 /** A section, of any content, that does not say `enabled: true`. */
 const switchedOff = (input: unknown) =>
   typeof input === "object" &&
@@ -537,6 +568,18 @@ function subspaceAgentsIssues(
 
   if (repeated(officers.flatMap((officer) => officer.registration ?? []))) {
     issues.push([["officers"], "A registration can belong to one officer"]);
+  }
+
+  for (const [index, officer] of officers.entries()) {
+    if (
+      officer.socketPath &&
+      basename(officer.socketPath) === officerFleetSocketName
+    ) {
+      issues.push([
+        ["officers", index, "socketPath"],
+        `${officerFleetSocketName} is the officer's Fleet API socket; give the Subspace socket another name, such as api.sock`,
+      ]);
+    }
   }
 
   for (const [index, officer] of officers.entries()) {
