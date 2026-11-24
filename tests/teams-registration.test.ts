@@ -13,7 +13,8 @@ import {
   TeamsRegistration,
 } from "../src/transports/teams/registration";
 import type { TurnProgress as Progress } from "../src/shared/turn-progress";
-import { saveWaitingDelay, waitingPhrase } from "../src/gateway/waiting";
+import { saveWaitingDelay } from "../src/config/waiting-overrides";
+import { waitingPhrase } from "../src/shared/waiting";
 import {
   activity,
   HUMAN,

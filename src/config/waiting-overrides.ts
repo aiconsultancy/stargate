@@ -2,14 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Schema } from "effect";
-import { settingsStruct } from "../config/settings-schema";
-import { type WaitingSettings, waitingDelaySchema } from "../config/waiting";
+import { settingsStruct } from "./settings-schema";
+import { type WaitingSettings, waitingDelaySchema } from "./waiting";
 
 export {
   waitingDelaySchema,
   waitingSchema,
   type WaitingSettings,
-} from "../config/waiting";
+} from "./waiting";
 
 type WaitingRegistration = {
   id: string;

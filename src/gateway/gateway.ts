@@ -112,7 +112,7 @@ import {
 } from "../transcription/transcription";
 import { type TurnProgress, turnProgressText } from "../shared/turn-progress";
 import type { UpdateReceipt } from "../automation/maintenance/update-notice";
-import { resolveWaiting } from "./waiting";
+import { resolveWaiting } from "../config/waiting-overrides";
 import { botDisplayName, waitingPhrase } from "../shared/waiting";
 
 // Catch-up retries read history only; they never prompt the agent.

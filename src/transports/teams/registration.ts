@@ -23,7 +23,7 @@ import {
   settingsUUID,
 } from "../../config/settings-schema";
 import type { Store } from "../../gateway/store";
-import { resolveWaiting } from "../../gateway/waiting";
+import { resolveWaiting } from "../../config/waiting-overrides";
 import { botDisplayName } from "../../shared/waiting";
 import {
   BotFrameworkKeyStore,
