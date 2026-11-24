@@ -1632,7 +1632,8 @@
         "src/backends/opencode/notices.ts",
         "src/backends/opencode/questions.ts",
         "src/backends/claude/config.ts",
-        "src/backends/codex/config.ts"
+        "src/backends/codex/config.ts",
+        "src/backends/codex/preflight.ts"
       ],
       "public": [
         "src/backend.ts",
@@ -1643,7 +1644,8 @@
         "src/backends/opencode/questions.ts",
         "src/pi-model.ts",
         "src/backends/claude/config.ts",
-        "src/backends/codex/config.ts"
+        "src/backends/codex/config.ts",
+        "src/backends/codex/preflight.ts"
       ],
       "contracts": [
         "src/backend.ts",
