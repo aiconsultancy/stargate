@@ -32,6 +32,7 @@ export async function readReloadCandidate(
     config.notify,
     config.dataDirectory,
     config.agentDispatch,
+    config.subspaceAgents,
   );
 
   return {
