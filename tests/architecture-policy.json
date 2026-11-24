@@ -1819,6 +1819,7 @@
         "src/crew/cron.ts",
         "src/crew/engine.ts",
         "src/coordination/crew/execution/drain-records.ts",
+        "src/coordination/crew/execution/task-records.ts",
         "src/coordination/crew/execution/update-notices.ts",
         "src/crew/fleet-status.ts",
         "src/crew/history-rpc.ts",
