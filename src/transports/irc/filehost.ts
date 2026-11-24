@@ -142,6 +142,14 @@ async function readBounded(
  */
 const refusedStatuses = new Set([400, 401, 403, 413, 415]);
 
+function uploadDisposition(name: string) {
+  const ascii = /^[ -~]+$/.test(name) && !/["\\]/.test(name);
+
+  return ascii
+    ? `attachment; filename="${name}"`
+    : `attachment; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 export type FilehostOptions = {
   account: string;
   password: string;
@@ -256,16 +264,13 @@ export class Filehost {
    */
   public async upload(file: Attachment, signal: AbortSignal): Promise<string> {
     const target = this.uploadURL();
-    const ascii = /^[ -~]+$/.test(file.name) && !/["\\]/.test(file.name);
     let response: Response;
 
     try {
       response = await fetch(target, {
         ...this.init(signal, {
           "content-type": file.mime,
-          "content-disposition": ascii
-            ? `attachment; filename="${file.name}"`
-            : `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+          "content-disposition": uploadDisposition(file.name),
         }),
         method: "POST",
         body: new Uint8Array(file.data),
