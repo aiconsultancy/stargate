@@ -73,6 +73,61 @@ function timestampValue(value: string) {
   return BigInt(seconds) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
 }
 
+type EligibleMessage = ThreadContext["messages"][number] & { ts: string };
+
+/** Keep the root first for selection, then return selected text in time order. */
+function selectContext(
+  eligible: EligibleMessage[],
+  thread: string,
+  pageTruncated: boolean,
+): ThreadContext {
+  const root = eligible.find((message) => message.ts === thread);
+  const newest = eligible.toReversed();
+
+  const ordered = root
+    ? [root, ...newest.filter((message) => message !== root)]
+    : newest;
+
+  const selected: EligibleMessage[] = [];
+  let remaining: number = threadContextLimits.totalCodepoints;
+  let truncated = pageTruncated;
+
+  for (const message of ordered) {
+    if (selected.length >= threadContextLimits.messages || !remaining) {
+      truncated = true;
+      break;
+    }
+
+    const limit = Math.min(remaining, threadContextLimits.messageCodepoints);
+    const points: string[] = [];
+
+    for (const point of message.text) {
+      if (points.length === limit) {
+        truncated = true;
+        break;
+      }
+
+      points.push(point);
+    }
+
+    remaining -= points.length;
+    selected.push({
+      ts: message.ts,
+      author: message.author,
+      text: points.join(""),
+    });
+  }
+
+  return {
+    messages: selected
+      .toSorted((a, b) =>
+        timestampValue(a.ts) < timestampValue(b.ts) ? -1 : 1,
+      )
+      .map(({ author, text }) => ({ author, text })),
+    truncated,
+  };
+}
+
 /** One bounded page; Slack text remains data, not instructions or agent roles. */
 export async function loadThreadContext(
   input: ThreadContextRequest,
@@ -103,17 +158,13 @@ export async function loadThreadContext(
     input.signal.throwIfAborted();
     const page = Schema.decodeUnknownSync(pageSchema)(raw);
 
-    const result: ThreadContext = {
-      messages: [],
-      truncated:
-        page.has_more === true ||
-        (page.response_metadata?.next_cursor?.trim() ?? "") !== "" ||
-        page.messages.length > threadContextLimits.pageSize,
-    };
+    const truncated =
+      page.has_more === true ||
+      (page.response_metadata?.next_cursor?.trim() ?? "") !== "" ||
+      page.messages.length > threadContextLimits.pageSize;
 
     const seen = new Set<string>();
-    let remaining: number = threadContextLimits.totalCodepoints;
-    const eligible: (ThreadContext["messages"][number] & { ts: string })[] = [];
+    const eligible: EligibleMessage[] = [];
 
     const candidates = page.messages
       .slice(0, threadContextLimits.pageSize)
@@ -170,48 +221,7 @@ export async function loadThreadContext(
       });
     }
 
-    const root = eligible.find((message) => message.ts === request.thread);
-    const newest = eligible.toReversed();
-
-    const ordered = root
-      ? [root, ...newest.filter((message) => message !== root)]
-      : newest;
-
-    const selected: typeof eligible = [];
-
-    for (const message of ordered) {
-      if (selected.length >= threadContextLimits.messages || !remaining) {
-        result.truncated = true;
-        break;
-      }
-
-      const limit = Math.min(remaining, threadContextLimits.messageCodepoints);
-      const points: string[] = [];
-
-      for (const point of message.text) {
-        if (points.length === limit) {
-          result.truncated = true;
-          break;
-        }
-
-        points.push(point);
-      }
-
-      remaining -= points.length;
-      selected.push({
-        ts: message.ts,
-        author: message.author,
-        text: points.join(""),
-      });
-    }
-
-    result.messages = selected
-      .toSorted((a, b) =>
-        timestampValue(a.ts) < timestampValue(b.ts) ? -1 : 1,
-      )
-      .map(({ author, text }) => ({ author, text }));
-
-    return result;
+    return selectContext(eligible, request.thread, truncated);
   } catch {
     input.signal.throwIfAborted();
     // Never propagate SDK payloads, token details, or untrusted response data.
