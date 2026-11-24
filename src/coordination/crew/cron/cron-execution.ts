@@ -10,7 +10,7 @@ import type {
 import { Schema } from "effect";
 import type { BackendContext } from "../../../backends/backend";
 import { PiDurableBackend } from "../../../backends/pi/pi-durable";
-import type { BackendConfig } from "../../../config";
+import type { piDurableBackendSchema } from "../../../backends/pi/config";
 import {
   type CronAdvanced,
   type CronEvaluation,
@@ -80,7 +80,7 @@ export interface CronExecutionAuthority {
   captain(caller: CrewCaller): Promise<void>;
 }
 
-type PiConfig = Extract<BackendConfig, { type: "pi-durable" }>;
+type PiConfig = typeof piDurableBackendSchema.Type;
 
 export interface CronArbiterBackend {
   createSession(input: {

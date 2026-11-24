@@ -14,8 +14,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 275,
-  "sourceEdges": 1153,
+  "sourceFiles": 276,
+  "sourceEdges": 1163,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -31,6 +31,7 @@
       "src/backend.ts",
       "src/backends/claude/config.ts",
       "src/backends/codex/config.ts",
+      "src/backends/config.ts",
       "src/backends/opencode-history.ts",
       "src/backends/opencode.ts",
       "src/backends/opencode/config.ts",

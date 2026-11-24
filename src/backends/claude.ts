@@ -36,7 +36,8 @@ import {
   type TextSink,
   sourceLine,
 } from "./backend";
-import { type BackendConfig, secret } from "../config";
+import type { claudeBackendSchema } from "./claude/config";
+import { secret } from "../lib/credentials";
 import {
   compareVersions,
   parseVersion,
@@ -58,7 +59,7 @@ import {
   textAttachment,
 } from "./cli-agent";
 
-type Config = Extract<BackendConfig, { type: "claude" }>;
+type Config = typeof claudeBackendSchema.Type;
 
 type UserContent = Exclude<SDKUserMessage["message"]["content"], string>;
 

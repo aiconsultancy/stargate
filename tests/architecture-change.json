@@ -1,5 +1,4 @@
 {
-  "baselineSha256": "ced9277eefbfc31ff6f687c40a13192383762979719d42dbe95a259a6d5f2bd3",
-  "pruneStale": true,
-  "closureAdditions": ["src/questions/native-question.ts"]
+  "baselineSha256": "9cfa2d98aecf3eae1691888f2a890161447acff3d51529fdf08160ab03aab085",
+  "closureAdditions": ["src/backends/config.ts"]
 }

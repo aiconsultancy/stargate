@@ -43,3 +43,14 @@ export function redactCredentials(text: string, limit = 1500): string {
     )
     .slice(0, limit);
 }
+
+export function secret(
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const value = env[name];
+
+  if (!value?.trim()) throw new Error(`Missing environment variable: ${name}`);
+
+  return value;
+}

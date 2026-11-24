@@ -30,8 +30,8 @@ import {
   latestInput,
   sourceLine,
 } from "../backend";
-import { type BackendConfig, secret } from "../../config";
-import { redactCredentials } from "../../lib/credentials";
+import type { opencodeBackendSchema } from "./config";
+import { redactCredentials, secret } from "../../lib/credentials";
 import {
   type FleetCrewStatus,
   fleetCrewStatusSchema,
@@ -94,7 +94,7 @@ import {
 } from "../../automation/maintenance/update-notice";
 import { OpenCodeHistory } from "./opencode-history";
 
-type Config = Extract<BackendConfig, { type: "opencode" }>;
+type Config = typeof opencodeBackendSchema.Type;
 
 const pinnedSessionSchema = Schema.Struct({
   id: Schema.String,
