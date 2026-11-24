@@ -182,24 +182,26 @@ async function installUnits(
   return 0;
 }
 
-export async function maintenanceCli(
+type MaintenanceOptions = {
+  configPath: string;
+  json?: boolean;
+  plan?: boolean;
+  name?: string;
+  print?: boolean;
+  release?: string;
+  version?: string;
+  outsideWindow?: boolean;
+  afterRun?: boolean;
+  acceptCurrent?: string;
+  yes?: boolean;
+  now?: boolean;
+  foreground?: boolean;
+  retryFailed?: boolean;
+};
+
+function validateMaintenanceOptions(
   operation: string | undefined,
-  options: {
-    configPath: string;
-    json?: boolean;
-    plan?: boolean;
-    name?: string;
-    print?: boolean;
-    release?: string;
-    version?: string;
-    outsideWindow?: boolean;
-    afterRun?: boolean;
-    acceptCurrent?: string;
-    yes?: boolean;
-    now?: boolean;
-    foreground?: boolean;
-    retryFailed?: boolean;
-  },
+  options: MaintenanceOptions,
 ) {
   if (
     (options.now || options.foreground || options.retryFailed) &&
@@ -224,6 +226,13 @@ export async function maintenanceCli(
     throw new Error(
       "--accept-current ENTRY [--yes] applies only to recover, without --after-run.",
     );
+}
+
+export async function maintenanceCli(
+  operation: string | undefined,
+  options: MaintenanceOptions,
+) {
+  validateMaintenanceOptions(operation, options);
 
   if (operation === "schema") {
     console.log(JSON.stringify(reportJsonSchema(), null, 2));
