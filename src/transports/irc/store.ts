@@ -38,7 +38,7 @@ export class IrcRecords implements IrcOperations {
     );
   }
 
-  /** Outbound IRC root of this registration's request; legacy rows stay plain. */
+  /** Outbound IRC root of this registration's request. */
   public ircReplyParent(botKey: string, thread: string): string | undefined {
     return (
       this.db
@@ -46,7 +46,10 @@ export class IrcRecords implements IrcOperations {
           { replyParent: string | null },
           [string, string, string, string]
         >(
-          `SELECT replyParent FROM jobs WHERE botKey=? AND thread=?
+          `SELECT COALESCE(replyParent, CASE
+             WHEN sender IS NULL AND received IS NOT NULL AND thread NOT GLOB 'stargate-*'
+             THEN thread END) AS replyParent
+           FROM jobs WHERE botKey=? AND thread=?
            UNION ALL SELECT COALESCE(json_extract(payload,'$.replyParent'),json_extract(payload,'$.thread')) AS replyParent
            FROM thread_followups WHERE botKey=? AND transport='irc' AND json_extract(payload,'$.thread')=? LIMIT 1`,
         )

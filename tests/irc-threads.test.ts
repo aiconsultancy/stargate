@@ -225,7 +225,7 @@ test("IRC thread: a reply to our threaded answer flattens to its known root", as
   ).toBe(true);
 });
 
-test("IRC thread: main-room answers stay untagged and reply tags grant no identity", async () => {
+test("IRC thread: a mid-message mention starts a thread and tags grant no identity", async () => {
   const { fake, prompts, delivered } = await setup();
   fake.say(
     { nick: "mallory", account: "mallory" },
@@ -236,19 +236,20 @@ test("IRC thread: main-room answers stay untagged and reply tags grant no identi
   fake.say({ nick: "ghost" }, "#galactica", "galactica: unauthenticated", {
     "+draft/reply": "forged-root",
   });
-  fake.say(
+
+  const request = fake.say(
     { nick: "jack", account: "jack" },
     "#galactica",
-    "galactica: room status",
+    "Could you check the room status, @galactica?",
   );
+
   await delivered();
   expect(prompts).toHaveLength(1);
-  expect(prompts[0]?.text).toBe("room status");
   expect(
-    lineOf(fake.received("galactica"), "PRIVMSG").every(
-      (message) => !message.tags.has("+draft/reply"),
+    lineOf(fake.received("galactica"), "PRIVMSG").map((message) =>
+      message.tags.get("+draft/reply"),
     ),
-  ).toBe(true);
+  ).toEqual([request, request, request]);
 });
 
 test("IRC thread: no message-tags capability keeps plain authenticated replies", async () => {

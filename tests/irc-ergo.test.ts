@@ -418,7 +418,7 @@ test.skipIf(!available)(
     );
 
     // Ergo 2.19.1 sends subscriber updates as 761/766, not METADATA messages.
-    jack.send("CAP REQ :batch draft/metadata-2");
+    jack.send("CAP REQ :batch draft/metadata-2 echo-message");
     await jack.wait(
       (m) =>
         m.command === "CAP" &&
@@ -444,6 +444,19 @@ test.skipIf(!available)(
     await captain.client.invite("observer", "#galactica");
 
     jack.send("PRIVMSG #galactica :galactica: status?");
+
+    const isRequest = (m: IrcMessage) =>
+      m.command === "PRIVMSG" &&
+      m.params[1] === "galactica: status?" &&
+      m.tags.has("msgid");
+
+    await jack.wait(isRequest, "request echo");
+    const request = jack.lines.find(isRequest)?.tags.get("msgid");
+
+    if (!request) {
+      throw new Error("request echo has no server message ID");
+    }
+
     await jack.wait(
       (m) =>
         m.command === "761" &&
@@ -477,9 +490,9 @@ test.skipIf(!available)(
 
     expect(reply[0]?.params[1]).toBe("Status");
     expect(reply[0]?.tags.get("account")).toBe("galactica");
-    expect(reply.every((message) => !message.tags.has("+draft/reply"))).toBe(
-      true,
-    );
+    expect(
+      reply.every((message) => message.tags.get("+draft/reply") === request),
+    ).toBe(true);
     expect(reply[1]?.params[1]?.startsWith("All green. Details follow.")).toBe(
       true,
     );
@@ -582,12 +595,12 @@ test.skipIf(!available)(
       ).toBe(true);
     }
 
-    // A real earlier message is the root; every relayed answer line stays
-    // In that one-level thread, not in a thread under the new request.
-    const root = reply[0]?.tags.get("msgid");
+    // Reply to the first answer.
+    // The original request remains the thread root for each relayed line.
+    const priorAnswer = reply[0]?.tags.get("msgid");
 
-    if (!root) {
-      throw new Error("captain root has no server msgid");
+    if (!priorAnswer) {
+      throw new Error("captain answer has no server msgid");
     }
 
     // The delivery ACK is on another socket. A round trip on Jack's socket
@@ -602,7 +615,7 @@ test.skipIf(!available)(
     const offset = jack.lines.length;
     jack.send(
       formatMessage("PRIVMSG", ["#galactica", "galactica: threaded status?"], {
-        "+draft/reply": root,
+        "+draft/reply": priorAnswer,
       }),
     );
     await until(
@@ -621,16 +634,16 @@ test.skipIf(!available)(
 
     expect(threaded.length).toBeGreaterThanOrEqual(2);
     expect(threaded.map((message) => message.tags.get("+draft/reply"))).toEqual(
-      threaded.map(() => root),
+      threaded.map(() => request),
     );
-    expect(contexts[1]?.source.replyParent).toBe(root);
+    expect(contexts[1]?.source.replyParent).toBe(request);
     const answerID = threaded[0]?.tags.get("msgid");
 
     if (!answerID) {
       throw new Error("thread answer has no server msgid");
     }
 
-    expect(captain.client.anchor(answerID)).toBe(root);
+    expect(captain.client.anchor(answerID)).toBe(request);
     expect(captain.client.requestAnchor(answerID)).toBe(
       contexts[1]?.source.message,
     );
