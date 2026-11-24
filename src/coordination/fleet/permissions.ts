@@ -46,9 +46,7 @@ function matches(value: string, rule: Pattern) {
     : value.startsWith(rule.text);
 }
 
-function potentiallyFleet(value: string) {
-  const supported = pattern(value);
-
+function potentiallyFleet(supported: Pattern | undefined) {
   if (supported) return actions.some((action) => matches(action, supported));
 
   // An unsupported expression can contain alternatives or negation: its
@@ -62,9 +60,11 @@ export function validateFleetPermissions(
   rules: readonly FleetPermissionRule[],
 ): void {
   for (const rule of rules) {
-    if (!potentiallyFleet(rule.action)) continue;
+    const action = pattern(rule.action);
 
-    if (!pattern(rule.action) || !pattern(rule.resource))
+    if (!potentiallyFleet(action)) continue;
+
+    if (!action || !pattern(rule.resource))
       throw new FleetError(
         "Fleet IPC permissions support only exact literals, '*' or a literal prefix followed by '*'.",
       );
@@ -120,8 +120,9 @@ export function fleetRequestAllowed(
     let allowed = false;
 
     for (const rule of rules) {
-      if (!potentiallyFleet(rule.action)) continue;
       const actionPattern = pattern(rule.action);
+
+      if (!potentiallyFleet(actionPattern)) continue;
       const resourcePattern = pattern(rule.resource);
 
       if (
