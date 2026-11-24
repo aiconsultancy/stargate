@@ -31,7 +31,7 @@ import {
 } from "../backend";
 import type { opencodeBackendSchema } from "./config";
 import { redactCredentials, secret } from "../../lib/credentials";
-import { isNativeInstructionContext } from "../../coordination/crew/instruction-context";
+import { isNativeInstructionContext } from "./instruction-context";
 import { crewMessageMetadataKey } from "../../coordination/crew/message-protocol";
 import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
 import {

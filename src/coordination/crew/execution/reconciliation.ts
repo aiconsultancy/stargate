@@ -14,7 +14,7 @@ import {
   settingsStartsWith,
   settingsStruct,
 } from "../../../config/settings-schema";
-import { isNativeInstructionContext } from "../instruction-context";
+import { isNativeInstructionContext } from "../../../backends/opencode/instruction-context";
 import {
   crewMessageMetadataKey,
   isTaskResume,
