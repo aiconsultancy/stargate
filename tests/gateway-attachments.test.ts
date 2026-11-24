@@ -19,7 +19,9 @@ import { bot, event, identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const png = Uint8Array.from(
@@ -92,7 +94,9 @@ async function fixture(pinned = false) {
     async completeUpload(channel, thread, id, title) {
       uploads.push({ channel, thread, id, title });
 
-      if (failComplete) throw new Error("Lost completion response");
+      if (failComplete) {
+        throw new Error("Lost completion response");
+      }
     },
     async sharedIn() {
       return isShared;
@@ -156,8 +160,9 @@ async function fixture(pinned = false) {
   const signal = new AbortController().signal;
 
   const drain = async () => {
-    for (const job of store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20))
+    for (const job of store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20)) {
       await gateway.process(job, signal);
+    }
   };
 
   return {
@@ -267,7 +272,9 @@ for (const shared of [true, false]) {
       shared ? "shared" : "unavailable",
     );
 
-    if (!shared) expect(f.posts.at(-1)?.text).toContain("unconfirmed");
+    if (!shared) {
+      expect(f.posts.at(-1)?.text).toContain("unconfirmed");
+    }
   });
 }
 
@@ -317,8 +324,10 @@ test("attachment eval: restart reconciles persisted upload without a second prom
 
   cleanup.push(() => gateway.close());
 
-  for (const job of reopened.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20))
+  for (const job of reopened.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20)) {
     await gateway.process(job, f.signal);
+  }
+
   expect(reopened.attachmentRecords.attachments(1)[0]?.phase).toBe("shared");
   expect(f.uploads).toHaveLength(1);
   expect(f.prompts).toHaveLength(1);
@@ -345,10 +354,12 @@ test("attachment eval: real OpenCode parser routes late private proof, not publi
     fetch(request) {
       const url = new URL(request.url);
 
-      if (!url.pathname.endsWith("/message"))
+      if (!url.pathname.endsWith("/message")) {
         return Response.json({
           data: { id: "ses_captain", time: { busy: 0, idle: time + 1 } },
         });
+      }
+
       const start = Number(url.searchParams.get("cursor") ?? 0);
 
       const end =
@@ -369,7 +380,10 @@ test("attachment eval: real OpenCode parser routes late private proof, not publi
     directory: f.directory,
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
+
   const native = new OpenCodeBackend(config);
   f.backend.transcript = (...args) => native.transcript(...args);
   f.backend.prompt = async (_session, text, _signal, _onText, onInput) => {
@@ -440,7 +454,10 @@ test("attachment delivery rechecks a live deny after upload and before sharing",
   const f = await fixture();
   const put = f.transport.putUpload;
 
-  if (!put) throw new Error("Missing upload fixture");
+  if (!put) {
+    throw new Error("Missing upload fixture");
+  }
+
   f.transport.putUpload = async (...args) => {
     await put(...args);
     f.gateway.reconfigure({

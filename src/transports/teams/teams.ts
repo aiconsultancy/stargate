@@ -125,18 +125,29 @@ export function teamsMessageBytes(text: string): number {
 // Following JSON.stringify: quotes, backslashes and control characters are
 // Escaped, as are lone surrogates (six ASCII characters each).
 function jsonCost(point: number): [number, number] {
-  if (point === 0x22 || point === 0x5c) return [2, 4];
+  if (point === 0x22 || point === 0x5c) {
+    return [2, 4];
+  }
 
-  if (point < 0x20)
+  if (point < 0x20) {
     return [0x08, 0x09, 0x0a, 0x0c, 0x0d].includes(point) ? [2, 4] : [6, 12];
+  }
 
-  if (point >= 0xd8_00 && point <= 0xdf_ff) return [6, 12];
+  if (point >= 0xd8_00 && point <= 0xdf_ff) {
+    return [6, 12];
+  }
 
-  if (point < 0x80) return [1, 2];
+  if (point < 0x80) {
+    return [1, 2];
+  }
 
-  if (point < 0x8_00) return [2, 2];
+  if (point < 0x8_00) {
+    return [2, 2];
+  }
 
-  if (point < 0x1_00_00) return [3, 2];
+  if (point < 0x1_00_00) {
+    return [3, 2];
+  }
 
   return [4, 4];
 }
@@ -156,8 +167,10 @@ function fittingEnd(text: string, limit: number, maxBytes: number): number {
     if (
       end + width > limit ||
       Math.max(utf8 + bytes8, utf16 + bytes16) > maxBytes
-    )
+    ) {
       break;
+    }
+
     utf8 += bytes8;
     utf16 += bytes16;
     end += width;
@@ -180,7 +193,9 @@ function boundariesUpTo(
   let last = 0;
 
   for (const { index } of graphemes.segment(text)) {
-    if (index > end) break;
+    if (index > end) {
+      break;
+    }
 
     if (index > 0) {
       last = index;
@@ -211,9 +226,13 @@ function lastCut(
     at > 0;
     at = text.lastIndexOf(needle, at - 1)
   ) {
-    if (boundaries.has(at)) return at;
+    if (boundaries.has(at)) {
+      return at;
+    }
 
-    if (text[at - 1] === "\r" && boundaries.has(at - 1)) return at - 1;
+    if (text[at - 1] === "\r" && boundaries.has(at - 1)) {
+      return at - 1;
+    }
   }
 
   return -1;
@@ -243,20 +262,29 @@ export function chunkText(
     const { boundaries, last } = boundariesUpTo(rest, end);
     let cut = lastCut(rest, "\n\n", end, boundaries);
 
-    if (cut < end / 2) cut = lastCut(rest, "\n", end, boundaries);
+    if (cut < end / 2) {
+      cut = lastCut(rest, "\n", end, boundaries);
+    }
 
-    if (cut < end / 2) cut = lastCut(rest, " ", end, boundaries);
+    if (cut < end / 2) {
+      cut = lastCut(rest, " ", end, boundaries);
+    }
 
     // Otherwise the last grapheme boundary; within a single grapheme too long for
     // One message, the code point boundary at end.
-    if (cut < end / 2) cut = last || end;
+    if (cut < end / 2) {
+      cut = last || end;
+    }
+
     // Keep both slices exactly: trimming would delete what sits at the split,
     // Such as the indentation of the next line.
     chunks.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }
 
-  if (rest) chunks.push(rest);
+  if (rest) {
+    chunks.push(rest);
+  }
 
   return chunks;
 }

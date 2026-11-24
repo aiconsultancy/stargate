@@ -98,7 +98,10 @@ function fixture(
   gateway.accept(event());
   const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-  if (!job) throw new Error("No fixture job");
+  if (!job) {
+    throw new Error("No fixture job");
+  }
+
   const pending = Promise.withResolvers<void>();
   const waiting = Promise.withResolvers<void>();
 
@@ -114,7 +117,10 @@ function fixture(
       wait: async (_ms, stop) => {
         waiting.resolve();
 
-        if (stop.aborted) throw new Error("aborted");
+        if (stop.aborted) {
+          throw new Error("aborted");
+        }
+
         await Promise.race([
           pending.promise,
           new Promise<never>((_, reject) => {
@@ -243,7 +249,10 @@ test("restart and terminal late refresh reuse persisted capture and Slack timest
     const published = Promise.withResolvers<void>();
     const publish = f.slack.activity;
 
-    if (!publish) throw new Error("Missing activity writer");
+    if (!publish) {
+      throw new Error("Missing activity writer");
+    }
+
     f.slack.activity = async (...args) => {
       const ts = await publish(...args);
       published.resolve();
@@ -293,7 +302,9 @@ test("missing saved capture stops retries without opening a new capture", async 
     f.store.activityRecords.saveActivity = (id, progress) => {
       save(id, progress);
 
-      if (progress.done) saved.resolve();
+      if (progress.done) {
+        saved.resolve();
+      }
     };
 
     f.backend.resumeActivity = () => watch;
@@ -509,7 +520,10 @@ test("captain answer delivery does not wait for reporting or replay on retry", a
     backend,
     {
       async post(_channel, _thread, text) {
-        if (posts++ === 0) throw new Error("Temporary Slack failure");
+        if (posts++ === 0) {
+          throw new Error("Temporary Slack failure");
+        }
+
         answers.push(text);
       },
       async activity() {
@@ -523,11 +537,17 @@ test("captain answer delivery does not wait for reporting or replay on retry", a
     gateway.accept(event());
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("No job");
+    if (!job) {
+      throw new Error("No job");
+    }
+
     await gateway.process(job, signal());
     const retry = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!retry) throw new Error("No pending answer delivery");
+    if (!retry) {
+      throw new Error("No pending answer delivery");
+    }
+
     await gateway.process(retry, signal());
     expect(answers).toEqual(["Final answer"]);
     expect(captures).toBe(1);
@@ -579,7 +599,10 @@ test("reporting transport failure cannot turn a successful answer into an error"
     gateway.accept(event());
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("No job");
+    if (!job) {
+      throw new Error("No job");
+    }
+
     await gateway.process(job, signal());
     expect(answers).toEqual(["Still answered"]);
   } finally {
@@ -664,7 +687,9 @@ test("a report read failure terminalizes the visible activity box", async () => 
 
   const f = fixture({
     async read() {
-      if (reads++) throw new Error("PRIVATE transport error");
+      if (reads++) {
+        throw new Error("PRIVATE transport error");
+      }
 
       return snapshot();
     },
@@ -732,7 +757,9 @@ for (const outcome of ["complete", "failure"] as const) {
       async read() {
         calls.push("read");
 
-        if (outcome === "failure") throw new Error("Read failed");
+        if (outcome === "failure") {
+          throw new Error("Read failed");
+        }
 
         return snapshot(2, "complete");
       },
@@ -802,7 +829,9 @@ test("retained handle stays inert while failed activity cleanup is still drainin
     async read(signal) {
       readSignal = signal;
 
-      if (!reads++) return snapshot();
+      if (!reads++) {
+        return snapshot();
+      }
 
       return read.promise;
     },

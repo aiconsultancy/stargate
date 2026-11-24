@@ -38,8 +38,9 @@ const registration = (
 const cleanup: string[] = [];
 
 afterEach(async () => {
-  for (const dir of cleanup.splice(0))
+  for (const dir of cleanup.splice(0)) {
     await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("crew auth accepts mixed and multiple EXTERNAL members without password collisions", () => {
@@ -67,7 +68,7 @@ test("crew auth refuses missing, both, non-TLS and duplicate PLAIN references", 
   for (const auth of [
     {},
     { passwordEnv: "CHIEF", clientPemFile: "/private/chief.pem" },
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(ircSchema)(
@@ -75,6 +76,8 @@ test("crew auth refuses missing, both, non-TLS and duplicate PLAIN references", 
         ),
       ),
     ).toBe(false);
+  }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(ircSchema)(
@@ -122,7 +125,10 @@ test("crew PEM references are restart-only without changing session routing", ()
   const after = structuredClone(before);
   const chief = after.irc[0]?.crew[0];
 
-  if (!chief) throw new Error("missing test member");
+  if (!chief) {
+    throw new Error("missing test member");
+  }
+
   chief.clientPemFile = "/private/rotated.pem";
   expect(
     restartRequired(

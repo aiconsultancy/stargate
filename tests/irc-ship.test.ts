@@ -20,7 +20,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const passwords = {
@@ -139,7 +141,9 @@ async function setup(
   const workers = ship.registrations.map((registration, index) => {
     const selected = [backends.captain, backends.chief, backends.tyrol][index];
 
-    if (!selected) throw new Error("missing backend");
+    if (!selected) {
+      throw new Error("missing backend");
+    }
 
     return new Gateway(
       registration.settings,
@@ -164,7 +168,10 @@ async function setup(
   });
   const [captain, chief, tyrol] = ship.registrations;
 
-  if (!captain || !chief || !tyrol) throw new Error("missing registration");
+  if (!captain || !chief || !tyrol) {
+    throw new Error("missing registration");
+  }
+
   await until(
     () =>
       captain.client.inChannel("#galactica") &&
@@ -229,8 +236,10 @@ test("irc ship: a mention reaches the pinned captain and replies as plain IRC li
   expect(lines.every((line) => !line.tags.has("+draft/reply"))).toBe(true);
   expect(lines[1]?.params[1]?.startsWith("Status: all systems")).toBe(true);
 
-  for (const line of fake.received("galactica"))
+  for (const line of fake.received("galactica")) {
     expect(utf8Bytes(line) + 2).toBeLessThanOrEqual(512);
+  }
+
   // Messages without an account tag never reach the agent.
   fake.say({ nick: "ghost" }, "#galactica", "galactica: hello?");
   await delay(200);
@@ -462,8 +471,10 @@ test("irc ship: an all-call reaches the captain and every crew member", async ()
     "[Admitted by text mention: everyone]\n\nEveryone, report status",
   );
 
-  for (const crew of [backends.chief, backends.tyrol])
+  for (const crew of [backends.chief, backends.tyrol]) {
     expect(crew.prompts[0]?.text).toContain("This is an all-call");
+  }
+
   // Untagged traffic that is not an all-call reaches nobody.
   fake.say(
     { nick: "jack", account: "jack" },

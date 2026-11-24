@@ -25,7 +25,9 @@ async function serve(overrides: Partial<TeamsListenerOptions> = {}) {
 
   const server = createTeamsListener({
     verifyToken: async (authorization) => {
-      if (authorization !== "Bearer good") throw new AuthError("bad token");
+      if (authorization !== "Bearer good") {
+        throw new AuthError("bad token");
+      }
 
       return token;
     },
@@ -56,8 +58,10 @@ function post(
 ): Promise<{ status: number; closed: boolean; body: string }> {
   const address = server.address();
 
-  if (!address || typeof address === "string")
+  if (!address || typeof address === "string") {
     throw new Error("Missing local listener");
+  }
+
   const body = options.body ?? "{}";
 
   return new Promise((resolve, reject) => {

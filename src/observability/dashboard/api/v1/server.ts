@@ -53,7 +53,10 @@ function authentication(token: string) {
       authorization ?? "",
     )?.[1];
 
-    if (value && timingSafeEqual(secret, Buffer.from(value))) return 200;
+    if (value && timingSafeEqual(secret, Buffer.from(value))) {
+      return 200;
+    }
+
     const now = performance.now();
 
     if (now >= expiresAt) {
@@ -105,10 +108,12 @@ export async function startApiV1Server(options: Options) {
       ? { unix: join(dataDirectory, "api.sock") }
       : parseApiListen(config.listen);
 
-  if (!listen)
+  if (!listen) {
     throw new Error(
       "Fleet API requires a private-network bind address and port",
     );
+  }
+
   options.signal.throwIfAborted();
   const allowsPeer = networkMatcher(config.allowedNetworks ?? privateNetworks);
   const allowsOrigin = originMatcher(config.corsOrigins ?? defaultCorsOrigins);
@@ -214,12 +219,18 @@ export async function startApiV1Server(options: Options) {
 
     // Reserve a bounded number of retries while stuck reads drain.
     for (const [settled, abandonAt] of httpReads) {
-      if (abandonedReads.size >= maxFleetReads || abandonAt > now) break;
+      if (abandonedReads.size >= maxFleetReads || abandonAt > now) {
+        break;
+      }
+
       httpReads.delete(settled);
       abandonedReads.add(settled);
     }
 
-    if (httpReads.size >= maxFleetReads) return;
+    if (httpReads.size >= maxFleetReads) {
+      return;
+    }
+
     const { result, settled } = readWithDeadline(signal, undefined, read);
     httpReads.set(settled, now + 3 * httpReadMs);
     void settled.then(() => {
@@ -246,17 +257,25 @@ export async function startApiV1Server(options: Options) {
 
         const address = peerAddress(remoteAddress);
 
-        if (config.listen !== "unix" && (!address || !allowsPeer(address)))
+        if (config.listen !== "unix" && (!address || !allowsPeer(address))) {
           return empty(403);
+        }
+
         const requestedOrigin = request.headers.get("Origin");
         const origin = allowsOrigin(requestedOrigin) ? requestedOrigin : null;
         headers.set("Vary", "Origin");
 
-        if (origin) headers.set("Access-Control-Allow-Origin", origin);
+        if (origin) {
+          headers.set("Access-Control-Allow-Origin", origin);
+        }
+
         const method = request.method;
 
         if (method === "OPTIONS") {
-          if (!origin) return empty(403);
+          if (!origin) {
+            return empty(403);
+          }
+
           headers.set("Access-Control-Allow-Methods", "GET");
           headers.set(
             "Access-Control-Allow-Headers",
@@ -279,7 +298,9 @@ export async function startApiV1Server(options: Options) {
           headers,
         );
 
-        if (auth !== 200) return empty(auth);
+        if (auth !== 200) {
+          return empty(auth);
+        }
 
         const pathname = new URL(request.url).pathname;
 
@@ -295,7 +316,10 @@ export async function startApiV1Server(options: Options) {
 
             const stream = events.open(signal);
 
-            if (!stream) return empty(503);
+            if (!stream) {
+              return empty(503);
+            }
+
             headers.set("Content-Type", "text/event-stream");
 
             return new Response(stream, { headers });
@@ -312,7 +336,9 @@ export async function startApiV1Server(options: Options) {
           ]);
 
           if (pathname === "/api/v1/fleet") {
-            if (method === "HEAD") return empty(200);
+            if (method === "HEAD") {
+              return empty(200);
+            }
 
             // Leave room for checkout projection and a response after crew waits.
             const crewDeadline = AbortSignal.timeout(
@@ -329,13 +355,17 @@ export async function startApiV1Server(options: Options) {
               return completeFleet(sample, reading);
             });
 
-            if (!overview) return empty(503);
+            if (!overview) {
+              return empty(503);
+            }
 
             const result = await overview.catch((error: unknown) => {
               signal.throwIfAborted();
 
-              if (fleet && read.aborted && error === read.reason)
+              if (fleet && read.aborted && error === read.reason) {
                 return fallbackFleet(fleet);
+              }
+
               throw error;
             });
 
@@ -350,10 +380,15 @@ export async function startApiV1Server(options: Options) {
 
           const id = match?.[1] && routeId(match[1]);
 
-          if (!id) return empty(404);
+          if (!id) {
+            return empty(404);
+          }
+
           const member = match?.[2] && routeId(match[2]);
 
-          if (match?.[2] && !member) return empty(404);
+          if (match?.[2] && !member) {
+            return empty(404);
+          }
 
           const detail = startHttpRead(read, async (reading) =>
             member
@@ -361,11 +396,16 @@ export async function startApiV1Server(options: Options) {
               : source.ship(id, reading),
           );
 
-          if (!detail) return empty(503);
+          if (!detail) {
+            return empty(503);
+          }
+
           const result = await detail;
           read.throwIfAborted();
 
-          if (!result) return empty(404);
+          if (!result) {
+            return empty(404);
+          }
 
           return method === "HEAD"
             ? empty(200)
@@ -388,7 +428,10 @@ export async function startApiV1Server(options: Options) {
   let stopping: Promise<void> | undefined;
 
   const stop = () => {
-    if (stopping !== undefined) return stopping;
+    if (stopping !== undefined) {
+      return stopping;
+    }
+
     options.signal.removeEventListener("abort", onAbort);
     lifetime.abort();
     host.stop();
@@ -404,7 +447,9 @@ export async function startApiV1Server(options: Options) {
 
   options.signal.addEventListener("abort", onAbort, { once: true });
 
-  if (options.signal.aborted) await stop();
+  if (options.signal.aborted) {
+    await stop();
+  }
 
   return {
     url: server.url,

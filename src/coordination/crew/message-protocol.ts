@@ -7,7 +7,9 @@ export const crewMessageMetadataKey = "pogoCrew";
 export function taskEnvelopePayload(text: string | undefined) {
   const line = text?.split("\n", 1)[0];
 
-  if (line === undefined) return;
+  if (line === undefined) {
+    return;
+  }
 
   const prefix = ["Stargate task envelope: ", "Pogo task envelope: "].find(
     (prefix) => line.startsWith(prefix),

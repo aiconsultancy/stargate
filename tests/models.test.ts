@@ -22,20 +22,27 @@ function fixture() {
       team: defaultTeam,
     },
     async captain(caller) {
-      if (caller.agent !== "bowser") throw new Error("not captain");
+      if (caller.agent !== "bowser") {
+        throw new Error("not captain");
+      }
     },
     async authorize(caller) {
-      if (caller.agent === "bowser" && caller.sessionID === "ses_captain")
+      if (caller.agent === "bowser" && caller.sessionID === "ses_captain") {
         return;
+      }
 
-      if (caller.agent === "mario" && caller.sessionID === "ses_mario") return;
+      if (caller.agent === "mario" && caller.sessionID === "ses_mario") {
+        return;
+      }
+
       throw new Error("not configured caller");
     },
     async inspectWorkerModel(crew, caller) {
       await this.captain(caller);
 
-      if (crew !== "mario")
+      if (crew !== "mario") {
         throw new CrewError("Unknown configured crew member.");
+      }
 
       return {
         crewID: crew,
@@ -47,8 +54,10 @@ function fixture() {
     async withWorkerControl(crew, caller, operation, options) {
       await this.captain(caller);
 
-      if (crew !== "mario")
+      if (crew !== "mario") {
         throw new CrewError("Unknown configured crew member.");
+      }
+
       controls.push(options);
       calls.push("lock");
 
@@ -271,10 +280,12 @@ test("model operations reject missing variants, disabled or unapproved routes", 
     { providerID: "openai-proxy", id: "disabled" },
     { providerID: "openai-proxy", id: "missing" },
     { providerID: "openai-proxy", id: "sol", variant: "invented" },
-  ])
+  ]) {
     await expect(
       f.tool.run({ op: "switch", target: "captain", ...model }, f.caller),
     ).rejects.toThrow();
+  }
+
   expect(f.calls).toEqual([]);
   expect(await f.tool.run({ op: "list" }, f.caller)).toMatchObject({
     models: [{ providerID: "openai-proxy", id: "sol", variants: ["high"] }],
@@ -351,10 +362,12 @@ test("inspect is read-only and effort refuses unknown targets and foreign caller
   ).toMatchObject({ sessionID: "ses_mario", model: { id: "old" } });
   expect(f.calls).toEqual([]);
 
-  for (const target of ["captain", "foreign"])
+  for (const target of ["captain", "foreign"]) {
     await expect(
       f.tool.run({ op: "effort", target, variant: "high" }, f.caller),
     ).rejects.toThrow("Unknown configured crew member");
+  }
+
   await expect(
     f.tool.run(
       { op: "effort", target: "mario", variant: "high" },

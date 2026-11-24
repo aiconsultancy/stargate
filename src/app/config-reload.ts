@@ -53,9 +53,15 @@ const child = (path: string, key: string) => (path ? `${path}.${key}` : key);
 /** Paths of differing leaves; arrays and type changes count as one leaf. */
 function diff(current: unknown, next: unknown, path: string, out: string[]) {
   if (isRecord(current) && isRecord(next)) {
-    for (const key of new Set([...Object.keys(current), ...Object.keys(next)]))
+    for (const key of new Set([
+      ...Object.keys(current),
+      ...Object.keys(next),
+    ])) {
       diff(current[key], next[key], child(path, key), out);
-  } else if (!isDeepStrictEqual(current, next)) out.push(path);
+    }
+  } else if (!isDeepStrictEqual(current, next)) {
+    out.push(path);
+  }
 }
 
 function fields(
@@ -71,9 +77,11 @@ function fields(
     return;
   }
 
-  for (const key of new Set([...Object.keys(current), ...Object.keys(next)]))
-    if (!live.includes(key))
+  for (const key of new Set([...Object.keys(current), ...Object.keys(next)])) {
+    if (!live.includes(key)) {
       diff(current[key], next[key], child(path, key), out);
+    }
+  }
 }
 
 /** Matches entries by id, so order is ignored. */
@@ -91,13 +99,20 @@ function byId<T extends { readonly id: string }>(
   for (const entry of current) {
     const other = after.get(entry.id);
 
-    if (other) compare(`${path}[${entry.id}]`, entry, other);
-    else if (membership === "restart") out.push(`${path}[${entry.id}]`);
+    if (other) {
+      compare(`${path}[${entry.id}]`, entry, other);
+    } else if (membership === "restart") {
+      out.push(`${path}[${entry.id}]`);
+    }
   }
 
-  if (membership === "restart")
-    for (const id of after.keys())
-      if (!before.has(id)) out.push(`${path}[${id}]`);
+  if (membership === "restart") {
+    for (const id of after.keys()) {
+      if (!before.has(id)) {
+        out.push(`${path}[${id}]`);
+      }
+    }
+  }
 }
 
 function compareIrcRegistration(
@@ -155,9 +170,11 @@ export function restartRequired(
     out,
   );
 
-  for (const [name, value] of Object.entries(current.environment))
-    if (value !== undefined && next.environment[name] !== value)
+  for (const [name, value] of Object.entries(current.environment)) {
+    if (value !== undefined && next.environment[name] !== value) {
       out.push(`environment.${name}`);
+    }
+  }
 
   return out.toSorted();
 }
@@ -197,14 +214,17 @@ export type ReloadResult =
 function compareCandidates(current: ReloadCandidate, next: ReloadCandidate) {
   const paths = restartRequired(current, next);
 
-  if (paths.length > 0)
+  if (paths.length > 0) {
     return {
       status: "restart-required",
       message: `Configuration reload refused: restart required for ${paths.join(", ")}. ${unchangedNote}`,
       paths,
     } as const;
+  }
 
-  if (isDeepStrictEqual(current, next)) return "unchanged" as const;
+  if (isDeepStrictEqual(current, next)) {
+    return "unchanged" as const;
+  }
 
   return;
 }
@@ -237,7 +257,9 @@ export class ConfigReload {
     this.#apply = apply;
 
     return () => {
-      if (this.#apply === apply) this.#apply = undefined;
+      if (this.#apply === apply) {
+        this.#apply = undefined;
+      }
     };
   }
 
@@ -257,7 +279,10 @@ export class ConfigReload {
 
   async #reload(): Promise<ReloadResult> {
     try {
-      if (this.#closed) return this.#report("unavailable");
+      if (this.#closed) {
+        return this.#report("unavailable");
+      }
+
       let next: ReloadCandidate;
 
       try {
@@ -268,10 +293,15 @@ export class ConfigReload {
 
       const apply = this.#apply;
 
-      if (this.#closed || !apply) return this.#report("unavailable");
+      if (this.#closed || !apply) {
+        return this.#report("unavailable");
+      }
+
       const comparison = compareCandidates(this.#current, next);
 
-      if (comparison === "unchanged") return this.#report(comparison);
+      if (comparison === "unchanged") {
+        return this.#report(comparison);
+      }
 
       if (comparison) {
         this.log.warn({ paths: comparison.paths }, comparison.message);
@@ -298,8 +328,11 @@ export class ConfigReload {
   #report(status: keyof typeof messages): ReloadResult {
     const message = messages[status];
 
-    if (status === "applied" || status === "unchanged") this.log.info(message);
-    else this.log.warn(message);
+    if (status === "applied" || status === "unchanged") {
+      this.log.info(message);
+    } else {
+      this.log.warn(message);
+    }
 
     return { status, message };
   }

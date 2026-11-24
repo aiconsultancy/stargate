@@ -13,7 +13,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const env = {
@@ -123,7 +125,9 @@ async function setup(members: CrewName[], { start = true } = {}) {
 
   const [captain] = ship.registrations;
 
-  if (!captain) throw new Error("missing captain");
+  if (!captain) {
+    throw new Error("missing captain");
+  }
 
   return {
     fake,
@@ -163,7 +167,9 @@ function joined(ship: IrcShip) {
 function member(ship: IrcShip, index: number) {
   const registration = ship.registrations[index];
 
-  if (!registration) throw new Error(`missing registration ${index}`);
+  if (!registration) {
+    throw new Error(`missing registration ${index}`);
+  }
 
   return registration;
 }
@@ -257,7 +263,10 @@ test("irc reload: added crew connect at commit, join on the captain's invite and
   expect(reload.removed).toEqual([]);
   const [tyrol] = reload.added;
 
-  if (!tyrol) throw new Error("missing added crew");
+  if (!tyrol) {
+    throw new Error("missing added crew");
+  }
+
   expect(tyrol.id).toBe("galactica-irc-tyrol");
   // Prepare connects nothing and changes nothing.
   await delay(100);
@@ -379,7 +388,10 @@ test("irc reload: removing a busy crew member is refused before any change", asy
   // Once the work has finished, the same plan commits.
   const job = store.queuedJob(tyrol.key, `#galactica:${work}`);
 
-  if (!job) throw new Error("missing job");
+  if (!job) {
+    throw new Error("missing job");
+  }
+
   store.running(job.id);
   store.respond(job.id, []);
   store.finish(job.id);

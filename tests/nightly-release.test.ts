@@ -84,7 +84,9 @@ const storage = Bun.serve({
   fetch(request): Response {
     state.storageAuthorization.push(request.headers.get("authorization"));
 
-    if (new URL(request.url).pathname === "/list") return Response.json(list());
+    if (new URL(request.url).pathname === "/list") {
+      return Response.json(list());
+    }
 
     return new Response(new Uint8Array(state.archive ?? archive));
   },
@@ -115,23 +117,30 @@ const api = Bun.serve({
     const repo = repositoryPath;
 
     if (path === `${repo}/releases`)
-      // An API redirect to another host must not carry the token (L1).
+    // An API redirect to another host must not carry the token (L1).
+    {
       return state.redirectList
         ? Response.redirect(`http://127.0.0.1:${storage.port}/list`, 302)
         : Response.json(list());
+    }
 
     if (path === `${repo}/releases/assets/1`)
-      // Signed storage URL on another origin: credentials must not follow.
+    // Signed storage URL on another origin: credentials must not follow.
+    {
       return Response.redirect(`http://127.0.0.1:${storage.port}/blob`, 302);
+    }
 
-    if (path === `${repo}/releases/assets/2`)
+    if (path === `${repo}/releases/assets/2`) {
       return new Response(state.checksum);
+    }
 
-    if (path === `${repo}/git/ref/tags/v0.2.0`)
+    if (path === `${repo}/git/ref/tags/v0.2.0`) {
       return Response.json({ object: { type: "commit", sha: commit } });
+    }
 
-    if (path === `${repo}/compare/${commit}...main`)
+    if (path === `${repo}/compare/${commit}...main`) {
       return Response.json({ status: state.compare });
+    }
 
     return new Response("missing", { status: 404 });
   },
@@ -203,7 +212,9 @@ function config(root: string, withCheckout = true): StargateReleaseConfig {
     stargate: { root },
   }).stargate;
 
-  if (!release) throw new Error("missing release configuration");
+  if (!release) {
+    throw new Error("missing release configuration");
+  }
 
   return {
     root,
@@ -285,7 +296,10 @@ async function newRoot(name: string) {
 async function stage(root: string, withCheckout = true, repository?: string) {
   const settings = config(root, withCheckout);
 
-  if (repository) settings.repository = repository;
+  if (repository) {
+    settings.repository = repository;
+  }
+
   const headers = githubHeaders("secret-token");
 
   const release = await newerRelease(
@@ -295,7 +309,9 @@ async function stage(root: string, withCheckout = true, repository?: string) {
     Date.parse("2026-11-12T00:00:00Z"),
   );
 
-  if (!release) throw new Error("no release");
+  if (!release) {
+    throw new Error("no release");
+  }
 
   return stageRelease({
     config: settings,
@@ -321,7 +337,9 @@ describe("Stargate release update", () => {
       Date.parse("2026-11-12T00:00:00Z"),
     );
 
-    if (!release) throw new Error("Fixture release missing");
+    if (!release) {
+      throw new Error("Fixture release missing");
+    }
 
     const input = {
       config: settings,
@@ -491,7 +509,10 @@ describe("Stargate release update", () => {
     const base = { ...config(root), checkout: other };
     const release = await newerRelease(base, headers, "0.1.0", Date.now());
 
-    if (!release) throw new Error("no release");
+    if (!release) {
+      throw new Error("no release");
+    }
+
     await expect(
       stageRelease({
         config: base,
@@ -590,7 +611,10 @@ describe("Stargate release update", () => {
       Date.now(),
     );
 
-    if (!release) throw new Error("no release");
+    if (!release) {
+      throw new Error("no release");
+    }
+
     await expect(
       stageRelease({
         config: { ...config(root, false), requireTreeCheck: true },
@@ -779,10 +803,11 @@ describe("Stargate release update", () => {
         "/repos/aiconsultancy/stargate/releases/tags/v0.2.0",
       ]);
 
-      for (const version of ["0.3.0", "0.4.0", "0.5.0", "0.9.0", "v0.2.0"])
+      for (const version of ["0.3.0", "0.4.0", "0.5.0", "0.9.0", "v0.2.0"]) {
         await expect(namedRelease(settings, {}, version)).rejects.toMatchObject(
           { reason: "not-found" },
         );
+      }
     } finally {
       await server.stop(true);
     }

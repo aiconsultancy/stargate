@@ -68,13 +68,16 @@ async function fixture(root = fixtureRoot()) {
     async get({ sessionID }) {
       const session = sessions.get(sessionID);
 
-      if (!session) throw { _tag: "Session.NotFoundError" };
+      if (!session) {
+        throw { _tag: "Session.NotFoundError" };
+      }
 
       return session;
     },
     async create(input) {
-      if (!input.id || !input.agent || !input.location)
+      if (!input.id || !input.agent || !input.location) {
         throw new Error("Missing fixture identity");
+      }
 
       const session = {
         id: input.id,
@@ -101,10 +104,16 @@ async function fixture(root = fixtureRoot()) {
       return { id: input.id ?? "missing", sessionID: input.sessionID };
     },
     async wait({ sessionID }, request) {
-      if (!busy.has(sessionID)) return;
+      if (!busy.has(sessionID)) {
+        return;
+      }
+
       const signal = request?.signal;
       await new Promise<void>((_, reject) => {
-        if (signal?.aborted) return reject(signal.reason);
+        if (signal?.aborted) {
+          return reject(signal.reason);
+        }
+
         signal?.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         });
@@ -136,7 +145,10 @@ async function fixture(root = fixtureRoot()) {
         reads++;
         onRead();
 
-        if (failRead) throw new Error("PRIVATE_API_DETAILS");
+        if (failRead) {
+          throw new Error("PRIVATE_API_DETAILS");
+        }
+
         expect(input.order).toBe(input.cursor ? undefined : "desc");
         const offset = Number(input.cursor ?? 0);
         const reversed = messages.toReversed();
@@ -206,7 +218,9 @@ async function fixture(root = fixtureRoot()) {
       )
     ).task;
 
-    if (!task) throw new Error("Missing fixture task");
+    if (!task) {
+      throw new Error("Missing fixture task");
+    }
 
     return task;
   };
@@ -217,7 +231,10 @@ async function fixture(root = fixtureRoot()) {
   ) => {
     const session = sessions.get(task.workerSessionID);
 
-    if (!session) throw new Error("Missing worker");
+    if (!session) {
+      throw new Error("Missing worker");
+    }
+
     session.outcome = outcome;
     busy.delete(session.id);
     messages.push({
@@ -263,7 +280,10 @@ test("cutover reads immutable historical pogoCrew result evidence without editin
     const task = await f.dispatch();
     const admitted = f.messages.find((message) => message.id === task.inputID);
 
-    if (!admitted?.text) throw new Error("Missing retained input");
+    if (!admitted?.text) {
+      throw new Error("Missing retained input");
+    }
+
     expect(admitted.metadata).toEqual({
       pogoCrew: { taskID: task.id, originCaptainID: task.originCaptainID },
     });
@@ -300,7 +320,10 @@ test("mapped native profiles recover old-named uncertain answers and retain old 
     f.finish(task);
     const final = f.messages.at(-1);
 
-    if (!final) throw new Error("Missing retained final");
+    if (!final) {
+      throw new Error("Missing retained final");
+    }
+
     final.time = { created: 8, completed: 9 };
     f.messages.splice(
       f.messages.length - 1,
@@ -382,7 +405,10 @@ test("mapped native profiles recover old-named uncertain answers and retain old 
     });
     const session = f.sessions.get(task.workerSessionID);
 
-    if (!session) throw new Error("Missing native peer");
+    if (!session) {
+      throw new Error("Missing native peer");
+    }
+
     session.agent = "ship-crew-worker";
 
     const result = await mapped.run(
@@ -430,11 +456,13 @@ for (const op of ["status", "wait"] as const) {
       const final = f.messages.at(-1);
       const input = { op: "send", to: "worker", text: "Any update?" };
 
-      for (let retry = 0; retry < 2; retry++)
+      for (let retry = 0; retry < 2; retry++) {
         expect(await f.engine.dm(input, f.captain)).toMatchObject({
           stored: true,
           notification: "inbox",
         });
+      }
+
       expect(f.mail).toHaveLength(1);
       expect(f.counts().synthetics).toBe(0);
       expect(f.messages.at(-1)).toBe(final);
@@ -472,7 +500,9 @@ test("a worker ending during notification validation leaves DM in its inbox", as
     const task = await f.dispatch();
     const get = f.native.get;
     f.native.get = async (input, request) => {
-      if (input.sessionID === task.workerSessionID) f.finish(task);
+      if (input.sessionID === task.workerSessionID) {
+        f.finish(task);
+      }
 
       return get(input, request);
     };
@@ -601,8 +631,12 @@ for (const status of ["uncertain", "cancelling"] as const) {
     try {
       const task = await f.dispatch();
       f.native.wait = async () => {
-        if (status === "uncertain") f.engine.state.uncertain(task.id);
-        else f.engine.state.beginCancel(task.id, task.originCaptainID);
+        if (status === "uncertain") {
+          f.engine.state.uncertain(task.id);
+        } else {
+          f.engine.state.beginCancel(task.id, task.originCaptainID);
+        }
+
         throw new Error("Native probe did not confirm idle");
       };
 
@@ -687,7 +721,10 @@ for (const notice of [
       ).toMatchObject({ status: "steered" });
       const message = f.messages.at(-1);
 
-      if (!message) throw new Error("Missing urgency message");
+      if (!message) {
+        throw new Error("Missing urgency message");
+      }
+
       expect(message.metadata).toEqual({
         pogoCrew: {
           messageID: "1".repeat(32),
@@ -697,7 +734,7 @@ for (const notice of [
         },
       });
 
-      if (notice === "different-task")
+      if (notice === "different-task") {
         message.metadata = {
           pogoCrew: {
             taskID: "task_other",
@@ -705,8 +742,9 @@ for (const notice of [
             originCaptainID: f.captain.sessionID,
           },
         };
+      }
 
-      if (notice === "different-captain")
+      if (notice === "different-captain") {
         message.metadata = {
           pogoCrew: {
             taskID: task.id,
@@ -714,8 +752,12 @@ for (const notice of [
             originCaptainID: "ses_other",
           },
         };
+      }
 
-      if (notice === "unrelated") message.metadata = {};
+      if (notice === "unrelated") {
+        message.metadata = {};
+      }
+
       f.finish(task);
 
       const result = await f.engine.run(
@@ -723,12 +765,12 @@ for (const notice of [
         f.captain,
       );
 
-      if (notice === "task-scoped")
+      if (notice === "task-scoped") {
         expect(result).toMatchObject({
           status: "completed",
           task: { result: "Implemented and tested." },
         });
-      else {
+      } else {
         expect(result.status).toBe("uncertain");
         expect(result.diagnostic).toContain("A later input follows this task");
       }
@@ -840,43 +882,57 @@ for (const failure of [
       const task = await f.dispatch();
       f.finish(task, failure === "interrupted" ? "interrupted" : "succeeded");
 
-      if (failure === "no-answer") f.messages.pop();
+      if (failure === "no-answer") {
+        f.messages.pop();
+      }
+
       const answer = f.messages.at(-1);
 
-      if (failure === "failed-answer" && answer)
+      if (failure === "failed-answer" && answer) {
         answer.error = { message: "PRIVATE_ERROR" };
+      }
 
-      if (failure === "unfinished" && answer) answer.finish = "length";
+      if (failure === "unfinished" && answer) {
+        answer.finish = "length";
+      }
 
-      if (failure === "later-input")
+      if (failure === "later-input") {
         f.messages.push({
           id: "other",
           type: "user",
           text: "Unrelated",
           time: { created: 4 },
         });
+      }
 
-      if (failure === "later-synthetic")
+      if (failure === "later-synthetic") {
         f.messages.push({
           id: "other",
           type: "synthetic",
           text: "Unrelated",
           time: { created: 4 },
         });
+      }
 
       if (failure === "wrong-envelope") {
         const input = f.messages[0];
 
-        if (input) input.text = "Different assignment";
+        if (input) {
+          input.text = "Different assignment";
+        }
       }
 
       if (failure === "wrong-session") {
         const session = f.sessions.get(task.workerSessionID);
 
-        if (session) session.agent = "other";
+        if (session) {
+          session.agent = "other";
+        }
       }
 
-      if (failure === "api") f.failRead();
+      if (failure === "api") {
+        f.failRead();
+      }
 
       const result = await f.engine.run(
         { op: "status", taskID: task.id },
@@ -964,7 +1020,10 @@ test("queued task checks recover the previous answer before FIFO promotion", asy
       )
     ).task;
 
-    if (!queued) throw new Error("Missing queued task");
+    if (!queued) {
+      throw new Error("Missing queued task");
+    }
+
     f.finish(task);
     expect(
       await f.engine.run({ op: "status", taskID: queued.id }, f.captain),
@@ -1000,7 +1059,7 @@ test("a changed task status or expected input cannot be overwritten by recovery"
   }
 });
 
-for (const hasFinal of [true, false])
+for (const hasFinal of [true, false]) {
   test(`reopened recovery correlates background shell notices without replay; final=${hasFinal}`, async () => {
     const f = await fixture();
 
@@ -1062,10 +1121,16 @@ for (const hasFinal of [true, false])
       f.finish(task);
       const final = f.messages.at(-1);
 
-      if (!final) throw new Error("Missing fixture final");
+      if (!final) {
+        throw new Error("Missing fixture final");
+      }
+
       final.time = { created: 8, completed: 9 };
 
-      if (!hasFinal) f.messages.pop();
+      if (!hasFinal) {
+        f.messages.pop();
+      }
+
       f.engine.state.uncertain(task.id);
       const retained = JSON.stringify(f.messages);
 
@@ -1083,7 +1148,10 @@ for (const hasFinal of [true, false])
         result: hasFinal ? "Implemented and tested." : null,
       });
 
-      if (!hasFinal) expect(reopened.state.task(task.id)?.released).toBe(0);
+      if (!hasFinal) {
+        expect(reopened.state.task(task.id)?.released).toBe(0);
+      }
+
       expect(JSON.stringify(f.messages)).toBe(retained);
       expect(f.counts()).toMatchObject({ prompts: 1, synthetics: 0 });
     } finally {
@@ -1091,3 +1159,4 @@ for (const hasFinal of [true, false])
       await f.close();
     }
   });
+}

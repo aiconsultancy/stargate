@@ -22,9 +22,13 @@ export const dispatchRoutes = {
   ) => {
     const query = new URLSearchParams();
 
-    for (const id of assignees) query.append("assignee", id);
+    for (const id of assignees) {
+      query.append("assignee", id);
+    }
 
-    if (updatedSince !== undefined) query.set("updatedSince", updatedSince);
+    if (updatedSince !== undefined) {
+      query.set("updatedSince", updatedSince);
+    }
 
     return `${prefix}/issues?${query.toString()}&${page(cursor)}`;
   },
@@ -54,7 +58,9 @@ export const commentBody = (body: string) => ({ body });
 function page(cursor: string | undefined) {
   const query = new URLSearchParams({ limit: String(pageLimit) });
 
-  if (cursor !== undefined) query.set("cursor", cursor);
+  if (cursor !== undefined) {
+    query.set("cursor", cursor);
+  }
 
   return query.toString();
 }

@@ -113,8 +113,10 @@ export class PeerDirectory {
   ): Promise<boolean> {
     const cached = this.cache.get(sender.user);
 
-    if (cached && cached.until > this.now())
+    if (cached && cached.until > this.now()) {
       return cached.bot !== undefined && cached.bot === sender.bot;
+    }
+
     let bot: string | undefined;
 
     try {
@@ -142,7 +144,9 @@ export class PeerDirectory {
     if (this.cache.size >= cacheLimit) {
       const oldest = this.cache.keys().next().value;
 
-      if (oldest !== undefined) this.cache.delete(oldest);
+      if (oldest !== undefined) {
+        this.cache.delete(oldest);
+      }
     }
 
     this.cache.set(sender.user, { bot, until: this.now() + cacheMs });
@@ -158,7 +162,10 @@ export function botSender(body: unknown): PeerSender | undefined {
       ? body.event
       : undefined;
 
-  if (typeof event !== "object" || event === null) return;
+  if (typeof event !== "object" || event === null) {
+    return;
+  }
+
   const user = "user" in event ? event.user : undefined;
   const bot = "bot_id" in event ? event.bot_id : undefined;
 

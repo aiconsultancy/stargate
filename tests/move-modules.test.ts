@@ -35,7 +35,9 @@ function git(root: string, ...args: string[]) {
     },
   });
 
-  if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.toString());
+  }
 
   return result.stdout.toString();
 }
@@ -55,7 +57,10 @@ async function fixture(files: Record<string, string>) {
   git(root, "config", "core.fsmonitor", "false");
   git(root, "config", "gc.auto", "0");
 
-  for (const [path, text] of Object.entries(files)) await put(root, path, text);
+  for (const [path, text] of Object.entries(files)) {
+    await put(root, path, text);
+  }
+
   git(root, "add", ".");
   git(root, "commit", "--quiet", "-m", "fixture");
 
@@ -75,8 +80,9 @@ async function expectFailure(work: Promise<void>, message?: string) {
 
   expect(error).toBeInstanceOf(Error);
 
-  if (message && error instanceof Error)
+  if (message && error instanceof Error) {
     expect(error.message).toContain(message);
+  }
 }
 
 test("moves modules and updates all code roots without changing other strings", async () => {
@@ -276,8 +282,10 @@ test("rewrites exact documentation paths once, not lookalikes or other files", a
     "AGENTS.md",
     "README.md",
     "CONTRIBUTING.md",
-  ])
+  ]) {
     expect(await text(root, path)).toBe(expected);
+  }
+
   expect(await text(root, "other.md")).toBe(original);
 });
 
@@ -423,8 +431,10 @@ test("rejects source and destination symlinks, including escaping parents", asyn
     [["src/link.ts", "src/new.ts"]],
     [["src/item.ts", "src/escape/item.ts"]],
     [["src/item.ts", "src/link.ts"]],
-  ] satisfies (readonly (readonly [string, string])[])[])
+  ] satisfies (readonly (readonly [string, string])[])[]) {
     await expectFailure(moveModules(root, moves));
+  }
+
   expect(git(root, "status", "--porcelain")).toBe(status);
   expect(await text(outside, "keep.txt")).toBe("outside\n");
   expect(await Bun.file(join(outside, "item.ts")).exists()).toBe(false);
@@ -445,13 +455,17 @@ test.each([
   if (kind === "staged" || kind === "unstaged") {
     await put(root, "tests/use.ts", 'import "../src/item"; // local change\n');
 
-    if (kind === "staged") git(root, "add", "tests/use.ts");
-  } else
+    if (kind === "staged") {
+      git(root, "add", "tests/use.ts");
+    }
+  } else {
     await put(
       root,
       kind === "ignored destination" ? "src/domain/item.ts" : "src/new.ts",
       "keep me\n",
     );
+  }
+
   const status = git(root, "status", "--porcelain");
   const index = git(root, "ls-files", "--stage");
   await expectFailure(
@@ -562,7 +576,10 @@ test.each(["before", "after"])(
     roots.push(wrapper);
     const realGit = Bun.which("git");
 
-    if (!realGit) throw new Error("Git is required for module-move tests");
+    if (!realGit) {
+      throw new Error("Git is required for module-move tests");
+    }
+
     const quotedGit = `'${realGit.replaceAll("'", "'\\''")}'`;
     await put(
       wrapper,
@@ -620,30 +637,37 @@ test.each([
   const moves = [["src/item.ts", "src/domain/item.ts"]] as const;
   await moveModules(root, moves);
 
-  if (kind === "statement")
+  if (kind === "statement") {
     await put(
       root,
       "src/domain/item.ts",
       'export const changed = "original"; // comment\n',
     );
+  }
 
-  if (kind === "string")
+  if (kind === "string") {
     await put(
       root,
       "src/domain/item.ts",
       'export const value = "changed"; // comment\n',
     );
+  }
 
-  if (kind === "comment")
+  if (kind === "comment") {
     await put(
       root,
       "src/domain/item.ts",
       'export const value = "original"; // changed\n',
     );
+  }
 
-  if (kind === "unrelated") await put(root, "notes.txt", "changed\n");
+  if (kind === "unrelated") {
+    await put(root, "notes.txt", "changed\n");
+  }
 
-  if (kind === "untracked") await put(root, "extra.txt", "new\n");
+  if (kind === "untracked") {
+    await put(root, "extra.txt", "new\n");
+  }
 
   if (kind === "staged") {
     await put(root, "notes.txt", "staged\n");
@@ -655,7 +679,10 @@ test.each([
     git(root, "rm", "--cached", "notes.txt");
   }
 
-  if (kind === "mode") await chmod(join(root, "src/domain/item.ts"), 0o755);
+  if (kind === "mode") {
+    await chmod(join(root, "src/domain/item.ts"), 0o755);
+  }
+
   const status = git(root, "status", "--porcelain");
   const index = git(root, "ls-files", "--stage");
   await expectFailure(moveModules(root, moves, { check: true }), "Unexpected");

@@ -54,8 +54,10 @@ function fixture() {
     async list(input, options) {
       expect(options?.signal).toBe(signal);
 
-      if (input?.cursor && input.order !== undefined)
+      if (input?.cursor && input.order !== undefined) {
         throw new Error("API cursor cannot be combined with order");
+      }
+
       expect(input?.order).toBe(input?.cursor ? undefined : "desc");
       calls.push({
         method: "sessions",
@@ -64,7 +66,9 @@ function fixture() {
         ...(input?.limit && { limit: input.limit }),
       });
 
-      if (failure) throw new Error("secret token raw SDK failure");
+      if (failure) {
+        throw new Error("secret token raw SDK failure");
+      }
 
       return sessionPages.get(input?.cursor ?? "") ?? { data: [], cursor: {} };
     },
@@ -72,10 +76,15 @@ function fixture() {
       expect(options?.signal).toBe(signal);
       calls.push({ method: "get", sessionID: input.sessionID });
 
-      if (failure) throw new Error("secret token raw SDK failure");
+      if (failure) {
+        throw new Error("secret token raw SDK failure");
+      }
+
       const found = known.get(input.sessionID);
 
-      if (!found) throw new Error("private not-found information");
+      if (!found) {
+        throw new Error("private not-found information");
+      }
 
       return found;
     },
@@ -85,11 +94,16 @@ function fixture() {
     async list(input, options) {
       expect(options?.signal).toBe(signal);
 
-      if (input.cursor && input.order !== undefined)
+      if (input.cursor && input.order !== undefined) {
         throw new Error("API cursor cannot be combined with order");
+      }
 
-      if (input.cursor) expect(input.order).toBeUndefined();
-      else expect(input.order === "asc" || input.order === "desc").toBe(true);
+      if (input.cursor) {
+        expect(input.order).toBeUndefined();
+      } else {
+        expect(input.order === "asc" || input.order === "desc").toBe(true);
+      }
+
       calls.push({
         method: "messages",
         sessionID: input.sessionID,
@@ -98,11 +112,15 @@ function fixture() {
         ...(input.limit && { limit: input.limit }),
       });
 
-      if (failure) throw new Error("secret token raw SDK failure");
+      if (failure) {
+        throw new Error("secret token raw SDK failure");
+      }
+
       const page = messagePages.get(`${input.sessionID}:${input.cursor ?? ""}`);
 
-      if ((page?.data.length ?? 0) > (input.limit ?? 20))
+      if ((page?.data.length ?? 0) > (input.limit ?? 20)) {
         throw new Error("fixture page exceeds requested limit");
+      }
 
       return page ?? { data: [], cursor: {} };
     },
@@ -149,10 +167,12 @@ test("history validates bounded, literal inputs", () => {
     { op: "messages", sessionID: "x", cursor: "x".repeat(16_385) },
     { op: "sessions", directory: "/foreign" },
     { op: "messages", sessionID: "x", order: "sideways" },
-  ])
+  ]) {
     expect(
       Result.isSuccess(Schema.decodeUnknownResult(historyInputSchema)(input)),
     ).toBe(false);
+  }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(historyInputSchema)({
@@ -193,7 +213,10 @@ test("session title search reaches the native index before pagination", async ()
     f.signal,
   );
 
-  if (first.op !== "sessions") throw new Error("wrong operation");
+  if (first.op !== "sessions") {
+    throw new Error("wrong operation");
+  }
+
   expect(first.sessions.map((item) => item.id)).toEqual(["found"]);
 
   const next = await history.run(
@@ -201,7 +224,10 @@ test("session title search reaches the native index before pagination", async ()
     f.signal,
   );
 
-  if (next.op !== "sessions") throw new Error("wrong operation");
+  if (next.op !== "sessions") {
+    throw new Error("wrong operation");
+  }
+
   expect(next.sessions.map((item) => item.id)).toEqual(["older"]);
   expect(next.partial).toBe(false);
 });
@@ -223,7 +249,10 @@ test("recent messages use descending native order and retain cursor ordering", a
     f.signal,
   );
 
-  if (first.op !== "messages") throw new Error("wrong operation");
+  if (first.op !== "messages") {
+    throw new Error("wrong operation");
+  }
+
   expect(first.messages.map((message) => message.id)).toEqual(["recent"]);
   expect(f.calls[1]?.order).toBe("desc");
 
@@ -232,7 +261,10 @@ test("recent messages use descending native order and retain cursor ordering", a
     f.signal,
   );
 
-  if (next.op !== "messages") throw new Error("wrong operation");
+  if (next.op !== "messages") {
+    throw new Error("wrong operation");
+  }
+
   expect(next.messages.map((message) => message.id)).toEqual(["previous"]);
   expect(f.calls[3]?.order).toBeUndefined();
   expect(next.partial).toBe(false);
@@ -256,7 +288,10 @@ test("session listing filters titles and visibility without exposing metadata", 
 
   expect(first.op).toBe("sessions");
 
-  if (first.op !== "sessions") throw new Error("wrong operation");
+  if (first.op !== "sessions") {
+    throw new Error("wrong operation");
+  }
+
   expect(first.sessions).toEqual([]);
   expect(first.partial).toBe(true);
   expect(first.cursor).toBe("opaque session +/==");
@@ -266,7 +301,10 @@ test("session listing filters titles and visibility without exposing metadata", 
     f.signal,
   );
 
-  if (next.op !== "sessions") throw new Error("wrong operation");
+  if (next.op !== "sessions") {
+    throw new Error("wrong operation");
+  }
+
   expect(next.sessions[0]?.id).toBe("two");
   expect(next.sessions[0]?.title?.length).toBeLessThanOrEqual(256);
   expect(JSON.stringify(next)).not.toContain("credential");
@@ -333,7 +371,10 @@ test("messages expose only user/assistant text and preserve opaque page cursors"
     f.signal,
   );
 
-  if (page.op !== "messages") throw new Error("wrong operation");
+  if (page.op !== "messages") {
+    throw new Error("wrong operation");
+  }
+
   expect(page.messages.map((message) => message.text)).toEqual([
     "Question",
     "Public answer",
@@ -349,8 +390,9 @@ test("messages expose only user/assistant text and preserve opaque page cursors"
     "system prompt",
     "instructions",
     "settings",
-  ])
+  ]) {
     expect(output).not.toContain(secret);
+  }
 
   const next = await f.history.run(
     {
@@ -362,7 +404,10 @@ test("messages expose only user/assistant text and preserve opaque page cursors"
     f.signal,
   );
 
-  if (next.op !== "messages") throw new Error("wrong operation");
+  if (next.op !== "messages") {
+    throw new Error("wrong operation");
+  }
+
   expect(next.messages[0]?.id).toBe("later");
   expect(next.partial).toBe(false);
   expect(f.calls.slice(-2).map((call) => call.method)).toEqual([
@@ -400,7 +445,10 @@ test("search resumes at unscanned message pages and later sessions", async () =>
     f.signal,
   );
 
-  if (first.op !== "search") throw new Error("wrong operation");
+  if (first.op !== "search") {
+    throw new Error("wrong operation");
+  }
+
   expect(first.matches).toEqual([]);
   expect(first.partial).toBe(true);
   expect(first.cursor).toBeDefined();
@@ -412,7 +460,10 @@ test("search resumes at unscanned message pages and later sessions", async () =>
     f.signal,
   );
 
-  if (second.op !== "search") throw new Error("wrong operation");
+  if (second.op !== "search") {
+    throw new Error("wrong operation");
+  }
+
   expect(second.matches.map((match) => match.id)).toEqual(["m31", "two-hit"]);
   expect(second.partial).toBe(false);
   expect(second.cursor).toBeUndefined();
@@ -438,11 +489,13 @@ test("search batches sessions and resumes every pending match exactly once", asy
     cursor: {},
   });
 
-  for (const id of [...ids, "last"])
+  for (const id of [...ids, "last"]) {
     f.messagePages.set(`${id}:`, {
       data: [user(`${id}-match`, "hit")],
       cursor: {},
     });
+  }
+
   const matches: string[] = [];
   let cursor: string | undefined;
 
@@ -452,7 +505,10 @@ test("search batches sessions and resumes every pending match exactly once", asy
       f.signal,
     );
 
-    if (result.op !== "search") throw new Error("wrong operation");
+    if (result.op !== "search") {
+      throw new Error("wrong operation");
+    }
+
     expect(result.matches.length).toBeLessThanOrEqual(3);
     expect(result.scannedPages).toBeLessThanOrEqual(32);
     matches.push(...result.matches.map((match) => match.sessionID));
@@ -492,7 +548,10 @@ test("search accepts version-one continuations without restarting sessions", asy
     f.signal,
   );
 
-  if (result.op !== "search") throw new Error("wrong operation");
+  if (result.op !== "search") {
+    throw new Error("wrong operation");
+  }
+
   expect(result.matches.map((match) => match.id)).toEqual(["old-cursor-hit"]);
   expect(result.partial).toBe(false);
   expect(f.calls.map((call) => call.method)).toEqual(["get", "messages"]);
@@ -509,8 +568,9 @@ test("search rechecks pending session visibility after a batched continuation", 
     cursor: {},
   });
 
-  for (const id of ["one", "two", "three"])
+  for (const id of ["one", "two", "three"]) {
     f.messagePages.set(`${id}:`, { data: [user(id, "hit")], cursor: {} });
+  }
 
   const first = await f.history.run(
     { op: "search", query: "hit", limit: 1 },
@@ -525,7 +585,10 @@ test("search rechecks pending session visibility after a batched continuation", 
     f.signal,
   );
 
-  if (next.op !== "search") throw new Error("wrong operation");
+  if (next.op !== "search") {
+    throw new Error("wrong operation");
+  }
+
   expect(next.matches.map((match) => match.id)).toEqual(["three"]);
   expect(next.partial).toBe(false);
   expect(
@@ -550,7 +613,10 @@ test("batched search cursors fit accepted bounds at maximum identifier lengths",
   });
   const firstID = ids[0];
 
-  if (!firstID) throw new Error("missing fixture session");
+  if (!firstID) {
+    throw new Error("missing fixture session");
+  }
+
   f.messagePages.set(`${firstID}:`, {
     data: [user("hit", "hit")],
     cursor: { next: "m".repeat(4096) },
@@ -589,7 +655,10 @@ test("small result limits scan full message batches for sparse matches", async (
     f.signal,
   );
 
-  if (result.op !== "search") throw new Error("wrong operation");
+  if (result.op !== "search") {
+    throw new Error("wrong operation");
+  }
+
   expect(result.matches.map((match) => match.id)).toEqual(["m99"]);
   expect(result.scannedPages).toBe(2);
   expect(result.partial).toBe(false);
@@ -627,14 +696,18 @@ test("mid-page continuation preserves all matches, page boundaries and pending s
       f.signal,
     );
 
-    if (result.op !== "search") throw new Error("wrong operation");
+    if (result.op !== "search") {
+      throw new Error("wrong operation");
+    }
+
     expect(result.matches).toHaveLength(1);
     matches.push(...result.matches.map((match) => match.id));
     cursor = result.cursor;
     expect(result.partial).toBe(index !== 5);
 
-    if (cursor)
+    if (cursor) {
       expect(Buffer.from(cursor, "base64url").toString()).not.toContain("text");
+    }
   }
 
   expect(matches).toEqual(["a", "b", "c", "d", "e", "f"]);
@@ -709,7 +782,10 @@ test("text is bounded and search excerpts contain matches beyond truncation", as
     f.signal,
   );
 
-  if (page.op !== "messages") throw new Error("wrong operation");
+  if (page.op !== "messages") {
+    throw new Error("wrong operation");
+  }
+
   expect(page.messages[0]?.text.length).toBeLessThanOrEqual(2000);
   expect(page.messages[0]?.truncated).toBe(true);
 
@@ -718,7 +794,10 @@ test("text is bounded and search excerpts contain matches beyond truncation", as
     f.signal,
   );
 
-  if (search.op !== "search") throw new Error("wrong operation");
+  if (search.op !== "search") {
+    throw new Error("wrong operation");
+  }
+
   expect(search.matches[0]?.text).toContain("Needle");
   expect(search.matches[0]?.text.length).toBeLessThanOrEqual(2000);
   expect(JSON.stringify(search).length).toBeLessThan(5000);

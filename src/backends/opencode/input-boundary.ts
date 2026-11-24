@@ -32,14 +32,22 @@ export function inputBoundary(
   message: BoundaryMessage,
   sessionID: string,
 ): string | undefined {
-  if (message.type === "user" || message.type === "shell") return message.id;
+  if (message.type === "user" || message.type === "shell") {
+    return message.id;
+  }
 
   // A shell callback is not a continuation of the latest chat. A reader with
   // Retained launch ancestry may replace this native-only boundary.
-  if (message.type === "synthetic" && message.metadata?.["source"] === "shell")
+  if (
+    message.type === "synthetic" &&
+    message.metadata?.["source"] === "shell"
+  ) {
     return message.id;
+  }
 
-  if (message.type !== "synthetic") return;
+  if (message.type !== "synthetic") {
+    return;
+  }
 
   if (
     message.metadata &&
@@ -61,8 +69,9 @@ export function inputBoundary(
       message.description === undefined &&
       (message.metadata === undefined ||
         Object.keys(message.metadata).length === 0))
-  )
+  ) {
     return;
+  }
 
   return message.id;
 }
@@ -99,7 +108,9 @@ export class InputBoundaryFold {
       this.mixed = false;
     }
 
-    if (message.input === undefined) return;
+    if (message.input === undefined) {
+      return;
+    }
 
     const mixed =
       message.type === "synthetic" &&
@@ -134,7 +145,9 @@ export function resolveBoundaryContext(
   for (let index = descending.length - 1; index >= 0; index--) {
     const message = descending[index];
 
-    if (message) input = fold.next(message) ?? input;
+    if (message) {
+      input = fold.next(message) ?? input;
+    }
   }
 
   return input;

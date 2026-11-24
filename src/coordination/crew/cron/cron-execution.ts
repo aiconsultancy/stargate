@@ -110,7 +110,9 @@ function parseModel(value: string): ModelRef {
   const separator = value.indexOf("/");
   const [id, variant] = value.slice(separator + 1).split("#");
 
-  if (!id) throw new CrewError("Cron model selector is invalid.");
+  if (!id) {
+    throw new CrewError("Cron model selector is invalid.");
+  }
 
   return {
     providerID: value.slice(0, separator),
@@ -137,7 +139,10 @@ export class CrewCronExecution {
 
       return { model: modelName(model) };
     } catch (error) {
-      if (error instanceof CrewError) throw error;
+      if (error instanceof CrewError) {
+        throw error;
+      }
+
       throw new CrewError(
         "Cron model validation unavailable; raw details withheld.",
       );
@@ -171,10 +176,14 @@ export class CrewCronExecution {
       if (
         !observation ||
         cronRisk(input.prompt, observation.text, observation.risks)
-      )
+      ) {
         return { ...result, verdict: "escalate" };
+      }
 
-      if (!input.arbiter) return { ...result, verdict: "act" };
+      if (!input.arbiter) {
+        return { ...result, verdict: "act" };
+      }
+
       const member = this.arbiter(input.arbiter);
       // A separate per-run store cannot acquire or resume the configured peer's
       // Conversation, task, mailbox or controller. No crew extension is installed.
@@ -230,7 +239,10 @@ export class CrewCronExecution {
         await backend.close();
       }
     } catch (error) {
-      if (error instanceof CrewError) throw error;
+      if (error instanceof CrewError) {
+        throw error;
+      }
+
       throw new CrewError(
         "Cron evaluation unavailable or unconfirmed; do not replay. Raw details withheld.",
       );
@@ -242,10 +254,11 @@ export class CrewCronExecution {
       (item) => item.id === id,
     );
 
-    if (member?.backend?.type !== "pi-durable")
+    if (member?.backend?.type !== "pi-durable") {
       throw new CrewError(
         "Cron arbiter requires a configured Pi crew backend.",
       );
+    }
 
     return { ...member, backend: member.backend };
   }
@@ -259,10 +272,12 @@ export class CrewCronExecution {
       captainSessionID,
     } = this.authority.options;
 
-    if (!captainSessionID)
+    if (!captainSessionID) {
       throw new CrewError(
         "Cron evaluation requires an existing pinned captain.",
       );
+    }
+
     await this.authority.captain({
       sessionID: captainSessionID,
       agent: team.captain.id,
@@ -282,15 +297,18 @@ export class CrewCronExecution {
         captain.agent ?? "",
       ) ||
       !captain.model
-    )
+    ) {
       throw new CrewError(
         "Cron captain identity or actual model is unavailable.",
       );
+    }
+
     const model = input.model ? parseModel(input.model) : captain.model;
     const providers = team.modelProviders ?? defaultModelProviders;
 
-    if (!providers.includes(model.providerID))
+    if (!providers.includes(model.providerID)) {
       throw new CrewError("Cron model provider is not allowed for this team.");
+    }
 
     const catalog = await this.api.model.list(
       { location: { directory }, types: ["chat"] },
@@ -309,8 +327,9 @@ export class CrewCronExecution {
       !selected ||
       (model.variant &&
         !selected.variants.some((variant) => variant.id === model.variant))
-    )
+    ) {
       throw new CrewError("Cron model or exact variant is unavailable.");
+    }
 
     const agents = await this.api.agent.list(
       { location: { directory } },
@@ -324,12 +343,16 @@ export class CrewCronExecution {
         !agents.data.some(
           (agent) => agent.model && modelName(agent.model) === modelName(model),
         ))
-    )
+    ) {
       throw new CrewError(
         "Cron model is not an available active profile route.",
       );
+    }
 
-    if (input.arbiter) this.arbiter(input.arbiter);
+    if (input.arbiter) {
+      this.arbiter(input.arbiter);
+    }
+
     signal.throwIfAborted();
 
     return model;

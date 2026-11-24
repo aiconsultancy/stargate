@@ -18,7 +18,9 @@ export async function botToken(
   try {
     companion = parseEnv(await readFile(`${configPath}.env`, "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
 
   return secret(bot.slack.botTokenEnv, { ...companion, ...process.env });

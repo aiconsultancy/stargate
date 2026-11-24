@@ -18,7 +18,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const opencode = (directory: string, extra: Record<string, unknown> = {}) => ({
@@ -159,7 +161,9 @@ async function setup(
   const workers = ship.registrations.map((registration, index) => {
     const selected = backends[index];
 
-    if (!selected) throw new Error("missing backend");
+    if (!selected) {
+      throw new Error("missing backend");
+    }
 
     return new Gateway(
       registration.settings,
@@ -266,7 +270,10 @@ test("irc stargate_dm copy: sent from the sender's account, once, never a second
 
   const [captain] = ship.registrations;
 
-  if (!captain) throw new Error("missing captain");
+  if (!captain) {
+    throw new Error("missing captain");
+  }
+
   await until(() => captain.client.inChannel("#agent-dms"), 5000, "audit");
   await until(() => link.reads.includes(0), 5000, "baseline read");
   link.push({
@@ -365,8 +372,10 @@ test("irc stargate_dm copy: baseline, members without IRC, credentials and lengt
   expect(long.endsWith("(truncated; full text in stargate_mail)")).toBe(true);
   expect(Buffer.byteLength(long)).toBeLessThan(2200);
 
-  for (const raw of fake.received("galactica-chief"))
+  for (const raw of fake.received("galactica-chief")) {
     expect(Buffer.byteLength(raw) + 2).toBeLessThanOrEqual(512);
+  }
+
   expect(fake.received("galactica-chief").join("\n")).not.toContain("xoxb");
 });
 

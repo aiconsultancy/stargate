@@ -36,8 +36,9 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
         body: body ? JSON.parse(body) : null,
       });
 
-      if (url.pathname === "/api/session")
+      if (url.pathname === "/api/session") {
         return Response.json({ data: { id: "session-1" } });
+      }
 
       if (url.pathname.endsWith("/prompt")) {
         const input: { id: string } = JSON.parse(body);
@@ -46,11 +47,12 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
         return Response.json({ data: { id: inputId } });
       }
 
-      if (url.pathname.endsWith("/wait"))
+      if (url.pathname.endsWith("/wait")) {
         return new Response(null, { status: 204 });
+      }
 
       if (url.pathname.endsWith("/message")) {
-        if (url.searchParams.has("cursor"))
+        if (url.searchParams.has("cursor")) {
           return Response.json({
             data: [
               { id: inputId, type: "user" },
@@ -62,6 +64,7 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
             ],
             cursor: {},
           });
+        }
 
         return Response.json({
           data: [
@@ -94,7 +97,10 @@ test("OpenCode V2 creates, queues, waits and reads paginated replies", async () 
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;
 
@@ -150,9 +156,11 @@ test("OpenCode sends only a compact Slack source line before the raw instruction
         return Response.json({ data: { id: inputId } });
       }
 
-      if (path.endsWith("/wait")) return new Response(null, { status: 204 });
+      if (path.endsWith("/wait")) {
+        return new Response(null, { status: 204 });
+      }
 
-      if (path.endsWith("/message"))
+      if (path.endsWith("/message")) {
         return Response.json({
           data: [
             {
@@ -164,6 +172,7 @@ test("OpenCode sends only a compact Slack source line before the raw instruction
           ],
           cursor: {},
         });
+      }
 
       return new Response(null, { status: 404 });
     },
@@ -176,7 +185,9 @@ test("OpenCode sends only a compact Slack source line before the raw instruction
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
 
     const source = {
       channel: "C123",
@@ -239,11 +250,12 @@ test("OpenCode placed-input failure explicitly interrupts server-side execution"
         return Response.json({ data: { id: inputId } });
       }
 
-      if (path.endsWith("/message"))
+      if (path.endsWith("/message")) {
         return Response.json({
           data: [{ id: inputId, type: "user" }],
           cursor: {},
         });
+      }
 
       if (new URL(request.url).pathname.endsWith("/interrupt")) {
         interrupted = true;
@@ -262,7 +274,10 @@ test("OpenCode placed-input failure explicitly interrupts server-side execution"
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     await expect(
       new OpenCodeBackend(config).prompt(
         "session",
@@ -284,7 +299,9 @@ test("OpenCode uncertain admission does not interrupt unrelated native work", as
     port: 0,
     hostname: "127.0.0.1",
     fetch(request) {
-      if (new URL(request.url).pathname.endsWith("/interrupt")) interrupts++;
+      if (new URL(request.url).pathname.endsWith("/interrupt")) {
+        interrupts++;
+      }
 
       return Response.json({ message: "unavailable" }, { status: 503 });
     },
@@ -297,7 +314,10 @@ test("OpenCode uncertain admission does not interrupt unrelated native work", as
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     await expect(
       new OpenCodeBackend(config).prompt(
         "session",
@@ -331,7 +351,9 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
             const body: { id?: string } = await request.json();
             input = body.id;
 
-            if (aborted) controller.abort();
+            if (aborted) {
+              controller.abort();
+            }
 
             return Response.json(
               { message: "Lost admission response" },
@@ -346,8 +368,9 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
           }
 
           if (path.endsWith("/message")) {
-            if (placement === "unreadable")
+            if (placement === "unreadable") {
               return new Response(null, { status: 503 });
+            }
 
             return Response.json({
               data:
@@ -375,7 +398,10 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
           directory: "/workspace",
         });
 
-        if (config.type !== "opencode") throw new Error("Invalid fixture");
+        if (config.type !== "opencode") {
+          throw new Error("Invalid fixture");
+        }
+
         await expect(
           new OpenCodeBackend(config).prompt(
             "session",
@@ -384,7 +410,10 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
           ),
         ).rejects.toThrow();
 
-        if (!input) throw new Error("Admission had no client input ID");
+        if (!input) {
+          throw new Error("Admission had no client input ID");
+        }
+
         expect(input).toMatch(/^msg_/);
         expect(prompts).toBe(1);
         expect(cancelled).toEqual([input]);
@@ -416,7 +445,10 @@ test("OpenCode cancellation before admission makes no native requests", async ()
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const controller = new AbortController();
     controller.abort();
     await expect(
@@ -534,7 +566,10 @@ function openCodeStreamFixture(
   const encoder = new TextEncoder();
 
   const emit = (type: string, data: Record<string, unknown>) => {
-    if (!stream) throw new Error("Fixture SSE connection is not open");
+    if (!stream) {
+      throw new Error("Fixture SSE connection is not open");
+    }
+
     stream.enqueue(
       encoder.encode(
         `data: ${JSON.stringify({
@@ -561,16 +596,21 @@ function openCodeStreamFixture(
         return Response.json({ data: forms });
       }
 
-      if (path.endsWith("/form/form_current"))
+      if (path.endsWith("/form/form_current")) {
         return Response.json({ data: currentForm });
+      }
 
-      if (path.endsWith("/message/answer-current"))
+      if (path.endsWith("/message/answer-current")) {
         return Response.json({ data: questionMessage });
+      }
+
       const detail = forms.find(({ id }) => path.endsWith(`/form/${id}`));
 
-      if (detail) return Response.json({ data: detail });
+      if (detail) {
+        return Response.json({ data: detail });
+      }
 
-      if (path.endsWith("/message/settled-answer"))
+      if (path.endsWith("/message/settled-answer")) {
         return Response.json({
           data: {
             id: "settled-answer",
@@ -579,17 +619,19 @@ function openCodeStreamFixture(
             content: [],
           },
         });
+      }
 
-      if (path === "/api/session/active")
+      if (path === "/api/session/active") {
         return Response.json({
           data: pendingQuestion?.active ? { "session-current": true } : {},
         });
+      }
 
       if (
         path.endsWith("/message/old-answer") &&
         pendingQuestion &&
         pendingQuestion.running !== false
-      )
+      ) {
         return Response.json({
           data: {
             id: "old-answer",
@@ -606,6 +648,7 @@ function openCodeStreamFixture(
             ],
           },
         });
+      }
 
       if (path === "/api/event") {
         return new Response(
@@ -614,7 +657,9 @@ function openCodeStreamFixture(
               stream = controller;
               emit("server.connected", {});
 
-              if (++eventConnections > 1) reconnected.resolve();
+              if (++eventConnections > 1) {
+                reconnected.resolve();
+              }
             },
             cancel() {
               stream = undefined;
@@ -626,7 +671,10 @@ function openCodeStreamFixture(
       }
 
       if (path.endsWith("/prompt")) {
-        if (!stream) throw new Error("Prompt preceded event connection");
+        if (!stream) {
+          throw new Error("Prompt preceded event connection");
+        }
+
         admissions++;
         const input: { id: string } = await request.json();
         inputId = input.id;
@@ -699,10 +747,15 @@ function openCodeStreamFixture(
       }
 
       if (path.endsWith("/inbox") && request.method === "GET") {
-        if (deliverDuringCheck) placed = true;
+        if (deliverDuringCheck) {
+          placed = true;
+        }
+
         checked.resolve();
 
-        if (++inboxReads === 2) checkedAgain.resolve();
+        if (++inboxReads === 2) {
+          checkedAgain.resolve();
+        }
 
         return Response.json({
           data: placed ? [] : [{ id: inputId, type: "user" }],
@@ -734,7 +787,9 @@ function openCodeStreamFixture(
     headersEnv,
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
 
   return {
     backend: new OpenCodeBackend(config),
@@ -758,9 +813,12 @@ function openCodeStreamFixture(
     withdrawals: () => withdrawals,
     emit,
     disconnect(kind: "eof" | "error" = "eof") {
-      if (kind === "error")
+      if (kind === "error") {
         stream?.error(new Error("Fixture event stream lost"));
-      else stream?.close();
+      } else {
+        stream?.close();
+      }
+
       stream = undefined;
     },
     async close() {
@@ -833,8 +891,11 @@ test("OpenCode wait disables only HTTP idleness and preserves its request", asyn
     await fixture.close();
     fetchSpy.mockRestore();
 
-    if (previous === undefined) delete process.env[headerEnv];
-    else process.env[headerEnv] = previous;
+    if (previous === undefined) {
+      delete process.env[headerEnv];
+    } else {
+      process.env[headerEnv] = previous;
+    }
   }
 });
 
@@ -856,7 +917,9 @@ for (const origin of [
       (text) => {
         snapshots.push(text);
 
-        if (text.includes("OWN B")) received.resolve();
+        if (text.includes("OWN B")) {
+          received.resolve();
+        }
       },
     );
 
@@ -938,7 +1001,9 @@ test("OpenCode streams only current-session visible text before canonical histor
     (text) => {
       snapshots.push(text);
 
-      if (text === "First block.\nCorrected second block.") received.resolve();
+      if (text === "First block.\nCorrected second block.") {
+        received.resolve();
+      }
     },
   );
 
@@ -1138,8 +1203,9 @@ test("OpenCode reports metadata for the exact inbox item and its own assistant",
     ReturnType<typeof Promise.withResolvers<void>>
   >();
 
-  for (const stage of ["queued", "reasoning", "tool"] as const)
+  for (const stage of ["queued", "reasoning", "tool"] as const) {
     stages.set(stage, Promise.withResolvers<void>());
+  }
 
   const result = fixture.backend.prompt(
     "session-current",
@@ -1225,7 +1291,9 @@ test("OpenCode rechecks uncertain ownership on a later tool event", async () => 
     undefined,
     humanIrcSource,
     ({ stage }) => {
-      if (stage === "tool") toolReported.resolve();
+      if (stage === "tool") {
+        toolReported.resolve();
+      }
     },
   );
 
@@ -1313,11 +1381,17 @@ test.each(["eof", "error"] as const)(
       undefined,
       humanIrcSource,
       ({ stage, disconnected }) => {
-        if (stage === "queued") connectionStates.push(!!disconnected);
+        if (stage === "queued") {
+          connectionStates.push(!!disconnected);
+        }
 
-        if (stage === "queued") queued.resolve();
+        if (stage === "queued") {
+          queued.resolve();
+        }
 
-        if (stage === "reasoning") reasoning.resolve();
+        if (stage === "reasoning") {
+          reasoning.resolve();
+        }
       },
       true,
     );
@@ -1365,7 +1439,9 @@ test.each([false, true])(
       (text) => {
         snapshots.push(text);
 
-        if (text.includes("OWN ANSWER")) received.resolve();
+        if (text.includes("OWN ANSWER")) {
+          received.resolve();
+        }
       },
     );
 
@@ -1388,7 +1464,10 @@ test.each([false, true])(
       });
       await fixture.checked;
 
-      if (!race) expect(fixture.historyReads()).toBe(0);
+      if (!race) {
+        expect(fixture.historyReads()).toBe(0);
+      }
+
       fixture.place();
       fixture.emit("session.text.delta", {
         sessionID: "session-current",
@@ -1525,10 +1604,11 @@ test("Pi live text decoding strips unknown keys and requires finite inputs", () 
     extra: true,
   };
 
-  for (const run of [{ inputs: [1.5, 0] }, { inputs: [], extra: true }])
+  for (const run of [{ inputs: [1.5, 0] }, { inputs: [], extra: true }]) {
     expect(piPartialText(view({ run, generation, extra: true }))).toBe(
       "Visible",
     );
+  }
 
   for (const live of [
     { run: null, generation },
@@ -1537,8 +1617,9 @@ test("Pi live text decoding strips unknown keys and requires finite inputs", () 
     { run: { inputs: ["1"] }, generation },
     { generation: { message: { content: [{ type: "text", text: null }] } } },
     { generation: { message: { content: [{ text: "missing type" }] } } },
-  ])
+  ]) {
     expect(piPartialText(view(live)), JSON.stringify(live)).toBe("");
+  }
 
   // Non-object live state is outside the SDK type; pass it without a cast.
   const untyped = (live: unknown): string =>
@@ -1548,8 +1629,9 @@ test("Pi live text decoding strips unknown keys and requires finite inputs", () 
 
   expect(untyped({ generation })).toBe("Visible");
 
-  for (const live of [[], null, "Visible", 1, true])
+  for (const live of [[], null, "Visible", 1, true]) {
     expect(untyped(live), JSON.stringify(live)).toBe("");
+  }
 });
 
 test("Pi conversation IDs accept decimal digits as safe integers", async () => {
@@ -1570,10 +1652,11 @@ test("Pi conversation IDs accept decimal digits as safe integers", async () => {
 
   const signal = new AbortController().signal;
 
-  for (const id of ["0", "7", "007", String(Number.MAX_SAFE_INTEGER)])
+  for (const id of ["0", "7", "007", String(Number.MAX_SAFE_INTEGER)]) {
     await expect(backend.prompt(id, "hello", signal)).rejects.toThrow(
       "Pi conversation not found",
     );
+  }
 
   for (const id of [
     "9007199254740992",
@@ -1585,10 +1668,12 @@ test("Pi conversation IDs accept decimal digits as safe integers", async () => {
     "1e3",
     " 7",
     "0x1",
-  ])
+  ]) {
     await expect(backend.prompt(id, "hello", signal), id).rejects.not.toThrow(
       "Pi conversation not found",
     );
+  }
+
   expect(opened).toEqual([0, 7, 7, Number.MAX_SAFE_INTEGER]);
 });
 
@@ -1634,7 +1719,10 @@ test("Pi ignores historical observer advances before attachment resolves", async
   let detached = false;
 
   const advance = (value: ConversationView) => {
-    if (!observer) throw new Error("Observer not attached");
+    if (!observer) {
+      throw new Error("Observer not attached");
+    }
+
     observer.advance(
       { kind: "value", value, ops: [], retired: false },
       BACKGROUND_CONTEXT,
@@ -1839,12 +1927,15 @@ test.each(["done", "unanswered"])("Pi %s owns text", async (outcome) => {
     (text) => {
       snapshots.push(text);
 
-      if (text === "OWN PARTIAL") partial.resolve();
+      if (text === "OWN PARTIAL") {
+        partial.resolve();
+      }
     },
   );
 
-  if (outcome === "done") expect(await pending).toBe("OWN ANSWER");
-  else {
+  if (outcome === "done") {
+    expect(await pending).toBe("OWN ANSWER");
+  } else {
     await expect(pending).rejects.toThrow("Pi input did not complete");
     expect(snapshots).toEqual(["OWN PARTIAL"]);
   }
@@ -1864,7 +1955,9 @@ test("real Pi Durable harness persists sessions under Bun SQLite", async () => {
       model: "openai/gpt-5",
     });
 
-    if (config.type !== "pi-durable") throw new Error("Invalid fixture");
+    if (config.type !== "pi-durable") {
+      throw new Error("Invalid fixture");
+    }
 
     const backend = await PiDurableBackend.open(config, {
       dataDirectory: directory,
@@ -1893,8 +1986,12 @@ test("real Pi Durable harness persists sessions under Bun SQLite", async () => {
       await reopened.close();
     }
   } finally {
-    if (previous === undefined) delete process.env["OPENAI_API_KEY"];
-    else process.env["OPENAI_API_KEY"] = previous;
+    if (previous === undefined) {
+      delete process.env["OPENAI_API_KEY"];
+    } else {
+      process.env["OPENAI_API_KEY"] = previous;
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -31,7 +31,9 @@ test("disabled HTTP config validates without enabling the API", () => {
 
   expect(Result.isSuccess(result)).toBe(true);
 
-  if (Result.isSuccess(result)) expect(result.success.api).toBeUndefined();
+  if (Result.isSuccess(result)) {
+    expect(result.success.api).toBeUndefined();
+  }
 });
 
 test("disabled adapters still reject unknown types, fields, mounts, destinations, grants and echo", () => {
@@ -91,10 +93,12 @@ test("disabled adapters still reject unknown types, fields, mounts, destinations
 
   bad.push({ ...input(), bots: [bot(), receiver] });
 
-  for (const value of bad)
+  for (const value of bad) {
     expect(
       Result.isFailure(Schema.decodeUnknownResult(configSchema)(value)),
     ).toBe(true);
+  }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(configSchema)({
@@ -143,7 +147,9 @@ test("credentials use effective environment without mutation, reject ambiguity a
   expect(producerCredentials(disabled.notify, {})).toEqual([]);
   const notify = config.notify;
 
-  if (!notify?.adapters["local"]) throw new Error("Missing config fixture");
+  if (!notify?.adapters["local"]) {
+    throw new Error("Missing config fixture");
+  }
 
   const ambiguous = {
     ...notify,
@@ -192,7 +198,9 @@ test("aliases deduplicate only identical physical bindings and notify remains re
   const config = runtimeConfig(await temporary());
   const notify = config.notify;
 
-  if (!notify?.destinations["log"]) throw new Error("Missing config fixture");
+  if (!notify?.destinations["log"]) {
+    throw new Error("Missing config fixture");
+  }
 
   const aliases = {
     ...notify,
@@ -233,7 +241,7 @@ test("aliases deduplicate only identical physical bindings and notify remains re
 });
 
 test("enabled HTTP config requires Unix API; disabled invalid topology still fails", () => {
-  for (const api of [undefined, { listen: "127.0.0.1:8484" }])
+  for (const api of [undefined, { listen: "127.0.0.1:8484" }]) {
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(configSchema)({
@@ -243,6 +251,8 @@ test("enabled HTTP config requires Unix API; disabled invalid topology still fai
         }),
       ),
     ).toBe(true);
+  }
+
   const invalid = notificationConfig();
   invalid.subscriptions[0]?.to.push("missing");
   expect(

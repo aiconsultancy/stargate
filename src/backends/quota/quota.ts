@@ -237,7 +237,10 @@ export function parseQuotaWindows(
     ] as const;
 
     for (const [name, window, scope] of names) {
-      if (data[name] === null || data[name] === undefined) continue;
+      if (data[name] === null || data[name] === undefined) {
+        continue;
+      }
+
       const value = decodeClaudeWindow(data[name]);
       add(
         window,
@@ -257,8 +260,10 @@ export function parseQuotaWindows(
           limit.kind !== "weekly_scoped" ||
           !scope ||
           !["opus", "sonnet", "haiku", "fable"].includes(scope)
-        )
+        ) {
           continue;
+        }
+
         add(
           "weekly",
           decodeScope(scope),
@@ -273,11 +278,17 @@ export function parseQuotaWindows(
       ["rate_limit", "subscription"],
       ["code_review_rate_limit", "code-review"],
     ] as const) {
-      if (data[name] === null || data[name] === undefined) continue;
+      if (data[name] === null || data[name] === undefined) {
+        continue;
+      }
+
       const family = decodeRecord(data[name]);
 
       for (const name of ["primary_window", "secondary_window"]) {
-        if (family[name] === null || family[name] === undefined) continue;
+        if (family[name] === null || family[name] === undefined) {
+          continue;
+        }
+
         const value = decodeCodexWindow(family[name]);
         add(
           windowOf(value.limit_window_seconds),
@@ -291,8 +302,9 @@ export function parseQuotaWindows(
     }
   }
 
-  if (windows.length === 0 || windows.length > 16)
+  if (windows.length === 0 || windows.length > 16) {
     throw new Error("Quota windows unavailable");
+  }
 
   return decodeWindows(windows);
 }
@@ -374,20 +386,23 @@ export class QuotaReader {
     caller.throwIfAborted();
     const now = this.now();
 
-    if (!this.config)
+    if (!this.config) {
       return {
         status: "not-configured",
         observedAt: now,
         cached: false,
         accounts: [],
       };
+    }
 
     if (
       this.cache &&
       now >= this.cache.observedAt &&
       now - this.cache.observedAt < ttl
-    )
+    ) {
       return structuredClone({ ...this.cache, cached: true });
+    }
+
     const signal = AbortSignal.any([caller, AbortSignal.timeout(8000)]);
 
     let snapshot: QuotaObservation = {
@@ -414,8 +429,10 @@ export class QuotaReader {
           file.disabled ||
           Option.isNone(provider) ||
           !this.monitoredProviders.includes(provider.value)
-        )
+        ) {
           return false;
+        }
+
         const emails = selected?.[provider.value];
 
         return (
@@ -445,8 +462,10 @@ export class QuotaReader {
       if (
         active.length + missing.reduce((sum, item) => sum + item.count, 0) >
         10
-      )
+      ) {
         throw new Error("Too many quota accounts");
+      }
+
       const counts = { claude: 0, codex: 0 };
 
       // Sequential, bounded reads avoid bursting subscription status endpoints.
@@ -473,7 +492,9 @@ export class QuotaReader {
         snapshot.accounts.push(account);
 
         try {
-          if (file.auth_index === undefined) continue;
+          if (file.auth_index === undefined) {
+            continue;
+          }
 
           const header: Record<string, string> = {
             Authorization: "Bearer $TOKEN$",
@@ -485,12 +506,15 @@ export class QuotaReader {
                 : "codex-tui/0.149.1",
           };
 
-          if (provider === "claude")
+          if (provider === "claude") {
             header["anthropic-beta"] = "oauth-2025-04-20";
+          }
+
           const accountID = file.chatgpt_account_id ?? file.account_id;
 
-          if (provider === "codex" && accountID)
+          if (provider === "codex" && accountID) {
             header["Chatgpt-Account-Id"] = accountID;
+          }
 
           const result = decodeCall(
             await this.request(
@@ -506,7 +530,10 @@ export class QuotaReader {
             ),
           );
 
-          if (result.status_code !== 200) continue;
+          if (result.status_code !== 200) {
+            continue;
+          }
+
           account.windows = parseQuotaWindows(
             provider,
             typeof result.body === "string"
@@ -522,7 +549,7 @@ export class QuotaReader {
       }
 
       for (const { provider, count } of missing) {
-        for (let skipped = 0; skipped < count; skipped++)
+        for (let skipped = 0; skipped < count; skipped++) {
           snapshot.accounts.push({
             provider,
             account: `${provider}-${++counts[provider]}`,
@@ -530,6 +557,7 @@ export class QuotaReader {
             observedAt: null,
             windows: [],
           });
+        }
       }
 
       const available = snapshot.accounts.filter(
@@ -561,7 +589,9 @@ export class QuotaReader {
   }
 
   private async key() {
-    if (!this.config) throw new Error("Quota not configured");
+    if (!this.config) {
+      throw new Error("Quota not configured");
+    }
 
     const file = await open(
       this.config.managementKeyFile,
@@ -576,11 +606,15 @@ export class QuotaReader {
         (stat.mode & 0o077) !== 0 ||
         stat.uid !== process.getuid?.() ||
         stat.size > 4096
-      )
+      ) {
         throw new Error("Private quota key required");
+      }
+
       const key = (await file.readFile("utf8")).trim();
 
-      if (!key || /\s/.test(key)) throw new Error("Invalid quota key");
+      if (!key || /\s/.test(key)) {
+        throw new Error("Invalid quota key");
+      }
 
       return key;
     } finally {
@@ -594,7 +628,9 @@ export class QuotaReader {
     signal: AbortSignal,
     body?: ApiCallBody,
   ): Promise<unknown> {
-    if (!this.config) throw new Error("Quota not configured");
+    if (!this.config) {
+      throw new Error("Quota not configured");
+    }
 
     const response = await fetch(new URL(path, this.config.baseURL), {
       method: body ? "POST" : "GET",
@@ -620,10 +656,16 @@ export class QuotaReader {
       for (;;) {
         const chunk = await reader.read();
 
-        if (chunk.done) break;
+        if (chunk.done) {
+          break;
+        }
+
         bytes += chunk.value.byteLength;
 
-        if (bytes > 1024 * 1024) throw new Error("Quota response too large");
+        if (bytes > 1024 * 1024) {
+          throw new Error("Quota response too large");
+        }
+
         chunks.push(chunk.value);
       }
 
@@ -645,12 +687,13 @@ export function formatQuota(
     `Snapshot: ${new Date(snapshot.observedAt).toISOString()}${snapshot.cached ? " (cached up to 60s)" : ""}.`,
   ];
 
-  if (snapshot.status === "not-configured")
+  if (snapshot.status === "not-configured") {
     lines.push("Quota reader not configured.");
-  else if (snapshot.accounts.length === 0)
+  } else if (snapshot.accounts.length === 0) {
     lines.push(
       "Quota unavailable. Check proxy access and private management-key configuration.",
     );
+  }
 
   for (const account of snapshot.accounts) {
     lines.push(

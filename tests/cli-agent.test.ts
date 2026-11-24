@@ -14,7 +14,9 @@ import {
 const cleanup: (() => Promise<unknown>)[] = [];
 
 afterEach(async () => {
-  for (const step of cleanup.splice(0).reverse()) await step();
+  for (const step of cleanup.splice(0).reverse()) {
+    await step();
+  }
 });
 
 test("a process whose identity changed is never signalled", async () => {

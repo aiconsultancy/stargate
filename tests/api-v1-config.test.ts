@@ -84,8 +84,9 @@ test("Fleet PR bindings require exact absolute paths and GitHub repository names
     { "/srv/../checkout": "example/project" },
     { "/srv/crew/checkout": "https://github.com/example/project" },
     { "/srv/crew/checkout": "example/.." },
-  ])
+  ]) {
     expect(() => config(invalid)).toThrow();
+  }
 });
 
 test("Fleet API rejects CIDRs reaching outside private ranges and unknown config keys", () => {
@@ -193,8 +194,9 @@ test("origin wildcards match exactly one ASCII label", () => {
     "https://subspace.123",
     "https://console.example.com:8443",
     "https://fleet-1.space.example:8443",
-  ])
+  ]) {
     expect(allows(origin)).toBe(true);
+  }
 
   for (const origin of [
     null,
@@ -212,8 +214,10 @@ test("origin wildcards match exactly one ASCII label", () => {
     "https://fleet.extra.space.example:8443",
     "https://subspace.Space",
     "http://subspace.space",
-  ])
+  ]) {
     expect(allows(origin)).toBe(false);
+  }
+
   const defaults = originMatcher(defaultCorsOrigins);
   expect(defaults("subspace://space-123")).toBe(true);
   expect(defaults("https://subspace.space-123")).toBe(false);

@@ -70,7 +70,7 @@ function fixture(changes: Changes = {}) {
       const path = new URL(request.url).pathname;
       calls.push(path);
 
-      if (path === `/api/session/${sessionID}`)
+      if (path === `/api/session/${sessionID}`) {
         return Response.json({
           data: {
             id: sessionID,
@@ -82,14 +82,17 @@ function fixture(changes: Changes = {}) {
             },
           },
         });
+      }
 
-      if (path === `/api/session/${sessionID}/message/${messageID}`)
+      if (path === `/api/session/${sessionID}/message/${messageID}`) {
         return Response.json({ data: message });
+      }
 
-      if (path === `/api/session/${sessionID}/inbox`)
+      if (path === `/api/session/${sessionID}/inbox`) {
         return Response.json({ data: changes.queued ? [{ id: inputID }] : [] });
+      }
 
-      if (path === `/api/session/${sessionID}/message`)
+      if (path === `/api/session/${sessionID}/message`) {
         return Response.json({
           data: [
             ...(changes.laterInput
@@ -119,6 +122,7 @@ function fixture(changes: Changes = {}) {
           ],
           cursor: {},
         });
+      }
 
       return new Response(null, { status: 404 });
     },
@@ -131,7 +135,10 @@ function fixture(changes: Changes = {}) {
     sessionID,
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid native fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid native fixture");
+  }
+
   const backend = new OpenCodeBackend(config);
 
   return {

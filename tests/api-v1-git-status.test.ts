@@ -52,7 +52,9 @@ function git(directory: string, ...args: string[]) {
     { cwd: directory },
   );
 
-  if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.toString());
+  }
 
   return result.stdout.toString().trim();
 }
@@ -61,7 +63,10 @@ async function waitForRemoval(directory: string, name?: string) {
   for (let attempt = 0; attempt < 50; attempt++) {
     const entries = await readdir(directory);
 
-    if (name === undefined ? !entries.length : !entries.includes(name)) return;
+    if (name === undefined ? !entries.length : !entries.includes(name)) {
+      return;
+    }
+
     await Bun.sleep(5);
   }
 }
@@ -133,7 +138,9 @@ test("rejects a primary index path outside the checkout and its Git directories"
     const read = createGitReader(Date.now, async (args, options) => {
       const result = await readCommand(args, options);
 
-      if (!result || !args.includes("--absolute-git-dir")) return result;
+      if (!result || !args.includes("--absolute-git-dir")) {
+        return result;
+      }
 
       return { ...result, stdout: result.stdout.replace(index, externalIndex) };
     });
@@ -167,8 +174,9 @@ test.each(["primary", "shared"])(
       const indexCommands: string[][] = [];
 
       const read = createGitReader(Date.now, (args, options) => {
-        if (args.includes("--shared-index-path") || args.includes("status"))
+        if (args.includes("--shared-index-path") || args.includes("status")) {
           indexCommands.push(args);
+        }
 
         return readCommand(args, options);
       });
@@ -273,11 +281,13 @@ test.each(["branch switch", "branch update", "switch during comparison"])(
         if (
           (change === "branch switch" && args.includes("status")) ||
           (change === "switch during comparison" && args.includes("rev-list"))
-        )
+        ) {
           git(directory, "switch", "other");
+        }
 
-        if (change === "branch update" && args.includes("status"))
+        if (change === "branch update" && args.includes("status")) {
           git(directory, "update-ref", "refs/heads/main", next);
+        }
 
         return result;
       });
@@ -307,7 +317,10 @@ test("index inspection runs outside the gateway thread and stops at its deadline
     git(directory, "add", "tracked");
 
     const read = createGitReader(Date.now, async (args, options) => {
-      if (args[0] !== process.execPath) return readCommand(args, options);
+      if (args[0] !== process.execPath) {
+        return readCommand(args, options);
+      }
+
       const before = heartbeats;
 
       const result = await readCommand(
@@ -353,8 +366,9 @@ test("Git snapshot preparation gets a fresh deadline after the initial commands"
     git(directory, "init", "-b", "main");
 
     const read = createGitReader(Date.now, (args, options) => {
-      if (args.includes("--absolute-git-dir"))
+      if (args.includes("--absolute-git-dir")) {
         initial.abort(new DOMException("Initial Git deadline", "TimeoutError"));
+      }
 
       return readCommand(args, options);
     });
@@ -379,7 +393,9 @@ test("caches an outer Git read timeout for 15 seconds", async () => {
   const read = createGitReader(
     () => now,
     async () => {
-      if (++calls === 1) return held.promise;
+      if (++calls === 1) {
+        return held.promise;
+      }
 
       return { code: 1, stdout: "" };
     },
@@ -527,8 +543,10 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
   const timeout = spyOn(AbortSignal, "timeout").mockReturnValue(signal);
 
   try {
-    for (const directory of [...heldByCwd.keys(), target])
+    for (const directory of [...heldByCwd.keys(), target]) {
       await mkdir(directory);
+    }
+
     const busyReads = busy.map((hold) => read(hold.directory, signal));
     await Promise.all(busy.map((hold) => hold.started.promise));
     // Its 400 ms budget ends at 500; it gets a slot at 350, with less than
@@ -545,7 +563,10 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
     expect(timedOut).toMatchObject({ error: "Git read timed out." });
     expect(calls).toBe(5);
 
-    for (const hold of busy) hold.result.resolve(null);
+    for (const hold of busy) {
+      hold.result.resolve(null);
+    }
+
     late.resolve(null);
     await Promise.all(busyReads);
     mono += 199;
@@ -558,7 +579,10 @@ test("a read that gets its slot late caches its timeout only briefly", async () 
   } finally {
     timeout.mockRestore();
 
-    for (const hold of busy) hold.result.resolve(null);
+    for (const hold of busy) {
+      hold.result.resolve(null);
+    }
+
     late.resolve(null);
     await rm(root, { recursive: true, force: true });
   }
@@ -574,7 +598,9 @@ test("caches a timeout spent only waiting for a read slot briefly", async () => 
     () => now,
     async () => {
       // The first four reads each hold a slot; later calls fail fast.
-      if (++calls <= 4) return held.promise;
+      if (++calls <= 4) {
+        return held.promise;
+      }
 
       return { code: 1, stdout: "" };
     },
@@ -587,8 +613,10 @@ test("caches a timeout spent only waiting for a read slot briefly", async () => 
   const signal = new AbortController().signal;
 
   try {
-    for (const name of ["busy-1", "busy-2", "busy-3", "busy-4", "waiting"])
+    for (const name of ["busy-1", "busy-2", "busy-3", "busy-4", "waiting"]) {
       await mkdir(join(root, name));
+    }
+
     const busy = [1, 2, 3, 4].map((n) => read(join(root, `busy-${n}`), signal));
     const waiting = join(root, "waiting");
     const timedOut = await read(waiting, signal);
@@ -639,7 +667,9 @@ test.each(["success", "failure"])(
               0,
             );
 
-            if (outcome === "failure") return { code: 1, stdout: "" };
+            if (outcome === "failure") {
+              return { code: 1, stdout: "" };
+            }
           }
 
           return readCommand(args, options);
@@ -704,8 +734,9 @@ test("leaves a planted temporary snapshot directory untouched", async () => {
       async (args, options) => {
         const snapshot = options.env["GIT_DIR"];
 
-        if (snapshot && args.includes("status"))
+        if (snapshot && args.includes("status")) {
           parents.push(dirname(snapshot));
+        }
 
         return readCommand(args, options);
       },
@@ -734,7 +765,10 @@ test("leaves a planted temporary snapshot directory untouched", async () => {
     expect(parents).toHaveLength(2);
     const [parent] = parents;
 
-    if (!parent) throw new Error("No temporary snapshot directory");
+    if (!parent) {
+      throw new Error("No temporary snapshot directory");
+    }
+
     expect(dirname(parent)).toBe(root);
     expect(parent).not.toBe(planted);
     expect(parents).toEqual([parent, parent]);
@@ -807,7 +841,9 @@ test("a temporary root reached through a symlink is checked and used canonically
         async (args, options) => {
           const snapshot = options.env["GIT_DIR"];
 
-          if (snapshot && args.includes("status")) parent = dirname(snapshot);
+          if (snapshot && args.includes("status")) {
+            parent = dirname(snapshot);
+          }
 
           return readCommand(args, options);
         },
@@ -1028,8 +1064,9 @@ test("a metadata file growing during the snapshot still hits the byte limit", as
 
     await handle.close();
     streams.mockImplementation(function (this: typeof handle, options) {
-      if (fstatSync(this.fd).ino === inode)
+      if (fstatSync(this.fd).ino === inode) {
         appendFileSync(exclude, Buffer.alloc(2 * 1024 * 1024, 10));
+      }
 
       return createReadStream.call(this, options);
     });
@@ -1069,8 +1106,9 @@ test("the index snapshot falls back to streaming in large blocks", async () => {
     await handle.close();
     const blockSizes: (number | undefined)[] = [];
     streams.mockImplementation(function (this: typeof handle, options) {
-      if (fstatSync(this.fd).ino === inode)
+      if (fstatSync(this.fd).ino === inode) {
         blockSizes.push(options?.highWaterMark);
+      }
 
       return createReadStream.call(this, options);
     });
@@ -1163,8 +1201,10 @@ test("status ignores worktree and info attributes", async () => {
       "other.txt text eol=lf\n",
     );
 
-    for (const name of ["tracked.txt", "other.txt"])
+    for (const name of ["tracked.txt", "other.txt"]) {
       await writeFile(join(directory, name), "original\n");
+    }
+
     git(directory, "add", ".");
     git(directory, "commit", "-m", "Initial");
 
@@ -1174,8 +1214,10 @@ test("status ignores worktree and info attributes", async () => {
         { cwd: directory },
       ).exitCode === 0;
 
-    for (const name of ["tracked.txt", "other.txt"])
+    for (const name of ["tracked.txt", "other.txt"]) {
       await writeFile(join(directory, name), "original\r\n");
+    }
+
     expect(
       await createGitReader()(directory, new AbortController().signal),
     ).toMatchObject({ changedFiles: supportsAttributeSource ? 2 : 1 });
@@ -1268,7 +1310,10 @@ test("stalled removal holds Git status permits beyond the caller deadline", asyn
 
   const removals = spyOn(fs, "rm").mockImplementation(async (path, options) => {
     if (String(path).startsWith(join(snapshots, "stargate-git-status-"))) {
-      if (++removing === 4) full.resolve();
+      if (++removing === 4) {
+        full.resolve();
+      }
+
       await held.promise;
     }
 
@@ -1384,9 +1429,13 @@ test("snapshot preparation leaves Git status its full two-second budget", async 
     git(directory, "add", ".");
 
     const read = createGitReader(Date.now, async (args, options) => {
-      if (args[0] === process.execPath) await Bun.sleep(650);
+      if (args[0] === process.execPath) {
+        await Bun.sleep(650);
+      }
 
-      if (args.includes("status")) await Bun.sleep(1450);
+      if (args.includes("status")) {
+        await Bun.sleep(1450);
+      }
 
       return readCommand(args, options);
     });

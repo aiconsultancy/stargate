@@ -93,7 +93,10 @@ const FAILURE =
 const DESCRIBE_CONCURRENCY = 5;
 
 function pageCursor(page: Page<unknown>, limit: number) {
-  if (page.data.length > limit) throw new Error(FAILURE);
+  if (page.data.length > limit) {
+    throw new Error(FAILURE);
+  }
+
   const cursor = page.cursor.next;
 
   return cursor === null || cursor === undefined ? {} : { cursor };
@@ -185,11 +188,13 @@ function entry(
     case "assistant":
       role = "assistant";
       parts = message.content.map((part): HistoryPart => {
-        if (part.type === "text")
+        if (part.type === "text") {
           return { type: "text", ...clipHistory(part.text) };
+        }
 
-        if (part.type === "reasoning")
+        if (part.type === "reasoning") {
           return { type: "reasoning", ...(full && clipHistory(part.text)) };
+        }
 
         return toolPart(part, full);
       });
@@ -333,13 +338,18 @@ export class OpenCodeHistory implements SessionHistory {
 
                 signal.throwIfAborted();
 
-                if (session.id !== id) throw new Error(FAILURE);
+                if (session.id !== id) {
+                  throw new Error(FAILURE);
+                }
 
                 return sessionInfo(session);
               } catch (error) {
                 signal.throwIfAborted();
 
-                if (isSessionNotFoundError(error)) return;
+                if (isSessionNotFoundError(error)) {
+                  return;
+                }
+
                 throw error;
               }
             }),
@@ -364,12 +374,13 @@ export class OpenCodeHistory implements SessionHistory {
     return this.read(signal, async () => {
       const request = decodeChildren(input);
 
-      if (request.parentID.startsWith(piHistoryPrefix))
+      if (request.parentID.startsWith(piHistoryPrefix)) {
         return decodeSessionPage(
           await this.client
             .rpc(CrewReporting)
             .historyChildren(request, this.request(signal)),
         );
+      }
 
       const page = await this.client.session.list(
         {
@@ -396,12 +407,13 @@ export class OpenCodeHistory implements SessionHistory {
     return this.read(signal, async () => {
       const request = decodeEntries(input);
 
-      if (request.sessionID.startsWith(piHistoryPrefix))
+      if (request.sessionID.startsWith(piHistoryPrefix)) {
         return decodeEntryPage(
           await this.client
             .rpc(CrewReporting)
             .historyEntries(request, this.request(signal)),
         );
+      }
 
       const page = await this.client.message.list(
         {

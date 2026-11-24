@@ -33,7 +33,10 @@ export function defaultInstallID(configPath: string, host = hostname()) {
 
 /** Stable delay in whole minutes, 0..max, derived from the install identity. */
 export function stableJitter(installID: string, max: number) {
-  if (max <= 0) return 0;
+  if (max <= 0) {
+    return 0;
+  }
+
   const digest = createHash("sha256").update(`jitter:${installID}`).digest();
 
   return digest.readUInt32BE(0) % (max + 1);
@@ -100,7 +103,9 @@ export function currentWindow(now: number, spec: WindowSpec, jitter: number) {
   for (const date of [today.subtract({ days: 1 }), today]) {
     const window = occurrence(date, spec, jitter);
 
-    if (window.opens <= now && now < window.closes) return window;
+    if (window.opens <= now && now < window.closes) {
+      return window;
+    }
   }
 
   return;
@@ -117,7 +122,9 @@ function adjacentWindow(
   for (let day = 0; day < 4; day++, date = date.add({ days: step })) {
     const window = occurrence(date, spec, jitter);
 
-    if (step === 1 ? window.start > now : window.start <= now) return window;
+    if (step === 1 ? window.start > now : window.start <= now) {
+      return window;
+    }
   }
 
   throw new Error("No maintenance window found.");

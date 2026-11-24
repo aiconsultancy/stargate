@@ -43,7 +43,9 @@ import { FakeIrcServer, until } from "./irc-fixture";
 const close: (() => Promise<unknown> | unknown)[] = [];
 
 afterEach(async () => {
-  for (const f of close.splice(0).reverse()) await f();
+  for (const f of close.splice(0).reverse()) {
+    await f();
+  }
 });
 
 const signal = () => new AbortController().signal;
@@ -79,7 +81,9 @@ class Native implements FleetReviewNative {
   async startReview(binding: FleetReviewBinding) {
     this.starts.push(binding);
 
-    if (this.failAdmission) throw new Error("uncertain transport");
+    if (this.failAdmission) {
+      throw new Error("uncertain transport");
+    }
   }
   async readReview(binding: FleetReviewBinding) {
     this.reads.push(binding);
@@ -226,8 +230,9 @@ async function world(
     allowDispatch: true,
     nativeReviews: native,
     authorize: async (caller) => {
-      if (caller.messageID !== "msg_live_assistant")
+      if (caller.messageID !== "msg_live_assistant") {
         throw new Error("not live");
+      }
 
       return ship === "peer"
         ? current
@@ -257,7 +262,9 @@ async function world(
   const stranger = await FleetControl.open(options("stranger"));
   controls.push(stranger);
   close.push(async () => {
-    for (const c of controls.reverse()) await c.close();
+    for (const c of controls.reverse()) {
+      await c.close();
+    }
   });
   author.recordSource({
     reference: "human-source",
@@ -310,10 +317,13 @@ async function world(
     };
     const packet = sent.at(-1);
 
-    if (!packet) throw new Error("No dispatch");
+    if (!packet) {
+      throw new Error("No dispatch");
+    }
+
     expect(packet).not.toContain("--- a/index.ts");
 
-    if (admit)
+    if (admit) {
       expect(
         peer.assignment(
           {
@@ -326,6 +336,8 @@ async function world(
           (s) => s.toLowerCase(),
         ),
       ).toBe(result.dispatchID);
+    }
+
     const prompt = peer.reviewAssignmentPrompt(result.dispatchID);
     expect(prompt).toContain(diff);
     expect(prompt).toContain(result.review.contextDigest);
@@ -406,7 +418,10 @@ test("two attested native-family proofs share an independent reviewer ship and p
   expect(a.sessionID).not.toBe(b.sessionID);
   expect(a.inputID).not.toBe(b.inputID);
 
-  for (const binding of w.native.starts) w.native.finish(binding);
+  for (const binding of w.native.starts) {
+    w.native.finish(binding);
+  }
+
   await w.peer.pollReviews(signal());
   const proofs = await w.proofs();
   expect(proofs).toHaveLength(2);
@@ -594,7 +609,7 @@ test("missing, binary, malformed, oversized and disallowed review context fails 
     diff + "\u0000",
     diff + "\ud800",
     "diff --git " + "x".repeat(256_000),
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(reviewAssignmentSchema)({
@@ -603,6 +618,8 @@ test("missing, binary, malformed, oversized and disallowed review context fails 
         }),
       ),
     ).toBe(false);
+  }
+
   await expect(w.begin({ repository: "other/project" })).rejects.toThrow(
     "not permitted",
   );
@@ -622,7 +639,10 @@ test("wrong family, native agent, head, digest or verdict never becomes approvin
     await w.start(c.id);
     const binding = w.native.starts[0];
 
-    if (!binding) throw new Error("No native review");
+    if (!binding) {
+      throw new Error("No native review");
+    }
+
     w.native.finish(binding, change);
     await w.peer.pollReviews(signal());
     expect(await w.proofs()).toEqual([]);
@@ -637,7 +657,10 @@ test("duplicate start and gateway restart recover the same proof without resubmi
   expect(w.native.starts).toHaveLength(1);
   const binding = w.native.starts[0];
 
-  if (!binding) throw new Error("No native binding");
+  if (!binding) {
+    throw new Error("No native binding");
+  }
+
   await w.reopen();
   expect((await w.start(c.id)).id).toBe(first.id);
   expect(w.native.starts).toHaveLength(1);
@@ -678,7 +701,10 @@ test("captain substitution binds only the original review input, never an interv
   await w.peer.pollReviews(signal());
   const binding = w.native.reads.at(-1);
 
-  if (!binding) throw new Error("No read");
+  if (!binding) {
+    throw new Error("No read");
+  }
+
   w.native.finish(binding);
   await w.peer.pollReviews(signal());
   expect((await w.proofs())[0]?.kind).toBe("captain");
@@ -695,10 +721,11 @@ test("proof reads are strict and cannot write arbitrary proof/verdict/family cla
       target.headSHA,
     "/reviews?repository=example/project&pullRequest=7",
     "/reviews?repository=*&pullRequest=7&headSHA=" + target.headSHA,
-  ])
+  ]) {
     expect(
       (await raw(join(w.directory, "peer.sock"), "GET", path)).status,
     ).toBe(400);
+  }
 
   for (const pullRequest of ["07", "0", "-1", "1e2", "9007199254740992"]) {
     const response = await raw(
@@ -838,19 +865,26 @@ test("authenticated IRC intake injects exact private context before retaining th
   ship.start(() => true);
   const registration = ship.registrations[0];
 
-  if (!registration) throw new Error("No IRC registration");
+  if (!registration) {
+    throw new Error("No IRC registration");
+  }
+
   await until(() => registration.client.inChannel("#peer"), 3000, "join");
   const c = await w.begin({}, false);
 
   const lines = w.packet.split("\n").flatMap((line) => {
-    if (!line) return [{ text: "" }];
+    if (!line) {
+      return [{ text: "" }];
+    }
+
     const chunks: { text: string; concat?: boolean }[] = [];
 
-    for (let offset = 0; offset < line.length; offset += 300)
+    for (let offset = 0; offset < line.length; offset += 300) {
       chunks.push({
         text: line.slice(offset, offset + 300),
         ...(offset ? { concat: true } : {}),
       });
+    }
 
     return chunks;
   });
@@ -864,7 +898,10 @@ test("authenticated IRC intake injects exact private context before retaining th
   );
   const job = store.ready(registration.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-  if (!job) throw new Error("No retained review");
+  if (!job) {
+    throw new Error("No retained review");
+  }
+
   expect(job.text.endsWith(reviewContextPrompt(c, diff))).toBe(true);
   expect(job.fleet).toEqual({ kind: "assignment", dispatchID: c.id });
   w.current = {
@@ -913,7 +950,9 @@ test("opt-in native review tool preserves permission source and immutable assign
   try {
     const review = tools.find((t) => t.name === "fleet_review");
 
-    if (!review) throw new Error("Review tool not enabled");
+    if (!review) {
+      throw new Error("Review tool not enabled");
+    }
 
     const ctx: ToolContext = {
       sessionID: Session.ID.make("ses_peer"),
@@ -962,7 +1001,7 @@ test("review workers cannot opt into mutating, wildcard or interactive permissio
     models: [{ provider: "unit", model: "gpt" }],
   };
 
-  for (const action of ["edit", "bash", "*", "stargate_crew"])
+  for (const action of ["edit", "bash", "*", "stargate_crew"]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(reviewAgentSchema)({
@@ -971,6 +1010,8 @@ test("review workers cannot opt into mutating, wildcard or interactive permissio
         }),
       ),
     ).toBe(false);
+  }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(reviewAgentSchema)({
@@ -999,7 +1040,10 @@ test("read-only recovery can recognise a late exact native completion after unce
   expect(started.state).toBe("uncertain");
   const binding = w.native.starts[0];
 
-  if (!binding) throw new Error("No binding");
+  if (!binding) {
+    throw new Error("No binding");
+  }
+
   await w.reopen();
   w.native.finish(binding);
   await w.peer.pollReviews(signal());
@@ -1030,7 +1074,10 @@ test("a completed native captain input cannot be rebound to a different structur
   await w.peer.pollReviews(signal());
   const binding = w.native.reads.find((b) => b.id === first.id);
 
-  if (!binding) throw new Error("Missing first binding");
+  if (!binding) {
+    throw new Error("Missing first binding");
+  }
+
   w.native.finish(binding);
   await w.peer.pollReviews(signal());
   const second = await w.begin({ headSHA: "d".repeat(40) });
@@ -1055,7 +1102,10 @@ test("bounded review recovery rotates past 100 stuck uncertain inputs and preser
   expect(w.native.starts).toHaveLength(101);
   const last = w.native.starts[100];
 
-  if (!last) throw new Error("Missing late native input");
+  if (!last) {
+    throw new Error("Missing late native input");
+  }
+
   await w.peer.pollReviews(signal());
   expect(w.native.reads).toHaveLength(100);
   expect(w.native.reads.some((binding) => binding.id === last.id)).toBe(false);

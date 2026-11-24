@@ -77,24 +77,33 @@ async function showUnit(
     )
     .catch(() => null);
 
-  if (result?.code !== 0) return null;
+  if (result?.code !== 0) {
+    return null;
+  }
+
   const values: Record<string, string> = {};
 
   for (const line of result.stdout.split("\n")) {
     const equals = line.indexOf("=");
     const key = line.slice(0, equals);
 
-    if (equals > 0 && properties.includes(key))
+    if (equals > 0 && properties.includes(key)) {
       values[key] = line.slice(equals + 1).trim();
+    }
   }
 
   return values;
 }
 
 function unitState(values: Record<string, string> | null): UnitState {
-  if (!values) return "unknown";
+  if (!values) {
+    return "unknown";
+  }
 
-  if (values["LoadState"] === "not-found") return "not-found";
+  if (values["LoadState"] === "not-found") {
+    return "not-found";
+  }
+
   const state = values["ActiveState"] ?? "";
 
   return (unitStates as readonly string[]).includes(state)
@@ -160,11 +169,17 @@ export function digestReport(name: string, report: Report, scrub: Scrub) {
   const clean = cleaner(scrub);
   const models = { applied: 0, rolledBack: 0, failed: 0, skipped: 0 };
 
-  for (const change of report.models)
-    if (change.status === "applied") models.applied++;
-    else if (change.status === "rolled-back") models.rolledBack++;
-    else if (change.status === "failed") models.failed++;
-    else if (change.status === "skipped") models.skipped++;
+  for (const change of report.models) {
+    if (change.status === "applied") {
+      models.applied++;
+    } else if (change.status === "rolled-back") {
+      models.rolledBack++;
+    } else if (change.status === "failed") {
+      models.failed++;
+    } else if (change.status === "skipped") {
+      models.skipped++;
+    }
+  }
 
   return {
     name: clean(name),
@@ -223,9 +238,11 @@ export async function readReports(
         ),
       );
 
-      if (Result.isSuccess(parsed))
+      if (Result.isSuccess(parsed)) {
         reports.push(digestReport(name, parsed.success, scrub));
-      else unreadable++;
+      } else {
+        unreadable++;
+      }
     } catch {
       unreadable++;
     }
@@ -246,7 +263,10 @@ export async function collectFacts(input: {
   const { config, runner, now } = input;
   const m = config.maintenance;
 
-  if (!m) throw new Error("No maintenance section in configuration.");
+  if (!m) {
+    throw new Error("No maintenance section in configuration.");
+  }
+
   const droid = m.droid;
   const data = config.dataDirectory;
   const installID = m.installID ?? defaultInstallID(resolve(input.configPath));
@@ -461,7 +481,7 @@ export function findings(
   const running = timer.runActive;
 
   if (facts.enabled) {
-    if (!runningUnit(timer.state))
+    if (!runningUnit(timer.state)) {
       list.push({
         code: "timer-inactive",
         text: `The maintenance timer ${timer.name} is ${timer.state}; no nightly run will start.`,
@@ -473,7 +493,7 @@ export function findings(
                 `systemctl --user enable --now ${timer.name}`,
               ],
       });
-    else {
+    } else {
       const planned = Date.parse(facts.window.lastPlannedStart);
       const since = timer.activeSince ? Date.parse(timer.activeSince) : null;
       const fired = timer.lastTrigger ? Date.parse(timer.lastTrigger) : null;
@@ -484,16 +504,17 @@ export function findings(
         since <= planned &&
         Date.parse(facts.now) >= planned + 30 * 60_000 &&
         (fired === null || fired < planned - 5 * 60_000)
-      )
+      ) {
         list.push({
           code: "timer-missed",
           text: `The maintenance timer did not fire for the window planned at ${facts.window.lastPlannedStart}.`,
           commands: [status(timer.name), "systemctl --user list-timers"],
         });
+      }
     }
   }
 
-  if (facts.alert)
+  if (facts.alert) {
     list.push({
       code: "alert",
       text:
@@ -502,23 +523,27 @@ export function findings(
           : `ALERT.json: run ${facts.alert.runID} ended ${facts.alert.outcome}${facts.alert.reason ? ` (${facts.alert.reason})` : ""}${facts.alert.journal ? " and left a journal" : ""}. Review the report, then delete ALERT.json.`,
       commands: [`cat ${facts.alertPath}`],
     });
+  }
 
-  if (!running && facts.journal.state === "present")
+  if (!running && facts.journal.state === "present") {
     list.push({
       code: "journal",
       text: `An interrupted run left a journal (${facts.journal.entries.join(", ")}). The next run recovers it after its idle gate.`,
       commands: [stargate("recover")],
     });
+  }
 
-  if (facts.journal.state === "corrupt")
+  if (facts.journal.state === "corrupt") {
     list.push({
       code: "journal-corrupt",
       text: "The maintenance journal is corrupt or not private. Runs refuse to proceed until an operator inspects it.",
       commands: [stargate("recover", " --accept-current journal")],
     });
+  }
+
   const gateway = facts.units.gateway;
 
-  if (!running && (!runningUnit(gateway.state) || !facts.ready?.alive))
+  if (!running && (!runningUnit(gateway.state) || !facts.ready?.alive)) {
     list.push({
       code: "gateway-down",
       text: runningUnit(gateway.state)
@@ -526,50 +551,59 @@ export function findings(
         : `The gateway unit ${gateway.unit} is ${gateway.state}; Slack messages are not handled.`,
       commands: [status(gateway.unit), logs(gateway.unit)],
     });
+  }
+
   const openCode = facts.units.openCode;
 
-  if (!running && openCode && !runningUnit(openCode.state))
+  if (!running && openCode && !runningUnit(openCode.state)) {
     list.push({
       code: "opencode-down",
       text: `The OpenCode unit ${openCode.unit} is ${openCode.state}.`,
       commands: [status(openCode.unit), logs(openCode.unit)],
     });
+  }
+
   const proxy = facts.units.proxy;
 
   if (
     !running &&
     (facts.proxyHealthy === false || (proxy && !runningUnit(proxy.state)))
-  )
+  ) {
     list.push({
       code: "proxy-unhealthy",
       text: `CLIProxyAPI ${proxy ? `(${proxy.unit}, ${proxy.state}) ` : ""}does not answer GET /v1/models.`,
       commands: proxy ? [status(proxy.unit), logs(proxy.unit)] : [],
     });
+  }
+
   const recent = facts.reports.slice(0, settings.failedNights);
 
   if (
     recent.length === settings.failedNights &&
     recent.every((r) => r.outcome === "failed" || r.outcome === "deferred")
-  )
+  ) {
     list.push({
       code: "runs-failing",
       text: `The last ${recent.length} run(s) ended ${recent.map((r) => `${r.outcome}${r.reason ? ` (${r.reason})` : ""}`).join(", ")}.`,
       commands: [stargate("plan")],
     });
+  }
 
-  if (facts.release.knownBad.length > 0)
+  if (facts.release.knownBad.length > 0) {
     list.push({
       code: "known-bad",
       text: `Known-bad Stargate release(s) newer than the current ${facts.release.current ?? "release"}: ${facts.release.knownBad.map((r) => `${r.version} (${r.reason})`).join(", ")}. Updates wait for a newer release.`,
       commands: [],
     });
+  }
 
-  if (facts.unreadableReports)
+  if (facts.unreadableReports) {
     list.push({
       code: "reports-unreadable",
       text: `${facts.unreadableReports} recent report(s) cannot be read or have an unknown schema.`,
       commands: [],
     });
+  }
 
   return list;
 }

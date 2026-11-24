@@ -106,10 +106,13 @@ export function setDefaultLockCommandForTests(command: LockCommand): void {
 }
 
 function currentUid(options: Ownership): number {
-  if (options.uid !== undefined) return options.uid;
+  if (options.uid !== undefined) {
+    return options.uid;
+  }
 
-  if (typeof process.getuid !== "function")
+  if (typeof process.getuid !== "function") {
     throw new Error("Unix sockets need a POSIX platform");
+  }
 
   return process.getuid();
 }
@@ -118,7 +121,10 @@ function lstatOrUndefined(path: string): Stats | undefined {
   try {
     return lstatSync(path);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+
     throw err;
   }
 }
@@ -128,7 +134,10 @@ function lstatSocketOrUndefined(path: string): BigIntStats | undefined {
   try {
     return lstatSync(path, { bigint: true });
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+
     throw err;
   }
 }
@@ -139,8 +148,9 @@ function lstatSocketOrUndefined(path: string): BigIntStats | undefined {
 // Different paths: lstat of "/safe/link/." follows the symlink "link", which a walk
 // Of the normalised path would never examine.
 function checkNormalised(path: string, what: string): void {
-  if (path !== resolve(path))
+  if (path !== resolve(path)) {
     throw new Error(`${what} ${path} is not an absolute, normalised path`);
+  }
 }
 
 // The directory must be a real directory (not a symlink), owned by this user and
@@ -154,16 +164,21 @@ export function checkPrivateDirectory(
   checkAncestors(dir, currentUid(options));
   const stats = lstatOrUndefined(dir);
 
-  if (!stats) throw new Error(`socket directory ${dir} does not exist`);
+  if (!stats) {
+    throw new Error(`socket directory ${dir} does not exist`);
+  }
 
-  if (stats.isSymbolicLink())
+  if (stats.isSymbolicLink()) {
     throw new Error(`socket directory ${dir} is a symlink`);
+  }
 
-  if (!stats.isDirectory())
+  if (!stats.isDirectory()) {
     throw new Error(`socket directory ${dir} is not a directory`);
+  }
 
-  if (stats.uid !== currentUid(options))
+  if (stats.uid !== currentUid(options)) {
     throw new Error(`socket directory ${dir} is not owned by this user`);
+  }
 
   if (stats.mode & 0o022) {
     throw new Error(
@@ -171,8 +186,9 @@ export function checkPrivateDirectory(
     );
   }
 
-  if (options.mode === 0o600 && (stats.mode & 0o7777) !== 0o700)
+  if (options.mode === 0o600 && (stats.mode & 0o7777) !== 0o700) {
     throw new Error(`private socket directory ${dir} must have mode 0700`);
+  }
 }
 
 // Whoever can write a directory can rename what is in it, so anyone able to write
@@ -190,15 +206,19 @@ function checkAncestors(dir: string, uid: number): void {
     current = dirname(current);
     const stats = lstatOrUndefined(current);
 
-    if (!stats) throw new Error(`socket directory ${dir} does not exist`);
+    if (!stats) {
+      throw new Error(`socket directory ${dir} does not exist`);
+    }
 
-    if (stats.isSymbolicLink())
+    if (stats.isSymbolicLink()) {
       throw new Error(`socket directory ancestor ${current} is a symlink`);
+    }
 
-    if (stats.uid !== 0 && stats.uid !== uid)
+    if (stats.uid !== 0 && stats.uid !== uid) {
       throw new Error(
         `socket directory ancestor ${current} is owned by uid ${stats.uid}, not root or this user`,
       );
+    }
 
     if (stats.mode & 0o022 && !(stats.mode & 0o1000)) {
       throw new Error(
@@ -214,10 +234,11 @@ function checkAncestors(dir: string, uid: number): void {
 // Catches every loss seen by then, such as the holder being killed during the
 // Liveness probe.
 function ensureStillHeld(lock: StartupLock, path: string, step: string): void {
-  if (!lock.stillHeld())
+  if (!lock.stillHeld()) {
     throw new StartupLockLostError(
       `lost the start-up lock for ${path} before ${step}`,
     );
+  }
 }
 
 // Dead means nothing is bound: the connection is refused or the file has gone.
@@ -235,7 +256,10 @@ export function isLiveSocket(
     let settled = false;
 
     const done = (live: boolean) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
+
       settled = true;
       socket.destroy();
       resolve(live);
@@ -266,34 +290,45 @@ export async function removeStaleSocket(
 ): Promise<void> {
   const stats = lstatSocketOrUndefined(path);
 
-  if (!stats) return;
+  if (!stats) {
+    return;
+  }
 
-  if (stats.isSymbolicLink())
+  if (stats.isSymbolicLink()) {
     throw new Error(`${path} is a symlink; refusing to use or remove it`);
+  }
 
-  if (!stats.isSocket())
+  if (!stats.isSocket()) {
     throw new Error(
       `${path} exists and is not a socket; refusing to remove it`,
     );
+  }
 
-  if (Number(stats.uid) !== currentUid(options))
+  if (Number(stats.uid) !== currentUid(options)) {
     throw new Error(`${path} is owned by another user; refusing to remove it`);
+  }
 
-  if (await isLiveSocket(path, 1000, options.connectTo))
+  if (await isLiveSocket(path, 1000, options.connectTo)) {
     throw new SocketBusyError(`${path} is served by another process`);
+  }
+
   const again = lstatSocketOrUndefined(path);
 
-  if (again && !sameFile(identityOf(stats), identityOf(again)))
+  if (again && !sameFile(identityOf(stats), identityOf(again))) {
     throw new SocketBusyError(
       `${path} was replaced while it was being checked`,
     );
+  }
+
   ensureStillHeld(lock, path, "removing the stale socket");
 
   try {
     unlinkSync(path);
   } catch (err) {
     // Its owner removed it in the meantime: the path is free, which is the goal.
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw err;
+    }
   }
 }
 
@@ -371,14 +406,19 @@ function acquireKernelLock(
     };
 
     const settle = (err?: Error) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
+
       settled = true;
       options.signal?.removeEventListener("abort", onAbort);
 
       if (err) {
         child.kill("SIGKILL");
         reject(err);
-      } else resolve({ release, stillHeld: () => alive });
+      } else {
+        resolve({ release, stillHeld: () => alive });
+      }
     };
 
     const onAbort = () => {
@@ -394,7 +434,9 @@ function acquireKernelLock(
     options.signal?.addEventListener("abort", onAbort, { once: true });
     child.stdin.on("error", () => {});
     child.stderr.on("data", (chunk: Buffer) => {
-      if (stderr.length < 500) stderr += chunk.toString("utf8");
+      if (stderr.length < 500) {
+        stderr += chunk.toString("utf8");
+      }
     });
     child.stdout.once("data", () => {
       settle();
@@ -407,14 +449,15 @@ function acquireKernelLock(
       );
     });
     child.once("exit", (code) => {
-      if (code === 1)
+      if (code === 1) {
         settle(new SocketBusyError(`${lockPath} is held by another starter`));
-      else
+      } else {
         settle(
           new Error(
             `${command} exited with ${code ?? "a signal"} before taking the start-up lock${stderr ? `: ${stderr.trim()}` : ""}`,
           ),
         );
+      }
     });
   });
 }
@@ -456,12 +499,17 @@ export async function withStartupLock<T>(
     // (EISDIR) where macOS opens it and the fstat below refuses it.
     const code = (err as NodeJS.ErrnoException).code;
 
-    if (code === "ELOOP" || code === "EISDIR") throw notRegular;
+    if (code === "ELOOP" || code === "EISDIR") {
+      throw notRegular;
+    }
+
     throw err;
   }
 
   try {
-    if (!fstatSync(fd).isFile()) throw notRegular;
+    if (!fstatSync(fd).isFile()) {
+      throw notRegular;
+    }
   } finally {
     closeSync(fd);
   }
@@ -549,8 +597,10 @@ async function checkAndBind(
     try {
       ensureStillHeld(lock, path, "publishing the private socket");
 
-      if (lstatSocketOrUndefined(path))
+      if (lstatSocketOrUndefined(path)) {
         throw new SocketBusyError(`${path} was replaced before publication`);
+      }
+
       renameSync(bindPath, path);
       stats = lstatSync(path, { bigint: true });
     } catch (error) {
@@ -580,16 +630,25 @@ export function unlinkOwnSocket(
   identity: SocketIdentity | undefined,
   options: Ownership = {},
 ): void {
-  if (!identity) return;
+  if (!identity) {
+    return;
+  }
+
   const stats = lstatSocketOrUndefined(path);
 
-  if (!stats?.isSocket() || Number(stats.uid) !== currentUid(options)) return;
+  if (!stats?.isSocket() || Number(stats.uid) !== currentUid(options)) {
+    return;
+  }
 
-  if (!sameFile(identityOf(stats), identity)) return;
+  if (!sameFile(identityOf(stats), identity)) {
+    return;
+  }
 
   try {
     unlinkSync(path);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw err;
+    }
   }
 }

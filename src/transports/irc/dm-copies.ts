@@ -23,16 +23,22 @@ export function copyText(item: { id: string; text: string }) {
     .join("\n")
     .trim();
 
-  if (sensitive(item.text) || sensitive(clean))
+  if (sensitive(item.text) || sensitive(clean)) {
     return `[stargate_dm ${item.id}: not copied to IRC, it may contain credentials. Read it with stargate_mail.]`;
+  }
+
   const marked = `[stargate_dm] ${clean}`;
 
-  if (Buffer.byteLength(marked) <= copyBytes) return marked;
+  if (Buffer.byteLength(marked) <= copyBytes) {
+    return marked;
+  }
+
   const suffix = " … (truncated; full text in stargate_mail)";
   let cut = marked;
 
-  while (Buffer.byteLength(cut + suffix) > copyBytes)
+  while (Buffer.byteLength(cut + suffix) > copyBytes) {
     cut = Array.from(cut).slice(0, -64).join("");
+  }
 
   return `${cut.trimEnd()}${suffix}`;
 }

@@ -25,8 +25,9 @@ const marker = "# Managed by Stargate CLI";
 const exec = promisify(execFile);
 
 export function serviceName(name = "stargate") {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name))
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name)) {
     throw new Error("Invalid service name.");
+  }
 
   return `${name}.service`;
 }
@@ -37,8 +38,9 @@ export function quote(value: string, command = false) {
       (character) =>
         character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
     )
-  )
+  ) {
     throw new Error("Service paths cannot contain control characters.");
+  }
 
   return `"${value
     .replaceAll("\\", "\\\\")
@@ -53,7 +55,9 @@ export function buildUnit(
   entrypoint = mainEntrypoint,
 ) {
   for (const path of [configPath, executable, entrypoint]) {
-    if (!isAbsolute(path)) throw new Error("Service paths must be absolute.");
+    if (!isAbsolute(path)) {
+      throw new Error("Service paths must be absolute.");
+    }
   }
 
   return `${marker}
@@ -80,8 +84,10 @@ export async function manageService(
   configPath: string,
   name = "stargate",
 ) {
-  if (process.platform !== "linux")
+  if (process.platform !== "linux") {
     throw new Error("User services require Linux with systemd.");
+  }
+
   const unit = serviceName(name);
   const path = join(homedir(), ".config/systemd/user", unit);
 
@@ -121,8 +127,10 @@ export async function manageService(
       throw new Error("Cannot read installed service.");
     }
 
-    if (!content.startsWith(`${marker}\n`))
+    if (!content.startsWith(`${marker}\n`)) {
       throw new Error("Refusing to remove an unrelated service.");
+    }
+
     await systemctl("disable", "--now", unit);
     await unlink(path);
     await systemctl("daemon-reload");
@@ -131,8 +139,9 @@ export async function manageService(
     return;
   }
 
-  if (!["start", "stop", "status"].includes(action))
+  if (!["start", "stop", "status"].includes(action)) {
     throw new Error("Unknown service command.");
+  }
 
   // `show` succeeds for an inactive service, unlike `status`.
   const result =
@@ -145,5 +154,7 @@ export async function manageService(
         )
       : await systemctl(action, unit);
 
-  if (result.stdout) console.log(result.stdout.trimEnd());
+  if (result.stdout) {
+    console.log(result.stdout.trimEnd());
+  }
 }

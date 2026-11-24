@@ -25,7 +25,9 @@ import { bot, event, identity } from "./fixtures";
 const cleanups: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    await cleanup();
+  }
 });
 
 const now = Date.parse("2026-11-17T12:00:00Z");
@@ -34,7 +36,10 @@ async function fixture(options: MetaOptions = {}) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-meta-"));
   const config = bot();
 
-  if (config.backend.type !== "opencode") throw new Error("Expected OpenCode");
+  if (config.backend.type !== "opencode") {
+    throw new Error("Expected OpenCode");
+  }
+
   config.backend.directory = directory;
   config.backend.agent = "adama";
   config.backend.sessionID = "ses_existing_captain";
@@ -103,7 +108,9 @@ async function fixture(options: MetaOptions = {}) {
       team: { captain: { id: "adama" } },
     },
     async captain(caller: { agent: string }) {
-      if (caller.agent !== "adama") throw new Error("Not captain");
+      if (caller.agent !== "adama") {
+        throw new Error("Not captain");
+      }
     },
   };
 
@@ -623,7 +630,10 @@ for (const changes of [
       const queued = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 10);
       expect(queued).toHaveLength(1);
       expect(queued[0]?.text).toBe("/config waiting 3");
-    } else noCaptainWork(f);
+    } else {
+      noCaptainWork(f);
+    }
+
     expect(f.delivered).toEqual([]);
     expect((await resolveWaiting(f.config)).delayMs).toBe(5000);
   });
@@ -713,8 +723,10 @@ test("retained pending claim reports uncertainty after reopen, never reapplies",
 test("failed waiting write remains pending and cannot later overwrite a tool change", async () => {
   const f = await fixture();
 
-  if (f.config.backend.type !== "opencode")
+  if (f.config.backend.type !== "opencode") {
     throw new Error("Expected OpenCode");
+  }
+
   const blocker = join(f.directory, "not-a-directory");
   await Bun.write(blocker, "fixture");
   f.config.backend.directory = blocker;
@@ -804,7 +816,9 @@ test("mute listing is bounded, current-registration-only, and does not mutate pr
         { id: "list", caller: "gateway", now: readTime },
       );
 
-      if (result.op !== "list") throw new Error("Expected list");
+      if (result.op !== "list") {
+        throw new Error("Expected list");
+      }
 
       return result;
     },
@@ -971,11 +985,12 @@ test("binding invalidation during waiting read releases only the proven-unwritte
 
   const f = await fixture({
     now: () => {
-      if (!invalidated)
+      if (!invalidated) {
         queueMicrotask(() => {
           invalidated = true;
           invalidate();
         });
+      }
 
       return now;
     },

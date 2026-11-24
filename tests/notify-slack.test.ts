@@ -52,8 +52,10 @@ test("maximum Unicode and instruction-like payloads remain literal in one bounde
     const call = calls[0];
     expect(call?.get("channel")).toBe("C123");
 
-    for (const flag of ["mrkdwn", "unfurl_links", "unfurl_media"])
+    for (const flag of ["mrkdwn", "unfurl_links", "unfurl_media"]) {
       expect(call?.get(flag)).toBe("false");
+    }
+
     expect(call?.get("parse")).toBe("none");
     expect(call?.get("thread_ts")).toBeNull();
     expect(call?.get("attachments")).toBeNull();
@@ -105,8 +107,9 @@ test("request-scoped cancellation aborts real HTTP without cancelling another de
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (!address || typeof address === "string")
+  if (!address || typeof address === "string") {
     throw new Error("Missing HTTP fixture port");
+  }
 
   const connection = new SlackConnection(
     "fixture-app",
@@ -161,14 +164,16 @@ test("positive Slack refusal and Retry-After differ from ambiguous 5xx/network o
     fetch() {
       calls++;
 
-      if (mode === "rate")
+      if (mode === "rate") {
         return new Response("rate", {
           status: 429,
           headers: { "Retry-After": "7" },
         });
+      }
 
-      if (mode === "refused")
+      if (mode === "refused") {
         return Response.json({ ok: false, error: "not_in_channel" });
+      }
 
       return new Response("ambiguous", { status: 500 });
     },
@@ -223,7 +228,10 @@ test("CURRENT binding check drops revoked rows instead of posting to a rebound d
   const admitted = resolveDestinations(initial, [original]);
   const frozen = admitted["log"];
 
-  if (!frozen) throw new Error("Missing fixture binding");
+  if (!frozen) {
+    throw new Error("Missing fixture binding");
+  }
+
   let notify = initial;
   let registrations = [original];
   let sends = 0;
@@ -262,8 +270,9 @@ test("CURRENT binding check drops revoked rows instead of posting to a rebound d
     registrations = structuredClone([original]);
     const current = registrations[0];
 
-    if (!current || !notify.destinations["log"])
+    if (!current || !notify.destinations["log"]) {
       throw new Error("Missing fixture binding");
+    }
 
     switch (change) {
       case "alias":
@@ -312,11 +321,13 @@ test("CURRENT binding check drops revoked rows instead of posting to a rebound d
   registrations = structuredClone([original]);
   notify = structuredClone(initial);
 
-  if (registrations[0]?.bot.backend.type === "opencode")
+  if (registrations[0]?.bot.backend.type === "opencode") {
     registrations[0].bot.backend.model = {
       providerID: "different",
       id: "different",
     };
+  }
+
   expect(sink.allowed(destination)).toBe(true);
   expect(
     await sink.send(
@@ -354,7 +365,10 @@ test("revoking one destination does not refuse an independent allowed channel", 
   const first = admitted["log"];
   const other = admitted["other"];
 
-  if (!first || !other) throw new Error("Missing fixture binding");
+  if (!first || !other) {
+    throw new Error("Missing fixture binding");
+  }
+
   sender.access.deniedChannels = ["COTHER"];
 
   const sink = slackNotificationSink({

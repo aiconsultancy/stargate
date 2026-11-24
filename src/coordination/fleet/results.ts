@@ -17,10 +17,15 @@ export function fleetOrigin(
   sessionID: string,
   source: VerifiedSource,
 ): FleetOrigin | undefined {
-  if (!source.origin) return;
+  if (!source.origin) {
+    return;
+  }
+
   const job = store.jobByEvent(source.origin.botKey, source.origin.eventId);
 
-  if (!job?.input) return;
+  if (!job?.input) {
+    return;
+  }
 
   return { ...source.origin, sessionID, inputID: job.input };
 }
@@ -71,26 +76,35 @@ export class FleetResults {
   public async poll(signal: AbortSignal) {
     const { control, store, botKey, sessionID, account } = this.options;
 
-    if (!control.resultsEnabled) return;
+    if (!control.resultsEnabled) {
+      return;
+    }
 
     for (const job of store.fleet.pendingFleetJobs(botKey)) {
       signal.throwIfAborted();
 
-      if (job.fleet?.kind !== "assignment") continue;
+      if (job.fleet?.kind !== "assignment") {
+        continue;
+      }
 
-      if (job.input)
+      if (job.input) {
         control.bindInput(
           job.botKey,
           job.eventId,
           job.fleet.dispatchID,
           job.input,
         );
+      }
 
-      if (job.status === "queued" || job.status === "running") continue;
+      if (job.status === "queued" || job.status === "running") {
+        continue;
+      }
+
       const delegation = control.delegation(job.fleet.dispatchID);
 
-      if (!delegation)
+      if (!delegation) {
         throw new Error("Fleet completion delegation unavailable");
+      }
 
       const makers = job.makers ?? (await this.recoverMakers(job, signal));
 
@@ -122,11 +136,16 @@ export class FleetResults {
     for (const { origin, completion } of control.pendingResults()) {
       signal.throwIfAborted();
 
-      if (origin.sessionID !== sessionID)
+      if (origin.sessionID !== sessionID) {
         throw new Error("Fleet result owner pin changed");
+      }
+
       const original = store.jobByEvent(origin.botKey, origin.eventId);
 
-      if (!original || original.input !== origin.inputID) continue;
+      if (!original || original.input !== origin.inputID) {
+        continue;
+      }
+
       const eventId = `fleet-result:${completion.dispatchID}`;
 
       const text = [
@@ -178,8 +197,10 @@ export class FleetResults {
         !inserted &&
         (!existing ||
           JSON.stringify(existing.fleet) !== JSON.stringify(resultJob))
-      )
+      ) {
         throw new Error("Fleet result continuation could not be retained");
+      }
+
       // Queue before acknowledgement: restart deduplicates the retained input.
       control.acknowledgeResult(completion.dispatchID);
     }
@@ -192,7 +213,10 @@ export class FleetResults {
       try {
         await this.poll(signal);
       } catch (error) {
-        if (signal.aborted) return;
+        if (signal.aborted) {
+          return;
+        }
+
         throw error;
       }
 

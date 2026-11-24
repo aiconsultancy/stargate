@@ -58,7 +58,9 @@ const decodeFrontmatter = Schema.decodeUnknownResult(frontmatterSchema);
 function validName(name: string): string {
   const result = decodeName(name);
 
-  if (Result.isFailure(result)) throw new Error("Invalid cronjob name.");
+  if (Result.isFailure(result)) {
+    throw new Error("Invalid cronjob name.");
+  }
 
   return result.success;
 }
@@ -71,11 +73,16 @@ export function parseCronjob(
 ): CronjobDefinition {
   validName(name);
 
-  if (Buffer.byteLength(text) > maxBytes)
+  if (Buffer.byteLength(text) > maxBytes) {
     throw new Error("Cronjob file exceeds size limit.");
+  }
+
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
 
-  if (!match) throw new Error("Invalid cronjob frontmatter delimiters.");
+  if (!match) {
+    throw new Error("Invalid cronjob frontmatter delimiters.");
+  }
+
   let yaml: unknown;
 
   try {
@@ -86,15 +93,21 @@ export function parseCronjob(
 
   const parsed = decodeFrontmatter(yaml);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     throw new Error("Invalid cronjob frontmatter fields.");
+  }
+
   const metadata = parsed.success;
 
-  if (metadata.name !== name) throw new Error("Cronjob folder name mismatch.");
+  if (metadata.name !== name) {
+    throw new Error("Cronjob folder name mismatch.");
+  }
+
   const body = text.slice(match[0].length);
 
-  if (body.length > 12_000)
+  if (body.length > 12_000) {
     throw new Error("Cronjob prompt exceeds size limit.");
+  }
 
   const { input } = validateCronInput(
     {
@@ -126,8 +139,9 @@ export function renderCronjob(
   const { prompt, ...metadata } = definition;
   const parsed = decodeFrontmatter(metadata);
 
-  if (Result.isFailure(parsed) || typeof prompt !== "string")
+  if (Result.isFailure(parsed) || typeof prompt !== "string") {
     throw new Error("Invalid cronjob definition.");
+  }
 
   // One delimiter newline belongs to the format, not to the Markdown body.
   return `---\n${Bun.YAML.stringify(parsed.success).trimEnd()}\n---\n${prompt}`;
@@ -152,14 +166,17 @@ async function directory(path: string, create = false): Promise<void> {
       try {
         await mkdir(current, { mode: 0o700 });
       } catch (error) {
-        if (!hasCode(error, "EEXIST")) throw error;
+        if (!hasCode(error, "EEXIST")) {
+          throw error;
+        }
       }
     }
 
     const stat = await lstat(current);
 
-    if (!stat.isDirectory() || stat.isSymbolicLink())
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
       throw new Error("Unsafe cronjob directory.");
+    }
   }
 }
 
@@ -174,13 +191,17 @@ export async function readCronjob(
   const path = join(job, "CRONJOB.md");
   const stat = await lstat(path);
 
-  if (!stat.isFile() || stat.isSymbolicLink())
+  if (!stat.isFile() || stat.isSymbolicLink()) {
     throw new Error("Unsafe cronjob file.");
+  }
+
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
 
   try {
-    if (!(await handle.stat()).isFile())
+    if (!(await handle.stat()).isFile()) {
       throw new Error("Unsafe cronjob file.");
+    }
+
     const buffer = Buffer.alloc(maxBytes + 1);
     let length = 0;
 
@@ -192,11 +213,16 @@ export async function readCronjob(
         null,
       );
 
-      if (!bytesRead) break;
+      if (!bytesRead) {
+        break;
+      }
+
       length += bytesRead;
     }
 
-    if (length > maxBytes) throw new Error("Cronjob file exceeds size limit.");
+    if (length > maxBytes) {
+      throw new Error("Cronjob file exceeds size limit.");
+    }
 
     return parseCronjob(buffer.subarray(0, length).toString("utf8"), name, now);
   } finally {
@@ -208,32 +234,47 @@ export async function listCronjobNames(root: string): Promise<string[]> {
   try {
     await directory(root);
   } catch (error) {
-    if (hasCode(error, "ENOENT")) return [];
+    if (hasCode(error, "ENOENT")) {
+      return [];
+    }
+
     throw error;
   }
 
   const names: string[] = [];
 
   for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (Result.isFailure(decodeName(entry.name))) continue;
+    if (Result.isFailure(decodeName(entry.name))) {
+      continue;
+    }
 
-    if (entry.isSymbolicLink()) throw new Error("Unsafe cronjob directory.");
+    if (entry.isSymbolicLink()) {
+      throw new Error("Unsafe cronjob directory.");
+    }
 
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
     await directory(join(root, entry.name));
 
     try {
       const file = await lstat(join(root, entry.name, "CRONJOB.md"));
 
-      if (file.isSymbolicLink() || !file.isFile())
+      if (file.isSymbolicLink() || !file.isFile()) {
         throw new Error("Unsafe cronjob file.");
+      }
     } catch (error) {
-      if (!hasCode(error, "ENOENT")) throw error;
+      if (!hasCode(error, "ENOENT")) {
+        throw error;
+      }
     }
 
     names.push(entry.name);
 
-    if (names.length > 100) throw new Error("Too many cronjob directories.");
+    if (names.length > 100) {
+      throw new Error("Too many cronjob directories.");
+    }
   }
 
   return names.toSorted();
@@ -264,11 +305,15 @@ export async function writeCronjob(
       // Publish complete bytes without replacing an existing definition.
       await link(temporary, path);
     } catch (error) {
-      if (!hasCode(error, "EEXIST")) throw error;
+      if (!hasCode(error, "EEXIST")) {
+        throw error;
+      }
+
       const existing = await readCronjob(root, normalized.name, now);
 
-      if (renderCronjob(existing) !== renderCronjob(normalized))
+      if (renderCronjob(existing) !== renderCronjob(normalized)) {
         throw new Error("Cronjob already exists with a different definition.");
+      }
     }
 
     return path;

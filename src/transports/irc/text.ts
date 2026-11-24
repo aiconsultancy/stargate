@@ -59,9 +59,12 @@ export function plainText(markdown: string): string {
         marker[0] === fence[0] &&
         marker.length >= fence.length &&
         line.trim() === marker
-      )
+      ) {
         fence = undefined;
-      else out.push(line);
+      } else {
+        out.push(line);
+      }
+
       continue;
     }
 
@@ -70,18 +73,22 @@ export function plainText(markdown: string): string {
       continue;
     }
 
-    if (rule.test(line) || tableSeparator.test(line)) continue;
+    if (rule.test(line) || tableSeparator.test(line)) {
+      continue;
+    }
 
     let text = line
       .replace(/^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/, "$1")
       .replace(/^(\s*)[*+]\s+/, "$1- ");
 
     // `| a | b |` table rows read as `a | b`.
-    if (/^\s*\|.*\|\s*$/.test(text))
+    if (/^\s*\|.*\|\s*$/.test(text)) {
       text = text
         .trim()
         .replace(/^\|\s*/, "")
         .replace(/\s*\|$/, "");
+    }
+
     out.push(inlineLine(text));
   }
 
@@ -95,7 +102,10 @@ export function plainText(markdown: string): string {
  * boundary, never inside a UTF-8 sequence.
  */
 export function ircLines(text: string, budget: number): string[] {
-  if (budget < 16) throw new Error("IRC line budget too small");
+  if (budget < 16) {
+    throw new Error("IRC line budget too small");
+  }
+
   const lines: string[] = [];
 
   for (const line of text.split("\n")) {
@@ -109,11 +119,16 @@ export function ircLines(text: string, budget: number): string[] {
       for (const char of rest) {
         const size = utf8Bytes(char);
 
-        if (bytes + size > budget) break;
+        if (bytes + size > budget) {
+          break;
+        }
+
         bytes += size;
         end += char.length;
 
-        if (char === " " && bytes > budget / 2) space = end - 1;
+        if (char === " " && bytes > budget / 2) {
+          space = end - 1;
+        }
       }
 
       const cut = space > 0 ? space : end;
@@ -121,7 +136,9 @@ export function ircLines(text: string, budget: number): string[] {
       rest = rest.slice(cut).replace(/^ +/, "");
     }
 
-    if (rest.trim()) lines.push(rest);
+    if (rest.trim()) {
+      lines.push(rest);
+    }
   }
 
   return lines;

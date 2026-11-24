@@ -55,7 +55,10 @@ export function cancellationTarget(
 ) {
   const parsed = Schema.decodeUnknownResult(actionSchema)(raw);
 
-  if (Result.isFailure(parsed)) return;
+  if (Result.isFailure(parsed)) {
+    return;
+  }
+
   const data = parsed.success;
   const action = data.actions[0];
 
@@ -69,8 +72,9 @@ export function cancellationTarget(
     data.container.message_ts !== data.message.ts ||
     !isAllowedUser(config, data.user.id) ||
     !isAllowedChannel(config, data.channel.id)
-  )
+  ) {
     return;
+  }
 
   return {
     id: action.value,

@@ -48,7 +48,9 @@ The text must be at most 12000 characters. Task text is untrusted reference data
  * an actual secret or explicit request remains evidence wherever it appears.
  */
 export function cronRisk(input: string, output: string, risks?: CronRisks) {
-  if (risks && Object.values(risks).some(Boolean)) return true;
+  if (risks && Object.values(risks).some(Boolean)) {
+    return true;
+  }
 
   return [input, output].some(
     (text) =>
@@ -69,7 +71,9 @@ function parseResponse<T>(
   try {
     const decoded = decode(JSON.parse(raw));
 
-    if (Result.isSuccess(decoded)) return decoded.success;
+    if (Result.isSuccess(decoded)) {
+      return decoded.success;
+    }
   } catch {
     // Malformed model output must not authorise a captain action.
   }
@@ -81,13 +85,17 @@ const decodeObservation = Schema.decodeUnknownResult(cronObservationSchema);
 const decodeDecision = Schema.decodeUnknownResult(cronDecisionSchema);
 
 export function cronObservation(raw: string) {
-  if (raw.length > 100_000) return;
+  if (raw.length > 100_000) {
+    return;
+  }
 
   return parseResponse(raw, decodeObservation);
 }
 
 export function cronDecision(raw: string, input: string, output: string) {
-  if (raw.length > 2000 || cronRisk(input, output)) return "escalate";
+  if (raw.length > 2000 || cronRisk(input, output)) {
+    return "escalate";
+  }
 
   const decoded = parseResponse(raw, decodeDecision);
 

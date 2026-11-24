@@ -85,12 +85,13 @@ const postInput = settingsStruct({
 
 const broadcastCheck = settingsCheck<typeof postInput.Type>(
   (input, context) => {
-    if (input.reply_broadcast && !input.thread_ts)
+    if (input.reply_broadcast && !input.thread_ts) {
       context.addIssue({
         code: "custom",
         message: "reply_broadcast requires thread_ts",
         path: ["reply_broadcast"],
       });
+    }
   },
 );
 
@@ -113,13 +114,17 @@ export const postInputSchema = Schema.Unknown.pipe(
                 Predicate.isTagged(child, "Filter") &&
                 child.filter === broadcastCheck,
             )
-          )
+          ) {
             return Effect.fail(issue);
+          }
+
           // Non-aborting field constraints must not hide the original post
           // Refinement. Structural failures still stop it, as in Zod.
           const structural = structuralPostInput(input);
 
-          if (Result.isFailure(structural)) return Effect.fail(issue);
+          if (Result.isFailure(structural)) {
+            return Effect.fail(issue);
+          }
 
           const diagnostic = broadcastCheck.run(
             structural.success,
@@ -224,7 +229,10 @@ export class CaptainPostStore {
       );
 
       try {
-        if (!fstatSync(fd).isFile()) throw new Error("Invalid post database.");
+        if (!fstatSync(fd).isFile()) {
+          throw new Error("Invalid post database.");
+        }
+
         fchmodSync(fd, 0o600);
       } finally {
         closeSync(fd);
@@ -254,11 +262,12 @@ export class CaptainPostStore {
           .all()
           .map(({ name }) => name);
 
-        if (!columns.includes("uploadOwner"))
+        if (!columns.includes("uploadOwner")) {
           this.db.run(`
             ALTER TABLE captain_posts ADD COLUMN uploadOwner TEXT;
             ALTER TABLE captain_posts ADD COLUMN uploadLeaseUntil INTEGER;
           `);
+        }
       })
       .immediate();
   }
@@ -275,7 +284,9 @@ export class CaptainPostStore {
       )
       .get(botKey, requestKey);
 
-    if (!row) return;
+    if (!row) {
+      return;
+    }
 
     return {
       ...row,
@@ -301,7 +312,9 @@ export class CaptainPostStore {
       .transaction(() => {
         const existing = this.get(botKey, requestKey);
 
-        if (existing) return { row: existing, created: false };
+        if (existing) {
+          return { row: existing, created: false };
+        }
 
         const window = this.db
           .query<{ count: number; oldest: number | null }, [string, number]>(
@@ -310,11 +323,13 @@ export class CaptainPostStore {
           )
           .get(botKey, now - hourMs);
 
-        if ((window?.count ?? 0) >= perHour)
+        if ((window?.count ?? 0) >= perHour) {
           return {
             limited: perHour,
             retryAt: (window?.oldest ?? now) + hourMs,
           };
+        }
+
         this.db
           .query(
             `INSERT INTO captain_posts (botKey, requestKey, fingerprint,
@@ -425,11 +440,17 @@ export class CaptainPostStore {
 
 /** Slack's `ok: false` or a rejected rate limit proves nothing was posted. */
 function refusal(error: unknown): string | undefined {
-  if (typeof error !== "object" || error === null || !("code" in error)) return;
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return;
+  }
 
-  if (error.code === ErrorCode.RateLimitedError) return "ratelimited";
+  if (error.code === ErrorCode.RateLimitedError) {
+    return "ratelimited";
+  }
 
-  if (error.code !== ErrorCode.PlatformError) return;
+  if (error.code !== ErrorCode.PlatformError) {
+    return;
+  }
 
   const code =
     "data" in error &&
@@ -488,17 +509,21 @@ async function prepareFiles(
     // Check against canonical roots cannot be escaped through a symlink.
     const root = rootOf(roots, path);
 
-    if (!root)
+    if (!root) {
       throw new CaptainPostError(
         `File ${index + 1} is outside this captain's post directories; nothing was posted.`,
       );
+    }
 
     try {
       prepared.push(
         await inspectAttachment({ path, caption: "" }, signal, root),
       );
     } catch (error) {
-      if (signal.aborted) throw error;
+      if (signal.aborted) {
+        throw error;
+      }
+
       throw new CaptainPostError(
         `File ${index + 1} unavailable (${error instanceof AttachmentUnavailable ? error.reason : "missing"}); nothing was posted.`,
       );
@@ -547,13 +572,20 @@ async function uploadFiles(
   save: () => boolean,
   signal: AbortSignal,
 ) {
-  if (!row.ts) return;
+  if (!row.ts) {
+    return;
+  }
+
   const thread = row.thread ?? row.ts;
 
   for (const state of row.files) {
-    if (signal.aborted) return;
+    if (signal.aborted) {
+      return;
+    }
 
-    if (settled.has(state.status)) continue;
+    if (settled.has(state.status)) {
+      continue;
+    }
 
     if (state.status === "completing" || state.status === "uncertain") {
       // Completion is one-shot. Only an observed share settles it.
@@ -565,7 +597,10 @@ async function uploadFiles(
 
       state.status = shared ? "shared" : "uncertain";
 
-      if (!save()) return;
+      if (!save()) {
+        return;
+      }
+
       continue;
     }
 
@@ -574,18 +609,24 @@ async function uploadFiles(
     const root = rootOf(roots, state.file.path);
     let data: Uint8Array | undefined;
 
-    if (root)
+    if (root) {
       try {
         data = (await readPreparedAttachment(state.file, signal, root)).data;
       } catch {
-        if (signal.aborted) return;
+        if (signal.aborted) {
+          return;
+        }
       }
+    }
 
     if (!data) {
       state.status = "unavailable";
       delete state.fileID;
 
-      if (!save()) return;
+      if (!save()) {
+        return;
+      }
+
       continue;
     }
 
@@ -599,20 +640,28 @@ async function uploadFiles(
       state.status = "uploading";
       state.fileID = upload.fileID;
 
-      if (!save()) return;
+      if (!save()) {
+        return;
+      }
+
       await files.putUpload(upload.url, data, signal);
     } catch {
       state.status = "pending";
       delete state.fileID;
 
-      if (!save()) return;
+      if (!save()) {
+        return;
+      }
+
       continue;
     }
 
     state.status = "completing";
 
     // Renewed immediately before the one-shot completion call.
-    if (!save() || state.fileID === undefined) return;
+    if (!save() || state.fileID === undefined) {
+      return;
+    }
 
     try {
       await files.completeUpload(
@@ -627,7 +676,9 @@ async function uploadFiles(
       state.status = "uncertain";
     }
 
-    if (!save()) return;
+    if (!save()) {
+      return;
+    }
   }
 }
 
@@ -652,7 +703,7 @@ function result(row: PostRow, replay: boolean, busy = false) {
     replay,
   };
 
-  if (row.status === "posted")
+  if (row.status === "posted") {
     return {
       status: files.every((file) => file.status === "shared")
         ? ("posted" as const)
@@ -674,14 +725,16 @@ function result(row: PostRow, replay: boolean, busy = false) {
             }
           : {}),
     };
+  }
 
-  if (row.status === "failed")
+  if (row.status === "failed") {
     return {
       status: "failed" as const,
       ...base,
       error: row.error ?? "slack_error",
       effect: "slack-refused-nothing-posted",
     };
+  }
 
   return {
     status: "uncertain" as const,
@@ -700,10 +753,12 @@ export async function runCaptainPost(
 ): Promise<unknown> {
   const parsed = Schema.decodeUnknownResult(postInputSchema)(raw);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     throw new CaptainPostError(
       "Invalid stargate_post input; nothing was posted.",
     );
+  }
+
   const input = parsed.success;
   let admitted = false;
   let store: CaptainPostStore | undefined;
@@ -714,10 +769,11 @@ export async function runCaptainPost(
     const config = await loadConfig(binding.configPath);
     const bot = config.bots.find((bot) => bot.id === binding.bot);
 
-    if (!bot?.captainPost)
+    if (!bot?.captainPost) {
       throw new CaptainPostError(
         "stargate_post is off for this bot; an operator must enable captainPost in its configuration.",
       );
+    }
 
     if (
       bot.backend.type !== "opencode" ||
@@ -725,15 +781,17 @@ export async function runCaptainPost(
       (binding.captainSessionID !== undefined &&
         bot.backend.sessionID !== undefined &&
         bot.backend.sessionID !== binding.captainSessionID)
-    )
+    ) {
       throw new CaptainPostError(
         "Post binding does not match this captain's bot registration.",
       );
+    }
 
-    if (!postAllowed(bot, input.channel))
+    if (!postAllowed(bot, input.channel)) {
       throw new CaptainPostError(
         "Channel is not allowed for this bot's posts; nothing was posted.",
       );
+    }
 
     // OpenCode's own scratch rule, read now so TMPDIR in this process applies.
     const roots = bot.captainPost.fileDirectories ?? [
@@ -748,8 +806,10 @@ export async function runCaptainPost(
 
     const auth = await web(signal).auth.test();
 
-    if (!auth.bot_id || !auth.team_id || !auth.user_id)
+    if (!auth.bot_id || !auth.team_id || !auth.user_id) {
       throw new CaptainPostError("Workspace bot token required.");
+    }
+
     const currentRoots = await canonicalRoots(roots);
     store = new CaptainPostStore(
       join(config.dataDirectory, "captain-post.sqlite"),
@@ -814,10 +874,12 @@ export async function runCaptainPost(
     const previous = store.get(botKey, requestKey);
 
     if (previous) {
-      if (previous.fingerprint !== fingerprint)
+      if (previous.fingerprint !== fingerprint) {
         throw new CaptainPostError(
           "This retry key belongs to a different post; nothing was posted.",
         );
+      }
+
       admitted = true;
 
       if (
@@ -868,19 +930,23 @@ export async function runCaptainPost(
       caller,
     );
 
-    if ("limited" in admission)
+    if ("limited" in admission) {
       throw new CaptainPostError(
         `Post rate limit reached (${admission.limited} per hour for this bot); nothing was posted. Try again after ${new Date(admission.retryAt).toISOString()}.`,
       );
+    }
+
     admitted = true;
     const { row, created } = admission;
 
     if (!created) {
       // A concurrent call with this key admitted first.
-      if (row.fingerprint !== fingerprint)
+      if (row.fingerprint !== fingerprint) {
         throw new CaptainPostError(
           "This retry key belongs to a different post; nothing was posted.",
         );
+      }
+
       audit(row, true);
 
       return result(row, true);
@@ -909,7 +975,9 @@ export async function runCaptainPost(
       if (typeof sent.ts === "string" && sent.ts) {
         row.status = "posted";
         row.ts = sent.ts;
-      } else row.status = "uncertain";
+      } else {
+        row.status = "uncertain";
+      }
     } catch (error) {
       const code = refusal(error);
       row.status = code ? "failed" : "uncertain";
@@ -935,7 +1003,10 @@ export async function runCaptainPost(
 
     return result(row, false);
   } catch (error) {
-    if (error instanceof CaptainPostError) throw error;
+    if (error instanceof CaptainPostError) {
+      throw error;
+    }
+
     throw new CaptainPostError(
       admitted
         ? "Post outcome unconfirmed; raw details withheld. Retry with the same key to read the recorded outcome."

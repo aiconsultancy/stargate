@@ -15,7 +15,9 @@ type Input = {
 
 /** Delivery failure or a lost gateway cancels the turn, never grants consent. */
 export async function startMaintenanceDelivery(input: Input) {
-  if (!input.backend.startMaintenance) return;
+  if (!input.backend.startMaintenance) {
+    return;
+  }
 
   const watch = await input.backend
     .startMaintenance(
@@ -27,7 +29,10 @@ export async function startMaintenanceDelivery(input: Input) {
 
   // Ordinary bots may not have the Stargate plugin. The captain tool fails closed
   // Without this registration; failed setup never becomes a timed permit.
-  if (!watch) return;
+  if (!watch) {
+    return;
+  }
+
   const stop = new AbortController();
   const signal = AbortSignal.any([input.signal, stop.signal]);
   const wait = input.wait ?? ((ms, signal) => delay(ms, undefined, { signal }));
@@ -57,7 +62,9 @@ export async function startMaintenanceDelivery(input: Input) {
         await wait(1000, signal);
       }
     } catch {
-      if (!signal.aborted) input.cancel();
+      if (!signal.aborted) {
+        input.cancel();
+      }
     } finally {
       input.resume();
     }

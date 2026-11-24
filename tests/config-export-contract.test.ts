@@ -158,13 +158,22 @@ test("fixed config entry preserves every exported name and value/type kind", asy
     try {
       const project = snapshot.getProject(config);
 
-      if (!project) throw new Error("Missing config export project");
+      if (!project) {
+        throw new Error("Missing config export project");
+      }
+
       const source = await project.program.getSourceFile(file);
 
-      if (!source) throw new Error("Missing fixed config entry");
+      if (!source) {
+        throw new Error("Missing fixed config entry");
+      }
+
       const module = await project.checker.getSymbolAtLocation(source);
 
-      if (!module) throw new Error("Missing fixed config module symbol");
+      if (!module) {
+        throw new Error("Missing fixed config module symbol");
+      }
+
       const actual = [];
 
       for (const symbol of await project.checker.getExportsOfModule(module)) {
@@ -173,8 +182,10 @@ test("fixed config entry preserves every exported name and value/type kind", asy
             ? await project.checker.getAliasedSymbol(symbol)
             : symbol;
 
-        if (await project.checker.isUnknownSymbol(target))
+        if (await project.checker.isUnknownSymbol(target)) {
           throw new Error(`Unresolved config export: ${symbol.name}`);
+        }
+
         const value = Object.hasOwn(fixedConfig, symbol.name);
         const type = Boolean(target.flags & SymbolFlags.Type) || !value;
         actual.push({

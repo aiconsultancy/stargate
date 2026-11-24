@@ -54,6 +54,8 @@ export interface ArchitecturePolicy {
   slices: Record<string, SlicePolicy>;
   /** Stable ID -> complete approved physical paths, including its original path. */
   aliases?: Record<string, string[]>;
+  /** Exact path and non-blank line ceiling after the brace migration. */
+  braceMigrationFileLimits?: Record<string, number>;
 }
 
 /** IDs keep their first recorded spelling. No basename or content matching. */
@@ -72,32 +74,48 @@ export function sourceIdentities(
 
   for (const [owner, slice] of Object.entries(policy.slices)) {
     for (const id of slice.files) {
-      if (!validPath(id)) throw new Error(`invalid module identity: ${id}`);
+      if (!validPath(id)) {
+        throw new Error(`invalid module identity: ${id}`);
+      }
 
-      if (owners.has(id)) throw new Error(`duplicate module identity: ${id}`);
+      if (owners.has(id)) {
+        throw new Error(`duplicate module identity: ${id}`);
+      }
+
       owners.set(id, owner);
     }
   }
 
-  for (const id of Object.keys(policy.aliases ?? {}))
-    if (!owners.has(id)) throw new Error(`unknown alias identity: ${id}`);
+  for (const id of Object.keys(policy.aliases ?? {})) {
+    if (!owners.has(id)) {
+      throw new Error(`unknown alias identity: ${id}`);
+    }
+  }
 
   for (const [id, owner] of owners) {
     const aliases = policy.aliases?.[id] ?? [id];
 
-    if (!aliases.includes(id))
+    if (!aliases.includes(id)) {
       throw new Error(`alias list omits original path: ${id}`);
+    }
 
     for (const path of aliases) {
-      if (!validPath(path)) throw new Error(`invalid source alias: ${path}`);
+      if (!validPath(path)) {
+        throw new Error(`invalid source alias: ${path}`);
+      }
 
-      if (paths.has(path)) throw new Error(`alias collision: ${path}`);
+      if (paths.has(path)) {
+        throw new Error(`alias collision: ${path}`);
+      }
+
       const sharedFolder = /^src\/(lib|shared)\//.exec(path)?.[1];
 
-      if (sharedFolder && sharedFolder !== owner)
+      if (sharedFolder && sharedFolder !== owner) {
         throw new Error(
           `alias changes shared-folder ownership: ${id} -> ${path}`,
         );
+      }
+
       paths.set(path, id);
     }
   }
@@ -108,11 +126,16 @@ export function sourceIdentities(
   for (const path of files) {
     const id = paths.get(path);
 
-    if (!id) throw new Error(`unknown source path: ${path}`);
+    if (!id) {
+      throw new Error(`unknown source path: ${path}`);
+    }
+
     const previous = physical.get(id);
 
-    if (previous)
+    if (previous) {
       throw new Error(`simultaneous aliases: ${id}: ${previous}, ${path}`);
+    }
+
     physical.set(id, path);
     identities.set(path, id);
   }
@@ -130,14 +153,19 @@ export function normalizeGraph(
   for (const [path, imports] of graph) {
     const id = paths.get(path);
 
-    if (!id) throw new Error(`unknown source path: ${path}`);
+    if (!id) {
+      throw new Error(`unknown source path: ${path}`);
+    }
+
     const edges = new Set<string>();
 
     for (const target of imports) {
       const targetID = paths.get(target);
 
-      if (!targetID || !graph.has(target))
+      if (!targetID || !graph.has(target)) {
         throw new Error(`unknown source target: ${path} -> ${target}`);
+      }
+
       edges.add(targetID);
     }
 
@@ -161,8 +189,26 @@ export async function sizeRegressions(
   const allowed = new Set<string>();
   const failures: string[] = [];
 
+  const braceLimits = new Map(
+    Object.entries(policy.braceMigrationFileLimits ?? {}),
+  );
+
+  for (const [path, limit] of braceLimits) {
+    if (
+      !identities.has(path) ||
+      !Number.isSafeInteger(limit) ||
+      limit <= 1000
+    ) {
+      failures.push(`invalid:brace-migration-file-limit:${path}:${limit}`);
+      braceLimits.delete(path);
+    }
+  }
+
   for (const id of largeFiles) {
-    if (allowed.has(id)) failures.push(`duplicate:large-file:${id}`);
+    if (allowed.has(id)) {
+      failures.push(`duplicate:large-file:${id}`);
+    }
+
     allowed.add(id);
   }
 
@@ -175,17 +221,36 @@ export async function sizeRegressions(
       .split("\n")
       .filter((line) => line.trim().length > 0).length;
 
-    if (count <= 1000) continue;
+    const braceLimit = braceLimits.get(path);
+
+    if (count <= 1000) {
+      if (braceLimit !== undefined) {
+        failures.push(`stale:brace-migration-file-limit:${path}`);
+      }
+
+      continue;
+    }
+
     oversized.add(id);
 
-    if (!allowed.has(id))
+    if (braceLimit !== undefined) {
+      if (count > braceLimit) {
+        failures.push(
+          `new:large-file:${path}:${id}:${count} non-blank lines > ${braceLimit}`,
+        );
+      }
+    } else if (!allowed.has(id)) {
       failures.push(
         `new:large-file:${path}:${id}:${count} non-blank lines > 1000`,
       );
+    }
   }
 
-  for (const id of allowed)
-    if (!oversized.has(id)) failures.push(`stale:large-file:${id}`);
+  for (const id of allowed) {
+    if (!oversized.has(id)) {
+      failures.push(`stale:large-file:${id}`);
+    }
+  }
 
   return failures.sort();
 }
@@ -209,42 +274,61 @@ export function boundaryViolations(
   const owners = new Map<string, { name: string; slice: SlicePolicy }>();
 
   for (const [name, slice] of Object.entries(policy.slices)) {
-    if (!layers.includes(slice.layer))
+    if (!layers.includes(slice.layer)) {
       failures.add(`policy:unknown-layer:${name}:${slice.layer}`);
-
-    for (const file of slice.files) {
-      if (owners.has(file)) failures.add(`membership:duplicate:${file}`);
-      owners.set(file, { name, slice });
-
-      if (!graph.has(file)) failures.add(`policy:missing-file:${file}`);
     }
 
-    for (const file of slice.public)
-      if (!slice.files.includes(file))
+    for (const file of slice.files) {
+      if (owners.has(file)) {
+        failures.add(`membership:duplicate:${file}`);
+      }
+
+      owners.set(file, { name, slice });
+
+      if (!graph.has(file)) {
+        failures.add(`policy:missing-file:${file}`);
+      }
+    }
+
+    for (const file of slice.public) {
+      if (!slice.files.includes(file)) {
         failures.add(`policy:public-not-owned:${name}:${file}`);
+      }
+    }
 
-    for (const file of slice.contracts ?? [])
-      if (!slice.public.includes(file))
+    for (const file of slice.contracts ?? []) {
+      if (!slice.public.includes(file)) {
         failures.add(`policy:contract-not-public:${name}:${file}`);
+      }
+    }
 
-    for (const [file, kind] of Object.entries(slice.retained ?? {}))
-      if (!slice.files.includes(file) || !["service", "store"].includes(kind))
+    for (const [file, kind] of Object.entries(slice.retained ?? {})) {
+      if (!slice.files.includes(file) || !["service", "store"].includes(kind)) {
         failures.add(`policy:invalid-owner-exception:${name}:${file}`);
+      }
+    }
 
-    for (const neighbour of slice.neighbours)
-      if (!policy.slices[neighbour] || neighbour === name)
+    for (const neighbour of slice.neighbours) {
+      if (!policy.slices[neighbour] || neighbour === name) {
         failures.add(`policy:unknown-neighbour:${name}:${neighbour}`);
+      }
+    }
   }
 
-  for (const file of graph.keys())
-    if (!owners.has(file)) failures.add(`membership:missing:${file}`);
+  for (const file of graph.keys()) {
+    if (!owners.has(file)) {
+      failures.add(`membership:missing:${file}`);
+    }
+  }
+
   const shared = (name: string) => name === "lib" || name === "shared";
 
   for (const [file, owner] of owners) {
     const folder = /^src\/(lib|shared)\//.exec(file)?.[1];
 
-    if (folder && folder !== owner.name)
+    if (folder && folder !== owner.name) {
       failures.add(`policy:shared-folder-owner:${file}:${owner.name}`);
+    }
   }
 
   const consumers = new Map<string, Set<string>>();
@@ -252,7 +336,9 @@ export function boundaryViolations(
   for (const [from, imports] of graph) {
     const source = owners.get(from);
 
-    if (!source) continue;
+    if (!source) {
+      continue;
+    }
 
     const sourceLayer = source.slice.contracts?.includes(from)
       ? "contracts"
@@ -261,7 +347,9 @@ export function boundaryViolations(
     for (const to of imports) {
       const target = owners.get(to);
 
-      if (!target) continue;
+      if (!target) {
+        continue;
+      }
 
       // Count consuming owners, including local use. Technical lib/shared
       // Buckets are not consuming slices; tests never enter the src graph.
@@ -277,34 +365,43 @@ export function boundaryViolations(
         ? "contracts"
         : target.slice.layer;
 
-      if (layers.indexOf(targetLayer) > layers.indexOf(sourceLayer))
+      if (layers.indexOf(targetLayer) > layers.indexOf(sourceLayer)) {
         failures.add(`direction:${edge}`);
+      }
 
-      if (source.name === target.name) continue;
+      if (source.name === target.name) {
+        continue;
+      }
 
-      if (!target.slice.public.includes(to)) failures.add(`private:${edge}`);
+      if (!target.slice.public.includes(to)) {
+        failures.add(`private:${edge}`);
+      }
 
-      if (!source.slice.neighbours.includes(target.name))
+      if (!source.slice.neighbours.includes(target.name)) {
         failures.add(`neighbour:${edge}`);
+      }
 
-      if (shared(source.name) && !shared(target.name))
+      if (shared(source.name) && !shared(target.name)) {
         failures.add(`shared-dependency:${edge}`);
+      }
     }
   }
 
   for (const [file, owner] of owners) {
     const count = consumers.get(file)?.size ?? 0;
 
-    if (shared(owner.name) && count < 3)
+    if (shared(owner.name) && count < 3) {
       failures.add(`rule-three:underused:${file}`);
+    }
 
     if (
       !shared(owner.name) &&
       count >= 3 &&
       !owner.slice.public.includes(file) &&
       !owner.slice.retained?.[file]
-    )
+    ) {
       failures.add(`rule-three:extract:${file}`);
+    }
   }
 
   return [...failures].sort();
@@ -334,30 +431,36 @@ function documentedPaths(markdown: string) {
     if (delimiter) {
       const marker = delimiter[1] ?? "";
 
-      if (!fence)
+      if (!fence) {
         fence = {
           marker: marker[0] ?? "",
           size: marker.length,
           target: /\bTARGET-LAYOUT\b/.test(delimiter[2] ?? ""),
         };
-      else if (
+      } else if (
         marker[0] === fence.marker &&
         marker.length >= fence.size &&
         !delimiter[2]?.trim()
-      )
+      ) {
         fence = undefined;
+      }
+
       continue;
     }
 
     // Scope is one labelled line or one labelled fence, never a whole document.
-    if (fence?.target || /^\s*TARGET-LAYOUT:/.test(line)) continue;
+    if (fence?.target || /^\s*TARGET-LAYOUT:/.test(line)) {
+      continue;
+    }
 
     for (const match of line.matchAll(
       /(?<![\w/.:~-])(?:\.\/)?(src\/[\w./*?-]+)/g,
     )) {
       const path = match[1]?.replace(/\.+$/, "");
 
-      if (path) paths.add(path);
+      if (path) {
+        paths.add(path);
+      }
     }
   }
 
@@ -401,7 +504,9 @@ export async function documentationViolations(
         }
       }
 
-      if (!exists) failures.push(`source-path:${document}:${path}`);
+      if (!exists) {
+        failures.push(`source-path:${document}:${path}`);
+      }
     }
   }
 
@@ -419,16 +524,19 @@ export async function architectureDocuments(
     })) {
       const path = join(directory, entry.name);
 
-      if (entry.isDirectory()) await visit(path);
-      else if (entry.isFile() && entry.name.endsWith(".md"))
+      if (entry.isDirectory()) {
+        await visit(path);
+      } else if (entry.isFile() && entry.name.endsWith(".md")) {
         documents[portable(path)] = await readFile(join(root, path), "utf8");
+      }
     }
   };
 
   await visit("docs");
 
-  for (const path of ["AGENTS.md", "README.md", "CONTRIBUTING.md"])
+  for (const path of ["AGENTS.md", "README.md", "CONTRIBUTING.md"]) {
     documents[path] = await readFile(join(root, path), "utf8");
+  }
 
   return documents;
 }
@@ -443,17 +551,24 @@ function inside(root: string, path: string) {
 }
 
 async function sourceFiles(directory: string): Promise<string[]> {
-  if ((await lstat(directory)).isSymbolicLink())
+  if ((await lstat(directory)).isSymbolicLink()) {
     throw new Error(`symbolic link: ${directory}`);
+  }
+
   const files: string[] = [];
 
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
 
-    if (entry.isSymbolicLink()) throw new Error(`symbolic link: ${path}`);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`symbolic link: ${path}`);
+    }
 
-    if (entry.isDirectory()) files.push(...(await sourceFiles(path)));
-    else if (entry.isFile() && sourceExtension.test(path)) files.push(path);
+    if (entry.isDirectory()) {
+      files.push(...(await sourceFiles(path)));
+    } else if (entry.isFile() && sourceExtension.test(path)) {
+      files.push(path);
+    }
   }
 
   return files.sort();
@@ -478,8 +593,10 @@ async function resolveLocal(
 ) {
   const named = resolve(dirname(from), specifier);
 
-  if (!inside(root, named))
+  if (!inside(root, named)) {
     throw new Error(`${from}: ${specifier} outside repository`);
+  }
+
   // Bun resolves symlinks. Check the spelled path first, including directories.
   let part = root;
 
@@ -487,12 +604,20 @@ async function resolveLocal(
     part = join(part, segment);
 
     const stat = await lstat(part).catch((error: unknown) => {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT")
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
         return undefined;
+      }
+
       throw error;
     });
 
-    if (stat?.isSymbolicLink()) throw new Error(`symbolic link: ${part}`);
+    if (stat?.isSymbolicLink()) {
+      throw new Error(`symbolic link: ${part}`);
+    }
   }
 
   let target: string;
@@ -514,15 +639,22 @@ async function resolveLocal(
       ...(stem.endsWith(".js") ? [stem.slice(0, -3) + ".ts"] : []),
     ].filter((path) => deleted.has(path));
 
-    if (candidates.length === 1 && candidates[0]) return candidates[0];
+    if (candidates.length === 1 && candidates[0]) {
+      return candidates[0];
+    }
+
     throw new Error(`${from}: unresolved local import ${specifier}`);
   }
 
-  if (!inside(root, target))
+  if (!inside(root, target)) {
     throw new Error(`${from}: ${specifier} resolves outside repository`);
+  }
+
   const stat = await lstat(target);
 
-  if (!stat.isFile()) throw new Error(`not a regular file: ${target}`);
+  if (!stat.isFile()) {
+    throw new Error(`not a regular file: ${target}`);
+  }
 
   return portable(relative(root, target));
 }
@@ -534,17 +666,20 @@ async function resolveSource(
   deleted: ReadonlySet<string>,
   strictFile?: string,
 ) {
-  if (isAbsolute(specifier) || specifier.startsWith("file:"))
+  if (isAbsolute(specifier) || specifier.startsWith("file:")) {
     throw new Error(`${from}: absolute source import: ${specifier}`);
+  }
 
   if (specifier.startsWith(".")) {
     try {
       return await resolveLocal(root, from, specifier, deleted);
     } catch (error) {
-      if (strictFile)
+      if (strictFile) {
         throw new Error(
           `closure-addition:unresolved-import:${strictFile}:${specifier}`,
         );
+      }
+
       throw error;
     }
   }
@@ -556,32 +691,37 @@ async function resolveSource(
   try {
     target = Bun.resolveSync(specifier, dirname(from));
   } catch {
-    if (strictFile)
+    if (strictFile) {
       throw new Error(
         `closure-addition:unresolved-import:${strictFile}:${specifier}`,
       );
+    }
 
     return undefined;
   }
 
   if (!isAbsolute(target)) {
-    if (strictFile && !isBuiltin(specifier) && !specifier.startsWith("bun:"))
+    if (strictFile && !isBuiltin(specifier) && !specifier.startsWith("bun:")) {
       throw new Error(
         `closure-addition:unresolved-import:${strictFile}:${specifier}`,
       );
+    }
 
     return undefined;
   }
 
   const name = portable(relative(root, target));
 
-  if (name.split("/").includes("node_modules")) return undefined;
+  if (name.split("/").includes("node_modules")) {
+    return undefined;
+  }
 
   if (!inside(root, target)) {
-    if (strictFile)
+    if (strictFile) {
       throw new Error(
         `closure-addition:untracked-import:${strictFile}:${specifier}`,
       );
+    }
 
     return undefined;
   }
@@ -596,16 +736,17 @@ function importsOf(node: Node, strictFile?: string): string[] {
     if (
       value &&
       (isStringLiteral(value) || isNoSubstitutionTemplateLiteral(value))
-    )
+    ) {
       imports.add(value.text);
+    }
   };
 
   const visit = (child: Node): void => {
-    if (isImportDeclaration(child) || isExportDeclaration(child))
+    if (isImportDeclaration(child) || isExportDeclaration(child)) {
       literal(child.moduleSpecifier);
-    else if (isImportTypeNode(child) && isLiteralTypeNode(child.argument))
+    } else if (isImportTypeNode(child) && isLiteralTypeNode(child.argument)) {
       literal(child.argument.literal);
-    else if (
+    } else if (
       isCallExpression(child) &&
       (child.expression.kind === SyntaxKind.ImportKeyword ||
         (isIdentifier(child.expression) && child.expression.text === "require"))
@@ -617,14 +758,18 @@ function importsOf(node: Node, strictFile?: string): string[] {
         (!argument ||
           (!isStringLiteral(argument) &&
             !isNoSubstitutionTemplateLiteral(argument)))
-      )
+      ) {
         throw new Error(`closure-addition:nonliteral-import:${strictFile}`);
+      }
+
       literal(argument);
     } else if (
       isImportEqualsDeclaration(child) &&
       isExternalModuleReference(child.moduleReference)
-    )
+    ) {
       literal(child.moduleReference.expression);
+    }
+
     child.forEachChild(visit);
   };
 
@@ -671,19 +816,29 @@ export async function buildGraph(
     try {
       const program = snapshot.getProject(config)?.program;
 
-      if (!program) throw new Error("Missing architecture parser project");
+      if (!program) {
+        throw new Error("Missing architecture parser project");
+      }
 
       for (const file of files) {
         const source = await program.getSourceFile(file);
 
-        if (!source) throw new Error(`Source not parsed: ${file}`);
+        if (!source) {
+          throw new Error(`Source not parsed: ${file}`);
+        }
+
         const diagnostics = await program.getSyntacticDiagnostics(file);
 
-        if (diagnostics.length)
+        if (diagnostics.length) {
           throw new Error(`Invalid source syntax: ${file}`);
+        }
+
         const edges = graph.get(portable(relative(root, file)));
 
-        if (!edges) throw new Error(`Source not in graph: ${file}`);
+        if (!edges) {
+          throw new Error(`Source not in graph: ${file}`);
+        }
+
         const path = portable(relative(root, file));
         const strictFile = strictImports.has(path) ? path : undefined;
 
@@ -696,12 +851,15 @@ export async function buildGraph(
             strictFile,
           );
 
-          if (!target) continue;
+          if (!target) {
+            continue;
+          }
 
-          if (strictFile && !graph.has(target))
+          if (strictFile && !graph.has(target)) {
             throw new Error(
               `closure-addition:untracked-import:${strictFile}:${specifier}`,
             );
+          }
 
           // Affected-test graphs retain imported data and known deleted targets.
           // The default architecture graph remains source-only.
@@ -709,12 +867,15 @@ export async function buildGraph(
             directories?.includes("tests") &&
             (!sourceExtension.test(target) || deleted.has(target)) &&
             !graph.has(target)
-          )
+          ) {
             graph.set(target, new Set());
+          }
 
-          if (graph.has(target)) edges.add(target);
-          else if (sourceExtension.test(target))
+          if (graph.has(target)) {
+            edges.add(target);
+          } else if (sourceExtension.test(target)) {
             throw new Error(`${file}: source outside src graph: ${specifier}`);
+          }
         }
       }
     } finally {
@@ -758,20 +919,29 @@ export function components(graph: SourceGraph): string[][] {
       }
     }
 
-    if (lows.get(file) !== index) return;
+    if (lows.get(file) !== index) {
+      return;
+    }
+
     const group: string[] = [];
 
     for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
       active.delete(node);
       group.push(node);
 
-      if (node === file) break;
+      if (node === file) {
+        break;
+      }
     }
 
     result.push(group.sort());
   };
 
-  for (const file of graph.keys()) if (!indices.has(file)) visit(file);
+  for (const file of graph.keys()) {
+    if (!indices.has(file)) {
+      visit(file);
+    }
+  }
 
   return result.sort((a, b) => (a[0] ?? "").localeCompare(b[0] ?? ""));
 }
@@ -782,21 +952,31 @@ export function cyclicEdges(graph: SourceGraph): string[] {
   for (const group of components(graph)) {
     const members = new Set(group);
 
-    for (const from of group)
-      for (const to of graph.get(from) ?? [])
-        if (members.has(to)) result.push(`${from} -> ${to}`);
+    for (const from of group) {
+      for (const to of graph.get(from) ?? []) {
+        if (members.has(to)) {
+          result.push(`${from} -> ${to}`);
+        }
+      }
+    }
   }
 
   return result.sort();
 }
 
 export function importClosure(graph: SourceGraph, entry: string): string[] {
-  if (!graph.has(entry)) return [];
+  if (!graph.has(entry)) {
+    return [];
+  }
+
   const seen = new Set<string>();
   const queue = [entry];
 
   for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
-    if (seen.has(file)) continue;
+    if (seen.has(file)) {
+      continue;
+    }
+
     seen.add(file);
     queue.push(...(graph.get(file) ?? []));
   }
@@ -832,14 +1012,17 @@ export function graphRegressions(
       .map((group) => group.length),
   );
 
-  if (baseline.largestCycle !== undefined && largest > baseline.largestCycle)
+  if (baseline.largestCycle !== undefined && largest > baseline.largestCycle) {
     failures.push(`largest-cycle:${largest} > ${baseline.largestCycle}`);
+  }
+
   const closure = importClosure(graph, baseline.crewPlugin.entry);
 
-  if (closure.length > baseline.crewPlugin.members.length)
+  if (closure.length > baseline.crewPlugin.members.length) {
     failures.push(
       `crew-closure:${closure.length} > ${baseline.crewPlugin.members.length}`,
     );
+  }
 
   return failures.sort();
 }
@@ -866,8 +1049,9 @@ export function staleGraphBaseline(
 
   const largest = Math.max(0, ...groups.map((group) => group.length));
 
-  if (largest < baseline.largestCycle)
+  if (largest < baseline.largestCycle) {
     failures.push(`stale:largest-cycle:${largest} < ${baseline.largestCycle}`);
+  }
 
   const inventory = (items: string[][]) =>
     items.map((group) => JSON.stringify([...group].sort())).sort();
@@ -875,23 +1059,35 @@ export function staleGraphBaseline(
   if (
     JSON.stringify(inventory(groups)) !==
     JSON.stringify(inventory(baseline.cycleComponents))
-  )
+  ) {
     failures.push("stale:cycle-components");
+  }
 
-  for (const file of baseline.rootFiles)
-    if (!roots.has(file)) failures.push(`stale:root:${file}`);
+  for (const file of baseline.rootFiles) {
+    if (!roots.has(file)) {
+      failures.push(`stale:root:${file}`);
+    }
+  }
 
-  for (const edge of baseline.cyclicEdges)
-    if (!cycles.has(edge)) failures.push(`stale:cycle:${edge}`);
+  for (const edge of baseline.cyclicEdges) {
+    if (!cycles.has(edge)) {
+      failures.push(`stale:cycle:${edge}`);
+    }
+  }
+
   const closure = new Set(importClosure(graph, baseline.crewPlugin.entry));
 
-  if (closure.size < baseline.crewPlugin.members.length)
+  if (closure.size < baseline.crewPlugin.members.length) {
     failures.push(
       `stale:crew-closure:${closure.size} < ${baseline.crewPlugin.members.length}`,
     );
+  }
 
-  for (const file of baseline.crewPlugin.members)
-    if (!closure.has(file)) failures.push(`stale:crew-member:${file}`);
+  for (const file of baseline.crewPlugin.members) {
+    if (!closure.has(file)) {
+      failures.push(`stale:crew-member:${file}`);
+    }
+  }
 
   return failures.sort();
 }

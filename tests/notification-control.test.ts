@@ -18,8 +18,9 @@ import { bot, identity } from "./fixtures";
 const directories: string[] = [];
 
 afterEach(async () => {
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
+  }
 });
 
 const target = {
@@ -149,8 +150,10 @@ test("invalid/DM/cross-registration/foreign captain targets fail before store wr
     [{ op: "mute", ...target }, { captainSessionID: "ses_child" }],
     [{ op: "mute", ...target }, { expectedDirectory: "/another" }],
     [{ op: "mute", ...target }, { operationID: "" }],
-  ] as const)
+  ] as const) {
     await expect(f.run(input, binding)).rejects.toThrow();
+  }
+
   expect(f.identityCalls()).toBe(0);
   expect(
     await Bun.file(join(f.directory, "notifications.sqlite")).exists(),
@@ -199,8 +202,9 @@ test("captain wrapper rejects crew, child and binding injection before its contr
       cron: { configPath: "/private/stargate.json", bot: "helper" },
     },
     async captain(caller: CrewCaller) {
-      if (caller.agent !== "captain" || caller.sessionID !== "ses_captain")
+      if (caller.agent !== "captain" || caller.sessionID !== "ses_captain") {
         throw new CrewError("Captain only.");
+      }
     },
   };
 

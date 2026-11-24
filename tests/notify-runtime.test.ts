@@ -32,11 +32,13 @@ test("production start preserves companion credentials overlapping disabled sour
     const adapter = config.notify?.adapters["local"];
     const source = adapter?.sources[0];
 
-    if (!source || !config.notify || !adapter)
+    if (!source || !config.notify || !adapter) {
       throw new Error("Missing credential fixture");
+    }
+
     source.tokenEnv = "BOT_TOKEN";
 
-    if (activeProducer)
+    if (activeProducer) {
       config.notify = {
         ...config.notify,
         adapters: {
@@ -49,6 +51,8 @@ test("production start preserves companion credentials overlapping disabled sour
           },
         },
       };
+    }
+
     await writeFile(join(directory, "stargate.json"), JSON.stringify(config), {
       mode: 0o600,
     });
@@ -116,8 +120,10 @@ for (const reference of [
     const source = adapter?.sources[0];
     const backend = config.bots[0]?.backend;
 
-    if (!source || !config.notify || !adapter || backend?.type !== "opencode")
+    if (!source || !config.notify || !adapter || backend?.type !== "opencode") {
       throw new Error("Missing shared credential fixture");
+    }
+
     source.tokenEnv = reference;
     backend.headersEnv = { "X-Fixture-Header": "DECLARED_HEADER" };
     config.notify = {
@@ -234,7 +240,7 @@ test("runtime composes Unix producer/core/fake Slack without any notification-or
       "/api/v1/ships/helper",
       "/api/v1/ships/helper/crew/shaw",
       "/api/v1/events",
-    ])
+    ]) {
       expect(
         (
           await unixRequest(join(directory, "api.sock"), path, {
@@ -243,6 +249,8 @@ test("runtime composes Unix producer/core/fake Slack without any notification-or
           })
         ).status,
       ).toBe(401);
+    }
+
     expect(
       (
         await unixRequest(join(directory, "api.sock"), "/api/v1/fleet", {
@@ -414,7 +422,10 @@ test("live reload revokes a retained row; failed candidate cannot advance CURREN
     const denied = structuredClone(config);
     const sender = denied.bots[0];
 
-    if (!sender) throw new Error("Missing fixture bot");
+    if (!sender) {
+      throw new Error("Missing fixture bot");
+    }
+
     sender.access.deniedChannels = ["C123"];
     await writeFile(path, JSON.stringify(denied));
     expect((await reload.request()).status).toBe("applied");
@@ -458,8 +469,10 @@ test("shutdown aborts underlying Slack HTTP and retains store/lock until actual 
   await new Promise<void>((resolve) => fake.listen(0, "127.0.0.1", resolve));
   const address = fake.address();
 
-  if (!address || typeof address === "string")
+  if (!address || typeof address === "string") {
     throw new Error("Missing fixture port");
+  }
+
   const url = `http://127.0.0.1:${address.port}/`;
 
   const real = new SlackConnection("fixture-app", "fixture-bot", log, {
@@ -580,8 +593,9 @@ test("nonsettling real child holds instance lock until referenced hard exit; ret
   const messages: string[] = [];
 
   const output = (async () => {
-    for await (const bytes of child.stdout)
+    for await (const bytes of child.stdout) {
       messages.push(new TextDecoder().decode(bytes));
+    }
   })();
 
   try {
@@ -634,12 +648,17 @@ test("nonsettling real child holds instance lock until referenced hard exit; ret
       expect(claim?.admittedAt).toBe(admittedAt);
       expect(claim?.payload.title).toBe("Retained");
 
-      if (claim) recovered.settle(claim, { state: "unknown" }, Date.now());
+      if (claim) {
+        recovered.settle(claim, { state: "unknown" }, Date.now());
+      }
     } finally {
       recovered.close();
     }
   } finally {
-    if (child.exitCode === null) child.kill("SIGKILL");
+    if (child.exitCode === null) {
+      child.kill("SIGKILL");
+    }
+
     await child.exited;
     await output;
     await new Response(child.stderr).text();

@@ -37,12 +37,15 @@ export async function readClientKey(path: string) {
   try {
     const info = await lstat(path);
 
-    if (!info.isFile() || (info.mode & 0o077) !== 0)
+    if (!info.isFile() || (info.mode & 0o077) !== 0) {
       throw new Error("The client key file is not a private regular file");
+    }
+
     const key = (await readFile(path, "utf8")).trim();
 
-    if (!key || /\s/.test(key))
+    if (!key || /\s/.test(key)) {
       throw new Error("The client key is empty or contains white space");
+    }
 
     return key;
   } catch {
@@ -80,8 +83,9 @@ export async function proxyModels(proxy: ProxyConfig, signal: AbortSignal) {
 
   const parsed = decodeModels(await response.json().catch(() => null));
 
-  if (Result.isFailure(parsed) || parsed.success.data.length === 0)
+  if (Result.isFailure(parsed) || parsed.success.data.length === 0) {
     throw new StepError("health-failed");
+  }
 
   return parsed.success.data.map((model) => model.id);
 }
@@ -152,7 +156,10 @@ export const binaryPath = (config: CliProxyConfig, version: string) =>
  */
 export async function cliProxyCurrent(config: CliProxyConfig) {
   try {
-    if (!(await lstat(config.link)).isSymbolicLink()) return null;
+    if (!(await lstat(config.link)).isSymbolicLink()) {
+      return null;
+    }
+
     const target = resolve(dirname(config.link), await readlink(config.link));
 
     return binaryPattern(config.binary).exec(target)?.[1] ?? null;
@@ -182,12 +189,17 @@ export async function cliProxyCandidate(
     config.coolOffHours,
   );
 
-  if (!release) return null;
+  if (!release) {
+    return null;
+  }
+
   const name = config.asset.replaceAll("{version}", release.version);
   const asset = release.assets.find((item) => item.name === name);
   const digest = /^sha256:([a-f0-9]{64})$/.exec(asset?.digest ?? "")?.[1];
 
-  if (!asset || !digest) throw new StepError("checksum-mismatch");
+  if (!asset || !digest) {
+    throw new StepError("checksum-mismatch");
+  }
 
   return { version: release.version, asset, digest };
 }
@@ -204,28 +216,43 @@ export async function cliProxyPrepare(
   runner: CommandRunner,
   signal: AbortSignal,
 ) {
-  if (!parseVersion(candidate.version)) throw new StepError("install-failed");
+  if (!parseVersion(candidate.version)) {
+    throw new StepError("install-failed");
+  }
+
   const url = candidate.asset.browser_download_url;
 
-  if (!url) throw new StepError("not-found");
+  if (!url) {
+    throw new StepError("not-found");
+  }
+
   await mkdir(staging, { recursive: true, mode: 0o700 });
 
   try {
     const archive = join(staging, "asset.tar.gz");
     const response = await request(url, { signal, timeoutMs: 600_000 });
 
-    if (!response.ok) throw new StepError("network");
+    if (!response.ok) {
+      throw new StepError("network");
+    }
+
     await writeBody(response, archive);
     const asset = await sha256File(archive);
 
-    if (asset !== candidate.digest) throw new StepError("checksum-mismatch");
+    if (asset !== candidate.digest) {
+      throw new StepError("checksum-mismatch");
+    }
+
     const entries = await inspectArchive(archive);
 
     const executable = entries.filter(
       (entry) => entry.path === config.executable && entry.type === "file",
     );
 
-    if (executable.length !== 1) throw new StepError("archive-invalid");
+    if (executable.length !== 1) {
+      throw new StepError("archive-invalid");
+    }
+
     const unpacked = join(staging, "unpacked");
     await mkdir(unpacked, { mode: 0o700 });
     await must(
@@ -254,8 +281,9 @@ export async function cliProxyPrepare(
         existing.isSymbolicLink() ||
         !existing.isFile() ||
         (await sha256File(target)) !== binary
-      )
+      ) {
         throw new StepError("checksum-mismatch");
+      }
     } else {
       await mkdir(dirname(target), { recursive: true, mode: 0o700 });
       const temp = `${target}.stargate-${process.pid}`;
@@ -270,8 +298,9 @@ export async function cliProxyPrepare(
       installed.isSymbolicLink() ||
       !installed.isFile() ||
       installed.nlink !== 1
-    )
+    ) {
       throw new StepError("archive-invalid");
+    }
 
     return { asset, binary };
   } finally {
@@ -379,7 +408,10 @@ export async function agentCliInstall(
   runner: CommandRunner,
   timeoutMs: number,
 ) {
-  if (specs.length === 0) return;
+  if (specs.length === 0) {
+    return;
+  }
+
   await must(
     runner,
     npmInstallCommand(config, specs, cutoff),

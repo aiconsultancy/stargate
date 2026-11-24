@@ -33,15 +33,23 @@ export function bumpFor(message: string): Bump {
   if (
     parsed?.groups?.["breaking"] ||
     body.some((line) => /^BREAKING[ -]CHANGE: /.test(line))
-  )
+  ) {
     return "major";
+  }
+
   const type = parsed?.groups?.["type"];
 
-  if (type === "feat") return "minor";
+  if (type === "feat") {
+    return "minor";
+  }
 
-  if (type && patchTypes.has(type)) return "patch";
+  if (type && patchTypes.has(type)) {
+    return "patch";
+  }
 
-  if (parsed?.groups?.["scope"] === "deps") return "patch";
+  if (parsed?.groups?.["scope"] === "deps") {
+    return "patch";
+  }
 
   return "none";
 }
@@ -55,10 +63,15 @@ export function nextVersion(
   messages: readonly string[],
   force = false,
 ): string | undefined {
-  if (last === undefined) return firstVersion;
+  if (last === undefined) {
+    return firstVersion;
+  }
+
   const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(last);
 
-  if (!match) throw new Error("Last release tag is not vMAJOR.MINOR.PATCH");
+  if (!match) {
+    throw new Error("Last release tag is not vMAJOR.MINOR.PATCH");
+  }
 
   let [major, minor, patch] = match.slice(1).map(Number) as [
     number,
@@ -68,17 +81,28 @@ export function nextVersion(
 
   let bump: Bump = "none";
 
-  for (const next of messages.map((item) => bumpFor(item)))
-    if (order[next] > order[bump]) bump = next;
+  for (const next of messages.map((item) => bumpFor(item))) {
+    if (order[next] > order[bump]) {
+      bump = next;
+    }
+  }
 
   if (bump === "none") {
-    if (!force || messages.length === 0) return undefined;
+    if (!force || messages.length === 0) {
+      return undefined;
+    }
+
     bump = "patch";
   }
 
-  if (bump === "major" && major > 0) return `${major + 1}.0.0`;
+  if (bump === "major" && major > 0) {
+    return `${major + 1}.0.0`;
+  }
 
-  if (bump === "major" || bump === "minor") return `${major}.${minor + 1}.0`;
+  if (bump === "major" || bump === "minor") {
+    return `${major}.${minor + 1}.0`;
+  }
+
   patch += 1;
 
   return `${major}.${minor}.${patch}`;
@@ -112,10 +136,11 @@ export function releaseFlagNotes(changelog: string) {
     ["New flags", "Default changes", "Enabled by default"].some(
       (label) => !new RegExp(`^- ${label}: \\S.*$`, "m").test(flags),
     )
-  )
+  ) {
     throw new Error(
       "Unreleased Feature flags must list New flags, Default changes and Enabled by default (use none explicitly)",
     );
+  }
 
   return flags;
 }
@@ -124,7 +149,9 @@ async function git(...args: string[]) {
   const process = Bun.spawn(["git", ...args], { stdout: "pipe" });
   const text = await new Response(process.stdout).text();
 
-  if ((await process.exited) !== 0) throw new Error(`git ${args[0]} failed`);
+  if ((await process.exited) !== 0) {
+    throw new Error(`git ${args[0]} failed`);
+  }
 
   return text;
 }

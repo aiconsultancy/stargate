@@ -56,7 +56,9 @@ export function isMarkerIssue(value: string): boolean {
 
 /** `kind,value`; an offer also names its issue: `offer,<offerID>,<issue>`. */
 export function formatDispatchMarker(marker: DispatchMarker): string {
-  if (marker.kind === "offer") return `offer,${marker.offerID},${marker.issue}`;
+  if (marker.kind === "offer") {
+    return `offer,${marker.offerID},${marker.issue}`;
+  }
 
   return "issue" in marker
     ? `${marker.kind},${marker.issue}`
@@ -67,30 +69,43 @@ export function formatDispatchMarker(marker: DispatchMarker): string {
 export function parseDispatchMarker(
   value: string | undefined,
 ): DispatchMarker | undefined {
-  if (value === undefined) return;
+  if (value === undefined) {
+    return;
+  }
+
   const [kind, argument, issue, ...rest] = value.split(",");
 
-  if (kind === undefined || argument === undefined || rest.length > 0) return;
+  if (kind === undefined || argument === undefined || rest.length > 0) {
+    return;
+  }
 
-  if (kind === "offer")
+  if (kind === "offer") {
     return issue !== undefined &&
       offerPattern.test(argument) &&
       issuePattern.test(issue)
       ? { kind, offerID: argument, issue }
       : undefined;
+  }
 
-  if (issue !== undefined) return;
+  if (issue !== undefined) {
+    return;
+  }
 
-  if (kind === "assigned" || kind === "gave-up")
+  if (kind === "assigned" || kind === "gave-up") {
     return issuePattern.test(argument) ? { kind, issue: argument } : undefined;
+  }
 
-  if (!offerPattern.test(argument)) return;
+  if (!offerPattern.test(argument)) {
+    return;
+  }
 
-  if (kind === "accept" || kind === "decline")
+  if (kind === "accept" || kind === "decline") {
     return { kind, offerID: argument };
+  }
 
-  if (outcomes.has(kind))
+  if (outcomes.has(kind)) {
     return { kind: kind as DispatchOutcome, offerID: argument };
+  }
 
   return;
 }

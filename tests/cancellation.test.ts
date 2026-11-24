@@ -12,7 +12,9 @@ import { bot, event, identity } from "./fixtures";
 const stores: Store[] = [];
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 });
 
 function fixture(channel = "C123") {
@@ -44,7 +46,9 @@ function fixture(channel = "C123") {
 
       signal.addEventListener("abort", abort, { once: true });
 
-      if (signal.aborted) abort();
+      if (signal.aborted) {
+        abort();
+      }
 
       try {
         return await Promise.race([finish.promise, aborted.promise]);
@@ -81,7 +85,9 @@ function fixture(channel = "C123") {
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
 
     return job;
   };
@@ -174,7 +180,9 @@ test("maintenance notice uses the persisted requester-only Stop target", async (
       const abort = () => reject(new Error("Stopped"));
       signal.addEventListener("abort", abort, { once: true });
 
-      if (signal.aborted) abort();
+      if (signal.aborted) {
+        abort();
+      }
     });
   };
 
@@ -288,8 +296,10 @@ test("Stop rejects other humans, bots, installations, channels, threads, and pre
   ];
 
   try {
-    for (const payload of invalid)
+    for (const payload of invalid) {
       expect(f.gateway.cancel(payload)).toBe(false);
+    }
+
     expect(signal.aborted).toBe(false);
     f.finish.resolve("Completed answer");
     await work;
@@ -334,7 +344,10 @@ test("Stop is bound to the current bot/backend namespace", () => {
   expect(other.cancel(f.payload())).toBe(false);
   const changed = bot();
 
-  if (changed.backend.type !== "opencode") throw new Error("Invalid fixture");
+  if (changed.backend.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
+
   changed.backend.directory = "/another";
 
   const backend = new Gateway(

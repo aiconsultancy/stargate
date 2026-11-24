@@ -141,9 +141,14 @@ export async function waitReady(
   for (;;) {
     const record = await readReady(dataDirectory);
 
-    if (record !== null && readyForRun(record, since, version)) return true;
+    if (record !== null && readyForRun(record, since, version)) {
+      return true;
+    }
 
-    if (now() >= until) return false;
+    if (now() >= until) {
+      return false;
+    }
+
     await sleep(2000);
   }
 }

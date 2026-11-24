@@ -118,7 +118,9 @@ function decode<S extends Schema.Codec<unknown, unknown>>(
 ): S["Type"] {
   const result = Schema.decodeUnknownResult(schema)(input);
 
-  if (Result.isFailure(result)) throw new Error(message);
+  if (Result.isFailure(result)) {
+    throw new Error(message);
+  }
 
   return result.success;
 }
@@ -134,13 +136,15 @@ async function jsonFile(path: string): Promise<unknown> {
 }
 
 async function realFile(path: string) {
-  if (!(await lstat(path)).isFile())
+  if (!(await lstat(path)).isFile()) {
     throw new Error("Profile file must be a real file.");
+  }
 }
 
 async function realDirectory(path: string) {
-  if (!(await lstat(path)).isDirectory())
+  if (!(await lstat(path)).isDirectory()) {
     throw new Error("Profile and agents directories must be real directories.");
+  }
 }
 
 async function agentFrontmatter(path: string): Promise<unknown> {
@@ -158,7 +162,10 @@ async function agentFrontmatter(path: string): Promise<unknown> {
 async function loadRoutes(root: string, name: string) {
   decode(nameSchema, name, "Invalid profile name.");
 
-  if (name === "current") throw new Error("Reserved profile name.");
+  if (name === "current") {
+    throw new Error("Reserved profile name.");
+  }
+
   const folder = join(root, name);
   await realDirectory(folder);
 
@@ -168,8 +175,9 @@ async function loadRoutes(root: string, name: string) {
     "Invalid profile manifest.",
   );
 
-  if (manifest.profile !== name)
+  if (manifest.profile !== name) {
     throw new Error("Profile name differs from manifest.");
+  }
 
   const routes =
     manifest.version === 1
@@ -197,8 +205,9 @@ async function loadRoutes(root: string, name: string) {
     "Invalid profile availability.",
   );
 
-  if (availability.missing.length > 0)
+  if (availability.missing.length > 0) {
     throw new Error("Profile has unavailable routes.");
+  }
 
   for (const route of unique.values()) {
     const agent = decode(
@@ -212,8 +221,9 @@ async function loadRoutes(root: string, name: string) {
       "Agent is disabled or has invalid frontmatter.",
     );
 
-    if (agent.model !== route.model)
+    if (agent.model !== route.model) {
       throw new Error("Agent model differs from manifest.");
+    }
   }
 
   const files = new Set(
@@ -262,7 +272,10 @@ async function checkAgentLinks(
   for (const file of await readdir(agents)) {
     const path = join(agents, file);
 
-    if (!(await lstat(path)).isSymbolicLink()) continue;
+    if (!(await lstat(path)).isSymbolicLink()) {
+      continue;
+    }
+
     const target = await readlink(path);
     const prefix = "../agent-profiles/current/";
 
@@ -275,8 +288,9 @@ async function checkAgentLinks(
 }
 
 async function selectorTarget(path: string) {
-  if (!(await lstat(path)).isSymbolicLink())
+  if (!(await lstat(path)).isSymbolicLink()) {
     throw new Error("Current selector must be a symlink.");
+  }
 
   const target = decode(
     nameSchema,
@@ -284,7 +298,9 @@ async function selectorTarget(path: string) {
     "Selector has an unmanaged target.",
   );
 
-  if (target === "current") throw new Error("Reserved profile name.");
+  if (target === "current") {
+    throw new Error("Reserved profile name.");
+  }
 
   return target;
 }
@@ -299,8 +315,9 @@ async function replaceLink(path: string, target: string) {
     await unlink(temporary).catch((error: unknown) => {
       if (
         !(error instanceof Error && "code" in error && error.code === "ENOENT")
-      )
+      ) {
         throw error;
+      }
     });
   }
 }
@@ -324,7 +341,9 @@ export function createProfileApi(
       connection ??= discover(serviceFile ? { file: serviceFile } : {});
       const endpoint = await connection;
 
-      if (!endpoint) throw new Error("No healthy registered service.");
+      if (!endpoint) {
+        throw new Error("No healthy registered service.");
+      }
 
       const response = await request(new URL(path, endpoint.url), {
         method: method.toUpperCase(),
@@ -337,7 +356,10 @@ export function createProfileApi(
         redirect: "error",
       });
 
-      if (!response.ok) throw new Error("Unsuccessful API response.");
+      if (!response.ok) {
+        throw new Error("Unsuccessful API response.");
+      }
+
       const body = await response.text();
 
       const value: unknown = body.trim() ? JSON.parse(body) : null;
@@ -355,8 +377,10 @@ export function createProfileApi(
 export async function switchAgentProfile(
   options: ProfileSwitchOptions,
 ): Promise<void> {
-  if (options.hot && options.requireIdle)
+  if (options.hot && options.requireIdle) {
     throw new Error("Choose --hot or --require-idle, not both.");
+  }
+
   const root = join(options.configDirectory, "agent-profiles");
   await realDirectory(root);
   const lock = join(root, ".switch.lock");
@@ -451,10 +475,11 @@ export async function switchAgentProfile(
         }
       }
 
-      if (!options.hot && (running || pending))
+      if (!options.hot && (running || pending)) {
         throw new Error(
           "Service has active sessions or pending requests. Retry when idle.",
         );
+      }
 
       return { running, pending };
     };
@@ -467,8 +492,9 @@ export async function switchAgentProfile(
     await readiness();
     signal.throwIfAborted();
 
-    if ((await selectorTarget(selector)) !== previous)
+    if ((await selectorTarget(selector)) !== previous) {
       throw new Error("Selector changed outside this operation.");
+    }
 
     if (previous !== options.profile) {
       await replaceLink(selector, options.profile);
@@ -500,13 +526,19 @@ export async function switchAgentProfile(
             agent.model?.variant !== variant;
         }
 
-        if (differs) break;
+        if (differs) {
+          break;
+        }
       }
 
-      if (!differs) break;
+      if (!differs) {
+        break;
+      }
 
-      if (now() >= deadline)
+      if (now() >= deadline) {
         throw new Error("Live route differs after 10 seconds.");
+      }
+
       await sleep(Math.min(250, deadline - now()), verifySignal);
     }
   } catch (error) {
@@ -514,8 +546,10 @@ export async function switchAgentProfile(
 
     if (changed && previous !== undefined) {
       try {
-        if ((await selectorTarget(selector)) !== options.profile)
+        if ((await selectorTarget(selector)) !== options.profile) {
           throw new Error("Selector changed outside this operation.");
+        }
+
         await replaceLink(selector, previous);
         await api("post", "/api/location/reload", AbortSignal.timeout(15_000));
         rollback = " Previous selector restored; service reloaded.";
@@ -553,8 +587,10 @@ if (import.meta.main) {
         "Usage: bun run src/ops/agent-profile-switch.ts PROFILE [--config-dir PATH] [--directory PATH] [--service-file PATH] [--hot | --require-idle]\nRequires idle sessions and no pending requests by default. --hot explicitly enables warning-and-proceed reload during active work. All loaded locations are affected.",
       );
     } else {
-      if (positionals.length !== 1 || !positionals[0])
+      if (positionals.length !== 1 || !positionals[0]) {
         throw new Error("Specify one installed profile. Use --help for usage.");
+      }
+
       await switchAgentProfile({
         configDirectory: resolve(
           values["config-dir"] ??

@@ -61,11 +61,15 @@ export class CrewMaintenance {
     signal.throwIfAborted();
 
     for (const turn of this.turns.values()) {
-      if (this.now() - turn.seenAt > leaseMs) this.close(turn);
+      if (this.now() - turn.seenAt > leaseMs) {
+        this.close(turn);
+      }
     }
 
-    if (this.turns.has(owner.sessionID) || this.turns.size >= 32)
+    if (this.turns.has(owner.sessionID) || this.turns.size >= 32) {
       throw new CrewError("A maintenance gateway turn is already registered.");
+    }
+
     this.turns.set(owner.sessionID, {
       ...owner,
       seenAt: this.now(),
@@ -78,8 +82,9 @@ export class CrewMaintenance {
   private owned(owner: Owner) {
     const turn = this.turns.get(owner.sessionID);
 
-    if (!turn || turn.id !== owner.id)
+    if (!turn || turn.id !== owner.id) {
       throw new CrewError("Maintenance gateway ownership unavailable.");
+    }
 
     if (this.now() - turn.seenAt > leaseMs) {
       this.close(owner);
@@ -107,7 +112,9 @@ export class CrewMaintenance {
     turn.seenAt = this.now();
     const pending = turn.pending;
 
-    if (!pending) return null;
+    if (!pending) {
+      return null;
+    }
 
     if (
       pending.deliveredAt !== undefined &&
@@ -128,10 +135,12 @@ export class CrewMaintenance {
   public delivered(owner: Owner & { noticeID: string }) {
     const pending = this.owned(owner).pending;
 
-    if (!pending || pending.notice.id !== owner.noticeID)
+    if (!pending || pending.notice.id !== owner.noticeID) {
       throw new CrewError(
         "Maintenance notice changed; delivery not confirmed.",
       );
+    }
+
     pending.deliveredAt ??= this.now();
 
     return true;
@@ -140,20 +149,26 @@ export class CrewMaintenance {
   public async run(raw: unknown, caller: CrewCaller): Promise<Permit> {
     const parsed = decodePlan(raw);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError("Invalid maintenance plan.");
+    }
+
     await this.authority.captain(caller);
     caller.signal.throwIfAborted();
     const turn = this.turns.get(caller.sessionID);
 
-    if (!turn)
+    if (!turn) {
       throw new CrewError(
         "No live maintenance gateway. Ask the user for explicit approval; do not use a shell sleep.",
       );
+    }
+
     this.owned(turn);
 
-    if (turn.pending)
+    if (turn.pending) {
       throw new CrewError("Another maintenance notice is pending.");
+    }
+
     const permit = Promise.withResolvers<Permit>();
     const stop = new AbortController();
 
@@ -186,9 +201,14 @@ export class CrewMaintenance {
   public close(owner: Owner) {
     const turn = this.turns.get(owner.sessionID);
 
-    if (!turn) return true;
+    if (!turn) {
+      return true;
+    }
 
-    if (turn.id !== owner.id) throw new CrewError("Maintenance turn changed.");
+    if (turn.id !== owner.id) {
+      throw new CrewError("Maintenance turn changed.");
+    }
+
     turn.stop.abort();
     this.turns.delete(owner.sessionID);
 
@@ -196,6 +216,8 @@ export class CrewMaintenance {
   }
 
   public dispose() {
-    for (const turn of this.turns.values()) this.close(turn);
+    for (const turn of this.turns.values()) {
+      this.close(turn);
+    }
   }
 }

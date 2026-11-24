@@ -26,7 +26,9 @@ import { bot, event, identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 type Message = { id: string; text: string | undefined; settled: boolean };
@@ -54,20 +56,26 @@ function nativeSession() {
       reads.push(cursor);
       this.beforeRead();
 
-      if (cursor === latestInput && !this.input)
+      if (cursor === latestInput && !this.input) {
         throw new TranscriptUnavailable("cursor");
+      }
+
       const after = cursor === latestInput ? this.input : cursor;
       const open = log.findIndex((message) => !message.settled);
       const done = open < 0 ? log : log.slice(0, open);
       const head = done.at(-1)?.id ?? "";
 
-      if (after === undefined) return { cursor: head, entries: [] };
+      if (after === undefined) {
+        return { cursor: head, entries: [] };
+      }
 
       const start =
         after === "" ? 0 : done.findIndex((m) => m.id === after) + 1;
 
-      if (after !== "" && start === 0)
+      if (after !== "" && start === 0) {
         throw new TranscriptUnavailable("cursor");
+      }
+
       const newer = done.slice(start);
 
       return {
@@ -101,7 +109,10 @@ function fixture(
 ) {
   const store = options.store ?? openStore(":memory:");
 
-  if (!options.store) cleanup.push(() => store.close());
+  if (!options.store) {
+    cleanup.push(() => store.close());
+  }
+
   const native = options.native ?? nativeSession();
   const prompts: string[] = [];
   let turn: Turn = async () => "";
@@ -157,8 +168,9 @@ function fixture(
   const next = () => store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
   const drain = async () => {
-    for (let job = next(); job; job = next())
+    for (let job = next(); job; job = next()) {
       await gateway.process(job, signal);
+    }
   };
 
   return {
@@ -194,7 +206,9 @@ const followUp = (text: string, ts: string) => ({
 function pending(f: { next(): Job | undefined }) {
   const job = f.next();
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
 
   return job;
 }
@@ -251,7 +265,10 @@ test("continuations after a turn reach the exact thread once, in order", async (
   ]);
   const streaming = f.native.log.at(-1);
 
-  if (streaming) streaming.settled = true;
+  if (streaming) {
+    streaming.settled = true;
+  }
+
   f.native.add(); // Tool-only continuation advances without a reply.
   await f.settle("unrelated-worker-session");
   expect(f.posts).toHaveLength(2);
@@ -288,12 +305,17 @@ test("failures keep public text that settled first, then one status box", async 
   for (const cause of ["timeout", "backend"] as const) {
     const config = bot();
 
-    if (cause === "timeout") config.turnTimeoutMs = 20;
+    if (cause === "timeout") {
+      config.turnTimeoutMs = 20;
+    }
+
     const f = fixture({ config });
     f.setTurn(async (signal) => {
       f.native.add("Progress before the failure.");
 
-      if (cause === "backend") throw new Error("PRIVATE SDK error");
+      if (cause === "backend") {
+        throw new Error("PRIVATE SDK error");
+      }
 
       return aborted(signal);
     });
@@ -324,7 +346,10 @@ test("Stop keeps settled public text and later results without rerunning", async
   const job = pending(f);
   const work = f.gateway.process(job, f.signal);
 
-  while (!f.store.previews(job.id).length) await Bun.sleep(1);
+  while (!f.store.previews(job.id).length) {
+    await Bun.sleep(1);
+  }
+
   const ts = f.store.previews(job.id)[0]?.ts;
   expect(
     f.gateway.cancel({
@@ -449,7 +474,10 @@ test("passive delivery retries reuse stored chunks without rereading or rerunnin
   let fail = true;
   const post = f.slack.post;
   f.slack.post = async (channel, thread, text) => {
-    if (fail && f.posts.length === 2) throw new Error("Slack unavailable");
+    if (fail && f.posts.length === 2) {
+      throw new Error("Slack unavailable");
+    }
+
     await post(channel, thread, text);
   };
 
@@ -602,7 +630,9 @@ test("catch-up failures retry with bounded backoff and keep the cursor", async (
   f.native.add("CI passed after an outage.");
   let failures = 12;
   f.native.beforeRead = () => {
-    if (failures-- > 0) throw new Error("history unavailable");
+    if (failures-- > 0) {
+      throw new Error("history unavailable");
+    }
   };
 
   const start = Date.now();
@@ -620,7 +650,9 @@ test("catch-up failures retry with bounded backoff and keep the cursor", async (
       setSystemTime(new Date(start + attempt * 300_001));
       await f.gateway.catchUp(f.signal);
 
-      if (attempt < 12) expect(cursor()).toBe(before);
+      if (attempt < 12) {
+        expect(cursor()).toBe(before);
+      }
     }
   } finally {
     setSystemTime();
@@ -635,7 +667,9 @@ test("an unreadable final history defers the reply instead of an unreceipted cop
   const f = fixture();
   let broken = false;
   f.native.beforeRead = () => {
-    if (broken) throw new Error("history unavailable");
+    if (broken) {
+      throw new Error("history unavailable");
+    }
   };
 
   f.setTurn(async () => {
@@ -660,8 +694,11 @@ test("an unsettled final message is read again, never duplicated by a fallback",
   const f = fixture();
   let reads = 0;
   f.native.beforeRead = () => {
-    if (++reads === 2)
-      for (const message of f.native.log) message.settled = true;
+    if (++reads === 2) {
+      for (const message of f.native.log) {
+        message.settled = true;
+      }
+    }
   };
 
   f.setTurn(async () => {
@@ -685,7 +722,10 @@ test("an unsettled final message is read again, never duplicated by a fallback",
   expect(f.failures).toEqual(["history"]);
   expect(f.texts()).toEqual(["Final answer."]);
 
-  for (const message of f.native.log) message.settled = true;
+  for (const message of f.native.log) {
+    message.settled = true;
+  }
+
   await f.gateway.catchUp(f.signal);
   await f.drain();
   await f.settle("session-1");
@@ -719,7 +759,9 @@ test("long transcript replies are delivered in full, never clipped", async () =>
   const f = fixture();
   const parts = [0, 1, 2].map((n) => `${"abcdefghi ".repeat(2500)}end-${n}`);
   f.setTurn(async () => {
-    for (const text of parts) f.native.add(text);
+    for (const text of parts) {
+      f.native.add(text);
+    }
 
     return parts.at(-1) ?? "";
   });
@@ -731,8 +773,10 @@ test("long transcript replies are delivered in full, never clipped", async () =>
   const compact = (text: string) => text.replace(/\s+/g, "");
   const delivered = compact(f.texts().join(""));
 
-  for (const text of [...parts, single])
+  for (const text of [...parts, single]) {
     expect(delivered).toContain(compact(text));
+  }
+
   expect(delivered).not.toContain("truncated");
   expect(f.texts().every((text) => Array.from(text).length <= 2800)).toBe(true);
 });
@@ -766,8 +810,10 @@ test("a lost cursor stops catch-up, then the next request re-anchors at its own 
   let written = false;
   f.native.beforeRead = () => {
     // Written after the streamed answer; a post-prompt head baseline skips it.
-    if (written || !f.native.log.some((m) => m.text === "Second answer."))
+    if (written || !f.native.log.some((m) => m.text === "Second answer.")) {
       return;
+    }
+
     written = true;
     f.native.add("Background reply after the answer.");
   };
@@ -829,7 +875,10 @@ test("an unsettled legacy reply shows delayed status after its input is anchored
   f.native.add("Old reply already in Slack.");
   let fail = true;
   f.native.beforeRead = () => {
-    if (!fail) return;
+    if (!fail) {
+      return;
+    }
+
     fail = false;
     throw new Error("history unavailable");
   };
@@ -844,7 +893,10 @@ test("an unsettled legacy reply shows delayed status after its input is anchored
   expect(f.texts()).toEqual([]);
   expect(f.failures).toEqual(["history"]);
 
-  for (const message of f.native.log) message.settled = true;
+  for (const message of f.native.log) {
+    message.settled = true;
+  }
+
   await f.gateway.catchUp(f.signal);
   await f.drain();
   await f.settle("session-1");
@@ -1047,8 +1099,10 @@ test("repair requeues a failed outbox row and refuses conflicting rows atomicall
     throw new Error("Slack unavailable");
   };
 
-  for (let attempt = 0; attempt < 8; attempt++)
+  for (let attempt = 0; attempt < 8; attempt++) {
     await f.gateway.process(pending(f), f.signal);
+  }
+
   expect(f.next()).toBeUndefined(); // The outbox row is now failed.
   f.slack.post = post;
 
@@ -1156,7 +1210,10 @@ test("roster idle checks include pending and in-flight transcript catch-ups", as
   const resume = Promise.withResolvers<void>();
   const read = f.backend.transcript;
 
-  if (!read) throw new Error("Missing transcript fixture");
+  if (!read) {
+    throw new Error("Missing transcript fixture");
+  }
+
   f.backend.transcript = async (...args) => {
     entered.resolve();
     await resume.promise;

@@ -51,7 +51,7 @@ test("journal input keeps strict branches, defaults, trim and Unicode bounds", (
     { op: "read", limit: 101 },
     { op: "read", limit: 1.5 },
     { op: "read", limit: "20" },
-  ])
+  ]) {
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(journalInputSchema, {
@@ -59,6 +59,7 @@ test("journal input keeps strict branches, defaults, trim and Unicode bounds", (
         })(input),
       ),
     ).toBe(true);
+  }
 });
 
 test("journal persists bounded redacted milestones, retry identity and scoped cursors", () => {

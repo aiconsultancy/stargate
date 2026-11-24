@@ -78,8 +78,10 @@ export async function readHealthFile(
         info.size > limit ||
         (privateFile &&
           ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.()))
-      )
+      ) {
         return null;
+      }
+
       const buffer = Buffer.alloc(limit + 1);
       const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
 
@@ -235,8 +237,10 @@ async function collectHost(
         const system = Number(tail?.[12]);
         const start = tail?.[19];
 
-        if (comm === null || !start || !Number.isFinite(user + system))
+        if (comm === null || !start || !Number.isFinite(user + system)) {
           continue;
+        }
+
         const pid = Number(id);
         const processTicks = user + system;
         processTimes.set(pid, { ticks: processTicks, start });
@@ -281,13 +285,16 @@ async function collectHost(
 
   for (const entry of [...samples]
     .toSorted((a, b) => (b.cpuPercent ?? -1) - (a.cpuPercent ?? -1))
-    .slice(0, 2))
+    .slice(0, 2)) {
     leaders.set(entry.pid, entry);
+  }
 
   for (const entry of [...samples]
     .toSorted((a, b) => (b.memoryBytes ?? -1) - (a.memoryBytes ?? -1))
-    .slice(0, 3))
+    .slice(0, 3)) {
     leaders.set(entry.pid, entry);
+  }
+
   let growth: HostHealth["growth"] = null;
 
   if (previous && at > previous.at) {
@@ -298,16 +305,19 @@ async function collectHost(
         before?.available === null ||
         before?.available === undefined ||
         disk.available === null
-      )
+      ) {
         continue;
+      }
+
       const bytes = Math.max(0, before.available - disk.available);
 
-      if (!growth || bytes > growth.bytes)
+      if (!growth || bytes > growth.bytes) {
         growth = {
           label: disk.label,
           bytes,
           intervalSeconds: (at - previous.at) / 1000,
         };
+      }
     }
   }
 

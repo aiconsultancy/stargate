@@ -99,8 +99,9 @@ test("favicon admission never permits arbitrary data URLs, local paths, links or
     `<link rel="stylesheet" href="${png}">`,
   ];
 
-  for (const html of refused)
+  for (const html of refused) {
     expect(() => handler(html), html).toThrow("self-contained");
+  }
 });
 
 test("branding leaves custom self-contained HTML untouched and expands only known tokens", () => {
@@ -119,7 +120,10 @@ test("the social preview embeds the unchanged SVG and includes a local 1280x640 
     svg,
   )?.[1];
 
-  if (!embedded) throw new Error("Social preview has no embedded source logo");
+  if (!embedded) {
+    throw new Error("Social preview has no embedded source logo");
+  }
+
   expect(Buffer.from(embedded, "base64")).toEqual(
     await readFile(
       new URL("../assets/icons/stargate-dark.svg", import.meta.url),

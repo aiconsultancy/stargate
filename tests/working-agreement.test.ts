@@ -53,8 +53,9 @@ test("OpenCode request hook advises reread only on change for an authorized curr
       if (
         caller.sessionID !== "root-a" ||
         caller.agent !== "ship-captain-adama"
-      )
+      ) {
         throw new Error("Not this member");
+      }
     });
 
     const request = () => ({

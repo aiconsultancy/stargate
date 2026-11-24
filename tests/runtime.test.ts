@@ -35,8 +35,9 @@ test("ready update notices are opt-in, persistent across restarts and included i
   let contexts = 0;
   const configured = bot();
 
-  if (configured.backend.type !== "opencode")
+  if (configured.backend.type !== "opencode") {
     throw new Error("Wrong fixture backend");
+  }
 
   const pinned = {
     ...configured,
@@ -94,19 +95,24 @@ test("ready update notices are opt-in, persistent across restarts and included i
         for (let i = 0; i < 200; i++) {
           const ready = await readReady(dataDirectory);
 
-          if (ready && ready.readyAt >= before) break;
+          if (ready && ready.readyAt >= before) {
+            break;
+          }
+
           await Bun.sleep(5);
         }
 
         expect(queued).toBe(expected);
         const ready = await readReady(dataDirectory);
 
-        if (enabled)
+        if (enabled) {
           expect(ready?.updateNotices?.[0]).toMatchObject({
             sessionID: "ses_captain",
             status,
           });
-        else expect(contexts).toBe(0);
+        } else {
+          expect(contexts).toBe(0);
+        }
       } finally {
         controller.abort();
         await running;
@@ -154,12 +160,17 @@ test("unpinned Slack sessions get the notice only on their next normal turn", as
   try {
     await f.started;
 
-    for (let i = 0; i < 100 && !(await readReady(dataDirectory)); i++)
+    for (let i = 0; i < 100 && !(await readReady(dataDirectory)); i++) {
       await Bun.sleep(5);
+    }
+
     expect(order).toEqual([]);
     await f.intake().accept(event("<@UBOT> hello", "100.001"));
 
-    for (let i = 0; i < 200 && order.length < 2; i++) await Bun.sleep(5);
+    for (let i = 0; i < 200 && order.length < 2; i++) {
+      await Bun.sleep(5);
+    }
+
     expect(order).toEqual(["notice", "prompt"]);
   } finally {
     controller.abort();
@@ -189,7 +200,9 @@ function harness(turn: Turn = async () => "Answer.") {
     slack: (bot) =>
       ({
         async identity() {
-          if (bot.id === "broken") throw new Error("auth.test failed");
+          if (bot.id === "broken") {
+            throw new Error("auth.test failed");
+          }
 
           return bot.id === "helper"
             ? identity
@@ -239,8 +252,11 @@ function harness(turn: Turn = async () => "Answer.") {
           events.push("backend closed");
 
           // Intake must be closed for every bot before any backend closes.
-          for (const [id, intake] of intakes)
-            if (intake.open()) events.push(`${id} intake still open`);
+          for (const [id, intake] of intakes) {
+            if (intake.open()) {
+              events.push(`${id} intake still open`);
+            }
+          }
         },
       };
 
@@ -259,7 +275,9 @@ function harness(turn: Turn = async () => "Answer.") {
     intake: (id = "helper") => {
       const intake = intakes.get(id);
 
-      if (!intake) throw new Error("Slack intake not started");
+      if (!intake) {
+        throw new Error("Slack intake not started");
+      }
 
       return intake;
     },
@@ -284,7 +302,9 @@ function seed(path: string, config: BotConfig, user = identity.user) {
     });
     const job = store.queuedJob(key, `C123:${thread}`);
 
-    if (!job) throw new Error("Missing seeded job");
+    if (!job) {
+      throw new Error("Missing seeded job");
+    }
 
     return { key, id: job.id };
   } finally {
@@ -314,8 +334,10 @@ test("pinned Slack runtime reads persisted notification preferences before model
   try {
     const config = bot();
 
-    if (config.backend.type !== "opencode")
+    if (config.backend.type !== "opencode") {
       throw new Error("Expected OpenCode");
+    }
+
     config.backend.sessionID = "ses_captain";
     config.access.textMentions = { channels: ["C123"], names: ["helper"] };
 
@@ -442,7 +464,10 @@ test("a failed worker stops the process with a restartable failure", async () =>
     store.saveSession(conversation, "session-1");
     const job = store.queuedJob(key, "C123:1.000");
 
-    if (!job) throw new Error("Missing seeded job");
+    if (!job) {
+      throw new Error("Missing seeded job");
+    }
+
     store.running(job.id);
     store.close();
     const config = { dataDirectory, bots: [helper] };
@@ -546,7 +571,10 @@ test("ready waits for connection and records later outages and recovery", async 
       for (let i = 0; i < 100; i++) {
         const record = await readReady(dataDirectory);
 
-        if (record?.transports?.[0]?.state === expected) return record;
+        if (record?.transports?.[0]?.state === expected) {
+          return record;
+        }
+
         await Bun.sleep(2);
       }
 
@@ -635,8 +663,10 @@ test("a disconnect during initial readiness I/O is not lost by the observer", as
       (await readReady(dataDirectory))?.transports?.[0]?.state !==
         "reconnecting";
       i++
-    )
+    ) {
       await Bun.sleep(2);
+    }
+
     expect(changed).toBe(true);
     expect((await readReady(dataDirectory))?.transports?.[0]?.state).toBe(
       "reconnecting",
@@ -710,7 +740,10 @@ test(
       const f = harness(
         (bot, signal) =>
           new Promise((_resolve, reject) => {
-            if (bot !== "other") return reject(new Error("unexpected turn"));
+            if (bot !== "other") {
+              return reject(new Error("unexpected turn"));
+            }
+
             busy.resolve();
             signal.addEventListener(
               "abort",
@@ -753,7 +786,10 @@ test(
       ).toHaveLength(2);
       expect(f.calls).toEqual(["other createSession", "other prompt"]);
 
-      if (!late) throw new Error("Late job was not seeded");
+      if (!late) {
+        throw new Error("Late job was not seeded");
+      }
+
       expect(status(path, late.key, late.id)).toBe("queued");
     } finally {
       await rm(dataDirectory, { recursive: true, force: true });
@@ -783,8 +819,10 @@ test("the dashboard socket serves the fleet and is removed on shutdown", async (
         () => false,
       );
 
-    for (let attempt = 0; attempt < 200 && !(await present()); attempt++)
+    for (let attempt = 0; attempt < 200 && !(await present()); attempt++) {
       await Bun.sleep(10);
+    }
+
     expect((await stat(socket)).mode & 0o777).toBe(0o600);
     const fleet = await fetch("http://stargate/api/fleet", { unix: socket });
     expect(fleet.status).toBe(200);
@@ -834,7 +872,10 @@ test("the Fleet API serves the projected fleet with the generated token", async 
     const tokenFile = join(dataDirectory, "api-token");
 
     for (let attempt = 0; attempt < 200; attempt++) {
-      if (await Bun.file(tokenFile).exists()) break;
+      if (await Bun.file(tokenFile).exists()) {
+        break;
+      }
+
       await Bun.sleep(10);
     }
 
@@ -843,8 +884,10 @@ test("the Fleet API serves the projected fleet with the generated token", async 
     const base = `http://127.0.0.1:${port}/api/v1`;
     let unauthorized: Response | undefined;
 
-    for (let attempt = 0; attempt < 200 && !unauthorized; attempt++)
+    for (let attempt = 0; attempt < 200 && !unauthorized; attempt++) {
       unauthorized = await fetch(`${base}/fleet`).catch(() => undefined);
+    }
+
     expect(unauthorized?.status).toBe(401);
 
     const response = await fetch(`${base}/fleet`, {
@@ -955,7 +998,10 @@ test("gateway writes a readiness record and delivers maintenance summaries", asy
 
     await f.started;
 
-    for (let i = 0; i < 100 && !announced.length; i++) await Bun.sleep(20);
+    for (let i = 0; i < 100 && !announced.length; i++) {
+      await Bun.sleep(20);
+    }
+
     const ready = await readReady(dataDirectory);
     expect(ready?.readyAt).toBeGreaterThanOrEqual(before);
     expect(ready?.pid).toBe(process.pid);

@@ -88,7 +88,9 @@ export async function handleSlackRequest(
   interactions?: SlackInteractions,
   open: () => boolean = () => true,
 ) {
-  if (!open()) return;
+  if (!open()) {
+    return;
+  }
 
   try {
     if (request.type === "slash_commands" && interactions) {
@@ -108,7 +110,9 @@ export async function handleSlackRequest(
 
       // Slack redelivers if intake closed while it waited.
       // The event ID deduplicates any stored copy.
-      if (!open()) return;
+      if (!open()) {
+        return;
+      }
     }
 
     await request.ack();
@@ -204,7 +208,10 @@ export class SlackConnection implements TransportDelivery {
       await this.historyWeb(signal).reactions.get({ channel, timestamp: ts }),
     );
 
-    if (Result.isFailure(result) || result.success.channel !== channel) return;
+    if (Result.isFailure(result) || result.success.channel !== channel) {
+      return;
+    }
+
     const message = result.success.message;
 
     if (
@@ -215,8 +222,9 @@ export class SlackConnection implements TransportDelivery {
       (message.parent_user_id !== undefined &&
         message.thread_ts === undefined) ||
       (message.app_id !== undefined && message.app_id !== appId)
-    )
+    ) {
       return;
+    }
 
     return message.thread_ts ?? message.ts;
   }
@@ -224,8 +232,9 @@ export class SlackConnection implements TransportDelivery {
   public async identity(signal?: AbortSignal): Promise<Identity> {
     const auth = await retrySlack(() => this.web.auth.test(), signal);
 
-    if (!auth.team_id || !auth.user_id || !auth.bot_id)
+    if (!auth.team_id || !auth.user_id || !auth.bot_id) {
       throw new Error("Slack requires a workspace bot token");
+    }
 
     return { team: auth.team_id, user: auth.user_id };
   }
@@ -282,7 +291,9 @@ export class SlackConnection implements TransportDelivery {
       unfurl_media: false,
     });
 
-    if (!result.ts) throw new Error("Slack did not return a message timestamp");
+    if (!result.ts) {
+      throw new Error("Slack did not return a message timestamp");
+    }
 
     return result.ts;
   }
@@ -311,7 +322,9 @@ export class SlackConnection implements TransportDelivery {
     payload: DisplayPayload,
     signal: AbortSignal,
   ): Promise<SinkOutcome> {
-    if (signal.aborted) return { state: "refused", retryable: true };
+    if (signal.aborted) {
+      return { state: "refused", retryable: true };
+    }
 
     try {
       const result = await this.historyWeb(signal).chat.postMessage({
@@ -375,13 +388,16 @@ export class SlackConnection implements TransportDelivery {
         thread_ts: thread,
       });
 
-      if (!result.ts)
+      if (!result.ts) {
         throw new Error("Slack did not return a message timestamp");
+      }
 
       return result.ts;
     } catch (error) {
-      if (ts !== undefined && slackError(error, "message_not_found"))
+      if (ts !== undefined && slackError(error, "message_not_found")) {
         return false;
+      }
+
       throw error;
     }
   }
@@ -417,7 +433,9 @@ export class SlackConnection implements TransportDelivery {
       thread_ts: thread,
     });
 
-    if (!result.ts) throw new Error("Slack did not return a message timestamp");
+    if (!result.ts) {
+      throw new Error("Slack did not return a message timestamp");
+    }
 
     return result.ts;
   }
@@ -426,7 +444,9 @@ export class SlackConnection implements TransportDelivery {
     open: async (triggerId, view) => {
       const result = await this.web.views.open({ trigger_id: triggerId, view });
 
-      if (!result.view?.id) throw new Error("Slack did not return a view ID");
+      if (!result.view?.id) {
+        throw new Error("Slack did not return a view ID");
+      }
 
       return result.view.id;
     },
@@ -473,7 +493,10 @@ export class SlackConnection implements TransportDelivery {
 
       return true;
     } catch (error) {
-      if (slackError(error, "message_not_found")) return false;
+      if (slackError(error, "message_not_found")) {
+        return false;
+      }
+
       throw error;
     }
   }
@@ -483,7 +506,9 @@ export class SlackConnection implements TransportDelivery {
       await this.web.chat.delete({ channel, ts });
     } catch (error) {
       // Retrying a confirmed or ambiguous delete must remain safe.
-      if (!slackError(error, "message_not_found")) throw error;
+      if (!slackError(error, "message_not_found")) {
+        throw error;
+      }
     }
   }
 
@@ -491,7 +516,9 @@ export class SlackConnection implements TransportDelivery {
     try {
       await this.web.reactions.add({ channel, timestamp, name });
     } catch (error) {
-      if (!slackError(error, "already_reacted")) throw error;
+      if (!slackError(error, "already_reacted")) {
+        throw error;
+      }
     }
   }
 
@@ -504,11 +531,15 @@ export class SlackConnection implements TransportDelivery {
     const args = { channel, timestamp, name: "eyes" };
 
     try {
-      if (active) await web.reactions.add(args);
-      else await web.reactions.remove(args);
+      if (active) {
+        await web.reactions.add(args);
+      } else {
+        await web.reactions.remove(args);
+      }
     } catch (error) {
-      if (!slackError(error, active ? "already_reacted" : "no_reaction"))
+      if (!slackError(error, active ? "already_reacted" : "no_reaction")) {
         throw error;
+      }
     }
   }
 

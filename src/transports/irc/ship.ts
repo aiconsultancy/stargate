@@ -231,8 +231,9 @@ async function memberCertificates(members: readonly ShipMember[]) {
   for (const member of members) {
     const path = member.clientPemFile;
 
-    if (path && !certificates.has(path))
+    if (path && !certificates.has(path)) {
       certificates.set(path, await clientPem(path));
+    }
   }
 
   return certificates;
@@ -357,14 +358,16 @@ function shipTransport(
         stored ?? job,
         client.fold,
       )
-    )
+    ) {
       return false;
+    }
 
     if (
       !config.fleetControl?.results &&
       !requiresVisitorTag(config, member, channel, client.fold)
-    )
+    ) {
       return true;
+    }
 
     // Recheck original addressing too: the JSON wrapper must not conceal a
     // Source that a later policy would refuse before execution or delivery.
@@ -401,8 +404,9 @@ function shipTransport(
         !config.features.turnStatus ||
         member.role !== "captain" ||
         (rank !== "captain" && rank !== "rear_admiral")
-      )
+      ) {
         return;
+      }
 
       return !job.fleet &&
         !job.sender &&
@@ -436,7 +440,10 @@ function shipTransport(
               send: async (text: string, allowed: () => boolean) => {
                 const account = config.questionOperator;
 
-                if (!account || !allowed()) return;
+                if (!account || !allowed()) {
+                  return;
+                }
+
                 const nick = await client.verifiedNick(account);
 
                 for (const line of ircLines(text, 300)) {
@@ -463,8 +470,9 @@ function shipTransport(
           ),
         human: (user: string) => questionHuman(config, user, client.fold),
         publish: async (job, text, allowed) => {
-          if (!client.hasCap("message-tags"))
+          if (!client.hasCap("message-tags")) {
             throw new Error("IRC questions need message tags");
+          }
 
           const delivery = new IrcDelivery(
             client,
@@ -675,7 +683,10 @@ export class IrcShip {
 
   /** Start every connection; intake stores messages only while `open()`. */
   public start(open: () => boolean) {
-    if (this.started) return;
+    if (this.started) {
+      return;
+    }
+
     this.started = true;
     this.open = open;
     this.track(this.maintain(this.controller.signal));
@@ -684,20 +695,26 @@ export class IrcShip {
       this.config.features.crewQuestionHandoff &&
       this.config.backend.type === "opencode" &&
       this.config.backend.sessionID
-    )
+    ) {
       this.track(
         new CrewQuestionGateway(
           this.config.backend,
           this.options.env ?? process.env,
         ).run(this.controller.signal),
       );
+    }
 
-    if (this.audit) this.track(this.audit.run(this.controller.signal));
+    if (this.audit) {
+      this.track(this.audit.run(this.controller.signal));
+    }
 
-    if (this.link && this.config.crewMessaging.ircCopies)
+    if (this.link && this.config.crewMessaging.ircCopies) {
       this.track(this.copies(this.link, this.controller.signal));
+    }
 
-    for (const registration of this.current) this.run(registration);
+    for (const registration of this.current) {
+      this.run(registration);
+    }
   }
 
   /** Bounded, indexed retention batches; never run synchronous cleanup on intake. */
@@ -705,17 +722,21 @@ export class IrcShip {
     while (!signal.aborted) {
       await delay(60_000, undefined, { signal }).catch(() => {});
 
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        return;
+      }
 
       if (
         !this.config.features.questions &&
         !this.config.access.humanWakeChannels?.length
-      )
+      ) {
         continue;
+      }
 
       try {
-        for (const registration of this.current)
+        for (const registration of this.current) {
           this.store.pruneIrcHistory(registration.key, Date.now());
+        }
       } catch {
         this.log.warn("IRC history cleanup unavailable");
       }
@@ -759,8 +780,9 @@ export class IrcShip {
     const next = effectiveIrcConfig(nextInput);
     const base = this.config;
 
-    if (next.id !== base.id)
+    if (next.id !== base.id) {
       throw new Error("IRC registration ID changed; restart required");
+    }
 
     const previous = new Map(
       shipMembers(base).map((member) => [member.id, connection(base, member)]),
@@ -788,10 +810,12 @@ export class IrcShip {
         continue;
       }
 
-      if (previous.get(member.id) !== connection(next, member))
+      if (previous.get(member.id) !== connection(next, member)) {
         throw new Error(
           `IRC connection settings of ${member.id} changed; restart required`,
         );
+      }
+
       slots.push({ member, kept });
     }
 
@@ -810,23 +834,33 @@ export class IrcShip {
       added: added.map(({ registration }) => registration),
       removed,
       commit: (idle) => {
-        if (committed) return;
+        if (committed) {
+          return;
+        }
 
-        if (this.controller.signal.aborted)
+        if (this.controller.signal.aborted) {
           throw new Error("IRC ship closed; reload not applied");
+        }
 
-        if (this.config !== base)
+        if (this.config !== base) {
           throw new Error("IRC reload plan is stale; prepare it again");
+        }
+
         const busy = removed.filter((item) => !idle(item.key));
 
-        if (busy.length > 0)
+        if (busy.length > 0) {
           throw new Error(
             `IRC crew busy: ${busy.map(({ id }) => id).join(", ")}; reload not applied`,
           );
+        }
+
         // One synchronous swap: nothing below throws.
         this.config = next;
         this.current = slots.map((slot) => {
-          if ("built" in slot) return this.adopt(slot.built);
+          if ("built" in slot) {
+            return this.adopt(slot.built);
+          }
+
           slot.kept.transport = shipTransport(
             next,
             slot.kept,
@@ -845,15 +879,24 @@ export class IrcShip {
           this.lifetimes.delete(registration);
           lifetime?.controller.abort();
 
-          if (lifetime?.loop !== undefined) stopping.push(lifetime.loop);
+          if (lifetime?.loop !== undefined) {
+            stopping.push(lifetime.loop);
+          }
         }
 
-        if (this.started)
-          for (const { registration } of added) this.run(registration);
+        if (this.started) {
+          for (const { registration } of added) {
+            this.run(registration);
+          }
+        }
+
         committed = true;
       },
       retire: () => {
-        if (!committed) return Promise.resolve();
+        if (!committed) {
+          return Promise.resolve();
+        }
+
         retiring ??= Promise.allSettled(stopping).then(() => {});
 
         return retiring;
@@ -875,8 +918,9 @@ export class IrcShip {
       !lifetime ||
       lifetime.loop !== undefined ||
       this.controller.signal.aborted
-    )
+    ) {
       return;
+    }
 
     const loop = registration.client.run(
       AbortSignal.any([this.controller.signal, lifetime.controller.signal]),
@@ -907,7 +951,9 @@ export class IrcShip {
         ? { clientCertificate: certificate }
         : undefined;
 
-    if (!credential) throw new Error("Missing IRC registration credential");
+    if (!credential) {
+      throw new Error("Missing IRC registration credential");
+    }
 
     const key = ircKey(
       member.id,
@@ -978,8 +1024,9 @@ export class IrcShip {
           if (
             detached() ||
             (strict && replay && !this.config.access.humanWakeChannels?.length)
-          )
+          ) {
             return;
+          }
 
           // Our own stargate_dm copy: delivered natively already, and mirrored
           // As the sender's outgoing DM. Never a turn, never mirrored twice.
@@ -1027,7 +1074,10 @@ export class IrcShip {
               this.mirrorIncoming(identity, client, message, false);
               const user = client.fold(actor);
 
-              if ((lastStatus.get(user) ?? 0) > Date.now() - 2000) return;
+              if ((lastStatus.get(user) ?? 0) > Date.now() - 2000) {
+                return;
+              }
+
               lastStatus.set(user, Date.now());
 
               const requested =
@@ -1141,9 +1191,13 @@ export class IrcShip {
           this.mirrorIncoming(identity, client, message, replay);
 
           // The audit channel is never a conversation: no turn, no Stop.
-          if (this.isAuditChannel(client, message.params[0] ?? "")) return;
+          if (this.isAuditChannel(client, message.params[0] ?? "")) {
+            return;
+          }
 
-          if (!replay && !strict) this.remember(identity, client, message);
+          if (!replay && !strict) {
+            this.remember(identity, client, message);
+          }
 
           // A replayed reaction is old intent: it never stops a turn.
           if (message.command === "TAGMSG") {
@@ -1157,12 +1211,17 @@ export class IrcShip {
                     message.tags.get("account") ?? "",
                     client.fold,
                   )))
-            )
+            ) {
               this.stop(registration, message);
-          } else this.receive(identity, client, message, filehost, replay);
+            }
+          } else {
+            this.receive(identity, client, message, filehost, replay);
+          }
         },
         sent: (sent) => {
-          if (!detached()) this.mirrorOutgoing(identity, client, sent);
+          if (!detached()) {
+            this.mirrorOutgoing(identity, client, sent);
+          }
         },
         published: ({ target, msgid, request, root }) => {
           if (
@@ -1171,8 +1230,9 @@ export class IrcShip {
             (!this.config.access.humanWakeChannels?.length &&
               !this.config.features.questions) ||
             this.isAuditChannel(client, target)
-          )
+          ) {
             return;
+          }
 
           const recipient = client.isChannel(target)
             ? target
@@ -1183,8 +1243,10 @@ export class IrcShip {
           if (
             !recipient ||
             (!client.isChannel(target) && !client.holds(recipient, target))
-          )
+          ) {
             return;
+          }
+
           this.store.ircPublished(
             identity.key,
             client.fold(recipient),
@@ -1194,13 +1256,18 @@ export class IrcShip {
           );
         },
         invite: (channel) => {
-          if (detached()) return;
+          if (detached()) {
+            return;
+          }
 
-          if (!client.join(channel))
+          if (!client.join(channel)) {
             memberLog.info("Ignored IRC invite to an unlisted channel");
+          }
         },
         joinFailed: (channel, numeric) => {
-          if (!detached()) this.joinFailed(identity, client, channel, numeric);
+          if (!detached()) {
+            this.joinFailed(identity, client, channel, numeric);
+          }
         },
       },
     );
@@ -1281,10 +1348,12 @@ export class IrcShip {
     const override = configured ? filehostURL(configured, secure) : undefined;
 
     if (advertised && override && advertised.origin !== override.origin) {
-      if (!this.filehostConflict)
+      if (!this.filehostConflict) {
         this.log.warn(
           "IRC FILEHOST differs from filehostOverride; files are off",
         );
+      }
+
       this.filehostConflict = true;
 
       return;
@@ -1299,7 +1368,10 @@ export class IrcShip {
    * set to now and nothing older is replayed.
    */
   private since(key: string, target: string) {
-    if (!this.config.features.catchUp) return;
+    if (!this.config.features.catchUp) {
+      return;
+    }
+
     const cursor = this.store.irc.ircCursor(key, target);
     const now = new Date();
 
@@ -1323,16 +1395,22 @@ export class IrcShip {
    * `catchUpHours`. Undefined when nothing is newer than the cursor.
    */
   private partnerSince(key: string, target: string, latest?: string) {
-    if (!this.config.features.catchUp) return;
+    if (!this.config.features.catchUp) {
+      return;
+    }
 
     const cursor =
       this.store.irc.ircCursor(key, target) ??
       this.store.irc.ircCursor(key, directBaseline);
 
-    if (!cursor) return;
-
-    if (latest && Number.isFinite(Date.parse(latest)) && latest <= cursor)
+    if (!cursor) {
       return;
+    }
+
+    if (latest && Number.isFinite(Date.parse(latest)) && latest <= cursor) {
+      return;
+    }
+
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
     const at = Date.parse(cursor);
 
@@ -1348,11 +1426,16 @@ export class IrcShip {
     filehost: () => URL | undefined,
     replay = false,
   ) {
-    if (!this.open()) return;
+    if (!this.open()) {
+      return;
+    }
+
     const time = message.tags.get("time");
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
 
-    if (replay && (!time || Date.parse(time) < oldest)) return;
+    if (replay && (!time || Date.parse(time) < oldest)) {
+      return;
+    }
 
     // Only after the sender and channel rules every message passes; the
     // Dispatcher then checks account, offer, reply and deadline itself.
@@ -1366,12 +1449,13 @@ export class IrcShip {
         fold: client.fold,
         joined: (channel) => client.inChannel(channel),
       })
-    )
+    ) {
       try {
         this.dispatchListener(message, client.fold);
       } catch {
         this.log.warn("Agent dispatch answer handler failed");
       }
+    }
 
     if (
       this.config.dmPolicy === "redirect" &&
@@ -1380,7 +1464,9 @@ export class IrcShip {
       // Never a turn: answer with the ship channel, act on nothing.
       this.advance(member, client, message);
 
-      if (!replay) this.redirect(member, client, message);
+      if (!replay) {
+        this.redirect(member, client, message);
+      }
 
       return;
     }
@@ -1511,7 +1597,9 @@ export class IrcShip {
         client.fold,
       );
 
-      if (dispatchID) privateReview = this.assignmentPrompt?.(dispatchID);
+      if (dispatchID) {
+        privateReview = this.assignmentPrompt?.(dispatchID);
+      }
     } catch {
       this.log.warn(
         "Fleet assignment correlation refused; IRC request not admitted",
@@ -1612,8 +1700,10 @@ export class IrcShip {
       !input.sender &&
       !input.fleet &&
       questionHuman(this.config, input.user, client.fold)
-    )
+    ) {
       this.store.questions.recordQuestionSource(input);
+    }
+
     const quietMs = this.config.access.humanMessageDebounceMs ?? 0;
 
     const trackThreads =
@@ -1648,7 +1738,7 @@ export class IrcShip {
       validMsgid(message.tags.get("msgid")) &&
       (!this.config.fleetPolicy ||
         fleetAuthority(this.config.fleetPolicy, input.user) === "human")
-    )
+    ) {
       this.store.enqueueIrcBurst(input, {
         quietMs,
         // Config changes form a boundary even when the account namespace stays.
@@ -1658,18 +1748,22 @@ export class IrcShip {
         invited: admission.threadInvitation === true,
         trackThreads,
       });
-    else if (trackThreads)
+    } else if (trackThreads) {
       this.store.enqueueIrcHuman(input, admission.threadInvitation === true);
-    else this.store.enqueue(input);
+    } else {
+      this.store.enqueue(input);
+    }
+
     this.advance(member, client, message);
     // Accepted: tell the server's read marker (channel, or the partner).
     const target = message.params[0] ?? "";
 
-    if (time)
+    if (time) {
       client.markRead(
         client.isChannel(target) ? target : sourceNick(message.source),
         time,
       );
+    }
   }
 
   /**
@@ -1682,20 +1776,24 @@ export class IrcShip {
     const time = message.tags.get("time");
     const target = message.params[0] ?? "";
 
-    if (!time || !Number.isFinite(Date.parse(time))) return;
+    if (!time || !Number.isFinite(Date.parse(time))) {
+      return;
+    }
 
     if (client.isChannel(target)) {
-      if (client.channel(target))
+      if (client.channel(target)) {
         this.store.irc.saveIrcCursor(member.key, client.fold(target), time);
+      }
     } else if (client.fold(target) === client.fold(client.nick)) {
       const partner = sourceNick(message.source);
 
-      if (partner)
+      if (partner) {
         this.store.irc.saveIrcCursor(
           member.key,
           partnerCursor(client.fold(partner)),
           time,
         );
+      }
     }
   }
 
@@ -1709,7 +1807,10 @@ export class IrcShip {
   private async copies(link: CrewLink, signal: AbortSignal) {
     const captain = this.current[0];
 
-    if (!captain) return;
+    if (!captain) {
+      return;
+    }
+
     const first = new Map<string, number>();
     let failing = false;
 
@@ -1729,15 +1830,19 @@ export class IrcShip {
         if (
           cursor === undefined ||
           (page.items.length === 0 && page.latest > cursor)
-        )
+        ) {
           this.store.irc.saveStargateDmCursor(captain.key, page.latest);
+        }
 
         for (const item of cursor === undefined ? [] : page.items) {
           if ((await this.copy(item)) === "retry") {
             const since = first.get(item.id) ?? Date.now();
             first.set(item.id, since);
 
-            if (Date.now() - since < copyRetryMs) break;
+            if (Date.now() - since < copyRetryMs) {
+              break;
+            }
+
             this.log.warn(
               { irc: this.config.id },
               "IRC stargate_dm copy not sent in time; skipped",
@@ -1748,13 +1853,17 @@ export class IrcShip {
           this.store.irc.saveStargateDmCursor(captain.key, item.sequence);
         }
       } catch {
-        if (signal.aborted) break;
+        if (signal.aborted) {
+          break;
+        }
 
-        if (!failing)
+        if (!failing) {
           this.log.warn(
             { irc: this.config.id },
             "Crew stargate_dm outbox unavailable; IRC copies wait",
           );
+        }
+
         failing = true;
       }
 
@@ -1785,16 +1894,26 @@ export class IrcShip {
     item: OutboxPage["items"][number],
   ): Promise<"sent" | "skipped" | "retry"> {
     // Never send a copy that has expired, even after retries.
-    if (Date.now() - item.created > outboxMaxAgeMs) return "skipped";
+    if (Date.now() - item.created > outboxMaxAgeMs) {
+      return "skipped";
+    }
+
     const sender = this.registrationOf(item.from);
     const recipient = this.registrationOf(item.to);
 
-    if (!sender || !recipient || sender === recipient) return "skipped";
+    if (!sender || !recipient || sender === recipient) {
+      return "skipped";
+    }
+
     const client = sender.client;
 
-    if (!client.registered) return "retry";
+    if (!client.registered) {
+      return "retry";
+    }
 
-    if (!client.hasCap("message-tags")) return "skipped";
+    if (!client.hasCap("message-tags")) {
+      return "skipped";
+    }
 
     try {
       const nick = await client.verifiedNick(recipient.account);
@@ -1805,8 +1924,9 @@ export class IrcShip {
       for (const line of ircLines(
         copyText(item),
         client.budget("PRIVMSG", "n".repeat(32), tags),
-      ))
+      )) {
         await client.privmsg(nick, line, tags, guard);
+      }
 
       return "sent";
     } catch {
@@ -1835,11 +1955,14 @@ export class IrcShip {
       config.backend.type !== "opencode" ||
       member.backend.type !== "opencode" ||
       member.backend.url !== config.backend.url
-    )
+    ) {
       return;
+    }
 
     return async (sessionID, signal) => {
-      if (this.bound.has(sessionID)) return;
+      if (this.bound.has(sessionID)) {
+        return;
+      }
 
       try {
         await link.bind(
@@ -1850,11 +1973,12 @@ export class IrcShip {
         this.bound.add(sessionID);
         this.log.info({ irc: member.id }, "IRC crew session bound");
       } catch {
-        if (!signal.aborted)
+        if (!signal.aborted) {
           this.log.warn(
             { irc: member.id },
             "IRC crew session not bound; stargate_dm and stargate_mail stay unavailable there",
           );
+        }
       }
     };
   }
@@ -1879,8 +2003,10 @@ export class IrcShip {
       !step ||
       !admission.textMention ||
       !this.config.access.allCallWords.includes(admission.textMention)
-    )
+    ) {
       return {};
+    }
+
     const turn = agentTurn(this.config, member, admission.channel, client.fold);
 
     return turn ? { notBefore: admission.received + turn * step } : {};
@@ -1895,8 +2021,10 @@ export class IrcShip {
       !client.isChannel(target) ||
       !client.channel(target) ||
       raw.startsWith("\u0001")
-    )
+    ) {
       return;
+    }
+
     const key = `${member.id} ${client.fold(target)}`;
     const time = Date.parse(message.tags.get("time") ?? "");
     const now = Date.now();
@@ -1911,7 +2039,10 @@ export class IrcShip {
       .join(" / ")
       .trim();
 
-    if (!text) return;
+    if (!text) {
+      return;
+    }
+
     lines.push({
       time: Number.isFinite(time) ? time : now,
       msgid: message.tags.get("msgid"),
@@ -1962,24 +2093,36 @@ export class IrcShip {
     if (
       !audit ||
       (message.command !== "PRIVMSG" && message.command !== "NOTICE")
-    )
+    ) {
       return;
+    }
+
     const [target = "", text = ""] = message.params;
 
     if (
       client.isChannel(target) ||
       client.fold(target) !== client.fold(client.nick)
-    )
+    ) {
       return;
+    }
 
-    if (!message.source?.includes("!")) return;
+    if (!message.source?.includes("!")) {
+      return;
+    }
+
     const nick = sourceNick(message.source);
 
-    if (client.fold(nick) === client.fold(client.nick)) return;
+    if (client.fold(nick) === client.fold(client.nick)) {
+      return;
+    }
+
     const time = message.tags.get("time");
     const oldest = Date.now() - this.config.catchUpHours * 3_600_000;
 
-    if (replay && (!time || Date.parse(time) < oldest)) return;
+    if (replay && (!time || Date.parse(time) < oldest)) {
+      return;
+    }
+
     const account = message.tags.get("account");
     audit.record(
       {
@@ -2000,7 +2143,10 @@ export class IrcShip {
     client: IrcClient,
     sent: { target: string; text: string },
   ) {
-    if (!this.audit || this.isAuditChannel(client, sent.target)) return;
+    if (!this.audit || this.isAuditChannel(client, sent.target)) {
+      return;
+    }
+
     const account = client.knownAccount(sent.target);
     this.audit.record({
       direction: "out",
@@ -2019,34 +2165,55 @@ export class IrcShip {
    * or this connection's own account.
    */
   private redirect(member: IrcMember, client: IrcClient, message: IrcMessage) {
-    if (message.command !== "PRIVMSG") return;
+    if (message.command !== "PRIVMSG") {
+      return;
+    }
+
     const [target = "", text = ""] = message.params;
 
-    if (client.fold(target) !== client.fold(client.nick)) return;
+    if (client.fold(target) !== client.fold(client.nick)) {
+      return;
+    }
+
     const command = ctcp(text);
 
-    if (command && command.verb !== "ACTION") return;
+    if (command && command.verb !== "ACTION") {
+      return;
+    }
 
-    if (!message.source?.includes("!")) return;
+    if (!message.source?.includes("!")) {
+      return;
+    }
+
     const nick = sourceNick(message.source);
     const account = message.tags.get("account");
 
-    if (!account || account === "*") return;
+    if (!account || account === "*") {
+      return;
+    }
 
     if (
       serviceNick(nick) ||
       client.fold(nick) === client.fold(client.nick) ||
       client.fold(account) === client.fold(member.account)
-    )
+    ) {
       return;
+    }
+
     const channel = member.channels[0];
 
-    if (!channel) return;
+    if (!channel) {
+      return;
+    }
+
     const key = `${member.id} ${client.fold(account)}`;
     const now = Date.now();
     const last = this.redirected.get(key);
 
-    if (last !== undefined && now - last < redirectCooldownMs) return;
+    if (last !== undefined && now - last < redirectCooldownMs) {
+      return;
+    }
+
     this.redirected.set(key, now);
     client.send("NOTICE", [nick, `Please ask in ${channel}`]).catch(() => {
       this.log.warn({ irc: member.id }, "IRC DM redirect not sent");
@@ -2055,7 +2222,10 @@ export class IrcShip {
 
   /** A Stop reaction from a person stops that request's active turn. */
   private stop(registration: IrcRegistration, message: IrcMessage) {
-    if (!this.open() || !this.config.features.reactions) return;
+    if (!this.open() || !this.config.features.reactions) {
+      return;
+    }
+
     const client = registration.client;
     const target = message.params[0] ?? "";
 
@@ -2074,10 +2244,13 @@ export class IrcShip {
         client.requestAnchor(msgid),
     });
 
-    if (!stop) return;
+    if (!stop) {
+      return;
+    }
 
-    if (registration.stopTurn?.(stop.conversation, stop.thread))
+    if (registration.stopTurn?.(stop.conversation, stop.thread)) {
       this.log.info({ irc: registration.id }, "IRC Stop reaction accepted");
+    }
   }
 
   /** An invite-only ship channel: the captain invites its own crew. */
@@ -2106,7 +2279,10 @@ export class IrcShip {
 
     const nick = client.nick;
 
-    if (!nick || !captain.client.inChannel(channel)) return;
+    if (!nick || !captain.client.inChannel(channel)) {
+      return;
+    }
+
     captain.client
       .invite(nick, channel)
       .then(() => {

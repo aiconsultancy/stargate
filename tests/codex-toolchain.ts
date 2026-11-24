@@ -32,7 +32,9 @@ export async function toolchain() {
   for (const name of programs) {
     const path = Bun.which(name);
 
-    if (path) await symlink(path, join(directory, name));
+    if (path) {
+      await symlink(path, join(directory, name));
+    }
   }
 
   return {

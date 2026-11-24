@@ -22,7 +22,9 @@ function git(root: string, ...args: string[]) {
     timeout: 30_000,
   });
 
-  if (result.status !== 0) throw new Error(result.stderr);
+  if (result.status !== 0) {
+    throw new Error(result.stderr);
+  }
 
   return result.stdout;
 }
@@ -30,8 +32,10 @@ function git(root: string, ...args: string[]) {
 async function scenario() {
   const root = await mkdtemp(join(tmpdir(), "affected-hook-"));
 
-  for (const directory of ["src", "tests", "scripts", "bin"])
+  for (const directory of ["src", "tests", "scripts", "bin"]) {
     await mkdir(join(root, directory));
+  }
+
   git(root, "init", "-b", "main");
   git(root, "config", "user.email", "hook-test@example.invalid");
   git(root, "config", "user.name", "Hook Test");
@@ -98,8 +102,9 @@ function untrustedPaths(output: string): Set<string> {
   if (
     !Array.isArray(value) ||
     !value.every((path): path is string => typeof path === "string")
-  )
+  ) {
     throw new Error("Invalid untrusted-path notice");
+  }
 
   return new Set(value);
 }
@@ -191,7 +196,10 @@ async function pendingSnapshot(
     const { watch } = await import("node:fs");
     await new Promise<void>((resolve, reject) => {
       const watcher = watch(root, () => {
-        if (!existsSync(done)) return;
+        if (!existsSync(done)) {
+          return;
+        }
+
         watcher.close();
         resolve();
       });
@@ -303,8 +311,10 @@ describe("affected-tests hook", () => {
         (_, n) => `tests/selected-${n}.test.ts`,
       ).sort();
 
-      for (const name of names)
+      for (const name of names) {
         await writeFile(join(root, name), "export {};\n");
+      }
+
       git(root, "add", ...names);
       const result = run(root);
       expect(result.status).toBe(0);
@@ -312,7 +322,10 @@ describe("affected-tests hook", () => {
         "21 selected files exceed the local limit 20",
       );
 
-      for (const name of names) expect(result.stdout).toContain(`  ${name}\n`);
+      for (const name of names) {
+        expect(result.stdout).toContain(`  ${name}\n`);
+      }
+
       expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -512,17 +525,21 @@ describe("affected-tests hook", () => {
       const root = await scenario();
 
       try {
-        if (operation === "delete") git(root, "rm", "tests/unrelated.test.ts");
-        else
+        if (operation === "delete") {
+          git(root, "rm", "tests/unrelated.test.ts");
+        } else {
           git(root, "mv", "tests/unrelated.test.ts", "tests/renamed.test.ts");
+        }
+
         expect(run(root).status).toBe(0);
 
-        if (operation === "delete")
+        if (operation === "delete") {
           expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
-        else
+        } else {
           expect(await readFile(join(root, "ran"), "utf8")).toBe(
             "test\n./tests/renamed.test.ts\n",
           );
+        }
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -657,7 +674,9 @@ describe("affected-tests hook", () => {
             "full suite runs in hosted Quality checks",
           );
           expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
-        } else expect(await readFile(join(root, "ran"), "utf8")).toBe("test\n");
+        } else {
+          expect(await readFile(join(root, "ran"), "utf8")).toBe("test\n");
+        }
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -686,9 +705,11 @@ describe("affected-tests hook", () => {
           new Set(["scripts/generate-review.ts"]),
         );
 
-        if (mode === "defer")
+        if (mode === "defer") {
           expect(await Bun.file(join(root, "ran")).exists()).toBe(false);
-        else expect(await readFile(join(root, "ran"), "utf8")).toBe("test\n");
+        } else {
+          expect(await readFile(join(root, "ran"), "utf8")).toBe("test\n");
+        }
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -725,8 +746,9 @@ describe("affected-tests hook", () => {
         "tests/extra-helper.ts",
         "tests/unrelated.test.ts",
         "misc/deleted.data",
-      ])
+      ]) {
         git(root, "rm", path);
+      }
 
       const edits: Record<string, string> = {
         "src/leaf.ts": "export const value = 2;\n",
@@ -794,7 +816,9 @@ describe("affected-tests hook", () => {
           covered: contributes || isTest || noticed.has(path),
         }).toEqual({ path, covered: true });
 
-        if (isTest) expect(noticed.has(path)).toBe(false);
+        if (isTest) {
+          expect(noticed.has(path)).toBe(false);
+        }
       }
 
       expect(selected).toEqual(
@@ -831,7 +855,10 @@ describe("affected-tests hook", () => {
       try {
         const realGit = Bun.which("git");
 
-        if (!realGit) throw new Error("Git unavailable");
+        if (!realGit) {
+          throw new Error("Git unavailable");
+        }
+
         await writeFile(join(root, "src/leaf.ts"), "export const value = 2;\n");
         git(root, "add", "src/leaf.ts");
         await writeFile(

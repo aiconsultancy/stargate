@@ -132,7 +132,9 @@ test("inline code cannot notify when split, including marker-free middle chunks"
       expect(JSON.stringify(part)).not.toContain('"user_id":"U123"');
     }
 
-    if (close) expect(JSON.stringify(parts)).toContain('"user_id":"U9"');
+    if (close) {
+      expect(JSON.stringify(parts)).toContain('"user_id":"U9"');
+    }
   }
 
   const parts = prepareSlackReply(`${"a".repeat(2796)}\`<@U123>\``);

@@ -135,8 +135,9 @@ export class Store {
           input.botKey,
           input.eventId,
         ) !== null
-    )
+    ) {
       return false;
+    }
 
     return (
       this.db
@@ -255,12 +256,14 @@ export class Store {
             "UPDATE jobs SET input=? WHERE botKey=? AND id=? AND status='running' AND input IS NULL",
           )
           .run(input, botKey, id).changes !== 1
-      )
+      ) {
         throw new Error("Native input could not be recorded");
+      }
 
       // Failed initial baselines still have a durable, owned lower bound.
-      if (sessionID)
+      if (sessionID) {
         this.captainTranscripts.anchorInput(botKey, sessionID, input, id);
+      }
     })();
   }
 
@@ -384,17 +387,20 @@ export class Store {
           )
           .run(input.cursor, input.conversation, input.from ?? null).changes ===
           0
-      )
+      ) {
         return;
+      }
+
       let queued = 0;
 
-      for (const eventId of input.requeue ?? [])
+      for (const eventId of input.requeue ?? []) {
         queued += this.db
           .query(`UPDATE jobs SET status=${storedReplyStatus},
           sent=CASE WHEN deferDelivery=1 THEN COALESCE(json_array_length(response),0) ELSE sent END,
           attempts=0,retry_at=0
           WHERE botKey=? AND conversation=? AND eventId=? AND status='failed' AND failure IS NOT 'muted'`)
           .run(input.botKey, input.conversation, eventId).changes;
+      }
 
       for (const reply of input.replies) {
         queued += this.db
@@ -418,8 +424,9 @@ export class Store {
       }
 
       // An existing row would be skipped silently; never advance past it.
-      if (queued !== input.replies.length + (input.requeue?.length ?? 0))
+      if (queued !== input.replies.length + (input.requeue?.length ?? 0)) {
         throw new TranscriptConflict();
+      }
 
       return queued;
     })();
@@ -522,7 +529,10 @@ export class Store {
         AND status IN (${pendingJobs}) ORDER BY id DESC LIMIT 1`)
         .get(botKey, conversation, thread);
 
-      if (!row) return;
+      if (!row) {
+        return;
+      }
+
       this.db
         .query(`${stopJob}
         WHERE id=? AND status IN (${pendingJobs})`)
@@ -557,11 +567,15 @@ export class Store {
   public enqueueIrcHuman(input: Incoming, invited: boolean): boolean {
     const root = input.replyParent ?? input.thread;
 
-    if (!validMsgid(input.thread) || !validMsgid(root))
+    if (!validMsgid(input.thread) || !validMsgid(root)) {
       throw new Error("IRC human thread identity is invalid");
+    }
 
     return this.db.transaction(() => {
-      if (!this.enqueue(input)) return false;
+      if (!this.enqueue(input)) {
+        return false;
+      }
+
       this.irc.ircThreadMessage(
         input.botKey,
         input.channel,
@@ -572,8 +586,9 @@ export class Store {
       if (
         invited ||
         this.irc.ircThreadParticipating(input.botKey, input.channel, root)
-      )
+      ) {
         this.irc.joinIrcThread(input.botKey, input.channel, root);
+      }
 
       return true;
     })();
@@ -607,8 +622,10 @@ export class Store {
       options.quietMs < 1 ||
       options.quietMs > 5000 ||
       !ircBurstEligible(input)
-    )
+    ) {
       return ordinary(input);
+    }
+
     const now = options.now ?? Date.now();
 
     const message = prepareIrcBurstMessage(
@@ -618,7 +635,9 @@ export class Store {
       now,
     );
 
-    if (!message) return ordinary(input);
+    if (!message) {
+      return ordinary(input);
+    }
 
     return this.db.transaction(() => {
       if (
@@ -628,8 +647,9 @@ export class Store {
             UNION ALL SELECT 1 FROM thread_followups WHERE botKey=? AND eventId=? LIMIT 1`)
           .get(input.botKey, input.eventId, input.botKey, input.eventId) !==
           null
-      )
+      ) {
         return false;
+      }
 
       const latest = this.db
         .query<StoredJob, [string]>(
@@ -693,8 +713,9 @@ export class Store {
                 latest.thread,
               );
 
-              if (options.invited)
+              if (options.invited) {
                 this.irc.joinIrcThread(input.botKey, input.channel, root);
+              }
             }
 
             return true;
@@ -709,11 +730,16 @@ export class Store {
           ...input,
           notBefore: Math.max(deadline, input.notBefore ?? 0),
         })
-      )
+      ) {
         return false;
+      }
+
       const job = this.jobByEvent(input.botKey, input.eventId);
 
-      if (!job) throw new Error("IRC burst job was not persisted");
+      if (!job) {
+        throw new Error("IRC burst job was not persisted");
+      }
+
       this.irc.startIrcBurst(
         job.id,
         options.policy,
@@ -738,8 +764,9 @@ export class Store {
       !validMsgid(msgid) ||
       !validMsgid(request) ||
       (wireRoot !== undefined && !validMsgid(wireRoot))
-    )
+    ) {
       return false;
+    }
 
     return this.db.transaction(() => {
       const job = this.db
@@ -751,14 +778,22 @@ export class Store {
         )
         .get(botKey, channel, request);
 
-      if (!job) return false;
+      if (!job) {
+        return false;
+      }
+
       const root = job.replyParent ?? job.thread;
 
-      if (!validMsgid(root) || (wireRoot !== undefined && wireRoot !== root))
+      if (!validMsgid(root) || (wireRoot !== undefined && wireRoot !== root)) {
         return false;
+      }
+
       const prior = this.irc.ircRequestAnchor(botKey, channel, msgid);
 
-      if (prior !== undefined && prior !== request) return false;
+      if (prior !== undefined && prior !== request) {
+        return false;
+      }
+
       this.irc.ircThreadMessage(botKey, channel, msgid, root, request);
       this.irc.joinIrcThread(botKey, channel, root);
 
@@ -799,7 +834,9 @@ export class Store {
       )
       .get(botKey, id);
 
-    if (!job) return;
+    if (!job) {
+      return;
+    }
 
     // Iterate bounded public chunks; never select prompts, inputs or file metadata.
     const parts = this.db
@@ -816,7 +853,9 @@ export class Store {
     for (const part of parts) {
       text = `${text}${text ? "\n\n" : ""}${part.text}`.slice(0, 12_000);
 
-      if (text.length === 12_000) break;
+      if (text.length === 12_000) {
+        break;
+      }
     }
 
     return { text, status: job.status, failure: job.failure };
@@ -847,10 +886,14 @@ export class Store {
         >("SELECT cancel_requested, conversation, status FROM jobs WHERE id=?")
         .get(id);
 
-      if (!job) throw new Error("Response job not found");
+      if (!job) {
+        throw new Error("Response job not found");
+      }
 
-      if (job.status !== "running")
+      if (job.status !== "running") {
         throw new JobTransitionRefused(id, job.status);
+      }
+
       const cancelled = job.cancel_requested === 1;
 
       const response = cancelled
@@ -882,11 +925,13 @@ export class Store {
             job.conversation,
             options.transcript.from ?? null,
           ).changes === 0
-      )
+      ) {
         throw new TranscriptConflict();
+      }
 
-      if (options.captain)
+      if (options.captain) {
         this.captainTranscripts.commitCaptain(options.captain);
+      }
 
       return response;
     })();
@@ -910,10 +955,15 @@ export class Store {
         AND ?>=sent AND ?<=json_array_length(response)`)
         .run(count, id, count, count).changes > 0;
 
-    if (!slackTs) return advance();
+    if (!slackTs) {
+      return advance();
+    }
 
     return this.db.transaction(() => {
-      if (!advance()) return false;
+      if (!advance()) {
+        return false;
+      }
+
       this.savePreview(id, count - 1, slackTs);
 
       return true;
@@ -968,8 +1018,9 @@ export class Store {
           AND (status='responding' OR (status='queued' AND ?='failed'))`)
           .run(status, id, status).changes > 0;
 
-      if (changed)
+      if (changed) {
         this.db.query("DELETE FROM delivery_units WHERE job=?").run(id);
+      }
 
       return changed;
     })();
@@ -1015,7 +1066,9 @@ export class Store {
       )
       .get(job, part);
 
-    if (!row) throw new Error("Delivery plan not found");
+    if (!row) {
+      throw new Error("Delivery plan not found");
+    }
 
     return row;
   }
@@ -1137,8 +1190,10 @@ export class Store {
         existing.inputID !== offer.inputID ||
         existing.jobID !== offer.jobID ||
         existing.fingerprint !== offer.fingerprint
-      )
+      ) {
         return;
+      }
+
       // A clarification creates a thread on the original request, never a new source.
       this.db
         .query(
@@ -1227,8 +1282,11 @@ export class Store {
       .query<{ status: JobStatus; n: number }, [string]>(
         "SELECT status,COUNT(*) AS n FROM jobs WHERE botKey=? GROUP BY status",
       )
-      .all(botKey))
-      if (Object.hasOwn(counts, row.status)) counts[row.status] = row.n;
+      .all(botKey)) {
+      if (Object.hasOwn(counts, row.status)) {
+        counts[row.status] = row.n;
+      }
+    }
 
     return counts;
   }

@@ -62,8 +62,9 @@ test("all fleet runtime protocol validators are native", () => {
     protocol.fleetOriginSchema,
     protocol.fleetCompletionSchema,
     protocol.fleetJobSchema,
-  ])
+  ]) {
     expect(Schema.isSchema(schema)).toBe(true);
+  }
 });
 
 test("fleet decoding keeps raw text, omitted versus undefined keys, transforms and field order", () => {
@@ -88,12 +89,14 @@ test("fleet decoding keeps raw text, omitted versus undefined keys, transforms a
     { ...input, target: " captain " },
     { ...input, text: "bad\0text" },
     { ...input, text: "😀".repeat(1801) },
-  ])
+  ]) {
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(protocol.dispatchInputSchema)(value),
       ),
     ).toBe(true);
+  }
+
   expect(decode({ ...input, text: "😀".repeat(1800) }).text).toHaveLength(3600);
   expect(Schema.decodeUnknownSync(protocol.reviewTargetSchema)(target)).toEqual(
     { ...target, repository: "owner/repo" },
@@ -113,8 +116,9 @@ test("UTC timestamps retain spelling and require valid calendar dates and second
     source.receivedAt,
     "2000-02-29T00:00:00Z",
     "2026-11-19T23:59:59.0Z",
-  ])
+  ]) {
     expect(decode({ ...source, receivedAt }).receivedAt).toBe(receivedAt);
+  }
 
   for (const receivedAt of [
     "2023-02-29T12:30:00Z",
@@ -124,7 +128,7 @@ test("UTC timestamps retain spelling and require valid calendar dates and second
     "2026-11-19T12:30:00+00:00",
     "2026-11-19T12:30:00z",
     "2026-11-19T24:00:00Z",
-  ])
+  ]) {
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(protocol.sourceSchema)({
@@ -133,6 +137,7 @@ test("UTC timestamps retain spelling and require valid calendar dates and second
         }),
       ),
     ).toBe(true);
+  }
 });
 
 test("strict runtime objects reject own/inherited and nested extras on native decode/encode", async () => {
@@ -185,7 +190,10 @@ test("strict runtime objects reject own/inherited and nested extras on native de
     },
   });
 
-  if (Result.isSuccess(failed)) throw new Error("Invalid nested PR accepted");
+  if (Result.isSuccess(failed)) {
+    throw new Error("Invalid nested PR accepted");
+  }
+
   expect(settingsIssues(failed.failure.issue).issues).toContainEqual(
     expect.objectContaining({ path: ["input", "review", "pullRequest"] }),
   );
@@ -194,7 +202,10 @@ test("strict runtime objects reject own/inherited and nested extras on native de
     op: "unknown",
   });
 
-  if (Result.isSuccess(badTag)) throw new Error("Unknown review accepted");
+  if (Result.isSuccess(badTag)) {
+    throw new Error("Unknown review accepted");
+  }
+
   expect(settingsIssues(badTag.failure.issue).issues).toContainEqual(
     expect.objectContaining({ path: ["op"] }),
   );
@@ -204,8 +215,10 @@ test("strict runtime objects reject own/inherited and nested extras on native de
     transport: "fleet",
   });
 
-  if (Result.isSuccess(badSource))
+  if (Result.isSuccess(badSource)) {
     throw new Error("Human fleet context accepted");
+  }
+
   expect(settingsIssues(badSource.failure.issue).issues).toContainEqual(
     expect.objectContaining({
       message: "Fleet completion context must remain non-human",
@@ -231,12 +244,13 @@ test("review diff and proof byte limits remain separate from code-point bounds",
     diff + "\ud800",
     diff + "\0",
     bounded.replace("rename to a", "rename to aa"),
-  ])
+  ]) {
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(protocol.reviewContextTextSchema)(value),
       ),
     ).toBe(true);
+  }
 
   const proof = {
     ...target,
@@ -265,7 +279,7 @@ test("review diff and proof byte limits remain separate from code-point bounds",
     Schema.decodeUnknownSync(protocol.reviewProofSchema)(proof).resultText,
   ).toHaveLength(32_000);
 
-  for (const resultText of [proof.resultText + "x", "\ud800"])
+  for (const resultText of [proof.resultText + "x", "\ud800"]) {
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(protocol.reviewProofSchema)({
@@ -274,6 +288,7 @@ test("review diff and proof byte limits remain separate from code-point bounds",
         }),
       ),
     ).toBe(true);
+  }
 });
 
 test("binding reviewer defaults are fresh mutable arrays and nested rules stay strict", () => {
@@ -348,7 +363,10 @@ test("Store fleet makers preserve read101/write100 and immutable first-save beha
     });
     const job = store.jobByEvent("bot", "event");
 
-    if (!job) throw new Error("Missing fixture job");
+    if (!job) {
+      throw new Error("Missing fixture job");
+    }
+
     expect(job.fleet).toEqual({ kind: "assignment", dispatchID: "dispatch" });
     expect(() =>
       store.fleet.saveMakers(
@@ -420,11 +438,16 @@ test("actual fleet tool registrations stay native with explicit review opt-in an
         "fleet_status",
       ]);
 
-      for (const tool of tools) expect(Schema.isSchema(tool.input)).toBe(true);
+      for (const tool of tools) {
+        expect(Schema.isSchema(tool.input)).toBe(true);
+      }
+
       const dispatch = tools.find(({ name }) => name === "fleet_dispatch");
 
-      if (!dispatch || !("~standard" in dispatch.input))
+      if (!dispatch || !("~standard" in dispatch.input)) {
         throw new Error("Missing Standard dispatch input");
+      }
+
       expect(
         await (dispatch.input as StandardSchemaV1)["~standard"].validate({
           target: "captain",
@@ -448,7 +471,10 @@ test("actual fleet tool registrations stay native with explicit review opt-in an
       if (reviews) {
         const review = tools.find(({ name }) => name === "fleet_review");
 
-        if (!review) throw new Error("Missing opted-in review");
+        if (!review) {
+          throw new Error("Missing opted-in review");
+        }
+
         expect(
           (review.input as StandardSchemaV1 & StandardJSONSchemaV1)[
             "~standard"

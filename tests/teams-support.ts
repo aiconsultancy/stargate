@@ -78,7 +78,9 @@ export class TeamsBackend implements AgentBackend {
   ) {
     this.replies.push({ session, request, decision });
 
-    if (this.failReply) throw new Error("Uncertain provider outcome");
+    if (this.failReply) {
+      throw new Error("Uncertain provider outcome");
+    }
   }
   permission(input = "native-human-input") {
     const request = {
@@ -182,7 +184,10 @@ export function registrationFixture(
           (job) => job.eventId === `${message.conversation.id}:${message.id}`,
         );
 
-      if (!job) throw new Error("Fixture activity was not queued");
+      if (!job) {
+        throw new Error("Fixture activity was not queued");
+      }
+
       store.running(job.id);
       store.saveInput(registration.key, job.id, input, backend.sessionID);
 
@@ -213,7 +218,9 @@ export function registrationFixture(
 
       const token = /approve ([a-f0-9]{32})/.exec(text ?? "")?.[1];
 
-      if (!token) throw new Error("No approval was offered");
+      if (!token) {
+        throw new Error("No approval was offered");
+      }
 
       return token;
     },
@@ -253,8 +260,11 @@ export async function signToken(
     ...overrides,
   };
 
-  for (const name of Object.keys(claims))
-    if (claims[name] === undefined) delete claims[name];
+  for (const name of Object.keys(claims)) {
+    if (claims[name] === undefined) {
+      delete claims[name];
+    }
+  }
 
   return new SignJWT(claims)
     .setProtectedHeader({
@@ -316,14 +326,17 @@ export function json(body: unknown, status = 200) {
 
 export function botFrameworkKeys(keys: Record<string, unknown>[]): Route {
   return (url) => {
-    if (url.href === BOT_FRAMEWORK_OPENID_URL)
+    if (url.href === BOT_FRAMEWORK_OPENID_URL) {
       return json({
         issuer: BOT_FRAMEWORK_ISSUER,
         jwks_uri: JWKS_URL,
         id_token_signing_alg_values_supported: ["RS256"],
       });
+    }
 
-    if (url.href === JWKS_URL) return json({ keys });
+    if (url.href === JWKS_URL) {
+      return json({ keys });
+    }
 
     return undefined;
   };

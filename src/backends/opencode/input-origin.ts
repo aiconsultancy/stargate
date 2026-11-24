@@ -89,8 +89,10 @@ export class InputBoundaryReader {
     if (
       message.type !== "synthetic" ||
       message.metadata?.["source"] !== "shell"
-    )
+    ) {
       return record;
+    }
+
     this.origins ??= this.readShellOrigins();
 
     return {
@@ -114,11 +116,12 @@ export class InputBoundaryReader {
       if (
         Option.isSome(parsed) &&
         parsed.value.metadata.shellID === parsed.value.metadata.jobID
-      )
+      ) {
         record.callback = {
           id: parsed.value.metadata.shellID,
           command: digest(parsed.value.description),
         };
+      }
     }
 
     if (message.type === "assistant") {
@@ -126,7 +129,10 @@ export class InputBoundaryReader {
         const parsed = decodeLaunch(part);
 
         if (Option.isSome(parsed)) {
-          if (record.launches.length >= 10_000) return;
+          if (record.launches.length >= 10_000) {
+            return;
+          }
+
           record.launches.push({
             id: parsed.value.state.metadata.shellID,
             command: digest(parsed.value.state.input.command),
@@ -162,30 +168,51 @@ export class InputBoundaryReader {
 
       this.signal.throwIfAborted();
 
-      if (page.data.length > 100 || records.length + page.data.length > 10_000)
+      if (
+        page.data.length > 100 ||
+        records.length + page.data.length > 10_000
+      ) {
         return new Map();
+      }
 
       for (const message of page.data) {
-        if (ids.has(message.id)) return new Map();
+        if (ids.has(message.id)) {
+          return new Map();
+        }
+
         ids.add(message.id);
         const record = this.compact(message);
 
-        if (!record) return new Map();
+        if (!record) {
+          return new Map();
+        }
+
         witnesses += record.launches.length;
 
-        if (witnesses > 10_000) return new Map();
+        if (witnesses > 10_000) {
+          return new Map();
+        }
+
         records.push(record);
       }
 
       cursor = page.cursor.next ?? undefined;
 
-      if (!cursor) break;
+      if (!cursor) {
+        break;
+      }
 
-      if (cursors.has(cursor)) return new Map();
+      if (cursors.has(cursor)) {
+        return new Map();
+      }
+
       cursors.add(cursor);
     }
 
-    if (cursor) return new Map();
+    if (cursor) {
+      return new Map();
+    }
+
     records.reverse();
 
     return this.foldShellOrigins(records);
@@ -229,7 +256,9 @@ export class InputBoundaryReader {
       for (const launch of record.launches) {
         const witnesses = launches.get(launch.id);
 
-        if (witnesses?.length === 1 && witnesses[0]) witnesses[0].input = input;
+        if (witnesses?.length === 1 && witnesses[0]) {
+          witnesses[0].input = input;
+        }
       }
     }
 
@@ -249,7 +278,9 @@ export async function inputOwnership(
     // Absence proves nothing, so delivered candidates still need history.
     const inbox = await client.session.inbox.list({ sessionID }, { signal });
 
-    if (inbox.some((item) => item.id === input)) return;
+    if (inbox.some((item) => item.id === input)) {
+      return;
+    }
   }
 
   const boundaries = new InputBoundaryReader(client, sessionID, signal);
@@ -268,10 +299,14 @@ export async function inputOwnership(
 
     for (const message of page.data) {
       if (!found) {
-        if (message.id === input) return;
+        if (message.id === input) {
+          return;
+        }
 
-        if (message.id === assistant && message.type === "assistant")
+        if (message.id === assistant && message.type === "assistant") {
           found = true;
+        }
+
         continue;
       }
 
@@ -283,19 +318,26 @@ export async function inputOwnership(
         return resolveBoundaryContext(chain) === input;
       }
 
-      if (record.input === undefined) continue;
+      if (record.input === undefined) {
+        continue;
+      }
 
-      if (chain.length === 0 && record.type !== "synthetic")
+      if (chain.length === 0 && record.type !== "synthetic") {
         return record.input === input;
+      }
+
       chain.push(record);
     }
 
     cursor = page.cursor.next ?? undefined;
 
-    if (cursor && cursors.has(cursor))
+    if (cursor && cursors.has(cursor)) {
       throw new Error("OpenCode history cursor repeated");
+    }
 
-    if (cursor) cursors.add(cursor);
+    if (cursor) {
+      cursors.add(cursor);
+    }
   } while (cursor);
 
   return found ? resolveBoundaryContext(chain) === input : undefined;

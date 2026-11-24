@@ -28,10 +28,13 @@ function databasePath() {
 }
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 function job(trigger: NonNullable<CronInput["trigger"]>): CronInput {
@@ -87,7 +90,9 @@ function observation(
 function account(snapshot: QuotaSnapshot) {
   const row = snapshot.accounts[0];
 
-  if (!row) throw new Error("Expected quota account");
+  if (!row) {
+    throw new Error("Expected quota account");
+  }
 
   return row;
 }
@@ -95,7 +100,9 @@ function account(snapshot: QuotaSnapshot) {
 function limit(snapshot: QuotaSnapshot) {
   const row = account(snapshot).windows[0];
 
-  if (!row) throw new Error("Expected quota window");
+  if (!row) {
+    throw new Error("Expected quota window");
+  }
 
   return row;
 }
@@ -126,7 +133,10 @@ test("reset bootstraps silently, advances on manual reset, and survives reopenin
     },
   });
 
-  if (!runs[0]) throw new Error("Expected reset run");
+  if (!runs[0]) {
+    throw new Error("Expected reset run");
+  }
+
   store.upsertFile(
     scope,
     { ...reset, prompt: "Changed definition." },
@@ -158,7 +168,10 @@ test("threshold fires initially high and only once per account reset cycle", () 
   });
   expect(open(path).pending(scope.botKey)).toEqual(first);
 
-  if (!first[0]) throw new Error("Expected threshold run");
+  if (!first[0]) {
+    throw new Error("Expected threshold run");
+  }
+
   store.finish(first[0].id, "done", now);
   const restarted = open(path);
   expect(
@@ -213,7 +226,10 @@ test("threshold crossing consumes paused, unavailable and busy events without ba
   const busy = store.add(scope, threshold, now);
   const manual = store.runNow(scope, busy.id, now);
 
-  if (!manual) throw new Error("Expected manual run");
+  if (!manual) {
+    throw new Error("Expected manual run");
+  }
+
   store.fileAvailability(scope.botKey, ["/jobs/paused.md"]);
   expect(store.claimQuota(scope.botKey, observation(20), now)).toEqual([]);
   expect(
@@ -294,8 +310,10 @@ test("invalid, stale, inactive and out-of-order observations cannot change basel
     invalid.push(snapshot);
   }
 
-  for (const snapshot of invalid)
+  for (const snapshot of invalid) {
     expect(store.claimQuota(scope.botKey, snapshot, now + 1)).toEqual([]);
+  }
+
   expect(
     store.claimQuota(
       scope.botKey,
@@ -334,7 +352,10 @@ test("subsecond jitter and backward drift do not reset or rearm thresholds after
 
   expect(bootstrap).toHaveLength(1);
 
-  if (!bootstrap[0]) throw new Error("Expected threshold run");
+  if (!bootstrap[0]) {
+    throw new Error("Expected threshold run");
+  }
+
   expect(bootstrap[0].quotaEvent?.type).toBe("quota-threshold");
   store.finish(bootstrap[0].id, "done", now);
 
@@ -342,7 +363,7 @@ test("subsecond jitter and backward drift do not reset or rearm thresholds after
     [499, 90, now + 1],
     [998, 0, now + 2],
     [-200, 90, now + 3],
-  ] as const)
+  ] as const) {
     expect(
       open(path).claimQuota(
         scope.botKey,
@@ -350,6 +371,7 @@ test("subsecond jitter and backward drift do not reset or rearm thresholds after
         at,
       ),
     ).toEqual([]);
+  }
 
   // A non-stale backwards timestamp becomes the next raw baseline.
   const next = open(path).claimQuota(
@@ -464,11 +486,15 @@ test("multi-hour reset drift without a sufficient usage drop stays in the same c
       at,
     );
 
-    if (used < 80) expect(runs).toEqual([]);
-    else {
+    if (used < 80) {
+      expect(runs).toEqual([]);
+    } else {
       expect(runs).toHaveLength(1);
 
-      if (!runs[0]) throw new Error("Expected threshold run");
+      if (!runs[0]) {
+        throw new Error("Expected threshold run");
+      }
+
       expect(runs[0].quotaEvent).toMatchObject({
         type: "quota-threshold",
         previousResetAt: now + 9 * hour,
@@ -506,7 +532,10 @@ test("weekly reset after the previous deadline fires once without a usage drop",
   const runs = open(path).claimQuota(scope.botKey, next, at);
   expect(runs).toHaveLength(1);
 
-  if (!runs[0]) throw new Error("Expected weekly reset run");
+  if (!runs[0]) {
+    throw new Error("Expected weekly reset run");
+  }
+
   expect(runs[0].quotaEvent).toMatchObject({
     previousResetAt,
     resetAt: nextResetAt,
@@ -547,7 +576,10 @@ test("provider, account, window, scope and bot observations stay isolated", () =
   const op = store.claimQuota(scope.botKey, snapshot, now);
   expect(op.map((run) => run.scheduleId)).toEqual([opus.id]);
 
-  if (!op[0]) throw new Error("Expected subset run");
+  if (!op[0]) {
+    throw new Error("Expected subset run");
+  }
+
   store.finish(op[0].id, "done", now);
   const weeklySnapshot = observation(90, now + 60_000, now + 1);
   limit(weeklySnapshot).window = "weekly";
@@ -558,8 +590,10 @@ test("provider, account, window, scope and bot observations stay isolated", () =
       .sort(),
   ).toEqual([weekly.id, defaultJob.id].sort());
 
-  for (const run of store.pending(scope.botKey))
+  for (const run of store.pending(scope.botKey)) {
     store.finish(run.id, "done", now + 1);
+  }
+
   const secondAccount = observation(90, now + 60_000, now + 2);
   account(secondAccount).account = "claude-2";
   expect(
@@ -616,12 +650,18 @@ test("same-instant manual, clock and quota runs retain unique occurrence identit
   const at = now + 60_000;
   const manual = store.runNow(scope, schedule.id, at);
 
-  if (!manual) throw new Error("Expected manual run");
+  if (!manual) {
+    throw new Error("Expected manual run");
+  }
+
   store.finish(manual.id, "done", at);
   const clock = store.claimDue(scope.botKey, at)[0];
   expect(clock?.dueAt).toBe(at + 1);
 
-  if (!clock) throw new Error("Expected clock run");
+  if (!clock) {
+    throw new Error("Expected clock run");
+  }
+
   store.finish(clock.id, "done", at);
   expect(
     store.claimQuota(scope.botKey, observation(90, at + 60_000, at), at)[0]
@@ -632,15 +672,21 @@ test("same-instant manual, clock and quota runs retain unique occurrence identit
 test("quota admission stays bounded without paused rows hiding eligible jobs or replaying overflow", () => {
   const store = open();
 
-  for (let index = 0; index < 100; index++)
+  for (let index = 0; index < 100; index++) {
     store.upsertFile(scope, threshold, `/jobs/paused-${index}.md`, true, now);
+  }
 
-  for (let index = 0; index < 101; index++)
+  for (let index = 0; index < 101; index++) {
     store.add(scope, threshold, now + 1);
+  }
+
   const admitted = store.claimQuota(scope.botKey, observation(90), now + 2);
   expect(admitted).toHaveLength(100);
 
-  for (const run of admitted) store.finish(run.id, "done", now + 2);
+  for (const run of admitted) {
+    store.finish(run.id, "done", now + 2);
+  }
+
   store.upsertFile(scope, threshold, "/jobs/paused-0.md", false, now + 3);
   expect(
     store.claimQuota(

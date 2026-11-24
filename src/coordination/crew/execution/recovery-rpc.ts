@@ -26,13 +26,18 @@ const recoveryBranches = [
 // Known-branch decoding retains acknowledgement paths before union routing.
 const recoveryOperationSchema = Schema.Unknown.check(
   Schema.makeFilter((raw) => {
-    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string") return;
+    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string") {
+      return;
+    }
 
     const branch = recoveryBranches.find(
       (member) => member.fields.op.ast.literal === raw["op"],
     );
 
-    if (!branch) return;
+    if (!branch) {
+      return;
+    }
+
     const parsed = Schema.decodeUnknownResult(branch, { errors: "all" })(raw);
 
     return Result.isFailure(parsed) ? parsed.failure.issue : undefined;
@@ -53,10 +58,11 @@ const recoveryNativeInput = Schema.toStandardSchemaV1(recoveryRequestSchema);
 const recoveryJSON = ({ target }: { target: StandardJSONSchemaV1.Target }) => {
   const json = settingsInputAdvertisement(recoveryRequestSchema);
 
-  if (target === "draft-2020-12")
+  if (target === "draft-2020-12") {
     return { $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12, ...json };
+  }
 
-  if (target === "draft-07")
+  if (target === "draft-07") {
     return {
       $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
       ...JsonSchema.toDocumentDraft07({
@@ -65,6 +71,8 @@ const recoveryJSON = ({ target }: { target: StandardJSONSchemaV1.Target }) => {
         definitions: {},
       }).schema,
     };
+  }
+
   throw new Error(`Unsupported recovery schema target: ${target}`);
 };
 

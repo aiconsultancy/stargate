@@ -32,30 +32,39 @@ export function validateCronInput(
 ): { input: CronInput; nextAt: number } {
   const parsed = Schema.decodeUnknownResult(inputSchema)(raw);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     throw new Error("Invalid cron input or field length.");
+  }
+
   const input = parsed.success;
   input.expression = input.expression.replace(/\s+/g, " ");
 
-  if (!input.expression && !input.trigger)
+  if (!input.expression && !input.trigger) {
     throw new Error("A schedule or quota trigger is required.");
+  }
 
-  if (input.expression && input.expression.split(" ").length !== 5)
+  if (input.expression && input.expression.split(" ").length !== 5) {
     throw new Error("Invalid cron expression: use five fields.");
+  }
 
-  if (!Number.isFinite(now) || !Number.isFinite(new Date(now).getTime()))
+  if (!Number.isFinite(now) || !Number.isFinite(new Date(now).getTime())) {
     throw new Error("Invalid cron reference time.");
+  }
 
   try {
-    if (/^[+-]/.test(input.timezone))
+    if (/^[+-]/.test(input.timezone)) {
       throw new Error("Fixed-offset timezones are not IANA names.");
+    }
+
     new Intl.DateTimeFormat("en", { timeZone: input.timezone }).format(now);
   } catch {
     throw new Error("Invalid cron timezone: use an IANA timezone name.");
   }
 
   // Event-only jobs never enter the clock due query. Zero is not a due date.
-  if (!input.expression) return { input, nextAt: 0 };
+  if (!input.expression) {
+    return { input, nextAt: 0 };
+  }
 
   try {
     const cron = new Cron(input.expression, {
@@ -66,8 +75,9 @@ export function validateCronInput(
 
     const nextAt = cron.nextRun(new Date(now))?.getTime();
 
-    if (nextAt === undefined || !Number.isFinite(nextAt) || nextAt <= now)
+    if (nextAt === undefined || !Number.isFinite(nextAt) || nextAt <= now) {
       throw new Error("The cron expression has no future occurrence.");
+    }
 
     return { input, nextAt };
   } catch {

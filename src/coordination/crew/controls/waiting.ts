@@ -25,8 +25,10 @@ export class CrewWaiting {
   public async run(raw: unknown, caller: CrewCaller) {
     const parsed = Schema.decodeUnknownResult(waitingInputSchema)(raw);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError("Invalid waiting settings.");
+    }
+
     caller.signal.throwIfAborted();
     await this.authority.captain(caller);
 

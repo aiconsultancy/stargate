@@ -71,10 +71,11 @@ function git(
     stderr: "pipe",
   });
 
-  if (result.exitCode !== 0)
+  if (result.exitCode !== 0) {
     throw new Error(
       `git ${args[0]} failed: ${result.stderr.toString().trim()}`,
     );
+  }
 
   return result.stdout;
 }
@@ -88,7 +89,10 @@ function readTree(root: string, ref: string): Tree {
     (line) => {
       const match = /^(\d+) (blob|commit) ([a-f0-9]+)\t([\s\S]+)$/.exec(line);
 
-      if (!match) throw new Error("Unsupported Git tree entry");
+      if (!match) {
+        throw new Error("Unsupported Git tree entry");
+      }
+
       const [, mode = "", kind = "", oid = "", path = ""] = match;
 
       return { mode, kind, oid, path };
@@ -110,8 +114,10 @@ function readTree(root: string, ref: string): Tree {
     const end = bytes.indexOf(10, offset);
     const size = Number(bytes.subarray(offset, end).toString().split(" ")[2]);
 
-    if (end === -1 || !Number.isSafeInteger(size) || size < 0)
+    if (end === -1 || !Number.isSafeInteger(size) || size < 0) {
       throw new Error("Invalid Git blob response");
+    }
+
     offset = end + 1;
     tree.set(entry.path, {
       mode: entry.mode,
@@ -128,8 +134,10 @@ function readTree(root: string, ref: string): Tree {
 }
 
 function validateMoves(tree: Tree, moves: readonly Move[]) {
-  if (moves.length === 0)
+  if (moves.length === 0) {
     throw new Error("Supply at least one old/new path pair");
+  }
+
   const sources = new Set<string>();
   const destinations = new Set<string>();
 
@@ -143,18 +151,24 @@ function validateMoves(tree: Tree, moves: readonly Move[]) {
         throw new Error(`Invalid module path: ${path}`);
       }
 
-      if (locked.has(path)) throw new Error(`Locked module: ${path}`);
+      if (locked.has(path)) {
+        throw new Error(`Locked module: ${path}`);
+      }
     }
 
-    if (posix.extname(oldPath) !== posix.extname(newPath))
+    if (posix.extname(oldPath) !== posix.extname(newPath)) {
       throw new Error("Moves must preserve file extensions");
+    }
+
     const source = tree.get(oldPath);
 
-    if (!source || !["100644", "100755"].includes(source.mode))
+    if (!source || !["100644", "100755"].includes(source.mode)) {
       throw new Error(`Unknown or non-file module: ${oldPath}`);
+    }
 
-    if (sources.has(oldPath) || destinations.has(newPath.toLowerCase()))
+    if (sources.has(oldPath) || destinations.has(newPath.toLowerCase())) {
       throw new Error("Duplicate move mapping");
+    }
 
     if (
       [...tree.keys()].some(
@@ -177,8 +191,9 @@ function validateMoves(tree: Tree, moves: readonly Move[]) {
       if (
         tree.has(parts.join("/")) ||
         destinations.has(parts.join("/").toLowerCase())
-      )
+      ) {
         throw new Error(`Destination parent collision: ${newPath}`);
+      }
     }
   }
 }
@@ -188,10 +203,12 @@ function resolveImport(tree: Tree, file: string, specifier: string) {
     .normalize(posix.join(posix.dirname(file), specifier))
     .replace(/\/$/, "");
 
-  if (tree.has(`${path}/package.json`))
+  if (tree.has(`${path}/package.json`)) {
     throw new Error(
       `Directory package resolution is not supported: ${file}: ${specifier}`,
     );
+  }
+
   const extension = posix.extname(path);
 
   const substitutions: Record<string, string[]> = {
@@ -222,10 +239,12 @@ function resolveImport(tree: Tree, file: string, specifier: string) {
     candidates.some(
       (candidate) => candidate.path !== path && tree.has(candidate.path),
     )
-  )
+  ) {
     throw new Error(
       `Ambiguous source/runtime module resolution: ${file}: ${specifier}`,
     );
+  }
+
   candidates.push(
     ...extensions.map((suffix) => ({
       path: `${path}/index${suffix}`,
@@ -260,19 +279,23 @@ function rewriteSpecifier(
   file: string,
   specifier: string,
 ): string {
-  if (!specifier.startsWith("./") && !specifier.startsWith("../"))
+  if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
     return specifier;
+  }
+
   const resolved = resolveImport(before, file, specifier);
   const newFile = moves.get(file) ?? file;
 
   if (!resolved) {
-    if (newFile !== file)
+    if (newFile !== file) {
       throw new Error(
         `Cannot resolve relative module in moved file: ${file}: ${specifier}`,
       );
+    }
 
-    if (resolveImport(after, newFile, specifier))
+    if (resolveImport(after, newFile, specifier)) {
       throw new Error(`Move changes module resolution: ${file}: ${specifier}`);
+    }
 
     return specifier;
   }
@@ -280,8 +303,9 @@ function rewriteSpecifier(
   const target = moves.get(resolved.path) ?? resolved.path;
 
   if (file === newFile && target === resolved.path) {
-    if (resolveImport(after, file, specifier)?.path !== target)
+    if (resolveImport(after, file, specifier)?.path !== target) {
       throw new Error(`Move changes module resolution: ${file}: ${specifier}`);
+    }
 
     return specifier;
   }
@@ -291,17 +315,23 @@ function rewriteSpecifier(
   // Keep the filename while relativizing; its stem may name an ancestor folder.
   let result = relativeSpecifier(newFile, target);
 
-  if (resolved.suffix) result = result.slice(0, -resolved.suffix.length);
+  if (resolved.suffix) {
+    result = result.slice(0, -resolved.suffix.length);
+  }
 
-  if (resolved.index && posix.basename(result) === "index")
+  if (resolved.index && posix.basename(result) === "index") {
     result = relativeSpecifier(newFile, posix.dirname(target));
-  else if (explicitExtension && resolved.suffix) result += explicitExtension;
+  } else if (explicitExtension && resolved.suffix) {
+    result += explicitExtension;
+  }
 
-  if (specifier.endsWith("/") && resolved.index)
+  if (specifier.endsWith("/") && resolved.index) {
     result += result.endsWith("/") ? "" : "/";
+  }
 
-  if (resolveImport(after, newFile, result)?.path !== target)
+  if (resolveImport(after, newFile, result)?.path !== target) {
     throw new Error(`Move changes module resolution: ${file}: ${specifier}`);
+  }
 
   return result;
 }
@@ -315,7 +345,10 @@ function rewriteDocs(
     /[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>"`]+|(?<![\p{L}\p{N}_./:@%+~-])(?:\.\.\/)*src\/[a-zA-Z0-9_./-]+(?![\p{L}\p{N}_./-])/gu,
     (token) => {
       // Consume complete URLs without rewriting path-like query/fragment text.
-      if (!token.startsWith("src/") && !token.startsWith("../")) return token;
+      if (!token.startsWith("src/") && !token.startsWith("../")) {
+        return token;
+      }
+
       // Sentence punctuation is not part of the path token.
       const path = token.replace(/\.+$/, "");
 
@@ -323,7 +356,10 @@ function rewriteDocs(
         const directory = posix.dirname(document);
         const resolved = posix.join(directory, path);
 
-        if (posix.relative(directory, resolved) !== path) return token;
+        if (posix.relative(directory, resolved) !== path) {
+          return token;
+        }
+
         const target = moves.get(resolved);
 
         return target
@@ -361,8 +397,10 @@ async function transformedTree(
     const bytes = before.get(path)?.bytes ?? Buffer.alloc(0);
     const text = bytes.toString("utf8");
 
-    if (!Buffer.from(text).equals(bytes))
+    if (!Buffer.from(text).equals(bytes)) {
       throw new Error(`Module is not UTF-8: ${path}`);
+    }
+
     virtualFiles[`${virtualRoot}/${path}`] = text;
   }
 
@@ -385,7 +423,9 @@ async function transformedTree(
     const snapshot = await api.updateSnapshot({ openProjects: [config] });
     const project = snapshot.getProject(config);
 
-    if (!project) throw new Error("TypeScript could not open the module tree");
+    if (!project) {
+      throw new Error("TypeScript could not open the module tree");
+    }
 
     for (const file of files) {
       const source = await project.program.getSourceFile(
@@ -399,8 +439,10 @@ async function transformedTree(
             `${virtualRoot}/${file}`,
           )
         ).length > 0
-      )
+      ) {
         throw new Error(`Cannot parse module: ${file}`);
+      }
+
       let text = virtualFiles[`${virtualRoot}/${file}`] ?? "";
       const edits: { start: number; end: number; value: string }[] = [];
 
@@ -424,12 +466,13 @@ async function transformedTree(
             literal.text,
           );
 
-          if (value !== literal.text)
+          if (value !== literal.text) {
             edits.push({
               start: skipTrivia(text, literal.pos) + 1,
               end: literal.end - 1,
               value,
             });
+          }
         }
 
         node.forEachChild(visit);
@@ -437,15 +480,18 @@ async function transformedTree(
 
       visit(source);
 
-      for (const edit of edits.toSorted((a, b) => b.start - a.start))
+      for (const edit of edits.toSorted((a, b) => b.start - a.start)) {
         text = text.slice(0, edit.start) + edit.value + text.slice(edit.end);
+      }
+
       const entry = before.get(file);
 
-      if (entry)
+      if (entry) {
         after.set(moves.get(file) ?? file, {
           ...entry,
           bytes: Buffer.from(text),
         });
+      }
     }
   } finally {
     await api.close();
@@ -455,18 +501,22 @@ async function transformedTree(
     if (
       !path.startsWith("docs/") &&
       !["AGENTS.md", "README.md", "CONTRIBUTING.md"].includes(path)
-    )
+    ) {
       continue;
+    }
 
-    if (!["100644", "100755"].includes(entry.mode) || entry.bytes.includes(0))
+    if (!["100644", "100755"].includes(entry.mode) || entry.bytes.includes(0)) {
       continue;
+    }
+
     const text = entry.bytes.toString("utf8");
 
-    if (Buffer.from(text).equals(entry.bytes))
+    if (Buffer.from(text).equals(entry.bytes)) {
       after.set(path, {
         ...entry,
         bytes: Buffer.from(rewriteDocs(text, path, moves)),
       });
+    }
   }
 
   return after;
@@ -481,8 +531,10 @@ function equal(a: Entry | undefined, b: Entry | undefined) {
 
 async function pathStat(path: string) {
   return lstat(path).catch((error: unknown) => {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT")
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return;
+    }
+
     throw error;
   });
 }
@@ -498,8 +550,9 @@ async function safePath(root: string, path: string) {
     if (
       stat?.isSymbolicLink() ||
       (stat && i < parts.length - 1 && !stat.isDirectory())
-    )
+    ) {
       throw new Error(`Unsafe path: ${path}`);
+    }
   }
 }
 
@@ -510,9 +563,13 @@ async function workingEntry(
   await safePath(root, path);
   const stat = await pathStat(join(root, path));
 
-  if (!stat) return undefined;
+  if (!stat) {
+    return undefined;
+  }
 
-  if (!stat.isFile()) throw new Error(`Not a regular file: ${path}`);
+  if (!stat.isFile()) {
+    throw new Error(`Not a regular file: ${path}`);
+  }
 
   return {
     mode: stat.mode & 0o111 ? "100755" : "100644",
@@ -546,13 +603,16 @@ async function checkTree(
           "--",
           path,
         ]).length > 0
-      )
+      ) {
         throw new Error(`Unexpected change: ${path}`);
+      }
+
       continue;
     }
 
-    if (!equal(await workingEntry(root, path), expected))
+    if (!equal(await workingEntry(root, path), expected)) {
       throw new Error(`Unexpected change: ${path}`);
+    }
   }
 
   const index = paths(git(root, ["ls-files", "--stage", "-z"]));
@@ -566,11 +626,16 @@ async function checkTree(
   for (const line of index) {
     const match = /^(\d+) ([a-f0-9]+) (\d)\t([\s\S]+)$/.exec(line);
 
-    if (!match) throw new Error("Unsupported Git index entry");
+    if (!match) {
+      throw new Error("Unsupported Git index entry");
+    }
+
     const [, mode = "", oid = "", stage = "", path = ""] = match;
 
-    if (stage !== "0")
+    if (stage !== "0") {
       throw new Error("Resolve index conflicts before checking moves");
+    }
+
     indexedPaths.add(path);
 
     const allowed = [
@@ -578,7 +643,9 @@ async function checkTree(
       after.get(path),
       movedOriginals.get(path),
     ].some((entry) => {
-      if (!entry || entry.mode !== mode) return false;
+      if (!entry || entry.mode !== mode) {
+        return false;
+      }
 
       const hash =
         mode === "160000"
@@ -591,12 +658,15 @@ async function checkTree(
       return hash === oid;
     });
 
-    if (!allowed) throw new Error(`Unexpected staged change: ${path}`);
+    if (!allowed) {
+      throw new Error(`Unexpected staged change: ${path}`);
+    }
   }
 
   for (const path of before.keys()) {
-    if (after.has(path) && !indexedPaths.has(path))
+    if (after.has(path) && !indexedPaths.has(path)) {
       throw new Error(`Unexpected staged deletion: ${path}`);
+    }
   }
 }
 
@@ -642,8 +712,9 @@ async function applyTree(
       if (
         dirty.has(path) ||
         !equal(await workingEntry(root, path), before.get(path))
-      )
+      ) {
         throw new Error(`Affected path is dirty or occupied: ${path}`);
+      }
     }
 
     for (const [, newPath] of pairs) {
@@ -669,7 +740,10 @@ async function applyTree(
     for (const path of changed) {
       const entry = after.get(path);
 
-      if (!entry) continue;
+      if (!entry) {
+        continue;
+      }
+
       written.push(path);
       await Bun.write(join(root, path), entry.bytes);
     }
@@ -685,28 +759,40 @@ async function applyTree(
 
       const entry = before.get(oldPath);
 
-      if (entry) await Bun.write(join(root, path), entry.bytes);
+      if (entry) {
+        await Bun.write(join(root, path), entry.bytes);
+      }
     }
 
     for (const [oldPath, newPath] of moved.toReversed()) {
       const destination = await pathStat(join(root, newPath));
 
-      if (!destination) continue;
+      if (!destination) {
+        continue;
+      }
 
-      if (await pathStat(join(root, oldPath)))
+      if (await pathStat(join(root, oldPath))) {
         throw new Error(
           `Rollback conflict; preserve both paths: ${oldPath}, ${newPath}`,
           { cause: error },
         );
+      }
+
       await rename(join(root, newPath), join(root, oldPath));
     }
 
-    for (const path of created.toReversed()) await rmdir(path);
+    for (const path of created.toReversed()) {
+      await rmdir(path);
+    }
+
     throw error;
   } finally {
     await lock.close();
 
-    if (!published) await rm(`${indexPath}.lock`, { force: true });
+    if (!published) {
+      await rm(`${indexPath}.lock`, { force: true });
+    }
+
     await rm(privateIndex, { force: true });
   }
 }
@@ -723,14 +809,17 @@ export async function moveModules(
     ["GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE"].some(
       (key) => process.env[key],
     )
-  )
+  ) {
     throw new Error("Custom Git index/worktree environment is not supported");
+  }
 
-  if (git(root, ["rev-parse", "--show-toplevel"]).toString().trim() !== root)
+  if (git(root, ["rev-parse", "--show-toplevel"]).toString().trim() !== root) {
     throw new Error("Run from the repository root");
+  }
 
-  if (options.base && !options.check)
+  if (options.base && !options.check) {
     throw new Error("--base requires --check");
+  }
 
   const ref = git(root, [
     "rev-parse",
@@ -744,8 +833,11 @@ export async function moveModules(
   const before = readTree(root, ref);
   const after = await transformedTree(before, pairs);
 
-  if (options.check) await checkTree(root, before, after, pairs);
-  else await applyTree(root, before, after, pairs);
+  if (options.check) {
+    await checkTree(root, before, after, pairs);
+  } else {
+    await applyTree(root, before, after, pairs);
+  }
 }
 
 const help = `Usage: bun scripts/move-modules.ts [--check [--base REF]] OLD NEW [OLD NEW ...]
@@ -766,8 +858,9 @@ if (import.meta.main) {
   try {
     const args = process.argv.slice(2);
 
-    if (args.includes("--help")) console.log(help);
-    else {
+    if (args.includes("--help")) {
+      console.log(help);
+    } else {
       let check = false;
       let base: string | undefined;
       const positional: string[] = [];
@@ -775,23 +868,31 @@ if (import.meta.main) {
       for (let i = 0; i < args.length; i++) {
         const arg = args[i] ?? "";
 
-        if (arg === "--check") check = true;
-        else if (arg === "--base") {
+        if (arg === "--check") {
+          check = true;
+        } else if (arg === "--base") {
           base = args[++i];
 
-          if (!base || base.startsWith("--"))
+          if (!base || base.startsWith("--")) {
             throw new Error("--base needs a reference");
-        } else if (arg.startsWith("-"))
+          }
+        } else if (arg.startsWith("-")) {
           throw new Error(`Unknown option: ${arg}`);
-        else positional.push(arg);
+        } else {
+          positional.push(arg);
+        }
       }
 
-      if (positional.length === 0 || positional.length % 2)
+      if (positional.length === 0 || positional.length % 2) {
         throw new Error("Supply old/new path pairs; use --help");
+      }
+
       const pairs: Move[] = [];
 
-      for (let i = 0; i < positional.length; i += 2)
+      for (let i = 0; i < positional.length; i += 2) {
         pairs.push([positional[i] ?? "", positional[i + 1] ?? ""]);
+      }
+
       await moveModules(process.cwd(), pairs, {
         check,
         ...(base && { base }),

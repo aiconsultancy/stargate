@@ -54,10 +54,14 @@ test("Pi preserves required default fields and native argument coercion", () => 
   for (const name of ["pi_history", "stargate_journal", "stargate_quota"]) {
     const tool = extension.tools?.find((tool) => tool.name === name);
 
-    if (!tool) throw new Error(`Missing registered tool: ${name}`);
+    if (!tool) {
+      throw new Error(`Missing registered tool: ${name}`);
+    }
 
-    if (name !== "stargate_journal")
+    if (name !== "stargate_journal") {
       expect(tool.parameters).toHaveProperty("type", "object");
+    }
+
     expect(tool.replay).toBe("unsafe");
 
     const input =
@@ -82,10 +86,14 @@ test("Pi preserves required default fields and native argument coercion", () => 
           : {},
     );
 
-    if (name !== "stargate_quota")
+    if (name !== "stargate_quota") {
       for (const arguments_ of name === "pi_history"
         ? [{}, { cursor: {} }]
-        : [{ op: "read" }, { op: "read", after: 0 }, { op: "read", limit: 20 }])
+        : [
+            { op: "read" },
+            { op: "read", after: 0 },
+            { op: "read", limit: 20 },
+          ]) {
         expect(() => {
           validateToolArguments(tool, {
             type: "toolCall",
@@ -94,6 +102,8 @@ test("Pi preserves required default fields and native argument coercion", () => 
             arguments: arguments_,
           });
         }).toThrow("Validation failed for tool");
+      }
+    }
 
     if (name === "pi_history") {
       const arguments_ = {
@@ -122,7 +132,7 @@ test("Pi preserves required default fields and native argument coercion", () => 
         { limit: 0 },
         { limit: 51 },
         { limit: 20, cursor: [] },
-      ])
+      ]) {
         expect(() => {
           validateToolArguments(tool, {
             type: "toolCall",
@@ -131,6 +141,7 @@ test("Pi preserves required default fields and native argument coercion", () => 
             arguments: arguments_,
           });
         }).toThrow("Validation failed for tool");
+      }
     }
 
     if (name === "stargate_journal") {
@@ -151,7 +162,7 @@ test("Pi preserves required default fields and native argument coercion", () => 
         { op: "read", after: 0, limit: 101 },
         { op: "append", text: "note", after: 0 },
         { op: "append", text: `${"😀".repeat(64_000)}x` },
-      ])
+      ]) {
         expect(() => {
           validateToolArguments(tool, {
             type: "toolCall",
@@ -160,6 +171,7 @@ test("Pi preserves required default fields and native argument coercion", () => 
             arguments: arguments_,
           });
         }).toThrow("Validation failed for tool");
+      }
     }
   }
 });
@@ -233,8 +245,9 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
 
     const output = toolMessages.find(({ role }) => role === "tool")?.content;
 
-    if (typeof output !== "string")
+    if (typeof output !== "string") {
       throw new Error("Missing native history result");
+    }
 
     const page = Schema.decodeUnknownSync(
       Schema.Struct({
@@ -273,8 +286,12 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
     await backend?.close();
     await server.stop(true);
 
-    if (previous === undefined) delete process.env[apiKeyEnv];
-    else process.env[apiKeyEnv] = previous;
+    if (previous === undefined) {
+      delete process.env[apiKeyEnv];
+    } else {
+      process.env[apiKeyEnv] = previous;
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -355,7 +372,7 @@ for (const tools of ["coding", "none"] as const) {
       expect(notices()).toBe(1);
       expect(JSON.stringify(requests)).not.toContain("PRIVATE AGREEMENT");
 
-      if (tools === "none")
+      if (tools === "none") {
         expect(
           requests.every(
             (request) =>
@@ -364,12 +381,17 @@ for (const tools of ["coding", "none"] as const) {
                 request["tools"].length === 0),
           ),
         ).toBe(true);
+      }
     } finally {
       await backend?.close();
       await server.stop(true);
 
-      if (previous === undefined) delete process.env[apiKeyEnv];
-      else process.env[apiKeyEnv] = previous;
+      if (previous === undefined) {
+        delete process.env[apiKeyEnv];
+      } else {
+        process.env[apiKeyEnv] = previous;
+      }
+
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -556,14 +578,16 @@ for (const scenario of [
           dataDirectory: directory,
           crew: {
             authorize() {
-              if ("denied" in scenario && scenario.denied)
+              if ("denied" in scenario && scenario.denied) {
                 throw new CrewError("Saved member conversation required.");
+              }
             },
             async run(_name, input) {
               inputs.push(input);
 
-              if (scenario.result === null)
+              if (scenario.result === null) {
                 throw new CrewError(scenario.error ?? "");
+              }
 
               return scenario.result;
             },
@@ -584,7 +608,9 @@ for (const scenario of [
 
       const output = messages.find(({ role }) => role === "tool")?.content;
 
-      if (typeof output !== "string") throw new Error("Missing tool result");
+      if (typeof output !== "string") {
+        throw new Error("Missing tool result");
+      }
 
       if (scenario.error) {
         expect(output).toContain(scenario.error);
@@ -599,22 +625,28 @@ for (const scenario of [
           "stargate_mail",
           "stargate_dm",
         ].includes(scenario.name)
-      )
+      ) {
         expect(JSON.parse(output)).toEqual(scenario.result);
-      else
+      } else {
         expect(JSON.parse(output)).toMatchObject({
           nextAfter: scenario.result?.nextAfter,
           entries: scenario.result?.entries,
         });
+      }
 
-      if ("input" in scenario)
+      if ("input" in scenario) {
         expect(inputs).toEqual(scenario.input === null ? [] : [scenario.input]);
+      }
     } finally {
       await backend?.close();
       await server.stop(true);
 
-      if (previous === undefined) delete process.env[apiKeyEnv];
-      else process.env[apiKeyEnv] = previous;
+      if (previous === undefined) {
+        delete process.env[apiKeyEnv];
+      } else {
+        process.env[apiKeyEnv] = previous;
+      }
+
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -683,7 +715,9 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
 
     const output = messages.find(({ role }) => role === "tool")?.content;
 
-    if (typeof output !== "string") throw new Error("Missing history output");
+    if (typeof output !== "string") {
+      throw new Error("Missing history output");
+    }
 
     const page = Schema.decodeUnknownSync(
       Schema.Struct({
@@ -709,8 +743,12 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
     await backend?.close();
     await server.stop(true);
 
-    if (previous === undefined) delete process.env[apiKeyEnv];
-    else process.env[apiKeyEnv] = previous;
+    if (previous === undefined) {
+      delete process.env[apiKeyEnv];
+    } else {
+      process.env[apiKeyEnv] = previous;
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });

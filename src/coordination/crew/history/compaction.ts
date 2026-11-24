@@ -61,7 +61,9 @@ export async function compactAndWait(
   const id = `msg_${randomUUID().replaceAll("-", "")}`;
   const connected = Promise.withResolvers<void>();
 
-  if (!waitForConnection) connected.resolve();
+  if (!waitForConnection) {
+    connected.resolve();
+  }
 
   const observed = (async () => {
     let started = false;
@@ -79,7 +81,9 @@ export async function compactAndWait(
         continue;
       }
 
-      if (event.data.sessionID !== sessionID) continue;
+      if (event.data.sessionID !== sessionID) {
+        continue;
+      }
 
       if (event.type === "session.compaction.started") {
         started = event.data.inputID === id;
@@ -88,7 +92,9 @@ export async function compactAndWait(
         (started || event.data.inputID === id)
       ) {
         throw new CrewError("Compaction was not confirmed; model unchanged.");
-      } else if (event.type === "session.compaction.ended" && started) return;
+      } else if (event.type === "session.compaction.ended" && started) {
+        return;
+      }
     }
 
     throw new CrewError("Compaction was not confirmed; model unchanged.");

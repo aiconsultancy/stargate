@@ -22,8 +22,9 @@ export type SubspaceOfficer = SubspaceAgentsConfig["officers"][number];
 export class SubspaceFileError extends Error {}
 
 function uid() {
-  if (typeof process.getuid !== "function")
+  if (typeof process.getuid !== "function") {
     throw new SubspaceFileError("Subspace agent keys need a POSIX platform");
+  }
 
   return process.getuid();
 }
@@ -32,7 +33,10 @@ async function lstatOrUndefined(path: string): Promise<Stats | undefined> {
   try {
     return await lstat(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+
     throw error;
   }
 }
@@ -62,24 +66,32 @@ export function checkAncestors(directory: string) {
       !stats.isDirectory() ||
       (stats.uid !== 0 && stats.uid !== uid()) ||
       (stats.mode & 0o022 && !(stats.mode & 0o1000))
-    )
+    ) {
       throw new SubspaceFileError(
         "A directory above the Subspace agent keys is a link, or is owned or writable by another user",
       );
+    }
   }
 }
 
 /** The state directory: created 0700 when absent, refused unless private. */
 export async function privateStateDirectory(directory: string) {
-  if (!(await lstatOrUndefined(directory)))
+  if (!(await lstatOrUndefined(directory))) {
     await mkdir(directory, { recursive: true, mode: 0o700 });
+  }
+
   checkAncestors(directory);
   const stats = await lstat(directory);
 
-  if (!stats.isDirectory() || stats.uid !== uid() || (stats.mode & 0o077) !== 0)
+  if (
+    !stats.isDirectory() ||
+    stats.uid !== uid() ||
+    (stats.mode & 0o077) !== 0
+  ) {
     throw new SubspaceFileError(
       "The Subspace agent state directory must be owned by the gateway user and private to it (mode 0700)",
     );
+  }
 }
 
 /** An explicitly placed bundle's directory: the gateway's, and only it may write. */
@@ -91,10 +103,11 @@ async function bundleDirectory(directory: string, officer: string) {
     !stats?.isDirectory() ||
     stats.uid !== uid() ||
     (stats.mode & 0o022) !== 0
-  )
+  ) {
     throw new SubspaceFileError(
       `The directory of ${officer}'s Subspace bundle must exist, be owned by the gateway user and be writable by it alone`,
     );
+  }
 }
 
 /**
@@ -115,7 +128,10 @@ export async function readPrivateFile(
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+
     throw new SubspaceFileError(`${what} is unreadable or a link`);
   }
 
@@ -127,10 +143,11 @@ export async function readPrivateFile(
       stats.uid !== uid() ||
       (stats.mode & 0o077) !== 0 ||
       stats.size > maxBytes
-    )
+    ) {
       throw new SubspaceFileError(
         `${what} must be a regular file owned by the gateway user, readable by it alone (mode 0600), of at most ${maxBytes} bytes`,
       );
+    }
 
     return await file.readFile({ encoding: "utf8" });
   } finally {
@@ -193,8 +210,9 @@ export async function readOfficerKey(
   officer: SubspaceOfficer,
   files: OfficerFiles,
 ): Promise<AgentKey | undefined> {
-  if (officer.bundlePath)
+  if (officer.bundlePath) {
     await bundleDirectory(dirname(files.bundle), officer.name);
+  }
 
   const text = await readPrivateFile(
     files.bundle,
@@ -202,7 +220,9 @@ export async function readOfficerKey(
     `${officer.name}'s Subspace bundle`,
   );
 
-  if (text === undefined) return;
+  if (text === undefined) {
+    return;
+  }
 
   try {
     return parseBundle(text);
@@ -220,8 +240,10 @@ export async function writeOfficerKey(
   algorithm: AgentKeyAlgorithm,
   key = generateAgentKey(officer.name, algorithm),
 ) {
-  if (officer.bundlePath)
+  if (officer.bundlePath) {
     await bundleDirectory(dirname(files.bundle), officer.name);
+  }
+
   await writePrivateFile(files.bundle, bundleText(key));
 
   return key;
@@ -237,10 +259,12 @@ export class DistinctCertificates {
   public add(officer: string, key: AgentKey) {
     const other = this.holders.get(key.fingerprint);
 
-    if (other !== undefined && other !== officer)
+    if (other !== undefined && other !== officer) {
       throw new SubspaceFileError(
         `${other} and ${officer} have the same certificate; each officer needs its own`,
       );
+    }
+
     this.holders.set(key.fingerprint, officer);
   }
 }
@@ -266,7 +290,9 @@ export async function readEnrolmentRecord(
     `${officer.name}'s Subspace enrolment record`,
   );
 
-  if (text === undefined) return;
+  if (text === undefined) {
+    return;
+  }
 
   const decoded = Schema.decodeUnknownResult(
     Schema.fromJsonString(recordSchema),

@@ -18,16 +18,21 @@ export function exactStruct<const Fields extends Schema.Struct.Fields>(
   const keys = new Set(Object.keys(fields));
 
   const exact = Schema.makeFilter<unknown>((input, ast) => {
-    if (!Predicate.isObject(input)) return "Expected an object";
+    if (!Predicate.isObject(input)) {
+      return "Expected an object";
+    }
+
     // For...in, as Zod 4 strict objects did: inherited enumerable keys count.
     const issues: Schema.FilterIssue[] = [];
 
-    for (const key in input)
-      if (!keys.has(key))
+    for (const key in input) {
+      if (!keys.has(key)) {
         issues.push({
           path: [key],
           issue: new SchemaIssue.UnexpectedKey(ast, input[key]),
         });
+      }
+    }
 
     return issues.length > 0 ? issues : undefined;
   });

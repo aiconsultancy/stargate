@@ -71,7 +71,10 @@ const pairingOrigin = settingsURL
   .check(
     settingsRefine(
       (value) => {
-        if (!URL.canParse(value) || !/^https?:\/\//i.test(value)) return false;
+        if (!URL.canParse(value) || !/^https?:\/\//i.test(value)) {
+          return false;
+        }
+
         const url = new URL(value);
 
         if (
@@ -79,12 +82,18 @@ const pairingOrigin = settingsURL
           url.username ||
           url.password ||
           url.pathname !== "/"
-        )
+        ) {
           return false;
+        }
 
-        if (url.protocol === "https:") return true;
+        if (url.protocol === "https:") {
+          return true;
+        }
 
-        if (url.protocol !== "http:") return false;
+        if (url.protocol !== "http:") {
+          return false;
+        }
+
         const host = url.hostname;
         const parts = host.split(".").map(Number);
 
@@ -312,24 +321,28 @@ export function agentDispatchTarget(
     (entry) => entry.id === dispatch.messaging.registration,
   );
 
-  if (!registration)
+  if (!registration) {
     return "Agent dispatch messaging.registration must name an IRC registration";
+  }
 
-  if (registration.fleetPolicy?.role !== "rear_admiral")
+  if (registration.fleetPolicy?.role !== "rear_admiral") {
     return "Agent dispatch runs only on a rear admiral's IRC registration (fleetPolicy.role rear_admiral)";
+  }
 
   const channel =
     dispatch.messaging.channel ?? registration.fleetChannels?.command;
 
-  if (!channel)
+  if (!channel) {
     return "Set agent dispatch messaging.channel or the registration's fleetChannels.command";
+  }
 
   const joined = effectiveIrcConfig(registration).channels.find(
     (name) => fold(name) === fold(channel),
   );
 
-  if (!joined)
+  if (!joined) {
     return "The agent dispatch channel must be one of the rear admiral registration's channels";
+  }
 
   return { registration, channel: joined };
 }
@@ -378,12 +391,13 @@ const subspaceOfficerSchema = settingsStruct({
   socketPath: Schema.optional(normalisedPath),
 }).check(
   settingsCheck((officer, context) => {
-    if ((officer.rank === "captain") !== (officer.ship !== undefined))
+    if ((officer.rank === "captain") !== (officer.ship !== undefined)) {
       context.addIssue({
         code: "custom",
         path: ["ship"],
         message: "A captain needs a ship; a rear admiral has none",
       });
+    }
   }),
 );
 
@@ -444,11 +458,12 @@ export const subspaceAgentsSchema = settingsStruct({
         if (
           (enrolment.tokenFile === undefined) ===
           (enrolment.tokenEnv === undefined)
-        )
+        ) {
           context.addIssue({
             code: "custom",
             message: "Set exactly one of tokenFile or tokenEnv",
           });
+        }
       }),
     ),
   ),
@@ -499,11 +514,13 @@ function subspaceAgentsIssues(
   const issues: [PropertyKey[], string][] = [];
   const officers = section.officers;
 
-  if (repeated(officers.map((officer) => officer.name.toLowerCase())))
+  if (repeated(officers.map((officer) => officer.name.toLowerCase()))) {
     issues.push([["officers"], "Officer names must be unique"]);
+  }
 
-  if (repeated(officers.flatMap((officer) => officer.bundlePath ?? [])))
+  if (repeated(officers.flatMap((officer) => officer.bundlePath ?? []))) {
     issues.push([["officers"], "Each officer needs its own bundlePath"]);
+  }
 
   if (
     repeated(
@@ -511,37 +528,42 @@ function subspaceAgentsIssues(
         officer.socketPath ? [dirname(officer.socketPath)] : [],
       ),
     )
-  )
+  ) {
     issues.push([
       ["officers"],
       "Each officer's socketPath needs its own directory",
     ]);
+  }
 
-  if (repeated(officers.flatMap((officer) => officer.registration ?? [])))
+  if (repeated(officers.flatMap((officer) => officer.registration ?? []))) {
     issues.push([["officers"], "A registration can belong to one officer"]);
+  }
 
   for (const [index, officer] of officers.entries()) {
-    if (officer.registration === undefined) continue;
+    if (officer.registration === undefined) {
+      continue;
+    }
 
     const backend = registrations.find(
       (registration) => registration.id === officer.registration,
     )?.backend;
 
-    if (!backend)
+    if (!backend) {
       issues.push([
         ["officers", index, "registration"],
         "Name a Slack, IRC or Teams registration",
       ]);
-    else if (backend.type === "claude" && !officer.socketPath)
+    } else if (backend.type === "claude" && !officer.socketPath) {
       issues.push([
         ["officers", index, "socketPath"],
         "A Claude officer needs socketPath for its MCP bridge",
       ]);
-    else if (backend.type === "claude" && backend.mcpServers?.["subspace"])
+    } else if (backend.type === "claude" && backend.mcpServers?.["subspace"]) {
       issues.push([
         ["officers", index, "registration"],
         "Remove the registration's own subspace MCP server; Stargate adds it",
       ]);
+    }
   }
 
   return issues;
@@ -604,17 +626,21 @@ export const teamsSchema = settingsStruct({
     .pipe(settingsDefault(1_800_000)),
 }).check(
   settingsCheck((value, context) => {
-    if (value.approvalUsers.some((user) => !value.access.users.includes(user)))
+    if (
+      value.approvalUsers.some((user) => !value.access.users.includes(user))
+    ) {
       context.addIssue({
         code: "custom",
         message: "Approval users must be allowed human users",
       });
+    }
 
-    if (value.approvalUsers.length > 0 && value.backend.type !== "opencode")
+    if (value.approvalUsers.length > 0 && value.backend.type !== "opencode") {
       context.addIssue({
         code: "custom",
         message: "Teams approvals require OpenCode",
       });
+    }
   }),
 );
 
@@ -712,25 +738,28 @@ const configCheck = (liveNotificationPolicy = false) =>
       if (agentDispatch?.enabled) {
         const target = agentDispatchTarget(agentDispatch, irc);
 
-        if (typeof target === "string")
+        if (typeof target === "string") {
           context.addIssue({
             code: "custom",
             path: ["agentDispatch", "messaging"],
             message: target,
           });
+        }
       }
 
-      if (subspaceAgents?.enabled)
+      if (subspaceAgents?.enabled) {
         for (const [path, message] of subspaceAgentsIssues(subspaceAgents, [
           ...bots,
           ...irc,
           ...teams,
-        ]))
+        ])) {
           context.addIssue({
             code: "custom",
             path: ["subspaceAgents", ...path],
             message,
           });
+        }
+      }
 
       if (notify) {
         const message = notifyConfigError(
@@ -740,30 +769,35 @@ const configCheck = (liveNotificationPolicy = false) =>
           liveNotificationPolicy,
         );
 
-        if (message)
+        if (message) {
           context.addIssue({ code: "custom", path: ["notify"], message });
+        }
       }
 
-      if (dashboardSocket && dashboard !== true)
+      if (dashboardSocket && dashboard !== true) {
         context.addIssue({
           code: "custom",
           path: ["dashboardSocket"],
           message: "A shared dashboard socket requires dashboard: true",
         });
+      }
 
-      if (bots.length + irc.length + teams.length === 0)
+      if (bots.length + irc.length + teams.length === 0) {
         context.addIssue({
           code: "custom",
           path: ["bots"],
           message: "Configure at least one Slack, Teams or IRC registration",
         });
+      }
+
       const ids = registrationIds({ bots, irc, teams });
 
-      if (new Set(ids).size !== ids.length)
+      if (new Set(ids).size !== ids.length) {
         context.addIssue({
           code: "custom",
           message: "Duplicate registration ID across bots, irc and IRC crew",
         });
+      }
 
       // One Slack bot and one IRC captain may share a pin: each delivers only
       // Replies attributed to its own native inputs. Same-transport pins stay
@@ -775,12 +809,13 @@ const configCheck = (liveNotificationPolicy = false) =>
           : [],
       );
 
-      if (new Set(ircPins).size !== ircPins.length)
+      if (new Set(ircPins).size !== ircPins.length) {
         context.addIssue({
           code: "custom",
           message:
             "Duplicate pinned OpenCode sessionID across IRC registrations",
         });
+      }
 
       const teamPins = teams.flatMap((team) =>
         team.backend.type === "opencode" && team.backend.sessionID
@@ -799,17 +834,19 @@ const configCheck = (liveNotificationPolicy = false) =>
       if (
         new Set(teamPins).size !== teamPins.length ||
         teamPins.some((pin) => slackPins.has(pin))
-      )
+      ) {
         context.addIssue({
           code: "custom",
           message: "A pinned session needs one primary chat transport owner",
         });
+      }
 
-      if (new Set(teams.map((team) => team.socketPath)).size !== teams.length)
+      if (new Set(teams.map((team) => team.socketPath)).size !== teams.length) {
         context.addIssue({
           code: "custom",
           message: "Teams registrations need separate socket paths",
         });
+      }
 
       // An audit channel is never a conversation in any registration: another
       // Ship listing it would answer mirrored lines. Host names and ports do
@@ -822,11 +859,12 @@ const configCheck = (liveNotificationPolicy = false) =>
       for (const registration of irc) {
         const audit = registration.audit?.channel;
 
-        if (audit !== undefined && shipChannels.has(widestFold(audit)))
+        if (audit !== undefined && shipChannels.has(widestFold(audit))) {
           context.addIssue({
             code: "custom",
             message: `IRC audit channel of ${registration.id} is a ship channel of an IRC registration`,
           });
+        }
       }
 
       const ircSecrets = irc.flatMap((registration) => [
@@ -836,17 +874,21 @@ const configCheck = (liveNotificationPolicy = false) =>
         ),
       ]);
 
-      if (new Set(ircSecrets).size !== ircSecrets.length)
+      if (new Set(ircSecrets).size !== ircSecrets.length) {
         context.addIssue({
           code: "custom",
           message: "Each IRC account needs its own passwordEnv",
         });
+      }
 
       for (const [feature, report] of [
         ["maintenance", maintenance?.report],
         ["quotaWatch", quotaWatch?.report],
       ] as const) {
-        if (!report) continue;
+        if (!report) {
+          continue;
+        }
+
         const bot = bots.find((item) => item.id === report.bot);
 
         const matches = (rules: readonly string[]) =>
@@ -856,7 +898,7 @@ const configCheck = (liveNotificationPolicy = false) =>
           !bot ||
           matches(bot.access.deniedChannels) ||
           (feature === "maintenance" && !matches(bot.access.channels))
-        )
+        ) {
           context.addIssue({
             code: "custom",
             path: [feature, "report"],
@@ -865,25 +907,29 @@ const configCheck = (liveNotificationPolicy = false) =>
                 ? "Maintenance report bot must exist and allow the report channel"
                 : "Quota report bot must exist and not deny the report channel",
           });
+        }
       }
 
-      for (const [index, bot] of bots.entries())
-        if (bot.captainPost && bot.backend.type !== "opencode")
+      for (const [index, bot] of bots.entries()) {
+        if (bot.captainPost && bot.backend.type !== "opencode") {
           context.addIssue({
             code: "custom",
             path: ["bots", index, "captainPost"],
             message: "captainPost requires an OpenCode captain backend",
           });
+        }
+      }
 
       const cronDirectories = bots.flatMap((bot) =>
         bot.cronjobs ? [resolve(bot.cronjobs.directory)] : [],
       );
 
-      if (new Set(cronDirectories).size !== cronDirectories.length)
+      if (new Set(cronDirectories).size !== cronDirectories.length) {
         context.addIssue({
           code: "custom",
           message: "Each bot needs a separate cronjobs directory",
         });
+      }
 
       const pinnedSessions = bots.flatMap((bot) =>
         bot.backend.type === "opencode" && bot.backend.sessionID !== undefined
@@ -940,10 +986,11 @@ export async function loadConfig(path: string) {
     (basename(dataDirectory) === ".stargate" &&
       !existsSync(join(dataDirectory, "stargate.sqlite")) &&
       existsSync(join(dirname(dataDirectory), ".pogo")))
-  )
+  ) {
     throw new Error(
       "Unconverted Pogo state detected. Stop and complete docs/hard-cutover.md before starting Stargate; do not delete state.",
     );
+  }
 
   return {
     ...config,

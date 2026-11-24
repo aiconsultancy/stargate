@@ -38,10 +38,13 @@ test("bundled maintenance example is valid and never enabled by default", async 
 });
 
 afterEach(async () => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 
-  for (const path of directories.splice(0))
+  for (const path of directories.splice(0)) {
     await rm(path, { recursive: true, force: true });
+  }
 });
 
 async function fixture() {
@@ -139,7 +142,10 @@ test("files run silently overnight and share one durable 08:30 UTC report", asyn
   const f = await fixture();
   const root = f.config.cronjobs?.directory;
 
-  if (!root) throw new Error("Missing fixture root");
+  if (!root) {
+    throw new Error("Missing fixture root");
+  }
+
   await writeCronjob(root, f.definition, now);
   await writeCronjob(root, { ...f.definition, name: "other-maintenance" }, now);
   const worker = f.scheduler();
@@ -171,7 +177,9 @@ test("paused files allow owner run-now; edits and missing files fail closed", as
   const f = await fixture();
   const root = f.config.cronjobs?.directory;
 
-  if (!root) throw new Error("Missing fixture root");
+  if (!root) {
+    throw new Error("Missing fixture root");
+  }
 
   const path = await writeCronjob(
     root,
@@ -348,7 +356,10 @@ test("file cron sync follows reloaded access without restarting the scheduler", 
   const f = await fixture();
   const settings = f.config.cronjobs;
 
-  if (!settings) throw new Error("Missing cron fixture");
+  if (!settings) {
+    throw new Error("Missing cron fixture");
+  }
+
   await writeCronjob(
     settings.directory,
     { ...f.definition, slack: { channel: "C456", user: "U123" } },

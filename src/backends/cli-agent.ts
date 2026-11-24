@@ -34,7 +34,9 @@ export function inherited(parent: NodeJS.ProcessEnv) {
   for (const name of inheritedEnvironment) {
     const value = parent[name];
 
-    if (value) env[name] = value;
+    if (value) {
+      env[name] = value;
+    }
   }
 
   return env;
@@ -69,10 +71,11 @@ export function textAttachment(file: Attachment) {
       (byte) =>
         byte === 127 || (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13),
     )
-  )
+  ) {
     throw new AttachmentInputUnavailable(
       "Text attachment contains binary control bytes",
     );
+  }
 
   return `Attachment: ${file.name}\n${decoded}`;
 }
@@ -139,8 +142,9 @@ function facts(stat: string, status: string) {
   const group = Number(fields[2]);
   const uids = /^Uid:[ \t]+(.+)$/m.exec(status)?.[1]?.trim().split(/\s+/);
 
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(group) || !uids)
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(group) || !uids) {
     return;
+  }
 
   return { start, group, uids };
 }
@@ -196,7 +200,9 @@ export async function turnProcesses(
   const found: TurnProcess[] = [];
   await Promise.all(
     entries.map(async (entry) => {
-      if (!/^\d+$/.test(entry) || Number(entry) === process.pid) return;
+      if (!/^\d+$/.test(entry) || Number(entry) === process.pid) {
+        return;
+      }
 
       try {
         const base = join(table.root, entry);
@@ -206,10 +212,13 @@ export async function turnProcesses(
           await readFile(join(base, "status"), "utf8"),
         );
 
-        if (!known || known.start < since || !owned(table, known.uids)) return;
+        if (!known || known.start < since || !owned(table, known.uids)) {
+          return;
+        }
 
-        if (carries(await readFile(join(base, "environ")), marker))
+        if (carries(await readFile(join(base, "environ")), marker)) {
           found.push({ pid: Number(entry), start: known.start });
+        }
       } catch {
         // Gone, or not readable by this user.
       }
@@ -242,8 +251,9 @@ export function signalTurnProcesses(
       now.start !== start ||
       !owned(table, now.uids) ||
       !carries(now.environ, marker)
-    )
+    ) {
       continue;
+    }
 
     try {
       table.kill(pid, signal);
@@ -270,8 +280,9 @@ function leads(table: ProcessTable, leader: TurnLeader) {
     now.group !== leader.pid ||
     !owned(table, now.uids) ||
     !carries(now.environ, leader.marker)
-  )
+  ) {
     return false;
+  }
 
   try {
     return readFileSync(join(table.root, String(leader.pid), "cmdline"), "utf8")
@@ -288,7 +299,9 @@ export function signalTurnGroup(
   leader: TurnLeader,
   signal: NodeJS.Signals,
 ) {
-  if (!leads(table, leader)) return false;
+  if (!leads(table, leader)) {
+    return false;
+  }
 
   try {
     table.kill(-leader.pid, signal);
@@ -307,7 +320,10 @@ async function until(
   const deadline = Date.now() + ms;
 
   while (!(await done())) {
-    if (Date.now() >= deadline || signal?.aborted) return false;
+    if (Date.now() >= deadline || signal?.aborted) {
+      return false;
+    }
+
     await delay(50);
   }
 
@@ -323,11 +339,17 @@ export async function stopTurnGroup(
 ) {
   const gone = () => !leads(table, leader);
 
-  if (!signalTurnGroup(table, leader, "SIGTERM")) return;
+  if (!signalTurnGroup(table, leader, "SIGTERM")) {
+    return;
+  }
 
-  if (await until(gone, grace, signal)) return;
+  if (await until(gone, grace, signal)) {
+    return;
+  }
 
-  if (signalTurnGroup(table, leader, "SIGKILL")) await until(gone, grace);
+  if (signalTurnGroup(table, leader, "SIGKILL")) {
+    await until(gone, grace);
+  }
 }
 
 /** SIGTERM a turn's processes, then SIGKILL whatever remains after `grace`. */
@@ -341,10 +363,15 @@ export async function stopTurnProcesses(
   const left = () => turnProcesses(table, marker, since);
   const gone = async () => (await left()).length === 0;
 
-  if (!signalTurnProcesses(table, await left(), marker, "SIGTERM")) return;
+  if (!signalTurnProcesses(table, await left(), marker, "SIGTERM")) {
+    return;
+  }
 
-  if (await until(gone, grace, signal)) return;
+  if (await until(gone, grace, signal)) {
+    return;
+  }
 
-  if (signalTurnProcesses(table, await left(), marker, "SIGKILL"))
+  if (signalTurnProcesses(table, await left(), marker, "SIGKILL")) {
     await until(gone, grace);
+  }
 }

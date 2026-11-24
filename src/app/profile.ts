@@ -115,10 +115,11 @@ const templateSchema = document.pipe(
 function parseOptions(input: Options) {
   const parsed = Schema.decodeUnknownResult(optionsSchema)(input);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     throw new Error(
       "Invalid profile paths, team, namespace, proxy URL, or credential reference.",
     );
+  }
 
   const options = {
     ...parsed.success,
@@ -161,14 +162,21 @@ export async function renderProfile(input: Options, role: string) {
   const captain = role === options.team.captain.id;
   const member = options.team.crew.find((member) => member.id === role);
 
-  if (member?.backend)
+  if (member?.backend) {
     throw new Error("Pi workers do not use OpenCode agent profiles.");
+  }
+
   const agent = captain ? options.team.captain : member;
 
-  if (!agent) throw new Error("Agent does not belong to the configured team.");
+  if (!agent) {
+    throw new Error("Agent does not belong to the configured team.");
+  }
+
   const profile = captain ? "captain" : member?.permissionProfile;
 
-  if (!profile) throw new Error("Missing team permission profile.");
+  if (!profile) {
+    throw new Error("Missing team permission profile.");
+  }
 
   const config: unknown = await Bun.file(
     join(templatesDirectory, "opencode.json"),
@@ -247,7 +255,10 @@ async function present(path: string) {
   try {
     return await lstat(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+
     throw new Error("Cannot inspect profile destination.");
   }
 }
@@ -285,8 +296,9 @@ async function configDirectory(directory: string) {
   const compatible = join(directory, ".opencode");
 
   if (await present(canonical)) {
-    if (!(await lstat(canonical)).isDirectory())
+    if (!(await lstat(canonical)).isDirectory()) {
       throw new Error("Canonical OpenCode directory must be a directory.");
+    }
 
     if (await present(compatible)) {
       if (
@@ -297,15 +309,19 @@ async function configDirectory(directory: string) {
           "Existing .opencode path conflicts with canonical .agents/opco.",
         );
       }
-    } else await symlink(".agents/opco", compatible);
+    } else {
+      await symlink(".agents/opco", compatible);
+    }
 
     return canonical;
   }
 
   const info = await present(compatible);
 
-  if (info && !info.isDirectory())
+  if (info && !info.isDirectory()) {
     throw new Error("Refusing an unrelated .opencode symlink or file.");
+  }
+
   await mkdir(compatible, { recursive: true, mode: 0o700 });
 
   return compatible;
@@ -324,13 +340,17 @@ async function excludeGenerated(
   const path = join(common, "info", "exclude");
   const info = await present(path);
 
-  if (info && !info.isFile())
+  if (info && !info.isFile()) {
     throw new Error("Git excludes must be a regular file.");
+  }
+
   const previous = info ? await readFile(path, "utf8") : "";
   const patterns = ["/.opencode/opencode.json", "/.agents/opco/opencode.json"];
 
   // Ignore compatibility symlinks, not unrelated source .opencode directories.
-  if (compatibilitySymlink) patterns.push("/.opencode", "!/.opencode/");
+  if (compatibilitySymlink) {
+    patterns.push("/.opencode", "!/.opencode/");
+  }
 
   for (const role of agentIDs) {
     patterns.push(
@@ -343,7 +363,10 @@ async function excludeGenerated(
     (pattern) => !previous.split("\n").includes(pattern),
   );
 
-  if (missing.length === 0) return;
+  if (missing.length === 0) {
+    return;
+  }
+
   await mkdir(dirname(path), { recursive: true });
   const file = await open(path, "a", 0o600);
 
@@ -398,8 +421,10 @@ export async function initializeProfile(input: Options) {
   const state = join(options.directory, ".local", "stargate-crew");
   await mkdir(state, { recursive: true, mode: 0o700 });
 
-  if (((await lstat(state)).mode & 0o077) !== 0)
+  if (((await lstat(state)).mode & 0o077) !== 0) {
     throw new Error("Crew state directory must be private (0700).");
+  }
+
   const agents = [options.team.captain, ...options.team.crew];
 
   const roster = [
@@ -443,15 +468,18 @@ export async function initializeProfile(input: Options) {
     const member = options.team.crew.find((member) => member.id === role);
     const directory = captain ? options.directory : worktrees[role];
 
-    if (!directory) throw new Error("Missing crew directory.");
+    if (!directory) {
+      throw new Error("Missing crew directory.");
+    }
 
     if (!captain) {
       const info = await present(directory);
 
-      if (info && !info.isDirectory())
+      if (info && !info.isDirectory()) {
         throw new Error(
           "Existing crew path must be a real worktree directory, not a symlink or file.",
         );
+      }
 
       if (!info) {
         await mkdir(options.worktreeDirectory, {
@@ -509,11 +537,12 @@ export async function initializeProfile(input: Options) {
         );
       }
 
-      if (options.workspaceMode === "clone")
+      if (options.workspaceMode === "clone") {
         await excludeGenerated(
           directory,
           agents.map(({ id, agent }) => agent ?? id),
         );
+      }
     }
 
     if (member?.backend) {

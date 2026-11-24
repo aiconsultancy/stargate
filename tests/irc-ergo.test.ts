@@ -43,7 +43,9 @@ const rateProof = process.env["STARGATE_ERGO_RATE_TEST"] === "1";
 const cleanup: (() => unknown)[] = [];
 
 afterAll(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 async function freePort() {
@@ -81,7 +83,9 @@ function openssl(directory: string, ...args: string[]) {
     stdio: "ignore",
   });
 
-  if (result.status !== 0) throw new Error("openssl failed");
+  if (result.status !== 0) {
+    throw new Error("openssl failed");
+  }
 }
 
 /** A raw test client: plaintext, optional NickServ identity, tag caps. */
@@ -102,9 +106,12 @@ async function raw(port: number) {
           buffer = buffer.slice(index + 2);
           const message = parseMessage(line);
 
-          if (message?.command === "PING")
+          if (message?.command === "PING") {
             socket.write(`PONG :${message.params[0] ?? ""}\r\n`);
-          else if (message) lines.push(message);
+          } else if (message) {
+            lines.push(message);
+          }
+
           index = buffer.indexOf("\r\n");
         }
       },
@@ -121,11 +128,17 @@ async function raw(port: number) {
     send,
     wait,
     async register(nick: string, password: string, caps = false) {
-      if (caps) send("CAP REQ :message-tags server-time account-tag");
+      if (caps) {
+        send("CAP REQ :message-tags server-time account-tag");
+      }
+
       send(`NICK ${nick}`);
       send(`USER ${nick} 0 * :test`);
 
-      if (caps) send("CAP END");
+      if (caps) {
+        send("CAP END");
+      }
+
       await wait((m) => m.command === "001", "welcome");
       send(`PRIVMSG NickServ :REGISTER ${password}`);
       await wait(
@@ -232,7 +245,10 @@ test.skipIf(!available)(
     const deadline = Date.now() + 10_000;
 
     while (!(await listening(secure)) || !(await listening(plain))) {
-      if (Date.now() > deadline) throw new Error("Ergo did not start");
+      if (Date.now() > deadline) {
+        throw new Error("Ergo did not start");
+      }
+
       await delay(50);
     }
 
@@ -334,7 +350,9 @@ test.skipIf(!available)(
         prompts.push(text);
         contexts.push(context);
 
-        if (prompts.length === 1) await firstReply.promise;
+        if (prompts.length === 1) {
+          await firstReply.promise;
+        }
 
         return `## Status\n\nAll **green**. ${"Details follow. ".repeat(40)}`;
       },
@@ -344,7 +362,9 @@ test.skipIf(!available)(
     const controller = new AbortController();
     const [captain, chief] = ship.registrations;
 
-    if (!captain || !chief) throw new Error("missing registration");
+    if (!captain || !chief) {
+      throw new Error("missing registration");
+    }
 
     const worker = new Gateway(
       captain.settings,
@@ -566,7 +586,10 @@ test.skipIf(!available)(
     // In that one-level thread, not in a thread under the new request.
     const root = reply[0]?.tags.get("msgid");
 
-    if (!root) throw new Error("captain root has no server msgid");
+    if (!root) {
+      throw new Error("captain root has no server msgid");
+    }
+
     // The delivery ACK is on another socket. A round trip on Jack's socket
     // Consumes all earlier lines before the second request's boundary.
     jack.send("PING :thread-boundary");
@@ -603,7 +626,10 @@ test.skipIf(!available)(
     expect(contexts[1]?.source.replyParent).toBe(root);
     const answerID = threaded[0]?.tags.get("msgid");
 
-    if (!answerID) throw new Error("thread answer has no server msgid");
+    if (!answerID) {
+      throw new Error("thread answer has no server msgid");
+    }
+
     expect(captain.client.anchor(answerID)).toBe(root);
     expect(captain.client.requestAnchor(answerID)).toBe(
       contexts[1]?.source.message,

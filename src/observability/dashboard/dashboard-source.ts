@@ -205,15 +205,20 @@ export function dashboardSource(
     >();
 
     for (const ship of ships) {
-      if (ship.bot.backend.type !== "opencode" || !ship.backend.sessionID)
+      if (ship.bot.backend.type !== "opencode" || !ship.backend.sessionID) {
         continue;
+      }
+
       const pinned = ship.backend.sessionID;
       const fingerprint = backendFingerprint(ship.bot);
       const key = JSON.stringify([pinned, fingerprint]);
       const bucket = buckets.get(key);
 
-      if (bucket) bucket.members.push(ship);
-      else buckets.set(key, { pinned, fingerprint, members: [ship] });
+      if (bucket) {
+        bucket.members.push(ship);
+      } else {
+        buckets.set(key, { pinned, fingerprint, members: [ship] });
+      }
     }
 
     const groups = new Map<
@@ -228,8 +233,9 @@ export function dashboardSource(
       if (
         members.length < 2 ||
         new Set(members.map((item) => kind(item))).size !== members.length
-      )
+      ) {
         continue;
+      }
 
       const ordered = [...members].toSorted((a, b) =>
         a.bot.id.localeCompare(b.bot.id),
@@ -238,7 +244,9 @@ export function dashboardSource(
       const primary =
         ordered.find((entry) => entry.transport?.kind === "irc") ?? ordered[0];
 
-      if (!primary) continue;
+      if (!primary) {
+        continue;
+      }
 
       const view: DashboardCaptain = {
         key: createHash("sha256")
@@ -264,7 +272,9 @@ export function dashboardSource(
         members: [primary, ...ordered.filter((entry) => entry !== primary)],
       };
 
-      for (const member of members) groups.set(member, group);
+      for (const member of members) {
+        groups.set(member, group);
+      }
     }
 
     return groups;
@@ -275,14 +285,18 @@ export function dashboardSource(
     signal: AbortSignal,
     fleetInput?: CrewStatusInput,
   ): Promise<CrewRead> {
-    if (!ship.backend.crewStatus) return { status: null };
+    if (!ship.backend.crewStatus) {
+      return { status: null };
+    }
 
     try {
       if (fleetInput && ship.backend.fleetCrewStatus) {
         const result = await ship.backend.fleetCrewStatus(fleetInput, signal);
         signal.throwIfAborted();
 
-        if (result) return result;
+        if (result) {
+          return result;
+        }
       }
 
       return {
@@ -305,7 +319,9 @@ export function dashboardSource(
     fleetSignal.throwIfAborted();
     const backend = members[0]?.backend;
 
-    if (!backend) return { status: null };
+    if (!backend) {
+      return { status: null };
+    }
 
     const slot = fleetCrew.get(backend) ?? {
       read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
@@ -343,13 +359,20 @@ export function dashboardSource(
           unavailable,
         )
         .then((sample) => {
-          if (fleetSignal.aborted) return unavailable();
+          if (fleetSignal.aborted) {
+            return unavailable();
+          }
 
           // A reload invalidated the cache while this attempt ran: answer its
           // Callers, but do not keep a sample from before the reload.
-          if (generation !== slot.generation) return sample;
+          if (generation !== slot.generation) {
+            return sample;
+          }
 
-          if (!sample.error) slot.latest = sample;
+          if (!sample.error) {
+            slot.latest = sample;
+          }
+
           slot.last = { sample, at: performance.now() };
 
           return sample;
@@ -375,9 +398,13 @@ export function dashboardSource(
       ).result.catch((error: unknown) => {
         wait.throwIfAborted();
 
-        if (!hasFallback) throw error;
+        if (!hasFallback) {
+          throw error;
+        }
 
-        if (pending.fallback) return slot.last?.sample ?? pending.fallback;
+        if (pending.fallback) {
+          return slot.last?.sample ?? pending.fallback;
+        }
 
         return readWithDeadline(wait, undefined, () => pending.result).result;
       });
@@ -385,10 +412,12 @@ export function dashboardSource(
       signal.throwIfAborted();
       fleetSignal.throwIfAborted();
 
-      if (crewDeadline?.aborted && error === crewDeadline.reason)
+      if (crewDeadline?.aborted && error === crewDeadline.reason) {
         return pending.fallback
           ? (slot.last?.sample ?? pending.fallback)
           : unavailable();
+      }
+
       throw error;
     }
   }
@@ -401,7 +430,10 @@ export function dashboardSource(
   ) {
     const cached = crewRoots.get(ship);
 
-    if (cached && now() - cached.at < ROOT_CACHE_MS) return cached.sessions;
+    if (cached && now() - cached.at < ROOT_CACHE_MS) {
+      return cached.sessions;
+    }
+
     const sessions = await history.roots(signal);
     crewRoots.set(ship, { at: now(), sessions });
 
@@ -421,8 +453,10 @@ export function dashboardSource(
       if (
         current === ship.backend.sessionID ||
         store.transcript.ownsSession(ship.key, current)
-      )
+      ) {
         return true;
+      }
+
       // Unreadable crew roots deny crew sessions; they never widen access.
       crewIDs ??= new Set(
         (await crewSessions(ship, history, signal).catch(() => [])).map(
@@ -431,10 +465,16 @@ export function dashboardSource(
       );
       signal.throwIfAborted();
 
-      if (crewIDs.has(current)) return true;
+      if (crewIDs.has(current)) {
+        return true;
+      }
+
       const [session] = await history.describe([current], signal);
 
-      if (session?.id !== current || !session.parentID) return false;
+      if (session?.id !== current || !session.parentID) {
+        return false;
+      }
+
       current = session.parentID;
     }
 
@@ -449,8 +489,9 @@ export function dashboardSource(
     const ship = find(id);
     const history = ship?.backend.history;
 
-    if (ship && history && (await allowed(ship, history, sessionID, signal)))
+    if (ship && history && (await allowed(ship, history, sessionID, signal))) {
       return history;
+    }
 
     return;
   }
@@ -461,12 +502,14 @@ export function dashboardSource(
   ): Promise<Pick<ShipView, "sessions" | "sessionsMore" | "sessionsError">> {
     const history = ship.backend.history;
 
-    if (!history)
+    if (!history) {
       return {
         sessions: [],
         sessionsMore: false,
         sessionsError: "Session history is not available for this backend.",
       };
+    }
+
     const pinned = ship.backend.sessionID;
 
     // One row beyond the page shows that older conversation roots exist.
@@ -510,7 +553,9 @@ export function dashboardSource(
       signal.throwIfAborted();
 
       // A bot without a crew has no crew roots to report.
-      if (ship.backend.crewStatus) error ??= "Crew sessions unavailable.";
+      if (ship.backend.crewStatus) {
+        error ??= "Crew sessions unavailable.";
+      }
     }
 
     const captain = gateway.filter((session) => session.kind === "captain");
@@ -540,7 +585,10 @@ export function dashboardSource(
       const key = group?.view ?? ship;
       const existing = reads.get(key);
 
-      if (existing !== undefined) return existing;
+      if (existing !== undefined) {
+        return existing;
+      }
+
       const members = group?.members ?? [ship];
 
       const readCrew = async (reading: AbortSignal): Promise<CrewRead> => {
@@ -565,15 +613,21 @@ export function dashboardSource(
               }).result.catch((error: unknown) => {
                 reading.throwIfAborted();
 
-                if (!retired.aborted) throw error;
+                if (!retired.aborted) {
+                  throw error;
+                }
 
                 return { status: null, error: crewUnavailable };
               })
             : await crew(member, reading);
 
-          if (result.status) return result;
+          if (result.status) {
+            return result;
+          }
 
-          if (result.error) last = result;
+          if (result.error) {
+            last = result;
+          }
         }
 
         return last;
@@ -644,7 +698,10 @@ export function dashboardSource(
   > {
     const ship = find(id);
 
-    if (!ship) return undefined;
+    if (!ship) {
+      return undefined;
+    }
+
     const { bot } = ship;
 
     const [{ status, error, metadata, observedAt }, sessions] =
@@ -759,17 +816,23 @@ export function dashboardSource(
       for (const { backend } of ships) {
         const slot = fleetCrew.get(backend);
 
-        if (!slot) continue;
+        if (!slot) {
+          continue;
+        }
+
         slot.generation++;
         delete slot.latest;
         delete slot.last;
 
-        if (slot.pending) slot.pending.fallback = undefined;
+        if (slot.pending) {
+          slot.pending.fallback = undefined;
+        }
       }
     },
     retireFleetBackend(backend: AgentBackend) {
-      if (!ships.some((ship) => ship.backend === backend))
+      if (!ships.some((ship) => ship.backend === backend)) {
         retirement(backend).abort();
+      }
     },
     fleetWithCrew: (
       signal: AbortSignal,
@@ -785,7 +848,9 @@ export function dashboardSource(
     async children(id, input, signal) {
       const history = await scopedHistory(id, input.parentID, signal);
 
-      if (!history) return;
+      if (!history) {
+        return;
+      }
 
       const page = await history.children(
         {
@@ -800,8 +865,9 @@ export function dashboardSource(
       );
 
       // A cursor is caller input and can belong to another listing.
-      if (page.sessions.some((item) => item.parentID !== input.parentID))
+      if (page.sessions.some((item) => item.parentID !== input.parentID)) {
         throw new Error("Child listing left the requested session.");
+      }
 
       return page;
     },

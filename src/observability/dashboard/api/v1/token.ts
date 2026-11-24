@@ -12,10 +12,14 @@ async function readToken(path: string) {
     path,
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
   ).catch((error: unknown) => {
-    if (!hasCode(error, "ENOENT")) throw error;
+    if (!hasCode(error, "ENOENT")) {
+      throw error;
+    }
   });
 
-  if (!file) return;
+  if (!file) {
+    return;
+  }
 
   try {
     const info = await file.stat();
@@ -26,14 +30,17 @@ async function readToken(path: string) {
       (info.mode & 0o7777) !== 0o600 ||
       info.size < 43 ||
       info.size > 44
-    )
+    ) {
       throw new Error("Unsafe Fleet API token file");
+    }
+
     const buffer = Buffer.alloc(45);
     const { bytesRead } = await file.read(buffer);
     const contents = buffer.subarray(0, bytesRead).toString("utf8");
 
-    if (!/^[A-Za-z0-9_-]{43}\n?$/.test(contents))
+    if (!/^[A-Za-z0-9_-]{43}\n?$/.test(contents)) {
       throw new Error("Invalid Fleet API token file");
+    }
 
     return contents.slice(0, 43);
   } finally {
@@ -53,10 +60,15 @@ async function publishToken(
     try {
       await link(temporary, path);
     } catch (error) {
-      if (!hasCode(error, "EEXIST")) throw error;
+      if (!hasCode(error, "EEXIST")) {
+        throw error;
+      }
+
       const existing = await readToken(path);
 
-      if (!existing) throw error;
+      if (!existing) {
+        throw error;
+      }
 
       return existing;
     }
@@ -77,13 +89,16 @@ export async function apiToken(dataDirectory: string, rotate = false) {
       !parent.isDirectory() ||
       parent.uid !== process.getuid?.() ||
       (parent.mode & 0o022) !== 0
-    )
+    ) {
       throw new Error("Unsafe Fleet API data directory");
+    }
 
     if (!rotate) {
       const existing = await readToken(path);
 
-      if (existing) return existing;
+      if (existing) {
+        return existing;
+      }
     }
 
     const token = randomBytes(32).toString("base64url");

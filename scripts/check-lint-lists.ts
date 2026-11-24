@@ -124,8 +124,9 @@ function isCeiling(name: string): name is Rule {
 function limit(value: CeilingSetting) {
   const max = value[1]["max"];
 
-  if (typeof max !== "number" || !Number.isInteger(max))
+  if (typeof max !== "number" || !Number.isInteger(max)) {
     throw new Error(`"max" must be an integer: ${JSON.stringify(value)}`);
+  }
 
   return max;
 }
@@ -184,11 +185,13 @@ function lint(run: Run, rules: Record<string, unknown>, files: string[]) {
   const stdout = readFileSync(outputPath, "utf8");
   const detail = `${result.stderr ?? ""}${result.error?.message ?? ""}`.trim();
 
-  if (result.status !== 0 && result.status !== 1)
+  if (result.status !== 0 && result.status !== 1) {
     throw new Error(`oxlint failed (status ${result.status}): ${detail}`);
+  }
 
-  if (!stdout.trim())
+  if (!stdout.trim()) {
     throw new Error(`oxlint gave no output; nothing was checked. ${detail}`);
+  }
 
   let output: unknown;
 
@@ -202,15 +205,17 @@ function lint(run: Run, rules: Record<string, unknown>, files: string[]) {
 
   const parsed = Schema.decodeUnknownSync(report)(output);
 
-  if (parsed.number_of_files !== files.length)
+  if (parsed.number_of_files !== files.length) {
     throw new Error(
       `oxlint linted ${parsed.number_of_files} of ${files.length} files`,
     );
+  }
 
-  if (parsed.number_of_rules !== Object.keys(rules).length)
+  if (parsed.number_of_rules !== Object.keys(rules).length) {
     throw new Error(
       `oxlint ran ${parsed.number_of_rules} of ${Object.keys(rules).length} rules: ${Object.keys(rules).join(", ")}`,
     );
+  }
 
   return parsed.diagnostics.map(({ code, filename, message }): Finding => {
     const number = /\((\d+)\)|complexity of (\d+)/.exec(message);
@@ -223,14 +228,14 @@ function lint(run: Run, rules: Record<string, unknown>, files: string[]) {
   });
 }
 
-type CeilingList = { files: string[]; setting: CeilingSetting };
+type CeilingList = { rule: Rule; files: string[]; setting: CeilingSetting };
 
 type ExceptionList = { at: string; files: string[]; rules: string[] };
 
 type Plan = {
   general: Record<string, unknown>;
   protectedFiles: Set<string>;
-  ceilings: Map<Rule, CeilingList>;
+  ceilings: CeilingList[];
   exceptions: ExceptionList[];
   failures: string[];
 };
@@ -263,21 +268,26 @@ function classify(plan: Plan, index: number, entry: Override) {
     (key) => !["files", "rules"].includes(key),
   );
 
-  if (entry.excludeFiles) return;
+  if (entry.excludeFiles) {
+    return;
+  }
 
   const structural = structuralName(files);
 
   if (structural) {
-    if (names.some((name) => !isOff(rules[name])))
+    if (names.some((name) => !isOff(rules[name]))) {
       plan.failures.push(
         `${at}: the ${structural} override may only turn rules off`,
       );
+    }
 
-    for (const name of ceilingRules)
-      if (!isOff(rules[name]))
+    for (const name of ceilingRules) {
+      if (!isOff(rules[name])) {
         plan.failures.push(
           `${at}: the ${structural} override must turn ${name} off`,
         );
+      }
+    }
 
     return;
   }
@@ -293,9 +303,20 @@ function classify(plan: Plan, index: number, entry: Override) {
   const [first] = names;
 
   if (names.length === 1 && first && isCeiling(first) && !isOff(rules[first])) {
-    if (plan.ceilings.has(first))
-      plan.failures.push(`${first}: more than one list (${at})`);
-    plan.ceilings.set(first, {
+    for (const file of files) {
+      if (
+        plan.ceilings.some(
+          (list) => list.rule === first && list.files.includes(file),
+        )
+      ) {
+        plan.failures.push(
+          `${first}: ${file} is in more than one list (${at})`,
+        );
+      }
+    }
+
+    plan.ceilings.push({
+      rule: first,
       files: [...files],
       setting: Schema.decodeUnknownSync(ceilingSetting)(rules[first]),
     });
@@ -304,18 +325,20 @@ function classify(plan: Plan, index: number, entry: Override) {
   }
 
   if (names.every((name) => isOff(rules[name]))) {
-    for (const name of names.filter((item) => isCeiling(item)))
+    for (const name of names.filter((item) => isCeiling(item))) {
       plan.failures.push(
         `${at}: turns the ceiling rule ${name} off; list the file in the ${name} list instead`,
       );
+    }
 
     for (const name of names) {
       const on = plan.general[name];
 
-      if (on === undefined || isOff(on))
+      if (on === undefined || isOff(on)) {
         plan.failures.push(
           `${at}: ${name} is not on in the general set, so this list turns nothing off`,
         );
+      }
     }
 
     plan.exceptions.push({
@@ -335,18 +358,20 @@ function classify(plan: Plan, index: number, entry: Override) {
 function checkPaths(plan: Plan, owner: string, files: readonly string[]) {
   const sorted = [...new Set(files)].toSorted();
 
-  if (files.join("\n") !== sorted.join("\n"))
+  if (files.join("\n") !== sorted.join("\n")) {
     plan.failures.push(`${owner}: list files must be unique and sorted`);
+  }
 
   for (const file of files) {
-    if (/[*?[\]{}!]/.test(file))
+    if (/[*?[\]{}!]/.test(file)) {
       plan.failures.push(`${owner}: ${file} is a pattern; list literal paths`);
-    else if (file.startsWith("tests/") || plan.protectedFiles.has(file))
+    } else if (file.startsWith("tests/") || plan.protectedFiles.has(file)) {
       plan.failures.push(
         `${owner}: ${file} is a test, a fixed entry or a Zod file; those rules are already off there`,
       );
-    else if (!existsSync(file))
+    } else if (!existsSync(file)) {
       plan.failures.push(`${owner}: ${file} does not exist; remove it`);
+    }
   }
 }
 
@@ -363,7 +388,9 @@ function unknownKeys(
 
 /** Refuses keys the check does not read, and overrides with no files. */
 function checkKeys(input: unknown) {
-  if (!isRecord(input)) return ["the configuration is not a JSON object"];
+  if (!isRecord(input)) {
+    return ["the configuration is not a JSON object"];
+  }
 
   const failures = unknownKeys(input, allowedKeys.top).map(
     (key) =>
@@ -393,12 +420,15 @@ function checkKeys(input: unknown) {
         ? `the ${structural} override`
         : "a ceiling list or an exception list";
 
-    for (const key of unknownKeys(entry, allowed))
+    for (const key of unknownKeys(entry, allowed)) {
       failures.push(
         `${at}: key "${key}" is not allowed in ${kind} (allowed: ${allowed.join(", ")})`,
       );
+    }
 
-    if (files.length === 0) failures.push(`${at}: lists no files`);
+    if (files.length === 0) {
+      failures.push(`${at}: lists no files`);
+    }
   }
 
   return failures;
@@ -408,8 +438,9 @@ async function readPlan(): Promise<{ plan: Plan; plugins: Run["plugins"] }> {
   const input: unknown = await Bun.file(".oxlintrc.json").json();
   const keyFailures = checkKeys(input);
 
-  if (keyFailures.length > 0)
+  if (keyFailures.length > 0) {
     throw new Error(keyFailures.toSorted().join("\n"));
+  }
 
   const {
     overrides,
@@ -426,7 +457,7 @@ async function readPlan(): Promise<{ plan: Plan; plugins: Run["plugins"] }> {
       ...(generalSet?.excludeFiles ?? []),
       ...structuralOverrides[1].files,
     ]),
-    ceilings: new Map(),
+    ceilings: [],
     exceptions: [],
     failures:
       generalSets.length === 1
@@ -436,34 +467,39 @@ async function readPlan(): Promise<{ plan: Plan; plugins: Run["plugins"] }> {
           ],
   };
 
-  for (const [index, entry] of overrides.entries())
+  for (const [index, entry] of overrides.entries()) {
     classify(plan, index, entry);
+  }
 
   return { plan, plugins: jsPlugins };
 }
 
 function checkCeilings(plan: Plan, run: Run, findings: Finding[]) {
-  for (const [name, { files, setting: listed }] of plan.ceilings) {
+  for (const { rule: name, files, setting: listed } of plan.ceilings) {
     const general = plan.general[name];
 
-    if (general === undefined || isOff(general)) continue;
+    if (general === undefined || isOff(general)) {
+      continue;
+    }
+
     const generalMax = limit(Schema.decodeUnknownSync(ceilingSetting)(general));
     const max = limit(listed);
-    const above = findings.filter((finding) => finding.rule === name);
 
-    for (const file of files)
-      if (!above.some((finding) => finding.file === file))
+    const above = findings.filter(
+      (finding) => finding.rule === name && files.includes(finding.file),
+    );
+
+    for (const file of files) {
+      if (!above.some((finding) => finding.file === file)) {
         plan.failures.push(
           `${name}: ${file} has no place above ${generalMax}; remove it from the ${name} list in .oxlintrc.json`,
         );
+      }
+    }
 
     let measured = Math.max(
       generalMax,
-      ...above.flatMap((finding) =>
-        files.includes(finding.file) && finding.value !== undefined
-          ? [finding.value]
-          : [],
-      ),
+      ...above.flatMap(({ value }) => (value === undefined ? [] : [value])),
     );
 
     // The nested-calls rule reports no number: probe below the listed
@@ -471,7 +507,7 @@ function checkCeilings(plan: Plan, run: Run, findings: Finding[]) {
     if (
       above.length > 0 &&
       above.every((finding) => finding.value === undefined)
-    )
+    ) {
       for (measured = max; measured > generalMax; measured--) {
         const probe = lint(
           { ...run, typeAware: false },
@@ -479,52 +515,65 @@ function checkCeilings(plan: Plan, run: Run, findings: Finding[]) {
           files,
         );
 
-        if (probe.some((finding) => finding.rule === name)) break;
+        if (probe.some((finding) => finding.rule === name)) {
+          break;
+        }
       }
+    }
 
-    if (above.length > 0 && max > measured)
+    if (above.length > 0 && max > measured) {
       plan.failures.push(
         `${name}: the list maximum ${max} is above the measured maximum ${measured}; set "max" to ${measured} in the ${name} list in .oxlintrc.json`,
       );
+    }
   }
 }
 
 function checkExceptions(plan: Plan, findings: Finding[]) {
-  for (const { at, files, rules } of plan.exceptions)
-    for (const rule of rules)
-      for (const file of files)
+  for (const { at, files, rules } of plan.exceptions) {
+    for (const rule of rules) {
+      for (const file of files) {
         if (
           !findings.some(
             (finding) => finding.rule === rule && finding.file === file,
           )
-        )
+        ) {
           plan.failures.push(
             `${at}: ${file} has no ${rule} finding with the rule on; remove it from this list in .oxlintrc.json`,
           );
+        }
+      }
+    }
+  }
 }
 
 export async function check() {
   const { plan, plugins } = await readPlan();
 
-  for (const [name, { files }] of plan.ceilings) {
+  for (const { rule: name, files } of plan.ceilings) {
     const general = plan.general[name];
 
-    if (general === undefined || isOff(general))
+    if (general === undefined || isOff(general)) {
       plan.failures.push(
         `${name}: the list has no general limit to compare with`,
       );
+    }
+
     checkPaths(plan, name, files);
   }
 
-  for (const { at, files } of plan.exceptions) checkPaths(plan, at, files);
+  for (const { at, files } of plan.exceptions) {
+    checkPaths(plan, at, files);
+  }
 
-  if (plan.failures.length > 0)
+  if (plan.failures.length > 0) {
     throw new Error(plan.failures.toSorted().join("\n"));
+  }
 
   const scratch = mkdtempSync(join(tmpdir(), "stargate-lint-lists-"));
 
   try {
-    const ceilingFiles = [...plan.ceilings.values()].flatMap((l) => l.files);
+    const ceilingFiles = plan.ceilings.flatMap((list) => list.files);
     const ceilingRun = { scratch, plugins: [], typeAware: false };
 
     const ceilingFindings =
@@ -532,10 +581,7 @@ export async function check() {
         ? lint(
             ceilingRun,
             Object.fromEntries(
-              [...plan.ceilings.keys()].map((name) => [
-                name,
-                plan.general[name],
-              ]),
+              plan.ceilings.map(({ rule }) => [rule, plan.general[rule]]),
             ),
             [...new Set(ceilingFiles)],
           )
@@ -551,7 +597,7 @@ export async function check() {
       ...new Set(plan.exceptions.flatMap((l) => l.files)),
     ];
 
-    if (exceptionRules.length > 0 && exceptionFiles.length > 0)
+    if (exceptionRules.length > 0 && exceptionFiles.length > 0) {
       checkExceptions(
         plan,
         lint(
@@ -562,12 +608,14 @@ export async function check() {
           exceptionFiles,
         ),
       );
+    }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
 
-  if (plan.failures.length > 0)
+  if (plan.failures.length > 0) {
     throw new Error(plan.failures.toSorted().join("\n"));
+  }
 }
 
 if (import.meta.main) {

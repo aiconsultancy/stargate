@@ -163,7 +163,10 @@ test("wake channels are opt-in, authenticated and constrained to joined channels
     "@account=operator;msgid=original :person!u@h PRIVMSG #ship :ordinary instruction",
   );
 
-  if (!message) throw new Error("Missing fixture message");
+  if (!message) {
+    throw new Error("Missing fixture message");
+  }
+
   expect(
     routeIrcMessage(message, {
       ...context,
@@ -185,7 +188,10 @@ test("wake channels are opt-in, authenticated and constrained to joined channels
     "@account=outsider;msgid=original :person!u@h PRIVMSG #ship :ordinary instruction",
   );
 
-  if (!stranger) throw new Error("Missing fixture message");
+  if (!stranger) {
+    throw new Error("Missing fixture message");
+  }
+
   expect(
     routeIrcMessage(stranger, { ...context, config: enabled, member }),
   ).toBeUndefined();

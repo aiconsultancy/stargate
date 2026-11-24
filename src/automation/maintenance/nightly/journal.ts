@@ -103,7 +103,9 @@ export class Journal {
   ) {}
 
   public static create(dataDirectory: string, runID: string) {
-    if (!isRunID(runID)) throw new StepError("unknown");
+    if (!isRunID(runID)) {
+      throw new StepError("unknown");
+    }
 
     return new Journal(dataDirectory, runID, {});
   }
@@ -129,13 +131,17 @@ export class Journal {
       return { kind: "corrupt" };
     }
 
-    if (content === null) return { kind: "none" };
+    if (content === null) {
+      return { kind: "none" };
+    }
 
     if (
       !(await privatePath(maintenanceDirectory(data), "directory")) ||
       !(await privatePath(source, "file"))
-    )
+    ) {
       return { kind: "corrupt" };
+    }
+
     let raw: unknown;
 
     try {
@@ -146,7 +152,9 @@ export class Journal {
 
     const parsed = parseJournal(raw, source === legacyPath(data), config);
 
-    if (!parsed) return { kind: "corrupt" };
+    if (!parsed) {
+      return { kind: "corrupt" };
+    }
 
     return {
       kind: "ok",
@@ -176,7 +184,10 @@ export class Journal {
   }
 
   public async clear(key: JournalEntry) {
-    if (this.data[key] === undefined) return;
+    if (this.data[key] === undefined) {
+      return;
+    }
+
     // The rest keeps the other entries in their order, as delete did.
     const { [key]: _removed, ...rest } = this.data;
     this.data = rest;
@@ -187,8 +198,9 @@ export class Journal {
     if (this.empty) {
       await unlink(journalPath(this.dataDirectory)).catch(() => {});
 
-      if (this.legacy)
+      if (this.legacy) {
         await unlink(legacyPath(this.dataDirectory)).catch(() => {});
+      }
 
       return;
     }
@@ -203,8 +215,9 @@ export class Journal {
       0o600,
     );
 
-    if (this.legacy)
+    if (this.legacy) {
       await unlink(legacyPath(this.dataDirectory)).catch(() => {});
+    }
   }
 }
 
@@ -219,35 +232,47 @@ function parseJournal(
 ): { runID: string; data: Fields } | null {
   const m = config.maintenance;
 
-  if (!m || typeof raw !== "object" || raw === null || Array.isArray(raw))
+  if (!m || typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return null;
+  }
+
   const data: Fields = {};
   let runID: string;
 
   if (legacy) {
     const marker = Schema.decodeUnknownOption(legacyMarker)(raw);
 
-    if (Option.isNone(marker) || marker.value.unit !== m.services.gateway)
+    if (Option.isNone(marker) || marker.value.unit !== m.services.gateway) {
       return null;
+    }
+
     const { stargateRoot, previousRelease } = marker.value;
 
     if (
       stargateRoot !== null &&
       stargateRoot !== undefined &&
       stargateRoot !== m.stargate?.root
-    )
+    ) {
       return null;
+    }
+
     runID = "legacy";
     data.gateway = { restartPending: false };
 
     if (previousRelease) {
-      if (stargateRoot === null || stargateRoot === undefined) return null;
+      if (stargateRoot === null || stargateRoot === undefined) {
+        return null;
+      }
+
       data.release = { previous: previousRelease, version: "0.0.0" };
     }
   } else if ((raw as Record<string, unknown>)["schema"] === journalV1) {
     const old = Schema.decodeUnknownOption(v1)(raw);
 
-    if (Option.isNone(old)) return null;
+    if (Option.isNone(old)) {
+      return null;
+    }
+
     const j = old.value;
     runID = j.runID;
 
@@ -280,16 +305,23 @@ function parseJournal(
               p.command,
           ))) ||
       (j.openCode && !same(j.openCode.restart, m.services.openCodeRestart))
-    )
+    ) {
       return null;
+    }
 
-    if (j.gateway) data.gateway = { restartPending: false };
+    if (j.gateway) {
+      data.gateway = { restartPending: false };
+    }
 
-    if (j.cliproxyapi)
+    if (j.cliproxyapi) {
       data.cliproxyapi = { previousVersion: j.cliproxyapi.version };
+    }
 
     if (j.release) {
-      if (j.release.root !== m.stargate?.root) return null;
+      if (j.release.root !== m.stargate?.root) {
+        return null;
+      }
+
       data.release = {
         previous: j.release.previous,
         version: j.release.version,
@@ -299,12 +331,14 @@ function parseJournal(
     if (j.files) {
       if (
         resolve(j.files.backup) !== backupDirectory(config.dataDirectory, runID)
-      )
+      ) {
         return null;
+      }
+
       data.files = {};
     }
 
-    if (j.clis)
+    if (j.clis) {
       data.clis = {
         packages: j.clis.packages.map(({ name, before, cutoff }) => ({
           name,
@@ -312,53 +346,80 @@ function parseJournal(
           cutoff,
         })),
       };
+    }
 
-    if (j.sessions) data.sessions = j.sessions;
+    if (j.sessions) {
+      data.sessions = j.sessions;
+    }
 
-    if (j.openCode)
+    if (j.openCode) {
       data.openCode = {
         restarted: j.openCode.restarted,
         restartPending: false,
       };
+    }
   } else {
     const record = raw as Record<string, unknown>;
     const allowed = new Set(["schema", "runID", ...Object.keys(fields)]);
 
-    if (record["schema"] !== journalSchemaID) return null;
+    if (record["schema"] !== journalSchemaID) {
+      return null;
+    }
 
-    if (Object.keys(record).some((key) => !allowed.has(key))) return null;
+    if (Object.keys(record).some((key) => !allowed.has(key))) {
+      return null;
+    }
+
     const id = Schema.decodeUnknownOption(runIDSchema)(record["runID"]);
 
-    if (Option.isNone(id)) return null;
+    if (Option.isNone(id)) {
+      return null;
+    }
+
     runID = id.value;
 
     for (const key of Object.keys(fields) as JournalEntry[]) {
-      if (record[key] === undefined) continue;
+      if (record[key] === undefined) {
+        continue;
+      }
+
       const parsed = Schema.decodeUnknownOption(fields[key])(record[key]);
 
-      if (Option.isNone(parsed)) return null;
+      if (Option.isNone(parsed)) {
+        return null;
+      }
+
       (data as Record<string, unknown>)[key] = parsed.value;
     }
   }
 
   // Every entry must refer to configured components only.
-  if (data.cliproxyapi && (!m.cliproxyapi || !m.proxy)) return null;
+  if (data.cliproxyapi && (!m.cliproxyapi || !m.proxy)) {
+    return null;
+  }
 
-  if (data.release && !m.stargate) return null;
+  if (data.release && !m.stargate) {
+    return null;
+  }
 
-  if (data.files && runID === "legacy") return null;
+  if (data.files && runID === "legacy") {
+    return null;
+  }
 
   if (data.clis) {
     const allowed = new Set((m.agentClis?.packages ?? []).map((p) => p.name));
 
-    if (data.clis.packages.some((p) => !allowed.has(p.name))) return null;
+    if (data.clis.packages.some((p) => !allowed.has(p.name))) {
+      return null;
+    }
   }
 
   if (data.sessions) {
     const providers = m.models?.providers ?? ["openai-proxy", "claude-proxy"];
 
-    if (data.sessions.some((s) => !providers.includes(s.from.providerID)))
+    if (data.sessions.some((s) => !providers.includes(s.from.providerID))) {
       return null;
+    }
   }
 
   return { runID, data };
@@ -391,8 +452,10 @@ export class FileChanges {
   public async write(path: string, content: string, expected?: string) {
     const old = await readOptional(path);
 
-    if (expected !== undefined && old !== expected)
+    if (expected !== undefined && old !== expected) {
       throw new StepError("external-change");
+    }
+
     await this.record({ kind: "file", path, old, written: sha256(content) });
     await atomicWrite(path, content);
   }
@@ -420,11 +483,15 @@ async function managedTargets(config: Config) {
     (m?.models?.teamFiles ?? []).map((path) => resolve(path)),
   );
 
-  if (m?.models?.updateGlobalCatalog)
+  if (m?.models?.updateGlobalCatalog) {
     files.add(resolve(globalCatalogPath(m.models)));
+  }
 
-  for (const crew of await discoverCrews(config).catch(() => []))
-    for (const root of crew.roots) files.add(resolve(root.configPath));
+  for (const crew of await discoverCrews(config).catch(() => [])) {
+    for (const root of crew.roots) {
+      files.add(resolve(root.configPath));
+    }
+  }
 
   const profiles = m?.models?.agentProfiles
     ? resolve(m.models.agentProfiles)
@@ -434,11 +501,18 @@ async function managedTargets(config: Config) {
     file(path: string) {
       const target = resolve(path);
 
-      if (target !== path) return false;
+      if (target !== path) {
+        return false;
+      }
 
-      if (files.has(target)) return true;
+      if (files.has(target)) {
+        return true;
+      }
 
-      if (!profiles) return false;
+      if (!profiles) {
+        return false;
+      }
+
       const parts = relative(profiles, target).split(sep);
       const name = parts[1] ?? "";
 
@@ -449,7 +523,10 @@ async function managedTargets(config: Config) {
       );
     },
     link(path: string, target: string) {
-      if (!profiles || resolve(path) !== path) return false;
+      if (!profiles || resolve(path) !== path) {
+        return false;
+      }
+
       const name = basename(path);
 
       return (
@@ -465,15 +542,19 @@ async function readBackupEntry(
   path: string,
   managed: Awaited<ReturnType<typeof managedTargets>>,
 ) {
-  if (!(await privatePath(path, "file"))) throw new StepError("unknown");
+  if (!(await privatePath(path, "file"))) {
+    throw new StepError("unknown");
+  }
+
   const entry = decodeBackupEntry(JSON.parse(await readFile(path, "utf8")));
 
   if (
     entry.kind === "link"
       ? !managed.link(entry.path, entry.target)
       : !managed.file(entry.path)
-  )
+  ) {
     throw new StepError("unknown");
+  }
 
   return entry;
 }
@@ -490,13 +571,16 @@ async function readBackup(config: Config, runID: string) {
     .filter((name) => /^\d+\.json$/.test(name))
     .toSorted((a, b) => Number(b.slice(0, -5)) - Number(a.slice(0, -5)));
 
-  if (names.length > 0 && !(await privatePath(backup, "directory")))
+  if (names.length > 0 && !(await privatePath(backup, "directory"))) {
     throw new StepError("unknown");
+  }
+
   const managed = await managedTargets(config);
   const entries: BackupEntry[] = [];
 
-  for (const name of names)
+  for (const name of names) {
     entries.push(await readBackupEntry(join(backup, name), managed));
+  }
 
   return entries;
 }
@@ -509,7 +593,9 @@ async function backupState(entry: BackupEntry) {
   if (entry.kind === "link") {
     const info = await lstat(entry.path).catch(() => null);
 
-    if (!info) return "previous";
+    if (!info) {
+      return "previous";
+    }
 
     return info.isSymbolicLink() &&
       (await readlink(entry.path)) === entry.target
@@ -519,7 +605,9 @@ async function backupState(entry: BackupEntry) {
 
   const current = await readOptional(entry.path);
 
-  if (current === entry.old) return "previous";
+  if (current === entry.old) {
+    return "previous";
+  }
 
   return current !== null && sha256(current) === entry.written
     ? "written"
@@ -543,21 +631,32 @@ export async function restoreBackup(
   const entries = await readBackup(config, runID);
   const checked = [];
 
-  for (const entry of entries)
+  for (const entry of entries) {
     checked.push({ entry, state: await backupState(entry) });
+  }
 
-  if (checked.some(({ state }) => state === "changed"))
+  if (checked.some(({ state }) => state === "changed")) {
     throw new StepError("external-change");
+  }
+
   let changing = false;
 
   for (const { entry, state } of checked) {
-    if (state === "previous") continue;
+    if (state === "previous") {
+      continue;
+    }
 
-    if (!changing) await beforeChange();
+    if (!changing) {
+      await beforeChange();
+    }
+
     changing = true;
 
-    if (entry.kind === "link" || entry.old === null) await unlink(entry.path);
-    else await atomicWrite(entry.path, entry.old);
+    if (entry.kind === "link" || entry.old === null) {
+      await unlink(entry.path);
+    } else {
+      await atomicWrite(entry.path, entry.old);
+    }
   }
 }
 
@@ -591,10 +690,11 @@ export async function describeEntry(
 
         const lines = [`backup ${backup}`];
 
-        for (const item of await readBackup(config, journal.runID))
+        for (const item of await readBackup(config, journal.runID)) {
           lines.push(
             `${item.kind} ${item.path}: ${labels[await backupState(item)]}`,
           );
+        }
 
         return lines;
       } catch {
@@ -605,7 +705,9 @@ export async function describeEntry(
     case "release": {
       const release = journal.get("release");
 
-      if (!release || !m?.stargate) return [];
+      if (!release || !m?.stargate) {
+        return [];
+      }
 
       return [
         `${await link(join(m.stargate.root, "current"))}; recovery points it back to releases/${release.previous}`,
@@ -620,7 +722,9 @@ export async function describeEntry(
     case "cliproxyapi": {
       const proxy = journal.get("cliproxyapi");
 
-      if (!proxy || !m?.cliproxyapi) return [];
+      if (!proxy || !m?.cliproxyapi) {
+        return [];
+      }
 
       return [
         `${await link(m.cliproxyapi.link)}; recovery points it back to ${binaryPath(m.cliproxyapi, proxy.previousVersion)}`,
@@ -794,14 +898,18 @@ export async function undoJournal(
   };
 
   const oweGateway = async () => {
-    if (journal.get("gateway"))
+    if (journal.get("gateway")) {
       await journal.set("gateway", { restartPending: true });
+    }
   };
 
   const idle = async (step: UndoStep) => {
     const result = await ctx.gate?.(step);
 
-    if (!result || result.idle) return true;
+    if (!result || result.idle) {
+      return true;
+    }
+
     record({ kind: "deferred", step, reason: result.reason });
 
     return false;
@@ -809,7 +917,9 @@ export async function undoJournal(
 
   const sessions = wanted("sessions") ? journal.get("sessions") : undefined;
 
-  if (sessions?.length && !(await idle("sessions"))) return false;
+  if (sessions?.length && !(await idle("sessions"))) {
+    return false;
+  }
 
   if (sessions?.length) {
     const left: SessionItem[] = [...sessions];
@@ -817,7 +927,10 @@ export async function undoJournal(
     const until = ctx.now() + undoBounds.sessions;
 
     for (const item of sessions.toReversed()) {
-      if (!control || ctx.now() >= until) break;
+      if (!control || ctx.now() >= until) {
+        break;
+      }
+
       const from = sessionRef(item);
       let ok = false;
 
@@ -837,15 +950,25 @@ export async function undoJournal(
         ok,
       });
 
-      if (ok) left.splice(left.indexOf(item), 1);
+      if (ok) {
+        left.splice(left.indexOf(item), 1);
+      }
     }
 
-    if (left.length > 0) await journal.set("sessions", left);
-    else await journal.clear("sessions");
-  } else if (wanted("sessions")) await journal.clear("sessions");
+    if (left.length > 0) {
+      await journal.set("sessions", left);
+    } else {
+      await journal.clear("sessions");
+    }
+  } else if (wanted("sessions")) {
+    await journal.clear("sessions");
+  }
 
   if (wanted("files") && journal.get("files")) {
-    if (!(await idle("files"))) return false;
+    if (!(await idle("files"))) {
+      return false;
+    }
+
     let reason: Reason | undefined;
 
     try {
@@ -876,10 +999,16 @@ export async function undoJournal(
         join(m.stargate.root, "releases", release.previous),
       );
 
-      if (!managed) throw new StepError("switch-failed");
+      if (!managed) {
+        throw new StepError("switch-failed");
+      }
+
       await restoreCurrent(m.stargate.root, release.previous);
 
-      if (restarted) await oweOpenCode();
+      if (restarted) {
+        await oweOpenCode();
+      }
+
       await oweGateway();
       await journal.clear("release");
     } catch {
@@ -898,7 +1027,10 @@ export async function undoJournal(
   const clis = wanted("clis") ? journal.get("clis") : undefined;
 
   if (clis && m?.agentClis) {
-    if (!(await idle("clis"))) return false;
+    if (!(await idle("clis"))) {
+      return false;
+    }
+
     const settings = m.agentClis;
     const left = [];
 
@@ -907,7 +1039,10 @@ export async function undoJournal(
       let ok = false;
 
       try {
-        if (!configured) throw new StepError("not-configured");
+        if (!configured) {
+          throw new StepError("not-configured");
+        }
+
         // The cutoff that produced the previous install: no newer dependency.
         await agentCliInstall(
           settings,
@@ -934,13 +1069,20 @@ export async function undoJournal(
         ok,
       });
 
-      if (!ok) left.push(item);
+      if (!ok) {
+        left.push(item);
+      }
     }
 
-    if (restarted && left.length < clis.packages.length) await oweOpenCode();
+    if (restarted && left.length < clis.packages.length) {
+      await oweOpenCode();
+    }
 
-    if (left.length > 0) await journal.set("clis", { packages: left });
-    else await journal.clear("clis");
+    if (left.length > 0) {
+      await journal.set("clis", { packages: left });
+    } else {
+      await journal.clear("clis");
+    }
   }
 
   const proxy = wanted("cliproxyapi") ? journal.get("cliproxyapi") : undefined;
@@ -964,13 +1106,19 @@ export async function undoJournal(
         .catch(() => null);
 
       // Already back on the previous binary and answering: nothing to redo.
-      if (linked === target && (await healthy())) ok = true;
-      else {
+      if (linked === target && (await healthy())) {
+        ok = true;
+      } else {
         const binary = await lstat(target).catch(() => null);
 
-        if (!binary?.isFile()) throw new StepError("not-found");
+        if (!binary?.isFile()) {
+          throw new StepError("not-found");
+        }
 
-        if (!(await idle("cliproxyapi"))) return false;
+        if (!(await idle("cliproxyapi"))) {
+          return false;
+        }
+
         await replaceLink(settings.link, target);
 
         const restartedProxy = await ctx.runner.run(
@@ -985,7 +1133,10 @@ export async function undoJournal(
         while (restartedProxy.code === 0 && !ok) {
           ok = await healthy();
 
-          if (ok || ctx.now() >= until) break;
+          if (ok || ctx.now() >= until) {
+            break;
+          }
+
           await ctx.sleep(3000);
         }
 
@@ -1003,14 +1154,18 @@ export async function undoJournal(
       ok,
     });
 
-    if (ok) await journal.clear("cliproxyapi");
+    if (ok) {
+      await journal.clear("cliproxyapi");
+    }
   }
 
   // Restart OpenCode while a restart is owed; the flag survives interruption.
   let openCodeOK = true;
 
   if (wanted("openCode") && journal.get("openCode")?.restartPending && m) {
-    if (!(await idle("opencode"))) return false;
+    if (!(await idle("opencode"))) {
+      return false;
+    }
 
     const result = await ctx.runner.run(m.services.openCodeRestart, {
       timeoutMs: 120_000,
@@ -1025,20 +1180,26 @@ export async function undoJournal(
         () => false,
       );
 
-      if (openCodeOK || ctx.now() >= until) break;
+      if (openCodeOK || ctx.now() >= until) {
+        break;
+      }
+
       await ctx.sleep(3000);
     }
 
     record({ kind: "restart", service: "opencode", ok: openCodeOK });
 
-    if (openCodeOK)
+    if (openCodeOK) {
       await journal.set("openCode", {
         restarted: journal.get("openCode")?.restarted ?? false,
         restartPending: false,
       });
+    }
   }
 
-  if (!only && openCodeOK) await journal.clear("openCode");
+  if (!only && openCodeOK) {
+    await journal.clear("openCode");
+  }
 
   const gateway = wanted("gateway") ? journal.get("gateway") : undefined;
 
@@ -1062,17 +1223,19 @@ export async function undoJournal(
       ready &&
       readyProcessAlive(ready) &&
       (expected === undefined || ready.version === expected)
-    )
+    ) {
       ok = true;
-    else {
+    } else {
       // Starting a stopped gateway interrupts nothing; restarting a running
       // (or unknown) one does.
       if (
         state !== "inactive" &&
         state !== "failed" &&
         !(await idle("gateway"))
-      )
+      ) {
         return false;
+      }
+
       const since = ctx.now();
 
       const started = await ctx.runner.run(
@@ -1095,7 +1258,9 @@ export async function undoJournal(
       record({ kind: "restart", service: "gateway", ok });
     }
 
-    if (ok) await journal.clear("gateway");
+    if (ok) {
+      await journal.clear("gateway");
+    }
   }
 
   return only

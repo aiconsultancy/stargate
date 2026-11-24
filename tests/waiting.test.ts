@@ -87,7 +87,9 @@ test("captain waiting changes persist and apply without gateway restart", async 
         team: { captain: { id: "adama" } },
       },
       async captain(caller: { agent: string }) {
-        if (caller.agent !== "adama") throw new Error("not captain");
+        if (caller.agent !== "adama") {
+          throw new Error("not captain");
+        }
       },
     };
 

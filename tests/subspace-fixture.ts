@@ -15,8 +15,9 @@ export const ENROLMENT_TOKEN = "senr1.example-enrolment-token";
 const directories: string[] = [];
 
 export async function removeDirectories() {
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
+  }
 }
 
 /** A private (0700) directory with a resolved path, as the gateway needs. */

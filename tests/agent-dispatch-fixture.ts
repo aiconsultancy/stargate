@@ -183,19 +183,26 @@ export class FakeApi implements DispatchApi {
   change(id: string, patch: Partial<StoredIssue>) {
     const issue = this.issues.get(id);
 
-    if (!issue) throw new Error("unknown issue");
+    if (!issue) {
+      throw new Error("unknown issue");
+    }
+
     Object.assign(issue, patch, {
       version: issue.version + 1,
       updatedAt: new Date(this.clock.now()).toISOString(),
     });
 
-    if (issue.assigneeId) issue.readyForAgents = false;
+    if (issue.assigneeId) {
+      issue.readyForAgents = false;
+    }
   }
 
   agent(userId: string) {
     const agent = this.agents.find((entry) => entry.userId === userId);
 
-    if (!agent) throw new Error("unknown agent");
+    if (!agent) {
+      throw new Error("unknown agent");
+    }
 
     return agent;
   }
@@ -336,11 +343,17 @@ export class FakeApi implements DispatchApi {
 
     const issue = this.issues.get(reference);
 
-    if (!issue) throw new Error("missing");
+    if (!issue) {
+      throw new Error("missing");
+    }
+
     this.beforeAssign?.(issue);
     this.beforeAssign = undefined;
 
-    if (issue.version !== version) return { conflict: true };
+    if (issue.version !== version) {
+      return { conflict: true };
+    }
+
     this.edits.push({ issue: reference, body: { version, assigneeId } });
     this.change(reference, { assigneeId });
 
@@ -349,9 +362,14 @@ export class FakeApi implements DispatchApi {
   async clearReady(reference: string, version: number): Promise<EditResult> {
     const issue = this.issues.get(reference);
 
-    if (!issue) throw new Error("missing");
+    if (!issue) {
+      throw new Error("missing");
+    }
 
-    if (issue.version !== version) return { conflict: true };
+    if (issue.version !== version) {
+      return { conflict: true };
+    }
+
     this.edits.push({
       issue: reference,
       body: { version, readyForAgents: false },
@@ -364,7 +382,9 @@ export class FakeApi implements DispatchApi {
     this.comments.push({ issue: reference, body });
     const issue = this.issues.get(reference);
 
-    if (issue) issue.updatedAt = new Date(this.clock.now()).toISOString();
+    if (issue) {
+      issue.updatedAt = new Date(this.clock.now()).toISOString();
+    }
   }
 }
 
@@ -389,16 +409,24 @@ export class FakeChat implements DispatchMessenger {
   refused: string[] = [];
   private sequence = 0;
   private carried(kind: "assigned" | "offer", issue: IssueLabel) {
-    if (!this.undeliverable.has(issue.identifier)) return;
+    if (!this.undeliverable.has(issue.identifier)) {
+      return;
+    }
+
     this.refused.push(`${kind} ${issue.identifier}`);
     throw new UndeliverableIssue("identifier cannot be carried");
   }
   async assigned(captain: CaptainRef, issue: IssueLabel) {
     this.carried("assigned", issue);
 
-    if (this.down) throw new Error("IRC unavailable");
+    if (this.down) {
+      throw new Error("IRC unavailable");
+    }
 
-    if (this.offline.has(captain.account)) return false;
+    if (this.offline.has(captain.account)) {
+      return false;
+    }
+
     this.lines.push({
       kind: "assigned",
       account: captain.account,
@@ -410,9 +438,14 @@ export class FakeChat implements DispatchMessenger {
   async offer(captain: CaptainRef, offer: { id: string; issue: IssueLabel }) {
     this.carried("offer", offer.issue);
 
-    if (this.down) throw new Error("IRC unavailable");
+    if (this.down) {
+      throw new Error("IRC unavailable");
+    }
 
-    if (this.offline.has(captain.account)) return undefined;
+    if (this.offline.has(captain.account)) {
+      return undefined;
+    }
+
     const messageID = `msg-${++this.sequence}`;
     this.lines.push({
       kind: "offer",
@@ -425,7 +458,10 @@ export class FakeChat implements DispatchMessenger {
     return { messageID };
   }
   async announce(event: DispatchEvent) {
-    if (this.down) throw new Error("IRC unavailable");
+    if (this.down) {
+      throw new Error("IRC unavailable");
+    }
+
     this.lines.push({ kind: "status", event });
   }
   offers() {
@@ -434,7 +470,9 @@ export class FakeChat implements DispatchMessenger {
   lastOffer() {
     const offer = this.offers().at(-1);
 
-    if (!offer) throw new Error("no offer");
+    if (!offer) {
+      throw new Error("no offer");
+    }
 
     return offer;
   }
@@ -518,39 +556,54 @@ export class FakeSubspaceHttp {
     const route = this.route(method, url, String(init.body ?? ""));
     const failure = route ? this.failures.get(route) : undefined;
 
-    if (failure === "refused") throw new TypeError("fetch failed");
+    if (failure === "refused") {
+      throw new TypeError("fetch failed");
+    }
 
-    if (failure === "timeout")
+    if (failure === "timeout") {
       return await new Promise<Response>((_, reject) => {
         const signal = init.signal;
 
-        if (!signal) return;
+        if (!signal) {
+          return;
+        }
 
-        if (signal.aborted) reject(signal.reason);
+        if (signal.aborted) {
+          reject(signal.reason);
+        }
+
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         });
       });
+    }
 
-    if (failure === "5xx")
+    if (failure === "5xx") {
       return new Response('{"title":"Unavailable"}', { status: 503 });
+    }
 
-    if (this.credentialStatus)
+    if (this.credentialStatus) {
       return new Response('{"title":"Refused"}', {
         status: this.credentialStatus,
       });
+    }
 
     if (
       headers.get("authorization") !== `Bearer ${TOKEN}` ||
       headers.get("x-access-id") !== ACCESS
-    )
+    ) {
       return new Response("{}", { status: 401 });
+    }
+
     const response = await this.answer(route, url, String(init.body ?? ""));
 
-    if (failure === "lost") throw new TypeError("connection reset");
+    if (failure === "lost") {
+      throw new TypeError("connection reset");
+    }
 
-    if (failure === "malformed")
+    if (failure === "malformed") {
       return new Response("{not json", { status: 200 });
+    }
 
     return response;
   }) as typeof fetch;
@@ -558,25 +611,37 @@ export class FakeSubspaceHttp {
   private route(method: string, url: URL, body: string): RouteKind | undefined {
     const path = url.pathname;
 
-    if (path === "/api/v1/me") return "me";
+    if (path === "/api/v1/me") {
+      return "me";
+    }
 
-    if (path.startsWith("/api/v1/fleets/")) return "fleet";
+    if (path.startsWith("/api/v1/fleets/")) {
+      return "fleet";
+    }
 
-    if (path === "/api/v1/initiatives") return "initiatives";
+    if (path === "/api/v1/initiatives") {
+      return "initiatives";
+    }
 
-    if (path === "/api/v1/projects") return "projects";
+    if (path === "/api/v1/projects") {
+      return "projects";
+    }
 
-    if (path === "/api/v1/issues")
+    if (path === "/api/v1/issues") {
       return url.searchParams.has("readyForAgents") ? "ready" : "assigned";
+    }
 
-    if (path.endsWith("/comments")) return "comment";
+    if (path.endsWith("/comments")) {
+      return "comment";
+    }
 
-    if (path.startsWith("/api/v1/issues/"))
+    if (path.startsWith("/api/v1/issues/")) {
       return method === "PATCH"
         ? body.includes('"assigneeId"')
           ? "assign"
           : "clear"
         : "issue";
+    }
 
     return;
   }
@@ -640,8 +705,9 @@ export class FakeSubspaceHttp {
             .map((issue) => api.wire(issue)),
         );
       case "ready":
-        if (this.rejectReadyFilter)
+        if (this.rejectReadyFilter) {
           return json({ title: "Unknown filter" }, 400);
+        }
 
         return page(api.readyRaw().map((issue) => api.wire(issue)));
       case "issue": {
@@ -654,7 +720,9 @@ export class FakeSubspaceHttp {
       case "clear": {
         const issue = api.issues.get(lastSegment(url));
 
-        if (!issue) return json({}, 404);
+        if (!issue) {
+          return json({}, 404);
+        }
 
         const edit = JSON.parse(body) as {
           version: number;
@@ -662,7 +730,10 @@ export class FakeSubspaceHttp {
           readyForAgents?: boolean;
         };
 
-        if (edit.version !== issue.version) return json({}, 409);
+        if (edit.version !== issue.version) {
+          return json({}, 409);
+        }
+
         api.edits.push({ issue: issue.id, body: edit });
         api.change(
           issue.id,
@@ -713,8 +784,9 @@ export const silent = pino({ level: "silent" });
 const directories: string[] = [];
 
 export async function removeDirectories() {
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
+  }
 }
 
 export async function tempDirectory() {

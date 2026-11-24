@@ -45,7 +45,10 @@ export { githubRepository, isGitHubRepositoryName };
 export function parseAheadBehind(output: string) {
   const match = /^(\d+)[\t ]+(\d+)$/.exec(output.trim());
 
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
+
   // The command compares base...HEAD, so the left side is behind.
   const behind = Number(match[1]);
   const ahead = Number(match[2]);
@@ -56,19 +59,30 @@ export function parseAheadBehind(output: string) {
 }
 
 export function countChangedPaths(output: string): number | null {
-  if (output === "") return 0;
+  if (output === "") {
+    return 0;
+  }
+
   const entries = output.split("\0");
 
-  if (entries.pop() !== "") return null;
+  if (entries.pop() !== "") {
+    return null;
+  }
+
   let count = 0;
 
   for (let index = 0; index < entries.length; index++) {
     const entry = entries[index];
 
-    if (!entry || !/^[ MTADRCU?!]{2} .+/s.test(entry)) return null;
+    if (!entry || !/^[ MTADRCU?!]{2} .+/s.test(entry)) {
+      return null;
+    }
 
     // In porcelain -z, a rename/copy has a second NUL-delimited path.
-    if (/^[RC]|^.[RC]/.test(entry) && !entries[++index]) return null;
+    if (/^[RC]|^.[RC]/.test(entry) && !entries[++index]) {
+      return null;
+    }
+
     count++;
   }
 
@@ -85,11 +99,15 @@ function statusOptions(output: string) {
   const options: string[] = [];
 
   for (const entry of output.split("\0")) {
-    if (!entry) continue;
+    if (!entry) {
+      continue;
+    }
+
     const [key, value = "true", ...rest] = entry.split("\n");
 
-    if (key && statusSettings.test(key) && rest.length === 0)
+    if (key && statusSettings.test(key) && rest.length === 0) {
       options.push("-c", `${key}=${value}`);
+    }
   }
 
   return options;
@@ -118,8 +136,9 @@ async function openStatusFile(source: string, roots: string[]) {
         !isAbsolute(child)
       );
     })
-  )
+  ) {
     return;
+  }
 
   if (process.platform === "darwin") {
     // Darwin O_NOFOLLOW_ANY
@@ -128,13 +147,19 @@ async function openStatusFile(source: string, roots: string[]) {
     return open(path, constants.O_RDONLY | constants.O_NONBLOCK | noFollowAny);
   }
 
-  if (process.platform !== "linux") return;
+  if (process.platform !== "linux") {
+    return;
+  }
+
   // Linux exposes directory descriptors through procfs. Open each component
   // Relative to its pinned parent, forbidding symlinks at each step.
   const parts = path.split(sep).slice(1);
   const name = parts.pop();
 
-  if (!name) return;
+  if (!name) {
+    return;
+  }
+
   const directoryFlags = constants.O_DIRECTORY | metadataFlags;
   let parent = await open(sep, directoryFlags);
 
@@ -156,7 +181,9 @@ async function openStatusFile(source: string, roots: string[]) {
 }
 
 async function cloneIndex(file: FileHandle, target: string) {
-  if (process.platform !== "linux") return false;
+  if (process.platform !== "linux") {
+    return false;
+  }
 
   // Clone the already-open file. Reopening its checkout path would race a
   // Replacement between the size check and clone.
@@ -186,30 +213,41 @@ async function copyStatusFile(
     if (
       kind === "pattern" ||
       (kind === "primary" && fileError(error) === "ENOENT")
-    )
+    ) {
       return;
+    }
+
     throw error;
   });
 
-  if (!file) return false;
+  if (!file) {
+    return false;
+  }
+
   let copied = 0;
 
   try {
     const metadata = await file.stat();
 
     if (!metadata.isFile()) {
-      if (kind === "pattern") return false;
+      if (kind === "pattern") {
+        return false;
+      }
+
       throw new Error("Git metadata unavailable");
     }
 
-    if (metadata.size > limit || metadata.size > budget.remaining)
+    if (metadata.size > limit || metadata.size > budget.remaining) {
       throw new MetadataLimitExceeded();
+    }
 
     if (kind !== "pattern" && (await cloneIndex(file, target))) {
       const { size } = await stat(target);
 
-      if (size > limit || size > budget.remaining)
+      if (size > limit || size > budget.remaining) {
         throw new MetadataLimitExceeded();
+      }
+
       budget.remaining -= size;
     } else {
       // Larger blocks avoid a read and write round trip for each 64 KiB of index.
@@ -225,8 +263,10 @@ async function copyStatusFile(
             budget.remaining -= chunk.byteLength;
             copied += chunk.byteLength;
 
-            if (remaining < 0 || budget.remaining < 0)
+            if (remaining < 0 || budget.remaining < 0) {
               throw new MetadataLimitExceeded();
+            }
+
             yield chunk;
           }
         },
@@ -244,8 +284,10 @@ async function copyStatusFile(
   } catch (error) {
     signal.throwIfAborted();
 
-    if (kind !== "pattern" || error instanceof MetadataLimitExceeded)
+    if (kind !== "pattern" || error instanceof MetadataLimitExceeded) {
       throw error;
+    }
+
     await rm(target, { force: true });
     budget.remaining += copied;
 
@@ -264,8 +306,9 @@ async function privateStatusDirectory(path: string) {
     metadata?.isDirectory() &&
     (metadata.mode & 0o777) === 0o700 &&
     metadata.uid === process.getuid?.()
-  )
+  ) {
     return metadata;
+  }
 
   return;
 }
@@ -273,7 +316,10 @@ async function privateStatusDirectory(path: string) {
 async function trustedStatusRoot(path: string, serviceOwned = false) {
   const canonical = await realpath(path).catch(() => {});
 
-  if (!canonical) return;
+  if (!canonical) {
+    return;
+  }
+
   const uid = process.getuid?.();
   // Walk from the root so each directory entry is protected before use.
   // Sticky directories protect entries owned by root or the service user.
@@ -288,8 +334,9 @@ async function trustedStatusRoot(path: string, serviceOwned = false) {
       (info.uid !== uid &&
         (info.uid !== 0 || (serviceOwned && ancestor === canonical))) ||
       (info.mode & 0o022 && !(info.mode & 0o1000))
-    )
+    ) {
       return;
+    }
   }
 
   return canonical;
@@ -308,7 +355,10 @@ function retainTemporaryStatusRoot(directory: string) {
       async (path) => {
         const info = await privateStatusDirectory(path);
 
-        if (info && (info.mode & 0o7777) === 0o700) return path;
+        if (info && (info.mode & 0o7777) === 0o700) {
+          return path;
+        }
+
         await removeStatusDirectory(path);
         throw new Error("Invalid private Git status directory");
       },
@@ -324,11 +374,16 @@ function retainTemporaryStatusRoot(directory: string) {
   return {
     path: retained.path,
     async release() {
-      if (--retained.readers !== 0) return;
+      if (--retained.readers !== 0) {
+        return;
+      }
+
       temporaryStatusRoots.delete(directory);
       const path = await retained.path.catch(() => {});
 
-      if (path) await removeStatusDirectory(path);
+      if (path) {
+        await removeStatusDirectory(path);
+      }
     },
   };
 }
@@ -359,27 +414,33 @@ function statusDirectories(
 
           if (parent && outsideCheckout(parent)) {
             await mkdir(parent, { mode: 0o700 }).catch((error: unknown) => {
-              if (fileError(error) !== "EEXIST") throw error;
+              if (fileError(error) !== "EEXIST") {
+                throw error;
+              }
             });
 
-            if (await privateStatusDirectory(parent))
+            if (await privateStatusDirectory(parent)) {
               return await mkdtemp(join(parent, statusDirectoryPrefix));
+            }
           }
         } catch (error) {
           if (
             !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
               String(fileError(error)),
             )
-          )
+          ) {
             throw error;
+          }
         }
       }
 
       if (!temporaryRoot) {
         const temporary = await trustedStatusRoot(temporaryDirectory());
 
-        if (!temporary || !outsideCheckout(temporary))
+        if (!temporary || !outsideCheckout(temporary)) {
           throw new Error("No private Git status directory outside checkout");
+        }
+
         temporaryRoot ??= retainTemporaryStatusRoot(temporary);
       }
 
@@ -394,8 +455,9 @@ function statusDirectories(
         throw error;
       });
 
-      if (!outsideCheckout(parent))
+      if (!outsideCheckout(parent)) {
         throw new Error("No private Git status directory outside checkout");
+      }
 
       return mkdtemp(join(parent, statusDirectoryPrefix));
     },
@@ -412,10 +474,16 @@ async function removeStatusDirectory(path: string) {
 async function sweepStatusDirectories(root: string) {
   const canonical = await trustedStatusRoot(root, true);
 
-  if (!canonical) return;
+  if (!canonical) {
+    return;
+  }
+
   const directory = join(canonical, statusDirectoryName);
 
-  if (!(await privateStatusDirectory(directory))) return;
+  if (!(await privateStatusDirectory(directory))) {
+    return;
+  }
+
   const cutoff = Date.now() - staleDirectoryAge;
   const names = await readdir(directory).catch(() => []);
 
@@ -423,13 +491,16 @@ async function sweepStatusDirectories(root: string) {
     if (
       !name.startsWith(statusDirectoryPrefix) ||
       !/^[a-z\d]{6}$/i.test(name.slice(statusDirectoryPrefix.length))
-    )
+    ) {
       continue;
+    }
+
     const path = join(directory, name);
     const metadata = await privateStatusDirectory(path);
 
-    if (metadata && metadata.mtimeMs < cutoff)
+    if (metadata && metadata.mtimeMs < cutoff) {
       await removeStatusDirectory(path);
+    }
   }
 }
 
@@ -455,16 +526,22 @@ async function readSharedIndexName(
 
   signal.throwIfAborted();
 
-  if (result?.code !== 0) throw new Error("Invalid Git index");
+  if (result?.code !== 0) {
+    throw new Error("Invalid Git index");
+  }
+
   const name = result.stdout;
 
-  if (!name) return;
+  if (!name) {
+    return;
+  }
 
   if (
     !/^sharedindex\.[a-f0-9]+$/.test(name) ||
     name.length !== "sharedindex.".length + (format === "sha1" ? 40 : 64)
-  )
+  ) {
     throw new Error("Invalid Git index");
+  }
 
   return name;
 }
@@ -537,8 +614,9 @@ async function prepareStatus(
     !isAbsolute(commonGit) ||
     (format !== "sha1" && format !== "sha256") ||
     rest.length > 0
-  )
+  ) {
     throw new Error("Git metadata unavailable");
+  }
 
   // Status only sees this repository's config, HEAD, index and object store.
   // Never copy executable settings, hooks, info/attributes or a commondir.
@@ -569,7 +647,9 @@ async function prepareStatus(
       async () => {
         const file = await openStatusFile(source, roots);
 
-        if (!file) throw new Error("Git metadata unavailable");
+        if (!file) {
+          throw new Error("Git metadata unavailable");
+        }
 
         return file;
       },
@@ -587,8 +667,9 @@ async function prepareStatus(
   if (await snapshotIndex(index, "index", "primary")) {
     const shared = await readSharedIndexName(gitDir, format, signal, command);
 
-    if (shared)
+    if (shared) {
       await snapshotIndex(join(dirname(index), shared), shared, "shared");
+    }
   }
 
   const snapshotPattern = (source: string, target: string) =>
@@ -622,7 +703,11 @@ async function prepareStatus(
       : configuredExcludes,
   ]);
 
-  for (const file of files) if (file.status === "rejected") throw file.reason;
+  for (const file of files) {
+    if (file.status === "rejected") {
+      throw file.reason;
+    }
+  }
 
   return {
     env: {
@@ -651,11 +736,15 @@ async function readHeadRef(run: RunGit) {
   const ref = await run("symbolic-ref", "-q", "HEAD");
 
   // Detached.
-  if (ref.code === 1) return "HEAD";
+  if (ref.code === 1) {
+    return "HEAD";
+  }
+
   const name = ref.stdout.trim();
 
-  if (ref.code !== 0 || !name.startsWith("refs/"))
+  if (ref.code !== 0 || !name.startsWith("refs/")) {
     throw new Error("Git HEAD unavailable");
+  }
 
   return name;
 }
@@ -663,11 +752,15 @@ async function readHeadRef(run: RunGit) {
 async function readCommit(run: RunGit, ref: string) {
   const revision = await run("rev-parse", "--verify", "--end-of-options", ref);
 
-  if (revision.code !== 0) return;
+  if (revision.code !== 0) {
+    return;
+  }
+
   const oid = revision.stdout.trim();
 
-  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid))
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid)) {
     throw new Error("Git HEAD unavailable");
+  }
 
   return oid;
 }
@@ -734,7 +827,9 @@ async function inspect(
 
     deadline.throwIfAborted();
 
-    if (!result) throw new Error("Git unavailable");
+    if (!result) {
+      throw new Error("Git unavailable");
+    }
 
     return result;
   };
@@ -743,9 +838,14 @@ async function inspect(
 
   try {
     try {
-      if (!(await stat(directory)).isDirectory()) return null;
+      if (!(await stat(directory)).isDirectory()) {
+        return null;
+      }
     } catch (error) {
-      if (fileError(error) === "ENOENT") return null;
+      if (fileError(error) === "ENOENT") {
+        return null;
+      }
+
       throw error;
     }
 
@@ -755,8 +855,10 @@ async function inspect(
       "--show-prefix",
     );
 
-    if (root.code !== 0 || root.stdout !== "true\n\n")
+    if (root.code !== 0 || root.stdout !== "true\n\n") {
       throw new Error("Checkout root unavailable");
+    }
+
     const branchRef = await readHeadRef(run);
 
     const branch = branchRef.startsWith("refs/heads/")
@@ -809,7 +911,10 @@ async function inspect(
     const changedFiles =
       changed.code === 0 ? countChangedPaths(changed.stdout) : null;
 
-    if (changedFiles === null) throw new Error("Git state unavailable");
+    if (changedFiles === null) {
+      throw new Error("Git state unavailable");
+    }
+
     const branchName = branch && safeRef(branch);
 
     const [remote, head] = await Promise.all([
@@ -832,14 +937,17 @@ async function inspect(
 
       counts = result.code === 0 ? parseAheadBehind(result.stdout) : null;
 
-      if (!counts) throw new Error("Git comparison unavailable");
+      if (!counts) {
+        throw new Error("Git comparison unavailable");
+      }
     }
 
     if (
       branchRef !== (await readHeadRef(run)) ||
       oid !== (await readCommit(run, "HEAD"))
-    )
+    ) {
       throw new Error("Git HEAD changed during status read");
+    }
 
     return {
       ...state,
@@ -908,8 +1016,11 @@ export function createGitReader(
     if (at - sweptAt >= 1000) {
       sweptAt = at;
 
-      for (const [path, entry] of cache)
-        if (entry.expiresAt <= at) cache.delete(path);
+      for (const [path, entry] of cache) {
+        if (entry.expiresAt <= at) {
+          cache.delete(path);
+        }
+      }
     }
 
     cache.set(directory, { expiresAt: at + ms, value });
@@ -917,22 +1028,29 @@ export function createGitReader(
     return value;
   }
 
-  if (dataDirectory)
+  if (dataDirectory) {
     void runAbortable(
       permits.withPermit(
         abortable(() => sweepStatusDirectories(dataDirectory)),
       ),
       lifetime.signal,
     ).catch(() => {});
+  }
 
   async function read(directory: string | undefined, caller: AbortSignal) {
     const signal = AbortSignal.any([caller, lifetime.signal]);
     signal.throwIfAborted();
 
-    if (!directory || !isAbsolute(directory)) return null;
+    if (!directory || !isAbsolute(directory)) {
+      return null;
+    }
+
     const cached = cachedResult(directory);
 
-    if (cached) return cached.value;
+    if (cached) {
+      return cached.value;
+    }
+
     // A timeout is this checkout's own when the read got its permit with at
     // Least half of its budget left. Cache that answer for the usual time.
     // A read that mostly waited for a slot says little about the checkout.
@@ -980,7 +1098,9 @@ export function createGitReader(
               } finally {
                 // The caller already has its result. Keep the permit until
                 // Removal finishes so stalled filesystems cannot queue copies.
-                if (snapshot) await removeStatusDirectory(snapshot);
+                if (snapshot) {
+                  await removeStatusDirectory(snapshot);
+                }
               }
             }),
           ),
@@ -998,11 +1118,16 @@ export function createGitReader(
     } catch (error) {
       signal.throwIfAborted();
 
-      if (!(error instanceof DOMException && error.name === "TimeoutError"))
+      if (!(error instanceof DOMException && error.name === "TimeoutError")) {
         throw error;
+      }
+
       const saved = cachedResult(directory);
 
-      if (saved) return saved.value;
+      if (saved) {
+        return saved.value;
+      }
+
       const timedOut = { ...emptyState(now()), error: "Git read timed out." };
 
       const own =

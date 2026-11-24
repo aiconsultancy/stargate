@@ -57,18 +57,25 @@ const saved = new Map<string, string | undefined>();
 const cleanup: (() => Promise<unknown>)[] = [];
 
 beforeEach(() => {
-  for (const name of [apiKeyEnv, ...Object.keys(hostSecrets)])
+  for (const name of [apiKeyEnv, ...Object.keys(hostSecrets)]) {
     saved.set(name, process.env[name]);
+  }
+
   Object.assign(process.env, hostSecrets, { [apiKeyEnv]: key });
 });
 
 afterEach(async () => {
   for (const [name, value] of saved) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
   }
 
-  for (const step of cleanup.splice(0).reverse()) await step();
+  for (const step of cleanup.splice(0).reverse()) {
+    await step();
+  }
 });
 
 function config(extra: Record<string, unknown> = {}, directory = "/workspace") {
@@ -88,11 +95,17 @@ const looseLogInput = Schema.Unknown.pipe(
     Schema.Unknown,
     SchemaTransformation.transform({
       decode: (input) => {
-        if (!Predicate.isObject(input)) return input;
+        if (!Predicate.isObject(input)) {
+          return input;
+        }
+
         const copy: Record<string, unknown> = { type: input["type"] };
 
-        for (const key in input)
-          if (key !== "type" && key !== "__proto__") copy[key] = input[key];
+        for (const key in input) {
+          if (key !== "type" && key !== "__proto__") {
+            copy[key] = input[key];
+          }
+        }
 
         return copy;
       },
@@ -175,7 +188,10 @@ async function until(check: () => Promise<boolean> | boolean, ms = 10_000) {
   const deadline = Date.now() + ms;
 
   while (!(await check())) {
-    if (Date.now() > deadline) throw new Error("Condition not reached");
+    if (Date.now() > deadline) {
+      throw new Error("Condition not reached");
+    }
+
     await delay(25);
   }
 }
@@ -297,10 +313,12 @@ test("Claude preserves supported UUID session IDs at the process boundary", asyn
     "ffffffff-ffff-ffff-ffff-ffffffffffff",
   ];
 
-  for (const id of ids)
+  for (const id of ids) {
     expect(await backend.prompt(id, "hi", signal())).toBe(
       "Hello world\n\nDone.",
     );
+  }
+
   expect(
     (await runs()).map((run) =>
       run.argv.find((argument) => argument.startsWith("--session-id=")),
@@ -341,9 +359,14 @@ test("Claude child receives only a minimal, explicit environment", async () => {
   const [run] = await runs();
   const env = run?.env ?? {};
 
-  for (const name of Object.keys(hostSecrets))
-    if (name !== "ANTHROPIC_AUTH_TOKEN" && name !== "ANTHROPIC_BASE_URL")
-      if (name !== "CLAUDE_CONFIG_DIR") expect(env[name]).toBeUndefined();
+  for (const name of Object.keys(hostSecrets)) {
+    if (name !== "ANTHROPIC_AUTH_TOKEN" && name !== "ANTHROPIC_BASE_URL") {
+      if (name !== "CLAUDE_CONFIG_DIR") {
+        expect(env[name]).toBeUndefined();
+      }
+    }
+  }
+
   expect(env["ANTHROPIC_AUTH_TOKEN"]).toBe(key);
   expect(env["ANTHROPIC_BASE_URL"]).toBe("http://127.0.0.1:8317");
   expect(env["CLAUDE_CONFIG_DIR"]).toBe(join(dataDirectory, "claude"));
@@ -649,8 +672,11 @@ test("no tool process outlives its Claude turn, even one ignoring SIGTERM", asyn
     );
 
   cleanup.push(async () => {
-    for (const pid of await grandchildren())
-      if (alive(pid)) process.kill(pid, "SIGKILL");
+    for (const pid of await grandchildren()) {
+      if (alive(pid)) {
+        process.kill(pid, "SIGKILL");
+      }
+    }
   });
   const id = await session(backend);
 
@@ -877,8 +903,11 @@ test("Claude recovery accepts only strict UUID records with safe integer bounds"
     await writeFile(path, text);
     await backend.interrupt(id, signal());
 
-    if (accepted) await expect(readFile(path)).rejects.toThrow();
-    else expect(await readFile(path, "utf8")).toBe(text);
+    if (accepted) {
+      await expect(readFile(path)).rejects.toThrow();
+    } else {
+      expect(await readFile(path, "utf8")).toBe(text);
+    }
   }
 
   const overflow = `{"pid":1,"turn":"${record.turn}","since":1e400}`;
@@ -905,7 +934,9 @@ test.skipIf(process.platform !== "linux")(
 
       const pid = child.pid ?? 0;
       cleanup.push(async () => {
-        if (alive(pid)) process.kill(pid, "SIGKILL");
+        if (alive(pid)) {
+          process.kill(pid, "SIGKILL");
+        }
       });
       // Ready once the new program's arguments are visible.
       await until(async () =>
@@ -952,7 +983,10 @@ test.skipIf(process.platform !== "linux")(
     await write(older, reused.marker, (await start(older)) + 1);
     await interrupt();
 
-    for (const pid of [foreign, impostor, older]) expect(alive(pid)).toBe(true);
+    for (const pid of [foreign, impostor, older]) {
+      expect(alive(pid)).toBe(true);
+    }
+
     // The recorded CLI and a marked tool process outside its group.
     const real = turn();
     const leader = await sleeper(`--resume=${id}`, real.env);
@@ -961,7 +995,9 @@ test.skipIf(process.platform !== "linux")(
     await interrupt();
     await until(() => !alive(leader) && !alive(tool));
 
-    for (const pid of [foreign, impostor, older]) expect(alive(pid)).toBe(true);
+    for (const pid of [foreign, impostor, older]) {
+      expect(alive(pid)).toBe(true);
+    }
   },
 );
 
@@ -1013,10 +1049,11 @@ test("Claude attachments become content blocks or fail closed", () => {
     file("application/zip"),
     file("text/plain", "\u0000"),
     { ...file("text/plain"), data: new Uint8Array([0xff]) },
-  ])
+  ]) {
     expect(() => claudeInputContent("x", [bad])).toThrow(
       AttachmentInputUnavailable,
     );
+  }
 });
 
 test("Claude configuration is strict and fails closed", () => {
@@ -1044,8 +1081,10 @@ test("Claude configuration is strict and fails closed", () => {
     { baseURL: "http://127.0.0.1:8317", apiKeyEnv },
     { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv: "lower-case" },
     { baseURL: "http://127.0.0.1:8317/v1", apiKey: "sk-value" },
-  ])
+  ]) {
     expect(parse({ provider })).toBe(false);
+  }
+
   expect(
     parse({ provider: { baseURL: "https://proxy.example/v1", apiKeyEnv } }),
   ).toBe(true);
@@ -1088,8 +1127,10 @@ test("Claude configuration is strict and fails closed", () => {
     { mcpServers: { helper: { type: "stdio", command: "relative" } } },
     { env: { ANTHROPIC_API_KEY: "x" } },
     { maxTurns: 0 },
-  ])
+  ]) {
     expect(parse(extra)).toBe(false);
+  }
+
   expect(parse({ allowedTools: ["Read", "Bash", "WebFetch"] })).toBe(true);
   // Every Stargate tool name still exists in the pinned SDK.
   const builtin: readonly string[] = BUILTIN_TOOL_NAMES;
@@ -1157,8 +1198,10 @@ test("Claude maps what the CLI reports to one shared failure category", async ()
     ["crash", "provider:crash:0:ran"],
   ];
 
-  for (const [prompt, cause] of cases)
+  for (const [prompt, cause] of cases) {
     expect([prompt, await failure(prompt)]).toEqual([prompt, cause]);
+  }
+
   // Not a provider failure: the generic failure stays.
   expect(await failure("fail:error_max_turns")).toBe(
     "Error: Claude turn failed: error_max_turns",

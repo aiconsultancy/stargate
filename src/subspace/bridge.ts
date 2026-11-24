@@ -90,8 +90,9 @@ function failureText(status: number, text: string) {
   try {
     const value: unknown = JSON.parse(text);
 
-    if (isRecord(value) && value["source"] === "stargate")
+    if (isRecord(value) && value["source"] === "stargate") {
       return String(value["error"]);
+    }
 
     const detail = isRecord(value)
       ? [value["title"], value["detail"]].find(
@@ -99,8 +100,9 @@ function failureText(status: number, text: string) {
         )
       : undefined;
 
-    if (detail)
+    if (detail) {
       return `The Subspace API answered HTTP ${status}: ${detail.slice(0, 200)}`;
+    }
   } catch {
     // Not JSON: the status alone.
   }
@@ -144,14 +146,19 @@ async function* streamedEvents(body: Readable) {
       const data = eventData(buffer.slice(0, end.index));
       buffer = buffer.slice(end.index + end[0].length);
 
-      if (data) yield data;
+      if (data) {
+        yield data;
+      }
+
       end = /\r?\n\r?\n/.exec(buffer);
     }
   }
 
   const rest = eventData(buffer + decoder.decode());
 
-  if (rest) yield rest;
+  if (rest) {
+    yield rest;
+  }
 }
 
 export type McpBridgeOptions = {
@@ -175,7 +182,9 @@ export async function runMcpBridge(options: McpBridgeOptions) {
   const inflight = new Set<Promise<void>>();
 
   const emit = (value: unknown, id: RpcId | undefined) => {
-    if (!isRecord(value) && !Array.isArray(value)) return;
+    if (!isRecord(value) && !Array.isArray(value)) {
+      return;
+    }
 
     // The API answers a malformed request with ID null; give it the request's.
     const message =
@@ -185,14 +194,19 @@ export async function runMcpBridge(options: McpBridgeOptions) {
 
     const result = isRecord(message) ? message["result"] : undefined;
 
-    if (isRecord(result) && typeof result["protocolVersion"] === "string")
+    if (isRecord(result) && typeof result["protocolVersion"] === "string") {
       protocolVersion = result["protocolVersion"];
+    }
+
     options.write(JSON.stringify(message));
   };
 
   const fail = (id: RpcId | undefined, message: string) => {
-    if (id === undefined) options.report(message);
-    else options.write(JSON.stringify(rpcError(id, -32_000, message)));
+    if (id === undefined) {
+      options.report(message);
+    } else {
+      options.write(JSON.stringify(rpcError(id, -32_000, message)));
+    }
   };
 
   const forward = async (line: string, id: RpcId | undefined) => {
@@ -222,17 +236,21 @@ export async function runMcpBridge(options: McpBridgeOptions) {
 
     const session = reply.headers["mcp-session-id"];
 
-    if (typeof session === "string") sessionId = session;
+    if (typeof session === "string") {
+      sessionId = session;
+    }
+
     const type = (reply.headers["content-type"] ?? "").split(";")[0]?.trim();
 
     try {
       if (type === "text/event-stream" && reply.status < 300) {
-        for await (const data of streamedEvents(reply.body))
+        for await (const data of streamedEvents(reply.body)) {
           try {
             emit(JSON.parse(data), id);
           } catch {
             options.report("Skipped an unreadable streamed MCP message");
           }
+        }
 
         return;
       }
@@ -252,11 +270,13 @@ export async function runMcpBridge(options: McpBridgeOptions) {
       if (
         (isRecord(value) && value["jsonrpc"] === "2.0") ||
         Array.isArray(value)
-      )
+      ) {
         emit(value, id);
-      else if (reply.status >= 300) fail(id, failureText(reply.status, text));
-      else if (value !== undefined)
+      } else if (reply.status >= 300) {
+        fail(id, failureText(reply.status, text));
+      } else if (value !== undefined) {
         fail(id, "The Subspace API's MCP answer is not JSON-RPC");
+      }
     } catch {
       fail(id, "The Subspace API's MCP answer was cut short");
     }
@@ -267,7 +287,9 @@ export async function runMcpBridge(options: McpBridgeOptions) {
   for await (const raw of lines) {
     const line = raw.trim();
 
-    if (!line) continue;
+    if (!line) {
+      continue;
+    }
 
     if (Buffer.byteLength(line) > maxMessageBytes) {
       options.write(
@@ -298,7 +320,9 @@ export async function runMcpBridge(options: McpBridgeOptions) {
       inflight.delete(task);
     });
 
-    if (isRecord(message) && message["method"] === "initialize") await task;
+    if (isRecord(message) && message["method"] === "initialize") {
+      await task;
+    }
   }
 
   await Promise.allSettled(inflight);
@@ -354,7 +378,9 @@ export async function runApiRequest(options: ApiRequestOptions) {
     return 1;
   }
 
-  for await (const chunk of reply.body) options.output.write(chunk as Buffer);
+  for await (const chunk of reply.body) {
+    options.output.write(chunk as Buffer);
+  }
 
   return 0;
 }

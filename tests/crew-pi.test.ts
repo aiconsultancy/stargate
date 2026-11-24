@@ -84,13 +84,16 @@ async function fixture() {
       nativeCalls.push(`get:${sessionID}`);
       const session = native.get(sessionID);
 
-      if (!session) throw { _tag: "Session.NotFoundError" };
+      if (!session) {
+        throw { _tag: "Session.NotFoundError" };
+      }
 
       return session;
     },
     async create(input) {
-      if (!input.id || !input.agent || !input.location)
+      if (!input.id || !input.agent || !input.location) {
         throw new Error("Invalid fixture session");
+      }
 
       const session = {
         id: input.id,
@@ -168,7 +171,9 @@ async function fixture() {
       async createSession() {
         creations++;
 
-        if (failCreate) throw new Error("private provider error");
+        if (failCreate) {
+          throw new Error("private provider error");
+        }
 
         return "17";
       },
@@ -328,7 +333,10 @@ test("oversized Pi mail is refused before storage and does not jam later inbox p
       ),
     ).toMatchObject({ stored: true, sequence: 1 });
 
-    if (!f.binding) throw new Error("Missing Pi binding");
+    if (!f.binding) {
+      throw new Error("Missing Pi binding");
+    }
+
     expect(
       await f.binding.run(
         "stargate_mail",
@@ -390,7 +398,10 @@ test("installed Pi inspection observes native idle and running state without pro
     ).rejects.toThrow("do not support Mesij status requests");
     f.turns[0]?.resolve("Done");
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     await f.engine.run({ op: "wait", taskID: task.id }, f.caller());
     expect(
       (await f.engine.run({ op: "inspect", crew: "twiki" }, f.caller()))
@@ -507,7 +518,10 @@ test("Pi coordination is host-bound and location plugins share one native storag
 
     await started;
 
-    if (!task || !f.binding) throw new Error("Missing Pi binding");
+    if (!task || !f.binding) {
+      throw new Error("Missing Pi binding");
+    }
+
     expect(() => f.binding?.authorize("18")).toThrow("saved conversation");
 
     const note = await f.binding.run(
@@ -575,7 +589,10 @@ test("a Pi DM captured before completion stays inbox-only after the exact result
 
     await started;
 
-    if (!task) throw new Error("Missing Pi task");
+    if (!task) {
+      throw new Error("Missing Pi task");
+    }
+
     const notify = f.engine.notifyMail.bind(f.engine);
     f.engine.notifyMail = async (...args) => {
       f.turns[0]?.resolve("Exact completed Pi result");
@@ -605,7 +622,10 @@ test("Pi consumes the trusted member definition without creating an OpenCode pro
   try {
     const member = f.engine.options.team.crew.find(({ id }) => id === "twiki");
 
-    if (!member) throw new Error("Missing Pi member");
+    if (!member) {
+      throw new Error("Missing Pi member");
+    }
+
     const path = piDefinitionPath(f.options.captainDirectory, member);
     await mkdir(
       join(f.options.captainDirectory, ".local", "ship", "definitions"),
@@ -801,7 +821,10 @@ test("a new owner reopens a Pi store only after the last owner closed it", async
     f.holdClose(gate.promise);
     const closing = f.engine.close();
 
-    while (!f.lifecycle.includes("close started")) await Bun.sleep(1);
+    while (!f.lifecycle.includes("close started")) {
+      await Bun.sleep(1);
+    }
+
     reopened = await CrewEngine.open(
       f.options,
       f.sessions,
@@ -868,7 +891,10 @@ test("a closed Pi owner cannot acquire a harness after a pending open", async ()
     const member = f.options.team?.crew.find(({ id }) => id === "twiki");
     const directory = f.options.worktrees["twiki"];
 
-    if (!member || !directory) throw new Error("Missing Pi worker");
+    if (!member || !directory) {
+      throw new Error("Missing Pi worker");
+    }
+
     await previous.canReport(member, directory);
     f.holdClose(gate.promise);
     const closing = previous.close();
@@ -994,13 +1020,19 @@ test("Pi owner shutdown aborts and drains read-only recovery before state closes
   try {
     const member = f.options.team?.crew.find(({ id }) => id === "twiki");
 
-    if (!member) throw new Error("Missing Pi worker");
+    if (!member) {
+      throw new Error("Missing Pi worker");
+    }
+
     const state = f.engine.state;
     const peer = state.reservePeer(member.id);
     state.readyPeer(member.id);
     const task = state.reserveTask(peer, "captain-a", "Inspect receipt");
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     state.savePiTaskConversation(task.id, "17");
 
     const result = owner
@@ -1024,7 +1056,10 @@ test("Pi owner shutdown aborts and drains read-only recovery before state closes
     state.finishAbandon(task.id, control, "confirmed", "Stopped");
     const replacement = state.reserveTask(peer, "captain-a", "Replacement");
 
-    if (!replacement) throw new Error("Missing replacement task");
+    if (!replacement) {
+      throw new Error("Missing replacement task");
+    }
+
     let stateClosed = false;
     let lateReads = 0;
     const lookup = state.task.bind(state);
@@ -1146,10 +1181,16 @@ test("explicit Pi roster expansion preserves all native peers and results", asyn
   const peers = (await original.run({ op: "ensure" }, f.caller())).peers;
   const peer = peers?.[0];
 
-  if (!peer) throw new Error("Missing original peer");
+  if (!peer) {
+    throw new Error("Missing original peer");
+  }
+
   const task = original.state.reserveTask(peer, "captain-a");
 
-  if (!task) throw new Error("Missing original task");
+  if (!task) {
+    throw new Error("Missing original task");
+  }
+
   original.state.complete(task.id, peer.sessionID, "Retained result");
   await original.close();
   const legacy = new Database(original.state.path);
@@ -1182,8 +1223,10 @@ test("explicit Pi roster expansion preserves all native peers and results", asyn
     );
 
     try {
-      for (const previous of peers ?? [])
+      for (const previous of peers ?? []) {
         expect(upgraded.state.peer(previous.crewID)).toEqual(previous);
+      }
+
       expect(upgraded.state.task(task.id)?.result).toBe("Retained result");
       expect(
         (await upgraded.run({ op: "ensure", crew: "twiki" }, f.caller()))
@@ -1204,10 +1247,16 @@ test("explicit OpenCode roster expansion preserves native and Pi peers and tasks
     const peers = (await f.engine.run({ op: "ensure" }, f.caller())).peers;
     const peer = peers?.find(({ crewID }) => crewID === "mario");
 
-    if (!peer) throw new Error("Missing original peer");
+    if (!peer) {
+      throw new Error("Missing original peer");
+    }
+
     const task = f.engine.state.reserveTask(peer, "captain-a");
 
-    if (!task) throw new Error("Missing original task");
+    if (!task) {
+      throw new Error("Missing original task");
+    }
+
     f.engine.state.complete(task.id, peer.sessionID, "Retained native result");
     const savedTask = f.engine.state.task(task.id);
     const statePath = f.engine.state.path;
@@ -1247,8 +1296,10 @@ test("explicit OpenCode roster expansion preserves native and Pi peers and tasks
     try {
       expect(upgraded.state.path).toBe(statePath);
 
-      for (const previous of peers ?? [])
+      for (const previous of peers ?? []) {
         expect(upgraded.state.peer(previous.crewID)).toEqual(previous);
+      }
+
       expect(upgraded.state.task(task.id)).toEqual(savedTask);
 
       const ensured = await upgraded.run(
@@ -1269,8 +1320,10 @@ test("explicit OpenCode roster expansion preserves native and Pi peers and tasks
     try {
       expect(reopened.state.peer("bosun")?.sessionID).toBe(bosunSessionID);
 
-      for (const previous of peers ?? [])
+      for (const previous of peers ?? []) {
         expect(reopened.state.peer(previous.crewID)).toEqual(previous);
+      }
+
       expect(reopened.state.task(task.id)).toEqual(savedTask);
     } finally {
       await reopened.close();
@@ -1325,8 +1378,10 @@ test("roster expansion accepts OpenCode additions but rejects rebinding and remo
     { ...next, namespace: "another" },
     { ...next, projectDirectory: "/other" },
     { ...next, captain: { ...old.captain, directory: "/other" } },
-  ])
+  ]) {
     expect(canExpandCrew(before, JSON.stringify(changed))).toBe(false);
+  }
+
   expect(
     canExpandCrew(
       before,

@@ -102,8 +102,9 @@ export const pidMaximum = (() => {
       readFileSync("/proc/sys/kernel/pid_max", "utf8").trim(),
     );
 
-    if (Number.isSafeInteger(value) && value >= 2 && value <= 4_194_304)
+    if (Number.isSafeInteger(value) && value >= 2 && value <= 4_194_304) {
       return value;
+    }
   } catch {
     // Other platforms have no Linux pid_max; retain the Linux ceiling.
   }
@@ -113,10 +114,11 @@ export const pidMaximum = (() => {
 
 export function admitPID(pid: number): number {
   // Negating 0 targets our group; negating 1 targets all permitted processes.
-  if (!Number.isInteger(pid) || pid < 2 || pid > pidMaximum)
+  if (!Number.isInteger(pid) || pid < 2 || pid > pidMaximum) {
     throw new Error(
       `Invalid owned process-group ID ${pid}; expected 2..${pidMaximum}`,
     );
+  }
 
   return pid;
 }
@@ -131,14 +133,19 @@ function groupExists(pid: number): boolean {
 
     return true;
   } catch (error) {
-    if (noProcess(error)) return false;
+    if (noProcess(error)) {
+      return false;
+    }
+
     throw error;
   }
 }
 
 function processIdentity(pid: number): ProcessIdentity {
-  if (!Number.isSafeInteger(pid) || pid <= 0)
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
     throw new Error(`Invalid process identity PID ${pid}`);
+  }
+
   const source = readFileSync(`/proc/${pid}/stat`, "utf8");
 
   const fields = source
@@ -160,8 +167,9 @@ function processIdentity(pid: number): ProcessIdentity {
     ![pid, parentPid, groupId, sessionId].every(
       (value) => Number.isSafeInteger(value) && value >= 0,
     )
-  )
+  ) {
     throw new Error(`Unreadable process identity for PID ${pid}`);
+  }
 
   return { pid, parentPid, groupId, sessionId, startTimeTicks, state };
 }
@@ -170,30 +178,39 @@ function processGroupSnapshot(pid: number): GroupSnapshot {
   const snapshot: GroupSnapshot = { members: [], errors: [] };
 
   try {
-    if (!groupExists(pid)) return snapshot;
+    if (!groupExists(pid)) {
+      return snapshot;
+    }
 
-    if (process.platform !== "linux")
+    if (process.platform !== "linux") {
       throw new Error("Linux /proc facts unavailable");
+    }
 
     for (const name of readdirSync("/proc")) {
-      if (!/^\d+$/.test(name)) continue;
+      if (!/^\d+$/.test(name)) {
+        continue;
+      }
 
       try {
         const identity = processIdentity(Number(name));
 
-        if (identity.groupId === pid) snapshot.members.push(identity);
+        if (identity.groupId === pid) {
+          snapshot.members.push(identity);
+        }
       } catch (error) {
-        if (!noProcess(error))
+        if (!noProcess(error)) {
           snapshot.errors.push(
             `PID ${name}: ${error instanceof Error ? error.message : "identity unreadable"}`,
           );
+        }
       }
     }
 
-    if (snapshot.members.length === 0 && groupExists(pid))
+    if (snapshot.members.length === 0 && groupExists(pid)) {
       snapshot.errors.push(
         `group ${pid} exists but its membership is unreadable`,
       );
+    }
   } catch (error) {
     snapshot.errors.push(
       error instanceof Error ? error.message : "group identity unreadable",
@@ -258,15 +275,22 @@ export function parseOptions(
     const arg = args[index];
 
     if (arg === "--fail-if-candidate-worse") {
-      if (switches.has(arg)) throw new Error(`Duplicate option: ${arg}`);
+      if (switches.has(arg)) {
+        throw new Error(`Duplicate option: ${arg}`);
+      }
+
       switches.add(arg);
     } else if (arg?.startsWith("--") && names.has(arg.slice(2))) {
       const value = args[++index];
 
-      if (!value || value.startsWith("--") || values.has(arg))
+      if (!value || value.startsWith("--") || values.has(arg)) {
         throw new Error(`Invalid option: ${arg}`);
+      }
+
       values.set(arg, value);
-    } else throw new Error(`Unknown option: ${arg ?? ""}`);
+    } else {
+      throw new Error(`Unknown option: ${arg ?? ""}`);
+    }
   }
 
   const number = (key: string, fallback: number, integer = true) => {
@@ -277,10 +301,11 @@ export function parseOptions(
       !Number.isFinite(value) ||
       value <= 0 ||
       (integer && !Number.isSafeInteger(value))
-    )
+    ) {
       throw new Error(
         `${key} must be a positive ${integer ? "integer" : "number"}`,
       );
+    }
 
     return value;
   };
@@ -292,17 +317,22 @@ export function parseOptions(
     isAbsolute(file) ||
     file.split(/[\\/]/).includes("..") ||
     !file.endsWith(".test.ts")
-  )
+  ) {
     throw new Error("--file must name one repository-relative .test.ts file");
+  }
+
   const load = values.get("--load") ?? "none";
 
-  if (load !== "none" && load !== "ambient" && load !== "synthetic")
+  if (load !== "none" && load !== "ambient" && load !== "synthetic") {
     throw new Error("Invalid --load mode");
+  }
+
   const base = values.get("--base");
   const failIfCandidateWorse = switches.has("--fail-if-candidate-worse");
 
-  if (failIfCandidateWorse && !base)
+  if (failIfCandidateWorse && !base) {
     throw new Error("--fail-if-candidate-worse requires --base");
+  }
 
   const lock =
     values.get("--lock") ?? process.env["STARGATE_TEST_COMPARE_LOCK"];
@@ -310,8 +340,9 @@ export function parseOptions(
   const runs = number("--runs", 10);
   const timeoutMs = number("--timeout-ms", 300_000);
 
-  if (runs > 10_000 || timeoutMs > 1_800_000)
+  if (runs > 10_000 || timeoutMs > 1_800_000) {
     throw new Error("Run count or process limit is too large");
+  }
 
   return {
     cwd: resolve(cwd),
@@ -349,8 +380,9 @@ export async function sampleLoad(): Promise<LoadAverage> {
       five !== undefined &&
       fifteen !== undefined &&
       values.every((v) => Number.isFinite(v) && v >= 0)
-    )
+    ) {
       return [one, five, fifteen];
+    }
   } catch {
     /* Load average is optional outside Linux. */
   }
@@ -378,10 +410,11 @@ function git(cwd: string, ...args: string[]): string {
     { cwd, env: environment(), encoding: "utf8", timeout: 60_000 },
   );
 
-  if (result.status !== 0)
+  if (result.status !== 0) {
     throw new Error(
       `Git failed: ${result.stderr || (result.error === undefined || result.error.message === "" ? args[0] : result.error.message)}`,
     );
+  }
 
   return result.stdout.trimEnd();
 }
@@ -395,8 +428,10 @@ async function exists(path: string): Promise<boolean> {
 
     return true;
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT")
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return false;
+    }
+
     throw error;
   }
 }
@@ -415,15 +450,20 @@ async function trackedSnapshot(source: string, destination: string) {
 
     await rm(to, { recursive: true, force: true });
 
-    if (!(await exists(from))) continue;
+    if (!(await exists(from))) {
+      continue;
+    }
+
     await mkdir(dirname(to), { recursive: true });
     const stat = await lstat(from);
 
     if (stat.isSymbolicLink()) {
       const target = await realpath(from);
 
-      if (!inside(source, target))
+      if (!inside(source, target)) {
         throw new Error(`Tracked link leaves the source tree: ${name}`);
+      }
+
       await symlink(
         relative(dirname(to), join(destination, relative(source, target))),
         to,
@@ -431,7 +471,9 @@ async function trackedSnapshot(source: string, destination: string) {
     } else if (stat.isFile()) {
       await copyFile(from, to, constants.COPYFILE_FICLONE);
       await chmod(to, stat.mode & 0o777);
-    } else throw new Error(`Unsupported tracked entry: ${name}`);
+    } else {
+      throw new Error(`Unsupported tracked entry: ${name}`);
+    }
   }
 
   git(destination, "add", "--all");
@@ -447,15 +489,19 @@ async function copyModules(source: string, destination: string) {
       if (entry.isSymbolicLink()) {
         const target = await realpath(path);
 
-        if (!inside(source, target))
+        if (!inside(source, target)) {
           throw new Error(
             `Dependency link leaves node_modules: ${relative(source, path)}`,
           );
+        }
+
         links.push({
           name: relative(source, path),
           target: relative(source, target),
         });
-      } else if (entry.isDirectory()) await walk(path);
+      } else if (entry.isDirectory()) {
+        await walk(path);
+      }
     }
   }
 
@@ -515,7 +561,9 @@ async function snapshot(
   );
   git(path, "checkout", "--quiet", "--detach", sha);
 
-  if (pathInput) await trackedSnapshot(source, path);
+  if (pathInput) {
+    await trackedSnapshot(source, path);
+  }
 
   return {
     side,
@@ -528,8 +576,10 @@ async function snapshot(
 }
 
 export async function compare(options: CompareOptions, runtime: Runtime = {}) {
-  if (process.platform === "win32")
+  if (process.platform === "win32") {
     throw new Error("test-compare requires POSIX process groups");
+  }
+
   const controller = new AbortController();
   let interrupt: "SIGINT" | "SIGTERM" | undefined;
 
@@ -547,8 +597,9 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
   process.on("SIGTERM", sigterm);
 
   const check = () => {
-    if (controller.signal.aborted)
+    if (controller.signal.aborted) {
       throw new Error(`Interrupted by ${interrupt ?? "signal"}`);
+    }
   };
 
   const owned = new Set<Group>();
@@ -590,7 +641,9 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
     check();
     const executable = command[0];
 
-    if (!executable) throw new Error("Empty child command");
+    if (!executable) {
+      throw new Error("Empty child command");
+    }
 
     const child = spawn(executable, command.slice(1), {
       cwd,
@@ -656,8 +709,13 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
           admitPID(pid);
 
           // Completed leaders do not justify signalling their saved group IDs.
-          if (group.child.exitCode === null && group.child.signalCode === null)
+          if (
+            group.child.exitCode === null &&
+            group.child.signalCode === null
+          ) {
             signalOwned(group);
+          }
+
           await waitFor(
             group.done,
             Math.max(1, deadline - performance.now()),
@@ -698,7 +756,9 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
 
     const failed = results.find((result) => result.status === "rejected");
 
-    if (failed?.status === "rejected") throw failed.reason;
+    if (failed?.status === "rejected") {
+      throw failed.reason;
+    }
   }
 
   function inspectGroup(group: Group): GroupSnapshot {
@@ -717,7 +777,10 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
   function signalOwned(group: Group) {
     const pid = group.child.pid;
 
-    if (pid === undefined) return;
+    if (pid === undefined) {
+      return;
+    }
+
     admitPID(pid);
     const snapshot = inspectGroup(group);
     group.signalDisposition = "withheld";
@@ -726,7 +789,9 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
       throw new Error(`group ${pid} ownership not proven: ${reason}`);
     };
 
-    if (snapshot.errors.length > 0) refuse(snapshot.errors.join("; "));
+    if (snapshot.errors.length > 0) {
+      refuse(snapshot.errors.join("; "));
+    }
 
     if (snapshot.members.length === 0) {
       group.signalDisposition = "not-needed";
@@ -736,16 +801,18 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
 
     const leader = group.spawnIdentity;
 
-    if (!leader || leader.groupId !== pid || leader.sessionId !== pid)
+    if (!leader || leader.groupId !== pid || leader.sessionId !== pid) {
       return refuse("spawn leader/session identity unavailable");
+    }
 
     if (
       snapshot.members.some(
         (member) =>
           member.groupId !== pid || member.sessionId !== leader.sessionId,
       )
-    )
+    ) {
       refuse("current member session/group changed");
+    }
 
     if (!group.firstSignalMembers) {
       if (
@@ -754,16 +821,19 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
             member.pid === pid &&
             member.startTimeTicks === leader.startTimeTicks,
         )
-      )
+      ) {
         refuse("spawn leader no longer anchors the first signal");
+      }
 
       if (
         snapshot.members.some(
           (member) =>
             BigInt(member.startTimeTicks) < BigInt(leader.startTimeTicks),
         )
-      )
+      ) {
         refuse("member predates the created session");
+      }
+
       group.firstSignalMembers = [...snapshot.members];
     } else if (
       snapshot.members.some(
@@ -775,15 +845,19 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
               known.sessionId === member.sessionId,
           ),
       )
-    )
+    ) {
       refuse("member PID/start time is not in the first-signal identity set");
+    }
 
     try {
       signalGroup(pid, "SIGKILL");
       group.signalsSent++;
       group.signalDisposition = "sent";
     } catch (error) {
-      if (!noProcess(error)) throw error;
+      if (!noProcess(error)) {
+        throw error;
+      }
+
       group.signalDisposition = "not-needed";
     }
   }
@@ -804,23 +878,32 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
             reject(new Error(`Interrupted by ${interrupt ?? "signal"}`));
           };
 
-          if (!cleanup)
+          if (!cleanup) {
             controller.signal.addEventListener("abort", cancel, { once: true });
+          }
+
           timer = setTimeout(() => {
             reject(new Error("Child or lock wait timed out"));
           }, milliseconds);
 
-          if (!cleanup && controller.signal.aborted) cancel();
+          if (!cleanup && controller.signal.aborted) {
+            cancel();
+          }
         }),
       ]);
     } finally {
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+      }
+
       controller.signal.removeEventListener("abort", cancel);
     }
   }
 
   async function acquireLock(tree: Tree): Promise<Group | undefined> {
-    if (!options.lock) return;
+    if (!options.lock) {
+      return;
+    }
 
     const holder = await start(
       [
@@ -849,19 +932,27 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
 
     await waitFor(ready, (options.lockWait + 1) * 1000);
     void holder.done.then(() => {
-      if (!holder.releasing) controller.abort();
+      if (!holder.releasing) {
+        controller.abort();
+      }
     });
 
     return holder;
   }
 
   async function releaseLock(holder: Group | undefined) {
-    if (!holder) return;
+    if (!holder) {
+      return;
+    }
+
     holder.releasing = true;
     holder.child.stdin?.end();
     const result = await waitFor(holder.done, 5000, true);
 
-    if (result.code !== 0) throw new Error("Lock holder failed before release");
+    if (result.code !== 0) {
+      throw new Error("Lock holder failed before release");
+    }
+
     await stop([holder]);
   }
 
@@ -881,8 +972,9 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
 
     if (lastHolder?.child.pid) {
       try {
-        if (!groupExists(lastHolder.child.pid)) cleanup.lock.state = "released";
-        else if (
+        if (!groupExists(lastHolder.child.pid)) {
+          cleanup.lock.state = "released";
+        } else if (
           lastHolder.child.exitCode !== null ||
           lastHolder.child.signalCode !== null
         ) {
@@ -896,18 +988,23 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
             )
               ? "released"
               : "not-confirmed-released";
-        } else
+        } else {
           cleanup.lock.state = lastHolder.releasing
             ? "not-confirmed-released"
             : "held";
+        }
       } catch {
         cleanup.lock.state = "not-confirmed-released";
       }
     }
 
-    if (cleanupFailed) errorMessage = cleanupMessage(cleanup);
+    if (cleanupFailed) {
+      errorMessage = cleanupMessage(cleanup);
+    }
 
-    if (!output) return;
+    if (!output) {
+      return;
+    }
 
     const metadata = {
       version: 1,
@@ -958,7 +1055,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
     if (
       (await exists(resolve(options.cwd, options.candidate))) &&
       (await stat(resolve(options.cwd, options.candidate))).isDirectory()
-    )
+    ) {
       roots.push(
         await realpath(
           git(
@@ -968,8 +1065,11 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
           ),
         ),
       );
+    }
 
-    if (options.dependencies) roots.push(await realpath(options.dependencies));
+    if (options.dependencies) {
+      roots.push(await realpath(options.dependencies));
+    }
 
     if (options.lock) {
       const lock = (await exists(options.lock))
@@ -979,14 +1079,17 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
             relative(dirname(options.lock), options.lock),
           );
 
-      if (roots.some((root) => inside(root, lock)))
+      if (roots.some((root) => inside(root, lock))) {
         throw new Error("Lock must be outside source trees");
+      }
     }
 
     const temporary = await realpath(tmpdir());
 
-    if (roots.some((root) => inside(root, temporary)))
+    if (roots.some((root) => inside(root, temporary))) {
       throw new Error("TMPDIR must be outside source trees");
+    }
+
     let target: string;
 
     if (options.output) {
@@ -995,27 +1098,38 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
         ? await realpath(options.output)
         : join(parent, relative(dirname(options.output), options.output));
 
-      if (roots.some((root) => inside(root, target)))
+      if (roots.some((root) => inside(root, target))) {
         throw new Error("Output must be outside source trees");
+      }
 
       if (await exists(target)) {
-        if ((await readdir(target)).length > 0)
+        if ((await readdir(target)).length > 0) {
           throw new Error("Output directory must be empty");
-      } else await mkdir(target, { mode: 0o700 });
-    } else target = await mkdtemp(join(temporary, "test-compare-results-"));
+        }
+      } else {
+        await mkdir(target, { mode: 0o700 });
+      }
+    } else {
+      target = await mkdtemp(join(temporary, "test-compare-results-"));
+    }
+
     await mkdir(join(target, "runs"), { mode: 0o700 });
     output = target;
 
-    if (process.platform !== "linux")
+    if (process.platform !== "linux") {
       throw new Error(
         "Linux /proc ownership facts unavailable; no child started",
       );
+    }
+
     processIdentity(process.pid);
     workspace = await mkdtemp(join(tmpdir(), "test-compare-work-"));
     runtime.workspace?.(workspace);
 
-    if (options.base)
+    if (options.base) {
       trees.push(await snapshot(options, workspace, "base", options.base));
+    }
+
     trees.push(
       await snapshot(
         options,
@@ -1031,19 +1145,26 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
         ? tree.source.slice(5)
         : caller;
 
-      if (inside(source, output))
+      if (inside(source, output)) {
         throw new Error("Output must be outside every source tree");
+      }
 
-      if (!(await exists(join(tree.path, options.file))))
+      if (!(await exists(join(tree.path, options.file)))) {
         throw new Error(`Test file is absent in ${tree.side}`);
+      }
 
-      if (!(await exists(join(tree.path, "package.json")))) continue;
+      if (!(await exists(join(tree.path, "package.json")))) {
+        continue;
+      }
+
       const lock = await readFile(join(tree.path, "bun.lock"));
 
-      if (!(await readFile(join(tree.donor, "bun.lock"))).equals(lock))
+      if (!(await readFile(join(tree.donor, "bun.lock"))).equals(lock)) {
         throw new Error(
           `Dependency lock differs for ${tree.side}; provide a matching --dependencies tree`,
         );
+      }
+
       const donor = await realpath(join(tree.donor, "node_modules"));
       let copy = modules.get(donor);
 
@@ -1061,7 +1182,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
     console.log(`Load mode: ${options.load}. Results: ${output}`);
     await record();
 
-    for (let iteration = 1; iteration <= options.runs; iteration++)
+    for (let iteration = 1; iteration <= options.runs; iteration++) {
       for (const tree of trees) {
         check();
         git(tree.path, "read-tree", "--reset", "-u", tree.snapshotTree);
@@ -1088,10 +1209,12 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
           if (
             options.load === "synthetic" &&
             (load === "unavailable" || load[0] > options.maxLoad)
-          )
+          ) {
             throw new Error(
               "Synthetic load refused on this host; use --load ambient",
             );
+          }
+
           const workerDirectory = join(workspace, "load");
           await mkdir(workerDirectory, { recursive: true });
 
@@ -1109,8 +1232,10 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
                 String(deadline),
               ]);
 
-            for (const command of commands)
+            for (const command of commands) {
               workers.push(await start(command, workerDirectory, log.fd));
+            }
+
             runtime.workersStarted?.(
               workers.flatMap((worker) =>
                 worker.child.pid ? [worker.child.pid] : [],
@@ -1165,18 +1290,22 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
             result.error ||
             result.signal ||
             (result.code !== 0 && result.code !== 1)
-          )
+          ) {
             throw new Error(
               `Test runner failed: ${result.error ?? result.signal ?? result.code}`,
             );
+          }
+
           const report = parseJUnit(await readFile(junit, "utf8"));
 
           const failures = report.tests.filter(
             (test) => test.status === "failed",
           );
 
-          if ((result.code === 0) !== (failures.length === 0))
+          if ((result.code === 0) !== (failures.length === 0)) {
             throw new Error("Runner exit and JUnit failures disagree");
+          }
+
           await stop([...workers, child]);
           child = undefined;
           workers.length = 0;
@@ -1206,6 +1335,7 @@ export async function compare(options: CompareOptions, runtime: Runtime = {}) {
 
         await record();
       }
+    }
 
     complete = true;
   } catch (error) {
@@ -1269,15 +1399,19 @@ async function loadWorker(
     !directory ||
     !Number.isFinite(deadline) ||
     deadline > Date.now() + 3_600_000
-  )
+  ) {
     throw new Error("Invalid load worker boundary");
+  }
 
   if (kind === "cpu") {
     let value = 1;
 
-    while (Date.now() < deadline)
-      for (let i = 0; i < 10_000; i++)
+    while (Date.now() < deadline) {
+      for (let i = 0; i < 10_000; i++) {
         value = Math.imul(value, 1_664_525) + 1_013_904_223;
+      }
+    }
+
     await writeFile(join(directory, "cpu.done"), String(value));
   } else if (kind === "io") {
     const file = await open(join(directory, "load.bin"), "w");
@@ -1293,20 +1427,28 @@ async function loadWorker(
     } finally {
       await file.close();
     }
-  } else throw new Error("Unknown load worker");
+  } else {
+    throw new Error("Unknown load worker");
+  }
 }
 
 if (import.meta.main) {
   try {
-    if (process.argv[2] === "--load-worker")
+    if (process.argv[2] === "--load-worker") {
       await loadWorker(process.argv[3], process.argv[4], process.argv[5]);
-    else if (process.argv.slice(2).includes("--help")) console.log(help);
-    else {
+    } else if (process.argv.slice(2).includes("--help")) {
+      console.log(help);
+    } else {
       const result = await compare(parseOptions(process.argv.slice(2)));
 
-      if (result.error) console.error(result.error);
+      if (result.error) {
+        console.error(result.error);
+      }
 
-      if (result.directory) console.log(`Results: ${result.directory}`);
+      if (result.directory) {
+        console.log(`Results: ${result.directory}`);
+      }
+
       console.log(result.verdict);
       process.exitCode = result.code;
     }

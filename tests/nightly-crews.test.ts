@@ -15,8 +15,9 @@ async function setup(name: string) {
   const captain = join(dir, "captain");
   const chief = join(dir, "chief");
 
-  for (const path of [captain, chief])
+  for (const path of [captain, chief]) {
     await mkdir(join(path, ".opencode"), { recursive: true });
+  }
 
   const options = {
     namespace: "ship",
@@ -65,8 +66,10 @@ describe("crew discovery fails closed", () => {
       },
     });
 
-    for (const directory of [captain, chief, other])
+    for (const directory of [captain, chief, other]) {
       await writeFile(join(directory, ".opencode", "opencode.json"), text);
+    }
+
     expect(await discoverCrews(config)).toHaveLength(1);
     const crews = await discoverCrews(config, true);
     expect(crews.map((crew) => crew.namespace)).toEqual([

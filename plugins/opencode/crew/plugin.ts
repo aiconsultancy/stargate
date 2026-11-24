@@ -138,7 +138,10 @@ const plugin = Plugin.define({
     const modelsFor = (selected: CrewEngine) => {
       let value = models.get(selected);
 
-      if (value) return value;
+      if (value) {
+        return value;
+      }
+
       value = new CrewModels(
         selected,
         ctx.session,
@@ -181,7 +184,10 @@ const plugin = Plugin.define({
     const questionsFor = (selected: CrewEngine) => {
       let bridge = questions.get(selected);
 
-      if (bridge) return bridge;
+      if (bridge) {
+        return bridge;
+      }
+
       bridge = new CrewQuestions(
         selected,
         async (task, signal) => {
@@ -201,8 +207,9 @@ const plugin = Plugin.define({
               selected.state.peer(task.crewID),
               worker,
             )
-          )
+          ) {
             throw new CrewError("Native crew clarification identity changed.");
+          }
 
           // Choose one backend for this operation. An ambiguous gateway write
           // Must never be retried using direct native form access.
@@ -211,10 +218,11 @@ const plugin = Plugin.define({
             !!selected.options.team.historyAPI,
           );
 
-          if (route === "unavailable")
+          if (route === "unavailable") {
             throw new CrewError(
               "Crew questions require the owning gateway with this history service.",
             );
+          }
 
           if (route === "gateway") {
             const member = selected.options.team.crew.find(
@@ -225,10 +233,11 @@ const plugin = Plugin.define({
               !member ||
               !worker.agent ||
               selected.options.captainSessionID !== task.originCaptainID
-            )
+            ) {
               throw new CrewError(
                 "Crew question requires the owning pinned captain.",
               );
+            }
 
             return handoff.backend(
               task,
@@ -257,7 +266,10 @@ const plugin = Plugin.define({
           enableWhenMissing: () =>
             canUseQuestionGateway && handoff.hasConsumer(),
           onUnavailable: () => {
-            if (unavailableReported) return;
+            if (unavailableReported) {
+              return;
+            }
+
             unavailableReported = true;
             console.warn(
               "Stargate crew question routing requires the owning IRC gateway, but no matching gateway is polling. For standalone use with a history endpoint that supports native forms, set team.questionGateway to false.",
@@ -290,10 +302,11 @@ const plugin = Plugin.define({
         if (
           resolve(ctx.location.directory) !==
           resolve(engine.options.captainDirectory)
-        )
+        ) {
           throw new CrewError(
             "Stargate RPC requires the configured captain location.",
           );
+        }
 
         return await operation();
       } catch (error) {
@@ -333,7 +346,10 @@ const plugin = Plugin.define({
 
     try {
       for (const selected of projects.contexts.values()) {
-        if (workerBootstrap && !autoQuestionGateway) continue;
+        if (workerBootstrap && !autoQuestionGateway) {
+          continue;
+        }
+
         const bridge = questionsFor(selected);
         await resources.own(
           async () => {
@@ -353,11 +369,12 @@ const plugin = Plugin.define({
                         )
                       : handoff.hasConsumer();
 
-                    if (!workerBootstrap || !paired)
+                    if (!workerBootstrap || !paired) {
                       await bridge.poll(
                         AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
                         !waitsForGateway || paired,
                       );
+                    }
                   } catch {
                     // Only safe structured tool errors are exposed; no raw SDK logs.
                   }
@@ -387,12 +404,13 @@ const plugin = Plugin.define({
         ),
       );
       await ctx.session.hook("context", async (event) => {
-        for (const selected of projects.contexts.values())
+        for (const selected of projects.contexts.values()) {
           selected.updateNoticeContext(
             event.sessionID,
             event.agent,
             event.system,
           );
+        }
       });
 
       const register: typeof ctx.rpc.register = (definition, handlers) =>
@@ -429,7 +447,7 @@ const plugin = Plugin.define({
           report(context.signal, async () => maintenance.close(input)),
       });
 
-      if (canUseQuestionGateway && captainLocation)
+      if (canUseQuestionGateway && captainLocation) {
         await register(CrewQuestionRpc, {
           take: (input, context) =>
             report(context.signal, async () => {
@@ -457,6 +475,8 @@ const plugin = Plugin.define({
               handoff.finish(input.captain, input.id, input.result),
             ),
         });
+      }
+
       await register(CrewIrc, {
         bind: (input, context) =>
           report(context.signal, () =>
@@ -501,10 +521,11 @@ const plugin = Plugin.define({
             const tools = noticeTools(await ctx.tool.list());
             const receipts = [];
 
-            for (const selected of projects.contexts.values())
+            for (const selected of projects.contexts.values()) {
               receipts.push(
                 ...(await selected.updateNotice(input, tools, context.signal)),
               );
+            }
 
             return receipts;
           }),
@@ -512,10 +533,11 @@ const plugin = Plugin.define({
           report(context.signal, async () => {
             const receipts = [];
 
-            for (const selected of projects.contexts.values())
+            for (const selected of projects.contexts.values()) {
               receipts.push(
                 ...(await selected.maintenanceNotice(input, context.signal)),
               );
+            }
 
             return receipts;
           }),
@@ -712,7 +734,7 @@ const plugin = Plugin.define({
               ),
           });
 
-          if (captainLocation)
+          if (captainLocation) {
             editor.add({
               name: "stargate_feedback_review",
               description:
@@ -737,6 +759,7 @@ const plugin = Plugin.define({
                   },
                 ),
             });
+          }
         }
 
         editor.add({

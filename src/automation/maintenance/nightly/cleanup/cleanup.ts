@@ -66,7 +66,9 @@ const reasonOf = (error: unknown): CleanupReason =>
   error instanceof Refusal ? error.reason : "metadata-unknown";
 
 function bounded<T>(values: T[], maximum = maxEntries) {
-  if (values.length > maximum) refuse("scan-limit");
+  if (values.length > maximum) {
+    refuse("scan-limit");
+  }
 
   return values;
 }
@@ -114,7 +116,9 @@ async function privatePath(path: string, view: ProcessView) {
   ) {
     const info = await view.stat(directory);
 
-    if (info.uid === view.uid && (info.mode & 0o077) === 0) return true;
+    if (info.uid === view.uid && (info.mode & 0o077) === 0) {
+      return true;
+    }
   }
 
   return false;
@@ -131,7 +135,9 @@ function mappedPaths(maps: string): string[] {
     // Address perms offset dev inode pathname
     const match = /^\S+ +\S+ +\S+ +\S+ +\S+ +(\/.*)$/.exec(line);
 
-    if (match?.[1]) paths.add(match[1]);
+    if (match?.[1]) {
+      paths.add(match[1]);
+    }
   }
 
   return [...paths];
@@ -174,21 +180,31 @@ export async function cleanupPathUse(
 
     /** One link: true when it points into `path`; throws when unreadable. */
     const link = async (name: string) => {
-      if (++count > 500_000 || stopped()) throw new Error("limit");
+      if (++count > 500_000 || stopped()) {
+        throw new Error("limit");
+      }
 
       try {
         return uses(await readlink(name));
       } catch (error) {
         // No such link: the process or thread exited, or a kernel thread.
-        if (gone(error)) return false;
+        if (gone(error)) {
+          return false;
+        }
+
         throw error;
       }
     };
 
     for (const pid of bounded(await readdir(view.root))) {
-      if (stopped()) return "unknown";
+      if (stopped()) {
+        return "unknown";
+      }
 
-      if (!/^\d+$/.test(pid)) continue;
+      if (!/^\d+$/.test(pid)) {
+        continue;
+      }
+
       const entry = join(view.root, pid);
 
       if (isolated) {
@@ -198,12 +214,16 @@ export async function cleanupPathUse(
           owner = (await view.stat(entry)).uid;
         } catch (error) {
           // Exited meanwhile.
-          if (gone(error)) continue;
+          if (gone(error)) {
+            continue;
+          }
 
           return "unknown";
         }
 
-        if (owner !== view.uid) continue;
+        if (owner !== view.uid) {
+          continue;
+        }
       }
 
       let threads: string[];
@@ -211,12 +231,16 @@ export async function cleanupPathUse(
       try {
         threads = bounded(await readdir(join(entry, "task")));
       } catch (error) {
-        if (gone(error)) continue;
+        if (gone(error)) {
+          continue;
+        }
 
         return "unknown";
       }
 
-      if (await link(join(entry, "exe"))) return "in-use";
+      if (await link(join(entry, "exe"))) {
+        return "in-use";
+      }
 
       try {
         const file = await open(join(entry, "maps"), constants.O_RDONLY);
@@ -224,7 +248,9 @@ export async function cleanupPathUse(
         try {
           const maps = await file.readFile({ encoding: "utf8" });
 
-          if (maps.length > maxMaps) return "unknown";
+          if (maps.length > maxMaps) {
+            return "unknown";
+          }
 
           // Linux escapes only newline as `\012`, not literal backslashes.
           // Compare raw paths and fold ambiguous spellings on both sides,
@@ -238,24 +264,32 @@ export async function cleanupPathUse(
                   path.replaceAll("\\012", "\n"),
                 ),
             )
-          )
+          ) {
             return "in-use";
+          }
         } finally {
           await file.close();
         }
       } catch (error) {
-        if (!gone(error)) return "unknown";
+        if (!gone(error)) {
+          return "unknown";
+        }
       }
 
       for (const tid of threads) {
-        if (!/^\d+$/.test(tid)) continue;
+        if (!/^\d+$/.test(tid)) {
+          continue;
+        }
+
         const thread = join(entry, "task", tid);
         let descriptors: string[];
 
         try {
           descriptors = bounded(await readdir(join(thread, "fd")));
         } catch (error) {
-          if (gone(error)) continue;
+          if (gone(error)) {
+            continue;
+          }
 
           return "unknown";
         }
@@ -264,8 +298,11 @@ export async function cleanupPathUse(
           join(thread, "cwd"),
           join(thread, "root"),
           ...descriptors.map((fd) => join(thread, "fd", fd)),
-        ])
-          if (await link(name)) return "in-use";
+        ]) {
+          if (await link(name)) {
+            return "in-use";
+          }
+        }
       }
     }
 
@@ -289,13 +326,16 @@ export function scratchBatch(
   cutoff: number,
   limit = maxItems,
 ): { names: string[]; partial: boolean } {
-  if (children.length <= limit)
+  if (children.length <= limit) {
     return {
       names: children.map((child) => child.name).toSorted(),
       partial: false,
     };
+  }
 
-  if (limit <= 0) return { names: [], partial: true };
+  if (limit <= 0) {
+    return { names: [], partial: true };
+  }
 
   const old = children
     .filter((child) => child.mtimeMs < cutoff)
@@ -338,8 +378,10 @@ function worktrees(text: string): Worktree[] {
     const lines = record.split("\0").filter(Boolean);
     const path = lines.shift()?.replace(/^worktree /, "");
 
-    if (!path || path.length > 4096 || !isAbsolute(path) || hasControls(path))
+    if (!path || path.length > 4096 || !isAbsolute(path) || hasControls(path)) {
       refuse("git-unknown");
+    }
+
     const tip = lines.find((line) => line.startsWith("HEAD "))?.slice(5) ?? "";
 
     const branch = lines
@@ -348,7 +390,9 @@ function worktrees(text: string): Worktree[] {
 
     const bare = lines.includes("bare");
 
-    if (!bare && !sha.test(tip)) refuse("git-unknown");
+    if (!bare && !sha.test(tip)) {
+      refuse("git-unknown");
+    }
 
     if (
       lines.some(
@@ -357,11 +401,14 @@ function worktrees(text: string): Worktree[] {
             line,
           ),
       )
-    )
+    ) {
       refuse("git-unknown");
+    }
 
-    if (lines.some((line) => line.startsWith("prunable")))
+    if (lines.some((line) => line.startsWith("prunable"))) {
       refuse("git-unknown");
+    }
+
     result.push({
       path: resolve(path),
       tip,
@@ -371,7 +418,9 @@ function worktrees(text: string): Worktree[] {
     });
   }
 
-  if (result.length === 0) refuse("git-unknown");
+  if (result.length === 0) {
+    refuse("git-unknown");
+  }
 
   return result;
 }
@@ -380,7 +429,10 @@ function worktrees(text: string): Worktree[] {
 export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
   const result: CleanupResult = { items: [], freedBytes: 0, plannedBytes: 0 };
 
-  if (!input.settings.enabled) return result;
+  if (!input.settings.enabled) {
+    return result;
+  }
+
   const deadline = Math.min(input.deadline ?? Infinity, Date.now() + 120_000);
   const home = homedir();
 
@@ -424,36 +476,44 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
   ].map((path) => resolve(path));
 
   // Include resolved aliases too; an unresolved operator protection still protects its literal path.
-  for (const path of [...protectedPaths])
+  for (const path of [...protectedPaths]) {
     try {
       protectedPaths.push(await realpath(path));
     } catch {
       /* Literal protection remains */
     }
+  }
 
   const tasks = (input.taskDirectories ?? []).map((path) => resolve(path));
 
-  for (const path of [...tasks])
+  for (const path of [...tasks]) {
     try {
       tasks.push(await realpath(path));
     } catch {
       /* Literal protection remains */
     }
+  }
 
   const primaries: string[] = [];
   let commands = 0;
   let auditBroken = false;
 
   const check = () => {
-    if (input.signal.aborted) refuse("aborted");
+    if (input.signal.aborted) {
+      refuse("aborted");
+    }
 
-    if (Date.now() >= deadline) refuse("deadline");
+    if (Date.now() >= deadline) {
+      refuse("deadline");
+    }
   };
 
   const capacity = () => !auditBroken && result.items.length < maxItems;
 
   async function record(item: CleanupItem) {
-    if (input.plan) return;
+    if (input.plan) {
+      return;
+    }
 
     try {
       await input.record?.({ ...item });
@@ -464,7 +524,10 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
   }
 
   async function emit(item: CleanupItem) {
-    if (!capacity()) return;
+    if (!capacity()) {
+      return;
+    }
+
     result.items.push(item);
     await record(item);
   }
@@ -474,9 +537,14 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
     args: string[],
     verification = false,
   ): Promise<CommandResult> {
-    if (!verification) check();
+    if (!verification) {
+      check();
+    }
 
-    if (++commands > 2000) refuse("scan-limit");
+    if (++commands > 2000) {
+      refuse("scan-limit");
+    }
+
     const timeoutMs = Math.max(1, Math.min(10_000, deadline - Date.now()));
 
     const output = await input.runner.run(
@@ -491,7 +559,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       },
     );
 
-    if (output.stdout.length >= 1024 * 1024) refuse("scan-limit");
+    if (output.stdout.length >= 1024 * 1024) {
+      refuse("scan-limit");
+    }
 
     return output;
   }
@@ -499,7 +569,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
   async function git(path: string, ...args: string[]) {
     const output = await command(path, args);
 
-    if (output.code !== 0) refuse("git-unknown");
+    if (output.code !== 0) {
+      refuse("git-unknown");
+    }
 
     return output.stdout;
   }
@@ -507,13 +579,20 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
   async function canonical(path: string) {
     check();
 
-    if (!isAbsolute(path) || resolve(path) !== path || hasControls(path))
+    if (!isAbsolute(path) || resolve(path) !== path || hasControls(path)) {
       refuse("unsafe-path");
+    }
 
-    if ((await realpath(path)) !== path || (await lstat(path)).isSymbolicLink())
+    if (
+      (await realpath(path)) !== path ||
+      (await lstat(path)).isSymbolicLink()
+    ) {
       refuse("symlink");
+    }
 
-    if (!(await lstat(path)).isDirectory()) refuse("unsafe-path");
+    if (!(await lstat(path)).isDirectory()) {
+      refuse("unsafe-path");
+    }
   }
 
   async function allowed(path: string, primary = true) {
@@ -527,12 +606,17 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       path === home ||
       fixed.some((p) => overlaps(path, p)) ||
       protectedPaths.some((p) => overlaps(path, p) && (primary || path !== p))
-    )
+    ) {
       refuse("protected");
+    }
 
-    if (primary && primaries.some((p) => overlaps(path, p))) refuse("primary");
+    if (primary && primaries.some((p) => overlaps(path, p))) {
+      refuse("primary");
+    }
 
-    if (tasks.some((p) => overlaps(path, p))) refuse("in-use");
+    if (tasks.some((p) => overlaps(path, p))) {
+      refuse("in-use");
+    }
 
     const use = await (input.inUse
       ? input.inUse(path)
@@ -540,7 +624,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
 
     check();
 
-    if (use !== "unused") refuse(use === "in-use" ? "in-use" : "use-unknown");
+    if (use !== "unused") {
+      refuse(use === "in-use" ? "in-use" : "use-unknown");
+    }
   }
 
   async function scan(path: string): Promise<Tree> {
@@ -554,16 +640,28 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
     const visit = async (current: string, depth: number): Promise<void> => {
       check();
 
-      if (++count > maxEntries || depth > 64) refuse("scan-limit");
+      if (++count > maxEntries || depth > 64) {
+        refuse("scan-limit");
+      }
+
       const info = await lstat(current);
 
-      if (info.isSymbolicLink()) refuse("symlink");
+      if (info.isSymbolicLink()) {
+        refuse("symlink");
+      }
 
-      if (!info.isFile() && !info.isDirectory()) refuse("metadata-unknown");
+      if (!info.isFile() && !info.isDirectory()) {
+        refuse("metadata-unknown");
+      }
 
-      if (info.isFile() && info.nlink !== 1) refuse("unsafe-path");
+      if (info.isFile() && info.nlink !== 1) {
+        refuse("unsafe-path");
+      }
 
-      if (info.dev !== device) refuse("unsafe-path");
+      if (info.dev !== device) {
+        refuse("unsafe-path");
+      }
+
       const name = basename(current);
 
       if (
@@ -571,11 +669,13 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
         current.endsWith(`${sep}.agents${sep}opco`) ||
         current.endsWith(`${sep}.local${sep}share${sep}stargate`) ||
         current.endsWith(`${sep}.local${sep}share${sep}opencode`)
-      )
+      ) {
         refuse("protected");
+      }
 
-      if (["slack-share", "avondale-fixtures"].includes(name))
+      if (["slack-share", "avondale-fixtures"].includes(name)) {
         refuse("protected");
+      }
 
       if (
         (/^(inspect-snapshot-|bosun-inspect-)/.test(name) &&
@@ -583,18 +683,25 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
         (name.endsWith("-relay.json") &&
           new Date(info.mtimeMs).toDateString() ===
             new Date(input.now).toDateString())
-      )
+      ) {
         refuse("retained");
+      }
 
       if (name === ".git") {
         // Linked worktrees require `git worktree remove`.
-        if (!info.isDirectory()) refuse("git-unknown");
+        if (!info.isDirectory()) {
+          refuse("git-unknown");
+        }
+
         repositories.push(dirname(current));
       }
 
       newestMtime = Math.max(newestMtime, info.mtimeMs);
 
-      if (info.isFile()) size += info.size;
+      if (info.isFile()) {
+        size += info.size;
+      }
+
       hash.update(
         JSON.stringify([
           current,
@@ -607,7 +714,7 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
         ]),
       );
 
-      if (info.isDirectory())
+      if (info.isDirectory()) {
         for (const name of bounded(await readdir(current)).toSorted()) {
           // The root .git pointer is metadata of an explicitly listed worktree, not a nested repository.
           if (
@@ -621,8 +728,10 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
               !pointer.isFile() ||
               pointer.nlink !== 1 ||
               pointer.dev !== device
-            )
+            ) {
               refuse("git-unknown");
+            }
+
             size += pointer.size;
             hash.update(
               JSON.stringify([
@@ -640,6 +749,7 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
 
           await visit(join(current, name), depth + 1);
         }
+      }
     };
 
     await visit(path, 0);
@@ -659,18 +769,21 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
           "--ignore-submodules=none",
         )
       ).length > 0
-    )
+    ) {
       refuse("dirty");
+    }
 
-    if ((await git(path, "rev-parse", "--show-toplevel")).trim() !== path)
+    if ((await git(path, "rev-parse", "--show-toplevel")).trim() !== path) {
       refuse("git-unknown");
+    }
   }
 
   async function remoteTips(path: string) {
     // Offline evidence only: origin, actual remote-tracking refs and verified
     // Local commit objects. Configured upstream names alone prove nothing.
-    if (!(await git(path, "remote")).trim().split("\n").includes("origin"))
+    if (!(await git(path, "remote")).trim().split("\n").includes("origin")) {
       refuse("git-unknown");
+    }
 
     const text = await git(
       path,
@@ -689,20 +802,25 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
           !ref?.startsWith("refs/remotes/origin/") ||
           type !== "commit" ||
           symbolic === undefined
-        )
+        ) {
           refuse("git-unknown");
+        }
 
         return symbolic ? [] : [tip];
       },
     );
 
-    if (tips.length === 0) refuse("git-unknown");
+    if (tips.length === 0) {
+      refuse("git-unknown");
+    }
 
     return tips;
   }
 
   async function contained(path: string, tip: string, remotes: string[]) {
-    if (!sha.test(tip)) refuse("git-unknown");
+    if (!sha.test(tip)) {
+      refuse("git-unknown");
+    }
 
     for (const remote of remotes) {
       const output = await command(path, [
@@ -712,9 +830,13 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
         remote,
       ]);
 
-      if (output.code === 0) return;
+      if (output.code === 0) {
+        return;
+      }
 
-      if (output.code !== 1 && output.code !== 128) refuse("git-unknown");
+      if (output.code !== 1 && output.code !== 128) {
+        refuse("git-unknown");
+      }
     }
 
     refuse("unpushed");
@@ -733,15 +855,18 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
 
     heads.push((await git(path, "rev-parse", "--verify", "HEAD")).trim());
 
-    for (const head of new Set(heads)) await contained(path, head, tips);
+    for (const head of new Set(heads)) {
+      await contained(path, head, tips);
+    }
   }
 
   async function treeSafe(path: string, kind: CleanupItem["kind"]) {
     await allowed(path);
     const tree = await scan(path);
 
-    if (tree.newestMtime >= input.now - input.settings.olderThanDays * day)
+    if (tree.newestMtime >= input.now - input.settings.olderThanDays * day) {
       refuse("recent");
+    }
 
     for (const repo of tree.repositories) {
       await clean(repo);
@@ -751,14 +876,20 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
         await git(repo, "worktree", "list", "--porcelain", "-z"),
       );
 
-      if (list.some((item) => item.path !== repo)) refuse("git-unknown");
+      if (list.some((item) => item.path !== repo)) {
+        refuse("git-unknown");
+      }
     }
 
     if (kind === "scratch") {
       try {
-        if ((await lstat(join(path, ".git"))).isFile()) refuse("git-unknown");
+        if ((await lstat(join(path, ".git"))).isFile()) {
+          refuse("git-unknown");
+        }
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
       }
     }
 
@@ -795,7 +926,10 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
     } catch (error) {
       // Filesystem removal can fail after deleting part of the tree.
       // Never classify an unknown removal outcome as a retained item.
-      if (error instanceof Refusal) throw error;
+      if (error instanceof Refusal) {
+        throw error;
+      }
+
       refuse("command-failed");
     }
 
@@ -805,19 +939,22 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
   }
 
   async function attempt(item: CleanupItem, operation: () => Promise<void>) {
-    if (!capacity()) return;
+    if (!capacity()) {
+      return;
+    }
 
     try {
       check();
       await operation();
     } catch (error) {
       if (auditBroken) {
-        if (result.items.length < maxItems)
+        if (result.items.length < maxItems) {
           result.items.push({
             ...item,
             status: "failed",
             reason: "audit-failed",
           });
+        }
 
         return;
       }
@@ -856,7 +993,10 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
 
       const primary = list[0];
 
-      if (!primary) refuse("git-unknown");
+      if (!primary) {
+        refuse("git-unknown");
+      }
+
       primaries.push(primary.path);
       repositoryLists.set(raw, list);
     });
@@ -867,7 +1007,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
     repositoryLists.size === new Set(input.settings.repositories).size;
 
   for (const raw of new Set(input.settings.scratchRoots)) {
-    if (!capacity()) break;
+    if (!capacity()) {
+      break;
+    }
 
     const base: CleanupItem = {
       kind: "scratch",
@@ -881,10 +1023,14 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
     await attempt(base, async () => {
       await canonical(raw);
 
-      if (raw === sep || raw === home || fixed.some((p) => inside(raw, p)))
+      if (raw === sep || raw === home || fixed.some((p) => inside(raw, p))) {
         refuse("protected");
+      }
 
-      if (!scratchAllowed) refuse("git-unknown");
+      if (!scratchAllowed) {
+        refuse("git-unknown");
+      }
+
       // More children than this run can still report: a batch now, the
       // Rest later. One report item is kept for the root itself, so every
       // Name of the batch has an item and the daily window loses no child.
@@ -892,17 +1038,19 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       const listed = bounded(await readdir(raw));
       const budget = maxItems - result.items.length;
 
-      if (listed.length <= budget)
+      if (listed.length <= budget) {
         children.push(...listed.map((name) => ({ name, mtimeMs: 0 })));
-      else
+      } else {
         for (const name of listed) {
           check();
           const info = await lstat(join(raw, name)).catch(() => {});
 
           // A plain file is never a candidate; it takes no place in a batch.
-          if (info && (info.isDirectory() || info.isSymbolicLink()))
+          if (info && (info.isDirectory() || info.isSymbolicLink())) {
             children.push({ name, mtimeMs: info.mtimeMs });
+          }
         }
+      }
 
       const batch = scratchBatch(
         children,
@@ -911,10 +1059,15 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
         listed.length <= budget ? budget : Math.max(0, budget - 1),
       );
 
-      if (batch.partial) await emit({ ...base, reason: "scan-limit" });
+      if (batch.partial) {
+        await emit({ ...base, reason: "scan-limit" });
+      }
 
       for (const name of batch.names) {
-        if (!capacity()) break;
+        if (!capacity()) {
+          break;
+        }
+
         const path = join(raw, name);
 
         if (hasControls(name) || path.length > 4096) {
@@ -926,7 +1079,10 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
 
         const info = await lstat(path);
 
-        if (!info.isDirectory() && !info.isSymbolicLink()) continue;
+        if (!info.isDirectory() && !info.isSymbolicLink()) {
+          continue;
+        }
+
         const item = { ...base, path };
         await attempt(item, async () => {
           const tree = await treeSafe(path, "scratch");
@@ -940,13 +1096,16 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
             async () => {
               const names = bounded(await readdir(raw));
 
-              if (!names.includes(name)) refuse("changed");
+              if (!names.includes(name)) {
+                refuse("changed");
+              }
 
               if (
                 (await treeSafe(path, "scratch")).fingerprint !==
                 tree.fingerprint
-              )
+              ) {
                 refuse("changed");
+              }
             },
             async () => {
               // Pin the parent descriptor; recursive removal cannot traverse a replaced ancestor.
@@ -965,11 +1124,14 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
                   parent.dev !== live.dev ||
                   parent.ino !== live.ino ||
                   (await realpath(raw)) !== raw
-                )
+                ) {
                   refuse("changed");
+                }
 
-                if ((await scan(path)).fingerprint !== tree.fingerprint)
+                if ((await scan(path)).fingerprint !== tree.fingerprint) {
                   refuse("changed");
+                }
+
                 check();
                 await rm(`/proc/self/fd/${handle.fd}/${name}`, {
                   recursive: true,
@@ -980,8 +1142,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
                   await lstat(`/proc/self/fd/${handle.fd}/${name}`);
                   refuse("command-failed");
                 } catch (error) {
-                  if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+                  if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                     throw error;
+                  }
                 }
               } finally {
                 await handle.close();
@@ -994,7 +1157,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
   }
 
   for (const [repo, initial] of repositoryLists) {
-    if (!capacity()) break;
+    if (!capacity()) {
+      break;
+    }
 
     const base: CleanupItem = {
       kind: "branch",
@@ -1013,17 +1178,23 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       if (!input.plan) {
         const fetch = await command(repo, ["fetch", "--prune", "origin"]);
 
-        if (fetch.code !== 0) refuse("fetch-failed");
+        if (fetch.code !== 0) {
+          refuse("fetch-failed");
+        }
       }
 
       const list = worktrees(
         await git(repo, "worktree", "list", "--porcelain", "-z"),
       );
 
-      if (list[0]?.path !== initial[0]?.path) refuse("changed");
+      if (list[0]?.path !== initial[0]?.path) {
+        refuse("changed");
+      }
 
       for (const worktree of list) {
-        if (!capacity()) break;
+        if (!capacity()) {
+          break;
+        }
 
         const item: CleanupItem = {
           ...base,
@@ -1034,10 +1205,13 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
         };
 
         await attempt(item, async () => {
-          if (worktree.path === list[0]?.path || worktree.bare)
+          if (worktree.path === list[0]?.path || worktree.bare) {
             refuse("primary");
+          }
 
-          if (worktree.locked) refuse("locked");
+          if (worktree.locked) {
+            refuse("locked");
+          }
 
           const validateGit = async () => {
             await clean(worktree.path);
@@ -1051,8 +1225,10 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
               fresh.locked ||
               fresh.tip !== worktree.tip ||
               fresh.branch !== worktree.branch
-            )
+            ) {
               refuse("changed");
+            }
+
             await allPushed(worktree.path);
           };
 
@@ -1069,8 +1245,10 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
               if (
                 (await treeSafe(worktree.path, "worktree")).fingerprint !==
                 tree.fingerprint
-              )
+              ) {
                 refuse("changed");
+              }
+
               await validateGit();
             },
             async () => {
@@ -1081,14 +1259,17 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
                 worktree.path,
               ]);
 
-              if (output.code) refuse("command-failed");
+              if (output.code) {
+                refuse("command-failed");
+              }
 
               try {
                 await lstat(worktree.path);
                 refuse("command-failed");
               } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                   throw error;
+                }
               }
             },
           );
@@ -1111,7 +1292,10 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       );
 
       for (const ref of refs) {
-        if (!capacity()) break;
+        if (!capacity()) {
+          break;
+        }
+
         const [full, tip] = ref.split("\t");
         const branch = full?.slice("refs/heads/".length);
 
@@ -1120,8 +1304,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
           !branch ||
           !tip ||
           !sha.test(tip)
-        )
+        ) {
           refuse("git-unknown");
+        }
 
         if (branch.length > 1024) {
           await emit({ ...base, reason: "unsafe-path" });
@@ -1134,24 +1319,30 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
           await allowed(repo, false);
           await clean(repo);
 
-          if (["main", "master"].includes(branch)) refuse("protected");
+          if (["main", "master"].includes(branch)) {
+            refuse("protected");
+          }
 
           const trees = worktrees(
             await git(repo, "worktree", "list", "--porcelain", "-z"),
           );
 
-          if (trees.some((tree) => tree.branch === branch))
+          if (trees.some((tree) => tree.branch === branch)) {
             refuse("checked-out");
+          }
 
-          if ((await git(repo, "rev-parse", "--verify", full)).trim() !== tip)
+          if ((await git(repo, "rev-parse", "--verify", full)).trim() !== tip) {
             refuse("changed");
+          }
 
           const main = (
             await git(repo, "rev-parse", "--verify", "refs/remotes/origin/main")
           ).trim();
 
-          if (!sha.test(main) || !(await remoteTips(repo)).includes(main))
+          if (!sha.test(main) || !(await remoteTips(repo)).includes(main)) {
             refuse("git-unknown");
+          }
+
           await contained(repo, tip, [main]);
         };
 
@@ -1160,7 +1351,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
           await perform(item, validate, async () => {
             const output = await command(repo, ["branch", "-d", "--", branch]);
 
-            if (output.code !== 0) refuse("command-failed");
+            if (output.code !== 0) {
+              refuse("command-failed");
+            }
 
             const remains = await command(
               repo,
@@ -1168,7 +1361,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
               true,
             );
 
-            if (remains.code !== 1) refuse("command-failed");
+            if (remains.code !== 1) {
+              refuse("command-failed");
+            }
           });
         });
       }
@@ -1185,7 +1380,9 @@ export async function runCleanup(input: CleanupInput): Promise<CleanupResult> {
       ) {
         const prune = await command(repo, ["worktree", "prune"]);
 
-        if (prune.code) refuse("command-failed");
+        if (prune.code) {
+          refuse("command-failed");
+        }
       }
     });
   }

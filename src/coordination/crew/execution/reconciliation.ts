@@ -288,14 +288,21 @@ async function* newest(
 
     signal.throwIfAborted();
 
-    if (result.data.length > limit)
+    if (result.data.length > limit) {
       throw new CrewError("Invalid evidence page.");
+    }
+
     yield* result.data;
     const next = result.cursor.next;
 
-    if (!next) return;
+    if (!next) {
+      return;
+    }
 
-    if (cursors.has(next)) throw new CrewError("Repeated history cursor.");
+    if (cursors.has(next)) {
+      throw new CrewError("Repeated history cursor.");
+    }
+
     cursors.add(next);
     cursor = next;
   }
@@ -313,12 +320,18 @@ export async function resumeAdmitted(
 ): Promise<boolean> {
   const inbox = await api.session.inbox.list({ sessionID }, { signal });
 
-  if (inbox.some(({ id }) => id === messageID)) return true;
+  if (inbox.some(({ id }) => id === messageID)) {
+    return true;
+  }
 
   for await (const message of newest(api, sessionID, "synthetic", signal)) {
-    if (message.time.created < idleAt) return false;
+    if (message.time.created < idleAt) {
+      return false;
+    }
 
-    if (message.id === messageID) return true;
+    if (message.id === messageID) {
+      return true;
+    }
   }
 
   return false;
@@ -328,10 +341,15 @@ export async function resumeAdmitted(
 function taskScoped(message: EvidenceMessage, task: PlacementTask): boolean {
   const notice = message.metadata?.[crewMessageMetadataKey];
 
-  if (typeof notice !== "object" || notice === null) return false;
+  if (typeof notice !== "object" || notice === null) {
+    return false;
+  }
+
   const value = notice as Record<string, unknown>;
 
-  if ("resumeIdleAt" in value) return isTaskResume(message, task);
+  if ("resumeIdleAt" in value) {
+    return isTaskResume(message, task);
+  }
 
   return (
     value["taskID"] === task.id &&
@@ -354,12 +372,17 @@ export async function observePlacement(
     const sessionID = task.workerSessionID;
     const inbox = await api.session.inbox.list({ sessionID }, { signal });
 
-    if (inbox.some(({ id }) => id === task.inputID)) return "queued";
+    if (inbox.some(({ id }) => id === task.inputID)) {
+      return "queued";
+    }
+
     let own: EvidenceMessage | undefined;
     let later = false;
 
     for await (const message of newest(api, sessionID, "user", signal)) {
-      if (message.type !== "user") continue;
+      if (message.type !== "user") {
+        continue;
+      }
 
       if (message.id === task.inputID) {
         own = message;
@@ -369,21 +392,34 @@ export async function observePlacement(
       later = true;
     }
 
-    if (!own) return "absent";
+    if (!own) {
+      return "absent";
+    }
 
-    if (later) return "superseded";
+    if (later) {
+      return "superseded";
+    }
+
     let pendingShellCallback = false;
 
     // Shell and foreign synthetic inputs also start or steer other work.
-    for (const type of ["shell", "synthetic"] as const)
+    for (const type of ["shell", "synthetic"] as const) {
       for await (const message of newest(api, sessionID, type, signal)) {
-        if (message.time.created < own.time.created) break;
+        if (message.time.created < own.time.created) {
+          break;
+        }
 
-        if (message.type !== type) continue;
+        if (message.type !== type) {
+          continue;
+        }
 
         if (type === "synthetic") {
-          if (taskScoped(message, task) || isNativeInstructionContext(message))
+          if (
+            taskScoped(message, task) ||
+            isNativeInstructionContext(message)
+          ) {
             continue;
+          }
 
           if (isShellCompletionCandidate(message)) {
             pendingShellCallback = true;
@@ -393,6 +429,7 @@ export async function observePlacement(
 
         return "superseded";
       }
+    }
 
     if (pendingShellCallback) {
       // Cross-type ordering needs native history, never timestamps alone.
@@ -400,9 +437,13 @@ export async function observePlacement(
 
       for await (const message of newest(api, sessionID, undefined, signal)) {
         if (message.type === "user") {
-          if (message.id !== task.inputID) return "superseded";
+          if (message.id !== task.inputID) {
+            return "superseded";
+          }
 
-          if (proof.exceededBounds) return "unknown";
+          if (proof.exceededBounds) {
+            return "unknown";
+          }
 
           return proof.finish(message.time.created) ? "placed" : "superseded";
         }
@@ -415,8 +456,9 @@ export async function observePlacement(
             !taskScoped(message, task) &&
             !isNativeInstructionContext(message) &&
             !candidate)
-        )
+        ) {
           return "superseded";
+        }
       }
 
       return "unknown";
@@ -440,8 +482,9 @@ export function idleBoundary(
     !execution.pendingPermissions &&
     time?.idle !== undefined &&
     time.idle >= (time.busy ?? 0)
-  )
+  ) {
     return time.idle;
+  }
 
   return undefined;
 }
@@ -450,10 +493,11 @@ export function requireQuiescent(execution: ExecutionInspection): void {
   if (
     idleBoundary(execution) === undefined ||
     execution.outcome !== "succeeded"
-  )
+  ) {
     throw new CrewError(
       "Worker is active, has pending input/approval, or lacks a successful idle boundary; reconciliation refused. Do not interrupt or replay it.",
     );
+  }
 }
 
 const envelopeSchema = settingsStruct({
@@ -467,8 +511,9 @@ function verifyInput(message: EvidenceMessage, task: CrewTask): string {
   try {
     const payload = taskEnvelopePayload(message.text);
 
-    if (payload === undefined)
+    if (payload === undefined) {
       throw new Error("Task envelope payload is missing");
+    }
 
     const envelope = Schema.decodeUnknownSync(envelopeSchema)(
       JSON.parse(payload),
@@ -488,8 +533,9 @@ function verifyInput(message: EvidenceMessage, task: CrewTask): string {
       !("originCaptainID" in metadata) ||
       metadata.originCaptainID !== task.originCaptainID ||
       message.text === undefined
-    )
+    ) {
       throw new Error("Task envelope does not match the task");
+    }
 
     return sha256(message.text);
   } catch {
@@ -529,17 +575,19 @@ export async function verifyResult(
 
     signal.throwIfAborted();
 
-    if (page.data.length > 64)
+    if (page.data.length > 64) {
       throw new CrewError("Invalid evidence page; reconciliation refused.");
+    }
 
     for (const message of page.data) {
       if (message.id === task.inputID && message.type === "user") {
         const inputSha256 = verifyInput(message, task);
 
-        if (!shellContext.finish(message.time.created))
+        if (!shellContext.finish(message.time.created)) {
           throw new CrewError(
             "A shell callback lacks unique task-owned launch proof; reconciliation refused.",
           );
+        }
 
         const result = (final?.content ?? [])
           .filter((part) => part.type === "text")
@@ -560,17 +608,20 @@ export async function verifyResult(
           !result.trim() ||
           result.length > 64_000 ||
           sha256(result) !== input.resultSha256
-        )
+        ) {
           throw new CrewError(
             "Final result evidence does not match the reviewed message/hash and admitted input; no state changed.",
           );
+        }
 
         return { result, inputSha256 };
       }
 
       const shellCandidate = shellContext.track(message);
 
-      if (shellCandidate && !final) unansweredShellCallback = true;
+      if (shellCandidate && !final) {
+        unansweredShellCallback = true;
+      }
 
       if (message.type === "assistant") {
         final ??= message;
@@ -591,9 +642,14 @@ export async function verifyResult(
 
     const next = page.cursor.next;
 
-    if (!next) break;
+    if (!next) {
+      break;
+    }
 
-    if (cursors.has(next)) break;
+    if (cursors.has(next)) {
+      break;
+    }
+
     cursors.add(next);
     cursor = next;
   }

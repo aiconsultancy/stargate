@@ -34,8 +34,9 @@ export function containsCredential(text: string) {
 export function redactCredentials(text: string, limit = 1500): string {
   let redacted = text.slice(0, 64_000);
 
-  for (const [pattern, replacement] of credentialRules)
+  for (const [pattern, replacement] of credentialRules) {
     redacted = redacted.replace(pattern, replacement);
+  }
 
   return redacted
     .replace(/\p{Cc}/gu, (character) =>
@@ -50,7 +51,9 @@ export function secret(
 ): string {
   const value = env[name];
 
-  if (!value?.trim()) throw new Error(`Missing environment variable: ${name}`);
+  if (!value?.trim()) {
+    throw new Error(`Missing environment variable: ${name}`);
+  }
 
   return value;
 }

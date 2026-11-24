@@ -157,10 +157,16 @@ export class PiCrewWorkers {
     member: CrewMember,
     directory: string,
   ): Promise<PiWorkerBackend> {
-    if (this.closed) throw new CrewError("Pi crew runtime is closing.");
+    if (this.closed) {
+      throw new CrewError("Pi crew runtime is closing.");
+    }
+
     const definition = member.backend;
 
-    if (!definition) throw new CrewError("Worker is not a Pi worker.");
+    if (!definition) {
+      throw new CrewError("Worker is not a Pi worker.");
+    }
+
     let backend = this.backends.get(member.id);
 
     if (!backend) {
@@ -177,11 +183,15 @@ export class PiCrewWorkers {
           let previous = closing.get(dataDirectory);
           previous;
           previous = closing.get(dataDirectory)
-        )
+        ) {
           await previous.catch(() => {});
+        }
 
         // No await between this check and registering pool ownership.
-        if (this.closed) throw new CrewError("Pi crew runtime is closing.");
+        if (this.closed) {
+          throw new CrewError("Pi crew runtime is closing.");
+        }
+
         const pooled = pool.get(dataDirectory);
 
         if (pooled) {
@@ -197,7 +207,9 @@ export class PiCrewWorkers {
           const owner = owners.values().next().value;
           const binding = owner?.binding?.(member);
 
-          if (!binding) throw new CrewError("Pi crew binding unavailable.");
+          if (!binding) {
+            throw new CrewError("Pi crew binding unavailable.");
+          }
 
           return binding;
         };
@@ -216,12 +228,14 @@ export class PiCrewWorkers {
                   error !== null &&
                   "code" in error &&
                   error.code === "ENOENT"
-                )
+                ) {
                   return piMemberDefinition(
                     member,
                     directory,
                     this.captainDirectory ?? "",
                   );
+                }
+
                 throw new CrewError(
                   "Pi member definition is unreadable; check the trusted definition file.",
                 );
@@ -280,16 +294,18 @@ export class PiCrewWorkers {
         this.leases.add(dataDirectory);
         // A failed open is not cached; the next caller opens again.
         opening.catch(() => {
-          if (pool.get(dataDirectory)?.backend === opening)
+          if (pool.get(dataDirectory)?.backend === opening) {
             pool.delete(dataDirectory);
+          }
         });
 
         return opening;
       })();
       const opened = backend;
       opened.catch(() => {
-        if (this.backends.get(member.id) === opened)
+        if (this.backends.get(member.id) === opened) {
           this.backends.delete(member.id);
+        }
       });
       this.backends.set(member.id, backend);
     }
@@ -306,19 +322,24 @@ export class PiCrewWorkers {
     signal.throwIfAborted();
     const saved = this.state.piPeer(peer.sessionID);
 
-    if (saved?.conversationID) return;
+    if (saved?.conversationID) {
+      return;
+    }
 
-    if (saved || peer.status === "ready")
+    if (saved || peer.status === "ready") {
       throw new CrewError(
         "Pi conversation creation is unconfirmed. Inspect private Pi state; automatic recreation is disabled.",
       );
+    }
+
     const backend = await this.backend(member, directory);
     signal.throwIfAborted();
 
-    if (!this.state.reservePiPeer(peer.sessionID))
+    if (!this.state.reservePiPeer(peer.sessionID)) {
       throw new CrewError(
         "Pi conversation creation is already reserved; retry ensure to inspect it.",
       );
+    }
 
     try {
       const conversationID = await backend.createSession({
@@ -353,7 +374,9 @@ export class PiCrewWorkers {
     _directory: string,
     signal: AbortSignal,
   ): Promise<CrewTask> {
-    if (this.closed) return task;
+    if (this.closed) {
+      return task;
+    }
 
     const recovery = this.recoverReceipt(
       task,
@@ -384,12 +407,16 @@ export class PiCrewWorkers {
       current.released !== 0 ||
       !["dispatching", "running", "uncertain"].includes(current.status) ||
       this.observed(current)
-    )
+    ) {
       return current;
+    }
+
     const expected = this.reconcile(current);
     const conversationID = this.state.piTaskConversation(expected.id);
 
-    if (!conversationID || !this.factory.recover) return expected;
+    if (!conversationID || !this.factory.recover) {
+      return expected;
+    }
 
     try {
       const hash = createHash("sha256").update(member.id).digest("hex");
@@ -411,12 +438,13 @@ export class PiCrewWorkers {
 
       signal.throwIfAborted();
 
-      if (answer !== undefined)
+      if (answer !== undefined) {
         return this.state.recoverResult(
           expected,
           answer.trim().slice(0, 64_000) ||
             "Worker finished without a text result.",
         );
+      }
     } catch {
       // Missing/unreadable native receipts remain unresolved, not failed or done.
     }
@@ -430,11 +458,15 @@ export class PiCrewWorkers {
     directory: string,
     signal: AbortSignal,
   ): Promise<boolean> {
-    if (executions.has(this.key(peer)) || notifications.has(this.key(peer)))
+    if (executions.has(this.key(peer)) || notifications.has(this.key(peer))) {
       return false;
+    }
+
     const conversationID = this.state.piPeer(peer.sessionID)?.conversationID;
 
-    if (!conversationID) return false;
+    if (!conversationID) {
+      return false;
+    }
 
     try {
       const backend = await this.backend(member, directory);
@@ -462,10 +494,16 @@ export class PiCrewWorkers {
   ): Promise<string> {
     const conversationID = this.state.piPeer(peer.sessionID)?.conversationID;
 
-    if (!conversationID) return "unavailable";
+    if (!conversationID) {
+      return "unavailable";
+    }
+
     const backend = await this.backend(member, directory);
 
-    if (!backend.notify) return "unsupported";
+    if (!backend.notify) {
+      return "unsupported";
+    }
+
     notifications.add(this.key(peer));
 
     try {
@@ -503,8 +541,10 @@ export class PiCrewWorkers {
     const operation = (async () => {
       signal.throwIfAborted();
 
-      if (this.closed || !member.backend)
+      if (this.closed || !member.backend) {
         throw new CrewError("Pi history unavailable or cancelled.");
+      }
+
       const hash = createHash("sha256").update(member.id).digest("hex");
 
       const dataDirectory = join(
@@ -517,12 +557,16 @@ export class PiCrewWorkers {
         let previous = closing.get(dataDirectory);
         previous;
         previous = closing.get(dataDirectory)
-      )
+      ) {
         await previous.catch(() => {});
+      }
+
       signal.throwIfAborted();
 
-      if (this.closed)
+      if (this.closed) {
         throw new CrewError("Pi history unavailable or cancelled.");
+      }
+
       const pooled = pool.get(dataDirectory);
 
       if (pooled) {
@@ -531,8 +575,9 @@ export class PiCrewWorkers {
         const backend = await pooled.backend;
         signal.throwIfAborted();
 
-        if (!backend.history)
+        if (!backend.history) {
           throw new CrewError("Pi history unavailable or cancelled.");
+        }
 
         return read(backend.history, signal);
       }
@@ -579,12 +624,15 @@ export class PiCrewWorkers {
       this.closed ||
       executions.has(this.key(peer)) ||
       notifications.has(this.key(peer))
-    )
+    ) {
       throw new CrewError("Pi worker is busy or closing.");
+    }
+
     const conversationID = this.state.piPeer(peer.sessionID)?.conversationID;
 
-    if (!conversationID)
+    if (!conversationID) {
       throw new CrewError("Pi worker has no confirmed conversation.");
+    }
 
     const execution: Execution = {
       taskID: task.id,
@@ -606,7 +654,9 @@ export class PiCrewWorkers {
       let observing = true;
 
       const flushProgress = () => {
-        if (pendingProgress === undefined) return;
+        if (pendingProgress === undefined) {
+          return;
+        }
 
         try {
           this.state.activity.progress(task.id, pendingProgress);
@@ -635,19 +685,27 @@ export class PiCrewWorkers {
             signal.aborted ||
             this.closed ||
             pendingProgress === undefined
-          )
+          ) {
             return;
+          }
+
           flushProgress();
           scheduleProgress();
         });
       };
 
       const onText: TextSink = (text) => {
-        if (!observing || signal.aborted || this.closed) return;
+        if (!observing || signal.aborted || this.closed) {
+          return;
+        }
+
         // Bound and redact before buffering, not just at the SQLite boundary.
         pendingProgress = redactCredentials(text, 64_000).slice(-400);
 
-        if (cancelProgress) return;
+        if (cancelProgress) {
+          return;
+        }
+
         flushProgress();
         scheduleProgress();
       };
@@ -659,11 +717,13 @@ export class PiCrewWorkers {
         signal.throwIfAborted();
         const isReport = this.state.reporting.isReport(task.id);
 
-        if (isReport && !backend.promptReport)
+        if (isReport && !backend.promptReport) {
           throw new CrewError("Pi backend cannot enforce read-only reporting.");
+        }
 
-        if (!isReport)
+        if (!isReport) {
           this.state.savePiTaskConversation(task.id, conversationID);
+        }
 
         const answer =
           isReport && backend.promptReport
@@ -718,7 +778,10 @@ export class PiCrewWorkers {
     this.recoveryController.abort();
     const running = [...this.owned];
 
-    for (const execution of running) execution.controller.abort();
+    for (const execution of running) {
+      execution.controller.abort();
+    }
+
     // Readers own native handles through their complete cleanup, even when an
     // Opener ignores cancellation. Crew state may close only after this drain.
     await Promise.allSettled([...this.recoveries, ...this.historyReads]);
@@ -727,17 +790,25 @@ export class PiCrewWorkers {
       [...this.leases].map(async (key) => {
         const entry = pool.get(key);
 
-        if (!entry) return;
+        if (!entry) {
+          return;
+        }
+
         entry.owners.delete(this);
 
         // Other plugin instances still own this harness.
-        if (entry.owners.size > 0) return;
+        if (entry.owners.size > 0) {
+          return;
+        }
+
         pool.delete(key);
 
         const closed = (async () => {
           await (await entry.backend).close();
         })().finally(() => {
-          if (closing.get(key) === closed) closing.delete(key);
+          if (closing.get(key) === closed) {
+            closing.delete(key);
+          }
         });
 
         closing.set(key, closed);

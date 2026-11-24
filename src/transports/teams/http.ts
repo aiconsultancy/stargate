@@ -22,7 +22,9 @@ function refuse(
 ): void {
   res.setHeader("connection", "close");
   res.once("finish", () => {
-    if (!req.complete) req.destroy();
+    if (!req.complete) {
+      req.destroy();
+    }
   });
   sendJson(res, status);
 }
@@ -133,8 +135,11 @@ export function createTeamsListener(options: TeamsListenerOptions): Server {
     try {
       activity = JSON.parse(await readBody(req, maxBytes));
     } catch (err) {
-      if (err instanceof BodyTooLargeError) refuse(req, res, 413);
-      else sendJson(res, 400);
+      if (err instanceof BodyTooLargeError) {
+        refuse(req, res, 413);
+      } else {
+        sendJson(res, 400);
+      }
 
       return;
     }

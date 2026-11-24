@@ -187,8 +187,9 @@ describe("OpenCode fleet history", () => {
     f.client.session.get = async ({ sessionID }, { signal }) => {
       expect(signal).toBe(f.signal);
 
-      if (sessionID === "missing")
+      if (sessionID === "missing") {
         throw { _tag: "SessionNotFoundError", message: "private missing ID" };
+      }
 
       return {
         ...info(sessionID),
@@ -255,7 +256,10 @@ describe("OpenCode fleet history", () => {
       active++;
       maximum = Math.max(maximum, active);
 
-      if (active === 5) started.resolve();
+      if (active === 5) {
+        started.resolve();
+      }
+
       await gate.promise;
       active--;
 
@@ -643,7 +647,7 @@ describe("OpenCode fleet history", () => {
     expect(page.entries[0]?.parts).toHaveLength(HISTORY_PARTS);
     expect(page.entries[0]?.omittedParts).toBe(3);
 
-    for (const entry of page.entries)
+    for (const entry of page.entries) {
       for (const part of entry.parts) {
         if (part.type === "text" && part.text !== "extra") {
           expect(part.text).toHaveLength(HISTORY_TEXT);
@@ -661,6 +665,7 @@ describe("OpenCode fleet history", () => {
           expect(part.truncated).toBe(true);
         }
       }
+    }
 
     expect(() =>
       Schema.decodeUnknownSync(historyEntryPageSchema)(page),
@@ -734,7 +739,9 @@ describe("OpenCode fleet history", () => {
       () => f.entries({ sessionID: "pi:worker" }),
     ];
 
-    for (const run of operations) await expect(run()).rejects.toThrow(failure);
+    for (const run of operations) {
+      await expect(run()).rejects.toThrow(failure);
+    }
   });
 
   test("already-aborted operations do not call native APIs or RPC", async () => {

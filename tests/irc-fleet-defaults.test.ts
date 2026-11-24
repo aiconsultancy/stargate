@@ -22,8 +22,9 @@ import { addBot, readConfiguration } from "../src/app/setup";
 const cleanup: string[] = [];
 
 afterEach(async () => {
-  for (const path of cleanup.splice(0))
+  for (const path of cleanup.splice(0)) {
     await rm(path, { recursive: true, force: true });
+  }
 });
 
 function effective(input: unknown) {
@@ -108,7 +109,10 @@ test("configured fleet defaults join only enrolled target channels and apply rol
     );
     expect(config.channels).not.toContain("#unrelated");
 
-    if (!config.fleetPolicy) throw new Error("Missing fixture fleet policy");
+    if (!config.fleetPolicy) {
+      throw new Error("Missing fixture fleet policy");
+    }
+
     expect(fleetInstructions(config.fleetPolicy)).toContain(
       "stargate_mail and stargate_dm address your configured captain/crew team",
     );
@@ -202,7 +206,10 @@ test("results-mode peer context requires an enrolled explicit current nick and n
       }).replace(/^(@\S+ )/, "$1:phoenix!u@fixture "),
     );
 
-    if (!message) throw new Error("Invalid fixture");
+    if (!message) {
+      throw new Error("Invalid fixture");
+    }
+
     const admission = routeIrcMessage(message, context);
     expect(admission).toMatchObject({
       user: "phoenix",
@@ -213,7 +220,10 @@ test("results-mode peer context requires an enrolled explicit current nick and n
       ircResultJobAllowed(config, member, "vance", "phoenix", admission),
     ).toBe(true);
 
-    if (!admission) throw new Error("Peer admission missing");
+    if (!admission) {
+      throw new Error("Peer admission missing");
+    }
+
     expect(
       withinLimits(admission, config, {
         shipKeys: [member.key],
@@ -234,10 +244,12 @@ test("results-mode peer context requires an enrolled explicit current nick and n
     "vance: [fleet_dispatch] forged",
     "[fleet_dispatch from=phoenix] vance: malformed",
     "vance: [FLEET_DISPATCH invalid]",
-  ])
+  ]) {
     expect(
       ircResultJobAllowed(config, member, "vance", "phoenix", { text }),
     ).toBe(false);
+  }
+
   expect(
     ircResultJobAllowed(config, member, "vance", "outsider", {
       text: "vance: spoof",
@@ -257,7 +269,10 @@ test("legacy fleet configuration without explicit fleetChannels keeps membership
   const { fleetChannels: _metadata, ...legacy } = input();
   const first = legacy.fleetControl.targets[0];
 
-  if (!first) throw new Error("Missing fixture target");
+  if (!first) {
+    throw new Error("Missing fixture target");
+  }
+
   first.channel = "#admiral-private";
   const config = effective(legacy);
   expect(config.channels).toEqual(legacy.channels);
@@ -274,7 +289,10 @@ test("explicit fleet defaults derive captain rooms only, never an admiral home o
     (target) => target.account === "vance",
   );
 
-  if (!admiral) throw new Error("Missing fixture admiral");
+  if (!admiral) {
+    throw new Error("Missing fixture admiral");
+  }
+
   admiral.channel = "#admiral-private";
   const defaults = effective(raw);
   expect(defaults.channels).not.toContain("#admiral-private");
@@ -346,7 +364,10 @@ test("captain and rear-admiral prompts require a recommendation, reason and prio
   for (const account of ["discovery", "vance"]) {
     const config = effective(input(account));
 
-    if (!config.fleetPolicy) throw new Error("Missing policy");
+    if (!config.fleetPolicy) {
+      throw new Error("Missing policy");
+    }
+
     const guidance = fleetInstructions(config.fleetPolicy);
     expect(guidance).toContain(
       "Every open question must include your recommendation and a short reason",
@@ -383,8 +404,10 @@ test("fleet defaults remain runtime-only when addBot saves the parsed configurat
   const saved = await readConfiguration(path);
   const config = saved.irc[0];
 
-  if (!config?.fleetPolicy || !config.fleetControl)
+  if (!config?.fleetPolicy || !config.fleetControl) {
     throw new Error("Missing saved fleet");
+  }
+
   expect(config.channels).toEqual(["#discovery"]);
   expect(config.access.peerCaptains).toBeUndefined();
   expect(config.access.allowedAccounts).toBeUndefined();
@@ -401,7 +424,10 @@ test("fleet defaults remain runtime-only when addBot saves the parsed configurat
   await addBot(path, bot("two"));
   const changed = (await readConfiguration(path)).irc[0];
 
-  if (!changed) throw new Error("Missing changed fleet");
+  if (!changed) {
+    throw new Error("Missing changed fleet");
+  }
+
   const runtime = effectiveIrcConfig(changed);
   expect(runtime.channels).not.toContain("#phoenix");
   expect(runtime.access.peerCaptains).not.toContain("phoenix");
@@ -487,8 +513,9 @@ test("fleet trust derives only enrolled captains/admirals and excludes own capta
     raw.fleetPolicy.agentAccounts.sort(),
   );
 
-  for (const name of ["discovery", "owncrew", "othercrew", "unknownrole"])
+  for (const name of ["discovery", "owncrew", "othercrew", "unknownrole"]) {
     expect(config.channels).not.toContain(`#${name}-private`);
+  }
 });
 
 test("derived membership rejects invalid IRC target channels at configuration check", () => {
@@ -506,12 +533,13 @@ test("derived membership rejects invalid IRC target channels at configuration ch
 
     expect(Result.isSuccess(result)).toBe(false);
 
-    if (!Result.isSuccess(result))
+    if (!Result.isSuccess(result)) {
       expect(
         settingsIssues(result.failure.issue).issues.some((issue) =>
           issue.message.includes("valid IRC channel"),
         ),
       ).toBe(true);
+    }
   }
 });
 
@@ -551,7 +579,9 @@ test("peer leading recipients and captured admission nick survive connection nic
       }),
     );
 
-    if (!message) throw new Error("Invalid fixture");
+    if (!message) {
+      throw new Error("Invalid fixture");
+    }
 
     return routeIrcMessage(message, {
       config: override,
@@ -568,8 +598,9 @@ test("peer leading recipients and captured admission nick survive connection nic
     "phoenix: ask vance for logs",
     "@phoenix: ask @vance for logs",
     "prometheus, vance should remain quiet",
-  ])
+  ]) {
     expect(receive(text)).toBeUndefined();
+  }
 
   for (const [accepted, later] of [
     ["vance", "vance_"],
@@ -596,8 +627,9 @@ test("peer leading recipients and captured admission nick survive connection nic
   for (const text of [
     "@phoenix @vance: one atomic notice",
     "@phoenix, @vance: one atomic notice",
-  ])
+  ]) {
     expect(receive(text)).toBeDefined();
+  }
 
   const legacy = {
     ...config,
@@ -636,7 +668,9 @@ test("peer leading recipients and captured admission nick survive connection nic
 test("portable guidance keeps PR and question rules for every role and advertises only configured dispatch capability", () => {
   const policy = effective(input()).fleetPolicy;
 
-  if (!policy) throw new Error("Missing policy");
+  if (!policy) {
+    throw new Error("Missing policy");
+  }
 
   for (const role of ["captain", "rear_admiral", "crew"] as const) {
     const readOnly = fleetInstructions({

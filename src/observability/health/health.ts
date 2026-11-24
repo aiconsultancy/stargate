@@ -425,10 +425,11 @@ function agentsSection(
   );
   summary = `captain readiness ${pin}; visible ownership ${c ? c.members.filter((member) => member.current !== null).length : "unknown"}/${c?.total ?? "unknown"}; visible queued ${c ? c.members.reduce((sum, member) => sum + member.queuedCount, 0) : "unknown"}; native activity/stalled unknown`;
 
-  for (const member of c?.members ?? [])
+  for (const member of c?.members ?? []) {
     rows.push(
       `⚠ ${identifier(member.id)} ${member.backend} ${member.provisioned}; observed ${member.observed}; ownership ${member.current?.status ?? "none"}${member.current ? ` ${identifier(member.current.id)}` : ""}; queued ${member.queuedCount}; start ${date(member.current?.startedAt)}; running duration ${member.current?.startedAt !== null && member.current?.startedAt !== undefined && member.current.startedAt <= now ? `${number((now - member.current.startedAt) / 1000)}s` : "unknown"}; update ${date(member.current?.updatedAt)}; last activity unknown`,
     );
+  }
 
   return { rows, summary };
 }
@@ -486,11 +487,15 @@ function stargateSection(read: StargateRead): SectionText {
       `⚠ restart drain ${drain.phase}; job ${drain.job}; services ${drain.services.join(", ")}; deadline ${date(drain.deadlineAt)}; stragglers ${drain.stragglers?.length ?? 0}`,
     );
 
-    for (const work of drain.stragglers?.slice(0, 8) ?? [])
+    for (const work of drain.stragglers?.slice(0, 8) ?? []) {
       rows.push(
         `⚠ drain ${identifier(work.taskID ?? "unknown-task")} ${identifier(work.sessionID ?? "unknown-session")}: ${identifier(work.reason)}`,
       );
-  } else rows.push("⚠ restart drain inactive or unknown");
+    }
+  } else {
+    rows.push("⚠ restart drain inactive or unknown");
+  }
+
   const r = parsedReady(read.ready);
   const valid = r && r.readyAt <= read.now;
   const alerted = Boolean(read.alert);
@@ -500,11 +505,14 @@ function stargateSection(read: StargateRead): SectionText {
     `⚠ gateway uptime ${number(read.uptime())}s; ${valid && r.transports ? `transports ${r.transports.filter((transport) => transport.state === "connected").length}/${r.transports.length} connected` : "Slack/IRC connection unknown"}; last alert ${alerted ? "present; state unknown" : "unknown"}`,
   );
 
-  if (valid && r.transports)
-    for (const transport of r.transports.slice(0, 30))
+  if (valid && r.transports) {
+    for (const transport of r.transports.slice(0, 30)) {
       rows.push(
         `${transport.state === "connected" ? "✓" : "✗"} ${transport.kind} ${transport.id.replace(/[^a-zA-Z0-9:_-]/g, "?").slice(0, 80)}: ${transport.state}; observed ${date(r.transportObservedAt ?? r.readyAt)}`,
       );
+    }
+  }
+
   const report = parsed(reportsSchema, read.reports);
   const latest = report?.reports[0];
   summary = `installed ${valid ? version(r.version) : "unknown"}; unit ${read.gatewayState ?? "unknown"}; last maintenance ${latest?.outcome ?? "unknown"}; delivery/latest release/coverage unknown`;
@@ -529,8 +537,10 @@ function stargateSection(read: StargateRead): SectionText {
     );
   }
 
-  if (schedules.some((schedule) => schedule.lastStatus === "failed"))
+  if (schedules.some((schedule) => schedule.lastStatus === "failed")) {
     rows.push("✗ cron failed; coverage unknown beyond listed rows");
+  }
+
   summary += `; cron failed ${cronKnown ? schedules.filter((schedule) => schedule.lastStatus === "failed").length : "unknown"}`;
 
   return { rows, summary };
@@ -616,7 +626,7 @@ function renderHealth(
 ): string {
   const header = "Health · read-only\n";
 
-  if (requested === undefined)
+  if (requested === undefined) {
     return (
       header +
       healthSections
@@ -630,6 +640,8 @@ function renderHealth(
         })
         .join("\n")
     );
+  }
+
   const section = requested as Section;
   const rows = sections[section]?.rows ?? [];
   const detail = `${aggregate(rows)} ${section}\n${rows.join("\n")}`;
@@ -657,8 +669,10 @@ export function createHealthReader(
     if (
       requested !== undefined &&
       !healthSections.includes(requested as Section)
-    )
+    ) {
       return `Health sections: ${healthSections.join(", ")}.`;
+    }
+
     const bot = input.bot();
 
     // Parse separately so callers can use the reader before optional config wiring.
@@ -696,16 +710,21 @@ export function createHealthReader(
 
     const sections: Partial<Record<Section, SectionText>> = {};
 
-    if (want("host")) sections.host = hostSection(host);
+    if (want("host")) {
+      sections.host = hostSection(host);
+    }
 
     const s = parsed(statusSchema, status);
 
-    if (want("agents"))
+    if (want("agents")) {
       sections.agents = agentsSection(s, crew, config.stalledAfterSeconds, now);
+    }
 
-    if (want("opencode")) sections.opencode = opencodeSection(s, opencodeState);
+    if (want("opencode")) {
+      sections.opencode = opencodeSection(s, opencodeState);
+    }
 
-    if (want("stargate"))
+    if (want("stargate")) {
       sections.stargate = stargateSection({
         drainState,
         ready,
@@ -716,10 +735,13 @@ export function createHealthReader(
         uptime: sources.uptime ?? (() => process.uptime()),
         schedules: input.schedules,
       });
+    }
 
-    if (want("proxy")) sections.proxy = proxySection(quota, proxyState, now);
+    if (want("proxy")) {
+      sections.proxy = proxySection(quota, proxyState, now);
+    }
 
-    if (want("services"))
+    if (want("services")) {
       sections.services = {
         rows: [
           "⚠ Sourcebot health/mirror refresh/index age unknown",
@@ -729,13 +751,15 @@ export function createHealthReader(
         summary:
           "Sourcebot health/mirror/index age unknown; Caddy routes unknown; Tailscale state/peers unknown; failed units/timers unknown",
       };
+    }
 
-    if (want("starfleet"))
+    if (want("starfleet")) {
       sections.starfleet = starfleetSection(
         snapshot,
         now,
         config.snapshotMaxAgeSeconds,
       );
+    }
 
     return renderHealth(requested, sections);
   };

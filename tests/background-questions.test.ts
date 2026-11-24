@@ -38,7 +38,9 @@ test("background question retains its case across expiry, ownership changes and 
     account: "operator",
     ready: () => online,
     send: async (text: string, allowed: () => boolean) => {
-      if (allowed()) sent.push(text);
+      if (allowed()) {
+        sent.push(text);
+      }
     },
   };
 
@@ -52,12 +54,16 @@ test("background question retains its case across expiry, ownership changes and 
       throw new Error("unexpected prompt");
     },
     pinnedBackgroundQuestions: async () => {
-      if (!engineOnline) throw new Error("disconnected");
+      if (!engineOnline) {
+        throw new Error("disconnected");
+      }
 
       return pending ? [q] : [];
     },
     backgroundOutcome: async () => {
-      if (!engineOnline) throw new Error("disconnected");
+      if (!engineOnline) {
+        throw new Error("disconnected");
+      }
 
       return pending ? undefined : "answered";
     },
@@ -65,7 +71,10 @@ test("background question retains its case across expiry, ownership changes and 
       expect(question.id).toBe(q.id);
       expect(answer).toEqual({ q0: "blue" });
 
-      if (!claim?.()) throw new Error("route changed");
+      if (!claim?.()) {
+        throw new Error("route changed");
+      }
+
       replies++;
       pending = false;
       engineOnline = false;
@@ -99,7 +108,9 @@ test("background question retains its case across expiry, ownership changes and 
   const reference = () => {
     const ref = sent.at(-1)?.match(/Q[0-9a-f]{10}/)?.[0];
 
-    if (!ref) throw new Error("Missing reference");
+    if (!ref) {
+      throw new Error("Missing reference");
+    }
 
     return ref;
   };

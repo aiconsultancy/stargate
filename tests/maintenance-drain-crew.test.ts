@@ -24,7 +24,9 @@ import { fixtureRoot } from "./fixture-root";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const piTeam = (): Team =>
@@ -100,13 +102,16 @@ async function fixture(team: Team = defaultTeam, pin = false) {
     async get({ sessionID }) {
       const session = sessions.get(sessionID);
 
-      if (!session) throw { _tag: "Session.NotFoundError" };
+      if (!session) {
+        throw { _tag: "Session.NotFoundError" };
+      }
 
       return session;
     },
     async create(input) {
-      if (!input.id || !input.agent || !input.location)
+      if (!input.id || !input.agent || !input.location) {
         throw new Error("Invalid fixture create");
+      }
 
       const session = {
         id: input.id,
@@ -132,7 +137,10 @@ async function fixture(team: Team = defaultTeam, pin = false) {
     async wait({ sessionID }, request) {
       beforeIdle?.();
 
-      if (!busy.has(sessionID)) return;
+      if (!busy.has(sessionID)) {
+        return;
+      }
+
       await new Promise<void>((_, reject) => {
         const signal = request?.signal;
         signal?.addEventListener("abort", () => reject(signal.reason), {
@@ -157,7 +165,10 @@ async function fixture(team: Team = defaultTeam, pin = false) {
     async send(input: MesijSend) {
       const known = keys.get(input.key);
 
-      if (known) return known;
+      if (known) {
+        return known;
+      }
+
       const sequence = mail.length + 1;
       const receipt = { id: String(sequence).padStart(32, "0"), sequence };
       mail.push({
@@ -242,7 +253,9 @@ test("a drain queues dispatches regardless of the queue flag; resume starts only
     )
   ).task;
 
-  if (!first) throw new Error("Missing running task");
+  if (!first) {
+    throw new Error("Missing running task");
+  }
 
   const ordinary = (
     await f.engine.run(
@@ -393,13 +406,18 @@ test("maintenance notices queue once per session and phase, supersede unread one
   const signal = new AbortController().signal;
   const peer = f.engine.state.peer("mario");
 
-  if (!peer) throw new Error("Missing peer");
+  if (!peer) {
+    throw new Error("Missing peer");
+  }
+
   // Pi crew need a ready reservation only; no native session is created.
   f.engine.state.reservePeer("twiki");
   f.engine.state.readyPeer("twiki");
   const twiki = f.engine.state.peer("twiki");
 
-  if (!twiki) throw new Error("Missing Pi peer");
+  if (!twiki) {
+    throw new Error("Missing Pi peer");
+  }
 
   const first = await f.engine.maintenanceNotice(record(), signal);
   expect(first).toEqual(

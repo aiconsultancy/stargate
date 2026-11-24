@@ -33,10 +33,13 @@ function databasePath() {
 }
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 describe("CronStore", () => {
@@ -44,8 +47,10 @@ describe("CronStore", () => {
     const path = databasePath();
     const first = open(path);
 
-    for (let index = 0; index < 12; index++)
+    for (let index = 0; index < 12; index++) {
       first.add(scope, { ...input, name: `Report ${index}` }, now + index);
+    }
+
     const store = open(path);
     const page = store.list(scope);
     expect(page).toHaveLength(10);
@@ -116,7 +121,10 @@ describe("CronStore", () => {
     const schedule = store.add(scope, input, now);
     const run = store.claimDue(scope.botKey, now + 60_000)[0];
 
-    if (!run) throw new Error("Expected due run");
+    if (!run) {
+      throw new Error("Expected due run");
+    }
+
     expect(store.announcing(run.id)).toBe(true);
     expect(store.announced(run.id, "1.000")).toBe(true);
     store.enqueued(run.id, 7);
@@ -135,7 +143,10 @@ describe("CronStore", () => {
       store.add({ ...scope, botKey }, input, now);
       const run = store.claimDue(botKey, now + 60_000)[0];
 
-      if (!run) throw new Error("Expected due run");
+      if (!run) {
+        throw new Error("Expected due run");
+      }
+
       store.announcing(run.id);
     }
 
@@ -151,7 +162,10 @@ describe("CronStore", () => {
     const schedule = store.add(scope, input, now);
     const run = store.claimDue(scope.botKey, now + 60_000)[0];
 
-    if (!run) throw new Error("Expected due run");
+    if (!run) {
+      throw new Error("Expected due run");
+    }
+
     store.announcing(run.id);
     store.announced(run.id, "1.000");
     store.enqueued(run.id, 7);

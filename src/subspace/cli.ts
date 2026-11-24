@@ -29,8 +29,10 @@ async function readInput(path: string) {
       const buffer = chunk as Buffer;
       size += buffer.length;
 
-      if (size > maxInputBytes)
+      if (size > maxInputBytes) {
         throw new Error("The request body is too large.");
+      }
+
       chunks.push(buffer);
     }
 
@@ -42,8 +44,9 @@ async function readInput(path: string) {
   try {
     const stats = await file.stat();
 
-    if (!stats.isFile() || stats.size > maxInputBytes)
+    if (!stats.isFile() || stats.size > maxInputBytes) {
       throw new Error("--input must be a regular file of at most 8 MiB.");
+    }
 
     return await file.readFile();
   } finally {
@@ -55,14 +58,18 @@ async function companionEnvironment(configPath: string) {
   try {
     return parseEnv(await readFile(`${configPath}.env`, "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {};
+    }
+
     throw new Error("Cannot read credential companion.");
   }
 }
 
 function socketPath(socket: string | undefined) {
-  if (!socket || !isAbsolute(socket))
+  if (!socket || !isAbsolute(socket)) {
     throw new Error("--socket must be the officer's absolute socket path.");
+  }
 
   return socket;
 }
@@ -75,14 +82,18 @@ const report = (text: string) => {
 export async function subspaceCli(input: SubspaceCliInput): Promise<number> {
   switch (input.operation) {
     case "enrol": {
-      if (input.positionals.length > 0) throw new Error("Use subspace --help.");
+      if (input.positionals.length > 0) {
+        throw new Error("Use subspace --help.");
+      }
+
       const config = await loadConfig(input.configPath);
       const section = config.subspaceAgents;
 
-      if (!section?.enabled)
+      if (!section?.enabled) {
         throw new Error(
           "Enable subspaceAgents in the Stargate configuration first.",
         );
+      }
 
       const outcomes = await enrolOfficers({
         section,
@@ -101,7 +112,10 @@ export async function subspaceCli(input: SubspaceCliInput): Promise<number> {
     }
 
     case "mcp":
-      if (input.positionals.length > 0) throw new Error("Use subspace --help.");
+      if (input.positionals.length > 0) {
+        throw new Error("Use subspace --help.");
+      }
+
       await runMcpBridge({
         socketPath: socketPath(input.socket),
         input: process.stdin,
@@ -116,8 +130,9 @@ export async function subspaceCli(input: SubspaceCliInput): Promise<number> {
       const [path, ...rest] = input.positionals;
       const method = (input.method ?? "GET").toUpperCase();
 
-      if (!path || rest.length > 0 || !methods.has(method))
+      if (!path || rest.length > 0 || !methods.has(method)) {
         throw new Error("Use subspace --help.");
+      }
 
       return runApiRequest({
         socketPath: socketPath(input.socket),

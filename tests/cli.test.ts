@@ -48,7 +48,7 @@ test("maintenance update parses its flags and keeps them off other commands", as
       ["--now"],
       ["--now", "--retry-failed"],
       ["--now", "--foreground"],
-    ])
+    ]) {
       await expect(
         runCli([
           "maintenance",
@@ -60,16 +60,18 @@ test("maintenance update parses its flags and keeps them off other commands", as
           "/missing/config",
         ]),
       ).rejects.toThrow(/config/i);
+    }
 
     for (const args of [
       ["maintenance", "run", "--now"],
       ["maintenance", "recover", "--retry-failed"],
       ["maintenance", "plan", "--foreground"],
       ["start", "--now"],
-    ])
+    ]) {
       await expect(
         runCli([...args, "--config", "/missing/config"]),
       ).rejects.toThrow("not supported");
+    }
   } finally {
     output.mockRestore();
   }
@@ -114,10 +116,12 @@ test("crew cron binding requires both explicit options and documents them", asyn
   for (const args of [
     ["--cron-config", "/missing/stargate.json"],
     ["--cron-bot", "helper"],
-  ])
+  ]) {
     await expect(runCli(["crew", "init", ...args])).rejects.toThrow(
       "must be supplied together",
     );
+  }
+
   const output = spyOn(console, "log").mockImplementation(() => {});
 
   try {
@@ -142,8 +146,9 @@ test("cron rejects unsupported options and selectors before configuration or Sla
     ["remove", "not-uuid", "--bot", "helper"],
     ["run", "--bot", "helper", "--prompt", "secret"],
     ["list", "--bot", "helper", "--url", "http://localhost"],
-  ])
+  ]) {
     await expect(runCli(["cron", ...args])).rejects.toThrow();
+  }
 });
 
 test("cron add bounds JSON input and never exposes file contents", async () => {

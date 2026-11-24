@@ -168,8 +168,9 @@ function decode<S extends Schema.Codec<unknown, unknown>>(
 ): S["Type"] {
   const result = Schema.decodeUnknownResult(schema)(value);
 
-  if (Result.isFailure(result))
+  if (Result.isFailure(result)) {
     throw new DispatchApiError(undefined, `Unexpected ${what} from the API`);
+  }
 
   return result.success;
 }
@@ -246,27 +247,32 @@ export class SubspaceApi implements DispatchApi {
   private headers(body: boolean) {
     const token = this.env[this.options.tokenEnv]?.trim();
 
-    if (!token)
+    if (!token) {
       throw new DispatchApiError(
         undefined,
         "The agent dispatch API token is not set",
       );
+    }
 
     const headers = new Headers({
       accept: "application/json",
       authorization: `Bearer ${token}`,
     });
 
-    if (body) headers.set("content-type", "application/json");
+    if (body) {
+      headers.set("content-type", "application/json");
+    }
 
     for (const [name, variable] of Object.entries(this.options.headersEnv)) {
       const value = this.env[variable]?.trim();
 
-      if (!value)
+      if (!value) {
         throw new DispatchApiError(
           undefined,
           "An agent dispatch API header variable is not set",
         );
+      }
+
       headers.set(name, value);
     }
 
@@ -297,7 +303,10 @@ export class SubspaceApi implements DispatchApi {
         ]),
       });
     } catch (error) {
-      if (error instanceof DispatchApiError) throw error;
+      if (error instanceof DispatchApiError) {
+        throw error;
+      }
+
       signal.throwIfAborted();
       throw new DispatchApiError(undefined, "The Subspace API is unreachable");
     }
@@ -310,25 +319,30 @@ export class SubspaceApi implements DispatchApi {
       signal.throwIfAborted();
 
       // A successful write status is the outcome; its body is optional.
-      if (method !== "GET" && response.ok)
+      if (method !== "GET" && response.ok) {
         return { status: response.status, text: "" };
+      }
+
       throw new DispatchApiError(
         response.status,
         "The Subspace API response was cut short",
       );
     }
 
-    if (text.length > maxBodyBytes)
+    if (text.length > maxBodyBytes) {
       throw new DispatchApiError(response.status, "API response too large");
+    }
 
-    if (response.status === 409 || response.status === 404)
+    if (response.status === 409 || response.status === 404) {
       return { status: response.status, text: "" };
+    }
 
-    if (!response.ok)
+    if (!response.ok) {
       throw new DispatchApiError(
         response.status,
         `The Subspace API answered HTTP ${response.status}`,
       );
+    }
 
     return { status: response.status, text };
   }
@@ -336,8 +350,9 @@ export class SubspaceApi implements DispatchApi {
   private async get(path: string, signal: AbortSignal) {
     const { status, text } = await this.request("GET", path, signal);
 
-    if (status === 404 || status === 409)
+    if (status === 404 || status === 409) {
       throw new DispatchApiError(status, `The Subspace API answered ${status}`);
+    }
 
     return json(status, text);
   }
@@ -361,10 +376,14 @@ export class SubspaceApi implements DispatchApi {
 
       items.push(...result.items);
 
-      if (!result.nextCursor) return { items, next: undefined };
+      if (!result.nextCursor) {
+        return { items, next: undefined };
+      }
 
-      if (result.nextCursor === cursor)
+      if (result.nextCursor === cursor) {
         throw new DispatchApiError(undefined, "API listing cursor repeated");
+      }
+
       cursor = result.nextCursor;
     }
 
@@ -383,11 +402,12 @@ export class SubspaceApi implements DispatchApi {
       signal,
     );
 
-    if (next !== undefined)
+    if (next !== undefined) {
       throw new DispatchApiError(
         undefined,
         "API listing exceeded its page bound",
       );
+    }
 
     return items;
   }
@@ -453,7 +473,10 @@ export class SubspaceApi implements DispatchApi {
       let current = id ? initiatives.get(id) : undefined;
 
       while (current && !seen.has(current.id)) {
-        if (current.fleetId) return current.fleetId;
+        if (current.fleetId) {
+          return current.fleetId;
+        }
+
         seen.add(current.id);
         current = current.parentId
           ? initiatives.get(current.parentId)
@@ -468,7 +491,9 @@ export class SubspaceApi implements DispatchApi {
     for (const item of await this.pages(dispatchRoutes.projects, signal)) {
       const project = decode(projectSchema, item, "project");
 
-      if (owner(project.initiativeId) === fleetId) projects.add(project.id);
+      if (owner(project.initiativeId) === fleetId) {
+        projects.add(project.id);
+      }
     }
 
     return projects;
@@ -480,7 +505,9 @@ export class SubspaceApi implements DispatchApi {
     cursor: string | undefined,
     signal: AbortSignal,
   ) {
-    if (assignees.length === 0) return { items: [], next: undefined };
+    if (assignees.length === 0) {
+      return { items: [], next: undefined };
+    }
 
     return this.issueListing(
       (page) => dispatchRoutes.assignedIssues(assignees, updatedSince, page),
@@ -500,10 +527,13 @@ export class SubspaceApi implements DispatchApi {
       signal,
     );
 
-    if (status === 404) return;
+    if (status === 404) {
+      return;
+    }
 
-    if (status === 409)
+    if (status === 409) {
       throw new DispatchApiError(status, `The Subspace API answered ${status}`);
+    }
 
     return toDispatchIssue(json(status, text));
   }
@@ -520,10 +550,13 @@ export class SubspaceApi implements DispatchApi {
       body,
     );
 
-    if (status === 404)
+    if (status === 404) {
       throw new DispatchApiError(404, "The issue is no longer available");
+    }
 
-    if (status === 409) return { conflict: true };
+    if (status === 409) {
+      return { conflict: true };
+    }
 
     // A 2xx means the write was applied; an unreadable body only hides the
     // New version, which the next read supplies.
@@ -559,7 +592,8 @@ export class SubspaceApi implements DispatchApi {
       commentBody(body),
     );
 
-    if (status === 404 || status === 409)
+    if (status === 404 || status === 409) {
       throw new DispatchApiError(status, "The comment was not recorded");
+    }
   }
 }

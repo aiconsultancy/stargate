@@ -109,11 +109,13 @@ test("a tree that cannot be proven complete has no digest", async () => {
     { "src/crew/plugin.ts": "export const broken = ;\n" },
     // It can read any file of the tree at run time.
     { "src/shared.ts": "export const shared = import.meta.dir;\n" },
-  ])
+  ]) {
     expect([files, await pluginDigest(await release(files))]).toEqual([
       files,
       undefined,
     ]);
+  }
+
   const linked = await release();
   await rm(join(linked, "src/shared.ts"));
   await symlink(join(linked, "src/gateway.ts"), join(linked, "src/shared.ts"));
@@ -143,11 +145,12 @@ test("an import that cannot be resolved from the source has no digest", async ()
     plugin(
       'import { createRequire } from "node:module";\nexport const load = createRequire(__filename);',
     ),
-  ])
+  ]) {
     expect([files, await pluginDigest(await release(files))]).toEqual([
       files,
       undefined,
     ]);
+  }
 
   // Literal forms are followed; the words in text and comments are not code.
   const literal = plugin(
@@ -293,7 +296,7 @@ test("every executable file of the closure is scanned, or there is no digest", a
   expect(await pluginDigest(await release(data(2)))).not.toBe(digest);
 
   // A format that Bun can run and this scanner cannot read is unknown.
-  for (const name of ["part.wasm", "part.node", "part.html", "part.sh"])
+  for (const name of ["part.wasm", "part.node", "part.html", "part.sh"]) {
     expect([
       name,
       await pluginDigest(
@@ -303,6 +306,7 @@ test("every executable file of the closure is scanned, or there is no digest", a
         }),
       ),
     ]).toEqual([name, undefined]);
+  }
 });
 
 test("the recorded digest is computed here, never taken from the archive", async () => {

@@ -41,12 +41,13 @@ export const textMentionRuleSchema = settingsStruct({
   ),
 }).check(
   settingsCheck((rule, context) => {
-    if (rule.muteBypassNames?.some((name) => !rule.names.includes(name)))
+    if (rule.muteBypassNames?.some((name) => !rule.names.includes(name))) {
       context.addIssue({
         code: "custom",
         path: ["muteBypassNames"],
         message: "Mute bypass names must be configured text-mention names.",
       });
+    }
   }),
 );
 

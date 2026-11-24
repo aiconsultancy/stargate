@@ -42,9 +42,14 @@ export async function readInputOrigin(
 
     for (const message of page.data) {
       if (!anchored) {
-        if (message.id !== messageID) continue;
+        if (message.id !== messageID) {
+          continue;
+        }
 
-        if (message.type !== "assistant") return null;
+        if (message.type !== "assistant") {
+          return null;
+        }
+
         anchored = true;
       }
 
@@ -56,20 +61,30 @@ export async function readInputOrigin(
         return origin();
       }
 
-      if (record.input === undefined) continue;
+      if (record.input === undefined) {
+        continue;
+      }
 
-      if (chain.length === 0 && record.type !== "synthetic")
+      if (chain.length === 0 && record.type !== "synthetic") {
         return record.input;
+      }
+
       chain.push(record);
     }
 
     cursor = page.cursor.next ?? undefined;
 
-    if (cursor && cursors.has(cursor)) return null;
+    if (cursor && cursors.has(cursor)) {
+      return null;
+    }
 
-    if (cursor) cursors.add(cursor);
+    if (cursor) {
+      cursors.add(cursor);
+    }
 
-    if (!cursor) return origin();
+    if (!cursor) {
+      return origin();
+    }
   }
 
   return null;

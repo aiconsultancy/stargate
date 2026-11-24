@@ -148,8 +148,9 @@ function slackFileURL(value: string): string {
     url.username ||
     url.password ||
     url.hash
-  )
+  ) {
     throw new Error("Invalid Slack file origin");
+  }
 
   return url.href;
 }
@@ -177,7 +178,10 @@ async function readBounded(
 ): Promise<Uint8Array> {
   const reader = response.body?.getReader();
 
-  if (!reader) throw new Error("Missing Slack file body");
+  if (!reader) {
+    throw new Error("Missing Slack file body");
+  }
+
   let cancelling: Promise<void> | undefined;
 
   const abort = () => {
@@ -195,23 +199,31 @@ async function readBounded(
       const chunk = await reader.read();
       signal.throwIfAborted();
 
-      if (chunk.done) break;
+      if (chunk.done) {
+        break;
+      }
 
-      if (used + chunk.value.byteLength > length)
+      if (used + chunk.value.byteLength > length) {
         throw new Error("Slack file exceeds declared size");
+      }
+
       data.set(chunk.value, used);
       used += chunk.value.byteLength;
     }
 
-    if (used !== length) throw new Error("Slack file size mismatch");
+    if (used !== length) {
+      throw new Error("Slack file size mismatch");
+    }
+
     const start = new TextDecoder().decode(data.subarray(0, 512));
 
     if (
       /^\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b|<script\b)/i.test(
         start,
       )
-    )
+    ) {
       throw new Error("Slack returned an HTML page");
+    }
 
     return data;
   } finally {
@@ -277,10 +289,11 @@ export class SlackFiles {
           isHTML(file.mimetype) ||
           (snippet && !file.mimetype.startsWith("text/")) ||
           total + file.size > maxAttachmentTotalBytes
-        )
+        ) {
           throw new Error(
             "Slack file metadata does not match the accepted request",
           );
+        }
 
         const url = slackFileURL(
           file.url_private_download ?? file.url_private ?? "",
@@ -293,7 +306,9 @@ export class SlackFiles {
         });
 
         try {
-          if (response.status !== 200) throw new Error("Slack download failed");
+          if (response.status !== 200) {
+            throw new Error("Slack download failed");
+          }
 
           const contentType = response.headers
             .get("content-type")
@@ -308,15 +323,19 @@ export class SlackFiles {
               ? !snippet
               : contentType !== file.mimetype &&
                 contentType !== "application/octet-stream")
-          )
+          ) {
             throw new Error("Slack file MIME mismatch");
+          }
+
           const declared = response.headers.get("content-length");
 
           if (
             declared !== null &&
             (!/^\d+$/.test(declared) || Number(declared) !== file.size)
-          )
+          ) {
             throw new Error("Slack file length mismatch");
+          }
+
           const data = await readBounded(response, file.size, stop);
 
           // Slack sends pasted text as force-download. Keep the verified text
@@ -329,8 +348,10 @@ export class SlackFiles {
                   byte === 127 ||
                   (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13),
               ))
-          )
+          ) {
             throw new Error("Slack snippet must be UTF-8 text");
+          }
+
           const transcript = slackTranscript(file);
           files.push({
             name: file.name,
@@ -394,7 +415,9 @@ export class SlackFiles {
       });
 
       try {
-        if (response.status !== 200) throw new Error("Slack upload failed");
+        if (response.status !== 200) {
+          throw new Error("Slack upload failed");
+        }
       } finally {
         await response.body?.cancel().catch(() => {});
       }
@@ -423,8 +446,9 @@ export class SlackFiles {
         }),
       );
 
-      if (result.files[0]?.id !== id)
+      if (result.files[0]?.id !== id) {
         throw new Error("Slack upload completion identity changed");
+      }
     });
   }
 
@@ -443,7 +467,9 @@ export class SlackFiles {
         await this.web(stop).files.info({ file: id }),
       );
 
-      if (result.file.id !== id) throw new Error("Slack file identity changed");
+      if (result.file.id !== id) {
+        throw new Error("Slack file identity changed");
+      }
 
       return [result.file.shares.public, result.file.shares.private].some(
         (group) =>

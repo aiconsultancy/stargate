@@ -71,16 +71,21 @@ const exceptionRekeys: { oldKey: string; newKey: string }[] = [];
 for (let index = 0; index < argv.length; index++) {
   const argument = argv[index];
 
-  if (!argument) throw new Error("Missing argument");
+  if (!argument) {
+    throw new Error("Missing argument");
+  }
 
   if (argument === "--allow-closure-addition") {
     const file = argv[++index];
 
-    if (!file || file.startsWith("--"))
+    if (!file || file.startsWith("--")) {
       throw new Error(`Invalid option: ${argument}`);
+    }
 
-    if (allowedClosureFiles.includes(file))
+    if (allowedClosureFiles.includes(file)) {
       throw new Error(`duplicate-closure-addition:${file}`);
+    }
+
     allowedClosureFiles.push(file);
   } else if (argument === "--rekey-exception") {
     const oldKey = argv[++index];
@@ -91,25 +96,36 @@ for (let index = 0; index < argv.length; index++) {
       !newKey ||
       oldKey.startsWith("--") ||
       newKey.startsWith("--")
-    )
+    ) {
       throw new Error("rekey:missing-keys");
+    }
 
-    if (exceptionRekeys.some((entry) => entry.oldKey === oldKey))
+    if (exceptionRekeys.some((entry) => entry.oldKey === oldKey)) {
       throw new Error(`rekey:duplicate-old:${oldKey}`);
+    }
 
-    if (exceptionRekeys.some((entry) => entry.newKey === newKey))
+    if (exceptionRekeys.some((entry) => entry.newKey === newKey)) {
       throw new Error(`rekey:duplicate-new:${newKey}`);
+    }
+
     exceptionRekeys.push({ oldKey, newKey });
   } else if (argument === "--write" || argument === "--prune-stale") {
-    if (flags.has(argument)) throw new Error(`Duplicate option: ${argument}`);
+    if (flags.has(argument)) {
+      throw new Error(`Duplicate option: ${argument}`);
+    }
+
     flags.add(argument);
   } else if (["--root", "--base", "--output"].includes(argument)) {
     const value = argv[++index];
 
-    if (!value || value.startsWith("--") || values.has(argument))
+    if (!value || value.startsWith("--") || values.has(argument)) {
       throw new Error(`Invalid option: ${argument}`);
+    }
+
     values.set(argument, value);
-  } else throw new Error(`Unknown option: ${argument}`);
+  } else {
+    throw new Error(`Unknown option: ${argument}`);
+  }
 }
 
 const rootArg = values.get("--root");
@@ -129,8 +145,11 @@ if (output) {
   const target = resolve(output);
 
   const physical = await realpath(target).catch(async (error: unknown) => {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
+    if (
+      !(error instanceof Error && "code" in error && error.code === "ENOENT")
+    ) {
       throw error;
+    }
 
     return join(await realpath(dirname(target)), basename(target));
   });
@@ -163,7 +182,9 @@ async function gitWithEnvironment(
     result.exited,
   ]);
 
-  if (exit !== 0) throw new Error(`git ${args.join(" ")}: ${stderr}`);
+  if (exit !== 0) {
+    throw new Error(`git ${args.join(" ")}: ${stderr}`);
+  }
 
   return stdout;
 }
@@ -260,8 +281,11 @@ const errors: string[] = [];
 function subset(actual: string[], allowed: string[], label: string) {
   const permissions = new Set(allowed);
 
-  for (const item of actual)
-    if (!permissions.has(item)) errors.push(`${label}:${item}`);
+  for (const item of actual) {
+    if (!permissions.has(item)) {
+      errors.push(`${label}:${item}`);
+    }
+  }
 }
 
 subset(working.largeFiles, baseline.largeFiles, "unauthorized-large-file");
@@ -270,8 +294,9 @@ subset(inventory.rootFiles, baseline.rootFiles, "root");
 
 subset(inventory.cyclicEdges, baseline.cyclicEdges, "cycle");
 
-if (new Set(working.exceptions).size !== working.exceptions.length)
+if (new Set(working.exceptions).size !== working.exceptions.length) {
   errors.push("duplicate-exception");
+}
 
 const approvedExceptions = [...working.exceptions];
 const allowedWorkingExceptions = [...baseline.exceptions];
@@ -293,61 +318,73 @@ if (exceptionRekeys.length > 0) {
       !old.target ||
       !next.source ||
       !next.target
-    )
+    ) {
       reason = "invalid-key";
-    else if (old.kind !== next.kind) reason = "different-kind";
-    else if (old.target !== next.target) reason = "different-target";
-    else if (
+    } else if (old.kind !== next.kind) {
+      reason = "different-kind";
+    } else if (old.target !== next.target) {
+      reason = "different-target";
+    } else if (
       !baseline.exceptions.includes(oldKey) ||
       (!working.exceptions.includes(oldKey) &&
         !working.exceptions.includes(newKey))
-    )
+    ) {
       reason = "unknown-old";
-    else if (
+    } else if (
       approvedExceptions.includes(oldKey) &&
       approvedExceptions.includes(newKey)
-    )
+    ) {
       reason = "duplicate-new";
-    else if (
+    } else if (
       violations.includes(oldKey) ||
       graph.get(old.source)?.has(old.target)
-    )
+    ) {
       reason = "old-key-present";
-    else {
+    } else {
       const file = [...paths].find(
         ([, identity]) => identity === next.source,
       )?.[0];
 
-      if (!file) reason = "new-source-missing";
-      else if (previous.files.has(file)) reason = "new-source-existed-at-base";
-      else if (!previous.graph.get(old.source)?.has(old.target))
+      if (!file) {
+        reason = "new-source-missing";
+      } else if (previous.files.has(file)) {
+        reason = "new-source-existed-at-base";
+      } else if (!previous.graph.get(old.source)?.has(old.target)) {
         reason = "base-edge-missing";
-      else if (!previous.violations.includes(oldKey))
+      } else if (!previous.violations.includes(oldKey)) {
         reason = "base-exception-missing";
-      else if (!violations.includes(newKey)) reason = "new-key-missing";
+      } else if (!violations.includes(newKey)) {
+        reason = "new-key-missing";
+      }
     }
 
-    if (reason) errors.push(`rekey:${reason}:${oldKey} => ${newKey}`);
-    else {
+    if (reason) {
+      errors.push(`rekey:${reason}:${oldKey} => ${newKey}`);
+    } else {
       const index = approvedExceptions.indexOf(oldKey);
 
-      if (index !== -1) approvedExceptions[index] = newKey;
+      if (index !== -1) {
+        approvedExceptions[index] = newKey;
+      }
+
       allowedWorkingExceptions.push(newKey);
     }
   }
 
-  if (violations.length > previous.violations.length)
+  if (violations.length > previous.violations.length) {
     errors.push(
       `rekey:exception-total-increase:${previous.violations.length} -> ${violations.length}`,
     );
+  }
 }
 
 subset(working.exceptions, allowedWorkingExceptions, "unauthorized-exception");
 
 subset(violations, approvedExceptions, "new");
 
-if (!flags.has("--prune-stale"))
+if (!flags.has("--prune-stale")) {
   subset(approvedExceptions, violations, "stale");
+}
 
 const sizeFailures = await sizeRegressions(root, policy, working.largeFiles);
 const staleSizePrefix = "stale:large-file:";
@@ -369,10 +406,11 @@ errors.push(
     ),
 );
 
-if (inventory.largestCycle > baseline.largestCycle)
+if (inventory.largestCycle > baseline.largestCycle) {
   errors.push(
     `largest-cycle:${inventory.largestCycle} > ${baseline.largestCycle}`,
   );
+}
 
 const closureCap = baseline.crewPlugin.members.length;
 const previousMembers = new Set(baseline.crewPlugin.members);
@@ -420,13 +458,18 @@ for (const file of [...allowedClosureFiles].toSorted()) {
     continue;
   }
 
-  if (!addedMembers.includes(identity))
+  if (!addedMembers.includes(identity)) {
     errors.push(`closure-addition:not-added:${file}`);
+  }
+
   const imports = [...(graph.get(identity) ?? [])].toSorted();
 
-  for (const target of imports)
-    if (!previousMembers.has(target))
+  for (const target of imports) {
+    if (!previousMembers.has(target)) {
       errors.push(`closure-addition:new-import:${file} -> ${target}`);
+    }
+  }
+
   closureAdditions.push({
     file,
     identity,
@@ -442,13 +485,15 @@ for (const file of [...allowedClosureFiles].toSorted()) {
 if (
   allowedClosureFiles.length === 0 &&
   inventory.crewPlugin.members.length > closureCap
-)
+) {
   errors.push(
     `crew-closure:${inventory.crewPlugin.members.length} > ${closureCap}`,
   );
+}
 
-if (errors.length > 0)
+if (errors.length > 0) {
   throw new Error(JSON.stringify({ errors: errors.toSorted() }, null, 2));
+}
 
 const measuredExceptions = new Set(violations);
 
@@ -492,10 +537,14 @@ if (flags.has("--write")) {
     formatter.exited,
   ]);
 
-  if (exit !== 0) throw new Error(`oxfmt failed (${exit}): ${stderr}`);
+  if (exit !== 0) {
+    throw new Error(`oxfmt failed (${exit}): ${stderr}`);
+  }
 
-  if (!isDeepStrictEqual(JSON.parse(formatted), next))
+  if (!isDeepStrictEqual(JSON.parse(formatted), next)) {
     throw new Error("Formatter changed baseline data");
+  }
+
   const temporary = `${baselinePath}.${randomUUID()}.tmp`;
   const mode = (await stat(baselinePath)).mode & 0o777;
   const file = await open(temporary, "wx", mode);
@@ -511,17 +560,20 @@ if (flags.has("--write")) {
     if (
       (await readFile(policyPath, "utf8")) !== policyBytes ||
       (await readFile(baselinePath, "utf8")) !== baselineBytes
-    )
+    ) {
       throw new Error(
         "Guard JSON changed during measurement; retry without concurrent editing",
       );
+    }
+
     await rename(temporary, baselinePath);
   } finally {
     await unlink(temporary).catch((error: unknown) => {
       if (
         !(error instanceof Error && "code" in error && error.code === "ENOENT")
-      )
+      ) {
         throw error;
+      }
     });
   }
 }
@@ -549,8 +601,9 @@ const result = {
   ...(exceptionRekeys.length > 0 && { exceptionRekeys }),
 };
 
-if (output)
+if (output) {
   await writeFile(resolve(output), JSON.stringify(result, null, 2) + "\n");
+}
 
 console.log(
   JSON.stringify({

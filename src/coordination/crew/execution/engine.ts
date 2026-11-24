@@ -189,11 +189,12 @@ export const crewOptionsSchema = settingsStruct({
     if (
       Object.keys(options.worktrees).length !== ids.length ||
       ids.some((id) => !Object.hasOwn(options.worktrees, id))
-    )
+    ) {
       context.addIssue({
         code: "custom",
         message: "Worktrees must exactly match configured crew IDs.",
       });
+    }
 
     const paths = [
       options.captainDirectory,
@@ -202,12 +203,13 @@ export const crewOptionsSchema = settingsStruct({
 
     for (const [index, path] of paths.entries()) {
       for (const other of paths.slice(index + 1)) {
-        if (nested(path, other) || nested(other, path))
+        if (nested(path, other) || nested(other, path)) {
           context.addIssue({
             code: "custom",
             message:
               "Captain and worker directories must be distinct and non-nested.",
           });
+        }
       }
     }
   }),
@@ -372,10 +374,11 @@ async function physicalDirectory(path: string): Promise<string> {
       error === null ||
       !("code" in error) ||
       error.code !== "ENOENT"
-    )
+    ) {
       throw new CrewError(
         "Cannot verify crew directory separation. Check directory access and symbolic links.",
       );
+    }
 
     return join(await physicalDirectory(dirname(path)), basename(path));
   }
@@ -449,10 +452,11 @@ export class CrewEngine {
             !peer ||
             member.backend?.tools !== "coding" ||
             state.piPeer(peer.sessionID)?.conversationID !== conversationID
-          )
+          ) {
             throw new CrewError(
               "Pi tools require this member's saved conversation.",
             );
+          }
 
           return peer;
         };
@@ -472,13 +476,21 @@ export class CrewEngine {
               [piIdentity]: true,
             };
 
-            if (name === "stargate_journal") return this.journal(input, caller);
+            if (name === "stargate_journal") {
+              return this.journal(input, caller);
+            }
 
-            if (name === "stargate_mail") return this.mail(input, caller);
+            if (name === "stargate_mail") {
+              return this.mail(input, caller);
+            }
 
-            if (name === "stargate_dm") return this.dm(input, caller);
+            if (name === "stargate_dm") {
+              return this.dm(input, caller);
+            }
 
-            if (name === "stargate_quota") return this.quota(input, caller);
+            if (name === "stargate_quota") {
+              return this.quota(input, caller);
+            }
 
             return this.run(input, caller);
           },
@@ -547,10 +559,11 @@ export class CrewEngine {
   public async quota(input: unknown, caller: CrewCaller) {
     await this.authorize(caller);
 
-    if (Result.isFailure(Schema.decodeUnknownResult(quotaInputSchema)(input)))
+    if (Result.isFailure(Schema.decodeUnknownResult(quotaInputSchema)(input))) {
       throw new CrewError(
         "Quota accepts no URL, credentials or other arguments.",
       );
+    }
 
     return this.quotas.read(caller.signal);
   }
@@ -567,10 +580,11 @@ export class CrewEngine {
   ) {
     const parsed = Schema.decodeUnknownResult(crewOptionsSchema)(input);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError(
         "Invalid crew plugin options. Supply exact configured crew worktrees and distinct, non-nested absolute captain/worker directories.",
       );
+    }
 
     const options = {
       ...parsed.success,
@@ -602,10 +616,11 @@ export class CrewEngine {
           worktrees: physicalWorktrees,
         }),
       )
-    )
+    ) {
       throw new CrewError(
         "Captain and worker directories must be distinct and non-nested, including symbolic links.",
       );
+    }
 
     const legacyFingerprint = JSON.stringify([
       options.namespace,
@@ -711,23 +726,25 @@ export class CrewEngine {
         (this.options.team.captain.agent ?? this.options.team.captain.id) ||
       session.location.directory !== this.options.captainDirectory ||
       this.state.peerBySession(session.id)
-    )
+    ) {
       throw new Error("Update notice captain identity changed");
+    }
 
-    if (input.id.startsWith("drain_"))
+    if (input.id.startsWith("drain_")) {
       this.state.queueDrainNotice(
         session.id,
         input.id,
         input.text,
         this.options.namespace,
       );
-    else
+    } else {
       this.state.updateNotices.queueExternalContext(
         session.id,
         input.id,
         input.text,
         this.options.namespace,
       );
+    }
 
     return { id: input.id, sessionID: session.id };
   }
@@ -760,10 +777,13 @@ export class CrewEngine {
       });
     };
 
-    if (captain) queue(captain);
-    else {
-      if (!this.sessions.list)
+    if (captain) {
+      queue(captain);
+    } else {
+      if (!this.sessions.list) {
         throw new Error("Maintenance captain discovery unavailable");
+      }
+
       let cursor: string | undefined;
 
       do {
@@ -787,27 +807,32 @@ export class CrewEngine {
             resolve(session.location.directory) ===
               resolve(this.options.captainDirectory) &&
             !this.state.peerBySession(session.id)
-          )
+          ) {
             queue(session.id);
+          }
         }
 
         cursor = page.cursor.next ?? undefined;
       } while (cursor);
     }
 
-    for (const irc of this.state.ircSessions.sessions())
+    for (const irc of this.state.ircSessions.sessions()) {
       if (
         this.options.team.crew.some(
           (member) => member.id === irc.crewID && !member.backend,
         )
-      )
+      ) {
         queue(irc.sessionID);
+      }
+    }
 
     for (const member of this.options.team.crew) {
       signal.throwIfAborted();
       const peer = this.state.peer(member.id);
 
-      if (peer?.status !== "ready") continue;
+      if (peer?.status !== "ready") {
+        continue;
+      }
 
       try {
         if (!member.backend) {
@@ -865,7 +890,10 @@ export class CrewEngine {
       for (const queued of this.state.drainQueued()) {
         signal.throwIfAborted();
 
-        if (workers.has(queued.crewID)) continue;
+        if (workers.has(queued.crewID)) {
+          continue;
+        }
+
         workers.add(queued.crewID);
 
         const caller: CrewCaller = {
@@ -877,8 +905,9 @@ export class CrewEngine {
         try {
           await this.captain(caller);
 
-          if ((await this.promote(queued, caller)).status !== "queued")
+          if ((await this.promote(queued, caller)).status !== "queued") {
             resumed++;
+          }
         } catch {
           signal.throwIfAborted();
         }
@@ -922,8 +951,9 @@ export class CrewEngine {
   ): CrewTask | null {
     // An IRC session never has a task, not even its member's current one.
     if (caller[ircIdentity]) {
-      if (id)
+      if (id) {
         throw new CrewError("IRC sessions have no task context; omit taskID.");
+      }
 
       return null;
     }
@@ -936,15 +966,22 @@ export class CrewEngine {
         : this.ownedWorkerTask(id, caller)
       : this.state.activeTask(caller.agent);
 
-    if (task && ["dispatching", "running", "cancelling"].includes(task.status))
+    if (
+      task &&
+      ["dispatching", "running", "cancelling"].includes(task.status)
+    ) {
       return task;
+    }
 
-    if (id && historical) return task;
+    if (id && historical) {
+      return task;
+    }
 
-    if (id)
+    if (id) {
       throw new CrewError(
         "Mail send requires a current task or a validated reply; this task is no longer current.",
       );
+    }
 
     return null;
   }
@@ -959,8 +996,9 @@ export class CrewEngine {
       request.receiptID !== id ||
       !task ||
       task.workerSessionID !== request.workerSessionID
-    )
+    ) {
       return null;
+    }
 
     return {
       id,
@@ -984,8 +1022,10 @@ export class CrewEngine {
 
     const envelope = Schema.decodeUnknownResult(mailEnvelopeSchema)(value);
 
-    if (Result.isFailure(envelope) || !envelope.success.statusRequestID)
+    if (Result.isFailure(envelope) || !envelope.success.statusRequestID) {
       return null;
+    }
+
     const mail = envelope.success;
     const request = this.state.statusRequest(envelope.success.statusRequestID);
 
@@ -1005,27 +1045,30 @@ export class CrewEngine {
       mail.sender !== event.sessionID ||
       mail.recipient !== event.to ||
       event.actor !== this.actor(mail.sender)
-    )
+    ) {
       return null;
+    }
 
     if (
       event.id === route.id &&
       mail.sender === route.sender &&
       mail.recipient === route.recipient
-    )
+    ) {
       return route;
+    }
 
     if (
       event.replyTo === route.id &&
       mail.sender === route.recipient &&
       mail.recipient === route.sender
-    )
+    ) {
       return {
         ...route,
         id: event.id,
         sender: mail.sender,
         recipient: mail.recipient,
       };
+    }
 
     return null;
   }
@@ -1034,15 +1077,22 @@ export class CrewEngine {
     const caller = this.logicalCaller(callerInput);
     const input = Schema.decodeUnknownResult(mailInputSchema)(raw);
 
-    if (Result.isFailure(input))
+    if (Result.isFailure(input)) {
       throw new CrewError("Invalid stargate_mail input.");
+    }
+
     const result = await this.message(raw, caller, false);
 
-    if (input.success.op !== "inbox" || !input.success.taskID) return result;
+    if (input.success.op !== "inbox" || !input.success.taskID) {
+      return result;
+    }
+
     // Keep pre-upgrade task envelopes readable without rewriting Mesij history.
     const legacy = await this.legacyMail(input.success, caller);
 
-    if (!("messages" in result) || !("messages" in legacy)) return result;
+    if (!("messages" in result) || !("messages" in legacy)) {
+      return result;
+    }
 
     const messages = [
       ...(result.messages ?? []),
@@ -1074,7 +1124,10 @@ export class CrewEngine {
         direct,
       );
     } catch (error) {
-      if (error instanceof CrewError) throw error;
+      if (error instanceof CrewError) {
+        throw error;
+      }
+
       throw new CrewError(
         "Mail admission unconfirmed. Retry only the same key; raw details withheld.",
       );
@@ -1088,17 +1141,24 @@ export class CrewEngine {
     delivery: "steer" | "queue",
   ): Promise<string> {
     // A reply to an IRC session waits in its inbox: nothing prompts it.
-    if (this.state.ircSessions.crewID(route.recipient)) return "inbox";
+    if (this.state.ircSessions.crewID(route.recipient)) {
+      return "inbox";
+    }
+
     const peer = this.state.peerBySession(route.recipient);
     const task = peer ? this.state.activeTask(peer.crewID) : null;
 
     const busy =
       task && ["running", "dispatching"].includes(task.status) ? task : null;
 
-    if (peer?.status !== "ready" && peer) return "unavailable";
+    if (peer?.status !== "ready" && peer) {
+      return "unavailable";
+    }
 
     // A drain never wakes an idle session; mail stays durable in its inbox.
-    if (!busy && this.drain()) return "deferred";
+    if (!busy && this.drain()) {
+      return "deferred";
+    }
 
     if (
       peer &&
@@ -1108,8 +1168,9 @@ export class CrewEngine {
             !this.sameCaptain(task.originCaptainID, route.captainID)) ||
             !["running", "dispatching", "completed"].includes(task.status) ||
             task.notifying)))
-    )
+    ) {
       return "deferred";
+    }
 
     const senderCaptainID =
       caller.agent === this.options.team.captain.id
@@ -1118,8 +1179,9 @@ export class CrewEngine {
           ? this.options.captainSessionID
           : this.mailTask(caller)?.originCaptainID;
 
-    if (busy && !this.sameCaptain(senderCaptainID, route.captainID))
+    if (busy && !this.sameCaptain(senderCaptainID, route.captainID)) {
       return "deferred";
+    }
 
     // A DM captured for an occupied task must not turn into a free-worker
     // Wake if status/wait collected it while Mesij was storing the message.
@@ -1128,36 +1190,46 @@ export class CrewEngine {
       peer &&
       route.targetTaskID &&
       (route.targetTaskID !== task?.id || task.status === "completed")
-    )
+    ) {
       return "inbox";
+    }
 
-    if (busy && delivery === "queue" && !this.member(busy.crewID).backend)
+    if (busy && delivery === "queue" && !this.member(busy.crewID).backend) {
       return "unsupported";
+    }
+
     const framing = `Stargate DM ${route.id} from ${caller.agent}.\n${text}\n\nReply through stargate_mail or stargate_dm with replyTo=${route.id}; a final answer is not a peer reply.${busy ? ` Your final answer remains task ${busy.id}'s result; restate it if you had already finished.` : ""}`;
     let originInputID: string | null = null;
 
     if (!peer && route.sourceTaskID) {
       const source = this.state.task(route.sourceTaskID);
 
-      if (source && this.sameCaptain(source.originCaptainID, route.recipient))
+      if (source && this.sameCaptain(source.originCaptainID, route.recipient)) {
         this.state.noticeOnce(route.id, source.id, framing);
+      }
 
       // A pin can inherit old task authority, never its native input namespace.
-      if (source?.originCaptainID === route.recipient)
+      if (source?.originCaptainID === route.recipient) {
         originInputID = source.originInputID;
+      }
     }
 
-    if (busy && !this.state.beginNotify(busy.id)) return "deferred";
+    if (busy && !this.state.beginNotify(busy.id)) {
+      return "deferred";
+    }
+
     let control: string | undefined;
 
     try {
       if (peer && !busy) {
         control = this.state.reserveControl(peer.crewID);
 
-        if (!(await this.idle(peer, caller.signal))) return "deferred";
+        if (!(await this.idle(peer, caller.signal))) {
+          return "deferred";
+        }
       }
 
-      if (peer && !this.member(peer.crewID).backend)
+      if (peer && !this.member(peer.crewID).backend) {
         this.validPeer(
           await this.sessions.get(
             { sessionID: peer.sessionID },
@@ -1165,22 +1237,31 @@ export class CrewEngine {
           ),
           peer,
         );
+      }
 
       if (peer && busy) {
         // Do not append input after an ended, uncollected task turn. Leave
         // Mail durable; status/wait owns canonical retained-answer recovery.
         // Idle alone is not evidence of a successful task result.
-        if (await this.idle(peer, caller.signal)) return "inbox";
+        if (await this.idle(peer, caller.signal)) {
+          return "inbox";
+        }
+
         caller.signal.throwIfAborted();
         const current = this.state.task(busy.id);
 
-        if (current?.status === "completed") return "inbox";
+        if (current?.status === "completed") {
+          return "inbox";
+        }
 
-        if (!current || !["running", "dispatching"].includes(current.status))
+        if (!current || !["running", "dispatching"].includes(current.status)) {
           return "deferred";
+        }
       }
 
-      if (!busy && this.drain()) return "deferred";
+      if (!busy && this.drain()) {
+        return "deferred";
+      }
 
       if (peer && this.member(peer.crewID).backend) {
         return await this.pi.notify(
@@ -1219,9 +1300,13 @@ export class CrewEngine {
     } catch {
       return "uncertain";
     } finally {
-      if (busy) this.state.endNotify(busy.id);
+      if (busy) {
+        this.state.endNotify(busy.id);
+      }
 
-      if (peer && control) this.state.releaseControl(peer.crewID, control);
+      if (peer && control) {
+        this.state.releaseControl(peer.crewID, control);
+      }
     }
   }
 
@@ -1251,8 +1336,9 @@ export class CrewEngine {
   public logicalCaller(caller: CrewCaller): CrewCaller {
     const captain = this.options.team.captain;
 
-    if (caller.agent === (captain.agent ?? captain.id))
+    if (caller.agent === (captain.agent ?? captain.id)) {
       return { ...caller, agent: captain.id };
+    }
 
     const member = this.options.team.crew.find(
       (member) => caller.agent === (member.agent ?? member.id),
@@ -1265,8 +1351,10 @@ export class CrewEngine {
     const caller = this.logicalCaller(callerInput);
     const input = decodeJournalInput(raw);
 
-    if (Result.isFailure(input))
+    if (Result.isFailure(input)) {
       throw new CrewError("Invalid stargate_journal input.");
+    }
+
     await this.authorize(caller);
     const task = this.mailTask(caller);
 
@@ -1279,7 +1367,7 @@ export class CrewEngine {
     // A pinned team has one captain; its lineage shares one journal context.
     const lineage = this.state.captainLineage(captainID);
 
-    if (input.success.op === "read")
+    if (input.success.op === "read") {
       return {
         ...store.read(
           lineage ? null : captainID,
@@ -1289,9 +1377,11 @@ export class CrewEngine {
         ),
         entry: undefined,
       };
+    }
 
-    if (!caller.id)
+    if (!caller.id) {
       throw new CrewError("Journal append requires a host tool-call identity.");
+    }
 
     const entry = store.append(
       {
@@ -1310,10 +1400,12 @@ export class CrewEngine {
   private async legacyMail(raw: unknown, caller: CrewCaller) {
     const parsed = Schema.decodeUnknownResult(legacyMailInputSchema)(raw);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError(
         "Invalid stargate_mail input. Supply a task ID and the operation's declared fields.",
       );
+    }
+
     const input = parsed.success;
 
     try {
@@ -1329,13 +1421,18 @@ export class CrewEngine {
           this.state.requestedStatus(requested.id, caller.sessionID)
             ? requested
             : this.ownedCaptainTask(input.taskID, caller);
-      } else source = this.ownedWorkerTask(input.taskID, caller);
+      } else {
+        source = this.ownedWorkerTask(input.taskID, caller);
+      }
+
       this.member(source.crewID);
 
-      if (source.status === "queued" || source.status === "cancelled")
+      if (source.status === "queued" || source.status === "cancelled") {
         throw new CrewError(
           "Queued or cancelled work has no active mail lineage.",
         );
+      }
+
       const actor = this.actor(caller.sessionID);
       await this.mailer.register(actor, caller.sessionID, caller.signal);
 
@@ -1360,7 +1457,10 @@ export class CrewEngine {
 
       for (const event of events) {
         // Mesij also returns sent/mentioned messages.
-        if (event.to !== caller.sessionID) continue;
+        if (event.to !== caller.sessionID) {
+          continue;
+        }
+
         let value: unknown;
 
         try {
@@ -1371,7 +1471,10 @@ export class CrewEngine {
 
         const envelope = Schema.decodeUnknownResult(mailEnvelopeSchema)(value);
 
-        if (Result.isFailure(envelope)) continue;
+        if (Result.isFailure(envelope)) {
+          continue;
+        }
+
         const mail = envelope.success;
         const origin = this.state.task(mail.sourceTaskID);
 
@@ -1402,8 +1505,10 @@ export class CrewEngine {
           (mail.sender !== origin.originCaptainID &&
             mail.sender !== origin.workerSessionID &&
             !statusLineage)
-        )
+        ) {
           continue;
+        }
+
         messages.push({
           id: event.id,
           sequence: event.sequence,
@@ -1422,7 +1527,10 @@ export class CrewEngine {
         nextAfter: events.at(-1)?.sequence ?? after,
       };
     } catch (error) {
-      if (error instanceof CrewError) throw error;
+      if (error instanceof CrewError) {
+        throw error;
+      }
+
       throw new CrewError(
         "Mesij operation unavailable or unconfirmed. Retry sends with the same key; raw details withheld.",
       );
@@ -1433,10 +1541,12 @@ export class CrewEngine {
     const caller = this.logicalCaller(callerInput);
     const parsed = Schema.decodeUnknownResult(crewInputSchema)(raw);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError(
         "Invalid stargate_crew input. Use the operation's declared fields.",
       );
+    }
+
     const input = parsed.success;
 
     const deadline =
@@ -1452,17 +1562,21 @@ export class CrewEngine {
       );
       authorized = true;
 
-      if (input.op === "roster")
+      if (input.op === "roster") {
         return { status: "roster", members: this.roster() };
+      }
 
-      if ("crew" in input && input.crew) this.member(input.crew);
+      if ("crew" in input && input.crew) {
+        this.member(input.crew);
+      }
 
       if (
         input.op === "urgent" &&
         input.to !== "captain" &&
         input.to !== this.options.team.captain.id
-      )
+      ) {
         this.member(input.to);
+      }
 
       if (input.op === "complete") {
         const task = this.ownedWorkerTask(input.taskID, caller);
@@ -1471,7 +1585,9 @@ export class CrewEngine {
         return { status: "completed" };
       }
 
-      if (input.op === "urgent") return await this.urgent(input, caller);
+      if (input.op === "urgent") {
+        return await this.urgent(input, caller);
+      }
 
       if (
         input.op === "status" &&
@@ -1488,33 +1604,45 @@ export class CrewEngine {
 
       await this.captain(caller);
 
-      if (input.op === "inspect") return await this.inspect(input, caller);
+      if (input.op === "inspect") {
+        return await this.inspect(input, caller);
+      }
 
-      if (input.op === "reconcile") return await this.reconcile(input, caller);
+      if (input.op === "reconcile") {
+        return await this.reconcile(input, caller);
+      }
 
-      if (input.op === "resume") return await this.resume(input, caller);
+      if (input.op === "resume") {
+        return await this.resume(input, caller);
+      }
 
-      if (input.op === "abandon") return await this.abandon(input, caller);
+      if (input.op === "abandon") {
+        return await this.abandon(input, caller);
+      }
 
       if (
         input.op === "workspace" ||
         input.op === "stash" ||
         input.op === "reset"
-      )
+      ) {
         return await this.workspace(input, caller);
+      }
 
       if (input.op === "ensure") {
         const peers: Peer[] = [];
 
         for (const id of input.crew
           ? [input.crew]
-          : this.options.team.crew.map(({ id }) => id))
+          : this.options.team.crew.map(({ id }) => id)) {
           peers.push(await this.ensure(id, caller.signal));
+        }
 
         return { status: "ready", peers };
       }
 
-      if (input.op === "dispatch") return await this.dispatch(input, caller);
+      if (input.op === "dispatch") {
+        return await this.dispatch(input, caller);
+      }
 
       if (input.op === "compact") {
         await this.withWorkerControl(input.crew, caller, (peer) =>
@@ -1529,17 +1657,24 @@ export class CrewEngine {
 
       let task = this.ownedCaptainTask(input.taskID, caller);
 
-      if (input.op === "wait") caller.signal.throwIfAborted();
+      if (input.op === "wait") {
+        caller.signal.throwIfAborted();
+      }
 
       const abandoned = this.abandoned(
         task,
         input.op === "wait" ? input.afterNoticeID : 0,
       );
 
-      if (abandoned) return abandoned;
+      if (abandoned) {
+        return abandoned;
+      }
 
       if (input.op === "status") {
-        if (task.status === "queued") task = await this.promote(task, caller);
+        if (task.status === "queued") {
+          task = await this.promote(task, caller);
+        }
+
         await this.observeResumeReceipts(task, caller);
         const recovered = await this.reconcileResult(task, caller);
 
@@ -1563,7 +1698,10 @@ export class CrewEngine {
         throw new CrewError(this.cancelled(task.id));
       }
 
-      if (error instanceof CrewError) throw error;
+      if (error instanceof CrewError) {
+        throw error;
+      }
+
       throw new CrewError(
         "Crew operation unavailable. Inspect OpenCode and crew state; raw SDK details withheld.",
       );
@@ -1576,16 +1714,19 @@ export class CrewEngine {
     if (
       caller.agent !== this.options.team.captain.id ||
       this.state.peerBySession(caller.sessionID)
-    )
+    ) {
       throw new CrewError(
         `Only ${this.options.team.captain.name ?? this.options.team.captain.id} captain sessions may perform this operation.`,
       );
+    }
+
     const pin = this.options.captainSessionID;
 
-    if (pin && caller.sessionID !== pin)
+    if (pin && caller.sessionID !== pin) {
       throw new CrewError(
         `Only the configured ${this.options.team.captain.name ?? this.options.team.captain.id} session may perform this operation; earlier captain sessions are retained history.`,
       );
+    }
 
     const session = await this.sessions.get(
       { sessionID: caller.sessionID },
@@ -1601,10 +1742,11 @@ export class CrewEngine {
       ].includes(session.agent ?? "") ||
       resolve(session.location.directory) !==
         resolve(this.options.captainDirectory)
-    )
+    ) {
       throw new CrewError(
         "Captain must be a root configured captain session in the configured captain directory.",
       );
+    }
   }
 
   /** Stored stargate_dm sends for Stargate's IRC copies (CrewIrc outbox RPC). */
@@ -1627,28 +1769,35 @@ export class CrewEngine {
     input: { sessionID: string; crewID: string },
     signal: AbortSignal,
   ): Promise<{ bound: true }> {
-    if (input.crewID === this.options.team.captain.id)
+    if (input.crewID === this.options.team.captain.id) {
       throw new CrewError(
         "The captain's IRC conversations use the pinned captain session; bind crew sessions only.",
       );
+    }
+
     const member = this.member(input.crewID);
 
-    if (member.backend)
+    if (member.backend) {
       throw new CrewError("Pi crew IRC sessions have no crew tools.");
+    }
 
-    if (!this.options.captainSessionID)
+    if (!this.options.captainSessionID) {
       throw new CrewError(
         "IRC crew messaging needs a pinned captain session (captainSessionID).",
       );
+    }
 
-    if (this.state.peerBySession(input.sessionID))
+    if (this.state.peerBySession(input.sessionID)) {
       throw new CrewError("A crew task session is not an IRC session.");
+    }
+
     await this.validIrcSession(input.sessionID, input.crewID, signal);
 
-    if (!this.state.ircSessions.bind(input.sessionID, input.crewID))
+    if (!this.state.ircSessions.bind(input.sessionID, input.crewID)) {
       throw new CrewError(
         "IRC session must be a root session of that crew member; it is bound to another member.",
       );
+    }
 
     return { bound: true };
   }
@@ -1667,10 +1816,11 @@ export class CrewEngine {
       ![member.agent ?? crewID, crewID].includes(session.agent ?? "") ||
       resolve(session.location.directory) !==
         resolve(this.options.worktrees[crewID] ?? "")
-    )
+    ) {
       throw new CrewError(
         "IRC session must be a root session of that crew member's agent in its worktree.",
       );
+    }
   }
 
   /**
@@ -1688,13 +1838,16 @@ export class CrewEngine {
       return caller;
     }
 
-    if (caller.agent !== bound)
+    if (caller.agent !== bound) {
       throw new CrewError(
         "This IRC session belongs to another crew member; it sends only as that member.",
       );
+    }
 
-    if (this.member(bound).backend || !this.options.captainSessionID)
+    if (this.member(bound).backend || !this.options.captainSessionID) {
       throw new CrewError("IRC crew messaging is unavailable for this member.");
+    }
+
     await this.validIrcSession(caller.sessionID, bound, caller.signal);
 
     return { ...caller, [ircIdentity]: bound };
@@ -1703,22 +1856,28 @@ export class CrewEngine {
   public async authorize(callerInput: CrewCaller): Promise<void> {
     const caller = this.logicalCaller(callerInput);
 
-    if (caller.agent === this.options.team.captain.id)
+    if (caller.agent === this.options.team.captain.id) {
       return this.captain(caller);
+    }
+
     const peer = this.state.peerBySession(caller.sessionID);
 
-    if (!peer || caller.agent !== peer.crewID)
+    if (!peer || caller.agent !== peer.crewID) {
       throw new CrewError(
         "Only the configured captain or assigned worker may use crew operations.",
       );
+    }
+
     this.member(peer.crewID);
 
     if (this.member(peer.crewID).backend) {
       if (
         caller[piIdentity] &&
         this.state.piPeer(peer.sessionID)?.conversationID
-      )
+      ) {
         return;
+      }
+
       throw new CrewError(
         "Pi workers cannot impersonate OpenCode tool callers.",
       );
@@ -1735,7 +1894,9 @@ export class CrewEngine {
   private member(id: string): CrewMember {
     const member = this.options.team.crew.find((member) => member.id === id);
 
-    if (!member) throw new CrewError("Unknown configured crew member.");
+    if (!member) {
+      throw new CrewError("Unknown configured crew member.");
+    }
 
     return member;
   }
@@ -1749,16 +1910,19 @@ export class CrewEngine {
     caller.signal.throwIfAborted();
     await this.captain(caller);
 
-    if (this.member(crewID).backend)
+    if (this.member(crewID).backend) {
       throw new CrewError(
         "Live model inspection applies only to OpenCode workers.",
       );
+    }
+
     const peer = this.state.peer(crewID);
 
-    if (peer?.status !== "ready")
+    if (peer?.status !== "ready") {
       throw new CrewError(
         "Worker is not provisioned; model inspection does not create sessions.",
       );
+    }
 
     const session = await this.sessions.get(
       { sessionID: peer.sessionID },
@@ -1780,17 +1944,19 @@ export class CrewEngine {
     const caller = this.logicalCaller(callerInput);
     await this.captain(caller);
 
-    if (this.member(crewID).backend)
+    if (this.member(crewID).backend) {
       throw new CrewError(
         "Pi worker compaction and live model switching are not supported.",
       );
+    }
 
     // The controls table requires a peer row. Check cheaply before reserving,
     // Then recheck readiness and native identity while the guard is held.
-    if (options.requireReady && this.state.peer(crewID)?.status !== "ready")
+    if (options.requireReady && this.state.peer(crewID)?.status !== "ready") {
       throw new CrewError(
         "Worker is not provisioned; this control does not create sessions.",
       );
+    }
 
     // Legacy switch/compact callers retain provisioning. Ready-only controls
     // Must not call ensure, even if a peer disappears before the guard is held.
@@ -1804,18 +1970,21 @@ export class CrewEngine {
       active &&
       active.status !== "completed" &&
       !this.ownsCaptainLineage(active.originCaptainID, caller)
-    )
+    ) {
       throw new CrewError("This crew member is busy for another captain.");
+    }
+
     const token = this.state.reserveControl(crewID);
 
     try {
       if (options.requireReady) {
         const ready = this.state.peer(crewID);
 
-        if (ready?.status !== "ready")
+        if (ready?.status !== "ready") {
           throw new CrewError(
             "Worker is not provisioned; this control does not create sessions.",
           );
+        }
 
         const session = await this.sessions.get(
           { sessionID: ready.sessionID },
@@ -1826,11 +1995,14 @@ export class CrewEngine {
         peer = { ...ready, ...(session.model && { model: session.model }) };
       }
 
-      if (!peer)
+      if (!peer) {
         throw new CrewError("Worker is not provisioned; control refused.");
+      }
 
-      if (!(await this.idle(peer, caller.signal)))
+      if (!(await this.idle(peer, caller.signal))) {
         throw new CrewError("Worker is not idle; control refused.");
+      }
+
       caller.signal.throwIfAborted();
 
       return await operation(peer);
@@ -1856,17 +2028,21 @@ export class CrewEngine {
       Array.isArray(metadata) ||
       metadata["namespace"] !== this.options.namespace ||
       metadata["crewID"] !== peer.crewID
-    )
+    ) {
       throw new CrewError(
         "Crew session identity changed. Restore its agent, directory and metadata; do not recreate it.",
       );
+    }
   }
 
   private async ensure(crewID: CrewID, signal: AbortSignal): Promise<Peer> {
     const member = this.member(crewID);
     const worktree = this.options.worktrees[crewID];
 
-    if (!worktree) throw new CrewError("Missing configured worker directory.");
+    if (!worktree) {
+      throw new CrewError("Missing configured worker directory.");
+    }
+
     const peer = this.state.reservePeer(crewID);
 
     if (member.backend) {
@@ -1884,12 +2060,15 @@ export class CrewEngine {
         { signal },
       );
     } catch (error) {
-      if (!notFound(error)) throw error;
+      if (!notFound(error)) {
+        throw error;
+      }
 
-      if (peer.status === "ready")
+      if (peer.status === "ready") {
         throw new CrewError(
           `Crew session ${peer.sessionID} is missing. Restore OpenCode data; automatic recreation is disabled.`,
         );
+      }
 
       try {
         const agent = await this.agents?.get(
@@ -1900,10 +2079,12 @@ export class CrewEngine {
           { signal },
         );
 
-        if (agent && agent.data.mode !== "primary")
+        if (agent && agent.data.mode !== "primary") {
           throw new CrewError(
             "Crew agent definitions must use mode primary. Validate the generated profile before ensuring sessions.",
           );
+        }
+
         // Stable ID persisted BEFORE creation; retries cannot create new peers.
         session = await this.sessions.create(
           {
@@ -1923,7 +2104,10 @@ export class CrewEngine {
           { signal },
         );
       } catch (error) {
-        if (error instanceof CrewError) throw error;
+        if (error instanceof CrewError) {
+          throw error;
+        }
+
         throw new CrewError(
           "Crew creation not confirmed. Retry ensure to inspect/adopt the reserved session ID; do not delete state.",
         );
@@ -1939,8 +2123,9 @@ export class CrewEngine {
   private ownedCaptainTask(id: string, caller: CrewCaller): CrewTask {
     const task = this.state.task(id);
 
-    if (!task || !this.ownsCaptainLineage(task.originCaptainID, caller))
+    if (!task || !this.ownsCaptainLineage(task.originCaptainID, caller)) {
       throw new CrewError("This captain does not own the requested task.");
+    }
 
     return task;
   }
@@ -1952,19 +2137,21 @@ export class CrewEngine {
       !task ||
       task.workerSessionID !== caller.sessionID ||
       caller.agent !== task.crewID
-    )
+    ) {
       throw new CrewError(
         "Only the assigned worker may use this task operation.",
       );
+    }
 
     return task;
   }
 
   private async inspectionAPI(caller: CrewCaller) {
-    if (!this.inspectionConnector)
+    if (!this.inspectionConnector) {
       throw new CrewError(
         "Authenticated inspection API unavailable; configure this team's same-server history API. No state changed.",
       );
+    }
 
     const native = await this.sessions.get(
       { sessionID: caller.sessionID },
@@ -1983,10 +2170,11 @@ export class CrewEngine {
     const active = this.state.activeTask(input.crew);
     const selected = input.taskID ? this.state.task(input.taskID) : active;
 
-    if (input.taskID && (!selected || selected.crewID !== input.crew))
+    if (input.taskID && (!selected || selected.crewID !== input.crew)) {
       throw new CrewError(
         "Requested task is not assigned to this team's member.",
       );
+    }
 
     const result: CrewResult = {
       status: peer ? "inspected" : "not-ensured",
@@ -2003,17 +2191,20 @@ export class CrewEngine {
     };
 
     if (!peer) {
-      if (input.requestStatus)
+      if (input.requestStatus) {
         throw new CrewError(
           "Worker has no registered session/task to interrogate.",
         );
+      }
 
       return result;
     }
 
     if (member.backend) {
-      if (input.requestStatus)
+      if (input.requestStatus) {
         throw new CrewError("Pi workers do not support Mesij status requests.");
+      }
+
       result.execution = {
         state: (await this.idle(peer, caller.signal)) ? "idle" : "running",
         backend: "pi",
@@ -2035,7 +2226,10 @@ export class CrewEngine {
 
       // Status requests need a validated live identity; plain reads keep the
       // Local ownership the captain needs for reconcile or abandon.
-      if (input.requestStatus) throw error;
+      if (input.requestStatus) {
+        throw error;
+      }
+
       result.execution = { state: "unknown" };
       result.diagnostic = `Native execution unknown: ${error instanceof CrewError ? error.message : "inspection API unavailable; raw details withheld."} Local ownership above is current. Retry inspect, or abandon with acknowledgeUnconfirmedStop.`;
 
@@ -2046,8 +2240,10 @@ export class CrewEngine {
     result.execution = live.execution;
 
     if (input.requestStatus) {
-      if (!active || selected?.id !== active.id)
+      if (!active || selected?.id !== active.id) {
         throw new CrewError("Status requests require the current active task.");
+      }
+
       result.statusRequest = await this.requestStatus(
         active,
         input.requestStatus.key,
@@ -2106,7 +2302,9 @@ export class CrewEngine {
       this.state.statusRequestReceipt(id, receipt.id);
       const route = this.statusRequestRoute(receipt.id);
 
-      if (route) this.state.mailRoutes.save(route);
+      if (route) {
+        this.state.mailRoutes.save(route);
+      }
 
       return receipt;
     } catch {
@@ -2122,21 +2320,26 @@ export class CrewEngine {
   ): Promise<CrewResult> {
     const task = this.state.task(input.taskID);
 
-    if (!task) throw new CrewError("Task is not in this team's state.");
+    if (!task) {
+      throw new CrewError("Task is not in this team's state.");
+    }
 
-    if (this.member(task.crewID).backend)
+    if (this.member(task.crewID).backend) {
       throw new CrewError(
         "Reconciliation supports native OpenCode workers only.",
       );
+    }
 
     if (
       task.workerSessionID !== input.expected.workerSessionID ||
       task.originCaptainID !== input.expected.originCaptainID ||
       task.inputID !== input.expected.inputID
-    )
+    ) {
       throw new CrewError(
         "Expected ownership is stale; inspect this task again.",
       );
+    }
+
     const previous = this.state.reconciliation(task.id);
 
     if (previous) {
@@ -2149,10 +2352,11 @@ export class CrewEngine {
         previous.resultMessageID !== input.resultMessageID ||
         previous.resultSha256 !== input.resultSha256 ||
         sha256(task.result) !== input.resultSha256
-      )
+      ) {
         throw new CrewError(
           "Reconciliation conflicts with retained audit/result.",
         );
+      }
 
       return { status: "reconciled", reconciliation: previous };
     }
@@ -2185,10 +2389,14 @@ export class CrewEngine {
       this.validPeer(after.session, peer);
       requireQuiescent(after.execution);
 
-      if (JSON.stringify(before.execution) !== JSON.stringify(after.execution))
+      if (
+        JSON.stringify(before.execution) !== JSON.stringify(after.execution)
+      ) {
         throw new CrewError(
           "Worker execution changed during evidence verification; inspect again.",
         );
+      }
+
       caller.signal.throwIfAborted();
 
       const reconciliation = this.state.finishReconciliation(
@@ -2217,7 +2425,9 @@ export class CrewEngine {
   ): Promise<void> {
     const pending = this.state.resumeBoundaries(task.id, true);
 
-    if (pending.length === 0) return;
+    if (pending.length === 0) {
+      return;
+    }
 
     const signal = AbortSignal.any([
       caller.signal,
@@ -2228,7 +2438,10 @@ export class CrewEngine {
       const api = await this.inspectionAPI({ ...caller, signal });
       const peer = this.state.peer(task.crewID);
 
-      if (!peer || peer.sessionID !== task.workerSessionID) return;
+      if (!peer || peer.sessionID !== task.workerSessionID) {
+        return;
+      }
+
       this.validPeer(
         await api.session.get({ sessionID: peer.sessionID }, { signal }),
         peer,
@@ -2243,8 +2456,9 @@ export class CrewEngine {
             idleAt,
             signal,
           )
-        )
+        ) {
           this.state.confirmResumeAttempt(task.id, idleAt);
+        }
       }
     } catch {
       caller.signal.throwIfAborted();
@@ -2258,21 +2472,25 @@ export class CrewEngine {
   ): Promise<CrewResult> {
     const task = this.ownedCaptainTask(input.taskID, caller);
 
-    if (this.drain())
+    if (this.drain()) {
       throw new CrewError(
         "Maintenance drain active; resume after maintenance completes.",
       );
+    }
 
-    if (!this.options.exclusiveWorkerInput)
+    if (!this.options.exclusiveWorkerInput) {
       throw new CrewError(
         "Resume requires a protected worker profile with exclusive Stargate input.",
       );
+    }
+
     const member = this.member(task.crewID);
     const peer = this.state.peer(task.crewID);
     const { expected } = input;
 
-    if (member.backend)
+    if (member.backend) {
       throw new CrewError("Resume supports native OpenCode workers only.");
+    }
 
     if (
       task.status !== "uncertain" ||
@@ -2282,10 +2500,11 @@ export class CrewEngine {
       task.workerSessionID !== expected.workerSessionID ||
       task.originCaptainID !== expected.originCaptainID ||
       task.inputID !== expected.inputID
-    )
+    ) {
       throw new CrewError(
         "Resume requires the current uncertain task and its inspected worker, captain and input.",
       );
+    }
 
     const token = this.state.reserveReconciliation(task);
 
@@ -2306,10 +2525,11 @@ export class CrewEngine {
 
         this.validPeer(session, peer);
 
-        if (idleBoundary(execution) !== expected.idleAt)
+        if (idleBoundary(execution) !== expected.idleAt) {
           throw new CrewError(
             "Worker changed, is busy, or has pending input or approval; inspect again before resuming.",
           );
+        }
 
         return execution;
       };
@@ -2334,15 +2554,17 @@ export class CrewEngine {
       const workerAgent = member.agent ?? task.crewID;
       const placement = await observePlacement(api, task, signal, workerAgent);
 
-      if (placement === "unknown")
+      if (placement === "unknown") {
         throw new CrewError(
           "Native history is unverified. Inspect the existing task before resuming.",
         );
+      }
 
-      if (placement !== "placed")
+      if (placement !== "placed") {
         throw new CrewError(
           "Original assignment no longer owns the native turn; resume refused.",
         );
+      }
 
       try {
         await readTaskResult(api, task, signal, workerAgent);
@@ -2359,15 +2581,19 @@ export class CrewEngine {
               : "History contains a final answer, but OpenCode did not report success. Preserve the answer and inspect the native outcome.",
         };
       } catch (error) {
-        if (!(error instanceof MissingTaskResult)) throw error;
+        if (!(error instanceof MissingTaskResult)) {
+          throw error;
+        }
       }
 
       const after = await inspect();
 
-      if (JSON.stringify(before) !== JSON.stringify(after))
+      if (JSON.stringify(before) !== JSON.stringify(after)) {
         throw new CrewError(
           "Worker changed during resume checks; inspect again.",
         );
+      }
+
       signal.throwIfAborted();
       this.state.recordResumeAttempt(
         task,
@@ -2423,10 +2649,12 @@ export class CrewEngine {
     } catch (error) {
       caller.signal.throwIfAborted();
 
-      if (signal.aborted)
+      if (signal.aborted) {
         throw new CrewError(
           "Resume inspection timed out. Inspect the existing task before another attempt.",
         );
+      }
+
       throw error;
     } finally {
       this.state.releaseControl(task.crewID, token);
@@ -2456,7 +2684,10 @@ export class CrewEngine {
   ): Promise<CrewResult> {
     const task = this.state.task(input.taskID);
 
-    if (!task) throw new CrewError("Task is not in this team's state.");
+    if (!task) {
+      throw new CrewError("Task is not in this team's state.");
+    }
+
     this.member(task.crewID);
     const { expected } = input;
     const previous = this.state.abandonment(task.id);
@@ -2469,14 +2700,17 @@ export class CrewEngine {
         previous.workerSessionID !== expected.workerSessionID ||
         previous.originCaptainID !== expected.originCaptainID ||
         previous.inputID !== expected.inputID
-      )
+      ) {
         throw new CrewError(
           "Task was already released by an abandon or proven cancellation with another key, reason or identity; inspect its retained audit.",
         );
+      }
+
       const token = this.state.resumeAbandon(task.id);
 
-      if (token)
+      if (token) {
         return this.stopAbandoned(task, previous.previousStatus, token, caller);
+      }
 
       return {
         status: "abandoned",
@@ -2485,29 +2719,34 @@ export class CrewEngine {
       };
     }
 
-    if (task.status === "abandoned" || task.released)
+    if (task.status === "abandoned" || task.released) {
       throw new CrewError(
         "Task is no longer assigned; inspect its retained state. Nothing abandoned.",
       );
+    }
 
     if (
       task.workerSessionID !== expected.workerSessionID ||
       task.originCaptainID !== expected.originCaptainID ||
       task.inputID !== expected.inputID
-    )
+    ) {
       throw new CrewError(
         "Expected ownership is stale; inspect this task again.",
       );
+    }
 
-    if (task.status === "completed")
+    if (task.status === "completed") {
       throw new CrewError(
         "Completed tasks keep their result; dispatch releases them normally. Nothing abandoned.",
       );
+    }
 
-    if (task.status === "queued" || task.status === "cancelled")
+    if (task.status === "queued" || task.status === "cancelled") {
       throw new CrewError(
         "Queued work has no native execution to abandon. Nothing abandoned.",
       );
+    }
+
     await this.observeResumeReceipts(task, caller);
 
     const token = this.state.beginAbandon(
@@ -2567,20 +2806,23 @@ export class CrewEngine {
     const member = this.member(task.crewID);
     const peer = this.state.peer(task.crewID);
 
-    if (!peer || peer.sessionID !== task.workerSessionID)
+    if (!peer || peer.sessionID !== task.workerSessionID) {
       return {
         stop: "unconfirmed",
         detail: "Worker reservation differs.",
         withdrawn: false,
       };
+    }
+
     const signal = AbortSignal.timeout(15_000);
 
     if (member.backend) {
-      if (this.pi.observed(task))
+      if (this.pi.observed(task)) {
         await Promise.race([
           this.pi.interrupt(peer),
           delay(5000, undefined, { ref: false }),
         ]);
+      }
 
       return (await this.idle(peer, signal))
         ? { stop: "confirmed", detail: "Pi worker idle.", withdrawn: false }
@@ -2595,13 +2837,14 @@ export class CrewEngine {
       ? await this.inspectionAPI({ ...caller, signal }).catch(() => null)
       : null;
 
-    if (this.state.resumeBoundaries(task.id, true).length > 0)
+    if (this.state.resumeBoundaries(task.id, true).length > 0) {
       return {
         stop: "unconfirmed",
         detail:
           "Resume admission is unconfirmed. Inspect native evidence before stopping.",
         withdrawn: false,
       };
+    }
 
     const resumeIDs = new Set(
       this.state
@@ -2627,16 +2870,21 @@ export class CrewEngine {
 
       const queued = await queuedResumes().catch(() => {});
 
-      if (!queued || (queued.length > 0 && !api?.session.inbox.cancel))
+      if (!queued || (queued.length > 0 && !api?.session.inbox.cancel)) {
         return stopUnconfirmed;
+      }
 
-      for (const { id } of queued)
+      for (const { id } of queued) {
         await api?.session.inbox
           .cancel?.({ sessionID: peer.sessionID, inboxID: id }, { signal })
           .catch(() => {});
+      }
+
       const remaining = await queuedResumes().catch(() => {});
 
-      if (!remaining || remaining.length > 0) return stopUnconfirmed;
+      if (!remaining || remaining.length > 0) {
+        return stopUnconfirmed;
+      }
     }
 
     let placement: Placement = api
@@ -2726,11 +2974,15 @@ export class CrewEngine {
       task.released ||
       !this.inspectionConnector ||
       this.member(task.crewID).backend
-    )
+    ) {
       return { task };
+    }
+
     const peer = this.state.peer(task.crewID);
 
-    if (!peer || peer.sessionID !== task.workerSessionID) return { task };
+    if (!peer || peer.sessionID !== task.workerSessionID) {
+      return { task };
+    }
 
     const signal = AbortSignal.any([
       caller.signal,
@@ -2753,11 +3005,12 @@ export class CrewEngine {
     caller.signal.throwIfAborted();
     const admitted = placement === "queued" || placement === "placed";
 
-    if (admitted && !(await this.idle(peer, signal)))
+    if (admitted && !(await this.idle(peer, signal))) {
       return {
         task: this.state.readmit(task),
         diagnostic: `Task ${task.id}: own input ${task.inputID} is ${placement} natively; running without resubmission.`,
       };
+    }
 
     return {
       task,
@@ -2790,7 +3043,7 @@ export class CrewEngine {
       caller.signal,
     );
 
-    if (input.op === "workspace")
+    if (input.op === "workspace") {
       return {
         status: "workspace",
         workspace: await inspectWorkspace(
@@ -2801,6 +3054,8 @@ export class CrewEngine {
         ),
         slot: this.slot(input.crew),
       };
+    }
+
     caller.signal.throwIfAborted();
     const peer = this.state.reservePeer(input.crew);
 
@@ -2812,32 +3067,38 @@ export class CrewEngine {
     try {
       const executionConfirmed = await this.idle(peer, caller.signal);
 
-      if (!executionConfirmed && !input.acknowledgeUnconfirmedExecution)
+      if (!executionConfirmed && !input.acknowledgeUnconfirmedExecution) {
         throw new CrewError(
           "Worker idle state is unconfirmed; native writes can race with Git. Retry with acknowledgeUnconfirmedExecution=true only if you accept that risk. No Git change made.",
         );
+      }
+
       const current = await inspectWorkspace(root, input.crew, caller.signal);
 
       if (
         current.head !== input.expected.head ||
         current.fingerprint !== input.expected.fingerprint
-      )
+      ) {
         throw new CrewError(
           "Workspace HEAD or changes differ from the inspected state; inspect again. No Git change made.",
         );
+      }
 
-      if (current.nested)
+      if (current.nested) {
         throw new CrewError(
           "Workspace contains a submodule or nested repository; review it natively. No Git change made.",
         );
+      }
 
-      if (!current.changeCount)
+      if (!current.changeCount) {
         return {
           status: "clean",
           workspace: current,
           checkpoint: null,
           executionConfirmed,
         };
+      }
+
       caller.signal.throwIfAborted();
 
       const checkpoint =
@@ -2845,7 +3106,7 @@ export class CrewEngine {
           ? await stashWorkspace(root, input.crew)
           : await resetWorkspace(root, input.crew, current.head);
 
-      if (checkpoint)
+      if (checkpoint) {
         this.state.reporting.journal.append(
           {
             member: input.crew,
@@ -2856,6 +3117,7 @@ export class CrewEngine {
           },
           `${input.crew}:workspace:${checkpoint.oid}`,
         );
+      }
 
       return {
         status: checkpoint
@@ -2924,7 +3186,9 @@ export class CrewEngine {
       ? await this.reconcileResult(active, caller)
       : undefined;
 
-    if (recovered) active = recovered.task;
+    if (recovered) {
+      active = recovered.task;
+    }
 
     const busy: CrewResult = {
       status: "busy",
@@ -2951,13 +3215,14 @@ export class CrewEngine {
           : busy;
       }
 
-      if (!this.state.release(active.id))
+      if (!this.state.release(active.id)) {
         return input.queue
           ? {
               status: "queued",
               task: enqueue(),
             }
           : busy;
+      }
     }
 
     if (!active && !(await this.idle(peer, caller.signal))) {
@@ -2974,7 +3239,7 @@ export class CrewEngine {
     caller.signal.throwIfAborted();
     const afterIdle = this.drain();
 
-    if (afterIdle)
+    if (afterIdle) {
       return {
         status: "queued",
         task: this.state.enqueue(
@@ -2988,6 +3253,7 @@ export class CrewEngine {
         diagnostic:
           "Maintenance drain active; assignment queued durably. Do not resubmit.",
       };
+    }
 
     const task = this.state.reserveTask(
       peer,
@@ -2996,13 +3262,14 @@ export class CrewEngine {
       originInputID,
     );
 
-    if (!task)
+    if (!task) {
       return input.queue
         ? {
             status: "queued",
             task: enqueue(),
           }
         : { status: "busy" };
+    }
 
     return this.admit(task, input.text, caller);
   }
@@ -3011,7 +3278,10 @@ export class CrewEngine {
     caller: CrewCaller,
     messageID: string | undefined,
   ): Promise<string | null> {
-    if (!messageID || !this.inspectionConnector) return null;
+    if (!messageID || !this.inspectionConnector) {
+      return null;
+    }
+
     const stop = new AbortController();
     const signal = AbortSignal.any([caller.signal, stop.signal]);
 
@@ -3039,13 +3309,14 @@ export class CrewEngine {
   }
 
   private async idle(peer: Peer, signal: AbortSignal): Promise<boolean> {
-    if (this.member(peer.crewID).backend)
+    if (this.member(peer.crewID).backend) {
       return this.pi.idle(
         peer,
         this.member(peer.crewID),
         this.options.worktrees[peer.crewID] ?? "",
         signal,
       );
+    }
 
     try {
       await this.sessions.wait(
@@ -3062,19 +3333,31 @@ export class CrewEngine {
   private async promote(task: CrewTask, caller: CrewCaller): Promise<CrewTask> {
     caller.signal.throwIfAborted();
 
-    if (this.drain()) return task;
+    if (this.drain()) {
+      return task;
+    }
+
     const peer = await this.ensure(task.crewID, caller.signal);
     let active = this.state.activeTask(task.crewID);
 
-    if (active) active = (await this.reconcileResult(active, caller)).task;
+    if (active) {
+      active = (await this.reconcileResult(active, caller)).task;
+    }
 
-    if (active && (active.status !== "completed" || active.notifying))
+    if (active && (active.status !== "completed" || active.notifying)) {
       return task;
+    }
 
-    if (!(await this.idle(peer, caller.signal))) return task;
+    if (!(await this.idle(peer, caller.signal))) {
+      return task;
+    }
+
     caller.signal.throwIfAborted();
 
-    if (this.drain()) return task;
+    if (this.drain()) {
+      return task;
+    }
+
     const promoted = this.state.promote(task.id, active?.id ?? null);
 
     if (promoted) {
@@ -3099,8 +3382,10 @@ export class CrewEngine {
         const peer = this.state.peer(task.crewID);
         const worktree = this.options.worktrees[task.crewID];
 
-        if (!peer || !worktree)
+        if (!peer || !worktree) {
           throw new CrewError("Pi worker reservation missing.");
+        }
+
         this.pi.start(member, worktree, peer, task, text);
 
         return { status: "running", task: this.state.task(task.id) ?? task };
@@ -3148,8 +3433,9 @@ export class CrewEngine {
       if (caller.signal.aborted) {
         await this.cancel(task, caller);
 
-        if (this.state.abandonment(task.id))
+        if (this.state.abandonment(task.id)) {
           throw new CrewError(this.cancelled(task.id));
+        }
       } else {
         // A lost receipt is not a lost input: correlate the persisted inputID.
         const api = await this.inspectionAPI(caller).catch(() => null);
@@ -3184,16 +3470,23 @@ export class CrewEngine {
   private async cancel(task: CrewTask, caller: CrewCaller) {
     const origin = this.captainOrigin(task, caller);
 
-    if (this.state.cancelQueued(task.id, origin)) return;
+    if (this.state.cancelQueued(task.id, origin)) {
+      return;
+    }
+
     const previous = this.state.task(task.id)?.status ?? task.status;
 
-    if (!this.state.beginCancel(task.id, origin)) return;
+    if (!this.state.beginCancel(task.id, origin)) {
+      return;
+    }
 
     try {
       if (this.member(task.crewID).backend) {
         const peer = this.state.peer(task.crewID);
 
-        if (peer) await this.pi.interrupt(peer);
+        if (peer) {
+          await this.pi.interrupt(peer);
+        }
 
         return;
       }
@@ -3201,13 +3494,14 @@ export class CrewEngine {
       // Withdraw the own queued input first; interrupt only proven placement.
       const stop = await this.stopOwnInput(task, caller, previous);
 
-      if (stop.withdrawn)
+      if (stop.withdrawn) {
         this.state.withdrawCancelled(
           task,
           origin,
           stop.detail,
           caller.sessionID,
         );
+      }
     } catch {
       // Native stop can fail independently; keep the reservation uncertain.
     } finally {
@@ -3218,14 +3512,17 @@ export class CrewEngine {
   private cancelled(taskID: string): string {
     const abandonment = this.state.abandonment(taskID);
 
-    if (abandonment?.operationKey === withdrawKey)
+    if (abandonment?.operationKey === withdrawKey) {
       return "Wait cancelled; own input withdrawn before execution and the task cancelled without a result.";
+    }
 
-    if (this.state.task(taskID)?.status === "cancelled")
+    if (this.state.task(taskID)?.status === "cancelled") {
       return "Wait cancelled; queued task cancelled without interrupting the worker.";
+    }
 
-    if (abandonment)
+    if (abandonment) {
       return "Wait cancelled; a captain abandoned this task. Inspect its retained audit.";
+    }
 
     return "Wait cancelled; task outcome uncertain. Inspect worker before further work.";
   }
@@ -3235,13 +3532,20 @@ export class CrewEngine {
     const member = this.options.team.crew.find((member) => member.id === id);
     const directory = this.options.worktrees[id];
 
-    if (!member?.backend || !directory || this.state.controlled(id))
+    if (!member?.backend || !directory || this.state.controlled(id)) {
       return false;
+    }
+
     const task = this.state.activeTask(id);
 
-    if (task && (task.status !== "completed" || task.notifying)) return false;
+    if (task && (task.status !== "completed" || task.notifying)) {
+      return false;
+    }
 
-    if (!(await this.pi.canReport(member, directory))) return false;
+    if (!(await this.pi.canReport(member, directory))) {
+      return false;
+    }
+
     const peer = this.state.peer(id);
 
     return !peer || (await this.idle(peer, signal));
@@ -3253,10 +3557,11 @@ export class CrewEngine {
     captureID: string,
     text: string,
   ): CrewTask {
-    if (!this.member(reporter).backend)
+    if (!this.member(reporter).backend) {
       throw new CrewError(
         "Activity reporter must be a configured Pi Durable worker.",
       );
+    }
 
     return this.state.enqueue(
       this.state.reservePeer(reporter),
@@ -3285,8 +3590,10 @@ export class CrewEngine {
   }
 
   public async progressReport(id: string, caller: CrewCaller) {
-    if (!this.state.reporting.isReport(id))
+    if (!this.state.reporting.isReport(id)) {
       throw new CrewError("Not a reporting task.");
+    }
+
     const task = this.ownedCaptainTask(id, caller);
     const key = `${this.state.path}:${id}`;
     let admission = reportAdmissions.get(key);
@@ -3319,12 +3626,16 @@ export class CrewEngine {
       // Durable admission; a cancelled queued report must not start maintenance.
       caller.signal.throwIfAborted();
       await this.promote(this.ownedCaptainTask(task.id, caller), caller);
-    } else await this.piRecover(task, caller.signal);
+    } else {
+      await this.piRecover(task, caller.signal);
+    }
   }
 
   public async cancelReport(id: string, caller: CrewCaller) {
-    if (!this.state.reporting.isReport(id))
+    if (!this.state.reporting.isReport(id)) {
       throw new CrewError("Not a reporting task.");
+    }
+
     await this.cancel(this.ownedCaptainTask(id, caller), caller);
   }
 
@@ -3342,25 +3653,36 @@ export class CrewEngine {
       task = await this.promote(task, caller);
       caller.signal.throwIfAborted();
 
-      if (task.status !== "queued") break;
+      if (task.status !== "queued") {
+        break;
+      }
+
       const notices = this.state.notices(task.id, after);
 
-      if (notices.length > 0) return { status: task.status, task, notices };
+      if (notices.length > 0) {
+        return { status: task.status, task, notices };
+      }
+
       const remaining = deadline - this.waitNow();
 
-      if (remaining <= 0) return elapsed(task, notices);
+      if (remaining <= 0) {
+        return elapsed(task, notices);
+      }
+
       await this.waitPoll(Math.min(25, remaining), caller.signal);
       task = this.ownedCaptainTask(task.id, caller);
     }
 
     caller.signal.throwIfAborted();
 
-    if (task.status === "cancelled")
+    if (task.status === "cancelled") {
       return {
         status: task.status,
         task,
         notices: this.state.notices(task.id, after),
       };
+    }
+
     const controller = new AbortController();
     let idle = false;
     let failed = false;
@@ -3372,10 +3694,16 @@ export class CrewEngine {
         let current = this.ownedCaptainTask(task.id, caller);
         const abandoned = this.abandoned(current, after);
 
-        if (abandoned) return abandoned;
+        if (abandoned) {
+          return abandoned;
+        }
+
         const piWorker = Boolean(this.member(current.crewID).backend);
 
-        if (piWorker) current = await this.piRecover(current, caller.signal);
+        if (piWorker) {
+          current = await this.piRecover(current, caller.signal);
+        }
+
         caller.signal.throwIfAborted();
 
         if (
@@ -3386,12 +3714,16 @@ export class CrewEngine {
           caller.signal.throwIfAborted();
           current = recovered.task;
 
-          if (current.status === "completed" || current.status === "uncertain")
+          if (
+            current.status === "completed" ||
+            current.status === "uncertain"
+          ) {
             return {
               status: current.status,
               ...recovered,
               notices: this.state.notices(task.id, after),
             };
+          }
         }
 
         const notices = this.state.notices(task.id, after);
@@ -3405,12 +3737,13 @@ export class CrewEngine {
           current.status === "completed" ||
           current.status === "uncertain" ||
           notices.length > 0
-        )
+        ) {
           return { status: current.status, task: current, notices };
+        }
 
         // A concurrent promotion reserves dispatching before SDK admission.
         // Observe idle only after admission; pre-admission idle is expected.
-        if (current.status === "running" && !observed && !piWorker)
+        if (current.status === "running" && !observed && !piWorker) {
           observed = this.sessions
             .wait(
               { sessionID: task.workerSessionID },
@@ -3426,17 +3759,20 @@ export class CrewEngine {
                 failed = true;
               },
             );
+        }
 
         if (idle || failed) {
           this.state.uncertain(task.id);
 
-          if (this.connectResults)
+          if (this.connectResults) {
             return {
               status: "uncertain",
               task: this.state.task(task.id) ?? current,
               notices,
               diagnostic: `Task ${task.id}, worker ${task.workerSessionID}: Native execution observation failed. Retry status to recover the retained answer when the existing OpenCode server is available; do not resubmit the assignment.`,
             };
+          }
+
           throw new CrewError(
             "Worker ended or became unavailable without a confirmed result; task outcome uncertain.",
           );
@@ -3444,7 +3780,10 @@ export class CrewEngine {
 
         const remaining = deadline - this.waitNow();
 
-        if (remaining <= 0) return elapsed(current, notices);
+        if (remaining <= 0) {
+          return elapsed(current, notices);
+        }
+
         await this.waitPoll(Math.min(25, remaining), caller.signal);
       }
     } catch (error) {
@@ -3465,14 +3804,19 @@ export class CrewEngine {
     caller: CrewCaller,
     knownIdle = false,
   ): Promise<{ task: CrewTask; diagnostic?: string }> {
-    if (this.member(task.crewID).backend)
+    if (this.member(task.crewID).backend) {
       return { task: await this.piRecover(task, caller.signal) };
+    }
+
     let readmission: string | undefined;
 
     if (task.status === "uncertain" && !knownIdle) {
       const readmitted = await this.readmitUncertain(task, caller);
 
-      if (readmitted.task.status === "running") return readmitted;
+      if (readmitted.task.status === "running") {
+        return readmitted;
+      }
+
       readmission = readmitted.diagnostic;
     }
 
@@ -3483,8 +3827,9 @@ export class CrewEngine {
       this.member(task.crewID).backend ||
       (task.status !== "running" && task.status !== "uncertain") ||
       task.released
-    )
+    ) {
       return { task, ...(readmission && { diagnostic: readmission }) };
+    }
 
     const signal = AbortSignal.any([
       caller.signal,
@@ -3494,10 +3839,11 @@ export class CrewEngine {
     try {
       const peer = this.state.peer(task.crewID);
 
-      if (!peer || peer.sessionID !== task.workerSessionID)
+      if (!peer || peer.sessionID !== task.workerSessionID) {
         throw new CrewError(
           "Worker reservation differs from this task. Restore its original session mapping before retrying status.",
         );
+      }
 
       if (!knownIdle && !(await this.idle(peer, signal))) {
         caller.signal.throwIfAborted();
@@ -3514,10 +3860,12 @@ export class CrewEngine {
 
       this.validPeer(session, peer);
 
-      if (session.outcome !== "succeeded")
+      if (session.outcome !== "succeeded") {
         throw new CrewError(
           `Worker is idle with outcome ${session.outcome ?? "unknown"}. Resume the existing task session and retry status after a successful final answer; do not resubmit the assignment.`,
         );
+      }
+
       const connection: Promise<ResultAPI> = connect(session, signal);
       const api = await connection;
 
@@ -3535,8 +3883,9 @@ export class CrewEngine {
       caller.signal.throwIfAborted();
       const current = this.state.task(task.id) ?? task;
 
-      if (current.status === task.status && !current.released)
+      if (current.status === task.status && !current.released) {
         this.state.uncertain(task.id);
+      }
 
       const detail =
         error instanceof CrewError

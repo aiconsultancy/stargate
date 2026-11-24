@@ -98,7 +98,9 @@ function git(args: string[], env = process.env): string {
     timeout: 30_000,
   });
 
-  if (result.status !== 0) throw new Error("Git comparison failed");
+  if (result.status !== 0) {
+    throw new Error("Git comparison failed");
+  }
 
   return result.stdout;
 }
@@ -107,12 +109,15 @@ async function snapshot(root: string, env: NodeJS.ProcessEnv) {
   await mkdir(root);
   git(["checkout-index", "--all", `--prefix=${root}/`], env);
 
-  for (const directory of directories)
+  for (const directory of directories) {
     await mkdir(join(root, directory), { recursive: true });
+  }
+
   const modules = join(process.cwd(), "node_modules");
 
-  if (await Bun.file(join(modules, "typescript/package.json")).exists())
+  if (await Bun.file(join(modules, "typescript/package.json")).exists()) {
     await symlink(modules, join(root, "node_modules"));
+  }
 }
 
 async function affected(existing: Set<string>) {
@@ -133,8 +138,10 @@ async function affected(existing: Set<string>) {
     const status = fields[index];
     const path = fields[index + 1];
 
-    if (!path || !status || !["A", "M", "D", "T"].includes(status))
+    if (!path || !status || !["A", "M", "D", "T"].includes(status)) {
       throw new Error("Unsupported index comparison");
+    }
+
     changes.push({ status, path });
   }
 
@@ -143,8 +150,9 @@ async function affected(existing: Set<string>) {
   const mappedTests = new Set<string>();
   const untrusted: string[] = [];
 
-  if (changes.length === 0)
+  if (changes.length === 0) {
     return { selected, graphTests, mappedTests, untrusted };
+  }
 
   const root = mkdtempSync(join(tmpdir(), "stargate-affected-"));
   let terminationStatus: number | undefined;
@@ -171,12 +179,15 @@ async function affected(existing: Set<string>) {
     git(["read-tree", "HEAD"], headEnv);
     await snapshot(join(root, "head"), headEnv);
 
-    if (terminationStatus !== undefined)
+    if (terminationStatus !== undefined) {
       return { selected, graphTests, mappedTests, untrusted };
+    }
+
     await snapshot(join(root, "index"), process.env);
 
-    if (terminationStatus !== undefined)
+    if (terminationStatus !== undefined) {
       return { selected, graphTests, mappedTests, untrusted };
+    }
 
     const { buildGraph, importClosure } =
       await import("../../tests/architecture-graph");
@@ -192,8 +203,11 @@ async function affected(existing: Set<string>) {
 
     const after = await buildGraph(join(root, "index"), directories, deleted);
 
-    for (const test of existing)
-      if (!after.has(test)) throw new Error("Test outside the scanned graph");
+    for (const test of existing) {
+      if (!after.has(test)) {
+        throw new Error("Test outside the scanned graph");
+      }
+    }
 
     const closures = [...existing].map((test) => ({
       test,
@@ -232,19 +246,26 @@ async function affected(existing: Set<string>) {
       if (
         !isTest &&
         (status === "T" || (reached.length === 0 && mapped.length === 0))
-      )
+      ) {
         untrusted.push(path);
+      }
 
-      for (const { test } of reached) graphTests.add(test);
+      for (const { test } of reached) {
+        graphTests.add(test);
+      }
 
-      for (const test of mapped) mappedTests.add(test);
+      for (const test of mapped) {
+        mappedTests.add(test);
+      }
 
       if (isTest && status !== "D") {
         graphTests.add(path);
       }
     }
 
-    for (const test of [...graphTests, ...mappedTests]) selected.add(test);
+    for (const test of [...graphTests, ...mappedTests]) {
+      selected.add(test);
+    }
 
     return {
       selected,
@@ -259,7 +280,9 @@ async function affected(existing: Set<string>) {
       process.off("SIGTERM", term);
       process.off("SIGINT", interrupt);
 
-      if (terminationStatus !== undefined) process.exit(terminationStatus);
+      if (terminationStatus !== undefined) {
+        process.exit(terminationStatus);
+      }
     }
   }
 }
@@ -287,8 +310,10 @@ try {
 
   total = existing.size;
 
-  if (!["full", "defer"].includes(UNTRUSTED_MODE))
+  if (!["full", "defer"].includes(UNTRUSTED_MODE)) {
     throw new Error("Invalid STARGATE_UNTRUSTED_TESTS mode");
+  }
+
   const result = await affected(existing);
   const full = result.untrusted.length > 0 && UNTRUSTED_MODE === "full";
   tests = full ? undefined : [...result.selected].toSorted();
@@ -297,13 +322,14 @@ try {
       `(graph=${result.graphTests.size}, mapped=${result.mappedTests.size}, untrusted-mode=${UNTRUSTED_MODE})`,
   );
 
-  if (result.untrusted.length > 0)
+  if (result.untrusted.length > 0) {
     console.log(
       `Untrusted paths: ${JSON.stringify(result.untrusted)}. ` +
         (full
           ? "Running the full suite locally."
           : "Running selected tests only; the full suite runs in hosted Quality checks."),
     );
+  }
 } catch {
   env = Object.fromEntries(
     Object.entries(env).filter(([name]) => !name.startsWith("GIT_")),

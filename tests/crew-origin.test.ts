@@ -169,8 +169,10 @@ test("native output-limit continuation stays neutral only with its exact native 
     { ...continuation, metadata: { source: "subagent" } },
     { ...continuation, metadata: { source: "shell" } },
     { ...continuation, text: "unknown context" },
-  ])
+  ]) {
     expect(inputBoundary(invalid, "captain")).toBe("limit");
+  }
+
   expect(inputBoundary({ ...continuation, type: "user" }, "captain")).toBe(
     "limit",
   );
@@ -329,7 +331,9 @@ test("crew queued origin survives restart and promotion without changing identit
     const peer = state.reservePeer("worker");
     const active = state.reserveTask(peer, "captain", "first", "input-first");
 
-    if (!active) throw new Error("Missing task");
+    if (!active) {
+      throw new Error("Missing task");
+    }
 
     const queued = state.enqueue(
       peer,
@@ -372,7 +376,10 @@ test("crew origin migration leaves original task and pending rows untagged", asy
     const peer = state.reservePeer("worker");
     const active = state.reserveTask(peer, "captain", "first");
 
-    if (!active) throw new Error("Missing task");
+    if (!active) {
+      throw new Error("Missing task");
+    }
+
     const queued = state.enqueue(peer, "captain", "second");
     state.complete(active.id, peer.sessionID, "Retained result");
     state.notice(active.id, "Retained notice");

@@ -14,8 +14,10 @@ export type LiveReplyOptions = {
 };
 
 function previewContent(part: ReplyChunk) {
-  if (typeof part === "string")
+  if (typeof part === "string") {
     return { body: part, content: undefined, key: part };
+  }
+
   const { text: body, content } = part;
 
   return { body, content, key: JSON.stringify({ text: body, content }) };
@@ -52,16 +54,23 @@ export class LiveReply {
     this.wait =
       options.wait ?? ((ms, signal) => delay(ms, undefined, { signal }));
     this.waitingTask = this.waiting(options).catch(() => {
-      if (!this.signal.aborted && !this.hasText)
+      if (!this.signal.aborted && !this.hasText) {
         this.log.warn({ job: job.id }, "Waiting feedback stopped");
+      }
     });
   }
 
   public readonly push = (text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim()) {
+      return;
+    }
+
     this.quiet();
 
-    if (this.held) return;
+    if (this.held) {
+      return;
+    }
+
     this.enqueue(text);
   };
 
@@ -78,10 +87,13 @@ export class LiveReply {
     await this.task;
     this.signal.throwIfAborted();
 
-    if (!this.allowed()) throw new Error("Delivery access denied");
+    if (!this.allowed()) {
+      throw new Error("Delivery access denied");
+    }
 
-    if (!this.slack.update || !this.slack.remove || this.disabled)
+    if (!this.slack.update || !this.slack.remove || this.disabled) {
       throw new Error("Cancellable maintenance notices unavailable");
+    }
 
     const preview = this.store
       .previews(this.job.id)
@@ -96,7 +108,9 @@ export class LiveReply {
         this.job.id,
       )) === false
     ) {
-      if (preview) this.store.removePreview(this.job.id, 0);
+      if (preview) {
+        this.store.removePreview(this.job.id, 0);
+      }
 
       const ts = await this.slack.post(
         this.job.channel,
@@ -105,7 +119,10 @@ export class LiveReply {
         this.job.id,
       );
 
-      if (!ts) throw new Error("Maintenance notice delivery unconfirmed");
+      if (!ts) {
+        throw new Error("Maintenance notice delivery unconfirmed");
+      }
+
       this.store.savePreview(this.job.id, 0, ts);
     }
 
@@ -123,24 +140,33 @@ export class LiveReply {
       this.signal.aborted ||
       !this.slack.update ||
       !this.slack.remove
-    )
+    ) {
       return;
+    }
+
     this.pending = text;
 
-    if (this.task !== undefined) return;
+    if (this.task !== undefined) {
+      return;
+    }
+
     this.task = this.flush()
       .catch(() => {
-        if (!this.signal.aborted)
+        if (!this.signal.aborted) {
           this.log.warn(
             { job: this.job.id },
             "Live Slack delivery stopped; final reply will be retried",
           );
+        }
+
         this.disabled = true;
       })
       .finally(() => {
         this.task = undefined;
 
-        if (this.pending !== undefined) this.enqueue(this.pending);
+        if (this.pending !== undefined) {
+          this.enqueue(this.pending);
+        }
       });
   }
 
@@ -152,8 +178,10 @@ export class LiveReply {
       settings.delayMs === null ||
       !this.slack.update ||
       !this.slack.remove
-    )
+    ) {
       return;
+    }
+
     const signal = AbortSignal.any([this.signal, this.waitingStop.signal]);
     await this.wait(settings.delayMs, signal);
     let index = 0;
@@ -171,12 +199,17 @@ export class LiveReply {
     while (this.pending !== undefined && !this.signal.aborted) {
       const wait = this.nextWrite - Date.now();
 
-      if (wait > 0) await this.wait(wait, this.signal);
+      if (wait > 0) {
+        await this.wait(wait, this.signal);
+      }
+
       this.signal.throwIfAborted();
       const text = this.pending;
       this.pending = undefined;
 
-      if (text === undefined) continue;
+      if (text === undefined) {
+        continue;
+      }
 
       const previews = new Map(
         this.store.previews(this.job.id).map(({ part, ts }) => [part, ts]),
@@ -190,13 +223,22 @@ export class LiveReply {
       for (let i = 0; i < parts.length; i++) {
         this.signal.throwIfAborted();
 
-        if (!this.allowed()) throw new Error("Delivery access denied");
+        if (!this.allowed()) {
+          throw new Error("Delivery access denied");
+        }
+
         const part = parts[i];
 
-        if (part === undefined) continue;
+        if (part === undefined) {
+          continue;
+        }
+
         const { body, content, key } = previewContent(part);
 
-        if (this.shown.get(i) === key) continue;
+        if (this.shown.get(i) === key) {
+          continue;
+        }
+
         const ts = previews.get(i);
 
         if (
@@ -209,7 +251,9 @@ export class LiveReply {
             content,
           )) === false
         ) {
-          if (ts) this.store.removePreview(this.job.id, i);
+          if (ts) {
+            this.store.removePreview(this.job.id, i);
+          }
 
           const created = await this.slack.post(
             this.job.channel,
@@ -220,8 +264,10 @@ export class LiveReply {
             content,
           );
 
-          if (!created)
+          if (!created) {
             throw new Error("Slack did not return a message timestamp");
+          }
+
           this.store.savePreview(this.job.id, i, created);
         }
 
@@ -229,8 +275,9 @@ export class LiveReply {
         this.nextWrite = Date.now() + this.intervalMs;
 
         // Respect channel posting limits even when a snapshot spans messages.
-        if (this.intervalMs > 0 && i + 1 < parts.length)
+        if (this.intervalMs > 0 && i + 1 < parts.length) {
           await this.wait(this.intervalMs, this.signal);
+        }
       }
     }
   }

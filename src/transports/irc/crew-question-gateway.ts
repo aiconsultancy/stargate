@@ -44,8 +44,9 @@ export class CrewQuestionGateway {
     if (
       owner.captain !== this.captain.sessionID ||
       owner.session === owner.captain
-    )
+    ) {
       return { status: "mismatch" };
+    }
 
     const worker = await this.client.session.get(
       { sessionID: owner.session },
@@ -65,15 +66,18 @@ export class CrewQuestionGateway {
       Array.isArray(identity) ||
       identity["namespace"] !== owner.namespace ||
       identity["crewID"] !== owner.crew
-    )
+    ) {
       return { status: "mismatch" };
+    }
 
     const backend = new OpenCodeQuestions(this.client, owner.session);
 
     if (action.kind === "list") {
       const questions = await backend.pendingQuestions(owner.session, signal);
 
-      if (questions.length > 16) return { status: "failed" };
+      if (questions.length > 16) {
+        return { status: "failed" };
+      }
 
       return {
         status: "ok",
@@ -99,8 +103,9 @@ export class CrewQuestionGateway {
           metadata: form.metadata,
           fields: form.fields,
         }) !== action.fingerprint
-      )
+      ) {
         return { status: "mismatch" };
+      }
 
       return {
         status:
@@ -118,18 +123,24 @@ export class CrewQuestionGateway {
         action.fingerprint,
         signal,
       ))
-    )
+    ) {
       return { status: "mismatch" };
+    }
 
-    if (action.kind === "check") return { status: "ok" };
+    if (action.kind === "check") {
+      return { status: "ok" };
+    }
 
-    if (!(await confirm())) return { status: "mismatch" };
+    if (!(await confirm())) {
+      return { status: "mismatch" };
+    }
+
     signal.throwIfAborted();
     const target = { sessionID: owner.session, formID: action.form };
 
-    if (action.answer === null)
+    if (action.answer === null) {
       await this.client.session.form.cancel(target, { signal });
-    else
+    } else {
       await this.client.session.form.reply(
         {
           ...target,
@@ -142,6 +153,7 @@ export class CrewQuestionGateway {
         },
         { signal },
       );
+    }
 
     return { status: "ok" };
   }
@@ -149,7 +161,10 @@ export class CrewQuestionGateway {
   public async run(stop: AbortSignal) {
     const captain = this.captain.sessionID;
 
-    if (!captain) return;
+    if (!captain) {
+      return;
+    }
+
     const rpc = this.client.rpc(CrewQuestionRpc);
     const location = { directory: this.captain.directory };
 

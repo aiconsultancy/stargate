@@ -27,8 +27,11 @@ test("the companion fills missing values without replacing the process environme
     expect(process.env[missing]).toBe("companion");
   } finally {
     for (const [key, value] of before) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
     }
 
     await rm(directory, { recursive: true });

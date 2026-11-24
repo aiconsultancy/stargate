@@ -22,8 +22,9 @@ test("chat admission, question and stored interaction roots use native codecs", 
     nativeQuestionSchema,
     ircBurstMessageSchema,
     activitySchema,
-  ])
+  ]) {
     expect(Schema.isSchema(schema)).toBe(true);
+  }
 });
 
 test("panel snapshot validates question settings without replacing or ordering them", () => {
@@ -64,8 +65,9 @@ test("Teams codec preserves defaults, stripping, UTC calendar and UUID dialect",
   for (const timestamp of [
     "2024-02-29T23:59:59Z",
     "2000-02-29T00:00:00.000001Z",
-  ])
+  ]) {
     expect(decode({ ...original, timestamp }).timestamp).toBe(timestamp);
+  }
 
   for (const timestamp of [
     "1900-02-29T00:00:00Z",
@@ -73,17 +75,20 @@ test("Teams codec preserves defaults, stripping, UTC calendar and UUID dialect",
     "2024-01-01T00:00Z",
     "2024-01-01T00:00:00+00:00",
     "2024-01-01T00:00:00z",
-  ])
+  ]) {
     expect(() => decode({ ...original, timestamp })).toThrow();
+  }
 
   for (const aadObjectId of [
     "00000000-0000-0000-0000-000000000000",
     "ffffffff-ffff-ffff-ffff-ffffffffffff",
-  ])
+  ]) {
     expect(
       decode({ ...original, from: { ...original.from, aadObjectId } }).from
         .aadObjectId,
     ).toBe(aadObjectId);
+  }
+
   expect(() =>
     decode({
       ...original,

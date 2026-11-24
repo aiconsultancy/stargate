@@ -18,7 +18,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 async function setup(
@@ -118,7 +120,10 @@ async function setup(
 
   const [captain] = ship.registrations;
 
-  if (!captain) throw new Error("missing captain");
+  if (!captain) {
+    throw new Error("missing captain");
+  }
+
   const controller = new AbortController();
 
   const gateway = new Gateway(
@@ -139,7 +144,10 @@ async function setup(
     worker ??= gateway.work(controller.signal);
   };
 
-  if (!options.deferWorker) startWorker();
+  if (!options.deferWorker) {
+    startWorker();
+  }
+
   ship.start(() => true);
   cleanup.push(async () => {
     release.resolve();
@@ -456,7 +464,10 @@ test("live IRC status reads the request observation while its model turn is stil
   );
   const job = store.jobByEvent(captain.key, `#galactica:${root}`);
 
-  if (!job) throw new Error("Missing request");
+  if (!job) {
+    throw new Error("Missing request");
+  }
+
   expect(
     store.requestProgress(captain.key, job.id, update.observedAt + 60_001)[0],
   ).toMatchObject({ request: job.id, stale: true, disconnected: false });
@@ -578,7 +589,9 @@ test("IRC progress relays authenticated notices for two requests in the same thr
     .map((line) => {
       const message = parseMessage(line);
 
-      if (!message) throw new Error("Invalid IRC transcript line");
+      if (!message) {
+        throw new Error("Invalid IRC transcript line");
+      }
 
       return describe(message);
     });
@@ -668,7 +681,10 @@ test("IRC progress reports a known failure stored while the IRC connection was o
     ({ account }) => account === "galactica",
   );
 
-  if (!connection) throw new Error("Missing ship connection");
+  if (!connection) {
+    throw new Error("Missing ship connection");
+  }
+
   connection.socket.end();
   await until(() => !captain.client.registered, 3000, "disconnected");
   fail(new BackendFailure("auth", { status: 401, ran: false }));
@@ -711,10 +727,15 @@ test("IRC progress confirms recovered stored replies and leaves interrupted nati
   for (const request of [succeeded, unknown]) {
     const job = store.jobByEvent(captain.key, `#galactica:${request}`);
 
-    if (!job) throw new Error("Missing request");
+    if (!job) {
+      throw new Error("Missing request");
+    }
+
     expect(store.running(job.id, job.text)).toBe(true);
 
-    if (request === succeeded) store.respond(job.id, ["Stored reply."]);
+    if (request === succeeded) {
+      store.respond(job.id, ["Stored reply."]);
+    }
   }
 
   startWorker();

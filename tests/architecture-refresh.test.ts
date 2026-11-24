@@ -44,7 +44,9 @@ function git(root: string, ...args: string[]) {
     timeout: 30_000,
   });
 
-  if (result.status !== 0) throw new Error(result.stderr);
+  if (result.status !== 0) {
+    throw new Error(result.stderr);
+  }
 
   return result.stdout.trim();
 }
@@ -342,10 +344,12 @@ describe("architecture baseline refresh", () => {
       const result = run(root, base, "--write", ...flags);
       expect(result.status).toBe(0);
 
-      if (flags.length)
+      if (flags.length) {
         expect(JSON.parse(result.stdout)).toMatchObject({
           prunedLargeFiles: [],
         });
+      }
+
       expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
     }
 
@@ -578,15 +582,22 @@ describe("architecture baseline refresh", () => {
     test(`rejects ${scenario} exceptions without changing the baseline`, async () => {
       const { root, base, original } = await fixture();
 
-      if (scenario === "unauthorized")
+      if (scenario === "unauthorized") {
         original.exceptions.push("unapproved:permission");
+      }
 
-      if (scenario === "new") original.exceptions = [];
+      if (scenario === "new") {
+        original.exceptions = [];
+      }
 
-      if (scenario === "duplicate") original.exceptions.push(EXCEPTION);
+      if (scenario === "duplicate") {
+        original.exceptions.push(EXCEPTION);
+      }
 
-      if (scenario === "stale")
+      if (scenario === "stale") {
         await files(root, { "src/feature/entry.ts": 'import "./leaf";\n' });
+      }
+
       await json(root, BASELINE, original);
       const before = await readFile(join(root, BASELINE), "utf8");
       const result = run(root, base, "--write");
@@ -613,10 +624,13 @@ describe("architecture baseline refresh", () => {
   ] as const) {
     test(`rejects ${scenario} growth against base permissions, not edited working caps`, async () => {
       const { root, base, original, policy } = await fixture((value) => {
-        if (scenario === "largest-cycle") value.largestCycle = 1;
+        if (scenario === "largest-cycle") {
+          value.largestCycle = 1;
+        }
 
-        if (scenario === "crew-closure")
+        if (scenario === "crew-closure") {
           value.crewPlugin.members = ["src/main.ts"];
+        }
       });
 
       if (scenario === "root") {
@@ -633,10 +647,14 @@ describe("architecture baseline refresh", () => {
         original.cyclicEdges.push("src/feature/leaf.ts -> src/feature/leaf.ts");
       }
 
-      if (scenario === "largest-cycle") original.largestCycle = 10;
+      if (scenario === "largest-cycle") {
+        original.largestCycle = 10;
+      }
 
-      if (scenario === "crew-closure")
+      if (scenario === "crew-closure") {
         original.crewPlugin.members = baseline().crewPlugin.members;
+      }
+
       await json(root, BASELINE, original);
       const before = await readFile(join(root, BASELINE), "utf8");
 
@@ -672,11 +690,14 @@ describe("architecture baseline refresh", () => {
       const result = run(root, base, "--write");
       expect(result.status).not.toBe(0);
 
-      if (scenario === "failure")
+      if (scenario === "failure") {
         expect(result.stderr).toContain("oxfmt failed (7)");
+      }
 
-      if (scenario === "semantic-change")
+      if (scenario === "semantic-change") {
         expect(result.stderr).toContain("Formatter changed baseline data");
+      }
+
       expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
       await noStagingFiles(root);
     });
@@ -733,8 +754,9 @@ describe("architecture baseline refresh", () => {
       ["--root", root],
       ["--output", join(root, "one"), "--output", join(root, "two")],
       ["--output"],
-    ])
+    ]) {
       expect(run(root, base, ...args).status).not.toBe(0);
+    }
   });
 
   test("writes optional preview receipts only outside the measured checkout", async () => {
@@ -886,8 +908,10 @@ describe("named architecture closure additions", () => {
         errors: [],
       });
 
-      if (!write)
+      if (!write) {
         expect(await readFile(join(root, BASELINE), "utf8")).toBe(before);
+      }
+
       await noStagingFiles(root);
     }
 
@@ -989,7 +1013,10 @@ describe("named architecture closure additions", () => {
     const identity = "src/feature/logical-new.ts";
     const feature = policy.slices["feature"];
 
-    if (!feature) throw new Error("Missing fixture feature slice");
+    if (!feature) {
+      throw new Error("Missing fixture feature slice");
+    }
+
     feature.files = feature.files.map((file) =>
       file === "src/feature/new.ts" ? identity : file,
     );
@@ -1198,10 +1225,11 @@ describe("named architecture closure additions", () => {
         await json(root, POLICY, policy);
       }
 
-      if (guard === "cycle")
+      if (guard === "cycle") {
         await files(root, {
           "src/feature/leaf.ts": 'import "./entry"; import "./leaf";\n',
         });
+      }
 
       if (guard === "size-permission") {
         original.largeFiles.push("src/feature/new.ts");

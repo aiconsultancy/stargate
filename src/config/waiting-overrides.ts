@@ -36,7 +36,9 @@ export async function resolveWaiting<
 >(bot: T): Promise<WaitingSettings> {
   const backend = bot.backend;
 
-  if (backend.type !== "opencode" || !backend.agent) return bot.waiting;
+  if (backend.type !== "opencode" || !backend.agent) {
+    return bot.waiting;
+  }
 
   try {
     const override = decodeOverride(

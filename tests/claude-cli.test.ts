@@ -27,18 +27,26 @@ const cleanup: (() => Promise<unknown>)[] = [];
 
 afterEach(async () => {
   for (const [name, value] of saved) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
   }
 
   saved.clear();
 
-  for (const step of cleanup.splice(0).reverse()) await step();
+  for (const step of cleanup.splice(0).reverse()) {
+    await step();
+  }
 });
 
 function setEnv(values: Record<string, string>) {
   for (const [name, value] of Object.entries(values)) {
-    if (!saved.has(name)) saved.set(name, process.env[name]);
+    if (!saved.has(name)) {
+      saved.set(name, process.env[name]);
+    }
+
     process.env[name] = value;
   }
 }
@@ -160,8 +168,10 @@ function fixture(script: Reply[] = []) {
           : {}),
       });
 
-      if (url.pathname !== "/v1/messages")
+      if (url.pathname !== "/v1/messages") {
         return Response.json({}, { status: 404 });
+      }
+
       const reply = script.shift() ?? { text: "Fixture reply" };
 
       return new Response(
@@ -315,8 +325,10 @@ test("real Claude Code CLI uses only the configured proxy and key", async () => 
   expect(last?.memory).toBe(true);
   expect(last?.tools).toContain("Read");
 
-  for (const tool of ["Bash", "Write", "Edit", "Agent", "WebFetch"])
+  for (const tool of ["Bash", "Write", "Edit", "Agent", "WebFetch"]) {
     expect(last?.tools).not.toContain(tool);
+  }
+
   expect(requests.filter(({ path }) => path === "/v1/messages").length).toBe(3);
   expect(await readdir(root)).not.toContain("hook");
 
@@ -436,10 +448,13 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
-      if (request.headers.get("authorization") !== `Bearer ${bearer}`)
+      if (request.headers.get("authorization") !== `Bearer ${bearer}`) {
         return new Response(null, { status: 401 });
+      }
 
-      if (request.method !== "POST") return new Response(null, { status: 405 });
+      if (request.method !== "POST") {
+        return new Response(null, { status: 405 });
+      }
 
       const { id, method, params } = (await request.json()) as {
         id?: unknown;
@@ -449,7 +464,9 @@ printf '%s\n' '{"Authorization":"Bearer ${bearer}"}'
 
       httpCalls.push({ method, arguments: params?.arguments });
 
-      if (id === undefined) return new Response(null, { status: 202 });
+      if (id === undefined) {
+        return new Response(null, { status: 202 });
+      }
 
       const result =
         method === "initialize"
@@ -627,13 +644,23 @@ test("no Bash process of the real CLI outlives its turn", async () => {
   };
 
   cleanup.push(async () => {
-    for (const pid of pids) if (alive(pid)) process.kill(pid, "SIGKILL");
+    for (const pid of pids) {
+      if (alive(pid)) {
+        process.kill(pid, "SIGKILL");
+      }
+    }
   });
 
-  for (const pid of pids) expect(pid).toBeGreaterThan(1);
+  for (const pid of pids) {
+    expect(pid).toBeGreaterThan(1);
+  }
+
   // A killed process can stay a zombie for a moment until it is reaped.
   const deadline = Date.now() + 3000;
 
-  while (pids.some(alive) && Date.now() < deadline) await Bun.sleep(25);
+  while (pids.some(alive) && Date.now() < deadline) {
+    await Bun.sleep(25);
+  }
+
   expect(pids.filter(alive)).toEqual([]);
 }, 120_000);

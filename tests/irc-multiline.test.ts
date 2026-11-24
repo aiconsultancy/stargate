@@ -16,7 +16,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const base = [
@@ -109,7 +111,10 @@ async function setup(
 
   const [captain] = ship.registrations;
 
-  if (!captain) throw new Error("missing captain");
+  if (!captain) {
+    throw new Error("missing captain");
+  }
+
   const controller = new AbortController();
 
   const worker = new Gateway(
@@ -169,8 +174,10 @@ test("irc multiline: one reply chunk is one batch, long lines concatenated", asy
   expect(batch?.lines.filter((line) => line.concat).length).toBeGreaterThan(0);
   expect(shown(batch?.lines ?? [])).toBe(`Status\n${long}\n- tanks: 40%`);
 
-  for (const line of fake.received("galactica"))
+  for (const line of fake.received("galactica")) {
     expect(utf8Bytes(line) + 2).toBeLessThanOrEqual(512);
+  }
+
   // No plain PRIVMSG lines: the whole chunk went in the batch.
   expect(
     lineOf(fake.received("galactica"), "PRIVMSG").filter(
@@ -188,7 +195,9 @@ test("irc multiline: max-lines splits a chunk; a retry resends only undelivered 
   let accepted = 0;
   fake.onMessage = () => {
     // The first batch arrives; the server refuses everything after it.
-    if (++accepted === 1) fake.refuse.add("galactica #galactica");
+    if (++accepted === 1) {
+      fake.refuse.add("galactica #galactica");
+    }
   };
 
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "galactica: count");
@@ -275,7 +284,9 @@ test("irc multiline lost before a retry: plain-line progress is kept too", async
   // Attempt 2 (plain lines): two lines pass, then the server refuses.
   let accepted = 0;
   fake.onMessage = () => {
-    if (++accepted === 2) fake.refuse.add("galactica #galactica");
+    if (++accepted === 2) {
+      fake.refuse.add("galactica #galactica");
+    }
   };
 
   fake.refuse.clear();
@@ -342,7 +353,9 @@ test("irc delivery without multiline: a retry resends only undelivered lines", a
 
   let accepted = 0;
   fake.onMessage = () => {
-    if (++accepted === 2) fake.refuse.add("galactica #galactica");
+    if (++accepted === 2) {
+      fake.refuse.add("galactica #galactica");
+    }
   };
 
   fake.say({ nick: "jack", account: "jack" }, "#galactica", "galactica: count");

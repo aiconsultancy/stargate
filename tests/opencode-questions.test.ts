@@ -8,7 +8,9 @@ import { CrewQuestionGateway } from "../src/transports/irc/crew-question-gateway
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const session = "ses_questions";
@@ -86,29 +88,32 @@ function fixture(
     async fetch(request) {
       const path = new URL(request.url).pathname;
 
-      if (missingSession)
+      if (missingSession) {
         return Response.json(
           { _tag: "SessionNotFoundError", sessionID: session, message: "gone" },
           { status: 404 },
         );
+      }
 
       if (
         path === `/api/session/${session}/form/${formID}` &&
         request.method === "GET"
       ) {
-        if (formFailure)
+        if (formFailure) {
           return Response.json(
             formFailure === 404
               ? { _tag: "FormNotFoundError", id: formID }
               : { _tag: "ServiceUnavailableError", message: "Unavailable" },
             { status: formFailure },
           );
+        }
 
         return Response.json({ data: form });
       }
 
-      if (path === `/api/session/${session}/form`)
+      if (path === `/api/session/${session}/form`) {
         return Response.json({ data: [form] });
+      }
 
       if (
         (path.endsWith(`/${formID}/reply`) && request.method === "POST") ||
@@ -120,17 +125,21 @@ function fixture(
           body: request.method === "POST" ? await request.json() : null,
         });
 
-        if (failWrite) return new Response(null, { status: 409 });
+        if (failWrite) {
+          return new Response(null, { status: 409 });
+        }
+
         form.state.status =
           request.method === "DELETE" ? "cancelled" : "answered";
 
         return new Response(null, { status: 204 });
       }
 
-      if (path === `/api/session/${session}/message/${assistant}`)
+      if (path === `/api/session/${session}/message/${assistant}`) {
         return Response.json({ data: message });
+      }
 
-      if (path === `/api/session/${session}/message/${input}`)
+      if (path === `/api/session/${session}/message/${input}`) {
         return Response.json({
           data: {
             id: input,
@@ -140,6 +149,7 @@ function fixture(
             time: { created: 1 },
           },
         });
+      }
 
       if (path === `/api/session/${session}/message`) {
         historyReads++;
@@ -169,15 +179,17 @@ function fixture(
         });
       }
 
-      if (path === `/api/session/${session}/inbox`)
+      if (path === `/api/session/${session}/inbox`) {
         return Response.json({ data: queued ? [{ id: input }] : [] });
+      }
 
-      if (path === "/api/session/active")
+      if (path === "/api/session/active") {
         return Response.json({
           data: idle ? {} : { [session]: { status: "busy" } },
         });
+      }
 
-      if (path === `/api/session/${session}`)
+      if (path === `/api/session/${session}`) {
         return Response.json({
           data: {
             ...workerIdentity,
@@ -191,6 +203,7 @@ function fixture(
             },
           },
         });
+      }
 
       return new Response(null, { status: 404 });
     },
@@ -203,7 +216,9 @@ function fixture(
     sessionID: session,
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid native fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid native fixture");
+  }
 
   const backend = new OpenCodeBackend(
     config,
@@ -298,7 +313,10 @@ test("crew gateway checks the worker identity, delivered input and form before r
   expect(result.forms).toHaveLength(1);
   const q = (await f.list())[0];
 
-  if (!q) throw new Error("Missing question");
+  if (!q) {
+    throw new Error("Missing question");
+  }
+
   const identity = { form: formID, fingerprint: q.fingerprint };
   expect(
     await f.gateway.execute(
@@ -389,7 +407,9 @@ test("OpenCode boundary corpus: question origin is strict at both object levels"
     const questions = await f.list();
     expect(questions).toHaveLength(accepted ? 1 : 0);
 
-    if (accepted) expect(questions[0]).toMatchObject({ inputID: input });
+    if (accepted) {
+      expect(questions[0]).toMatchObject({ inputID: input });
+    }
   }
 });
 
@@ -400,7 +420,10 @@ test("native questions bind exact form, running tool and delivered input, never 
   expect(questions).toHaveLength(1);
   const q = questions[0];
 
-  if (!q || "unsupported" in q) throw new Error("Missing native question");
+  if (!q || "unsupported" in q) {
+    throw new Error("Missing native question");
+  }
+
   expect(q).toMatchObject({
     id: formID,
     sessionID: session,
@@ -436,7 +459,10 @@ test("native cancellation uses form cancel, with no prompt or permission endpoin
   const f = fixture();
   const q = (await f.list())[0];
 
-  if (!q || "unsupported" in q) throw new Error("Missing question");
+  if (!q || "unsupported" in q) {
+    throw new Error("Missing question");
+  }
+
   await f.backend.replyQuestion(q, null, AbortSignal.timeout(3000));
   expect(f.writes).toEqual([
     {
@@ -502,7 +528,10 @@ for (const change of [
       expect(pending[0]).toMatchObject({ unsupported: true, inputID: input });
       expect(pending[0]).not.toHaveProperty("fields");
       expect(pending[0]).not.toHaveProperty("title");
-    } else expect(pending).toEqual([]);
+    } else {
+      expect(pending).toEqual([]);
+    }
+
     expect(f.writes).toHaveLength(0);
   });
 }
@@ -511,7 +540,10 @@ test("native form mutation or already-completed race cannot reuse an earlier que
   const f = fixture();
   const q = (await f.list())[0];
 
-  if (!q || "unsupported" in q) throw new Error("Missing question");
+  if (!q || "unsupported" in q) {
+    throw new Error("Missing question");
+  }
+
   f.form.title = "Different question";
   expect(
     await f.backend.questionBelongsToInput(
@@ -550,7 +582,10 @@ test("repeated native checks reuse immutable ancestry but still reject a queued 
   const f = fixture();
   const q = (await f.list())[0];
 
-  if (!q || "unsupported" in q) throw new Error("Missing question");
+  if (!q || "unsupported" in q) {
+    throw new Error("Missing question");
+  }
+
   const initial = f.historyReads;
   expect(initial).toBeGreaterThan(0);
 
@@ -632,8 +667,10 @@ test("crew form adapter uses its verified injected client, not fallback service 
   const questions = await f.list();
   const question = questions[0];
 
-  if (!question || "unsupported" in question)
+  if (!question || "unsupported" in question) {
     throw new Error("Missing owned question");
+  }
+
   await f.backend.replyQuestion(
     question,
     { q0: "wait" },
@@ -662,7 +699,10 @@ test("only standalone synthetic input can be claimed outside its original thread
   const standalone = fixture(false, "synthetic");
   const [q] = await standalone.backend.pinnedBackgroundQuestions(signal);
 
-  if (!q) throw new Error("Missing synthetic question");
+  if (!q) {
+    throw new Error("Missing synthetic question");
+  }
+
   await expect(
     standalone.backend.replyQuestion(q, { q0: "wait" }, signal, () => false),
   ).rejects.toThrow();

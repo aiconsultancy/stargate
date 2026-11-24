@@ -104,7 +104,9 @@ test("failure delivery replaces a preview and retries durable cause without reru
     async failure(_channel, _thread, cause, ts) {
       writes.push({ cause, ...(ts ? { ts } : {}) });
 
-      if (fail) throw new Error("Slack unavailable");
+      if (fail) {
+        throw new Error("Slack unavailable");
+      }
 
       return "preview";
     },
@@ -122,7 +124,9 @@ test("failure delivery replaces a preview and retries durable cause without reru
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
 
     return job;
   };
@@ -172,20 +176,27 @@ test("timeout, shutdown, and context failures have distinct durable causes and p
 
     const backend: AgentBackend = {
       async createSession() {
-        if (cause === "context") throw new ThreadContextUnavailable();
+        if (cause === "context") {
+          throw new ThreadContextUnavailable();
+        }
 
         return "captain";
       },
       async prompt(_session, _text, signal) {
         turns++;
 
-        if (cause === "interrupted") shutdown.abort();
+        if (cause === "interrupted") {
+          shutdown.abort();
+        }
+
         await new Promise<void>((_resolve, reject) => {
-          if (signal.aborted) reject(signal.reason);
-          else
+          if (signal.aborted) {
+            reject(signal.reason);
+          } else {
             signal.addEventListener("abort", () => reject(signal.reason), {
               once: true,
             });
+          }
         });
 
         return "unreachable";
@@ -212,7 +223,10 @@ test("timeout, shutdown, and context failures have distinct durable causes and p
       gateway.accept(event());
       const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-      if (!job) throw new Error("Missing job");
+      if (!job) {
+        throw new Error("Missing job");
+      }
+
       await gateway.process(job, shutdown.signal);
       expect(store.failure(job.id)).toBe(cause);
 
@@ -220,10 +234,15 @@ test("timeout, shutdown, and context failures have distinct durable causes and p
         const pending = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
         expect(pending?.failure).toBe("interrupted");
 
-        if (pending)
+        if (pending) {
           await gateway.process(pending, new AbortController().signal);
+        }
+
         expect(texts[0]).toContain("Stargate stopped");
-      } else expect(texts).toEqual([failureText(cause)]);
+      } else {
+        expect(texts).toEqual([failureText(cause)]);
+      }
+
       expect(turns).toBe(cause === "context" ? 0 : 1);
     } finally {
       await gateway.close();
@@ -347,10 +366,11 @@ test("a provider cause carries a category, a status and a flag, never text", () 
   );
 
   // An impossible status is dropped, not stored.
-  for (const status of [0, 42, 600, 429.5, Number.NaN])
+  for (const status of [0, 42, 600, 429.5, Number.NaN]) {
     expect(new BackendFailure("provider", { status, ran: true }).failure).toBe(
       "provider:provider:0:ran",
     );
+  }
 
   for (const text of [
     "provider:quota:429:idle:extra",
@@ -358,8 +378,10 @@ test("a provider cause carries a category, a status and a flag, never text", () 
     "provider:secret:429:idle",
     "provider:quota:429:maybe",
     "provider:quota:xoxb-1:idle",
-  ])
+  ]) {
     expect(providerFailure(text)).toBeUndefined();
+  }
+
   expect(
     [402, 429, 401, 403, 404, 408, 504, 400, 500, 529].map(statusKind),
   ).toEqual([
@@ -425,7 +447,10 @@ test("the gateway reports the category in the card and in the log, never provide
     expect(gateway.accept(event())).toBe(true);
     const [job] = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1);
 
-    if (!job) throw new Error("Expected a job");
+    if (!job) {
+      throw new Error("Expected a job");
+    }
+
     await gateway.process(job, new AbortController().signal);
     expect(cards).toEqual(["provider:quota:429:idle"]);
     expect(store.failure(job.id)).toBe("provider:quota:429:idle");
@@ -445,7 +470,10 @@ test("the gateway reports the category in the card and in the log, never provide
       JSON.stringify(store.transcript.replies(gateway.key, job.conversation)),
     ].join("\n");
 
-    for (const secret of secrets) expect(visible).not.toContain(secret);
+    for (const secret of secrets) {
+      expect(visible).not.toContain(secret);
+    }
+
     expect(containsCredential(visible)).toBe(false);
   } finally {
     store.close();
@@ -477,7 +505,10 @@ test("a failure without a category keeps the generic card and names no status", 
     gateway.accept(event());
     const [job] = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1);
 
-    if (!job) throw new Error("Expected a job");
+    if (!job) {
+      throw new Error("Expected a job");
+    }
+
     await gateway.process(job, new AbortController().signal);
     expect(store.failure(job.id)).toBe("backend");
     const logged = lines.join("");

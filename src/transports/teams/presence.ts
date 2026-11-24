@@ -17,8 +17,10 @@ export type TeamsWaiting = WaitingSettings & { name: string };
 type Label = { text: string; generic: boolean };
 
 function label(progress?: TurnProgress): Label {
-  if (progress && "disconnected" in progress && progress.disconnected)
+  if (progress && "disconnected" in progress && progress.disconnected) {
     return { text: "Connection interrupted", generic: false };
+  }
+
   const stage: string | undefined = progress?.stage;
 
   switch (stage) {
@@ -47,10 +49,16 @@ export class TeamsPresence {
   public constructor(private readonly refreshMs = 3000) {}
 
   private reserveSlot(channel: string, anchor: string, now: number) {
-    for (const [key, item] of this.slots)
-      if (item.expires <= now) this.slots.delete(key);
+    for (const [key, item] of this.slots) {
+      if (item.expires <= now) {
+        this.slots.delete(key);
+      }
+    }
 
-    if (this.slots.has(channel) || this.slots.size >= 200) return;
+    if (this.slots.has(channel) || this.slots.size >= 200) {
+      return;
+    }
+
     const slot: Slot = { anchor, expires: now + 600_000 };
     this.slots.set(channel, slot);
 
@@ -66,7 +74,10 @@ export class TeamsPresence {
     send: Send,
     waiting?: TeamsWaiting,
   ) {
-    if (signal.aborted || !allowed()) return;
+    if (signal.aborted || !allowed()) {
+      return;
+    }
+
     const now = Date.now();
     const slot = this.reserveSlot(channel, anchor, now);
 
@@ -139,14 +150,18 @@ export class TeamsPresence {
               !response.id ||
               response.id.length > 512 ||
               /[\p{Cc}\p{Cf}]/u.test(response.id)
-            )
+            ) {
               throw new Error("Stream ID unavailable");
+            }
+
             slot.id = response.id;
           }
 
           previous = text;
 
-          if (text !== stage.text) phraseShownAt ??= Date.now();
+          if (text !== stage.text) {
+            phraseShownAt ??= Date.now();
+          }
         } catch {
           informative = false;
         }
@@ -162,10 +177,12 @@ export class TeamsPresence {
           "Waiting to retry",
           "Connection interrupted",
         ].includes(stage.text)
-      )
+      ) {
         await send({ type: "typing", replyToId: anchor }, deadline).catch(
           () => {},
         );
+      }
+
       await delay(this.refreshMs, undefined, { signal: deadline }).catch(
         () => {},
       );
@@ -183,8 +200,10 @@ export class TeamsPresence {
   ) {
     const slot = this.slots.get(channel);
 
-    if (!slot?.id || slot.anchor !== anchor || slot.expires <= Date.now())
+    if (!slot?.id || slot.anchor !== anchor || slot.expires <= Date.now()) {
       return;
+    }
+
     this.slots.delete(channel);
 
     try {
@@ -199,7 +218,9 @@ export class TeamsPresence {
         signal,
       );
     } catch (error) {
-      if (!isDefiniteRefusal(error)) throw error;
+      if (!isDefiniteRefusal(error)) {
+        throw error;
+      }
 
       return;
     }

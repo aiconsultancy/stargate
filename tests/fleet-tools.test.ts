@@ -113,8 +113,9 @@ async function fixture() {
       allowDispatch: true,
       permissions: [{ action: "*", resource: "*", effect: "allow" }],
       async authorize(value) {
-        if (value.messageID !== "msg_native_assistant")
+        if (value.messageID !== "msg_native_assistant") {
           throw new FleetError("Unverified native input ancestry.");
+        }
       },
       async send(_target, text) {
         sent.push(text);
@@ -551,12 +552,15 @@ test("the real V2 loader resolves the canonical and compatibility Fleet packages
   expect(canonical?.endsWith("/plugins/opencode/fleet/plugin.ts")).toBe(true);
   expect(compatibility?.endsWith("/src/fleet/plugin.ts")).toBe(true);
 
-  if (!canonical || !compatibility)
+  if (!canonical || !compatibility) {
     throw new Error("Missing Fleet plugin entry point");
+  }
+
   const current = await Host.load(canonical);
 
-  if (!current || typeof current !== "object" || !("default" in current))
+  if (!current || typeof current !== "object" || !("default" in current)) {
     throw new Error("Missing Fleet plugin export");
+  }
 
   expect(current).toMatchObject({
     default: { id: "stargate.fleet", effect: expect.any(Function) },
@@ -569,7 +573,10 @@ test("the repository root still resolves and loads the Crew plugin", async () =>
 
   expect(entry?.endsWith("/plugins/opencode/crew/plugin.ts")).toBe(true);
 
-  if (!entry) throw new Error("Missing Crew plugin entry point");
+  if (!entry) {
+    throw new Error("Missing Crew plugin entry point");
+  }
+
   expect(await Host.load(entry)).toMatchObject({
     default: { id: "stargate.crew", effect: expect.any(Function) },
   });
@@ -614,7 +621,9 @@ test("OpenCode tools assert native permission and bind native caller, never mode
         async assert(input) {
           permissions.push(input);
 
-          if (denied) throw new Error("native permission denied");
+          if (denied) {
+            throw new Error("native permission denied");
+          }
         },
       },
     });
@@ -731,8 +740,9 @@ test("authenticated Teams instruction dispatches as Vance, captain verifies orig
               (job) =>
                 job.input === originByNativeAssistant.get(value.messageID),
             )
-        )
+        ) {
           throw new FleetError("No retained native input for this tool call");
+        }
       },
     });
 
@@ -758,8 +768,10 @@ test("authenticated Teams instruction dispatches as Vance, captain verifies orig
     const originalReference =
       teams.registration.transport.source?.(job)?.reference;
 
-    if (!originalReference)
+    if (!originalReference) {
       throw new Error("Authenticated source reference missing");
+    }
+
     const tools: Info[] = [];
     const permissions: unknown[] = [];
 
@@ -790,7 +802,9 @@ test("authenticated Teams instruction dispatches as Vance, captain verifies orig
 
     const dispatch = tools.find((tool) => tool.name === "fleet_dispatch");
 
-    if (!dispatch) throw new Error("Missing dispatch tool");
+    if (!dispatch) {
+      throw new Error("Missing dispatch tool");
+    }
 
     const context: ToolContext = {
       sessionID: Session.ID.make("ses_owner"),

@@ -15,7 +15,9 @@ import { FakeIrcServer, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const hour = 60 * 60_000;
@@ -78,7 +80,10 @@ async function run(
 
   const [captain] = ship.registrations;
 
-  if (!captain) throw new Error("missing captain");
+  if (!captain) {
+    throw new Error("missing captain");
+  }
+
   const controller = new AbortController();
 
   const worker = new Gateway(
@@ -97,7 +102,10 @@ async function run(
   let closed = false;
 
   const close = async () => {
-    if (closed) return;
+    if (closed) {
+      return;
+    }
+
     closed = true;
     controller.abort();
     await worker;

@@ -173,14 +173,20 @@ export function cutoverBotKey(key: string, before: unknown, after: unknown) {
       (parts.length === 5 && typeof parts[0] === "string") ||
       (parts.length === 7 && parts[0] === "irc")
     )
-  )
+  ) {
     throw new Error("Unsupported bot namespace shape.");
+  }
+
   const oldBackend = decodeRecord(before);
 
-  if (oldBackend["type"] === "opencode") delete oldBackend["sessionID"];
+  if (oldBackend["type"] === "opencode") {
+    delete oldBackend["sessionID"];
+  }
 
-  if (sha256(JSON.stringify(oldBackend)) !== parts.at(-1))
+  if (sha256(JSON.stringify(oldBackend)) !== parts.at(-1)) {
     throw new Error("Old normalized backend does not match stored namespace.");
+  }
+
   parts[parts.length - 1] = backendFingerprint({
     backend: Schema.decodeUnknownSync(backendSchema)(after),
   });
@@ -205,12 +211,17 @@ export function cutoverSessionFields(
   let update: SessionUpdateInput = { sessionID: before.id };
 
   if (before.metadata && Object.hasOwn(before.metadata, "pogoCrew")) {
-    if (Object.hasOwn(before.metadata, "stargateCrew"))
+    if (Object.hasOwn(before.metadata, "stargateCrew")) {
       throw new Error("Both native crew metadata keys exist.");
+    }
+
     const metadata = { ...before.metadata };
     const value = metadata["pogoCrew"];
 
-    if (value === undefined) throw new Error("Invalid native crew metadata.");
+    if (value === undefined) {
+      throw new Error("Invalid native crew metadata.");
+    }
+
     metadata["stargateCrew"] = value;
     delete metadata["pogoCrew"];
     update = { ...update, metadata };
@@ -223,8 +234,9 @@ export function cutoverSessionFields(
       resource: migratedPath(stargateName(rule.resource), paths),
     }));
 
-    if (!isDeepStrictEqual(permissions, before.permissions))
+    if (!isDeepStrictEqual(permissions, before.permissions)) {
       update = { ...update, permissions };
+    }
   }
 
   const directory = migratedPath(before.directory, paths);
@@ -247,12 +259,15 @@ export function migratedPath(value: string, paths: readonly Mapping[]) {
 }
 
 function uniqueMappings(mappings: readonly Mapping[]) {
-  for (const field of ["from", "to"] as const)
-    if (new Set(mappings.map((item) => item[field])).size !== mappings.length)
+  for (const field of ["from", "to"] as const) {
+    if (new Set(mappings.map((item) => item[field])).size !== mappings.length) {
       throw new Error("Duplicate migration mapping.");
+    }
+  }
 
-  if (mappings.some(({ from, to }) => from === to))
+  if (mappings.some(({ from, to }) => from === to)) {
     throw new Error("Unchanged migration mapping.");
+  }
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -296,22 +311,29 @@ function convertDatabase(
           ? ["jobs", "sessions"]
           : ["cron_schedules", "cron_runs"];
 
-      if (!required.every((name) => names.has(name)))
+      if (!required.every((name) => names.has(name))) {
         throw new Error("Wrong migration database kind.");
+      }
 
-      if (kind === "gateway")
+      if (kind === "gateway") {
         for (const old of ["irc_pogo_dm", "irc_pogo_dm_cursor"]) {
-          if (!names.has(old)) continue;
+          if (!names.has(old)) {
+            continue;
+          }
+
           const next = old.replace("pogo", "stargate");
 
-          if (names.has(next))
+          if (names.has(next)) {
             throw new Error("Both old and new DM tables exist.");
+          }
+
           db.run(`ALTER TABLE "${old}" RENAME TO "${next}"`);
           names.delete(old);
           names.add(next);
         }
+      }
 
-      if (kind === "gateway" && columns(db, "jobs").has("output_files"))
+      if (kind === "gateway" && columns(db, "jobs").has("output_files")) {
         for (const row of db
           .query<{ id: number; output_files: string }, []>(
             "SELECT id,output_files FROM jobs WHERE output_files IS NOT NULL",
@@ -337,6 +359,7 @@ function convertDatabase(
             row.id,
           );
         }
+      }
 
       const scoped = [
         "jobs",
@@ -349,15 +372,19 @@ function convertDatabase(
       ];
 
       for (const table of scoped) {
-        if (!names.has(table) || !columns(db, table).has("botKey")) continue;
+        if (!names.has(table) || !columns(db, table).has("botKey")) {
+          continue;
+        }
 
         for (const { from, to } of keys) {
           if (
             db
               .query(`SELECT 1 FROM "${table}" WHERE botKey=? LIMIT 1`)
               .get(to) !== null
-          )
+          ) {
             throw new Error("Destination bot namespace already exists.");
+          }
+
           db.query(`UPDATE "${table}" SET botKey=? WHERE botKey=?`).run(
             to,
             from,
@@ -366,8 +393,9 @@ function convertDatabase(
       }
 
       for (const table of ["sessions", "jobs"]) {
-        if (!names.has(table) || !columns(db, table).has("conversation"))
+        if (!names.has(table) || !columns(db, table).has("conversation")) {
           continue;
+        }
 
         const conversations = db
           .query<{ conversation: string }, []>(
@@ -379,7 +407,10 @@ function convertDatabase(
           const parts = decodeParts(JSON.parse(conversation));
           const mapped = keys.find(({ from }) => parts[0] === from);
 
-          if (!mapped) continue;
+          if (!mapped) {
+            continue;
+          }
+
           parts[0] = mapped.to;
           const next = JSON.stringify(parts);
 
@@ -387,8 +418,10 @@ function convertDatabase(
             db
               .query(`SELECT 1 FROM "${table}" WHERE conversation=? LIMIT 1`)
               .get(next) !== null
-          )
+          ) {
             throw new Error("Destination conversation already exists.");
+          }
+
           db.query(
             `UPDATE "${table}" SET conversation=? WHERE conversation=?`,
           ).run(next, conversation);
@@ -401,14 +434,18 @@ function convertDatabase(
             .query<{ id: string; source: string }, []>(
               "SELECT id,source FROM cron_schedules WHERE source IS NOT NULL",
             )
-            .all())
+            .all()) {
             db.query("UPDATE cron_schedules SET source=? WHERE id=?").run(
               migratedPath(row.source, paths),
               row.id,
             );
+          }
         }
 
-        if (names.has("cron_runs") && columns(db, "cron_runs").has("snapshot"))
+        if (
+          names.has("cron_runs") &&
+          columns(db, "cron_runs").has("snapshot")
+        ) {
           for (const row of db
             .query<{ id: string; snapshot: string }, []>(
               "SELECT id,snapshot FROM cron_runs WHERE snapshot IS NOT NULL",
@@ -419,21 +456,25 @@ function convertDatabase(
               keys.find(({ from }) => snapshot["botKey"] === from)?.to ??
               snapshot["botKey"];
 
-            if (typeof snapshot["source"] === "string")
+            if (typeof snapshot["source"] === "string") {
               snapshot["source"] = migratedPath(snapshot["source"], paths);
+            }
+
             db.query("UPDATE cron_runs SET snapshot=? WHERE id=?").run(
               JSON.stringify(snapshot),
               row.id,
             );
           }
+        }
       }
 
       if (
         db
           .query<{ integrity_check: string }, []>("PRAGMA integrity_check")
           .get()?.integrity_check !== "ok"
-      )
+      ) {
         throw new Error("SQLite integrity check failed.");
+      }
     }).immediate();
     db.run("PRAGMA wal_checkpoint(TRUNCATE)");
   } finally {
@@ -450,8 +491,10 @@ function applyEdits(value: unknown, edits: readonly (typeof edit.Type)[]) {
         typeof parent !== "object" ||
         parent === null ||
         !Object.hasOwn(parent, part)
-      )
+      ) {
         throw new Error("Missing JSON migration path.");
+      }
+
       parent = (parent as Record<string | number, unknown>)[part];
     }
 
@@ -462,12 +505,16 @@ function applyEdits(value: unknown, edits: readonly (typeof edit.Type)[]) {
       typeof parent !== "object" ||
       parent === null ||
       !Object.hasOwn(parent, key)
-    )
+    ) {
       throw new Error("Missing JSON migration field.");
+    }
+
     const target = parent as Record<string | number, unknown>;
 
-    if (!isDeepStrictEqual(target[key], edit.before))
+    if (!isDeepStrictEqual(target[key], edit.before)) {
       throw new Error("JSON migration precondition failed.");
+    }
+
     target[key] = edit.after;
   }
 
@@ -488,22 +535,26 @@ function convertMesij(
   uniqueMappings(actors);
   uniqueMappings(projects);
 
-  for (const { from, to } of actors)
+  for (const { from, to } of actors) {
     if (
       !/^pogo:[a-f0-9]{64}:.+$/.test(from) ||
       to !== `stargate:${from.slice(5)}`
-    )
+    ) {
       throw new Error("Mesij actor mappings must preserve namespace and role.");
+    }
+  }
+
   const db = new Database(path, { strict: true, create: false });
 
   try {
     if (
       db.query<{ user_version: number }, []>("PRAGMA user_version").get()
         ?.user_version !== 4
-    )
+    ) {
       throw new Error(
         "Unsupported Mesij schema; expected pinned v0.1.0 schema 4.",
       );
+    }
 
     const required: Record<string, string[]> = {
       events: [
@@ -544,16 +595,19 @@ function convertMesij(
       projection_errors: ["event_id", "project_id", "reason"],
     };
 
-    for (const [table, expected] of Object.entries(required))
+    for (const [table, expected] of Object.entries(required)) {
       if (
         !isDeepStrictEqual(
           [...columns(db, table)].toSorted(),
           expected.toSorted(),
         )
-      )
+      ) {
         throw new Error(
           "Mesij schema differs from the pinned migration contract.",
         );
+      }
+    }
+
     db.query("ATTACH DATABASE ? AS crew").run(crew);
     db.transaction(() => {
       const triggers = [
@@ -566,26 +620,33 @@ function convertMesij(
           )
           .get(name);
 
-        if (!trigger?.sql) throw new Error("Mesij immutability guard missing.");
+        if (!trigger?.sql) {
+          throw new Error("Mesij immutability guard missing.");
+        }
 
         return { name, sql: trigger.sql };
       });
 
-      for (const { to } of actors)
-        for (const table of ["events", "agents", "mentions"])
+      for (const { to } of actors) {
+        for (const table of ["events", "agents", "mentions"]) {
           if (
             db.query(`SELECT 1 FROM ${table} WHERE actor=? LIMIT 1`).get(to) !==
             null
-          )
+          ) {
             throw new Error("Mesij target actor already exists.");
+          }
+        }
+      }
 
-      for (const { to } of projects)
+      for (const { to } of projects) {
         if (
           db
             .query("SELECT 1 FROM events WHERE project_id=? LIMIT 1")
             .get(to) !== null
-        )
+        ) {
           throw new Error("Mesij target project already exists.");
+        }
+      }
 
       type Event = {
         id: string;
@@ -608,13 +669,21 @@ function convertMesij(
       const fingerprints = events.flatMap((event) => {
         const actor = translate(event.actor, actors);
 
-        if (actor === event.actor) return [];
+        if (actor === event.actor) {
+          return [];
+        }
+
         const parsed = payloadRecord(JSON.parse(event.payload));
 
-        if (Result.isFailure(parsed)) return [];
+        if (Result.isFailure(parsed)) {
+          return [];
+        }
+
         const payload = parsed.success;
 
-        if (typeof payload["message"] !== "string") return [];
+        if (typeof payload["message"] !== "string") {
+          return [];
+        }
 
         const fingerprint = (identity: string) =>
           sha256(
@@ -667,10 +736,12 @@ function convertMesij(
           );
 
           if (!match) {
-            if (intent.receiptID === null)
+            if (intent.receiptID === null) {
               throw new Error(
                 "Unsent mail intent has no recoverable message preimage; resolve before cutover.",
               );
+            }
+
             continue;
           }
 
@@ -679,34 +750,42 @@ function convertMesij(
             intent.sender !== match.event.session_id ||
             intent.recipient !== match.event.recipient_session ||
             (intent.receiptID !== null && intent.receiptID !== match.event.id)
-          )
+          ) {
             throw new Error(
               "Mesij mail intent identity does not match retained event.",
             );
+          }
+
           db.query(
             "UPDATE crew.mail_intents SET fingerprint=? WHERE key=? AND fingerprint=?",
           ).run(match.after, intent.key, match.before);
         }
       }
 
-      for (const trigger of triggers) db.run(`DROP TRIGGER "${trigger.name}"`);
+      for (const trigger of triggers) {
+        db.run(`DROP TRIGGER "${trigger.name}"`);
+      }
 
-      for (const { from, to } of actors)
-        for (const table of ["events", "agents", "mentions"])
+      for (const { from, to } of actors) {
+        for (const table of ["events", "agents", "mentions"]) {
           db.query(`UPDATE ${table} SET actor=? WHERE actor=?`).run(to, from);
+        }
+      }
 
-      for (const { from, to } of projects)
+      for (const { from, to } of projects) {
         for (const table of [
           "events",
           "agents",
           "idempotency_keys",
           "active_work",
           "projection_errors",
-        ])
+        ]) {
           db.query(`UPDATE ${table} SET project_id=? WHERE project_id=?`).run(
             to,
             from,
           );
+        }
+      }
 
       for (const event of events) {
         const parsed = payloadRecord(JSON.parse(event.payload));
@@ -732,26 +811,31 @@ function convertMesij(
 
         const worktree = migratedPath(event.worktree, paths);
 
-        if (worktree !== event.worktree)
+        if (worktree !== event.worktree) {
           db.query("UPDATE events SET worktree=? WHERE id=?").run(
             worktree,
             event.id,
           );
+        }
       }
 
       // V0.1.0 active_work.projection has no actor identity field. Its `data`
       // And `message` are opaque payloads, not a place to replace product text.
-      for (const trigger of triggers) db.run(trigger.sql);
+      for (const trigger of triggers) {
+        db.run(trigger.sql);
+      }
 
-      for (const schema of ["main", "crew"])
+      for (const schema of ["main", "crew"]) {
         if (
           db
             .query<{ integrity_check: string }, []>(
               `PRAGMA ${schema}.integrity_check`,
             )
             .get()?.integrity_check !== "ok"
-        )
+        ) {
           throw new Error("Mesij/crew integrity check failed.");
+        }
+      }
     }).immediate();
     db.run(
       "PRAGMA main.wal_checkpoint(TRUNCATE); PRAGMA crew.wal_checkpoint(TRUNCATE)",
@@ -764,11 +848,13 @@ function convertMesij(
 /** Reject links, sockets and live SQLite sidecars; use SQLite backups, not cp of a running DB. */
 async function inspectTree(root: string) {
   for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (entry.isDirectory()) await inspectTree(join(root, entry.name));
-    else if (!entry.isFile() || /-(wal|shm|journal)$/.test(entry.name))
+    if (entry.isDirectory()) {
+      await inspectTree(join(root, entry.name));
+    } else if (!entry.isFile() || /-(wal|shm|journal)$/.test(entry.name)) {
       throw new Error(
         "Snapshot contains a link, special file or SQLite sidecar.",
       );
+    }
   }
 }
 
@@ -779,7 +865,10 @@ async function physicalDestination(path: string) {
 
   for (;;) {
     const info = await lstat(ancestor).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return null;
+      if (error.code === "ENOENT") {
+        return null;
+      }
+
       throw error;
     });
 
@@ -787,16 +876,19 @@ async function physicalDestination(path: string) {
       // Broken links and non-directory ancestors fail closed, not as absent paths.
       const physical = await realpath(ancestor);
 
-      if (!(await lstat(physical)).isDirectory())
+      if (!(await lstat(physical)).isDirectory()) {
         throw new Error("Migration destination ancestor is not a directory.");
+      }
 
       return resolve(physical, ...suffix);
     }
 
     const parent = dirname(ancestor);
 
-    if (parent === ancestor)
+    if (parent === ancestor) {
       throw new Error("Cannot resolve migration destination.");
+    }
+
     suffix.unshift(basename(ancestor));
     ancestor = parent;
   }
@@ -812,10 +904,12 @@ export async function migrateSnapshot(input: MigrationPlan) {
     info.isSymbolicLink() ||
     (info.mode & 0o077) !== 0 ||
     info.uid !== process.getuid?.()
-  )
+  ) {
     throw new Error(
       "Source must be a private, owned offline snapshot directory.",
     );
+  }
+
   const source = await realpath(requestedSource);
   const destination = await physicalDestination(resolve(plan.destination));
 
@@ -823,40 +917,52 @@ export async function migrateSnapshot(input: MigrationPlan) {
     source === destination ||
     source.startsWith(`${destination}${sep}`) ||
     destination.startsWith(`${source}${sep}`)
-  )
+  ) {
     throw new Error("Snapshot roots must be disjoint.");
+  }
 
   if (
     await lstat(destination).then(
       () => true,
       (error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return false;
+        if (error.code === "ENOENT") {
+          return false;
+        }
+
         throw error;
       },
     )
-  )
+  ) {
     throw new Error("Migration destination already exists.");
+  }
 
   if (
     (await readFile(join(source, ".stargate-offline-snapshot"), "utf8")) !==
     "pogo-to-stargate-v1\n"
-  )
+  ) {
     throw new Error("Offline snapshot acknowledgement missing.");
+  }
 
-  if (await Bun.file(join(source, ".stargate-cutover-complete.json")).exists())
+  if (
+    await Bun.file(join(source, ".stargate-cutover-complete.json")).exists()
+  ) {
     throw new Error("Snapshot has already been converted.");
+  }
+
   uniqueMappings(plan.paths);
   uniqueMappings(plan.botKeys);
 
-  for (const { from, to } of plan.paths)
+  for (const { from, to } of plan.paths) {
     if (
       ![from, to].every(
         (path) => isAbsolute(path) && resolve(path) === path && path !== "/",
       )
-    )
+    ) {
       throw new Error(
         "Path mappings require canonical absolute non-root paths.",
       );
+    }
+  }
 
   for (const { from, to } of plan.botKeys) {
     const before = decodeBotKey(JSON.parse(from));
@@ -865,34 +971,38 @@ export async function migrateSnapshot(input: MigrationPlan) {
     if (
       !isDeepStrictEqual(before.slice(0, -1), after.slice(0, -1)) ||
       !isFingerprint(after.at(-1))
-    )
+    ) {
       throw new Error("Bot mapping may change only the backend fingerprint.");
+    }
   }
 
   await inspectTree(source);
   // No activation or live paths. A failed copy stays incomplete for inspection.
   await mkdir(destination, { mode: 0o700 });
 
-  for (const entry of await readdir(source))
+  for (const entry of await readdir(source)) {
     await cp(join(source, entry), join(destination, entry), {
       recursive: true,
       errorOnExist: true,
       force: false,
     });
+  }
 
   const at = (path: string) => {
     const result = resolve(destination, path);
 
-    if (relative(destination, result).startsWith(".."))
+    if (relative(destination, result).startsWith("..")) {
       throw new Error("Migration path escaped snapshot.");
+    }
 
     return result;
   };
 
   convertDatabase(at(plan.gateway), "gateway", plan.botKeys, plan.paths);
 
-  if (plan.cron)
+  if (plan.cron) {
     convertDatabase(at(plan.cron), "cron", plan.botKeys, plan.paths);
+  }
 
   for (const crew of plan.crew) {
     const namespace = (text: string) => {
@@ -903,8 +1013,10 @@ export async function migrateSnapshot(input: MigrationPlan) {
         : decodeString(record(value)["namespace"]);
     };
 
-    if (namespace(crew.before) !== namespace(crew.after))
+    if (namespace(crew.before) !== namespace(crew.after)) {
       throw new Error("Crew namespace cannot change.");
+    }
+
     const db = new Database(at(crew.database), { strict: true, create: false });
 
     try {
@@ -913,17 +1025,20 @@ export async function migrateSnapshot(input: MigrationPlan) {
           .query<{ value: string }, []>("SELECT value FROM identity")
           .all();
 
-        if (rows.length !== 1 || rows[0]?.value !== crew.before)
+        if (rows.length !== 1 || rows[0]?.value !== crew.before) {
           throw new Error("Crew identity precondition failed.");
+        }
+
         db.query("UPDATE identity SET value=? WHERE value=?").run(
           crew.after,
           crew.before,
         );
 
-        if (tables(db).has("task_abandonments"))
+        if (tables(db).has("task_abandonments")) {
           db.query(
             "UPDATE task_abandonments SET operationKey='stargate:cancel' WHERE operationKey='pogo:cancel'",
           ).run();
+        }
       }).immediate();
       db.run("PRAGMA wal_checkpoint(TRUNCATE)");
     } finally {
@@ -932,8 +1047,10 @@ export async function migrateSnapshot(input: MigrationPlan) {
   }
 
   for (const mesij of plan.mesij) {
-    if (!(await Bun.file(at(mesij.crewDatabase)).exists()))
+    if (!(await Bun.file(at(mesij.crewDatabase)).exists())) {
       throw new Error("Mesij crew database missing.");
+    }
+
     convertMesij(
       at(mesij.database),
       at(mesij.crewDatabase),
@@ -954,8 +1071,9 @@ export async function migrateSnapshot(input: MigrationPlan) {
           )
           .all(item.key);
 
-        if (rows.length !== 1 || rows[0]?.["value"] !== item.before)
+        if (rows.length !== 1 || rows[0]?.["value"] !== item.before) {
           throw new Error("Native cell migration precondition failed.");
+        }
 
         if (
           db
@@ -963,8 +1081,9 @@ export async function migrateSnapshot(input: MigrationPlan) {
               `UPDATE "${item.table}" SET "${item.column}"=? WHERE "${item.keyColumn}"=? AND "${item.column}"=?`,
             )
             .run(item.after, item.key, item.before).changes !== 1
-        )
+        ) {
           throw new Error("Native cell migration refused.");
+        }
       }).immediate();
       db.run("PRAGMA wal_checkpoint(TRUNCATE)");
     } finally {
@@ -987,8 +1106,10 @@ export async function migrateSnapshot(input: MigrationPlan) {
         () => true,
         () => false,
       )
-    )
+    ) {
       throw new Error("Move destination already exists.");
+    }
+
     await mkdir(dirname(at(move.to)), { recursive: true, mode: 0o700 });
     await rename(at(move.from), at(move.to));
   }
@@ -1006,7 +1127,10 @@ if (import.meta.main) {
   try {
     const [path, extra] = process.argv.slice(2);
 
-    if (!path || extra) throw new Error("Expected one private plan file.");
+    if (!path || extra) {
+      throw new Error("Expected one private plan file.");
+    }
+
     const info = await lstat(path);
 
     if (
@@ -1014,8 +1138,10 @@ if (import.meta.main) {
       info.isSymbolicLink() ||
       (info.mode & 0o077) !== 0 ||
       info.uid !== process.getuid?.()
-    )
+    ) {
       throw new Error("Plan file must be private and owned.");
+    }
+
     const input: unknown = JSON.parse(await readFile(path, "utf8"));
     await migrateSnapshot(decodePlan(input));
     console.log(

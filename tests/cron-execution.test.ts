@@ -30,10 +30,11 @@ const risks = {
 };
 
 test("cron decision accepts each bounded verdict and fails closed", () => {
-  for (const verdict of ["act", "ignore", "escalate"] as const)
+  for (const verdict of ["act", "ignore", "escalate"] as const) {
     expect(cronDecision(JSON.stringify({ verdict, risks }), "", "")).toBe(
       verdict,
     );
+  }
 
   for (const value of [
     "not JSON",
@@ -41,12 +42,13 @@ test("cron decision accepts each bounded verdict and fails closed", () => {
     '{"verdict":"ignore"}',
     JSON.stringify({ verdict: "unknown", risks }),
     JSON.stringify({ verdict: "ignore", risks, extra: true }),
-  ])
+  ]) {
     expect(cronDecision(value, "", "")).toBe("escalate");
+  }
 });
 
 test("risk flags and explicit dangerous requests cannot be ignored", () => {
-  for (const key of Object.keys(risks))
+  for (const key of Object.keys(risks)) {
     expect(
       cronDecision(
         JSON.stringify({
@@ -57,6 +59,8 @@ test("risk flags and explicit dangerous requests cannot be ignored", () => {
         "",
       ),
     ).toBe("escalate");
+  }
+
   const quiet = JSON.stringify({ verdict: "ignore", risks });
 
   for (const prompt of [
@@ -66,8 +70,10 @@ test("risk flags and explicit dangerous requests cannot be ignored", () => {
     "owner decision required",
     "rm -rf the directory",
     "remove production data",
-  ])
+  ]) {
     expect(cronDecision(quiet, prompt, "")).toBe("escalate");
+  }
+
   expect(cronDecision(quiet, "check status", "destroy the volume")).toBe(
     "escalate",
   );
@@ -275,10 +281,12 @@ test("cron validates live provider, model, variant and profile without fallback"
     "go-proxy/disabled",
     "go-proxy/cheap#high",
     "go-proxy/no-route",
-  ])
+  ]) {
     await expect(
       f.executor.evaluate({ id: "run-b", prompt: "status", model }, signal()),
     ).rejects.toThrow("Cron");
+  }
+
   expect(f.generations).toEqual([]);
   f.authority.options.team.modelProviders = ["openai-proxy"];
   await expect(
@@ -439,10 +447,15 @@ test("configured Pi arbiter runs tools-off in its own store, not its busy peer",
 test("unknown and non-Pi arbiters cannot fall back to captain execution", async () => {
   const f = fixture();
 
-  for (const arbiter of ["not-configured", defaultTeam.crew[0]?.id ?? "mario"])
+  for (const arbiter of [
+    "not-configured",
+    defaultTeam.crew[0]?.id ?? "mario",
+  ]) {
     await expect(
       f.executor.evaluate({ id: "run-f", prompt: "status", arbiter }, signal()),
     ).rejects.toThrow("configured Pi");
+  }
+
   expect(f.generations).toEqual([]);
 });
 
@@ -526,21 +539,23 @@ test("cron RPC input boundaries reject excess properties and oversized text", ()
     { sessionID: "ses_other" },
     { tools: true },
     { model: "invalid" },
-  ])
+  ]) {
     expect(
       Result.isFailure(Schema.decodeUnknownResult(cronModelInputSchema)(value)),
     ).toBe(true);
+  }
 
   for (const value of [
     { id: "", prompt: "status" },
     { id: "run", prompt: "x".repeat(14_001) },
     { id: "run", prompt: "status", captain: "other" },
-  ])
+  ]) {
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(cronEvaluateInputSchema)(value),
       ),
     ).toBe(true);
+  }
 });
 
 test("cron adapter uses location-scoped RPC and never calls native sessions", async () => {
@@ -606,7 +621,10 @@ test("cron adapter uses location-scoped RPC and never calls native sessions", as
       headersEnv: {},
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
     expect(await backend.cronModel({}, signal())).toEqual({
       model: "go-proxy/cheap#low",

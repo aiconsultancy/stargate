@@ -195,7 +195,10 @@ test("lost Mesij receipt survives reopen and cannot create an invisible acknowle
     expect(page.messages).toMatchObject([{ text: input.text }]);
     const event = f.events[0];
 
-    if (!event) throw new Error("Missing stored event");
+    if (!event) {
+      throw new Error("Missing stored event");
+    }
+
     expect(f.engine.state.mailRoutes.get(event.id)).toMatchObject({
       sender: f.captain().sessionID,
       recipient: f.peer.sessionID,
@@ -245,7 +248,10 @@ for (const field of [
       );
       const original = f.events[0];
 
-      if (!original) throw new Error("Missing stored event");
+      if (!original) {
+        throw new Error("Missing stored event");
+      }
+
       const envelope: Record<string, unknown> = JSON.parse(original.text);
       envelope[field] = "forged-other-context";
 
@@ -286,7 +292,10 @@ test("recovered mail preserves current-task captain filtering", async () => {
       "Existing assignment",
     );
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     await f.engine.mail(
       { op: "send", to: "worker", text: "Other captain mail", key: "other" },
       f.captain("ses_captain_b"),
@@ -314,7 +323,10 @@ test("a failed proven route repair holds ACKs across reopen, including caller-su
     );
     const original = f.events[0];
 
-    if (!original) throw new Error("Missing stored event");
+    if (!original) {
+      throw new Error("Missing stored event");
+    }
+
     db.exec(`CREATE TRIGGER fail_mail_route BEFORE INSERT ON mail_routes
       BEGIN SELECT RAISE(ABORT, 'Route write unavailable'); END;`);
     await expect(f.engine.mail({ op: "inbox" }, f.worker())).rejects.toThrow();
@@ -364,16 +376,24 @@ for (const lost of [false, true]) {
     const f = await fixture();
 
     try {
-      if (!lost) f.keepNextReceipt();
+      if (!lost) {
+        f.keepNextReceipt();
+      }
+
       await f.engine.mail(
         { op: "send", to: "worker", text: "Authorized once", key: "original" },
         f.captain(),
       );
       const original = f.events[0];
 
-      if (!original) throw new Error("Missing stored event");
+      if (!original) {
+        throw new Error("Missing stored event");
+      }
 
-      if (lost) await f.engine.mail({ op: "inbox" }, f.worker());
+      if (lost) {
+        await f.engine.mail({ op: "inbox" }, f.worker());
+      }
+
       const copy = { ...original, id: "c".repeat(32), sequence: 2 };
       f.events.push(copy);
       const page = await f.engine.mail({ op: "inbox" }, f.worker());
@@ -402,16 +422,25 @@ test.each([false, true])(
     const f = await fixture(tmpdir());
 
     try {
-      if (!lost) f.keepNextReceipt();
+      if (!lost) {
+        f.keepNextReceipt();
+      }
+
       const send = { op: "send", to: "worker", text: "Same content" };
       await f.engine.mail({ ...send, key: "first" }, f.captain());
 
-      if (lost) f.loseNextReceipt();
+      if (lost) {
+        f.loseNextReceipt();
+      }
+
       await f.engine.mail({ ...send, key: "second" }, f.captain());
       expect(f.events).toHaveLength(2);
       const original = f.events[0];
 
-      if (!original) throw new Error("Missing stored event");
+      if (!original) {
+        throw new Error("Missing stored event");
+      }
+
       const copy = { ...original, id: "b".repeat(32), sequence: 3 };
       f.events.push(copy);
       const page = await f.engine.mail({ op: "inbox" }, f.worker());
@@ -444,10 +473,16 @@ test("receipt binding refuses a different ID or captain context", async () => {
       )
       .get();
 
-    if (!intent) throw new Error("Missing bound intent");
+    if (!intent) {
+      throw new Error("Missing bound intent");
+    }
+
     const route = f.engine.state.mailRoutes.get(intent.receiptID);
 
-    if (!route) throw new Error("Missing route");
+    if (!route) {
+      throw new Error("Missing route");
+    }
+
     expect(() =>
       f.engine.state.mailRoutes.save(
         { ...route, id: "a".repeat(32) },
@@ -494,8 +529,12 @@ test("concurrent identical text correlates out-of-order receipts before local ro
   f.onStored(async (event, key) => {
     receipts.set(key, event.id);
 
-    if (event.sequence === 1) secondStored.resolve();
-    else bothStored.resolve();
+    if (event.sequence === 1) {
+      secondStored.resolve();
+    } else {
+      bothStored.resolve();
+    }
+
     await (event.sequence === 1 ? secondReceipt.promise : firstReceipt.promise);
   });
   const input = { op: "send", to: "worker", text: "Identical human text" };
@@ -534,11 +573,17 @@ test("concurrent identical text correlates out-of-order receipts before local ro
       .all()) {
       const receipt = receipts.get(row.key);
 
-      if (!receipt) throw new Error("Missing native receipt");
+      if (!receipt) {
+        throw new Error("Missing native receipt");
+      }
+
       expect(row.receiptID).toBe(receipt);
       const event = f.events.find(({ id }) => id === row.receiptID);
 
-      if (!event) throw new Error("Missing correlated event");
+      if (!event) {
+        throw new Error("Missing correlated event");
+      }
+
       const envelope: Record<string, unknown> = JSON.parse(event.text);
       expect(envelope["intentKey"]).toBe(row.key);
       expect(envelope["text"]).toBe(input.text);
@@ -571,7 +616,9 @@ test("route recovery binds native sender identity and does not trust matching JS
     );
     const original = f.events[0];
 
-    if (!original) throw new Error("Missing stored event");
+    if (!original) {
+      throw new Error("Missing stored event");
+    }
 
     const forged = {
       ...original,
@@ -651,7 +698,10 @@ test("lost reply receipts recover the original captain route without cross-capta
     const question = (await f.engine.mail({ op: "inbox" }, f.worker()))
       .messages?.[0];
 
-    if (!question) throw new Error("Missing validated question");
+    if (!question) {
+      throw new Error("Missing validated question");
+    }
+
     f.loseNextReceipt();
 
     const reply = {

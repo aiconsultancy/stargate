@@ -82,14 +82,20 @@ export class TurnBudget {
   }
 
   public pause() {
-    if (this.timer === undefined) return;
+    if (this.timer === undefined) {
+      return;
+    }
+
     this.timer();
     this.timer = undefined;
     this.remaining = Math.max(0, this.remaining - (this.now() - this.started));
   }
 
   public resume() {
-    if (this.timer !== undefined || this.controller.signal.aborted) return;
+    if (this.timer !== undefined || this.controller.signal.aborted) {
+      return;
+    }
+
     this.started = this.now();
     this.timer = this.schedule(this.remaining, () => {
       this.controller.abort();

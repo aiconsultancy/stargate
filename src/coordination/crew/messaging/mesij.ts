@@ -127,7 +127,9 @@ function parse<S extends Schema.ConstraintDecoder<unknown>>(
 ): S["Type"] {
   const result = Schema.decodeUnknownResult(schema)(input);
 
-  if (Result.isFailure(result)) throw new MesijError(code);
+  if (Result.isFailure(result)) {
+    throw new MesijError(code);
+  }
 
   return result.success;
 }
@@ -170,8 +172,9 @@ export class MesijClient {
       event.actor !== input.actor ||
       event.session !== input.sessionID ||
       event.type !== "session.started"
-    )
+    ) {
       throw new MesijError("output");
+    }
 
     return receipt(event);
   }
@@ -205,8 +208,9 @@ export class MesijClient {
       event.reply_to !== message.replyTo ||
       event.type !== (message.replyTo ? "message.replied" : "message.posted") ||
       event.payload.message !== message.text
-    )
+    ) {
       throw new MesijError("output");
+    }
 
     return receipt(event);
   }
@@ -243,8 +247,10 @@ export class MesijClient {
     let previous = query.after;
 
     return events.map((event) => {
-      if (event.sequence <= previous || !event.type.startsWith("message."))
+      if (event.sequence <= previous || !event.type.startsWith("message.")) {
         throw new MesijError("output");
+      }
+
       previous = event.sequence;
 
       return {
@@ -264,15 +270,19 @@ export class MesijClient {
     signal: AbortSignal,
     input?: string,
   ): Promise<string> {
-    if (signal.aborted) throw new MesijError("cancelled");
+    if (signal.aborted) {
+      throw new MesijError("cancelled");
+    }
+
     const env = { ...process.env };
     // Never let inherited Mesij overrides redirect this roster to another DB.
     delete env["MESIJ_DB"];
     delete env["MESIJ_PROJECT"];
     delete env["MESIJ_HOME"];
 
-    if (this.options.dataDirectory)
+    if (this.options.dataDirectory) {
       env["MESIJ_HOME"] = this.options.dataDirectory;
+    }
 
     return new Promise((resolve, reject) => {
       let failure: MesijErrorCode | undefined;
@@ -295,8 +305,11 @@ export class MesijClient {
         failure ??= code;
 
         try {
-          if (grouped && child.pid) process.kill(-child.pid, "SIGKILL");
-          else child.kill("SIGKILL");
+          if (grouped && child.pid) {
+            process.kill(-child.pid, "SIGKILL");
+          } else {
+            child.kill("SIGKILL");
+          }
         } catch {
           // A process that has already exited still completes through close.
           child.kill("SIGKILL");
@@ -320,22 +333,35 @@ export class MesijClient {
         stop("process");
       });
       child.stdout.on("data", (chunk: Buffer) => {
-        if (failure) return;
+        if (failure) {
+          return;
+        }
+
         length += chunk.length;
 
-        if (length > this.options.maxOutputBytes) stop("limit");
-        else chunks.push(chunk);
+        if (length > this.options.maxOutputBytes) {
+          stop("limit");
+        } else {
+          chunks.push(chunk);
+        }
       });
       child.on("close", (code) => {
         clearTimeout(timer);
         signal.removeEventListener("abort", abort);
 
-        if (failure) reject(new MesijError(failure));
-        else if (code !== 0) reject(new MesijError("process"));
-        else resolve(Buffer.concat(chunks).toString("utf8"));
+        if (failure) {
+          reject(new MesijError(failure));
+        } else if (code !== 0) {
+          reject(new MesijError("process"));
+        } else {
+          resolve(Buffer.concat(chunks).toString("utf8"));
+        }
       });
 
-      if (signal.aborted) abort();
+      if (signal.aborted) {
+        abort();
+      }
+
       child.stdin.end(input);
     });
   }

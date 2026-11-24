@@ -49,7 +49,10 @@ function native(handler: (input: unknown) => unknown, raw = false) {
     const request = new Request(url, init);
     const name = new URL(request.url).pathname.split("/").at(-1);
 
-    if (!isHistoryMethod(name)) return new Response(null, { status: 404 });
+    if (!isHistoryMethod(name)) {
+      return new Response(null, { status: 404 });
+    }
+
     const method = codecs[name];
     const body: unknown = await request.json();
 
@@ -180,10 +183,12 @@ describe("history RPC input decoding", () => {
       ["historyEntries", { sessionID: "a", extra: true }],
     ];
 
-    for (const [name, input] of cases)
+    for (const [name, input] of cases) {
       expect(await f.run(name, input), JSON.stringify(input)).toEqual({
         ok: false,
       });
+    }
+
     expect(f.received).toEqual([]);
   });
 
@@ -378,8 +383,9 @@ describe("exported history decoders", () => {
       [historyPartSchema, inherit({ extra: 1 }, text("x"))],
       [historyChildrenInputSchema, inherit({ extra: 1 }, { parentID: "a" })],
       [roots, Object.create({ extra: 1 })],
-    ] satisfies [Schema.Codec<unknown, unknown>, unknown][])
+    ] satisfies [Schema.Codec<unknown, unknown>, unknown][]) {
       expect(decode(schema, value)).toEqual({ ok: false });
+    }
   });
 
   test("inherited declared fields and empty prototypes decode as own values", () => {
@@ -403,7 +409,8 @@ describe("exported history decoders", () => {
       Object.create(null),
       Object.defineProperty({}, "hidden", { value: 1 }),
       { [Symbol("own")]: 1 },
-    ])
+    ]) {
       expect(decode(roots, value)).toMatchObject({ ok: true });
+    }
   });
 });

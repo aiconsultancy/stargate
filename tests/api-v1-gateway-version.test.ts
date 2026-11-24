@@ -64,7 +64,9 @@ function gitCheckout(directory: string, tags: string[]) {
     "release",
   );
 
-  for (const tag of tags) git("tag", tag);
+  for (const tag of tags) {
+    git("tag", tag);
+  }
 }
 
 test("a git checkout at a release tag reports that tag's version", async () => {

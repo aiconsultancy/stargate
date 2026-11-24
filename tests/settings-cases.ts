@@ -354,20 +354,27 @@ export function settingsCases(
   const add = (label: string, input: unknown) => {
     const key = settingsCanonical(input);
 
-    if (seen.has(key)) return;
+    if (seen.has(key)) {
+      return;
+    }
+
     seen.add(key);
     cases.push({ label, input });
   };
 
   const walk = (root: unknown, value: unknown, path: (string | number)[]) => {
-    if (value === null || typeof value !== "object") return;
+    if (value === null || typeof value !== "object") {
+      return;
+    }
 
     if (!Array.isArray(value)) {
       const next = structuredClone(root);
       const target = at(next, path);
 
-      if (target && typeof target === "object")
+      if (target && typeof target === "object") {
         Object.assign(target, { unexpected: true });
+      }
+
       add(`${path.join(".")}:extra`, next);
     }
 
@@ -378,8 +385,10 @@ export function settingsCases(
         const next = structuredClone(root);
         const target = at(next, path);
 
-        if (target && typeof target === "object")
+        if (target && typeof target === "object") {
           Object.assign(target, { [key]: replacement });
+        }
+
         add(`${nextPath.join(".")}:${index}`, next);
       }
 
@@ -392,7 +401,9 @@ export function settingsCases(
     walk(seed, seed, []);
   }
 
-  for (const [index, input] of changes.entries()) add(`root:${index}`, input);
+  for (const [index, input] of changes.entries()) {
+    add(`root:${index}`, input);
+  }
 
   return cases;
 }
@@ -401,7 +412,10 @@ function at(root: unknown, path: (string | number)[]): unknown {
   let value = root;
 
   for (const key of path) {
-    if (value === null || typeof value !== "object") return;
+    if (value === null || typeof value !== "object") {
+      return;
+    }
+
     value = Reflect.get(value, key);
   }
 
@@ -410,15 +424,19 @@ function at(root: unknown, path: (string | number)[]): unknown {
 
 export function settingsCanonical(value: unknown): string {
   return JSON.stringify(value, (_key, input: unknown) => {
-    if (input === undefined) return { $undefined: true };
+    if (input === undefined) {
+      return { $undefined: true };
+    }
 
-    if (typeof input === "number" && !Number.isFinite(input))
+    if (typeof input === "number" && !Number.isFinite(input)) {
       return { $number: String(input) };
+    }
 
-    if (input !== null && typeof input === "object" && !Array.isArray(input))
+    if (input !== null && typeof input === "object" && !Array.isArray(input)) {
       return Object.fromEntries(
         Object.entries(input).sort(([a], [b]) => a.localeCompare(b)),
       );
+    }
 
     return input;
   });

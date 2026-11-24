@@ -32,8 +32,10 @@ function parseCatalog(text: string) {
   try {
     const config = decodeRecord(JSON.parse(text));
 
-    if (`${JSON.stringify(config, null, 2)}\n` !== text)
+    if (`${JSON.stringify(config, null, 2)}\n` !== text) {
       throw new Error("Model catalog is not canonical JSON");
+    }
+
     const providers = decodeRecord(config["providers"]);
 
     return { config, providers };
@@ -52,22 +54,32 @@ export function catalogRefs(
   const refs: ModelRef[] = [];
 
   for (const providerID of providers) {
-    if (!Object.hasOwn(parsed.providers, providerID)) continue;
+    if (!Object.hasOwn(parsed.providers, providerID)) {
+      continue;
+    }
+
     const provider = decodeRecord(parsed.providers[providerID]);
 
-    if (provider["models"] === undefined) continue;
+    if (provider["models"] === undefined) {
+      continue;
+    }
+
     const models = decodeModels(provider["models"]);
     const newest = new Map<string, string>();
 
     for (const id of Object.keys(models)) {
       const model = parseModel(id);
 
-      if (!model || !families.includes(model.family)) continue;
+      if (!model || !families.includes(model.family)) {
+        continue;
+      }
+
       const previous = newest.get(model.family);
       const before = previous ? parseModel(previous) : null;
 
-      if (!before || compareModels(model, before) > 0)
+      if (!before || compareModels(model, before) > 0) {
         newest.set(model.family, id);
+      }
     }
 
     refs.push(...[...newest.values()].map((id) => ({ providerID, id })));
@@ -109,15 +121,22 @@ export function upgradeGlobalCatalog(
         !after ||
         before.family !== after.family ||
         compareModels(after, before) <= 0
-      )
+      ) {
         continue;
+      }
+
       const provider = { ...decodeRecord(updatedProviders[from.providerID]) };
       const models = { ...decodeModels(provider["models"]) };
 
-      if (Object.hasOwn(models, next)) continue;
+      if (Object.hasOwn(models, next)) {
+        continue;
+      }
+
       const template = models[from.id];
 
-      if (!template) throw new StepError("config-format");
+      if (!template) {
+        throw new StepError("config-format");
+      }
 
       const variants =
         template["variants"] === undefined

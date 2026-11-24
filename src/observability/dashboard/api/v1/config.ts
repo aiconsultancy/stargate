@@ -87,24 +87,30 @@ type ConfigIssue = { path: PropertyKey[]; message: string };
 // Type names, and the length check that also reports a value of the wrong
 // Type when that value has a length.
 function received(value: unknown) {
-  if (typeof value === "number")
+  if (typeof value === "number") {
     return Number.isNaN(value)
       ? "NaN"
       : Number.isFinite(value)
         ? "number"
         : String(value);
+  }
 
-  if (value === null) return "null";
+  if (value === null) {
+    return "null";
+  }
 
-  if (Array.isArray(value)) return "array";
+  if (Array.isArray(value)) {
+    return "array";
+  }
 
   if (
     typeof value === "object" &&
     Object.getPrototypeOf(value) !== Object.prototype &&
     "constructor" in value &&
     typeof value.constructor === "function"
-  )
+  ) {
     return value.constructor.name;
+  }
 
   return typeof value;
 }
@@ -117,14 +123,17 @@ function tooShort(value: unknown): string | undefined {
         ? value["length"]
         : undefined;
 
-  if (length === undefined || (typeof length === "number" && length >= 1))
+  if (length === undefined || (typeof length === "number" && length >= 1)) {
     return;
+  }
 
-  if (typeof value === "string")
+  if (typeof value === "string") {
     return "Too small: expected string to have >=1 characters";
+  }
 
-  if (Array.isArray(value))
+  if (Array.isArray(value)) {
     return "Too small: expected array to have >=1 items";
+  }
 
   return "Too small: expected unknown to be >=1";
 }
@@ -135,12 +144,13 @@ const lengthFields = new Set(["allowedNetworks", "fleetName"]);
 function valueAt(root: unknown, path: readonly PropertyKey[]) {
   let value = root;
 
-  for (const key of path)
+  for (const key of path) {
     value = Array.isArray(value)
       ? value[Number(key)]
       : Predicate.isObject(value)
         ? value[key]
         : undefined;
+  }
 
   return value;
 }
@@ -166,7 +176,9 @@ function typeIssue(
       ? tooShort(value)
       : undefined;
 
-  if (short) issues.push({ path, message: short });
+  if (short) {
+    issues.push({ path, message: short });
+  }
 }
 
 function issueMessages(
@@ -182,7 +194,9 @@ function issueMessages(
   }
 
   if (Predicate.isTagged(issue, "Composite")) {
-    for (const child of issue.issues) issueMessages(child, root, path, issues);
+    for (const child of issue.issues) {
+      issueMessages(child, root, path, issues);
+    }
 
     return;
   }
@@ -195,7 +209,9 @@ function issueMessages(
 
   // An optional field: a failure inside its codec, or no member matched.
   if (Predicate.isTagged(issue, "AnyOf") && issue.issues.length > 0) {
-    for (const child of issue.issues) issueMessages(child, root, path, issues);
+    for (const child of issue.issues) {
+      issueMessages(child, root, path, issues);
+    }
 
     return;
   }
@@ -220,7 +236,9 @@ function issueMessages(
         : valueAt(root, path),
     );
 
-    if (short) issues.push({ path, message: short });
+    if (short) {
+      issues.push({ path, message: short });
+    }
 
     return;
   }
@@ -231,7 +249,7 @@ function issueMessages(
     return;
   }
 
-  for (const item of settingsIssues(issue).issues)
+  for (const item of settingsIssues(issue).issues) {
     issues.push({
       path: [
         ...path,
@@ -241,20 +259,23 @@ function issueMessages(
       ],
       message: item.message,
     });
+  }
 }
 
 function configIssues(input: unknown): ConfigIssue[] {
-  if (!Predicate.isObject(input) || Array.isArray(input))
+  if (!Predicate.isObject(input) || Array.isArray(input)) {
     return [
       {
         path: [],
         message: `Invalid input: expected object, received ${received(input)}`,
       },
     ];
+  }
+
   const issues: ConfigIssue[] = [];
   const decoded = decodeFields(input);
 
-  if (Result.isFailure(decoded))
+  if (Result.isFailure(decoded)) {
     for (const [name, field] of Object.entries(fields)) {
       if (name === "pullRequestRepositories") {
         // The repository map keeps the wording of its Effect setting codec.
@@ -263,8 +284,9 @@ function configIssues(input: unknown): ConfigIssue[] {
         const repositories =
           value === undefined ? undefined : decodeRepositories(value);
 
-        if (repositories && Result.isFailure(repositories))
-          for (const item of settingsIssues(repositories.failure.issue).issues)
+        if (repositories && Result.isFailure(repositories)) {
+          for (const item of settingsIssues(repositories.failure.issue)
+            .issues) {
             issues.push({
               path: [
                 name,
@@ -274,6 +296,9 @@ function configIssues(input: unknown): ConfigIssue[] {
               ],
               message: item.message,
             });
+          }
+        }
+
         continue;
       }
 
@@ -282,15 +307,18 @@ function configIssues(input: unknown): ConfigIssue[] {
         { errors: "all" },
       )({ [name]: input[name] });
 
-      if (Result.isFailure(result))
+      if (Result.isFailure(result)) {
         issueMessages(result.failure.issue, input, [], issues);
+      }
     }
+  }
 
-  for (const key in input)
+  for (const key in input) {
     if (!Object.hasOwn(fields, key)) {
       issues.push({ path: [], message: "Unrecognized Fleet API setting" });
       break;
     }
+  }
 
   return issues;
 }
@@ -310,8 +338,9 @@ export const apiV1ConfigSchema = Schema.declareConstructor<ApiV1Config>()(
     const decoded = decodeFields(input);
     const [first, ...rest] = issues;
 
-    if (!first && Result.isSuccess(decoded))
+    if (!first && Result.isSuccess(decoded)) {
       return Effect.succeed({ ...decoded.success });
+    }
 
     return Effect.fail(
       first

@@ -121,8 +121,9 @@ const defaults: Dependencies = {
     const web = botWebClient(await botToken(bot, configPath), signal);
     const auth = await web.auth.test();
 
-    if (!auth.bot_id || !auth.team_id || !auth.user_id)
+    if (!auth.bot_id || !auth.team_id || !auth.user_id) {
       throw new Error("Workspace bot required.");
+    }
 
     return { team: auth.team_id, user: auth.user_id };
   },
@@ -137,16 +138,20 @@ function modelValidator(
     input: Pick<CronAdvanced, "model" | "arbiter">,
     signal: AbortSignal,
   ) => {
-    if (dependencies.model)
+    if (dependencies.model) {
       return dependencies.model(bot, dataDirectory, input, signal);
+    }
 
-    if (bot.backend.type !== "opencode")
+    if (bot.backend.type !== "opencode") {
       throw new CronControlError("This backend cannot validate cron models.");
+    }
+
     const backend = new OpenCodeBackend(bot.backend);
 
     try {
-      if (typeof backend.cronModel !== "function")
+      if (typeof backend.cronModel !== "function") {
         throw new CronControlError("This backend cannot validate cron models.");
+      }
 
       return await backend.cronModel(input, signal);
     } finally {
@@ -168,8 +173,9 @@ function listCronjobs(
     (channel !== undefined && !isAllowedChannel(bot, channel)) ||
     (user !== undefined &&
       (user === identity.user || !isAllowedUser(bot, user)))
-  )
+  ) {
     throw new CronControlError("Cronjob user or channel is not allowed.");
+  }
 
   return {
     jobs: store
@@ -199,18 +205,21 @@ export async function runCronOperation(
 ): Promise<unknown> {
   const parsed = Schema.decodeUnknownResult(cronOperationSchema)(raw);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     throw new CronControlError("Invalid cronjob operation.");
+  }
+
   signal.throwIfAborted();
 
   try {
     const config = await loadConfig(binding.configPath);
     const bot = config.bots.find((bot) => bot.id === binding.bot);
 
-    if (!bot?.cronjobs)
+    if (!bot?.cronjobs) {
       throw new CronControlError(
         "Configure this bot's cronjobs directory and Slack destination first.",
       );
+    }
 
     if (
       binding.expectedDirectory &&
@@ -234,10 +243,11 @@ export async function runCronOperation(
     if (parsed.success.op !== "add") {
       const existing = await lstat(storePath).catch(() => {});
 
-      if (!existing?.isFile() || existing.isSymbolicLink())
+      if (!existing?.isFile() || existing.isSymbolicLink()) {
         throw new CronControlError(
           "Cron state is unavailable at this configuration's data directory; inspect the gateway configuration before retrying.",
         );
+      }
     }
 
     const store = new CronStore(storePath);
@@ -269,19 +279,21 @@ export async function runCronOperation(
       signal.throwIfAborted();
       const input = parsed.success;
 
-      if (input.op === "report")
+      if (input.op === "report") {
         return {
           jobs: store
             .report(manager.key)
             .map((job) => ({ ...job, model: job.model ?? "captain" })),
           definitionErrors: errors,
         };
+      }
 
-      if (input.op === "list")
+      if (input.op === "list") {
         return {
           ...listCronjobs(input, bot, identity, store, manager),
           definitionErrors: errors,
         };
+      }
 
       if (input.op === "remove") {
         const job = store.findDestination(manager.key, input.id);
@@ -290,8 +302,9 @@ export async function runCronOperation(
           !job ||
           (input.channel !== undefined && input.channel !== job.channel) ||
           (input.user !== undefined && input.user !== job.user)
-        )
+        ) {
           return { removed: false };
+        }
 
         // Removing an existing task grants no new access or execution. Retain
         // Bot ownership even when its former destination is no longer allowed.
@@ -309,8 +322,9 @@ export async function runCronOperation(
         channel: input.channel ?? bot.cronjobs.channel,
       };
 
-      if (!manager.allowed(scope))
+      if (!manager.allowed(scope)) {
         throw new CronControlError("Cronjob user or channel is not allowed.");
+      }
 
       if (input.op === "run") {
         const run = store.runNow(scope, input.name, now, input.requestId);
@@ -358,7 +372,10 @@ export async function runCronOperation(
       store.close();
     }
   } catch (error) {
-    if (error instanceof CronControlError) throw error;
+    if (error instanceof CronControlError) {
+      throw error;
+    }
+
     throw new CronControlError(
       "Cronjob operation unconfirmed; check definition, ownership, configuration and access before retrying.",
     );

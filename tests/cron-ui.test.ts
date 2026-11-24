@@ -15,10 +15,13 @@ const stores: CronStore[] = [];
 const directories: string[] = [];
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 const input = {
@@ -127,8 +130,10 @@ function submission(view: View, values = input) {
 test("slash list is private, scoped, paginated, and ACK precedes API", async () => {
   const f = fixture();
 
-  for (let n = 0; n < 11; n++)
+  for (let n = 0; n < 11; n++) {
     f.store.add(f.scope, { ...input, name: `Task ${n}` });
+  }
+
   f.store.add(
     { ...f.scope, user: "UOTHER" },
     { ...input, name: "Other owner" },
@@ -143,7 +148,10 @@ test("slash list is private, scoped, paginated, and ACK precedes API", async () 
   const view = f.calls[0]?.view;
   expect(view).toBeDefined();
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   expect(JSON.stringify(view)).not.toContain("Other owner");
   expect(JSON.stringify(view)).not.toContain("Other channel");
   expect(JSON.stringify(view)).not.toContain("Other bot");
@@ -164,7 +172,10 @@ test("Add opens form with UTC and saves before ACK; retry stays idempotent", asy
   await f.ui.command(command("add"), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   expect(JSON.stringify(view)).toContain('"initial_value":"UTC"');
   expect(JSON.stringify(view)).toContain("authorizes recurring execution");
   expect(view.submit?.text).toBe("Add");
@@ -187,7 +198,10 @@ test("list Add pushes form, and saving clears the modal stack", async () => {
   await f.ui.command(command("list"), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   await f.ui.interactive(action(view, "cron_add"), f.ack);
   expect(f.calls.at(-1)).toMatchObject({ kind: "push", id: "trigger-action" });
   expect(f.calls.at(-1)?.view.submit?.text).toBe("Add");
@@ -198,7 +212,9 @@ test("invalid form returns field errors and does not save", async () => {
   await f.ui.command(command("add"), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
 
   for (const values of [
     { ...input, expression: "* * * * * *" },
@@ -220,7 +236,10 @@ test("remove confirms, checks ownership, and refreshes list with hash", async ()
   await f.ui.command(command("remove"), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   expect(JSON.stringify(view)).toContain('"confirm"');
   await f.ui.interactive(action(view, "cron_remove", other.id), f.ack);
   expect(f.store.list({ ...f.scope, user: "UOTHER" })).toHaveLength(1);
@@ -258,8 +277,10 @@ test("commands reject cross-registration, denied users/channels, bots, malformed
     { ...command(), user_id: "B123" },
     { ...command(), bot_id: "B123" },
     null,
-  ])
+  ]) {
     await f.ui.command(body, f.ack);
+  }
+
   expect(f.calls).toEqual([]);
   expect(f.acks).toHaveLength(8);
 });
@@ -269,7 +290,10 @@ test("actions and submissions recheck identity, metadata scope, and current ACL"
   await f.ui.command(command("add"), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   const submit = submission(view);
   const baseAction = action({ ...view, callback_id: "cron_list" }, "cron_add");
 
@@ -319,7 +343,10 @@ test("storage failure returns a safe form error without success ACK", async () =
   await f.ui.command(command("add"), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   f.store.add = () => {
     throw new Error("private payload in SQLite error");
   };
@@ -336,7 +363,10 @@ test("remove persists before ambiguous ACK failure and retries idempotently", as
   await f.ui.command(command(), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   const body = action(view, "cron_remove", job.id);
   const enabledAtAck: boolean[] = [];
   let attempts = 0;
@@ -365,7 +395,10 @@ test("ACL revocation during ACK does not undo durable removal", async () => {
   await f.ui.command(command(), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   await f.ui.interactive(action(view, "cron_remove", job.id), async () => {
     f.config.access.deniedUsers = ["U123"];
   });
@@ -387,7 +420,9 @@ test("manual run commits before ACK, deduplicates retries, and stays owner scope
   f.store.runNow = (...args) => {
     const result = runNow(...args);
 
-    if (result) commits++;
+    if (result) {
+      commits++;
+    }
 
     return result;
   };
@@ -412,7 +447,10 @@ test("report selector stores daily mode; missing selector retains immediate", as
   await f.ui.command(command("add"), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   expect(JSON.stringify(view)).toContain("local storage");
   expect(JSON.stringify(view)).toContain(
     '"initial_option":{"text":{"type":"plain_text","text":"Immediate"',
@@ -449,7 +487,10 @@ test("configured Add writes a definition, validates names, and retries safely", 
   await f.ui.command(command("add"), f.ack);
   const view = f.calls[0]?.view;
 
-  if (!view) throw new Error("missing view");
+  if (!view) {
+    throw new Error("missing view");
+  }
+
   expect(JSON.stringify(view)).toContain("08:30 UTC");
   await f.ui.interactive(submission(view), f.ack);
   expect(f.acks.at(-1)).toMatchObject({

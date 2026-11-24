@@ -132,8 +132,10 @@ async function settingsFingerprint(
   bot: BotConfig,
   settingsPath: (directory: string, agent: string) => string,
 ): Promise<string> {
-  if (bot.backend.type !== "opencode" || !bot.backend.agent)
+  if (bot.backend.type !== "opencode" || !bot.backend.agent) {
     return "unsupported";
+  }
+
   const path = settingsPath(bot.backend.directory, bot.backend.agent);
 
   try {
@@ -145,12 +147,17 @@ async function settingsFingerprint(
     try {
       const before = await file.stat({ bigint: true });
 
-      if (!before.isFile() || before.size > 4096n)
+      if (!before.isFile() || before.size > 4096n) {
         throw new Error(configPanelUnavailable);
+      }
+
       const bytes = Buffer.alloc(4097);
       const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
 
-      if (bytesRead > 4096) throw new Error(configPanelUnavailable);
+      if (bytesRead > 4096) {
+        throw new Error(configPanelUnavailable);
+      }
+
       const after = await file.stat({ bigint: true });
       const current = await lstat(path, { bigint: true });
 
@@ -160,8 +167,9 @@ async function settingsFingerprint(
       if (
         identity(before) !== identity(after) ||
         identity(after) !== identity(current)
-      )
+      ) {
         throw new Error(configPanelStale);
+      }
 
       return hash(`${identity(after)}:${hash(bytes.subarray(0, bytesRead))}`);
     } finally {
@@ -174,8 +182,10 @@ async function settingsFingerprint(
           Schema.Struct({ code: Schema.Literal("ENOENT") }),
         )(error),
       )
-    )
+    ) {
       return "absent";
+    }
+
     throw error;
   }
 }
@@ -191,8 +201,9 @@ export async function readConfigSnapshot(
   const after = await settingsFingerprint(bot, waitingSettingsPath);
   const questionsAfter = await settingsFingerprint(bot, questionSettingsPath);
 
-  if (before !== after || questionsBefore !== questionsAfter)
+  if (before !== after || questionsBefore !== questionsAfter) {
     throw new Error(configPanelStale);
+  }
 
   // Only the current registration's safe status projection is retained, not reasons.
   const mutes = page

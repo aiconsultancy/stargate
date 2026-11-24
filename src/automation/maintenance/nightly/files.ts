@@ -59,7 +59,10 @@ export async function readOptional(path: string) {
   try {
     return await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+
     throw error;
   }
 }

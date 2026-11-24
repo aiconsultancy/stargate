@@ -142,10 +142,15 @@ export class PairingUI {
     const now = this.monotonicNow();
 
     for (const [nonce, entry] of this.pending) {
-      if (entry.expires <= now) this.pending.delete(nonce);
+      if (entry.expires <= now) {
+        this.pending.delete(nonce);
+      }
     }
 
-    if (this.pending.size >= 128) return;
+    if (this.pending.size >= 128) {
+      return;
+    }
+
     const nonce = randomUUID();
     this.pending.set(nonce, {
       user,
@@ -222,11 +227,12 @@ export class PairingUI {
     } catch {
       this.log.error("Could not open pairing confirmation");
 
-      if (!acknowledged)
+      if (!acknowledged) {
         await once({
           response_type: "ephemeral",
           text: "Pairing unavailable.",
         });
+      }
     }
   }
 
@@ -257,7 +263,9 @@ export class PairingUI {
         data.team.id,
       );
 
-    if (owned) pending.used = true;
+    if (owned) {
+      pending.used = true;
+    }
 
     try {
       await ack();
@@ -269,7 +277,9 @@ export class PairingUI {
 
     // Invalid envelopes cannot select a modal. Duplicate actions do nothing,
     // Preserving any already-delivered code instead of overwriting it.
-    if (!owned) return;
+    if (!owned) {
+      return;
+    }
 
     try {
       if (!valid || pending.expires <= this.monotonicNow()) {
@@ -296,8 +306,10 @@ export class PairingUI {
           data.team.id,
         ) ||
         !this.backend.pair
-      )
+      ) {
         return;
+      }
+
       const started = this.monotonicNow();
       const result = await this.backend.pair(signal);
       signal.throwIfAborted();
@@ -309,15 +321,19 @@ export class PairingUI {
           data.api_app_id,
           data.team.id,
         )
-      )
+      ) {
         return;
+      }
 
       // Wall-clock corrections must not change local expiry decisions.
       // Count request time conservatively; only the server can redeem a code.
       const remaining =
         result.expiresIn * 1000 - (this.monotonicNow() - started);
 
-      if (remaining <= 0) throw new Error("Pairing expired");
+      if (remaining <= 0) {
+        throw new Error("Pairing expired");
+      }
+
       const expires = this.wallNow() + remaining;
 
       const urls =
@@ -343,7 +359,9 @@ export class PairingUI {
     } catch {
       this.log.error("Pairing request failed; not retried");
 
-      if (this.signal.aborted) return;
+      if (this.signal.aborted) {
+        return;
+      }
 
       try {
         await this.api.update(

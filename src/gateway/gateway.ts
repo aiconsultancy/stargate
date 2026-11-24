@@ -185,15 +185,25 @@ export type GatewayConfig =
 
 /** The failure a thrown error names when no signal ended the turn. */
 function errorFailure(error: unknown): RequestFailure {
-  if (error instanceof BackendFailure) return error.failure;
+  if (error instanceof BackendFailure) {
+    return error.failure;
+  }
 
-  if (error instanceof PendingBackendQuestion) return "pending-question";
+  if (error instanceof PendingBackendQuestion) {
+    return "pending-question";
+  }
 
-  if (error instanceof ThreadContextUnavailable) return "context";
+  if (error instanceof ThreadContextUnavailable) {
+    return "context";
+  }
 
-  if (error instanceof AttachmentInputUnavailable) return "attachments";
+  if (error instanceof AttachmentInputUnavailable) {
+    return "attachments";
+  }
 
-  if (error instanceof TranscriptionUnavailable) return "transcription";
+  if (error instanceof TranscriptionUnavailable) {
+    return "transcription";
+  }
 
   return "backend";
 }
@@ -221,7 +231,7 @@ export function slackTransport(
     allowed: (user, channel) =>
       isAllowedUser(config, user) && isAllowedChannel(config, channel),
     source(job) {
-      if (job.slackReaction)
+      if (job.slackReaction) {
         return {
           channel: job.channel,
           thread: job.thread,
@@ -229,13 +239,16 @@ export function slackTransport(
           user: job.user,
           reaction: job.slackReaction,
         };
+      }
+
       const message = job.eventId.slice(job.channel.length + 1);
 
       if (
         !job.eventId.startsWith(`${job.channel}:`) ||
         !/^\d{1,16}\.\d{1,6}$/.test(message)
-      )
+      ) {
         return;
+      }
 
       return {
         channel: job.channel,
@@ -313,7 +326,10 @@ export class Gateway {
     const selected =
       transport ?? (this.bot ? slackTransport(this.bot, identity) : undefined);
 
-    if (!selected) throw new Error("Gateway transport is required");
+    if (!selected) {
+      throw new Error("Gateway transport is required");
+    }
+
     this.transport = selected;
     this.key = selected.key;
 
@@ -371,7 +387,7 @@ export class Gateway {
       !this.questions &&
       this.supportsQuestions &&
       (this.transport.questions || this.slackQuestions)
-    )
+    ) {
       this.questions = new Questions(
         this.key,
         this.store,
@@ -383,10 +399,14 @@ export class Gateway {
         },
         this.questionLifetime.signal,
       );
+    }
   }
 
   private questionPort(): QuestionPort | undefined {
-    if (!this.slackQuestions || !this.bot) return this.transport.questions;
+    if (!this.slackQuestions || !this.bot) {
+      return this.transport.questions;
+    }
+
     const bot = this.bot;
     const ui = this.slackQuestions;
 
@@ -402,7 +422,10 @@ export class Gateway {
       publishQuestion: (job, offer, question, allowed) =>
         ui.publishQuestion(job, offer, question, allowed),
       publish: async (job, text, allowed) => {
-        if (!allowed()) return;
+        if (!allowed()) {
+          return;
+        }
+
         await this.slack.post(job.channel, job.thread, text, undefined, {
           allowed,
         });
@@ -421,8 +444,10 @@ export class Gateway {
     const selected =
       transport ?? (bot ? slackTransport(bot, this.identity) : this.transport);
 
-    if (selected.key !== this.key)
+    if (selected.key !== this.key) {
       throw new Error("restart required: gateway namespace");
+    }
+
     this.config = config;
     this.bot = bot;
     this.transcriber = transcriber;
@@ -450,8 +475,10 @@ export class Gateway {
       ...((await this.backend.maintenanceNotice?.(record, signal)) ?? []),
     ];
 
-    if (!this.backend.queueUpdateNotice || this.backend.sessionID)
+    if (!this.backend.queueUpdateNotice || this.backend.sessionID) {
       return receipts;
+    }
+
     const phase = drainNoticePhase(record);
     const text = drainNoticeText(record);
     const sessions = new Set<string>();
@@ -459,7 +486,9 @@ export class Gateway {
     for (const conversation of this.store.transcript.transcripts(this.key)) {
       const session = this.store.session(conversation);
 
-      if (session) sessions.add(session);
+      if (session) {
+        sessions.add(session);
+      }
     }
 
     for (const sessionID of [...sessions].slice(0, 200)) {
@@ -513,13 +542,22 @@ export class Gateway {
   }
 
   public accept(body: unknown, peer?: PeerSender, resumesThread = false) {
-    if (metaCandidate(body, this.identity)) return false;
+    if (metaCandidate(body, this.identity)) {
+      return false;
+    }
+
     const bot = this.bot;
 
-    if (!bot) return false;
+    if (!bot) {
+      return false;
+    }
+
     const routed = this.route(body, peer);
 
-    if (!routed) return false;
+    if (!routed) {
+      return false;
+    }
+
     const followed = resumesThread || this.store.follows(routed.conversation);
     // A voice message in a thread the bot follows keeps today's behaviour,
     // Unless every turn needs a mention.
@@ -530,8 +568,10 @@ export class Gateway {
         ? { ...routed, gate: null }
         : routed;
 
-    if (!input.startsConversation && !followed && input.gate !== "spoken")
+    if (!input.startsConversation && !followed && input.gate !== "spoken") {
       return false;
+    }
+
     // Loop protection: a peer captain gets a bounded number of turns per
     // Thread. The window ends at this message's Slack time, not host time.
     const sent = Number(input.eventId.slice(input.channel.length + 1)) * 1000;
@@ -565,8 +605,9 @@ export class Gateway {
       !input.sender &&
       !input.fleet &&
       !input.slackReaction
-    )
+    ) {
       this.store.questions.recordQuestionSource(input);
+    }
 
     return accepted;
   }
@@ -576,7 +617,10 @@ export class Gateway {
     signal: AbortSignal,
     finalOwner?: number,
   ): Promise<void> {
-    if (this.followUpTask !== undefined) return this.followUpTask;
+    if (this.followUpTask !== undefined) {
+      return this.followUpTask;
+    }
+
     this.followUpTask = this.deliverFollowUps(signal, finalOwner);
 
     try {
@@ -661,16 +705,22 @@ export class Gateway {
         this.store.threadFollowUps.settleFollowUp(receipt, state);
       }
 
-      if ((receipt.notified && state === receipt.state) || !this.allowed(input))
+      if (
+        (receipt.notified && state === receipt.state) ||
+        !this.allowed(input)
+      ) {
         continue;
+      }
 
       if (!this.reactionNotificationsOpen(input)) {
         const queued =
           state === "queued" &&
           this.store.jobByEvent(input.botKey, input.eventId);
 
-        if (queued !== false && queued !== null)
+        if (queued !== false && queued !== null) {
           this.notificationDispatch(queued);
+        }
+
         this.store.threadFollowUps.notifiedFollowUp(receipt);
         continue;
       }
@@ -707,7 +757,9 @@ export class Gateway {
   private route(body: unknown, peer?: PeerSender) {
     const bot = this.bot;
 
-    if (!bot) return;
+    if (!bot) {
+      return;
+    }
 
     return this.routeNotifications((read) =>
       routeEvent(body, bot, this.identity, peer, read),
@@ -723,7 +775,10 @@ export class Gateway {
           ? (channel, thread) => {
               const state = this.notifications?.(channel, thread);
 
-              if (!state) throw new Error("Notification reader unavailable");
+              if (!state) {
+                throw new Error("Notification reader unavailable");
+              }
+
               this.notificationFault = false;
               muted = state.mode === "addressed-only";
 
@@ -742,11 +797,12 @@ export class Gateway {
         if (
           this.mutedAdmissions === 1 ||
           Number.isInteger(Math.log2(this.mutedAdmissions))
-        )
+        ) {
           this.log.debug(
             { count: this.mutedAdmissions },
             "Muted Slack notification not admitted",
           );
+        }
       }
 
       return routed;
@@ -758,8 +814,9 @@ export class Gateway {
   }
 
   private reactionNotificationsOpen(input: Incoming) {
-    if (!input.slackReaction || !input.notification || !this.notifications)
+    if (!input.slackReaction || !input.notification || !this.notifications) {
       return true;
+    }
 
     try {
       const state = this.notifications(input.channel, input.thread);
@@ -774,10 +831,12 @@ export class Gateway {
   }
 
   private notificationUnavailable() {
-    if (!this.notificationFault)
+    if (!this.notificationFault) {
       this.log.warn(
         "Notification preferences unavailable; Slack chat admission held",
       );
+    }
+
     this.notificationFault = true;
   }
 
@@ -787,8 +846,9 @@ export class Gateway {
       !job.notification ||
       !this.notifications ||
       job.channel.startsWith("D")
-    )
+    ) {
       return job;
+    }
 
     try {
       const state = this.notifications(job.channel, job.thread);
@@ -798,7 +858,9 @@ export class Gateway {
         state.mode === "addressed-only" &&
         job.notification.wake === "ordinary"
       ) {
-        if (!this.store.suppressNotification(job.id)) this.refused(job, "mute");
+        if (!this.store.suppressNotification(job.id)) {
+          this.refused(job, "mute");
+        }
 
         return;
       }
@@ -835,7 +897,9 @@ export class Gateway {
   ) {
     const bot = this.bot;
 
-    if (!bot) return false;
+    if (!bot) {
+      return false;
+    }
 
     if (
       await this.slackQuestions?.interactive(
@@ -843,8 +907,9 @@ export class Gateway {
         ack,
         () => open() && this.bot === bot,
       )
-    )
+    ) {
       return true;
+    }
 
     return this.meta.interactive(
       body,
@@ -891,14 +956,18 @@ export class Gateway {
       slackReaction: { name, action },
     } = input;
 
-    if (!this.allowed(input)) return false;
+    if (!this.allowed(input)) {
+      return false;
+    }
 
     const admission = this.routeNotifications((read) => {
       const notification = channel.startsWith("D")
         ? undefined
         : read?.(channel, thread);
 
-      if (notification?.mode === "addressed-only") return;
+      if (notification?.mode === "addressed-only") {
+        return;
+      }
 
       return {
         ...input,
@@ -914,10 +983,16 @@ export class Gateway {
 
   /** Commit the exact requester-authorized target before Socket Mode ACK. */
   public cancel(body: unknown) {
-    if (!this.bot) return false;
+    if (!this.bot) {
+      return false;
+    }
+
     const target = cancellationTarget(body, this.bot, this.identity);
 
-    if (!target || !this.store.cancel(this.key, target)) return false;
+    if (!target || !this.store.cancel(this.key, target)) {
+      return false;
+    }
+
     this.cancellations.get(target.id)?.abort();
 
     return true;
@@ -931,11 +1006,15 @@ export class Gateway {
   public stopTurn(conversation: string, thread: string) {
     const id = this.store.cancelTurn(this.key, conversation, thread);
 
-    if (id === undefined) return false;
+    if (id === undefined) {
+      return false;
+    }
+
     const active = this.cancellations.get(id);
 
-    if (active) active.abort();
-    else
+    if (active) {
+      active.abort();
+    } else {
       void this.questions
         ?.stop(
           id,
@@ -949,13 +1028,17 @@ export class Gateway {
             "Recovered native Stop outcome unavailable; not replayed",
           );
         });
+    }
 
     return true;
   }
 
   /** Only transport-verified controls reach this method; they never enter a model. */
   public async answerQuestion(input: Incoming, control: QuestionControl) {
-    if (this.questionLifetime.signal.aborted) return;
+    if (this.questionLifetime.signal.aborted) {
+      return;
+    }
+
     await this.questions?.answer(
       input,
       control,
@@ -995,7 +1078,9 @@ export class Gateway {
     name: string;
     deferDelivery?: boolean;
   }): number | undefined {
-    if (!this.allowed(input)) return;
+    if (!this.allowed(input)) {
+      return;
+    }
 
     const eventId = input.deferDelivery
       ? `scheduled:${input.runId}`
@@ -1047,7 +1132,9 @@ export class Gateway {
 
     try {
       await runAbortable(this.supervise(), signal).catch((error: unknown) => {
-        if (!signal.aborted) throw error;
+        if (!signal.aborted) {
+          throw error;
+        }
       });
     } finally {
       stopQuestions();
@@ -1063,7 +1150,7 @@ export class Gateway {
         if (
           this.questions ||
           (this.transport.name === "irc" && this.supportsQuestions)
-        )
+        ) {
           yield* Effect.forkScoped(
             abortable(async (signal) => {
               while (!signal.aborted) {
@@ -1072,14 +1159,17 @@ export class Gateway {
                     AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
                   );
                 } catch {
-                  if (!signal.aborted)
+                  if (!signal.aborted) {
                     this.log.warn("Native clarification check unavailable");
+                  }
                 }
 
                 await delay(1000, undefined, { signal }).catch(() => {});
               }
             }),
           );
+        }
+
         yield* Effect.addFinalizer(() =>
           Effect.promise(() => this.activity.close()),
         );
@@ -1087,7 +1177,7 @@ export class Gateway {
         const watch =
           this.backend.transcript && this.backend.watch?.bind(this.backend);
 
-        if (watch)
+        if (watch) {
           yield* Effect.forkScoped(
             abortable((signal) =>
               watch(
@@ -1107,6 +1197,8 @@ export class Gateway {
               ),
             ),
           );
+        }
+
         // Closes first: every turn and catch-up observes shutdown and settles.
         const slots = yield* FiberMap.make<string>();
         yield* Effect.repeat(this.poll(slots), Schedule.spaced("200 millis"));
@@ -1167,19 +1259,26 @@ export class Gateway {
     }
 
     for (const session of interrupted) {
-      if (retainedSessions.has(session)) continue;
+      if (retainedSessions.has(session)) {
+        continue;
+      }
+
       await this.backend.interrupt?.(session, AbortSignal.timeout(5000));
     }
 
     this.store.recover(this.key, retainedQuestions);
 
     // Restart catch-up for every mapping; unbaselined ones seed at current history.
-    if (this.backend.transcript) this.settle();
+    if (this.backend.transcript) {
+      this.settle();
+    }
 
     if (this.backend.sessionID) {
       const job = this.store.latestBotActivity(this.key);
 
-      if (job) await this.activity.resume(job, this.backend.sessionID, signal);
+      if (job) {
+        await this.activity.resume(job, this.backend.sessionID, signal);
+      }
 
       return;
     }
@@ -1188,7 +1287,9 @@ export class Gateway {
       const job = this.store.latestActivity(this.key, conversation);
       const session = this.store.session(conversation);
 
-      if (job && session) await this.activity.resume(job, session, signal);
+      if (job && session) {
+        await this.activity.resume(job, session, signal);
+      }
     }
   }
 
@@ -1197,7 +1298,10 @@ export class Gateway {
     return Effect.gen({ self: this }, function* () {
       this.drain?.tick();
 
-      if (this.paused) return;
+      if (this.paused) {
+        return;
+      }
+
       yield* abortable((signal) => this.pollFollowUps(signal));
       const used = yield* FiberMap.size(slots);
       // Held: accepted jobs stay queued; responding deliveries may finish.
@@ -1214,19 +1318,26 @@ export class Gateway {
         .filter((job) => !hold || job.status !== "queued");
 
       for (const job of jobs) {
-        if ((yield* FiberMap.size(slots)) >= this.config.concurrency) break;
+        if ((yield* FiberMap.size(slots)) >= this.config.concurrency) {
+          break;
+        }
 
         // One worker per job. A pinned turn holds the bot slot while it
         // Delivers; its `responding` row must not start again in the
         // Conversation slot, or every chunk and file is sent twice.
-        if (this.turnPolicies.has(job.id)) continue;
+        if (this.turnPolicies.has(job.id)) {
+          continue;
+        }
 
         const slot =
           this.backend.sessionID && job.status === "queued"
             ? this.key
             : job.conversation;
 
-        if (yield* FiberMap.has(slots, slot)) continue;
+        if (yield* FiberMap.has(slots, slot)) {
+          continue;
+        }
+
         yield* FiberMap.run(
           slots,
           slot,
@@ -1254,8 +1365,9 @@ export class Gateway {
       if (
         (!session || session === this.backend.sessionID) &&
         !this.unavailable.has(this.key)
-      )
+      ) {
         this.queueTranscript(this.key);
+      }
 
       return;
     }
@@ -1263,9 +1375,11 @@ export class Gateway {
     for (const conversation of this.store.transcript.transcripts(
       this.key,
       session,
-    ))
-      if (!this.unavailable.has(conversation))
+    )) {
+      if (!this.unavailable.has(conversation)) {
         this.queueTranscript(conversation);
+      }
+    }
   }
 
   /** Catch-up state has one key per pinned session, else per conversation. */
@@ -1291,17 +1405,24 @@ export class Gateway {
       ),
       signal,
     ).catch((error: unknown) => {
-      if (!signal.aborted) throw error;
+      if (!signal.aborted) {
+        throw error;
+      }
     });
   }
 
   private startCatchUps(slots: FiberMap.FiberMap<string>) {
     return Effect.gen({ self: this }, function* () {
-      if (this.paused || this.drain?.held()) return;
+      if (this.paused || this.drain?.held()) {
+        return;
+      }
+
       const now = Date.now();
 
       for (const [conversation, retry] of this.settled) {
-        if ((yield* FiberMap.size(slots)) >= this.config.concurrency) break;
+        if ((yield* FiberMap.size(slots)) >= this.config.concurrency) {
+          break;
+        }
 
         // A pending turn reads the same history; later replies wait for delivery.
         if (
@@ -1310,8 +1431,10 @@ export class Gateway {
           (this.backend.sessionID
             ? this.store.captainBusy(this.key)
             : this.store.unfinished(conversation))
-        )
+        ) {
           continue;
+        }
+
         this.settled.delete(conversation);
         yield* FiberMap.run(
           slots,
@@ -1334,10 +1457,13 @@ export class Gateway {
     this.active++;
 
     try {
-      if (!(await this.transcriptCatchUp(conversation, signal)))
+      if (!(await this.transcriptCatchUp(conversation, signal))) {
         this.queueTranscript(conversation);
+      }
     } catch (error) {
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        return;
+      }
 
       const awaitingInput =
         error instanceof TranscriptUnavailable &&
@@ -1351,15 +1477,19 @@ export class Gateway {
 
       if (error instanceof TranscriptUnavailable && awaitingInput !== true) {
         // Keep the mapping and cursor; the next request re-anchors.
-        if (!this.unavailable.has(conversation))
+        if (!this.unavailable.has(conversation)) {
           this.log.warn("Transcript unavailable; background catch-up stopped");
+        }
+
         this.unavailable.add(conversation);
 
         return;
       }
 
-      if (!retry.attempts)
+      if (!retry.attempts) {
         this.log.warn("Transcript catch-up failed; retrying with backoff");
+      }
+
       // The cursor stays put, so a later read resumes without a gap.
       this.settled.set(conversation, {
         attempts: retry.attempts + 1,
@@ -1372,16 +1502,18 @@ export class Gateway {
 
   /** False means another writer changed the thread; read it again. */
   private async transcriptCatchUp(conversation: string, shutdown: AbortSignal) {
-    if (this.backend.sessionID)
+    if (this.backend.sessionID) {
       return this.captainCatchUp(this.backend.sessionID, shutdown);
+    }
 
     const target = this.store.transcript.transcriptTarget(
       this.key,
       conversation,
     );
 
-    if (!target || !this.backend.transcript || !this.allowed(target))
+    if (!target || !this.backend.transcript || !this.allowed(target)) {
       return true;
+    }
 
     const signal = AbortSignal.any([
       shutdown,
@@ -1390,8 +1522,9 @@ export class Gateway {
 
     const activityJob = this.store.latestActivity(this.key, conversation);
 
-    if (activityJob)
+    if (activityJob) {
       await this.activity.resume(activityJob, target.session, shutdown);
+    }
 
     const read = await this.backend.transcript(
       target.session,
@@ -1405,7 +1538,10 @@ export class Gateway {
       return true;
     }
 
-    if (read.cursor === target.cursor) return true;
+    if (read.cursor === target.cursor) {
+      return true;
+    }
+
     const text = transcriptReply(read.entries);
     const files = transcriptAttachments(read.entries);
     const last = read.entries.at(-1);
@@ -1457,17 +1593,27 @@ export class Gateway {
       this.store.jobByInput(this.key, input)?.id ?? null;
 
     for (const entry of read.entries) {
-      if (entry.input !== undefined) owner = ownerFor(entry.input);
+      if (entry.input !== undefined) {
+        owner = ownerFor(entry.input);
+      }
 
-      if (owner === null) continue;
+      if (owner === null) {
+        continue;
+      }
+
       const group = groups.at(-1);
 
-      if (group?.job === owner) group.entries.push(entry);
-      else groups.push({ job: owner, entries: [entry] });
+      if (group?.job === owner) {
+        group.entries.push(entry);
+      } else {
+        groups.push({ job: owner, entries: [entry] });
+      }
     }
 
     // A native input with no public reply must still clear/set ownership.
-    if (read.input !== undefined) owner = ownerFor(read.input);
+    if (read.input !== undefined) {
+      owner = ownerFor(read.input);
+    }
 
     const own = groups
       .filter((group) => group.job === current)
@@ -1506,7 +1652,10 @@ export class Gateway {
   }
 
   private async captainCatchUp(sessionID: string, shutdown: AbortSignal) {
-    if (!this.backend.transcript) return true;
+    if (!this.backend.transcript) {
+      return true;
+    }
+
     const from = this.store.captainCursor(this.key, sessionID);
 
     const signal = AbortSignal.any([
@@ -1520,11 +1669,16 @@ export class Gateway {
       signal,
     });
 
-    if (validated !== sessionID)
+    if (validated !== sessionID) {
       throw new Error("Pinned session identity changed");
+    }
+
     const activity = this.store.latestBotActivity(this.key);
 
-    if (activity) await this.activity.resume(activity, sessionID, shutdown);
+    if (activity) {
+      await this.activity.resume(activity, sessionID, shutdown);
+    }
+
     const read = await this.backend.transcript(sessionID, from.cursor, signal);
     const { commit } = this.captainTranscript(sessionID, from, read);
 
@@ -1537,10 +1691,15 @@ export class Gateway {
     session: string,
     signal: AbortSignal,
   ) {
-    if (!this.backend.transcript) return;
+    if (!this.backend.transcript) {
+      return;
+    }
+
     const from = this.store.transcript.transcriptCursor(conversation);
 
-    if (from !== undefined) return from;
+    if (from !== undefined) {
+      return from;
+    }
 
     try {
       const { cursor } = await this.backend.transcript(
@@ -1551,7 +1710,10 @@ export class Gateway {
 
       return this.store.transcript.baselineTranscript(conversation, cursor);
     } catch (error) {
-      if (signal.aborted) throw error;
+      if (signal.aborted) {
+        throw error;
+      }
+
       // No cursor exists yet, so the prompt reply cannot be delivered twice.
       this.log.warn("Transcript baseline unavailable; using prompt reply");
 
@@ -1569,15 +1731,24 @@ export class Gateway {
 
     for (const wait of [0, ...finalReadDelaysMs]) {
       try {
-        if (wait) await delay(wait, undefined, { signal });
+        if (wait) {
+          await delay(wait, undefined, { signal });
+        }
+
         read =
           (await this.backend.transcript?.(session, after, signal)) ?? read;
 
-        if (read && !read.pending) return read;
+        if (read && !read.pending) {
+          return read;
+        }
       } catch (error) {
-        if (error instanceof TranscriptUnavailable && !read) return error;
+        if (error instanceof TranscriptUnavailable && !read) {
+          return error;
+        }
 
-        if (signal.aborted) break;
+        if (signal.aborted) {
+          break;
+        }
       }
     }
 
@@ -1597,7 +1768,9 @@ export class Gateway {
     if (from !== undefined) {
       const read = await this.settledRead(session, from, signal);
 
-      if (read && !(read instanceof TranscriptUnavailable)) return read;
+      if (read && !(read instanceof TranscriptUnavailable)) {
+        return read;
+      }
 
       if (
         !(read instanceof TranscriptUnavailable && read.reason === "cursor")
@@ -1610,7 +1783,9 @@ export class Gateway {
 
     const anchored = await this.settledRead(session, latestInput, signal);
 
-    if (!anchored || anchored instanceof TranscriptUnavailable) return;
+    if (!anchored || anchored instanceof TranscriptUnavailable) {
+      return;
+    }
 
     return {
       ...anchored,
@@ -1689,7 +1864,9 @@ export class Gateway {
         signal,
       );
     } catch {
-      if (shutdown.aborted) return;
+      if (shutdown.aborted) {
+        return;
+      }
 
       ignore("Voice message not transcribed; ignored without a reply");
 
@@ -1750,29 +1927,38 @@ export class Gateway {
 
     // Recheck policy for queued inputs and pending delivery after a restart.
     if (!allowed(held)) {
-      if (held.gate === "spoken") this.store.discard(held.id);
-      else if (!this.store.finish(held.id, "failed"))
+      if (held.gate === "spoken") {
+        this.store.discard(held.id);
+      } else if (!this.store.finish(held.id, "failed")) {
         this.refused(held, "finish");
+      }
 
       return;
     }
 
     const pending = this.notificationDispatch(held);
 
-    if (!pending) return;
+    if (!pending) {
+      return;
+    }
+
     // A transcript held only in this call; a restart transcribes again.
     let heard: Awaited<ReturnType<typeof transcribeMedia>> | undefined;
 
     if (held.status === "queued" && held.gate === "spoken") {
       heard = await this.hear(held, shutdown, { config, bot, transcriber });
 
-      if (!heard) return;
+      if (!heard) {
+        return;
+      }
     }
 
     const classified =
       held.gate === "spoken" ? this.notificationDispatch(pending) : pending;
 
-    if (!classified) return;
+    if (!classified) {
+      return;
+    }
 
     const job: Job =
       held.gate === "spoken" ? { ...classified, gate: "admitted" } : classified;
@@ -1785,12 +1971,13 @@ export class Gateway {
         : undefined;
 
     const publishOutcome = (outcome: RequestOutcome) => {
-      if (request && !shutdown.aborted)
+      if (request && !shutdown.aborted) {
         void this.slack
           .requestSettled?.(job.channel, request, outcome, shutdown, () =>
             allowed(job),
           )
           .catch(() => {});
+      }
     };
 
     const readReceipt = async (active: boolean) => {
@@ -1824,9 +2011,14 @@ export class Gateway {
       // Intake may have extended a queued IRC burst after ready() returned.
       // Refuse a stale snapshot; the next poll reads its full text and files.
       // Re-check at the last moment: a drain can start after ready() returned.
-      if (this.drain?.held()) return;
+      if (this.drain?.held()) {
+        return;
+      }
 
-      if (!this.store.running(job.id, job.text)) return;
+      if (!this.store.running(job.id, job.text)) {
+        return;
+      }
+
       await readReceipt(true);
       // Only an accepted requester Stop aborts this controller.
       const cancellation = new AbortController();
@@ -1892,16 +2084,20 @@ export class Gateway {
       let files: PublishedFile[] = [];
 
       const reply = (text: string, complete: boolean) => {
-        if (job.deferDelivery)
+        if (job.deferDelivery) {
           return parseAttachments(
             parseReactionReply(text, complete).text,
             complete,
           ).text;
+        }
+
         const parsed = parseReactionReply(text, complete);
 
         // A silent turn needs no "working" notice; the final cleanup removes
         // One that is already shown.
-        if (parsed.silent && !complete) live?.quiet();
+        if (parsed.silent && !complete) {
+          live?.quiet();
+        }
 
         if (
           allowed(job) &&
@@ -1934,11 +2130,15 @@ export class Gateway {
           session = pinned ? undefined : this.store.session(job.conversation);
           let text = job.text;
 
-          if (job.notification?.note)
+          if (job.notification?.note) {
             text = `${job.notification.note}\n\n${text}`;
+          }
+
           const instructions = transport.instructions?.(job);
 
-          if (instructions) text = `${instructions}\n\n${text}`;
+          if (instructions) {
+            text = `${instructions}\n\n${text}`;
+          }
 
           // Chat messages only. Digest runs have no thread.
           const source = job.deferDelivery
@@ -1949,18 +2149,23 @@ export class Gateway {
             pinned && source ? { source } : undefined;
 
           // Unpinned adapters, including Pi, do not receive ordinary source context.
-          if (!pinned && source?.reaction)
+          if (!pinned && source?.reaction) {
             text = `${sourceLine({ source })}\n\n${text}`;
+          }
+
           // Without a source line, the prompt itself names a special sender.
           const note = sourceContext ? undefined : transport.note(job);
 
-          if (note) text = `${note}\n\n${text}`;
+          if (note) {
+            text = `${note}\n\n${text}`;
+          }
 
           if (
             job.textMention &&
             !(transport.name === "irc" && job.textMention.startsWith("@"))
-          )
+          ) {
             text = `${textMentionNote(job.textMention)}\n\n${text}`;
+          }
 
           // Greybeard: pinned turns carry IDs only; missing history needs explicit retrieval.
           if (!pinned && !session && bot) {
@@ -1971,8 +2176,9 @@ export class Gateway {
               !source.reaction &&
               source.message !== job.thread
             ) {
-              if (!this.slack.threadContext)
+              if (!this.slack.threadContext) {
                 throw new ThreadContextUnavailable();
+              }
 
               const history = await this.slack.threadContext({
                 channel: job.channel,
@@ -1998,8 +2204,9 @@ export class Gateway {
             });
 
             if (pinned) {
-              if (session !== pinned)
+              if (session !== pinned) {
                 throw new Error("Pinned session identity changed");
+              }
             } else {
               // A new unpinned session's transcript starts with this turn.
               this.store.saveSession(
@@ -2012,8 +2219,10 @@ export class Gateway {
 
           signal.throwIfAborted();
 
-          if (!pinned && transport.sessionReady)
+          if (!pinned && transport.sessionReady) {
             await transport.sessionReady(session, signal).catch(() => {});
+          }
+
           signal.throwIfAborted();
           this.unavailable.delete(this.catchUpKey(job.conversation));
 
@@ -2036,14 +2245,19 @@ export class Gateway {
                 );
                 from = captain.cursor;
               } catch (error) {
-                if (signal.aborted) throw error;
+                if (signal.aborted) {
+                  throw error;
+                }
+
                 this.log.warn(
                   "Captain baseline unavailable; using input boundary",
                 );
               }
             }
-          } else
+          } else {
             from = await this.transcriptFrom(job.conversation, session, signal);
+          }
+
           signal.throwIfAborted();
           // No notice can be delivered for a digest run, and only Slack has a
           // Cancel button. Without a permit the backend keeps that tool
@@ -2056,8 +2270,10 @@ export class Gateway {
                   requestID: `slack-job-${job.id}`,
                   signal,
                   publish: async (notice) => {
-                    if (!allowed(job))
+                    if (!allowed(job)) {
                       throw new Error("Maintenance notice access denied");
+                    }
+
                     await live.announce(maintenanceText(notice));
                     budget.pause();
                   },
@@ -2075,20 +2291,24 @@ export class Gateway {
                 })
               : undefined;
 
-          if (!job.deferDelivery)
+          if (!job.deferDelivery) {
             activity = await this.activity.start(
               job,
               session,
               signal,
               shutdown,
             );
+          }
+
           const fileIDs = this.store.attachmentRecords.inputFiles(job.id);
           let inputFiles: Attachment[] = [];
 
           // A spoken-mention gate already transcribed this message.
           if (heard) {
-            if (heard.files.length > 0 && !this.backend.supportsAttachments)
+            if (heard.files.length > 0 && !this.backend.supportsAttachments) {
               throw new AttachmentInputUnavailable();
+            }
+
             inputFiles = heard.files;
             text = [text, spokenMentionNote, ...heard.blocks]
               .filter(Boolean)
@@ -2099,10 +2319,12 @@ export class Gateway {
                 job.deferDelivery ||
                 !this.slack.files ||
                 !(this.backend.supportsAttachments || transcriber)
-              )
+              ) {
                 throw new Error(
                   "Attachment input is unavailable for this backend",
                 );
+              }
+
               inputFiles = await this.slack.files.download(
                 fileIDs,
                 job.channel,
@@ -2110,15 +2332,17 @@ export class Gateway {
               );
               checkAttachments(inputFiles);
 
-              if (inputFiles.length !== fileIDs.length)
+              if (inputFiles.length !== fileIDs.length) {
                 throw new Error("Some requested attachments are unavailable");
+              }
 
               // Refuse before any audio leaves: speech alone needs no file input.
               if (
                 !this.backend.supportsAttachments &&
                 !inputFiles.every((item) => isMedia(item))
-              )
+              ) {
                 throw new Error("Backend accepts no files");
+              }
             } catch {
               signal.throwIfAborted();
               throw new AttachmentInputUnavailable();
@@ -2178,20 +2402,25 @@ export class Gateway {
             observeProgress
               ? (update) => {
                   // Backend completion can precede durable reply delivery.
-                  if (update.stage !== "completed") progress = update;
+                  if (update.stage !== "completed") {
+                    progress = update;
+                  }
 
-                  if (turnStatus === "live")
+                  if (turnStatus === "live") {
                     this.store.saveTurnProgress(job.id, update);
+                  }
                 }
               : undefined,
             turnStatus === "live",
           );
 
-          if (turnStatus === "live")
+          if (turnStatus === "live") {
             this.store.saveTurnProgress(job.id, {
               stage: "completed",
               observedAt: Date.now(),
             });
+          }
+
           // A concurrent native receipt must settle before final link capture.
           await this.followUpTask;
           // History may become readable only as the original turn settles.
@@ -2204,8 +2433,10 @@ export class Gateway {
           const own = reply(settled, true);
           const ownReply = parseReactionReply(settled);
 
-          if (this.backend.transcript)
+          if (this.backend.transcript) {
             transcript = await this.finalTranscript(session, from, signal);
+          }
+
           signal.throwIfAborted();
 
           // Settled history covers every public reply since the last delivery.
@@ -2237,8 +2468,10 @@ export class Gateway {
             : from !== undefined ||
               (pinned !== undefined && this.backend.transcript !== undefined);
 
-          if (unread || transcript?.pending)
+          if (unread || transcript?.pending) {
             this.queueTranscript(this.catchUpKey(job.conversation));
+          }
+
           // This request's own reply is silent: there is no text to wait for.
           const deferred = unread && !ownReply.silent;
           activity?.finish();
@@ -2246,21 +2479,32 @@ export class Gateway {
           if (deferred) {
             failure = "history";
             output = [statusText(failure)];
-          } else
+          } else {
             output =
               (reacted || silent) && !answer.trim()
                 ? []
                 : transcript && answer.trim()
                   ? this.prepare(answer, true)
                   : this.prepare(answer);
+          }
 
-          if (transcript) keep = deferred ? 0 : output.length;
+          if (transcript) {
+            keep = deferred ? 0 : output.length;
+          }
         } catch (error) {
-          if (cancellation.signal.aborted || maintenanceFailure.signal.aborted)
+          if (
+            cancellation.signal.aborted ||
+            maintenanceFailure.signal.aborted
+          ) {
             activity?.cancel();
-          else if (!shutdown.aborted) activity?.finish();
+          } else if (!shutdown.aborted) {
+            activity?.finish();
+          }
 
-          if (error instanceof PromptNotSubmitted) admitted = false;
+          if (error instanceof PromptNotSubmitted) {
+            admitted = false;
+          }
+
           silent = false;
           failure = cancellation.signal.aborted
             ? "cancelled"
@@ -2296,8 +2540,9 @@ export class Gateway {
           // A request refused before admission submitted no input and owns no
           // Text: reading history for it could assign another source's reply
           // To this thread. Earlier continuations stay with catch-up.
-          if (this.backend.transcript && session && !admitted)
+          if (this.backend.transcript && session && !admitted) {
             this.queueTranscript(this.catchUpKey(job.conversation));
+          }
 
           // Keep public text that settled before the failure; shutdown recovers later.
           if (
@@ -2312,8 +2557,9 @@ export class Gateway {
               AbortSignal.any([shutdown, AbortSignal.timeout(10_000)]),
             );
 
-            if (transcript ? transcript.pending : from !== undefined)
+            if (transcript ? transcript.pending : from !== undefined) {
               this.queueTranscript(this.catchUpKey(job.conversation));
+            }
 
             const owned =
               transcript && captain
@@ -2328,11 +2574,13 @@ export class Gateway {
                 ? this.transcriptText(transcript)
                 : "";
 
-            if (text)
+            if (text) {
               output = [
                 ...this.prepare(this.followUpAnswer(job.id, text), true),
                 ...output,
               ];
+            }
+
             keep = output.length - 1;
           }
         }
@@ -2360,7 +2608,10 @@ export class Gateway {
               }),
           });
         } catch (error) {
-          if (!(error instanceof TranscriptConflict)) throw error;
+          if (!(error instanceof TranscriptConflict)) {
+            throw error;
+          }
+
           // Another writer moved the cursor: catch-up delivers from there.
           failure = "history";
           output = this.store.respond(job.id, [statusText(failure)], failure);
@@ -2392,8 +2643,11 @@ export class Gateway {
 
     // Try the final reply first. A known failure can still be reported
     // When its error reply remains unconfirmed.
-    if (failure && knownRequestFailure(failure)) publishOutcome("failed");
-    else if (delivered && !failure) publishOutcome("completed");
+    if (failure && knownRequestFailure(failure)) {
+      publishOutcome("failed");
+    } else if (delivered && !failure) {
+      publishOutcome("completed");
+    }
   }
 
   /** The store refused a transition: the job is not in the expected status. */
@@ -2419,8 +2673,12 @@ export class Gateway {
     readReceipt: (active: boolean) => Promise<void>,
   ) {
     if (job.deferDelivery) {
-      if (!this.store.sent(job.id, output.length) || !this.store.finish(job.id))
+      if (
+        !this.store.sent(job.id, output.length) ||
+        !this.store.finish(job.id)
+      ) {
         this.refused(job, "finish");
+      }
 
       return;
     }
@@ -2432,23 +2690,37 @@ export class Gateway {
 
       // A corrected answer, error, or recovery notice may be shorter than its preview.
       for (const [part, ts] of previews) {
-        if (part < output.length) continue;
+        if (part < output.length) {
+          continue;
+        }
 
-        if (shutdown.aborted) return;
+        if (shutdown.aborted) {
+          return;
+        }
 
-        if (!this.slack.remove)
+        if (!this.slack.remove) {
           throw new Error("Slack preview cleanup unavailable");
+        }
+
         await this.slack.remove(job.channel, ts);
         this.store.removePreview(job.id, part);
       }
 
       for (let i = job.sent; i < output.length; i++) {
-        if (shutdown.aborted) return;
+        if (shutdown.aborted) {
+          return;
+        }
 
-        if (!allowed(job)) throw new Error("Delivery access denied");
+        if (!allowed(job)) {
+          throw new Error("Delivery access denied");
+        }
+
         const chunk = output[i];
 
-        if (chunk === undefined) continue;
+        if (chunk === undefined) {
+          continue;
+        }
+
         const text = replyText(chunk);
         // Persisted classification is final: never derive it again here.
         const content = typeof chunk === "string" ? undefined : chunk.content;
@@ -2473,13 +2745,16 @@ export class Gateway {
               failure,
             );
 
-            if (typeof replacement === "string") posted = replacement;
+            if (typeof replacement === "string") {
+              posted = replacement;
+            }
           } else if (!ts && typeof result === "string") {
             posted = result;
           }
         } else {
-          if (ts && !this.slack.update)
+          if (ts && !this.slack.update) {
             throw new Error("Slack preview update unavailable");
+          }
 
           if (
             !ts ||
@@ -2491,7 +2766,10 @@ export class Gateway {
               content,
             )) === false
           ) {
-            if (ts) this.store.removePreview(job.id, i);
+            if (ts) {
+              this.store.removePreview(job.id, i);
+            }
+
             posted =
               (await this.slack.post(
                 job.channel,
@@ -2528,9 +2806,14 @@ export class Gateway {
         shutdown,
       );
 
-      if (output.length > 0) await readReceipt(false);
+      if (output.length > 0) {
+        await readReceipt(false);
+      }
 
-      if (this.store.finish(job.id)) return true;
+      if (this.store.finish(job.id)) {
+        return true;
+      }
+
       this.refused(job, "finish");
     } catch {
       this.log.warn({ job: job.id }, "Slack delivery failed");
@@ -2541,7 +2824,7 @@ export class Gateway {
           this.store.attachmentRecords
             .attachments(job.id)
             .some((file) => file.phase !== "shared")
-        )
+        ) {
           await this.slack
             .post(
               job.channel,
@@ -2551,15 +2834,19 @@ export class Gateway {
               { allowed: () => allowed(job) },
             )
             .catch(() => {});
+        }
 
-        if (!this.store.finish(job.id, "failed")) this.refused(job, "finish");
+        if (!this.store.finish(job.id, "failed")) {
+          this.refused(job, "finish");
+        }
       } else if (
         !this.store.retry(
           job.id,
           Date.now() + Math.min(60_000, 1000 * 2 ** job.attempts),
         )
-      )
+      ) {
         this.refused(job, "retry");
+      }
     }
 
     return;

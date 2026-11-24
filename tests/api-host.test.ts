@@ -60,8 +60,9 @@ async function fixture(
       signal: shutdown.signal,
       timing,
       fleet: async (input) => {
-        if (input.headers.get("Authorization") !== "Bearer operator")
+        if (input.headers.get("Authorization") !== "Bearer operator") {
           return new Response(null, { status: 401 });
+        }
 
         if (new URL(input.url).pathname === "/api/v1/events") {
           return new Response(
@@ -168,7 +169,9 @@ async function raw(
     socket.once("error", reject);
   });
 
-  if (text) socket.write(text);
+  if (text) {
+    socket.write(text);
+  }
 
   return { socket, closed };
 }
@@ -190,8 +193,11 @@ function holdTimeoutResponse() {
         Reflect.apply(original, this, args);
       };
 
-      if (this.statusCode !== 503) flush();
-      else queued.resolve({ output: this, flush });
+      if (this.statusCode !== 503) {
+        flush();
+      } else {
+        queued.resolve({ output: this, flush });
+      }
 
       return this;
     },
@@ -498,8 +504,10 @@ test.each(["finish", "flush bound"])(
         expect(bound).toBeDefined();
         const expire = bound?.[0];
 
-        if (typeof expire !== "function")
+        if (typeof expire !== "function") {
           throw new Error("Missing bounded timeout-response cleanup");
+        }
+
         expire();
         expect(await client.closed).toBe("");
       }
@@ -579,7 +587,10 @@ test("64 pre-header connections are bounded and release capacity at their deadli
 
     expect(await next.closed).toContain("fleet");
   } finally {
-    for (const client of clients) client.destroy();
+    for (const client of clients) {
+      client.destroy();
+    }
+
     await host.close();
   }
 });
@@ -622,7 +633,10 @@ test("notification slots remain held after timeout while Fleet reads and streams
   ) => {
     signals.push(signal);
 
-    if (signals.length === 8) entered.resolve();
+    if (signals.length === 8) {
+      entered.resolve();
+    }
+
     await settled.promise;
 
     return new Response("done", { status: 202 });
@@ -718,7 +732,9 @@ test("notification slots remain held after timeout while Fleet reads and streams
     clients.push(event.socket);
     const heartbeat = Promise.withResolvers<void>();
     event.socket.on("data", (text: string) => {
-      if (text.includes("heartbeat")) heartbeat.resolve();
+      if (text.includes("heartbeat")) {
+        heartbeat.resolve();
+      }
     });
     await heartbeat.promise;
     await Promise.all(active.map((client) => client.closed));
@@ -732,7 +748,10 @@ test("notification slots remain held after timeout while Fleet reads and streams
   } finally {
     settled.resolve();
 
-    for (const client of clients) client.destroy();
+    for (const client of clients) {
+      client.destroy();
+    }
+
     await host.close();
   }
 });
@@ -906,7 +925,10 @@ test("eight Fleet reads have a separate bounded budget from notification work", 
     fleet: async () => {
       reads++;
 
-      if (reads === 8) entered.resolve();
+      if (reads === 8) {
+        entered.resolve();
+      }
+
       await settle.promise;
 
       return new Response("fleet");
@@ -941,11 +963,16 @@ test("eight Fleet reads have a separate bounded budget from notification work", 
     expect((await post(socketPath)).status).toBe(202);
     settle.resolve();
 
-    for (const client of active) expect(await client.closed).toContain("fleet");
+    for (const client of active) {
+      expect(await client.closed).toContain("fleet");
+    }
   } finally {
     settle.resolve();
 
-    for (const client of clients) client.destroy();
+    for (const client of clients) {
+      client.destroy();
+    }
+
     await host.stop();
     await rm(directory, { recursive: true, force: true });
   }
@@ -972,7 +999,9 @@ test("the response bridge applies backpressure and cancels a blocked reader on s
                   entered.resolve();
                   controller.enqueue(new Uint8Array(64 * 1024));
 
-                  if (pulled === 256) controller.close();
+                  if (pulled === 256) {
+                    controller.close();
+                  }
                 },
                 cancel() {
                   cancelled.resolve();
@@ -1067,7 +1096,7 @@ test("empty route list leaves notifications absent and stop cancels stream reade
     signal: signal(),
     timing: { requestMs: 40 },
     fleet: async (input) => {
-      if (new URL(input.url).pathname === "/api/v1/fleet")
+      if (new URL(input.url).pathname === "/api/v1/fleet") {
         return new Promise<Response>((resolve) => {
           input.signal.addEventListener(
             "abort",
@@ -1077,6 +1106,7 @@ test("empty route list leaves notifications absent and stop cancels stream reade
             },
           );
         });
+      }
 
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -1102,7 +1132,9 @@ test("empty route list leaves notifications absent and stop cancels stream reade
 
     const initial = Promise.withResolvers<void>();
     client.socket.on("data", (text: string) => {
-      if (text.includes("initial")) initial.resolve();
+      if (text.includes("initial")) {
+        initial.resolve();
+      }
     });
     await initial.promise;
 
@@ -1131,9 +1163,13 @@ test("startup abort cancels a published SSE stream and awaits reader settlement"
   const socketRemoved = Promise.withResolvers<void>();
 
   const watcher = watch(directory, (_event, name) => {
-    if (name === "lock-releasing") lockReleasing.resolve();
+    if (name === "lock-releasing") {
+      lockReleasing.resolve();
+    }
 
-    if (name === "api.sock" && !existsSync(socketPath)) socketRemoved.resolve();
+    if (name === "api.sock" && !existsSync(socketPath)) {
+      socketRemoved.resolve();
+    }
   });
 
   const lockProgram = `
@@ -1174,8 +1210,10 @@ test("startup abort cancels a published SSE stream and awaits reader settlement"
     listen: { unix: socketPath },
     signal: shutdown.signal,
     fleet: async (input) => {
-      if (input.headers.get("Authorization") !== "Bearer operator")
+      if (input.headers.get("Authorization") !== "Bearer operator") {
         return new Response(null, { status: 401 });
+      }
+
       entered.resolve(input.signal);
 
       return new Response(
@@ -1225,7 +1263,9 @@ test("startup abort cancels a published SSE stream and awaits reader settlement"
       "GET /api/v1/events HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer operator\r\n\r\n",
     );
     client.socket.on("data", (text: string) => {
-      if (text.includes("event: heartbeat")) firstFrame.resolve();
+      if (text.includes("event: heartbeat")) {
+        firstFrame.resolve();
+      }
     });
     const requestSignal = await entered.promise;
     await firstFrame.promise;
@@ -1253,7 +1293,10 @@ test("startup abort cancels a published SSE stream and awaits reader settlement"
     await writeFile(releasePath, "");
     const result = await outcome;
 
-    if ("server" in result) await result.server.stop();
+    if ("server" in result) {
+      await result.server.stop();
+    }
+
     await client?.closed;
     watcher.close();
     setDefaultLockCommandForTests(flockCommand);
@@ -1292,8 +1335,12 @@ test("private helper preserves occupied paths, group defaults and foreign socket
     await chmod(directory, 0o700);
 
     for (const kind of ["file", "symlink"] as const) {
-      if (kind === "file") await writeFile(path, "keep");
-      else await symlink("missing", path);
+      if (kind === "file") {
+        await writeFile(path, "keep");
+      } else {
+        await symlink("missing", path);
+      }
+
       await expect(
         listenOnUnixSocket(createServer(), path, { mode: 0o600 }),
       ).rejects.toThrow();
@@ -1317,8 +1364,10 @@ test("private helper preserves occupied paths, group defaults and foreign socket
     await new Promise<void>((resolve) => live.close(() => resolve()));
     unlinkOwnSocket(path, identity);
   } finally {
-    if (live.listening)
+    if (live.listening) {
       await new Promise<void>((resolve) => live.close(() => resolve()));
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -1333,7 +1382,9 @@ test("a stale owned socket is replaced with a born-private socket", async () => 
   current.once("listening", () => {
     const path = current.address();
 
-    if (typeof path === "string") bornMode = lstatSync(path).mode & 0o777;
+    if (typeof path === "string") {
+      bornMode = lstatSync(path).mode & 0o777;
+    }
   });
 
   try {
@@ -1348,9 +1399,12 @@ test("a stale owned socket is replaced with a born-private socket", async () => 
     unlinkOwnSocket(path, identity);
     await expect(lstat(path)).rejects.toThrow();
   } finally {
-    for (const server of [old, current])
-      if (server.listening)
+    for (const server of [old, current]) {
+      if (server.listening) {
         await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });

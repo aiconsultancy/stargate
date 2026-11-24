@@ -30,7 +30,9 @@ export function notificationQueries(dataDirectory: string, key: () => string) {
           },
         );
 
-        if (result.op !== "list") throw new Error("Expected mute list");
+        if (result.op !== "list") {
+          throw new Error("Expected mute list");
+        }
 
         return result;
       }),

@@ -33,7 +33,10 @@ import {
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
+
   await removeDirectories();
 });
 
@@ -68,11 +71,12 @@ async function officers(
   const sockets = await privateDirectory("sg-");
   const socketOf = new Map<string, string>();
 
-  for (const name of names)
+  for (const name of names) {
     socketOf.set(
       name,
       join(await childDirectory(sockets, name, 0o700), "a.sock"),
     );
+  }
 
   const config = section(
     stub.url,
@@ -142,8 +146,10 @@ test("proxy: each officer's socket signs as that officer, whatever the caller se
     "forwarded",
     "origin",
     "proxy-authorization",
-  ])
+  ]) {
     expect(first.headers[header]).toBeUndefined();
+  }
+
   expect(first.headers["x-correlation-id"]).toBe("correlation-1");
   expect(first.headers["accept"]).toBe("application/json");
 
@@ -191,8 +197,9 @@ test("proxy: only /api/v1/ paths and the usual methods reach the one configured 
     ["//evil.example/api/v1/me", undefined],
     ["http://evil.example/api/v1/me", undefined],
     ["/api/v1/me#fragment", undefined],
-  ] as const)
+  ] as const) {
     expect(apiPath(target)).toBe(expected);
+  }
 
   const { stub, socket } = await officers(["captain-a"]);
 
@@ -212,10 +219,12 @@ test("proxy: only /api/v1/ paths and the usual methods reach the one configured 
     });
   }
 
-  for (const method of ["OPTIONS", "TRACE"])
+  for (const method of ["OPTIONS", "TRACE"]) {
     expect(
       (await overSocket(socket("captain-a"), method, "/api/v1/me")).status,
     ).toBe(405);
+  }
+
   expect(forwarded(stub)).toEqual([]);
 });
 
@@ -273,7 +282,9 @@ test("proxy: an API that is down, slow or refusing gives a clear error and the p
   let mode: "slow" | "refuse" | "ok" = "slow";
 
   const { stub, socket, lines } = await officers(["captain-a"], async () => {
-    if (mode === "slow") await Bun.sleep(3000);
+    if (mode === "slow") {
+      await Bun.sleep(3000);
+    }
 
     return mode === "refuse"
       ? Response.json(
@@ -423,15 +434,18 @@ test("socket: 0660 in a directory the gateway owns, removed on close", async () 
 /** A stand-in for the API's MCP endpoint: JSON answers, 202 for notifications. */
 function mcpApi(stream = false): Handler {
   return (request) => {
-    if (request.path !== "/mcp")
+    if (request.path !== "/mcp") {
       return Response.json({ title: "Not found" }, { status: 404 });
+    }
 
     const message = JSON.parse(request.body) as {
       id?: number;
       method: string;
     };
 
-    if (message.id === undefined) return new Response(null, { status: 202 });
+    if (message.id === undefined) {
+      return new Response(null, { status: 202 });
+    }
 
     const result =
       message.method === "initialize"
@@ -472,10 +486,12 @@ async function bridge(socketPath: string, messages: unknown[]) {
     },
   });
 
-  for (const message of messages)
+  for (const message of messages) {
     input.write(
       `${typeof message === "string" ? message : JSON.stringify(message)}\n`,
     );
+  }
+
   input.end();
   await running;
 
@@ -545,11 +561,12 @@ test("bridge: an MCP exchange round-trips over stdio and the officer's socket", 
 
   const key = await keyOf("captain-a");
 
-  for (const request of requests)
+  for (const request of requests) {
     expect(
       (await verifyAgentToken(bearer(request), key.certificate, stub.url))
         .payload.sub,
     ).toBe(key.fingerprint);
+  }
 });
 
 test("bridge: streamed answers become one line per event", async () => {

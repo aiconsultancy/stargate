@@ -50,7 +50,9 @@ function until(...args: Parameters<typeof pollUntil>) {
 afterEach(async () => {
   polling.abort();
 
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const captainAccount = "galactica-captain";
@@ -137,8 +139,10 @@ async function world(
 
   cleanup.push(() => fake.stop());
 
-  if (options.captainInvited !== false)
+  if (options.captainInvited !== false) {
     fake.invited.add(`${captainAccount}:#agent-dms`);
+  }
+
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-audit-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const store = openStore(join(directory, "stargate.sqlite"));
@@ -235,7 +239,10 @@ async function setup(
   let closed = false;
 
   const close = async () => {
-    if (closed) return;
+    if (closed) {
+      return;
+    }
+
     closed = true;
     controller.abort();
     await Promise.all(workers);
@@ -245,7 +252,9 @@ async function setup(
   cleanup.push(close);
   const [captain, chief] = ship.registrations;
 
-  if (!captain || !chief) throw new Error("missing registration");
+  if (!captain || !chief) {
+    throw new Error("missing registration");
+  }
 
   const joined = () => ({
     captainShip: captain.client.inChannel("#ship-galactica"),
@@ -290,13 +299,16 @@ function mirror(fake: FakeIrcServer) {
   for (const raw of fake.received(captainAccount)) {
     const message = parseMessage(raw);
 
-    if (!message) continue;
+    if (!message) {
+      continue;
+    }
+
     const [first = "", second = "", third = ""] = message.params;
 
     if (message.command === "BATCH") {
-      if (first.startsWith("+") && third === "#agent-dms")
+      if (first.startsWith("+") && third === "#agent-dms") {
         open.set(first.slice(1), []);
-      else if (first.startsWith("-") && open.has(first.slice(1))) {
+      } else if (first.startsWith("-") && open.has(first.slice(1))) {
         entries.push((open.get(first.slice(1)) ?? []).join(""));
         open.delete(first.slice(1));
       }
@@ -304,17 +316,22 @@ function mirror(fake: FakeIrcServer) {
       continue;
     }
 
-    if (message.command !== "PRIVMSG" || first !== "#agent-dms") continue;
+    if (message.command !== "PRIVMSG" || first !== "#agent-dms") {
+      continue;
+    }
+
     const batch = message.tags.get("batch");
     const lines = batch === undefined ? undefined : open.get(batch);
 
-    if (lines)
+    if (lines) {
       lines.push(
         lines.length && !message.tags.has("draft/multiline-concat")
           ? `\n${second}`
           : second,
       );
-    else entries.push(second);
+    } else {
+      entries.push(second);
+    }
   }
 
   return entries;
@@ -366,7 +383,7 @@ test("irc audit: line format for incoming and outgoing DMs", () => {
   );
 
   // Services, ZNC-style modules and CTCP other than ACTION are skipped.
-  for (const nick of ["NickServ", "chanserv", "HostServ", "*status"])
+  for (const nick of ["NickServ", "chanserv", "HostServ", "*status"]) {
     expect(
       auditLine({
         ...base,
@@ -375,6 +392,8 @@ test("irc audit: line format for incoming and outgoing DMs", () => {
         text: "This nickname is registered",
       }),
     ).toBeUndefined();
+  }
+
   expect(
     auditLine({
       ...base,
@@ -384,7 +403,7 @@ test("irc audit: line format for incoming and outgoing DMs", () => {
     }),
   ).toBe("[dm] * jack waves (→ galactica-captain)");
 
-  for (const text of ["\u0001VERSION\u0001", "\u0001PING 123\u0001"])
+  for (const text of ["\u0001VERSION\u0001", "\u0001PING 123\u0001"]) {
     expect(
       auditLine({
         ...base,
@@ -393,6 +412,7 @@ test("irc audit: line format for incoming and outgoing DMs", () => {
         text,
       }),
     ).toBeUndefined();
+  }
 
   // Credential-like text is withheld, never partly redacted.
   for (const text of [
@@ -400,7 +420,7 @@ test("irc audit: line format for incoming and outgoing DMs", () => {
     "SET PASSWORD correct-horse",
     "token: synthetic-test-token",
     "password=hunter2",
-  ])
+  ]) {
     expect(
       auditLine({
         ...base,
@@ -409,6 +429,7 @@ test("irc audit: line format for incoming and outgoing DMs", () => {
         text,
       }),
     ).toBe(`[dm] jack → galactica-captain: ${withheld}`);
+  }
 });
 
 test("irc audit: any line of a multiline DM can withhold the whole entry", () => {
@@ -429,8 +450,10 @@ test("irc audit: any line of a multiline DM can withhold the whole entry", () =>
     "a\n/cs register #agent-dms",
     "line one\nset password new-one",
     "first\nsecond\nthird password=x",
-  ])
+  ]) {
     expect(entry(text)).toBe(`[dm] jack → galactica-captain: ${withheld}`);
+  }
+
   // Outgoing batches use the same rule.
   expect(
     auditLine({
@@ -548,8 +571,9 @@ test("irc audit: services, credentials and CTCP other than ACTION are not mirror
     .filter((line) => line.includes("#agent-dms"))
     .join("\n");
 
-  for (const secret of ["s3cret", "hunter2", "xoxb", "NickServ", "VERSION"])
+  for (const secret of ["s3cret", "hunter2", "xoxb", "NickServ", "VERSION"]) {
     expect(audit).not.toContain(secret);
+  }
 });
 
 test("irc audit: the audit channel is never a conversation and never loops", async () => {
@@ -630,8 +654,9 @@ test("irc audit: long entries split into whole IRC lines without multiline", asy
   );
   expect(lines.join(" ")).toBe(`[dm] jack → galactica-captain: ${long}`);
 
-  for (const line of plain.fake.received(captainAccount))
+  for (const line of plain.fake.received(captainAccount)) {
     expect(utf8Bytes(line) + 2).toBeLessThanOrEqual(512);
+  }
 }, 30_000); // One fresh open (10 s), join (5 s), reply (5 s), margin (10 s).
 
 test("irc audit: a failed or full mirror never blocks the DM reply", async () => {
@@ -672,8 +697,10 @@ test("irc audit: a failed or full mirror never blocks the DM reply", async () =>
     answer: (text) => `Re: ${text}`,
   });
 
-  for (const text of ["one", "two", "three"])
+  for (const text of ["one", "two", "three"]) {
     full.fake.say(jack, captainAccount, text);
+  }
+
   await until(
     () => full.store.queueCounts(full.captain.key).done === 3,
     5000,
@@ -698,8 +725,9 @@ test("irc audit: a failed or full mirror never blocks the DM reply", async () =>
     full.logs.some((line) => line.includes("IRC DM audit lines not posted")),
   ).toBe(true);
 
-  for (const text of ["Re: one", '"one"', "three"])
+  for (const text of ["Re: one", '"one"', "three"]) {
     expect(full.logs.join("\n")).not.toContain(text);
+  }
 });
 
 test("irc audit: crew never join the audit channel; config keeps it apart", async () => {
@@ -964,15 +992,23 @@ test("irc audit: names any runtime casemapping joins are refused by config", () 
   const leaks: string[] = [];
   let equalPairs = 0;
 
-  for (const audit of names)
+  for (const audit of names) {
     for (const ship of names) {
-      if (audit === ship) continue;
+      if (audit === ship) {
+        continue;
+      }
 
-      if (!mappings.some((m) => fold(audit, m) === fold(ship, m))) continue;
+      if (!mappings.some((m) => fold(audit, m) === fold(ship, m))) {
+        continue;
+      }
+
       equalPairs++;
 
-      if (accepted(audit, ship)) leaks.push(`${audit} / ${ship}`);
+      if (accepted(audit, ship)) {
+        leaks.push(`${audit} / ${ship}`);
+      }
     }
+  }
 
   expect(equalPairs).toBeGreaterThan(100);
   expect(leaks).toEqual([]);
@@ -1009,7 +1045,9 @@ test("irc send queue: a send that times out before its write is never written", 
 
   // Unlabeled JOINs hold the throttle; the labeled sends behind them
   // Time out while still queued.
-  for (let i = 0; i < 4; i++) client.join("#ship-galactica");
+  for (let i = 0; i < 4; i++) {
+    client.join("#ship-galactica");
+  }
 
   const outcomes = await Promise.allSettled([
     client.privmsg("jack", "normal lane"),
@@ -1021,9 +1059,12 @@ test("irc send queue: a send that times out before its write is never written", 
     "rejected",
   ]);
 
-  for (const outcome of outcomes)
-    if (outcome.status === "rejected")
+  for (const outcome of outcomes) {
+    if (outcome.status === "rejected") {
       expect(String(outcome.reason)).toContain("expired");
+    }
+  }
+
   await delay(1600);
   const sent = fake.received(captainAccount).join("\n");
   expect(sent).not.toContain("normal lane");
@@ -1039,7 +1080,10 @@ test("irc audit: an entry that expires in the send queue counts as dropped", asy
   await delay(400);
 
   // Rejoining the audit channel queues a line and nothing else.
-  for (let i = 0; i < 6; i++) captain.client.join("#agent-dms");
+  for (let i = 0; i < 6; i++) {
+    captain.client.join("#agent-dms");
+  }
+
   fake.say(jack, captainAccount, "during the backlog");
   await until(
     () => logs.some((line) => line.includes("IRC DM audit lines dropped")),
@@ -1082,8 +1126,10 @@ test("irc audit: dmPolicy redirect points every DM to the ship channel", async (
   await mirrored(fake, "[dm] bob → galactica-captain: hi");
 
   // Without an account there is no answer: rotating nicks cannot flood.
-  for (const nick of ["ghost1", "ghost2", "ghost3"])
+  for (const nick of ["ghost1", "ghost2", "ghost3"]) {
     fake.say({ nick }, captainAccount, "hi?");
+  }
+
   await mirrored(fake, "[dm] ghost3 (no account) → galactica-captain: hi?");
   await delay(200);
   expect(
@@ -1152,8 +1198,10 @@ test("irc audit: CTCP wrappers never hide a credential or services command", () 
     "fine\n\u0001VERSION identify secret",
     "note\n\u0001PING /msg NickServ identify secret\u0001",
     "a\n\u0001\u0001ACTION ghost galactica-captain pw\u0001",
-  ])
+  ]) {
     expect(entry(text)).toBe(hidden);
+  }
+
   // A harmless ACTION stays visible; "identify" in prose is not a command.
   expect(entry("\u0001ACTION waves\u0001")).toBe(
     "[dm] * jack waves (→ galactica-captain)",
@@ -1249,13 +1297,22 @@ test("private operator controls stay out of the model and audit, including repla
     fields: [{ key: "q0", type: "string" }],
   });
 
-  if (!q) throw new Error("Missing case");
+  if (!q) {
+    throw new Error("Missing case");
+  }
+
   const token = store.backgroundCases.show(q.reference);
 
-  if (!token) throw new Error("Missing token");
+  if (!token) {
+    throw new Error("Missing token");
+  }
+
   const route = captain.transport.questions?.operator;
 
-  if (!route) throw new Error("Missing configured route");
+  if (!route) {
+    throw new Error("Missing configured route");
+  }
+
   fake.setUser("operator", "operator");
   await route.send("private outgoing form", () => true);
   await until(
@@ -1268,7 +1325,9 @@ test("private operator controls stay out of the model and audit, including repla
   );
   const seen: string[] = [];
   captain.operatorQuestion = async (actor, text, connected) => {
-    if (connected()) seen.push(actor + " " + text);
+    if (connected()) {
+      seen.push(actor + " " + text);
+    }
   };
 
   const op = { nick: "operator", account: "operator" };
@@ -1319,6 +1378,7 @@ test("private clarification configuration requires an admitted human and a pinne
     { access: { deniedAccounts: ["operator"] } },
     { access: { deniedChannels: ["*"] } },
     { backend: { ...backend, sessionID: undefined } },
-  ])
+  ]) {
     expect(Result.isFailure(decode({ ...config, ...change }))).toBe(true);
+  }
 });

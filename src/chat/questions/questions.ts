@@ -195,16 +195,19 @@ export class Questions {
       !(this.port()?.authorized?.(job) ?? this.allowed(job)) ||
       (this.backend.sessionID ?? this.store.session(job.conversation)) !==
         offer.sessionID
-    )
+    ) {
       return;
+    }
 
     return job;
   }
 
   /** Preserve established native waiters only; this grants no reply authority. */
   private establishedWaiter(offer: QuestionOffer): Job | undefined {
-    if (!offer.recovering && offer.state !== "attempted" && !offer.outcome)
+    if (!offer.recovering && offer.state !== "attempted" && !offer.outcome) {
       return;
+    }
+
     const job = this.store.jobByInput(this.key, offer.inputID);
 
     if (
@@ -217,8 +220,9 @@ export class Questions {
       !this.store.questions.recordedQuestionSource(job) ||
       (this.backend.sessionID ?? this.store.session(job.conversation)) !==
         offer.sessionID
-    )
+    ) {
       return;
+    }
 
     return job;
   }
@@ -239,7 +243,9 @@ export class Questions {
 
       const job = this.owner(offer);
 
-      if (job?.status !== "running" || offer.state === "closed") continue;
+      if (job?.status !== "running" || offer.state === "closed") {
+        continue;
+      }
 
       if (
         await this.backend.questionBelongsToInput?.(
@@ -264,7 +270,10 @@ export class Questions {
       .questionOffers(this.key)
       .find((o) => o.jobID === jobID && o.recovering !== 0);
 
-    if (!offer || !this.backend.interruptInput) return false;
+    if (!offer || !this.backend.interruptInput) {
+      return false;
+    }
+
     const job = this.establishedWaiter(offer);
     const port = this.port();
 
@@ -273,11 +282,16 @@ export class Questions {
       !this.store.questions.questionSourceCancelled(offer) ||
       !port?.human(job.user) ||
       !(port.authorized?.(job) ?? this.allowed(job))
-    )
+    ) {
       return false;
+    }
+
     signal.throwIfAborted();
 
-    if (!this.store.questions.claimQuestionStop(offer)) return false;
+    if (!this.store.questions.claimQuestionStop(offer)) {
+      return false;
+    }
+
     // The adapter revalidates exact input ownership. Never fall back to a
     // Whole-session interruption, and never replay an uncertain Stop on boot.
     await this.backend.interruptInput(offer.sessionID, offer.inputID, signal);
@@ -297,26 +311,35 @@ export class Questions {
       !route ||
       !this.backend.pinnedBackgroundQuestions ||
       Date.now() < this.nextBackgroundPoll
-    )
+    ) {
       return;
+    }
+
     this.nextBackgroundPoll = Date.now() + 10_000;
     const pending = await this.backend.pinnedBackgroundQuestions(signal);
 
     for (const row of this.store.backgroundCases.unsettled(this.key)) {
       this.store.backgroundCases.checked(row.reference);
 
-      if (pending.some((q) => q.id === row.form && q.sessionID === row.session))
+      if (
+        pending.some((q) => q.id === row.form && q.sessionID === row.session)
+      ) {
         continue;
+      }
 
       const outcome = await this.backend
         .backgroundOutcome?.(row.session, row.form, row.fingerprint, signal)
         .catch(() => {});
 
-      if (outcome) this.store.backgroundCases.close(row.reference, outcome);
+      if (outcome) {
+        this.store.backgroundCases.close(row.reference, outcome);
+      }
     }
 
     for (const q of pending) {
-      if (this.store.jobByInput(this.key, q.inputID)) continue;
+      if (this.store.jobByInput(this.key, q.inputID)) {
+        continue;
+      }
 
       const found = this.store.backgroundCases.remember(
         this.key,
@@ -330,8 +353,9 @@ export class Questions {
         found.fingerprint !== q.fingerprint ||
         found.state !== "new" ||
         !route.ready()
-      )
+      ) {
         continue;
+      }
 
       const allowed = () =>
         !signal.aborted && this.port()?.operator === route && route.ready();
@@ -341,7 +365,9 @@ export class Questions {
         allowed,
       );
 
-      if (allowed()) this.store.backgroundCases.alerted(found.reference);
+      if (allowed()) {
+        this.store.backgroundCases.alerted(found.reference);
+      }
     }
   }
 
@@ -354,10 +380,16 @@ export class Questions {
     const control = operatorControl(text);
     const route = this.port()?.operator;
 
-    if (!control || !route || actor !== route.account || !route.ready()) return;
+    if (!control || !route || actor !== route.account || !route.ready()) {
+      return;
+    }
+
     const key = control[2]?.toLowerCase() ?? "";
 
-    if (this.inFlight.has(key)) return;
+    if (this.inFlight.has(key)) {
+      return;
+    }
+
     this.inFlight.add(key);
 
     try {
@@ -383,7 +415,7 @@ export class Questions {
       found.owner !== actor ||
       found.session !== this.backend.sessionID
     ) {
-      if (connected() && !this.lifetime.aborted)
+      if (connected() && !this.lifetime.aborted) {
         await route.send(
           "No current question matches that reference.",
           () =>
@@ -392,6 +424,7 @@ export class Questions {
             this.port()?.operator === route &&
             route.ready(),
         );
+      }
 
       return;
     }
@@ -411,7 +444,9 @@ export class Questions {
         v.fingerprint === found.fingerprint,
     );
 
-    if (!allowed()) return;
+    if (!allowed()) {
+      return;
+    }
 
     if (
       !q ||
@@ -433,8 +468,10 @@ export class Questions {
       if (token) {
         const lines = questionFields(q);
 
-        if (q.fields.some((field) => field.type === "multiselect"))
+        if (q.fields.some((field) => field.type === "multiselect")) {
           lines.push("Use comma-separated numbers for multiple choices.");
+        }
+
         lines.push(
           `Send answer ${token} <choice or answer> here within 30 minutes.`,
         );
@@ -463,7 +500,9 @@ export class Questions {
       return;
     }
 
-    if (!this.backend.replyQuestion || !allowed()) return;
+    if (!this.backend.replyQuestion || !allowed()) {
+      return;
+    }
 
     if (found.expires <= Date.now()) {
       await route.send(
@@ -487,11 +526,12 @@ export class Questions {
       });
     } catch {
       if (!claimed) {
-        if (allowed())
+        if (allowed()) {
           await route.send(
             "The answer was not submitted. Show the current question before answering.",
             allowed,
           );
+        }
 
         return;
       }
@@ -540,8 +580,11 @@ export class Questions {
     const offers = this.store.questions.questionOffers(this.key);
     const tokens = new Set(offers.map((o) => o.token));
 
-    for (const token of this.noticeFailures.keys())
-      if (!tokens.has(token)) this.noticeFailures.delete(token);
+    for (const token of this.noticeFailures.keys()) {
+      if (!tokens.has(token)) {
+        this.noticeFailures.delete(token);
+      }
+    }
 
     const sessions = [
       ...new Set([
@@ -553,13 +596,21 @@ export class Questions {
       ]),
     ].toSorted();
 
-    for (const session of this.failures.keys())
-      if (!sessions.includes(session)) this.failures.delete(session);
+    for (const session of this.failures.keys()) {
+      if (!sessions.includes(session)) {
+        this.failures.delete(session);
+      }
+    }
 
-    for (const session of this.missing.keys())
-      if (!sessions.includes(session)) this.missing.delete(session);
+    for (const session of this.missing.keys()) {
+      if (!sessions.includes(session)) {
+        this.missing.delete(session);
+      }
+    }
 
-    if (sessions.length === 0) return;
+    if (sessions.length === 0) {
+      return;
+    }
 
     const selected = Array.from(
       { length: Math.min(16, sessions.length) },
@@ -576,8 +627,9 @@ export class Questions {
       if (
         (this.missing.get(session) ?? 0) > Date.now() ||
         (this.failures.get(session)?.until ?? 0) > Date.now()
-      )
+      ) {
         continue;
+      }
 
       try {
         await this.pollSession(session, signal);
@@ -593,13 +645,21 @@ export class Questions {
       }
     }
 
-    for (const session of this.failures.keys())
-      if (!sessions.includes(session)) this.failures.delete(session);
+    for (const session of this.failures.keys()) {
+      if (!sessions.includes(session)) {
+        this.failures.delete(session);
+      }
+    }
 
-    for (const session of this.missing.keys())
-      if (!sessions.includes(session)) this.missing.delete(session);
+    for (const session of this.missing.keys()) {
+      if (!sessions.includes(session)) {
+        this.missing.delete(session);
+      }
+    }
 
-    if (failed) throw new Error("Native clarification session unavailable");
+    if (failed) {
+      throw new Error("Native clarification session unavailable");
+    }
   }
 
   private async pollSession(session: string, signal: AbortSignal) {
@@ -610,8 +670,10 @@ export class Questions {
       .filter((o) => o.sessionID === session)) {
       if (this.store.questions.questionSourceCancelled(offer)) {
         if (!this.inFlight.has(offer.token)) {
-          if (offer.state === "attempted" && !offer.outcome)
+          if (offer.state === "attempted" && !offer.outcome) {
             this.store.questions.questionOutcome(offer.token, "uncertain");
+          }
+
           this.store.questions.questionOutcomeNotified(offer.token);
           this.store.questions.retireQuestion(offer.token);
         }
@@ -623,8 +685,10 @@ export class Questions {
         offer.state === "attempted" &&
         !offer.outcome &&
         !this.inFlight.has(offer.token)
-      )
+      ) {
         this.store.questions.questionOutcome(offer.token, "uncertain");
+      }
+
       await this.notifyOutcome(
         this.store.questions.questionByToken(this.key, offer.token) ?? offer,
       );
@@ -641,8 +705,10 @@ export class Questions {
             o.sessionID === session &&
             (o.state !== "closed" || o.recovering !== 0),
         )
-    )
+    ) {
       return;
+    }
+
     const settings = await this.port()?.settings?.();
 
     // Disabling controls revokes publication and writes, not settlement reads.
@@ -652,8 +718,9 @@ export class Questions {
         ? []
         : ((await this.backend.pendingQuestions?.(session, signal)) ?? []);
 
-    if (pending.length > 16)
+    if (pending.length > 16) {
       throw new Error("Too many native clarification questions");
+    }
 
     for (const raw of pending) {
       const question =
@@ -661,7 +728,10 @@ export class Questions {
           ? raw
           : Schema.decodeUnknownSync(nativeQuestionSchema)(raw);
 
-      if (question.sessionID !== session) continue;
+      if (question.sessionID !== session) {
+        continue;
+      }
+
       const job = this.store.jobByInput(this.key, question.inputID);
 
       if (
@@ -671,8 +741,9 @@ export class Questions {
           inputID: question.inputID,
           sessionID: session,
         })
-      )
+      ) {
         continue;
+      }
 
       const offer = this.store.offerQuestion({
         token: randomBytes(16).toString("hex"),
@@ -703,8 +774,9 @@ export class Questions {
         offer?.state !== "offered" ||
         offer.notified ||
         ((offer.publicationStarted ?? 0) !== 0 && offer.expires <= Date.now())
-      )
+      ) {
         continue;
+      }
 
       if (
         !(await this.backend.questionBelongsToInput?.(
@@ -714,15 +786,19 @@ export class Questions {
           question.fingerprint,
           signal,
         ))
-      )
+      ) {
         continue;
+      }
+
       await this.publishOffer(job, offer, question, signal);
     }
 
     for (const offer of this.store.questions
       .questionOffers(this.key)
       .filter((o) => o.sessionID === session)) {
-      if (pending.some((q) => q.id === offer.formID)) continue;
+      if (pending.some((q) => q.id === offer.formID)) {
+        continue;
+      }
 
       // A filtered list is not proof of absence. Only the native form API can
       // Authoritatively report settlement; transient/unsupported forms stay live.
@@ -732,18 +808,26 @@ export class Questions {
         signal,
       );
 
-      if (state !== "resolved" && state !== "missing-session") continue;
+      if (state !== "resolved" && state !== "missing-session") {
+        continue;
+      }
 
       // The form may settle before its reply request returns. Keep the durable
       // Attempt writable until that request records its success/uncertainty.
       // Check after the awaited state read: an answer may start during it.
-      if (this.inFlight.has(offer.token)) continue;
+      if (this.inFlight.has(offer.token)) {
+        continue;
+      }
+
       this.store.questions.closeQuestion(offer.token);
 
       if (state === "missing-session") {
         missingSession = true;
 
-        if (offer.recovering) this.store.failQuestionRecovery(offer);
+        if (offer.recovering) {
+          this.store.failQuestionRecovery(offer);
+        }
+
         continue;
       }
 
@@ -769,8 +853,9 @@ export class Questions {
       !this.store.questions
         .questionOffers(this.key)
         .some((o) => o.sessionID === session)
-    )
+    ) {
       this.missing.set(session, Date.now() + 60_000);
+    }
   }
 
   private async publishOffer(
@@ -791,8 +876,10 @@ export class Questions {
       ((current.publicationStarted ?? 0) !== 0 &&
         current.expires <= Date.now()) ||
       port.ready?.(job) === false
-    )
+    ) {
       return;
+    }
+
     this.offering.add(offer.token);
 
     try {
@@ -800,14 +887,19 @@ export class Questions {
       // Persist before sending: an ACK loss must not silently renew a seen token.
       const settings = await port.settings?.();
 
-      if (settings && !settings.enabled) return;
+      if (settings && !settings.enabled) {
+        return;
+      }
+
       current = this.store.questions.startQuestionPublication(
         this.key,
         offer.token,
         settings?.timeoutMs,
       );
 
-      if (!current) return;
+      if (!current) {
+        return;
+      }
 
       if (port.publishQuestion && !("unsupported" in question)) {
         await port.publishQuestion(
@@ -816,7 +908,7 @@ export class Questions {
           question,
           () => !signal.aborted && !!this.owner(offer),
         );
-      } else
+      } else {
         await port.publish(
           job,
           "unsupported" in question
@@ -824,6 +916,8 @@ export class Questions {
             : prefix + questionText(question, port.account, offer.token),
           () => !signal.aborted && !!this.owner(offer),
         );
+      }
+
       this.store.questions.questionNotified(offer.token);
     } finally {
       this.offering.delete(offer.token);
@@ -844,8 +938,10 @@ export class Questions {
         offer.fingerprint,
         signal,
       ))
-    )
+    ) {
       return;
+    }
+
     const settings = await this.port()?.settings?.();
     signal.throwIfAborted();
 
@@ -853,8 +949,10 @@ export class Questions {
       (settings && !settings.enabled) ||
       !this.owner(offer) ||
       !this.store.questions.claimExpiredQuestion(offer.token, Date.now())
-    )
+    ) {
       return;
+    }
+
     this.inFlight.add(offer.token);
 
     try {
@@ -882,8 +980,10 @@ export class Questions {
       offer.outcomeNotified ||
       this.lifetime.aborted ||
       this.notifying.has(offer.token)
-    )
+    ) {
       return;
+    }
+
     const job = this.owner(offer);
     const port = this.port();
 
@@ -893,8 +993,9 @@ export class Questions {
       this.store.questions.questionOutcomeNotified(offer.token);
       this.noticeFailures.delete(offer.token);
 
-      if (!this.inFlight.has(offer.token))
+      if (!this.inFlight.has(offer.token)) {
         this.store.questions.retireQuestion(offer.token);
+      }
 
       return;
     }
@@ -902,8 +1003,10 @@ export class Questions {
     if (
       port.ready?.(job) === false ||
       (this.noticeFailures.get(offer.token)?.until ?? 0) > Date.now()
-    )
+    ) {
       return;
+    }
+
     this.notifying.add(offer.token);
 
     try {
@@ -940,15 +1043,20 @@ export class Questions {
   ) {
     const settings = await this.port()?.settings?.();
 
-    if (settings && !settings.enabled) return;
+    if (settings && !settings.enabled) {
+      return;
+    }
+
     const offer = this.store.questions.questionByToken(this.key, control.token);
 
     if (
       control.invalid ||
       offer?.state !== "offered" ||
       (!control.renew && offer.expires <= Date.now())
-    )
+    ) {
       return;
+    }
+
     const job = this.owner(offer);
 
     if (
@@ -968,8 +1076,9 @@ export class Questions {
       input.channel !== job.channel ||
       (input.replyParent ?? input.thread) !== (job.replyParent ?? job.thread) ||
       !this.port()?.human(input.user)
-    )
+    ) {
       return;
+    }
 
     const question = (
       await this.backend.pendingQuestions?.(offer.sessionID, signal)
@@ -991,14 +1100,21 @@ export class Questions {
         offer.fingerprint,
         signal,
       ))
-    )
+    ) {
       return;
+    }
 
     if (control.renew) {
-      if (offer.expires > Date.now()) return;
+      if (offer.expires > Date.now()) {
+        return;
+      }
+
       const port = this.port();
 
-      if (!port || !this.owner(offer)) return;
+      if (!port || !this.owner(offer)) {
+        return;
+      }
+
       signal.throwIfAborted();
 
       const fresh = this.store.questions.renewQuestion(
@@ -1007,7 +1123,10 @@ export class Questions {
         Date.now(),
       );
 
-      if (!fresh) return;
+      if (!fresh) {
+        return;
+      }
+
       await this.publishOffer(
         job,
         fresh,
@@ -1053,13 +1172,17 @@ export class Questions {
       !actorAllowed ||
       !this.owner(offer) ||
       !this.store.questions.attemptQuestion(offer.token, Date.now())
-    )
+    ) {
       return;
+    }
+
     this.inFlight.add(offer.token);
 
     try {
-      if (!this.backend.replyQuestion)
+      if (!this.backend.replyQuestion) {
         throw new Error("Question reply unavailable");
+      }
+
       await this.backend.replyQuestion(question, answer, signal);
       this.store.questions.questionOutcome(
         offer.token,

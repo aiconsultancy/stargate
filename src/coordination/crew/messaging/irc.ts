@@ -106,7 +106,9 @@ export class IrcSessions {
         .get()?.seq ??
       0;
 
-    if (input.after === undefined) return { items: [], latest };
+    if (input.after === undefined) {
+      return { items: [], latest };
+    }
 
     const items = this.db
       .query<

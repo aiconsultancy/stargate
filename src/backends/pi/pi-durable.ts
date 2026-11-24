@@ -98,22 +98,25 @@ const proxyFetch = (conversation: string | undefined) =>
           if (response.ok) {
             calls.accepted++;
             delete calls.failure;
-          } else
+          } else {
             calls.failure = {
               kind: statusKind(response.status),
               status: response.status,
             };
+          }
         }
 
         return response;
       } catch (error) {
-        if (calls && !init?.signal?.aborted)
+        if (calls && !init?.signal?.aborted) {
           calls.failure = {
             kind:
               error instanceof Error && error.name === "TimeoutError"
                 ? "timeout"
                 : "network",
           };
+        }
+
         throw error;
       }
     },
@@ -139,11 +142,15 @@ function proxyProvider(config: PiModelSettings) {
   // When another explicit proxy model is needed, never infer a native route.
   const proxy = config.provider;
 
-  if (!proxy || !piProxyModels.includes(config.model))
+  if (!proxy || !piProxyModels.includes(config.model)) {
     throw new Error(`Pi proxy requires model ${piProxyModels.join(" or ")}`);
+  }
+
   secret(proxy.apiKeyEnv);
 
-  if (config.model === piClaudeProxyModel) return claudeProxyProvider(proxy);
+  if (config.model === piClaudeProxyModel) {
+    return claudeProxyProvider(proxy);
+  }
 
   // Reuse the pinned SDK's Go catalog: tools, reasoning and input limits stay
   // Aligned with its wire implementation. Never register native providers here.
@@ -151,13 +158,16 @@ function proxyProvider(config: PiModelSettings) {
     .getModels()
     .find((model) => model.id === "deepseek-v4.1-flash");
 
-  if (!source || !hasApi(source, "openai-completions"))
+  if (!source || !hasApi(source, "openai-completions")) {
     throw new Error("Pi SDK has no DeepSeek V4.1 Flash chat model");
+  }
+
   const api = openAICompletionsApi();
 
   const requestOptions = (options: Parameters<typeof api.streamSimple>[2]) => {
-    if (!options?.sessionId)
+    if (!options?.sessionId) {
       throw new Error("Pi proxy request requires a conversation identity");
+    }
 
     return {
       ...options,
@@ -199,8 +209,10 @@ function proxyProvider(config: PiModelSettings) {
 function claudeProxyProvider(proxy: PiProxy) {
   // Same `/v1` endpoint as OpenCode's claude-proxy; the Anthropic SDK appends
   // `/v1/messages` to its root itself.
-  if (!proxy.baseURL.endsWith("/v1"))
+  if (!proxy.baseURL.endsWith("/v1")) {
     throw new Error("Pi Claude proxy baseURL must end with /v1");
+  }
+
   const baseUrl = proxy.baseURL.slice(0, -"/v1".length);
   const id = piClaudeProxyModel.slice("anthropic/".length);
 
@@ -208,8 +220,10 @@ function claudeProxyProvider(proxy: PiProxy) {
     .getModels()
     .find((model) => model.id === id);
 
-  if (!source || !hasApi(source, "anthropic-messages"))
+  if (!source || !hasApi(source, "anthropic-messages")) {
     throw new Error(`Pi SDK has no ${id} chat model`);
+  }
+
   const api = anthropicMessagesApi();
 
   return createProvider({
@@ -264,10 +278,11 @@ export function piModels(config: PiModelSettings) {
     if (
       !model ||
       !getSupportedThinkingLevels(model).includes(config.thinkingLevel)
-    )
+    ) {
       throw new Error(
         `Pi model ${config.model} does not support thinking level ${config.thinkingLevel}`,
       );
+    }
   }
 
   return models;
@@ -350,7 +365,9 @@ export class PiDurableBackend implements AgentBackend {
         call,
       );
 
-      if (!conversation) return undefined;
+      if (!conversation) {
+        return undefined;
+      }
 
       return await conversation.commit(async (tx) => {
         const receipt = await tx.submissionByRequest(
@@ -358,10 +375,15 @@ export class PiDurableBackend implements AgentBackend {
           requestId,
         );
 
-        if (receipt?.type !== "input" || receipt.status !== "done") return;
+        if (receipt?.type !== "input" || receipt.status !== "done") {
+          return;
+        }
+
         const answer = await tx.entry(AssistantEntry, receipt.answer);
 
-        if (!answer || answer.conversationId !== conversation.id) return;
+        if (!answer || answer.conversationId !== conversation.id) {
+          return;
+        }
 
         return (answer.model ?? [])
           .flatMap((message) =>
@@ -374,8 +396,11 @@ export class PiDurableBackend implements AgentBackend {
           .join("");
       }, call);
     } finally {
-      if (harness) await harness.close(BACKGROUND_CONTEXT);
-      else await storage.close(BACKGROUND_CONTEXT);
+      if (harness) {
+        await harness.close(BACKGROUND_CONTEXT);
+      } else {
+        await storage.close(BACKGROUND_CONTEXT);
+      }
     }
   }
 
@@ -398,7 +423,10 @@ export class PiDurableBackend implements AgentBackend {
               async beforeRequest(request, api) {
                 const id = String(api.conversationId);
 
-                if (!agreement.owns(id)) return;
+                if (!agreement.owns(id)) {
+                  return;
+                }
+
                 const changed = await notice(id);
 
                 return changed
@@ -422,9 +450,11 @@ export class PiDurableBackend implements AgentBackend {
 
     let openedHarness: Harness | undefined;
 
-    if (config.tools === "coding") registry.install(CodingTools);
+    if (config.tools === "coding") {
+      registry.install(CodingTools);
+    }
 
-    if (config.tools === "coding" && context.crew)
+    if (config.tools === "coding" && context.crew) {
       registry.install(
         piCrewExtension(context.crew, async (id, input, signal) => {
           const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
@@ -434,7 +464,9 @@ export class PiDurableBackend implements AgentBackend {
             context,
           );
 
-          if (!conversation) throw new Error("Pi conversation unavailable");
+          if (!conversation) {
+            throw new Error("Pi conversation unavailable");
+          }
 
           const page = await conversation.entries(
             {},
@@ -447,8 +479,9 @@ export class PiDurableBackend implements AgentBackend {
             next: page.next ?? null,
             items: page.items.flatMap((entry) =>
               (entry.model ?? []).flatMap((message) => {
-                if (message.role !== "user" && message.role !== "assistant")
+                if (message.role !== "user" && message.role !== "assistant") {
                   return [];
+                }
 
                 const visible =
                   typeof message.content === "string"
@@ -477,6 +510,8 @@ export class PiDurableBackend implements AgentBackend {
           };
         }),
       );
+    }
+
     const activeReports = new Set<ConversationId>();
 
     const reportGuard = defineExtension({
@@ -493,10 +528,11 @@ export class PiDurableBackend implements AgentBackend {
             if (
               agent?.instructions === reportInstructions &&
               !activeReports.has(api.conversationId)
-            )
+            ) {
               throw new Error(
                 "Unconfirmed report execution cannot resume after restart",
               );
+            }
           },
         }),
         hook(CompactionTask, {
@@ -507,8 +543,9 @@ export class PiDurableBackend implements AgentBackend {
               context,
             );
 
-            if (agent?.instructions === reportInstructions)
+            if (agent?.instructions === reportInstructions) {
               return { decline: true };
+            }
 
             return;
           },
@@ -612,7 +649,9 @@ export class PiDurableBackend implements AgentBackend {
       context,
     );
 
-    if (!conversation) throw new Error("Pi conversation not found");
+    if (!conversation) {
+      throw new Error("Pi conversation not found");
+    }
 
     let observation:
       | Awaited<ReturnType<Harness["observeConversation"]>>
@@ -632,7 +671,10 @@ export class PiDurableBackend implements AgentBackend {
       )
       .catch(() => {});
 
-    if (provider) providerCalls.set(provider, calls);
+    if (provider) {
+      providerCalls.set(provider, calls);
+    }
+
     let latestView: ConversationView | undefined;
     let updates = Promise.resolve();
     let settled = false;
@@ -644,16 +686,19 @@ export class PiDurableBackend implements AgentBackend {
         record.type !== "input" ||
         record.status === "unanswered" ||
         record.entry === undefined
-      )
+      ) {
         return;
+      }
 
       for (const entry of view.entries) {
         if (
           entry.id <= record.entry ||
           (record.answer !== undefined && entry.id > record.answer) ||
           !AssistantEntry.is(entry)
-        )
+        ) {
           continue;
+        }
+
         visible.set(
           entry.id,
           (entry.model ?? [])
@@ -688,10 +733,15 @@ export class PiDurableBackend implements AgentBackend {
       latestView = view;
       updates = updates
         .then(async () => {
-          if (!submission || settled) return;
+          if (!submission || settled) {
+            return;
+          }
+
           const record = await submission.status(context);
 
-          if (!settled) collect(view, record);
+          if (!settled) {
+            collect(view, record);
+          }
         })
         .catch(() => {
           // Observation is best effort; the submission's answer is authoritative.
@@ -704,7 +754,10 @@ export class PiDurableBackend implements AgentBackend {
           conversationId(sessionId) as ConversationId,
           {
             advance(call) {
-              if (call.kind !== "value") return;
+              if (call.kind !== "value") {
+                return;
+              }
+
               update(call.value);
             },
             end() {},
@@ -716,24 +769,33 @@ export class PiDurableBackend implements AgentBackend {
 
       signal.throwIfAborted();
 
-      if (typeof result === "function") result(requestId);
+      if (typeof result === "function") {
+        result(requestId);
+      }
+
       attempted = true;
       submission = await conversation.submit(
         { type: "input", requestId, content, whenBusy: "followUp" },
         context,
       );
 
-      if (latestView) update(latestView);
+      if (latestView) {
+        update(latestView);
+      }
+
       const completed = await submission.wait(context);
       await updates;
       settled = true;
 
-      if (completed.status !== "done" || completed.type !== "input")
+      if (completed.status !== "done" || completed.type !== "input") {
         throw new Error("Pi input did not complete");
+      }
 
       // Status can move ahead of observation; bound retained text at the answer.
       for (const id of visible.keys()) {
-        if (id <= completed.entry || id > completed.answer) visible.delete(id);
+        if (id <= completed.entry || id > completed.answer) {
+          visible.delete(id);
+        }
       }
 
       const entry = await conversation.commit(
@@ -741,7 +803,9 @@ export class PiDurableBackend implements AgentBackend {
         context,
       );
 
-      if (!entry) throw new Error("Pi answer not found");
+      if (!entry) {
+        throw new Error("Pi answer not found");
+      }
 
       const answer = (entry.model ?? [])
         .flatMap((message) =>
@@ -755,7 +819,10 @@ export class PiDurableBackend implements AgentBackend {
 
       // Crew progress observation must not change its canonical task result.
       // Normal Slack streaming still returns all visible text for this turn.
-      if (!onText || result === "final") return answer;
+      if (!onText || result === "final") {
+        return answer;
+      }
+
       visible.set(entry.id, answer);
 
       return [...visible.values()].filter(Boolean).join("\n\n");
@@ -777,13 +844,16 @@ export class PiDurableBackend implements AgentBackend {
               cleanup,
             );
 
-            if (record)
+            if (record) {
               submission = await this.harness.submission(record.id, cleanup);
+            }
           }
 
           const outcome = await submission?.abort(cleanup);
 
-          if (outcome === "already_placed") await conversation.abort(cleanup);
+          if (outcome === "already_placed") {
+            await conversation.abort(cleanup);
+          }
         } catch {
           // Unreadable admission/placement remains uncertain; no broad abort.
         }
@@ -791,15 +861,19 @@ export class PiDurableBackend implements AgentBackend {
 
       // The proxy refused or could not be reached. An accepted call before
       // It means that the turn ran tools between the two calls.
-      if (!signal.aborted && calls.failure)
+      if (!signal.aborted && calls.failure) {
         throw new BackendFailure(calls.failure.kind, {
           status: calls.failure.status,
           ran: calls.accepted > 0,
         });
+      }
+
       throw error;
     } finally {
-      if (provider && providerCalls.get(provider) === calls)
+      if (provider && providerCalls.get(provider) === calls) {
         providerCalls.delete(provider);
+      }
+
       settled = true;
       observation?.detach();
       await updates;
@@ -827,8 +901,10 @@ export class PiDurableBackend implements AgentBackend {
         conversationId(sessionId) as ConversationId,
         context,
       ))
-    )
+    ) {
       throw new Error("Pi worker conversation not found");
+    }
+
     const separator = this.config.model.indexOf("/");
 
     const report = await this.harness.createConversation(
@@ -877,7 +953,9 @@ export class PiDurableBackend implements AgentBackend {
       context,
     );
 
-    if (conversation) await conversation.abort(context);
+    if (conversation) {
+      await conversation.abort(context);
+    }
   }
 
   public async waitForIdle(sessionId: string, signal: AbortSignal) {
@@ -888,7 +966,10 @@ export class PiDurableBackend implements AgentBackend {
       context,
     );
 
-    if (!conversation) throw new Error("Pi conversation not found");
+    if (!conversation) {
+      throw new Error("Pi conversation not found");
+    }
+
     await conversation.waitForIdle(context);
   }
 
@@ -906,7 +987,10 @@ export class PiDurableBackend implements AgentBackend {
       context,
     );
 
-    if (!conversation) throw new Error("Pi conversation not found");
+    if (!conversation) {
+      throw new Error("Pi conversation not found");
+    }
+
     await conversation.submit(
       {
         type: "input",

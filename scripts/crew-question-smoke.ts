@@ -35,15 +35,17 @@ const [binary, mesij, brokerPath] = process.argv
   .slice(2)
   .filter((arg) => arg !== "--lose-ack" && arg !== "--standalone");
 
-if (!binary || !mesij)
+if (!binary || !mesij) {
   throw new Error(
     "Pass the OpenCode binary and pinned mesij paths; optionally the read-only history broker script",
   );
+}
 
-if (standalone && (brokerPath || loseAck))
+if (standalone && (brokerPath || loseAck)) {
   throw new Error(
     "--standalone uses native service discovery without a gateway or broker",
   );
+}
 
 const home = await realpath(
   await mkdtemp(join(tmpdir(), "crew-clarification-")),
@@ -75,7 +77,9 @@ const model = Bun.serve({
   async fetch(req) {
     const body: unknown = await req.json();
 
-    if (!isModelRequest(body)) throw new Error("Unexpected model request body");
+    if (!isModelRequest(body)) {
+      throw new Error("Unexpected model request body");
+    }
 
     const answered = body.messages.some(
       (m: { role: string }) => m.role === "tool",
@@ -87,7 +91,9 @@ const model = Bun.serve({
       JSON.stringify(body.messages),
     )?.[1];
 
-    if (token && !answered) captainAnswers++;
+    if (token && !answered) {
+      captainAnswers++;
+    }
 
     const question = {
       questions: [
@@ -212,13 +218,14 @@ assert.ok(task);
 
 state.running(task.id);
 
-if (standalone)
+if (standalone) {
   await saveQuestionSettings(
     captainDirectory,
     "build",
     { enabled: true, timeoutMs: 300_000, answer: "requester" },
     new AbortController().signal,
   );
+}
 
 const config = join(home, "config/opencode");
 
@@ -285,7 +292,10 @@ async function wait<T>(get: () => Promise<T | undefined>, label: string) {
   for (let i = 0; i < 160; i++) {
     const value = await get();
 
-    if (value) return value;
+    if (value) {
+      return value;
+    }
+
     await Bun.sleep(150);
   }
 
@@ -390,7 +400,10 @@ try {
           request.method === "POST" &&
           new URL(request.url).pathname.endsWith("/form/" + form.id + "/reply");
 
-        if (isWrite) writes++;
+        if (isWrite) {
+          writes++;
+        }
+
         const result = await fetch(request);
 
         if (isWrite && loseAck) {
@@ -413,8 +426,9 @@ try {
     permissions: [],
   };
 
-  if (!standalone)
+  if (!standalone) {
     gateway = new CrewQuestionGateway(config, {}, traced).run(stop.signal);
+  }
 
   if (loseAck) {
     await wait(

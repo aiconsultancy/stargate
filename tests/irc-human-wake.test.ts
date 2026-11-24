@@ -29,7 +29,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const close: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const cleanup of close.splice(0).reverse()) await cleanup();
+  for (const cleanup of close.splice(0).reverse()) {
+    await cleanup();
+  }
 });
 
 const captains = ["discovery", "phoenix", "prometheus", "protostar"];
@@ -114,7 +116,9 @@ function wire(
     }).replace(/^(@\S+ )/, "$1:jac!u@fixture "),
   );
 
-  if (!parsed) throw new Error("Invalid fixture message");
+  if (!parsed) {
+    throw new Error("Invalid fixture message");
+  }
 
   return parsed;
 }
@@ -220,7 +224,9 @@ test("fleet visitors require a current explicit tag, even in a thread they joine
     const base = config(account);
     const channel = "#prometheus";
 
-    if (!base.fleetControl) throw new Error("Missing fleet control fixture");
+    if (!base.fleetControl) {
+      throw new Error("Missing fleet control fixture");
+    }
 
     const cfg = {
       ...base,
@@ -339,7 +345,10 @@ test("only explicit invitations or confirmed own replies create durable thread p
   const cfg = config();
   const broad = route(cfg, "#command", "top-level", { msgid: "root" }, store);
 
-  if (!broad) throw new Error("Missing broad input");
+  if (!broad) {
+    throw new Error("Missing broad input");
+  }
+
   expect(store.enqueueIrcHuman(broad, false)).toBe(true);
   expect(store.irc.ircThreadParticipating(cfg.id, "#command", "root")).toBe(
     false,
@@ -365,7 +374,10 @@ test("only explicit invitations or confirmed own replies create durable thread p
     store,
   );
 
-  if (!invited) throw new Error("Missing invited input");
+  if (!invited) {
+    throw new Error("Missing invited input");
+  }
+
   expect(invited.threadInvitation).toBe(true);
   expect(
     route(
@@ -429,9 +441,11 @@ test("only explicit invitations or confirmed own replies create durable thread p
       { "+draft/reply": "" },
       { "+reply": "bad\nroot" },
       { "+draft/reply": "root", "+reply": "different" },
-    ])
-      for (const text of ["unaddressed", "discovery: explicitly addressed"])
+    ]) {
+      for (const text of ["unaddressed", "discovery: explicitly addressed"]) {
         expect(route(cfg, "#command", text, tags, store)).toBeUndefined();
+      }
+    }
   } finally {
     store.close();
   }
@@ -444,7 +458,10 @@ test("all-replies mode admits unknown opaque parents from verified humans; other
     const cfg = config("vance");
     const broad = route(cfg, "#starbase", "root", { msgid: "root" }, store);
 
-    if (!broad) throw new Error("Missing root");
+    if (!broad) {
+      throw new Error("Missing root");
+    }
+
     store.enqueueIrcHuman(broad, false);
     expect(
       route(
@@ -565,7 +582,10 @@ async function liveFixture(multiline = false) {
     ),
   });
 
-  if (multiline) fake.caps.push("draft/multiline=max-bytes=4096,max-lines=100");
+  if (multiline) {
+    fake.caps.push("draft/multiline=max-bytes=4096,max-lines=100");
+  }
+
   fake.start();
   close.push(() => fake.stop());
   const directory = await mkdtemp(join(tmpdir(), "irc-human-live-"));
@@ -596,7 +616,9 @@ async function liveFixture(multiline = false) {
 
       const primary = ship.registrations[0];
 
-      if (!primary) throw new Error("Missing captain");
+      if (!primary) {
+        throw new Error("Missing captain");
+      }
 
       const backend: AgentBackend = {
         sessionID: `ses_${account}`,
@@ -623,8 +645,10 @@ async function liveFixture(multiline = false) {
 
       const detail = ircDashboardShip(primary, cfg, backend);
 
-      if (detail.transport?.kind !== "irc")
+      if (detail.transport?.kind !== "irc") {
         throw new Error("Missing IRC dashboard transport");
+      }
+
       expect(detail.transport.access.humanWakeChannels).toEqual(
         cfg.access.humanWakeChannels,
       );
@@ -658,7 +682,10 @@ async function liveFixture(multiline = false) {
   };
 
   const stop = async () => {
-    for (const controller of controllers) controller.abort();
+    for (const controller of controllers) {
+      controller.abort();
+    }
+
     await Promise.all(workers);
     await Promise.all(ships.map((ship) => ship.close()));
     ships = [];
@@ -678,7 +705,10 @@ async function liveFixture(multiline = false) {
         ships.every((ship) => {
           const key = ship.registrations[0]?.key;
 
-          if (!key) return false;
+          if (!key) {
+            return false;
+          }
+
           const q = store.queueCounts(key);
 
           return q.queued + q.running + q.responding === 0;
@@ -707,7 +737,7 @@ async function liveFixture(multiline = false) {
   };
 }
 
-for (const multiline of [false, true])
+for (const multiline of [false, true]) {
   test(`real IRC intake keeps silent broad listeners out of threads, confirms publication, and survives restart/replay (${multiline ? "multiline" : "single line"})`, async () => {
     const f = await liveFixture(multiline);
 
@@ -727,7 +757,10 @@ for (const multiline of [false, true])
     for (const ship of f.ships) {
       const primary = ship.registrations[0];
 
-      if (!primary) throw new Error("Missing captain");
+      if (!primary) {
+        throw new Error("Missing captain");
+      }
+
       expect(
         f.store.irc.ircThreadParticipating(primary.key, "#command", root),
       ).toBe(false);
@@ -754,7 +787,9 @@ for (const multiline of [false, true])
       (ship) => ship.registrations[0]?.account === "discovery",
     )?.registrations[0];
 
-    if (!discovery) throw new Error("Missing discovery");
+    if (!discovery) {
+      throw new Error("Missing discovery");
+    }
 
     const publication = () => {
       const lines = f.fake.received("discovery");
@@ -766,7 +801,9 @@ for (const multiline of [false, true])
 
       const batch = message?.tags.get("batch");
 
-      if (batch === undefined) return message;
+      if (batch === undefined) {
+        return message;
+      }
 
       // Client tags belong to a multiline BATCH opener, not its inner lines.
       return lineOf(lines, "BATCH").find(
@@ -853,6 +890,7 @@ for (const multiline of [false, true])
       replyParent: "unseen-parent",
     });
   });
+}
 
 test("only matched actual own publication joins a broad-wake thread; forged own echoes cannot create membership", async () => {
   const f = await liveFixture();
@@ -869,9 +907,14 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
   for (const ship of f.ships) {
     const primary = ship.registrations[0];
 
-    if (!primary) throw new Error("Missing captain");
+    if (!primary) {
+      throw new Error("Missing captain");
+    }
 
-    if (primary.account === "vance") continue;
+    if (primary.account === "vance") {
+      continue;
+    }
+
     await until(
       () => f.store.irc.ircThreadParticipating(primary.key, "#command", root),
       5000,
@@ -900,7 +943,10 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
   for (const ship of f.ships) {
     const primary = ship.registrations[0];
 
-    if (!primary) throw new Error("Missing captain");
+    if (!primary) {
+      throw new Error("Missing captain");
+    }
+
     expect(
       f.store.irc.ircThreadParticipating(
         primary.key,
@@ -934,7 +980,10 @@ test("only matched actual own publication joins a broad-wake thread; forged own 
   for (const ship of f.ships) {
     const primary = ship.registrations[0];
 
-    if (!primary) throw new Error("Missing captain");
+    if (!primary) {
+      throw new Error("Missing captain");
+    }
+
     expect(
       f.store.irc.ircThreadParticipating(primary.key, "#command", missed),
     ).toBe(false);

@@ -33,7 +33,10 @@ import {
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
+
   await removeDirectories();
 });
 
@@ -101,10 +104,11 @@ test("configuration: absent by default; switched off is the same as absent, unva
     { enabled: false },
     withoutEnabled,
     { enabled: false, api: "not checked", officers: 7, unknown: true },
-  ])
+  ]) {
     expect(decodeConfig({ subspaceAgents: section }).subspaceAgents).toBe(
       undefined,
     );
+  }
 
   // An enabled section is validated in full, with its defaults.
   const decoded: unknown = decodeConfig({
@@ -127,8 +131,9 @@ test("configuration: absent by default; switched off is the same as absent, unva
     { enabled: true },
     enabledRaw({ unknown: true }),
     "on",
-  ])
+  ]) {
     expect(refusal({ subspaceAgents: section })).not.toBe("accepted");
+  }
 });
 
 test("reload: adding, changing or removing a switched-off section needs no restart", () => {
@@ -220,10 +225,11 @@ test("configuration: a disabled section is not cross-checked; an enabled one is"
       ],
       "Each officer needs its own bundlePath",
     ],
-  ] as const)
+  ] as const) {
     expect(refusal({ subspaceAgents: enabledRaw({ officers }) })).toContain(
       message,
     );
+  }
 });
 
 test("configuration: officer fields, headers and the enrolment source are bounded", () => {
@@ -264,8 +270,9 @@ test("configuration: officer fields, headers and the enrolment source are bounde
     enabledRaw({
       enrolment: { tokenEnv: "EXAMPLE_TOKEN", tokenFile: "/etc/example/token" },
     }),
-  ])
+  ]) {
     expect(refusal({ subspaceAgents: raw })).not.toBe("accepted");
+  }
 
   expect(
     refusal({
@@ -494,8 +501,9 @@ test("certificates: sent in canonical form, and never one for two officers", asy
   // A bundle written elsewhere, with Windows line endings.
   const text = bundleText(key).replaceAll("\n", "\r\n");
 
-  for (const name of ["a.pem", "b.pem"])
+  for (const name of ["a.pem", "b.pem"]) {
     await writeFile(join(keys, name), text, { mode: 0o600 });
+  }
 
   const shared = section(stub.url, [
     captain("captain-a", { bundlePath: join(keys, "a.pem") }),

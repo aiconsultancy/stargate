@@ -68,8 +68,10 @@ export function mapPullRequest(
       url.hash ||
       url.pathname.toLowerCase() !==
         `/${repository.toLowerCase()}/pull/${pr.number}`
-    )
+    ) {
       return null;
+    }
+
     let result: V1PullRequest["checks"] = "none";
 
     for (const check of pr.statusCheckRollup ?? []) {
@@ -82,8 +84,11 @@ export function mapPullRequest(
         break;
       }
 
-      if (!status || !completed.has(status)) result = "running";
-      else if (result === "none") result = "passing";
+      if (!status || !completed.has(status)) {
+        result = "running";
+      } else if (result === "none") {
+        result = "passing";
+      }
     }
 
     return {
@@ -111,8 +116,10 @@ function matchingPull(
     headRefName !== branch ||
     `${headRepositoryOwner.login}/${headRepository.name}`.toLowerCase() !==
       repository
-  )
+  ) {
     return;
+  }
+
   const pr = mapPullRequest(input, repository);
 
   return pr?.number === number ? pr : undefined;
@@ -145,7 +152,9 @@ export function createPullReader(
   async function authenticate() {
     const executable = which("gh");
 
-    if (!executable) return null;
+    if (!executable) {
+      return null;
+    }
 
     const result = await run(
       [executable, "auth", "status", "--hostname", "github.com"],
@@ -156,11 +165,16 @@ export function createPullReader(
   }
 
   async function refresh(repository: string, branch: string) {
-    if (!auth || auth.expiresAt <= now())
+    if (!auth || auth.expiresAt <= now()) {
       auth = { expiresAt: now() + ttl, executable: authenticate() };
+    }
+
     const executable = await auth.executable;
 
-    if (!executable) return;
+    if (!executable) {
+      return;
+    }
+
     const owner = repository.slice(0, repository.indexOf("/"));
 
     const result = await run(
@@ -182,12 +196,17 @@ export function createPullReader(
       { env, timeout },
     );
 
-    if (result?.code !== 0) return;
+    if (result?.code !== 0) {
+      return;
+    }
 
     try {
       const list: unknown = JSON.parse(result.stdout);
 
-      if (!Array.isArray(list)) return;
+      if (!Array.isArray(list)) {
+        return;
+      }
+
       let incomplete = list.length >= candidateLimit;
 
       for (const entry of list) {
@@ -200,7 +219,9 @@ export function createPullReader(
 
         const { number, repository: head } = candidate.value;
 
-        if (head?.toLowerCase() !== repository) continue;
+        if (head?.toLowerCase() !== repository) {
+          continue;
+        }
 
         const details = await run(
           [
@@ -216,7 +237,9 @@ export function createPullReader(
           { env, timeout },
         );
 
-        if (details?.code !== 0) return;
+        if (details?.code !== 0) {
+          return;
+        }
 
         return matchingPull(
           JSON.parse(details.stdout),
@@ -252,7 +275,9 @@ export function createPullReader(
           if (cache.size >= 500) {
             const oldest = cache.keys().next();
 
-            if (!oldest.done) cache.delete(oldest.value);
+            if (!oldest.done) {
+              cache.delete(oldest.value);
+            }
           }
 
           cache.set(key, {

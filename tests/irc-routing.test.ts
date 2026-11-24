@@ -32,7 +32,9 @@ import { bot } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const backend = {
@@ -104,7 +106,9 @@ function message(
     })}`.replace(/^(@\S+ )/, "$1:someone!u@h "),
   );
 
-  if (!parsed) throw new Error("bad fixture");
+  if (!parsed) {
+    throw new Error("bad fixture");
+  }
 
   return parsed;
 }
@@ -177,8 +181,10 @@ test("irc nick-mention access requires a live joined target, exact nick, and an 
       "+draft/reply": "own-1",
     }),
     message("#other", "galactica-2: status?", { account: "jack" }),
-  ])
+  ]) {
     expect(admit(m)).toBeUndefined();
+  }
+
   expect(
     routeIrcMessage(
       message("#galactica", "galactica-2: status?", { account: "jack" }),
@@ -324,7 +330,9 @@ test("irc routing: direct messages are per account and captain-only", () => {
   // A missing msgid gets a stable synthetic ID for deduplication.
   const parsed = parseMessage("@account=jack :jack!u@h PRIVMSG galactica :hi");
 
-  if (!parsed) throw new Error("bad fixture");
+  if (!parsed) {
+    throw new Error("bad fixture");
+  }
 
   const context = {
     config,
@@ -495,9 +503,13 @@ test("irc limits: peers per conversation, ship messages per channel", async () =
       },
     );
 
-    if (!admission) throw new Error("not routed");
+    if (!admission) {
+      throw new Error("not routed");
+    }
 
-    if (!withinLimits(admission, config, limits)) return false;
+    if (!withinLimits(admission, config, limits)) {
+      return false;
+    }
 
     return store.enqueue(admission);
   };
@@ -512,12 +524,15 @@ test("irc limits: peers per conversation, ship messages per channel", async () =
   expect(admit(captain, "galactica-chief", "s4", at(61))).toBe(true);
 
   // People are never limited.
-  for (let i = 0; i < 6; i++)
+  for (let i = 0; i < 6; i++) {
     expect(admit(captain, "jack", `h${i}`, at(5))).toBe(true);
+  }
 
   // All peers share 30 turns per receiving connection and conversation.
-  for (let i = 0; i < 30; i++)
+  for (let i = 0; i < 30; i++) {
     expect(admit(captain, "defiant", `p${i}`, at(10 + i))).toBe(true);
+  }
+
   expect(admit(captain, "defiant", "p30", at(40))).toBe(false);
   expect(admit(captain, "defiant", "d0", at(40), "galactica", "hello")).toBe(
     true,
@@ -769,7 +784,9 @@ test("irc casemapping: one folded channel key for caps, routing and denies", asy
   };
 
   const admit = (admission: ReturnType<typeof routeAs>) => {
-    if (!admission) throw new Error("not routed");
+    if (!admission) {
+      throw new Error("not routed");
+    }
 
     return withinLimits(admission, mixed, limits) && store.enqueue(admission);
   };
@@ -843,9 +860,12 @@ test("irc namespace: host, port and network name select a new namespace", async 
     await keys({ ...local, network: "Other" }),
   ];
 
-  for (const other of changed)
-    for (const [index, key] of other.entries())
+  for (const other of changed) {
+    for (const [index, key] of other.entries()) {
       expect(key).not.toBe(base[index]);
+    }
+  }
+
   // The network name compares without case; TLS alone is not identity.
   expect(await keys({ ...local, network: "fleet" })).toEqual(
     await keys({ ...local, network: "FLEET" }),
@@ -857,7 +877,9 @@ test("irc crew confinement: runtime checks use the negotiated CASEMAPPING", () =
   const base = shipConfig({ channels: ["#ship[1]"], crew: [] });
   const [crewConfig] = shipConfig().crew;
 
-  if (!crewConfig) throw new Error("missing crew fixture");
+  if (!crewConfig) {
+    throw new Error("missing crew fixture");
+  }
 
   const loose: IrcConfig = {
     ...base,
@@ -892,7 +914,9 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
   cleanup.push(() => store.close());
   const [chiefConfig] = shipConfig().crew;
 
-  if (!chiefConfig) throw new Error("missing crew fixture");
+  if (!chiefConfig) {
+    throw new Error("missing crew fixture");
+  }
 
   // Captain in #galactica and #bridge; chief (spelled #Galactica) and
   // Tyrol in #galactica only. Default: 60 ship messages per agent an hour.
@@ -941,10 +965,13 @@ test("irc ship cap: per agent, times the ship agents configured in the channel",
         },
       );
 
-      if (!admission) throw new Error("not routed");
+      if (!admission) {
+        throw new Error("not routed");
+      }
 
-      if (withinLimits(admission, config, limits, (v) => fold(v, "ascii")))
+      if (withinLimits(admission, config, limits, (v) => fold(v, "ascii"))) {
         count += store.enqueue(admission) ? 1 : 0;
+      }
     }
 
     return count;
@@ -1012,7 +1039,10 @@ test("irc ship cap: a crew → captain DM is capped at per agent × 2", async ()
       },
     );
 
-    if (!admission) throw new Error("not routed");
+    if (!admission) {
+      throw new Error("not routed");
+    }
+
     expect(admission.sender).toBe("crew");
     expect(admission.channel).toBe("galactica-chief");
 
@@ -1026,7 +1056,12 @@ test("irc ship cap: a crew → captain DM is capped at per agent × 2", async ()
   const ship = shipConfig({ access: {} });
   let admitted = 0;
 
-  for (let i = 0; i < 121; i++) if (dm(ship, `dm${i}`)) admitted++;
+  for (let i = 0; i < 121; i++) {
+    if (dm(ship, `dm${i}`)) {
+      admitted++;
+    }
+  }
+
   expect(admitted).toBe(120);
   // 0 still turns ship messages off, in direct messages too.
   const off = shipConfig({ access: { shipTurnsPerAgentPerHour: 0 } });
@@ -1051,14 +1086,19 @@ test("irc ship cap: a crew → captain DM is capped at per agent × 2", async ()
     },
   );
 
-  if (!admission) throw new Error("not routed");
+  if (!admission) {
+    throw new Error("not routed");
+  }
+
   expect(withinLimits(admission, off, offLimits)).toBe(false);
 });
 
 test("irc all-call: reaches every ship agent in the channel, word-bounded", async () => {
   const [chiefConfig] = shipConfig().crew;
 
-  if (!chiefConfig) throw new Error("missing crew fixture");
+  if (!chiefConfig) {
+    throw new Error("missing crew fixture");
+  }
 
   const ship = shipConfig({
     channels: ["#galactica", "#bridge"],
@@ -1194,13 +1234,18 @@ test("irc all-call: ship senders count against the channel cap, people do not", 
       },
     );
 
-    if (!admission) throw new Error("not routed");
+    if (!admission) {
+      throw new Error("not routed");
+    }
 
     return withinLimits(admission, config, limits) && store.enqueue(admission);
   };
 
   // People are never capped by the ship limit.
-  for (let i = 0; i < 5; i++) expect(call(chief, "jack")).toBe(true);
+  for (let i = 0; i < 5; i++) {
+    expect(call(chief, "jack")).toBe(true);
+  }
+
   // Ship all-calls fan out and count: the captain's reaches chief (1),
   // Chief's reaches the captain (2), the next one is dropped.
   expect(call(chief, "galactica")).toBe(true);
@@ -1312,7 +1357,10 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
 
     expect(admitted).toMatchObject({ user: "defiant", sender: "captain" });
 
-    if (!admitted) throw new Error("Expected enrolled peer");
+    if (!admitted) {
+      throw new Error("Expected enrolled peer");
+    }
+
     expect(
       withinLimits(admitted, restricted, {
         shipKeys: [captain.key],
@@ -1352,8 +1400,9 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
       account: "jack",
       bot: "",
     }),
-  ])
+  ]) {
     expect(routeIrcMessage(candidate, context)).toBeUndefined();
+  }
 
   const denied = shipConfig({
     fleetPolicy: fleet,
@@ -1397,7 +1446,9 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
   cleanup.push(() => ship.close());
   const primary = ship.registrations[0];
 
-  if (!primary) throw new Error("Missing primary");
+  if (!primary) {
+    throw new Error("Missing primary");
+  }
 
   const admitted = routeIrcMessage(
     message("#galactica", "galactica: context", {
@@ -1407,7 +1458,10 @@ test("strict fleet peer context requires BOTH enrolled agent and explicit peer; 
     context,
   );
 
-  if (!admitted) throw new Error("Expected peer context");
+  if (!admitted) {
+    throw new Error("Expected peer context");
+  }
+
   expect(primary.transport.source(admitted)).toMatchObject({
     authority: "agent",
     user: "defiant",
@@ -1461,7 +1515,7 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
     "admiral: ask galactica to report",
     "defiant: ask galactica to report",
     "vance: only you should wake",
-  ])
+  ]) {
     expect(
       routeIrcMessage(
         message("#galactica", text, {
@@ -1471,6 +1525,7 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
         context,
       ),
     ).toBeUndefined();
+  }
 
   for (const text of [
     "galactica_: ask vance to report",
@@ -1479,16 +1534,20 @@ test("results mode: an explicit other fleet recipient overrides later mentions, 
     "Please ask vance: galactica status",
     "Ordinary human own-channel instruction",
     "galactica: vance: this is still addressed to galactica",
-  ])
+  ]) {
     expect(
       routeIrcMessage(
         message("#galactica", text, { account: "jack" }),
         context,
       ),
     ).toBeDefined();
+  }
+
   const fleetControl = restricted.fleetControl;
 
-  if (!fleetControl) throw new Error("Missing fleet control fixture");
+  if (!fleetControl) {
+    throw new Error("Missing fleet control fixture");
+  }
 
   const legacy = {
     ...restricted,

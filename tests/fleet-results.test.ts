@@ -48,7 +48,9 @@ import {
 const cleanup: (() => Promise<unknown> | unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const log = pino({ enabled: false });
@@ -148,7 +150,9 @@ class Native implements AgentBackend {
     operation: FleetRequest["operation"],
     input: unknown,
   ) {
-    if (!this.active) throw new Error("No native input is executing");
+    if (!this.active) {
+      throw new Error("No native input is executing");
+    }
 
     return fleetRequest(
       socket,
@@ -166,21 +170,29 @@ class Native implements AgentBackend {
     );
   }
   async executionMakers(session: string, input: string) {
-    if (session !== this.sessionID || !this.makers.has(input))
+    if (session !== this.sessionID || !this.makers.has(input)) {
       throw new Error("No exact native maker");
+    }
 
     return this.makers.get(input) ?? [];
   }
   async transcript(session: string, after: string | undefined) {
-    if (session !== this.sessionID) throw new Error("Wrong native session");
+    if (session !== this.sessionID) {
+      throw new Error("Wrong native session");
+    }
+
     const head = this.records.at(-1);
 
-    if (after === undefined) return { cursor: head?.id ?? "", entries: [] };
+    if (after === undefined) {
+      return { cursor: head?.id ?? "", entries: [] };
+    }
 
     const index =
       after === "" ? -1 : this.records.findIndex((entry) => entry.id === after);
 
-    if (after !== "" && index < 0) throw new Error("Missing native cursor");
+    if (after !== "" && index < 0) {
+      throw new Error("Missing native cursor");
+    }
 
     return {
       cursor: head?.id ?? after,
@@ -323,7 +335,9 @@ async function world(
     cleanup.push(() => ship.close());
     const registration = ship.registrations[0];
 
-    if (!registration) throw new Error("No IRC registration");
+    if (!registration) {
+      throw new Error("No IRC registration");
+    }
 
     const gateway = new Gateway(
       registration.settings,
@@ -405,8 +419,8 @@ async function world(
     ownership: { lockCommand },
     origin: (source) => fleetOrigin(store, backend.sessionID, source),
     async authorize(caller) {
-      for (const key of keys)
-        for (const job of store.permissionCandidates(key))
+      for (const key of keys) {
+        for (const job of store.permissionCandidates(key)) {
           if (
             job.input &&
             (await backend.toolBelongsToInput(
@@ -414,8 +428,12 @@ async function world(
               caller.messageID,
               job.input,
             ))
-          )
+          ) {
             return;
+          }
+        }
+      }
+
       throw new Error("No exact active native source");
     },
     async send(target, text, sendSignal) {
@@ -496,7 +514,10 @@ async function world(
   const processNext = async (gateway: Gateway, store: Store) => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("No queued job");
+    if (!job) {
+      throw new Error("No queued job");
+    }
+
     await gateway.process(job, signal());
 
     return job;
@@ -504,13 +525,20 @@ async function world(
 
   let dispatch: { dispatchID?: string; sourceReference?: string } | undefined;
   vance.handler = async (call) => {
-    if (call.context?.source.authority === "agent")
+    if (call.context?.source.authority === "agent") {
       return "Captain outcome verified: implementation is complete.";
+    }
 
-    if (call.text.includes("Other request")) return "Other request answered.";
+    if (call.text.includes("Other request")) {
+      return "Other request answered.";
+    }
+
     const reference = call.context?.source.reference;
 
-    if (!reference) throw new Error("No original source");
+    if (!reference) {
+      throw new Error("No original source");
+    }
+
     dispatch = (await vance.tool(
       owner,
       ownerOptions.config.socketPath,
@@ -528,7 +556,9 @@ async function world(
   captain.handler = async (call) => {
     const reference = /source=(\S+) authority=/.exec(call.text)?.[1];
 
-    if (!reference) throw new Error("Missing delegated original");
+    if (!reference) {
+      throw new Error("Missing delegated original");
+    }
 
     const verified = await captain.tool(
       receiver,
@@ -663,7 +693,10 @@ test("fleet results: duplicate transport/polls and a copied dispatch never rerun
   const job = await f.processNext(f.targetIrc.gateway, f.captainStore);
   const accept = f.targetIrc.ship.assignmentRecorder;
 
-  if (!accept) throw new Error("No assignment recorder");
+  if (!accept) {
+    throw new Error("No assignment recorder");
+  }
+
   let attempts = 0;
   f.targetIrc.ship.assignmentRecorder = (value, fold) => {
     attempts++;
@@ -673,7 +706,10 @@ test("fleet results: duplicate transport/polls and a copied dispatch never rerun
 
   const text = f.packets[0];
 
-  if (!text) throw new Error("No dispatch packet");
+  if (!text) {
+    throw new Error("No dispatch packet");
+  }
+
   const msgid = job.eventId.slice(job.channel.length + 1);
   f.fake.say({ nick: "vance", account: "vance" }, "#captain", text, {
     bot: "",
@@ -800,7 +836,10 @@ test("fleet results: interrupted admitted execution reports uncertainty without 
     1,
   )[0];
 
-  if (!job) throw new Error("No captain assignment");
+  if (!job) {
+    throw new Error("No captain assignment");
+  }
+
   f.captainStore.running(job.id);
   f.captainStore.saveInput(
     job.botKey,
@@ -818,7 +857,10 @@ test("fleet results: interrupted admitted execution reports uncertainty without 
     1,
   )[0];
 
-  if (!result) throw new Error("No uncertain result");
+  if (!result) {
+    throw new Error("No uncertain result");
+  }
+
   expect(result.fleet).toMatchObject({
     kind: "result",
     completion: {
@@ -844,7 +886,10 @@ test("fleet results: oversized backend makers become empty uncertain evidence", 
   const job = await f.processNext(f.targetIrc.gateway, f.captainStore);
   const inputID = f.captainStore.jobByEvent(job.botKey, job.eventId)?.input;
 
-  if (!inputID) throw new Error("Missing admitted native input");
+  if (!inputID) {
+    throw new Error("Missing admitted native input");
+  }
+
   f.captain.makers.set(
     inputID,
     Array.from({ length: 101 }, (_, index) => ({
@@ -939,7 +984,9 @@ test("fleet results: explicit peer chat remains agent context and forged native/
     1,
   )[0];
 
-  if (job?.fleet?.kind !== "assignment") throw new Error("No delegation");
+  if (job?.fleet?.kind !== "assignment") {
+    throw new Error("No delegation");
+  }
 
   const completion = {
     dispatchID: job.fleet.dispatchID,
@@ -1005,7 +1052,10 @@ test("fleet results: explicit peer chat remains agent context and forged native/
   });
   const record = f.ownerIrc.ship.assignmentRecorder;
 
-  if (!record) throw new Error("No assignment recorder");
+  if (!record) {
+    throw new Error("No assignment recorder");
+  }
+
   let checked = false;
   f.ownerIrc.ship.assignmentRecorder = (input, fold) => {
     const dispatchID = record(input, fold);
@@ -1100,11 +1150,16 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
   ] as const) {
     const record = ship.assignmentRecorder;
 
-    if (!record) throw new Error("Missing real assignment recorder");
+    if (!record) {
+      throw new Error("Missing real assignment recorder");
+    }
+
     ship.assignmentRecorder = (input, fold) => {
       const dispatchID = record(input, fold);
 
-      if (!dispatchID && input.sender === peer) recordChat();
+      if (!dispatchID && input.sender === peer) {
+        recordChat();
+      }
 
       return dispatchID;
     };
@@ -1112,10 +1167,12 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
 
   const original = f.vance.handler;
   f.vance.handler = async (call) => {
-    if (call.context?.source.authority === "agent")
+    if (call.context?.source.authority === "agent") {
       return call.context.source.transport === "fleet"
         ? "Captain: result verified."
         : "[[stargate:silent]]";
+    }
+
     await original(call);
 
     return "Captain: assignment sent.";
@@ -1124,7 +1181,10 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
   f.captain.handler = async (call) => {
     const reference = /source=(\S+) authority=/.exec(call.text)?.[1];
 
-    if (!reference) return "[[stargate:silent]]";
+    if (!reference) {
+      return "[[stargate:silent]]";
+    }
+
     expect(
       await f.captain.tool(
         f.receiver,
@@ -1179,7 +1239,10 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
     .ready(f.targetIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
     .find((job) => job.fleet?.kind === "assignment");
 
-  if (!assignment) throw new Error("Missing protected assignment");
+  if (!assignment) {
+    throw new Error("Missing protected assignment");
+  }
+
   await f.targetIrc.gateway.process(assignment, signal());
   expect(assignment.fleet?.kind).toBe("assignment");
   await f.targetResults.poll(signal());
@@ -1189,7 +1252,10 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
     .ready(f.ownerIrc.gateway.key, Number.MAX_SAFE_INTEGER, 100)
     .find((job) => job.fleet?.kind === "result");
 
-  if (!result) throw new Error("Missing protected result");
+  if (!result) {
+    throw new Error("Missing protected result");
+  }
+
   await f.ownerIrc.gateway.process(result, signal());
   expect(result.fleet?.kind).toBe("result");
   expect(result.conversation).toBe(origin.conversation);
@@ -1213,7 +1279,10 @@ test("fleet results: shared IRC peer feedback stays ordinary agent context along
     for (let turn = 0; turn < 5; turn++) {
       const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-      if (!job) break;
+      if (!job) {
+        break;
+      }
+
       expect(job.fleet).toBeUndefined();
       await gateway.process(job, signal());
     }
@@ -1235,7 +1304,10 @@ async function forcedNick(f: Awaited<ReturnType<typeof world>>, nick: string) {
     (client) => client.account === "vance",
   );
 
-  if (!connection?.nick) throw new Error("Missing authenticated connection");
+  if (!connection?.nick) {
+    throw new Error("Missing authenticated connection");
+  }
+
   const old = connection.nick;
   connection.nick = nick;
   f.fake.sendTo("vance", `:${old}!u@stargate NICK ${nick}`);
@@ -1279,14 +1351,18 @@ for (const [accepted, later] of [
         1,
       )[0];
 
-      if (!job) throw new Error("Missing admitted peer job");
+      if (!job) {
+        throw new Error("Missing admitted peer job");
+      }
+
       expect(job.text).toBe(text);
       expect(job.textMention).toBe(`@${accepted}`);
       expect(job.eventId).toBe(`#command:${source}`);
       const before = f.vance.calls.length;
 
-      if (phase === "queued") await forcedNick(f, later);
-      else {
+      if (phase === "queued") {
+        await forcedNick(f, later);
+      } else {
         const delivery = f.ownerIrc.registration.delivery;
         const post = delivery.post.bind(delivery);
         delivery.post = async (...args) => {
@@ -1353,7 +1429,10 @@ test.each([
       );
       const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-      if (!job) throw new Error("Missing bounded peer job");
+      if (!job) {
+        throw new Error("Missing bounded peer job");
+      }
+
       expect(job.fleet).toBeUndefined();
       expect(job.sender).toBe("captain");
       await gateway.process(job, signal());
@@ -1371,10 +1450,12 @@ test.each([
     for (const [gateway, store] of [
       [f.ownerIrc.gateway, f.ownerStore],
       [f.targetIrc.gateway, f.captainStore],
-    ] as const)
+    ] as const) {
       expect(
         store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 100),
       ).toHaveLength(0);
+    }
+
     expect(f.owner.pendingResults()).toHaveLength(0);
   },
   15_000,
@@ -1404,21 +1485,28 @@ test("fleet results: queued and recovered ordinary peer jobs are retained but re
     ).toBe(true);
     const queued = f.ownerStore.jobByEvent(key, eventId);
 
-    if (!queued) throw new Error("Missing preserved old job");
+    if (!queued) {
+      throw new Error("Missing preserved old job");
+    }
 
     if (state !== "queued") {
       f.ownerStore.running(queued.id);
 
-      if (state === "responding")
+      if (state === "responding") {
         f.ownerStore.respond(queued.id, [
           "Captain: old response would restart the loop.",
         ]);
-      else f.ownerStore.recover(key);
+      } else {
+        f.ownerStore.recover(key);
+      }
     }
 
     const held = f.ownerStore.jobByEvent(key, eventId);
 
-    if (!held) throw new Error("Missing recovery record");
+    if (!held) {
+      throw new Error("Missing recovery record");
+    }
+
     await f.ownerIrc.gateway.process(held, signal());
     expect(f.ownerStore.jobByEvent(key, eventId)).toMatchObject({
       id: queued.id,
@@ -1465,7 +1553,10 @@ test("fleet results: recovery refuses retained misaddressed human jobs but a cor
     ).toBe(true);
     const job = f.captainStore.jobByEvent(key, eventId);
 
-    if (!job) throw new Error("Missing retained human request");
+    if (!job) {
+      throw new Error("Missing retained human request");
+    }
+
     await f.targetIrc.gateway.process(job, signal());
     expect(f.captainStore.jobByEvent(key, eventId)).toMatchObject({
       id: job.id,

@@ -57,11 +57,13 @@ export async function repairTranscript(input: {
   /** Classify one whole reply once; defaults to plain unclassified chunks. */
   prepare?: (text: string, unbounded: boolean) => ReplyChunk[];
 }): Promise<TranscriptRepair> {
-  if (input.backend.sessionID)
+  if (input.backend.sessionID) {
     throw new Error("Captain-scoped transcript repair unsupported");
+  }
 
-  if (!input.backend.transcript)
+  if (!input.backend.transcript) {
     throw new Error("Backend has no transcript support");
+  }
 
   const conversation = conversationKey(
     input.botKey,
@@ -74,7 +76,9 @@ export async function repairTranscript(input: {
     conversation,
   );
 
-  if (!target) throw new Error("No mapped conversation for this bot thread");
+  if (!target) {
+    throw new Error("No mapped conversation for this bot thread");
+  }
 
   const read = await input.backend
     .transcript(
@@ -90,8 +94,9 @@ export async function repairTranscript(input: {
     ? read.entries.filter((entry) => input.only?.includes(entry.id))
     : read.entries;
 
-  if (input.only && entries.length !== new Set(input.only).size)
+  if (input.only && entries.length !== new Set(input.only).size) {
     throw new Error("Some requested messages are not settled public replies");
+  }
 
   const rows = input.store.transcript.transcriptRows(
     input.botKey,
@@ -120,16 +125,23 @@ export async function repairTranscript(input: {
   for (const entry of entries) {
     const text = transcriptReply([entry]);
 
-    if (!text) continue;
+    if (!text) {
+      continue;
+    }
 
-    if (sent.includes(comparable(text))) delivered.push(entry.id);
-    else missing.push({ id: entry.id, created: entry.created, text });
+    if (sent.includes(comparable(text))) {
+      delivered.push(entry.id);
+    } else {
+      missing.push({ id: entry.id, created: entry.created, text });
+    }
   }
 
   const limit = input.limit ?? 20;
 
-  if (missing.length > limit)
+  if (missing.length > limit) {
     throw new Error(`Found ${missing.length} missing replies; limit ${limit}`);
+  }
+
   const existing = new Set(rows.map((row) => row.eventId));
 
   const conflicts = missing
@@ -141,10 +153,11 @@ export async function repairTranscript(input: {
   let queued = 0;
 
   if (input.apply) {
-    if (conflicts.length > 0)
+    if (conflicts.length > 0) {
       throw new Error(
         `Outbox rows conflict with missing replies: ${conflicts.join(", ")}`,
       );
+    }
 
     const result = input.store.appendTranscript({
       botKey: input.botKey,
@@ -162,8 +175,10 @@ export async function repairTranscript(input: {
       requeue: requeue.map((row) => row.eventId),
     });
 
-    if (result === undefined)
+    if (result === undefined) {
       throw new Error("Thread is busy or changed; run the repair again");
+    }
+
     queued = result;
   }
 
@@ -204,7 +219,10 @@ export async function repairThread(input: {
   const config = await loadConfig(input.config);
   const bot = config.bots.find((candidate) => candidate.id === input.bot);
 
-  if (!bot) throw new Error("Unknown bot ID");
+  if (!bot) {
+    throw new Error("Unknown bot ID");
+  }
+
   // Harden existing state before SQLite creates WAL/SHM. Never create a
   // Replacement database or follow a database symlink during repair.
   await chmod(config.dataDirectory, 0o700);
@@ -212,8 +230,10 @@ export async function repairThread(input: {
   const file = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
 
   try {
-    if (!(await file.stat()).isFile())
+    if (!(await file.stat()).isFile()) {
       throw new Error("Invalid gateway database");
+    }
+
     await file.chmod(0o600);
   } finally {
     await file.close();
@@ -237,8 +257,9 @@ export async function repairThread(input: {
 
     const [botKey] = keys;
 
-    if (!botKey || keys.length !== 1)
+    if (!botKey || keys.length !== 1) {
       throw new Error("Expected one current bot namespace for this thread");
+    }
 
     const backend = await createBackend(bot.backend, {
       dataDirectory: join(

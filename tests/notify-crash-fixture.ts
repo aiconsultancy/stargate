@@ -10,7 +10,9 @@ import { NotifyStore } from "../src/notifications/ingest/store";
 const path = process.argv[2];
 const point = process.argv[3];
 
-if (!path || !point) throw new Error("Missing crash fixture arguments");
+if (!path || !point) {
+  throw new Error("Missing crash fixture arguments");
+}
 
 const store = new NotifyStore(
   path,
@@ -50,16 +52,23 @@ function hold(): never {
 
 store.admit(source, input, () => [destination], 1000);
 
-if (point === "after-commit") hold();
+if (point === "after-commit") {
+  hold();
+}
 
 const claim = store.claim(1000);
 
-if (!claim) throw new Error("Missing crash fixture claim");
+if (!claim) {
+  throw new Error("Missing crash fixture claim");
+}
 
-if (point === "after-claim") hold();
+if (point === "after-claim") {
+  hold();
+}
 
-if (point !== "after-acceptance")
+if (point !== "after-acceptance") {
   throw new Error("Unknown crash fixture point");
+}
 
 // Fake provider acceptance. The Promise never settles, so the real claimed
 // Row remains leased when the parent kills this process.

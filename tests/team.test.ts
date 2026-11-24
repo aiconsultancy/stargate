@@ -101,12 +101,14 @@ test("history endpoints require safe transport and environment references", () =
       url: "https://example.com",
       headersEnv: { authorization: "Bearer secret" },
     },
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(teamSchema)({ ...team, historyAPI }),
       ),
     ).toBe(false);
+  }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(teamSchema)({

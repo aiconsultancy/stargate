@@ -160,7 +160,9 @@ test("conversation eval: exported plugin wires cancellable native wait through i
       )
     ).task;
 
-    if (!task) throw new Error("Missing fixture task");
+    if (!task) {
+      throw new Error("Missing fixture task");
+    }
 
     const registration = {
       dispose: Effect.sync(() => {
@@ -227,7 +229,9 @@ test("conversation eval: exported plugin wires cancellable native wait through i
       [
         "editor.add",
         (tool: RegisteredTool) => {
-          if (tool.name === "stargate_crew") crewTool = tool;
+          if (tool.name === "stargate_crew") {
+            crewTool = tool;
+          }
         },
       ],
     ]);
@@ -252,7 +256,10 @@ test("conversation eval: exported plugin wires cancellable native wait through i
     const host = readStub("") as EffectPlugin.Context;
     await Effect.runPromise(plugin.effect(host).pipe(Scope.provide(scope)));
 
-    if (!crewTool) throw new Error("Crew tool was not registered");
+    if (!crewTool) {
+      throw new Error("Crew tool was not registered");
+    }
+
     work = Effect.runPromise(
       crewTool.execute(
         { op: "wait", taskID: task.id },
@@ -282,10 +289,14 @@ test("conversation eval: exported plugin wires cancellable native wait through i
       );
     });
 
-    if (result.type === "failure") throw result.error;
+    if (result.type === "failure") {
+      throw result.error;
+    }
 
-    if (typeof result.value.content !== "string")
+    if (typeof result.value.content !== "string") {
       throw new Error("Crew tool did not return JSON text");
+    }
+
     expect(JSON.parse(result.value.content)).toMatchObject({
       status: "completed",
       task: {
@@ -349,7 +360,10 @@ test("conversation eval: bounded wait yields without cancelling the worker and l
       )
     ).task;
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     f.engine.state.notice(task.id, "Already read");
     const after = f.engine.state.notices(task.id, 0).at(-1)?.id ?? 0;
     const before = f.engine.state.task(task.id);
@@ -438,7 +452,10 @@ test("bounded queued wait preserves FIFO and origins without admitting or replay
       )
     ).task;
 
-    if (!first) throw new Error("Missing task");
+    if (!first) {
+      throw new Error("Missing task");
+    }
+
     f.history.set("ses_captain_a", [
       { id: "queue-tool", type: "assistant", time: { created: 2 } },
       { id: "queue-origin", type: "user", time: { created: 1 } },
@@ -457,7 +474,10 @@ test("bounded queued wait preserves FIFO and origins without admitting or replay
       caller,
     );
 
-    if (!queued) throw new Error("Missing queued task");
+    if (!queued) {
+      throw new Error("Missing queued task");
+    }
+
     const fifo = f.engine.state.queuedTasks("mario");
     const before = f.engine.state.task(first.id);
     expect(
@@ -500,10 +520,16 @@ test("bounded wait shares one deadline across queued promotion and running obser
       )
     ).task;
 
-    if (!first || !queued) throw new Error("Missing tasks");
+    if (!first || !queued) {
+      throw new Error("Missing tasks");
+    }
+
     let polls = 0;
     clock.onPoll(async () => {
-      if (++polls !== 1) return;
+      if (++polls !== 1) {
+        return;
+      }
+
       await f.engine.run(
         { op: "complete", taskID: first.id, result: "First done" },
         f.worker(first.workerSessionID),
@@ -554,7 +580,10 @@ test("bounded wait counts initial promotion and authorization time without resta
       )
     ).task;
 
-    if (!first || !queued) throw new Error("Missing tasks");
+    if (!first || !queued) {
+      throw new Error("Missing tasks");
+    }
+
     await f.engine.run(
       { op: "complete", taskID: first.id, result: "Done" },
       f.worker(first.workerSessionID),
@@ -619,20 +648,29 @@ test("bounded wait preserves completion, notices, idle failure and caller abort 
         )
       ).task;
 
-      if (!task) throw new Error("Missing task");
+      if (!task) {
+        throw new Error("Missing task");
+      }
+
       f.client.wait = nativeWait(
         () =>
           Effect.gen(function* () {
-            if (!f.busy.has(task.workerSessionID)) return;
+            if (!f.busy.has(task.workerSessionID)) {
+              return;
+            }
+
             yield* Deferred.await(idle);
 
-            if (outcome === "failure")
+            if (outcome === "failure") {
               return yield* Effect.fail(new Error("Native observation failed"));
+            }
           }),
         Context.empty(),
       );
       clock.onPoll(async () => {
-        if (clock.now() < 50) return;
+        if (clock.now() < 50) {
+          return;
+        }
 
         if (outcome === "complete" || outcome === "complete-abort") {
           await f.engine.run(
@@ -640,11 +678,16 @@ test("bounded wait preserves completion, notices, idle failure and caller abort 
             f.worker(task.workerSessionID),
           );
 
-          if (outcome === "complete-abort") stop.abort();
-        } else if (outcome === "notice")
+          if (outcome === "complete-abort") {
+            stop.abort();
+          }
+        } else if (outcome === "notice") {
           f.engine.state.notice(task.id, "Need approval");
-        else if (outcome === "abort") stop.abort();
-        else Effect.runSync(Deferred.succeed(idle, undefined));
+        } else if (outcome === "abort") {
+          stop.abort();
+        } else {
+          Effect.runSync(Deferred.succeed(idle, undefined));
+        }
       });
 
       const waiting = boundedOutcome(
@@ -661,8 +704,11 @@ test("bounded wait preserves completion, notices, idle failure and caller abort 
           outcome === "complete" ? "completed" : "running",
         );
 
-        if (outcome === "complete") expect(result.task?.result).toBe("Done");
-        else expect(result.notices?.[0]?.text).toBe("Need approval");
+        if (outcome === "complete") {
+          expect(result.task?.result).toBe("Done");
+        } else {
+          expect(result.notices?.[0]?.text).toBe("Need approval");
+        }
       } else {
         await expect(waiting).rejects.toThrow(
           outcome === "abort" || outcome === "complete-abort"
@@ -704,7 +750,10 @@ test("conversation eval: bounded wait lets a SQLite-queued Slack source enter af
     )
   ).task;
 
-  if (!task) throw new Error("Missing task");
+  if (!task) {
+    throw new Error("Missing task");
+  }
+
   const before = f.engine.state.task(task.id);
   clock.onPoll(async () => {
     entered.resolve();
@@ -758,7 +807,10 @@ test("conversation eval: bounded wait lets a SQLite-queued Slack source enter af
     });
     const first = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
 
-    if (!first) throw new Error("Missing first job");
+    if (!first) {
+      throw new Error("Missing first job");
+    }
+
     work = gateway.process(first, stop.signal);
     await entered.promise;
     expect(store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)).toEqual(
@@ -769,7 +821,10 @@ test("conversation eval: bounded wait lets a SQLite-queued Slack source enter af
     await boundedOutcome(work);
     const next = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
 
-    if (!next) throw new Error("Missing second job");
+    if (!next) {
+      throw new Error("Missing second job");
+    }
+
     await gateway.process(next, stop.signal);
     expect(prompts).toEqual(["Track A", "Plan B"]);
     expect(posts).toEqual([
@@ -814,7 +869,10 @@ test("dispatch binds the exact open assistant origin before later inputs and pre
       )
     ).task;
 
-    if (!first || !queued) throw new Error("Missing tasks");
+    if (!first || !queued) {
+      throw new Error("Missing tasks");
+    }
+
     expect(first.originInputID).toBe("original");
     expect(queued).toMatchObject({
       status: "queued",
@@ -866,10 +924,11 @@ test("dispatch leaves origin unknown when ancestry is absent, unreadable or unav
         { id: "unrelated", type: "user", time: { created: 1 } },
       ]);
 
-      if (mode === "api-error")
+      if (mode === "api-error") {
         f.inspectionAPI.message.list = async () => {
           throw new Error("Private API failure");
         };
+      }
 
       const caller =
         mode === "missing-context"
@@ -887,7 +946,10 @@ test("dispatch leaves origin unknown when ancestry is absent, unreadable or unav
       });
       expect(f.inputs).toHaveLength(1);
     } finally {
-      if (engine !== f.engine) await engine.close();
+      if (engine !== f.engine) {
+        await engine.close();
+      }
+
       await f.close();
     }
   }
@@ -901,7 +963,10 @@ test("dispatch origin deadline cancels a stalled history read without replay or 
     f.inspectionAPI.message.list = async (_input, request) => {
       const signal = request?.signal;
 
-      if (!signal) throw new Error("Missing history signal");
+      if (!signal) {
+        throw new Error("Missing history signal");
+      }
+
       observed = signal;
 
       return new Promise<never>((_resolve, reject) => {
@@ -943,7 +1008,10 @@ test("captain wakes queue with exact task origin while worker steer and wait not
       )
     ).task;
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     await f.engine.dm(
       { op: "send", to: "mario", text: "Continue" },
       f.captain(),
@@ -1003,7 +1071,9 @@ test("task-free and legacy-lineage captain wakes never invent a pinned input ori
       await f.engine.run({ op: "ensure", crew: "mario" }, f.captain())
     ).peers?.[0];
 
-    if (!peer) throw new Error("Missing peer");
+    if (!peer) {
+      throw new Error("Missing peer");
+    }
 
     const old = f.engine.state.reserveTask(
       peer,
@@ -1012,7 +1082,10 @@ test("task-free and legacy-lineage captain wakes never invent a pinned input ori
       "old-private-input",
     );
 
-    if (!old) throw new Error("Missing task");
+    if (!old) {
+      throw new Error("Missing task");
+    }
+
     f.engine.state.running(old.id);
     await pinned.notifyMail(
       {
@@ -1106,7 +1179,10 @@ test("conversation eval: busy status lets a second source progress without repla
     )
   ).task;
 
-  if (!task) throw new Error("Missing task");
+  if (!task) {
+    throw new Error("Missing task");
+  }
+
   const before = f.engine.state.task(task.id);
 
   const gateway = new Gateway(
@@ -1147,8 +1223,10 @@ test("conversation eval: busy status lets a second source progress without repla
       event: { ...other.event, channel: "D123", channel_type: "im" },
     });
 
-    for (const job of store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 2))
+    for (const job of store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 2)) {
       await gateway.process(job, new AbortController().signal);
+    }
+
     expect(posts).toEqual([
       { channel: "C123", thread: "1.000", text: "Project A is running." },
       {
@@ -1186,7 +1264,10 @@ test("conversation eval: explicit completion releases wait before native worker 
     )
   ).task;
 
-  if (!task) throw new Error("Missing task");
+  if (!task) {
+    throw new Error("Missing task");
+  }
+
   f.client.wait = nativeWait(
     () =>
       Effect.gen(function* () {
@@ -1257,13 +1338,15 @@ test("host-bound journal notes work without a task and isolate captain roots", a
       { op: "read", after: -1 },
       { op: "append", text: "  " },
       { op: "append", text: "note", unexpected: true },
-    ])
+    ]) {
       await expect(
         f.engine.journal(input, {
           ...caller,
           sessionID: "unauthorized",
         }),
       ).rejects.toThrow("Invalid stargate_journal input.");
+    }
+
     expect(
       (await f.engine.journal({ op: "read" }, f.captain())).entries,
     ).toHaveLength(1);
@@ -1280,7 +1363,9 @@ test("idle mail, aliases, correlated captain reply and broadcast share one inbox
       await f.engine.run({ op: "ensure", crew: "mario" }, f.captain())
     ).peers?.[0];
 
-    if (!peer) throw new Error("Missing peer");
+    if (!peer) {
+      throw new Error("Missing peer");
+    }
 
     const sent = await f.engine.mail(
       { op: "send", to: "mario", text: "Question" },
@@ -1347,7 +1432,10 @@ test("DM stored first, busy steer never resumes, native failure preserves task s
       )
     ).task;
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     const caller = f.captain();
 
     const receipt = await f.engine.dm(
@@ -1441,7 +1529,10 @@ test("busy crew receives correlated captain steer with queued work without promo
       )
     ).task;
 
-    if (!task || !queued) throw new Error("Missing tasks");
+    if (!task || !queued) {
+      throw new Error("Missing tasks");
+    }
+
     const beforeCurrent = f.engine.state.task(task.id);
     const beforeQueued = f.engine.state.task(queued.id);
 
@@ -1511,7 +1602,10 @@ test("namespaced native definitions keep short crew, mail, journal and task iden
       )
     ).task;
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     expect(f.creations[0]?.agent).toBe("galactica-crew-mario");
     expect(task.crewID).toBe("mario");
     const worker = f.worker(task.workerSessionID);
@@ -1571,7 +1665,9 @@ test("a correlated reply routes exactly but cannot steer another captain's work"
       )
     ).task;
 
-    if (!mario || !luigi) throw new Error("Missing tasks");
+    if (!mario || !luigi) {
+      throw new Error("Missing tasks");
+    }
 
     const incoming = await f.engine.mail(
       { op: "send", to: "mario", text: "Question" },
@@ -1626,7 +1722,10 @@ test("finished worker has no stale captain context for inbox, new mail or journa
       )
     ).task;
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     await f.engine.run(
       { op: "complete", taskID: task.id, result: "Done" },
       f.worker(task.workerSessionID),
@@ -1695,7 +1794,10 @@ test("notification bookkeeping failure keeps the successful durable mail receipt
       )
     ).task;
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     f.engine.state.beginNotify = () => {
       throw new Error("private database details");
     };
@@ -1756,8 +1858,9 @@ test("broadcast returns partial receipts and Pi tools-none stores no unreadable 
     f.mailer.register = register;
     const send = f.mailer.send;
     f.mailer.send = async (input, signal) => {
-      if (input.to === f.engine.state.peer("luigi")?.sessionID)
+      if (input.to === f.engine.state.peer("luigi")?.sessionID) {
         throw new Error("private transport failure");
+      }
 
       return send(input, signal);
     };
@@ -1795,7 +1898,10 @@ test("update notices queue once behind busy OpenCode crew without interrupting, 
       )
     ).task;
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     const before = f.calls.length;
     const nativeHistory = structuredClone(f.history.get(task.workerSessionID));
 
@@ -1848,7 +1954,10 @@ test("passive notices preserve uncertain reconciliation and later legitimate dis
       )
     ).task;
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     const input = uncertainResult(f, task);
     await f.engine.updateNotice(
       buildUpdateSnapshot("0.37.0", {}, "- New notices"),
@@ -2028,13 +2137,17 @@ async function fixture(
     async get({ sessionID }) {
       const session = sessions.get(sessionID);
 
-      if (!session) throw { _tag: "Session.NotFoundError" };
+      if (!session) {
+        throw { _tag: "Session.NotFoundError" };
+      }
 
       return session;
     },
     async create(input) {
-      if (!input.id || !input.location || !input.agent)
+      if (!input.id || !input.location || !input.agent) {
         throw new Error("Invalid fixture create");
+      }
+
       calls.push({ method: "create", sessionID: input.id });
       creations.push(input);
 
@@ -2049,7 +2162,9 @@ async function fixture(
 
       sessions.set(input.id, session);
 
-      if (createFailure) throw new Error("secret raw SDK error");
+      if (createFailure) {
+        throw new Error("secret raw SDK error");
+      }
 
       return session;
     },
@@ -2063,7 +2178,10 @@ async function fixture(
       busy.add(input.sessionID);
       promptHook();
 
-      if (promptFailure) throw new Error("secret raw SDK error");
+      if (promptFailure) {
+        throw new Error("secret raw SDK error");
+      }
+
       // Accepted input is placed in the busy worker's native history.
       history.set(input.sessionID, [
         {
@@ -2079,11 +2197,17 @@ async function fixture(
       return { id: input.id ?? "msg_fixture", sessionID: input.sessionID };
     },
     async wait({ sessionID }, request) {
-      if (!busy.has(sessionID)) return;
+      if (!busy.has(sessionID)) {
+        return;
+      }
+
       await new Promise<void>((_, reject) => {
         const signal = request?.signal;
 
-        if (signal?.aborted) return reject(signal.reason);
+        if (signal?.aborted) {
+          return reject(signal.reason);
+        }
+
         signal?.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         });
@@ -2094,7 +2218,9 @@ async function fixture(
       calls.push({ method: "interrupt", sessionID });
       busy.delete(sessionID);
 
-      if (interruptFailure) throw new Error("secret raw SDK error");
+      if (interruptFailure) {
+        throw new Error("secret raw SDK error");
+      }
 
       return { interrupted: true };
     },
@@ -2118,8 +2244,9 @@ async function fixture(
       const previous = sentKeys.get(input.key);
 
       if (previous) {
-        if (previous.text !== input.text)
+        if (previous.text !== input.text) {
           throw new Error("Conflicting Mesij replay key");
+        }
 
         return { id: previous.id, sequence: previous.sequence };
       }
@@ -2191,7 +2318,9 @@ async function fixture(
     },
   };
 
-  if (seededSchema) await copyCrewDatabase(directory, options.namespace);
+  if (seededSchema) {
+    await copyCrewDatabase(directory, options.namespace);
+  }
 
   const engine = await CrewEngine.open(
     options,
@@ -2270,7 +2399,9 @@ async function assignedTask(f: Awaited<ReturnType<typeof fixture>>) {
     )
   ).task;
 
-  if (!task) throw new Error("Missing assigned fixture task");
+  if (!task) {
+    throw new Error("Missing assigned fixture task");
+  }
 
   return task;
 }
@@ -2282,7 +2413,10 @@ function uncertainResult(
 ) {
   const admitted = f.inputs.find((input) => input.id === task.inputID);
 
-  if (!admitted) throw new Error("Missing admitted input");
+  if (!admitted) {
+    throw new Error("Missing admitted input");
+  }
+
   f.history.set(task.workerSessionID, [
     {
       id: "msg_retained_final",
@@ -2330,7 +2464,10 @@ test("cutover reconciles immutable historical pogoCrew evidence with its origina
     const messages = f.history.get(task.workerSessionID);
     const admitted = messages?.find((message) => message.id === task.inputID);
 
-    if (!admitted?.text) throw new Error("Missing retained input");
+    if (!admitted?.text) {
+      throw new Error("Missing retained input");
+    }
+
     admitted.text = admitted.text.replace(
       "Stargate task envelope: ",
       "Pogo task envelope: ",
@@ -2375,7 +2512,10 @@ test("worker reads its own task status without captain mediation or execution", 
 
     const peer = f.engine.state.peer("mario");
 
-    if (!peer || !task.task) throw new Error("Missing task fixture");
+    if (!peer || !task.task) {
+      throw new Error("Missing task fixture");
+    }
+
     const before = f.calls.length;
 
     const status = await f.engine.run(
@@ -2409,7 +2549,10 @@ test("waiting changes reject children, foreign roots and worker impersonation", 
     const path = waitingSettingsPath(f.options.captainDirectory, "bowser");
     const captain = f.sessions.get("ses_captain_a");
 
-    if (!captain) throw new Error("missing captain fixture");
+    if (!captain) {
+      throw new Error("missing captain fixture");
+    }
+
     f.sessions.set("ses_child", {
       ...captain,
       id: "ses_child",
@@ -2503,7 +2646,10 @@ test("custom roster authorizes real sessions and applies permission profiles", a
     ).rejects.toThrow("configured");
     const worker = f.sessions.get(peers?.[0]?.sessionID ?? "");
 
-    if (!worker) throw new Error("Missing worker");
+    if (!worker) {
+      throw new Error("Missing worker");
+    }
+
     worker.location.directory = "/wrong";
     await expect(f.engine.authorize(f.worker(worker.id))).rejects.toThrow(
       "identity",
@@ -2948,7 +3094,10 @@ test("queued wait promotes once under contention and returns the owned result", 
     f.onPrompt(() => {
       const current = f.engine.state.activeTask("builder");
 
-      if (!current) throw new Error("Missing task");
+      if (!current) {
+        throw new Error("Missing task");
+      }
+
       f.engine.state.complete(
         current.id,
         current.workerSessionID,
@@ -2997,7 +3146,10 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
       )
     ).task;
 
-    if (!first || !queued) throw new Error("Missing task fixture");
+    if (!first || !queued) {
+      throw new Error("Missing task fixture");
+    }
+
     await f.engine.run(
       { op: "complete", taskID: first.id, result: "First done" },
       f.worker(first.workerSessionID),
@@ -3020,16 +3172,18 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
         id === queued.id &&
         second.state.task(id)?.status === "dispatching" &&
         ++dispatchingPolls === 2
-      )
+      ) {
         dispatchingObserved.resolve();
+      }
 
       return notices(id, after);
     };
 
     const wait = f.client.wait.bind(f.client);
     f.client.wait = async (input, request) => {
-      if (second.state.task(queued.id)?.status === "running")
+      if (second.state.task(queued.id)?.status === "running") {
         runningObserved.resolve();
+      }
 
       return wait(input, request);
     };
@@ -3062,10 +3216,11 @@ test("concurrent queued wait does not treat pre-admission idle as worker exit", 
     );
     f.busy.delete(queued.workerSessionID);
 
-    for (const result of await Promise.all([promoting, observing]))
+    for (const result of await Promise.all([promoting, observing])) {
       expect(result).toMatchObject({
         result: { status: "completed", task: { result: "Second done" } },
       });
+    }
   } finally {
     controller.abort();
     allowAdmission.resolve();
@@ -3086,7 +3241,10 @@ test("admitted worker exit without completion stays uncertain and is not replaye
       )
     ).task;
 
-    if (!task) throw new Error("Missing task fixture");
+    if (!task) {
+      throw new Error("Missing task fixture");
+    }
+
     expect(task.status).toBe("running");
     f.busy.delete(task.workerSessionID);
     await expect(
@@ -3154,7 +3312,10 @@ test("cross-origin captain reconciles exact evidence, retains audit and selects 
         )
       ).task;
 
-      if (!task) throw new Error("Missing queue fixture");
+      if (!task) {
+        throw new Error("Missing queue fixture");
+      }
+
       queued.push(task);
     }
 
@@ -3213,7 +3374,10 @@ test("cross-origin captain reconciles exact evidence, retains audit and selects 
       const later = queued[1];
       const next = queued[0];
 
-      if (!next || !later) throw new Error("Missing queue head");
+      if (!next || !later) {
+        throw new Error("Missing queue head");
+      }
+
       expect(
         (
           await reopened.run(
@@ -3352,7 +3516,9 @@ for (const state of ["running", "uncertain", "completed"] as const) {
     try {
       const task = await assignedTask(f);
 
-      if (state === "uncertain") uncertainResult(f, task);
+      if (state === "uncertain") {
+        uncertainResult(f, task);
+      }
 
       const requested = await f.engine.run(
         { op: "inspect", crew: "builder", requestStatus: { key: "interop" } },
@@ -3361,7 +3527,10 @@ for (const state of ["running", "uncertain", "completed"] as const) {
 
       const receiptID = requested.statusRequest?.id;
 
-      if (!receiptID) throw new Error("Missing status request receipt");
+      if (!receiptID) {
+        throw new Error("Missing status request receipt");
+      }
+
       // Simulate an installed request predating mail_routes, then a restart.
       const db = new Database(f.engine.state.path);
 
@@ -3426,7 +3595,7 @@ for (const state of ["running", "uncertain", "completed"] as const) {
           ),
         ).rejects.toThrow();
 
-        if (state !== "running")
+        if (state !== "running") {
           await expect(
             reopened.mail(
               {
@@ -3439,6 +3608,8 @@ for (const state of ["running", "uncertain", "completed"] as const) {
               worker,
             ),
           ).rejects.toThrow("current task");
+        }
+
         expect(
           await reopened.mail(
             {
@@ -3454,7 +3625,10 @@ for (const state of ["running", "uncertain", "completed"] as const) {
         ).toMatchObject({ stored: true, notification: "not_requested" });
         const reply = f.messages.at(-1);
 
-        if (!reply) throw new Error("Missing status reply");
+        if (!reply) {
+          throw new Error("Missing status reply");
+        }
+
         const oldReply = new Database(reopened.state.path);
 
         try {
@@ -3517,7 +3691,10 @@ for (const native of ["builder", "ship-crew-builder", "foreign"]) {
       const input = uncertainResult(f, task);
       const final = f.history.get(task.workerSessionID)?.[0];
 
-      if (!final) throw new Error("Missing final answer");
+      if (!final) {
+        throw new Error("Missing final answer");
+      }
+
       final.agent = native;
 
       if (native === "foreign") {
@@ -3558,7 +3735,10 @@ test("installed maintenance uses mapped captain authorization and rejects foreig
     gate.close({ sessionID: "ses_captain_a", id: "mapped" });
     const root = f.sessions.get("ses_captain_b");
 
-    if (!root) throw new Error("Missing root");
+    if (!root) {
+      throw new Error("Missing root");
+    }
+
     root.agent = "lead";
     await gate.open(
       { sessionID: root.id, id: "historical" },
@@ -3586,10 +3766,16 @@ test("installed status inbox rejects forged legacy request/reply lineage", async
       f.captain("ses_captain_b"),
     );
 
-    if (!request.statusRequest) throw new Error("Missing request");
+    if (!request.statusRequest) {
+      throw new Error("Missing request");
+    }
+
     const original = f.messages[0];
 
-    if (!original) throw new Error("Missing event");
+    if (!original) {
+      throw new Error("Missing event");
+    }
+
     const envelope = JSON.parse(original.text);
 
     const reply = {
@@ -3661,10 +3847,11 @@ test("inspection/reconciliation reject workers, child/foreign roots and tasks fr
         location: { directory: other.options.captainDirectory },
       });
 
-      for (const id of ["ses_child", "ses_foreign"])
+      for (const id of ["ses_child", "ses_foreign"]) {
         await expect(f.engine.run(operation, f.captain(id))).rejects.toThrow(
           "root configured captain",
         );
+      }
     }
 
     const foreign = await assignedTask(other);
@@ -3780,17 +3967,18 @@ test.each([
         const db = new Database(f.engine.state.path);
 
         try {
-          if (field === "peer")
+          if (field === "peer") {
             db.query(
               "UPDATE peers SET sessionID='ses_changed' WHERE crewID='builder'",
             ).run();
-          else if (field === "released" || field === "notifying")
+          } else if (field === "released" || field === "notifying") {
             db.query(`UPDATE tasks SET ${field}=1 WHERE id=?`).run(task.id);
-          else
+          } else {
             db.query(`UPDATE tasks SET ${field}=? WHERE id=?`).run(
               field === "status" ? "running" : "changed_identity",
               task.id,
             );
+          }
         } finally {
           db.close();
         }
@@ -3852,30 +4040,47 @@ test.each([
     const final = messages?.[0];
     const admitted = messages?.[1];
 
-    if (!messages || !final || !admitted)
+    if (!messages || !final || !admitted) {
       throw new Error("Missing evidence fixture");
+    }
 
-    if (failure === "hash") input.resultSha256 = "0".repeat(64);
+    if (failure === "hash") {
+      input.resultSha256 = "0".repeat(64);
+    }
 
-    if (failure === "message") input.resultMessageID = "msg_other_result";
+    if (failure === "message") {
+      input.resultMessageID = "msg_other_result";
+    }
 
-    if (failure === "input") admitted.metadata = {};
+    if (failure === "input") {
+      admitted.metadata = {};
+    }
 
-    if (failure === "envelope") admitted.text = "Stargate task envelope: {}";
+    if (failure === "envelope") {
+      admitted.text = "Stargate task envelope: {}";
+    }
 
-    if (failure === "interleaved")
+    if (failure === "interleaved") {
       messages.splice(1, 0, {
         id: "msg_other_input",
         type: "user",
         time: { created: 65 },
         text: "Unrelated private prompt",
       });
+    }
 
-    if (failure === "finish") final.finish = "tool-calls";
+    if (failure === "finish") {
+      final.finish = "tool-calls";
+    }
 
-    if (failure === "agent") final.agent = "reader";
+    if (failure === "agent") {
+      final.agent = "reader";
+    }
 
-    if (failure === "missing") messages.pop();
+    if (failure === "missing") {
+      messages.pop();
+    }
+
     await expect(f.engine.run(input, f.captain())).rejects.toThrow(
       /evidence|input|envelope/,
     );
@@ -3895,7 +4100,10 @@ test("reconciliation evidence paginates and rejects conflicting idempotent retri
     const input = uncertainResult(f, task);
     const messages = f.history.get(task.workerSessionID);
 
-    if (!messages?.[0] || !messages[1]) throw new Error("Missing evidence");
+    if (!messages?.[0] || !messages[1]) {
+      throw new Error("Missing evidence");
+    }
+
     const [final, admitted] = messages;
     f.inspectionAPI.message.list = async ({ cursor, sessionID }) => {
       expect(sessionID).toBe(task.workerSessionID);
@@ -3991,7 +4199,9 @@ test("reconciliation rejects queued/cancelled work and conflicting retained resu
       )
     ).task;
 
-    if (!queued) throw new Error("Missing queue fixture");
+    if (!queued) {
+      throw new Error("Missing queue fixture");
+    }
 
     const queuedInput = {
       ...input,
@@ -4109,7 +4319,10 @@ test("inspection/reconciliation fail closed on foreign peer metadata and changed
     const input = uncertainResult(f, task);
     const session = f.sessions.get(task.workerSessionID);
 
-    if (!session) throw new Error("Missing peer fixture");
+    if (!session) {
+      throw new Error("Missing peer fixture");
+    }
+
     const metadata = session.metadata;
     session.metadata = {
       stargateCrew: { namespace: "foreign-team", crewID: "builder" },
@@ -4121,7 +4334,10 @@ test("inspection/reconciliation fail closed on foreign peer metadata and changed
       "identity changed",
     );
 
-    if (metadata) session.metadata = metadata;
+    if (metadata) {
+      session.metadata = metadata;
+    }
+
     const list = f.inspectionAPI.message.list;
     f.inspectionAPI.message.list = async (...args) => {
       session.time = { updated: 200, busy: 150, idle: 200 };
@@ -4148,8 +4364,10 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
-      if (request.headers.get("authorization") !== "Bearer fixture-only")
+      if (request.headers.get("authorization") !== "Bearer fixture-only") {
         return Response.json({ _tag: "UnauthorizedError" }, { status: 401 });
+      }
+
       const url = new URL(request.url);
       expect(url.pathname).toBe("/api/rpc/stargate.crew.recovery/run");
       expect(url.searchParams.get("location[directory]")).toBe(
@@ -4161,8 +4379,9 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
         "~standard"
       ].validate(body.input);
 
-      if (decoded.issues)
+      if (decoded.issues) {
         return Response.json({ _tag: "BadRequestError" }, { status: 400 });
+      }
 
       return Response.json({
         output: await runRecoveryOperator(
@@ -4199,8 +4418,9 @@ test("authenticated operator SDK RPC invokes inspection/reconciliation without a
         sessionID: "ses_captain_b",
         request: { ...input, expected: { ...input.expected, extra: true } },
       },
-    ])
+    ]) {
       await expect(rpc.run(malformed, options)).rejects.toBeDefined();
+    }
 
     const inspected = JSON.parse(
       await rpc.run(
@@ -4247,7 +4467,10 @@ test("external worker activity blocks admission and controls always release", as
       await f.engine.run({ op: "ensure", crew: "builder" }, f.captain())
     ).peers?.[0];
 
-    if (!peer) throw new Error("Missing peer");
+    if (!peer) {
+      throw new Error("Missing peer");
+    }
+
     f.busy.add(peer.sessionID);
 
     const queued = await f.engine.run(
@@ -4294,7 +4517,10 @@ test("worker urgency cannot create an idle colleague's root session", async () =
       )
     ).task;
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     expect(
       await f.engine.run(
         { op: "urgent", taskID: task.id, to: "luigi", text: "Question" },
@@ -4337,7 +4563,10 @@ test("Daisy receives broad session tools but workers cannot ensure", async () =>
     ).rejects.toThrow("Only Bowser");
     const captain = f.sessions.get("ses_captain_a");
 
-    if (!captain) throw new Error("Missing fixture captain");
+    if (!captain) {
+      throw new Error("Missing fixture captain");
+    }
+
     captain.location.directory = "/different-workspace";
     await expect(f.engine.run({ op: "ensure" }, f.captain())).rejects.toThrow(
       "configured",
@@ -4375,7 +4604,7 @@ test("independent plugin instances atomically reserve the same worker", async ()
   }
 });
 
-for (const placed of [true, false])
+for (const placed of [true, false]) {
   test(`aborted admission interrupts only proven own placement: ${placed}`, async () => {
     const f = await fixture();
 
@@ -4384,7 +4613,7 @@ for (const placed of [true, false])
       f.onPrompt(() => {
         const input = f.inputs.at(-1);
 
-        if (placed && input)
+        if (placed && input) {
           f.history.set(input.sessionID, [
             {
               id: input.id ?? "",
@@ -4393,6 +4622,8 @@ for (const placed of [true, false])
               text: input.text,
             },
           ]);
+        }
+
         controller.abort();
       });
       f.failPrompt();
@@ -4411,6 +4642,7 @@ for (const placed of [true, false])
       await f.close();
     }
   });
+}
 
 test("same-captain colleague urgency includes the recipient's exact task ID", async () => {
   const f = await fixture();
@@ -4787,7 +5019,10 @@ test("unrelated lookup failures preserve the pending reservation without creatin
 
   try {
     f.client.get = async (input, request) => {
-      if (input.sessionID === "ses_captain_a") return get(input, request);
+      if (input.sessionID === "ses_captain_a") {
+        return get(input, request);
+      }
+
       throw { _tag: "Location.NotFoundError", message: "secret raw SDK error" };
     };
 
@@ -4800,7 +5035,10 @@ test("unrelated lookup failures preserve the pending reservation without creatin
     expect(pending?.status).toBe("pending");
     expect(f.creations).toHaveLength(0);
 
-    if (!pending) throw new Error("Missing fixture reservation");
+    if (!pending) {
+      throw new Error("Missing fixture reservation");
+    }
+
     f.client.get = get;
 
     const result = await f.engine.run(
@@ -4822,7 +5060,10 @@ test("ready-only model inspection/control never reserve or create an unprovision
 
   try {
     for (const pending of [false, true]) {
-      if (pending) f.engine.state.reservePeer("builder");
+      if (pending) {
+        f.engine.state.reservePeer("builder");
+      }
+
       const before = f.engine.state.peer("builder");
       await expect(
         f.engine.inspectWorkerModel("builder", f.captain()),
@@ -4854,10 +5095,16 @@ test("ready-only inspection validates one existing native snapshot and refuses c
     await f.engine.run({ op: "ensure", crew: "builder" }, f.captain());
     const peer = f.engine.state.peer("builder");
 
-    if (!peer) throw new Error("Missing peer");
+    if (!peer) {
+      throw new Error("Missing peer");
+    }
+
     const native = f.sessions.get(peer.sessionID);
 
-    if (!native) throw new Error("Missing native worker");
+    if (!native) {
+      throw new Error("Missing native worker");
+    }
+
     native.model = { providerID: "fixture", id: "builder", variant: "high" };
     const original = structuredClone(native);
     const reads: string[] = [];
@@ -4922,7 +5169,10 @@ test("ready-only model operations refuse Pi, unknown crew and foreign native cap
 
   const captain = f.sessions.get("ses_captain_a");
 
-  if (!captain) throw new Error("Missing captain fixture");
+  if (!captain) {
+    throw new Error("Missing captain fixture");
+  }
+
   f.sessions.set("ses_captaina", { ...captain, id: "ses_captaina" });
 
   const pinned = await CrewEngine.open(
@@ -4939,8 +5189,10 @@ test("ready-only model operations refuse Pi, unknown crew and foreign native cap
         f.engine.withWorkerControl("builder", f.captain(), async () => {}, {
           requireReady: true,
         }),
-    ])
+    ]) {
       await expect(op()).rejects.toThrow(/Pi|OpenCode workers/);
+    }
+
     await expect(
       f.engine.inspectWorkerModel("foreign", f.captain()),
     ).rejects.toThrow("Unknown configured crew");
@@ -4982,7 +5234,10 @@ function effortModels(f: Awaited<ReturnType<typeof fixture>>) {
     async switchModel({ sessionID, model }) {
       const current = f.sessions.get(sessionID);
 
-      if (!current) throw new Error("Missing worker");
+      if (!current) {
+        throw new Error("Missing worker");
+      }
+
       writes++;
       current.model = model;
     },
@@ -5033,7 +5288,10 @@ test("effort real engine refuses held/running/uncertain/native-busy work includi
     const peer = f.engine.state.peer("builder");
     const native = peer && f.sessions.get(peer.sessionID);
 
-    if (!peer || !native) throw new Error("Missing worker");
+    if (!peer || !native) {
+      throw new Error("Missing worker");
+    }
+
     native.model = { providerID: "openai-proxy", id: "model", variant: "high" };
     const models = effortModels(f);
 
@@ -5059,7 +5317,10 @@ test("effort real engine refuses held/running/uncertain/native-busy work includi
       "Retained original work",
     );
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     f.engine.state.running(task.id);
     const running = f.engine.state.task(task.id);
     await expect(request()).rejects.toThrow("running or uncertain");
@@ -5100,7 +5361,10 @@ test("effort ready-only control excludes competing dispatch and retains session/
     const peer = f.engine.state.peer("builder");
     const native = peer && f.sessions.get(peer.sessionID);
 
-    if (!peer || !native) throw new Error("Missing worker");
+    if (!peer || !native) {
+      throw new Error("Missing worker");
+    }
+
     native.model = { providerID: "openai-proxy", id: "model", variant: "low" };
     const before = structuredClone(native);
     const models = effortModels(f);
@@ -5149,7 +5413,10 @@ test("effort can update an idle provisioned worker with queued-only work without
     const peer = f.engine.state.peer("builder");
     const native = peer && f.sessions.get(peer.sessionID);
 
-    if (!peer || !native) throw new Error("Missing worker");
+    if (!peer || !native) {
+      throw new Error("Missing worker");
+    }
+
     native.model = { providerID: "openai-proxy", id: "model", variant: "low" };
     f.busy.add(peer.sessionID);
 
@@ -5165,7 +5432,10 @@ test("effort can update an idle provisioned worker with queued-only work without
 
     expect(queued.status).toBe("queued");
 
-    if (!queued.task) throw new Error("Missing queued task");
+    if (!queued.task) {
+      throw new Error("Missing queued task");
+    }
+
     f.busy.delete(peer.sessionID);
     const models = effortModels(f);
     expect(

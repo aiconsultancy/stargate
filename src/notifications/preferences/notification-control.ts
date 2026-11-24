@@ -36,8 +36,9 @@ const defaults: NotificationDependencies = {
     const web = botWebClient(await botToken(bot, configPath), signal);
     const auth = await web.auth.test();
 
-    if (!auth.bot_id || !auth.team_id || !auth.user_id)
+    if (!auth.bot_id || !auth.team_id || !auth.user_id) {
       throw new Error("Workspace bot required.");
+    }
 
     return { team: auth.team_id, user: auth.user_id };
   },
@@ -52,10 +53,12 @@ export async function runNotificationOperation(
 ): Promise<unknown> {
   const parsed = Schema.decodeUnknownResult(notificationInputSchema)(raw);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     throw new NotificationControlError(
       "Invalid notification operation; use explicit C/G targets.",
     );
+  }
+
   signal.throwIfAborted();
 
   try {
@@ -66,24 +69,28 @@ export async function runNotificationOperation(
       bot?.backend.type !== "opencode" ||
       bot.backend.sessionID !== binding.captainSessionID ||
       resolve(bot.backend.directory) !== resolve(binding.expectedDirectory)
-    )
+    ) {
       throw new NotificationControlError(
         "Notification binding does not match this pinned Slack captain.",
       );
+    }
+
     const input = parsed.success;
 
-    if ("channel" in input && !isAllowedChannel(bot, input.channel))
+    if ("channel" in input && !isAllowedChannel(bot, input.channel)) {
       throw new NotificationControlError(
         "Notification target channel is not allowed for this bot.",
       );
+    }
 
     if (
       ["mute", "unmute", "clear_all"].includes(input.op) &&
       !binding.operationID
-    )
+    ) {
       throw new NotificationControlError(
         "Notification changes require a stable host tool-call identity.",
       );
+    }
 
     const identity = await dependencies.identity(
       bot,
@@ -107,7 +114,10 @@ export async function runNotificationOperation(
       store.close();
     }
   } catch (error) {
-    if (error instanceof NotificationControlError) throw error;
+    if (error instanceof NotificationControlError) {
+      throw error;
+    }
+
     throw new NotificationControlError(
       "Notification operation unconfirmed; no success is claimed. Retry the same host operation after checking private store access.",
     );

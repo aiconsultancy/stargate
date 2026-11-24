@@ -105,8 +105,10 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
         ),
       )(options.destinations);
 
-      if (Result.isFailure(subscriptions) || Result.isFailure(destinations))
+      if (Result.isFailure(subscriptions) || Result.isFailure(destinations)) {
         return yield* Effect.fail(new StoreUnavailable());
+      }
+
       yield* Effect.try({
         try: () => {
           store.recover(clock.now());
@@ -134,11 +136,13 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
       const closeAdmission = () => {
         closing = true;
 
-        for (const admission of pending)
+        for (const admission of pending) {
           Deferred.doneUnsafe(
             admission.result,
             Effect.fail(new ShuttingDown()),
           );
+        }
+
         pending.clear();
         Queue.shutdownUnsafe(queue);
         wake.abort();
@@ -153,21 +157,27 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
         source: Source,
         input: NotificationInput,
       ): Effect.fn.Return<Accepted, PublishError> {
-        if (closing) return yield* Effect.fail(new ShuttingDown());
+        if (closing) {
+          return yield* Effect.fail(new ShuttingDown());
+        }
+
         const checkedSource = Schema.decodeUnknownResult(Source)(source);
 
         const checkedInput =
           Schema.decodeUnknownResult(NotificationInput)(input);
 
-        if (Result.isFailure(checkedSource) || Result.isFailure(checkedInput))
+        if (Result.isFailure(checkedSource) || Result.isFailure(checkedInput)) {
           return yield* Effect.fail(new InvalidNotification());
+        }
 
         if (
           !checkedSource.success.topics.some((pattern) =>
             topicMatches(pattern, checkedInput.success.topic),
           )
-        )
+        ) {
           return yield* Effect.fail(new TopicNotGranted());
+        }
+
         const result = yield* Deferred.make<Accepted, PublishError>();
 
         const admission: Admission = {
@@ -179,17 +189,26 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
         // Offer and bookkeeping are one non-suspending operation. The owner, not
         // The caller's fiber, owns every successfully offered admission.
         const offered = yield* Effect.sync(() => {
-          if (closing) return "closed";
+          if (closing) {
+            return "closed";
+          }
 
-          if (!Queue.offerUnsafe(queue, admission)) return "full";
+          if (!Queue.offerUnsafe(queue, admission)) {
+            return "full";
+          }
+
           pending.add(admission);
 
           return "offered";
         });
 
-        if (offered === "closed") return yield* Effect.fail(new ShuttingDown());
+        if (offered === "closed") {
+          return yield* Effect.fail(new ShuttingDown());
+        }
 
-        if (offered === "full") return yield* Effect.fail(new QueueFull());
+        if (offered === "full") {
+          return yield* Effect.fail(new QueueFull());
+        }
 
         return yield* Deferred.await(result);
       });
@@ -259,7 +278,9 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
             /* Fail closed */
           }
 
-          if (!allowed) return { state: "refused", retryable: false };
+          if (!allowed) {
+            return { state: "refused", retryable: false };
+          }
 
           try {
             return await options.sink.send(
@@ -302,30 +323,42 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
               while (!closing && active.size < store.limits.concurrency) {
                 const claim = store.claim(clock.now());
 
-                if (!claim) break;
+                if (!claim) {
+                  break;
+                }
+
                 launch(claim);
               }
             } catch {
               fail();
             }
 
-            if (!closing)
+            if (!closing) {
               yield* abortable(
                 (signal) =>
                   clock.wait(25, AbortSignal.any([signal, wake.signal])),
                 () => new ShuttingDown(),
               ).pipe(Effect.catch(() => Effect.void));
+            }
           }
         }),
       );
 
       const shutdown = (): Promise<ShutdownResult> => {
-        if (storeClosed) return Promise.resolve({ state: "closed" });
+        if (storeClosed) {
+          return Promise.resolve({ state: "closed" });
+        }
 
-        if (shutdownRun !== undefined) return shutdownRun;
+        if (shutdownRun !== undefined) {
+          return shutdownRun;
+        }
+
         closeAdmission();
 
-        for (const attempt of active.values()) attempt.controller.abort();
+        for (const attempt of active.values()) {
+          attempt.controller.abort();
+        }
+
         const grace = new AbortController();
 
         const settled = Promise.all([
@@ -343,7 +376,10 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
           .then((quiet): ShutdownResult => {
             grace.abort();
 
-            if (!quiet) return { state: "unresolved", active: active.size };
+            if (!quiet) {
+              return { state: "unresolved", active: active.size };
+            }
+
             store.close();
             storeClosed = true;
 
@@ -369,7 +405,9 @@ export const makeNotifications = Effect.fn("notify.makeNotifications")(
 
       return core;
     } finally {
-      if (!initialized) store.close();
+      if (!initialized) {
+        store.close();
+      }
     }
   },
   // Acquisition must register the store finalizer before interruption can

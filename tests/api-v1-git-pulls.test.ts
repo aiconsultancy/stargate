@@ -59,8 +59,9 @@ test("parses only GitHub owner/repo from URL and scp-like remotes", () => {
     "https://user:fixture-password@github.com/example/project",
     "ssh://git@GitHub.com:22/example/project.git",
     "git@github.com:example/project.git",
-  ])
+  ]) {
     expect(githubRepository(remote)).toBe("example/project");
+  }
 
   for (const remote of [
     "/local/checkout",
@@ -69,8 +70,9 @@ test("parses only GitHub owner/repo from URL and scp-like remotes", () => {
     "git@example.test:example/project.git",
     "https://github.com/example/project/deeper",
     "https://github.com/example/%2fproject",
-  ])
+  ]) {
     expect(githubRepository(remote)).toBeNull();
+  }
 });
 
 test("reads real Git state, respects the 15-second cache and handles a detached HEAD", async () => {
@@ -101,7 +103,9 @@ test("reads real Git state, respects the 15-second cache and handles a detached 
       { cwd: directory },
     );
 
-    if (command.exitCode !== 0) throw new Error(command.stderr.toString());
+    if (command.exitCode !== 0) {
+      throw new Error(command.stderr.toString());
+    }
   };
 
   try {
@@ -206,7 +210,9 @@ test("looks up only the bound repository and requires an exact head repository",
     run: async (args) => {
       commands.push(args);
 
-      if (args[1] === "auth") return { code: 0, stdout: "" };
+      if (args[1] === "auth") {
+        return { code: 0, stdout: "" };
+      }
 
       if (args[1] === "api") {
         const rows = [
@@ -214,8 +220,9 @@ test("looks up only the bound repository and requires an exact head repository",
           { number: 41, repository: "Example/renamed" },
         ];
 
-        if (args.at(-1) === "head=example:123")
+        if (args.at(-1) === "head=example:123") {
           rows.push({ number: 40, repository: "Example/project" });
+        }
 
         return { code: 0, stdout: JSON.stringify(rows) };
       }
@@ -265,15 +272,18 @@ test.each([
     const pull = createPullReader(Date.now, {
       which: () => "/fixture/gh",
       run: async (command) => {
-        if (command[1] === "auth") return { code: 0, stdout: "" };
+        if (command[1] === "auth") {
+          return { code: 0, stdout: "" };
+        }
 
-        if (command[1] === "api")
+        if (command[1] === "api") {
           return {
             code: 0,
             stdout: JSON.stringify([
               { number: 1, repository: "example/project" },
             ]),
           };
+        }
 
         return {
           code: 0,
@@ -322,7 +332,7 @@ test("PR refreshes deduplicate work, keep the last result on failure and clear i
         return { code: authCode, stdout: "" };
       }
 
-      if (command[2] === "view")
+      if (command[2] === "view") {
         return {
           code: 0,
           stdout: JSON.stringify({
@@ -337,9 +347,14 @@ test("PR refreshes deduplicate work, keep the last result on failure and clear i
             headRepositoryOwner: { login: "example" },
           }),
         };
+      }
+
       const branch = command.at(-1)?.replace(/^head=example:/, "");
 
-      if (!branch) throw new Error("Missing branch");
+      if (!branch) {
+        throw new Error("Missing branch");
+      }
+
       const response = Promise.withResolvers<Response>();
       views.set(branch, response);
 
@@ -402,9 +417,11 @@ test.each(["123", "#123"])(
     const pull = createPullReader(Date.now, {
       which: () => "/fixture/gh",
       run: async (command) => {
-        if (command[1] === "auth") return { code: 0, stdout: "" };
+        if (command[1] === "auth") {
+          return { code: 0, stdout: "" };
+        }
 
-        if (command[2] === "view")
+        if (command[2] === "view") {
           return {
             code: 0,
             stdout: JSON.stringify({
@@ -413,13 +430,15 @@ test.each(["123", "#123"])(
               url: `https://github.com/example/project/pull/${command[3]}`,
             }),
           };
+        }
 
         if (
           command[1] !== "api" ||
           !command.includes(`head=example:${branch}`) ||
           !command.includes("state=all")
-        )
+        ) {
           return { code: 1, stdout: "" };
+        }
 
         return {
           code: 0,

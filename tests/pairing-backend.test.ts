@@ -13,7 +13,9 @@ function backend(url: string, headersEnv: Record<string, string> = {}) {
     headersEnv,
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
 
   return new OpenCodeBackend(config);
 }

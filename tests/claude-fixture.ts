@@ -58,7 +58,9 @@ const flag = (name: string) => {
 
   const argument = process.argv[index];
 
-  if (index < 0 || argument === undefined) return undefined;
+  if (index < 0 || argument === undefined) {
+    return undefined;
+  }
 
   return argument.includes("=")
     ? argument.slice(name.length + 1)
@@ -156,8 +158,10 @@ let linger = false;
 async function answer(text: string) {
   linger = text.includes("linger");
 
-  if (resumed && !existsSync(transcript))
+  if (resumed && !existsSync(transcript)) {
     return result("error_during_execution", true);
+  }
+
   mkdirSync(join(home, "projects", "fixture"), { recursive: true });
   appendFileSync(transcript, `${JSON.stringify({ type: "user", text })}\n`);
   write({
@@ -177,7 +181,9 @@ async function answer(text: string) {
     ...base(),
   });
 
-  if (text.includes("stubborn")) await stubborn(text.includes("detached"));
+  if (text.includes("stubborn")) {
+    await stubborn(text.includes("detached"));
+  }
 
   if (text.includes("hang")) {
     // A tool command in the same process group must stop with the CLI.
@@ -187,18 +193,23 @@ async function answer(text: string) {
     return;
   }
 
-  if (text.includes("crash")) process.exit(3);
+  if (text.includes("crash")) {
+    process.exit(3);
+  }
+
   // "fail", "fail:<cause>" or "fail:<cause>:<status>"; "tool" runs one first.
   const failure = /fail(?::(\w+))?(?::(\d+))?/.exec(text);
 
   if (failure) {
-    if (text.includes("tool"))
+    if (text.includes("tool")) {
       assistant("msg_tool", {
         type: "tool_use",
         id: "toolu_1",
         name: "Bash",
         input: { command: "deploy" },
       });
+    }
+
     assistant(
       "msg_fail",
       { type: "text", text: "API Error: raw upstream detail sk-ant-secret" },
@@ -281,11 +292,14 @@ process.stdin.on("data", (chunk: string) => {
     const line = buffer.slice(0, index);
     buffer = buffer.slice(index + 1);
 
-    if (!line.trim()) continue;
+    if (!line.trim()) {
+      continue;
+    }
+
     const frame = JSON.parse(line);
     log({ input: frame });
 
-    if (frame.type === "control_request")
+    if (frame.type === "control_request") {
       write({
         type: "control_response",
         response: {
@@ -294,7 +308,7 @@ process.stdin.on("data", (chunk: string) => {
           response: { mcp_servers_applied: true },
         },
       });
-    else if (frame.type === "user") {
+    } else if (frame.type === "user") {
       const content = frame.message.content;
       void answer(
         typeof content === "string"
@@ -308,6 +322,9 @@ process.stdin.on("data", (chunk: string) => {
 });
 
 process.stdin.on("end", () => {
-  if (linger) setInterval(() => {}, 1000);
-  else process.exit(0);
+  if (linger) {
+    setInterval(() => {}, 1000);
+  } else {
+    process.exit(0);
+  }
 });

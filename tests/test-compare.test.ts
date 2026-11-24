@@ -34,14 +34,18 @@ const script = join(import.meta.dir, "../scripts/test-compare.ts");
 
 afterEach(async () => {
   for (const child of children.splice(0)) {
-    if (child.exitCode === null) child.kill("SIGTERM");
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+    }
+
     await child.exited;
   }
 
   await Promise.all(outputs.splice(0));
 
-  for (const root of roots.splice(0))
+  for (const root of roots.splice(0)) {
     await rm(root, { recursive: true, force: true });
+  }
 });
 
 function git(root: string, ...args: string[]) {
@@ -50,7 +54,9 @@ function git(root: string, ...args: string[]) {
     encoding: "utf8",
   });
 
-  if (result.status !== 0) throw new Error(result.stderr);
+  if (result.status !== 0) {
+    throw new Error(result.stderr);
+  }
 
   return result.stdout.trim();
 }
@@ -79,8 +85,11 @@ function fixtureState(path: string): string {
           ["worker.ready", "counter.ready", "pids.json", "driver.pid"].includes(
             name,
           )
-        )
-          for (const pid of text.match(/\d+/g) ?? []) pids.add(pid);
+        ) {
+          for (const pid of text.match(/\d+/g) ?? []) {
+            pids.add(pid);
+          }
+        }
 
         return [name, text];
       } catch (error) {
@@ -147,14 +156,17 @@ async function waitForFile(
               "code" in error &&
               error.code === "ENOENT"
             )
-          )
+          ) {
             reject(error);
+          }
         });
       };
 
       // Subscribe before reading so publication between the two cannot be lost.
       watcher = watch(dirname(path), (_event, name) => {
-        if (name === null || name === basename(path)) read();
+        if (name === null || name === basename(path)) {
+          read();
+        }
       });
       watcher.once("error", reject);
       cancel = schedule(() =>
@@ -184,7 +196,9 @@ function alive(pid: number) {
 
 function workerPID(text: string): number {
   try {
-    if (!/^\d+$/.test(text)) throw new Error("PID is not decimal");
+    if (!/^\d+$/.test(text)) {
+      throw new Error("PID is not decimal");
+    }
 
     return admitPID(Number(text));
   } catch {
@@ -195,8 +209,10 @@ function workerPID(text: string): number {
 }
 
 test("fixture readiness refuses values that publish no positive integer PID", () => {
-  for (const text of ["", " ", "0", "NaN", "-1", "1.5", "Infinity"])
+  for (const text of ["", " ", "0", "NaN", "-1", "1.5", "Infinity"]) {
     expect(() => workerPID(text)).toThrow("fixture published no PID");
+  }
+
   expect(workerPID("123")).toBe(123);
 });
 
@@ -431,7 +447,10 @@ test("readiness outer limit reports the fixture state without another poll", asy
     return () => {};
   });
 
-  if (!expire) throw new Error("Outer limit not registered");
+  if (!expire) {
+    throw new Error("Outer limit not registered");
+  }
+
   expire();
   await expect(waiting).rejects.toThrow("not-renamed");
 });
@@ -903,8 +922,9 @@ test.each(["foreign-start", "foreign-session", "unreadable"] as const)(
 
       expect(group.currentMembers).toEqual([identities.current]);
       expect(result.error).toContain(identities.current.startTimeTicks);
-    } else
+    } else {
       expect(group.errors).toContain(`identity unreadable for group ${pid}`);
+    }
 
     const recorded = JSON.parse(
       await readFile(join(f.output, "results.json"), "utf8"),

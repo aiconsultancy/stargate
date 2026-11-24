@@ -205,17 +205,21 @@ export class HistoryError extends CrewError {}
 function nextCursor(page: Page<unknown>): string | undefined {
   const cursor = page.cursor.next;
 
-  if (cursor === null || cursor === undefined) return;
+  if (cursor === null || cursor === undefined) {
+    return;
+  }
 
-  if (Result.isFailure(Schema.decodeUnknownResult(apiCursor)(cursor)))
+  if (Result.isFailure(Schema.decodeUnknownResult(apiCursor)(cursor))) {
     throw new HistoryError("Invalid history API response.");
+  }
 
   return cursor;
 }
 
 function checkedID(id: string): string {
-  if (Result.isFailure(Schema.decodeUnknownResult(identifier)(id)))
+  if (Result.isFailure(Schema.decodeUnknownResult(identifier)(id))) {
     throw new HistoryError("Invalid history API response.");
+  }
 
   return id;
 }
@@ -237,7 +241,9 @@ function plainText(
   message: HistoryMessage,
   query?: string,
 ): HistoryText | undefined {
-  if (message.type !== "user" && message.type !== "assistant") return;
+  if (message.type !== "user" && message.type !== "assistant") {
+    return;
+  }
 
   const text =
     message.type === "user"
@@ -247,10 +253,16 @@ function plainText(
           .map((part) => part.text ?? "")
           .join("\n");
 
-  if (!text) return;
+  if (!text) {
+    return;
+  }
+
   const index = query === undefined ? 0 : text.toLowerCase().indexOf(query);
 
-  if (index < 0) return;
+  if (index < 0) {
+    return;
+  }
+
   const start = Math.max(0, index - 128);
 
   return {
@@ -265,16 +277,19 @@ function plainText(
 
 function decodeCursor(cursor: string, query: string): SearchPosition {
   try {
-    if (!/^[A-Za-z0-9_-]+$/.test(cursor))
+    if (!/^[A-Za-z0-9_-]+$/.test(cursor)) {
       throw new Error("History cursor is not base64url");
+    }
 
     const decoded = decodeSettings(
       searchCursor,
       JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")),
     );
 
-    if (decoded.query !== query)
+    if (decoded.query !== query) {
       throw new Error("History cursor belongs to another query");
+    }
+
     const position = decoded.position;
 
     return position.phase === "messages" && !("pendingSessionIDs" in position)
@@ -305,11 +320,15 @@ export class CrewHistory {
       signal.throwIfAborted();
       const parsed = Schema.decodeUnknownResult(historyInputSchema)(input);
 
-      if (Result.isFailure(parsed))
+      if (Result.isFailure(parsed)) {
         throw new HistoryError("Invalid history input.");
+      }
+
       const request = parsed.success;
 
-      if (request.op === "search") return await this.search(request, signal);
+      if (request.op === "search") {
+        return await this.search(request, signal);
+      }
 
       if (request.op === "sessions") {
         const page = await this.options.sessions.list(
@@ -327,8 +346,10 @@ export class CrewHistory {
 
         signal.throwIfAborted();
 
-        if (page.data.length > request.limit)
+        if (page.data.length > request.limit) {
           throw new HistoryError("Invalid history API response.");
+        }
+
         const needle = request.query?.toLowerCase();
 
         return {
@@ -352,8 +373,9 @@ export class CrewHistory {
 
       signal.throwIfAborted();
 
-      if (session.id !== request.sessionID || !this.options.visible(session))
+      if (session.id !== request.sessionID || !this.options.visible(session)) {
         throw new HistoryError("History session is not available.");
+      }
 
       const page = await this.options.messages.list(
         {
@@ -368,8 +390,9 @@ export class CrewHistory {
 
       signal.throwIfAborted();
 
-      if (page.data.length > request.limit)
+      if (page.data.length > request.limit) {
         throw new HistoryError("Invalid history API response.");
+      }
 
       return {
         op: "messages",
@@ -386,10 +409,14 @@ export class CrewHistory {
         ...continuation(nextCursor(page)),
       };
     } catch (error) {
-      if (signal.aborted)
+      if (signal.aborted) {
         throw new HistoryError("History operation cancelled.");
+      }
 
-      if (error instanceof HistoryError) throw error;
+      if (error instanceof HistoryError) {
+        throw error;
+      }
+
       throw new HistoryError(
         "History API request failed; raw details withheld.",
       );
@@ -431,8 +458,10 @@ export class CrewHistory {
         signal.throwIfAborted();
         scannedPages++;
 
-        if (page.data.length > SESSION_BATCH)
+        if (page.data.length > SESSION_BATCH) {
           throw new HistoryError("Invalid history API response.");
+        }
+
         const next = nextCursor(page);
 
         const [sessionID, ...pendingSessionIDs] = page.data
@@ -504,20 +533,27 @@ export class CrewHistory {
       signal.throwIfAborted();
       scannedPages++;
 
-      if (page.data.length > MESSAGE_BATCH)
+      if (page.data.length > MESSAGE_BATCH) {
         throw new HistoryError("Invalid history API response.");
+      }
 
-      if (position.offset > page.data.length)
+      if (position.offset > page.data.length) {
         throw new HistoryError("Invalid history cursor.");
+      }
+
       let consumed = position.offset;
 
       for (const message of page.data.slice(position.offset)) {
         consumed++;
         const result = plainText(position.sessionID, message, needle);
 
-        if (result) matches.push(result);
+        if (result) {
+          matches.push(result);
+        }
 
-        if (matches.length === input.limit) break;
+        if (matches.length === input.limit) {
+          break;
+        }
       }
 
       const next = nextCursor(page);

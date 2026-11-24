@@ -83,8 +83,9 @@ function claudeCLI() {
     JSON.parse(readFileSync(join(root, "package.json"), "utf8")),
   );
 
-  if (!parseVersion(claudeCodeVersion))
+  if (!parseVersion(claudeCodeVersion)) {
     throw new ClaudeTurnError(versionFailure);
+  }
 
   const native = () => {
     const report = process.report?.getReport() as
@@ -106,7 +107,9 @@ function claudeCLI() {
           `@anthropic-ai/claude-agent-sdk-${target}/claude${process.platform === "win32" ? ".exe" : ""}`,
         );
 
-        if (existsSync(path)) return path;
+        if (existsSync(path)) {
+          return path;
+        }
       } catch {
         // This platform package is not installed; try the next candidate.
       }
@@ -198,10 +201,15 @@ export function claudeInputContent(
     );
   }
 
-  if (files.length === 0) return text;
+  if (files.length === 0) {
+    return text;
+  }
+
   const content: UserContent = [];
 
-  if (text) content.push({ type: "text", text });
+  if (text) {
+    content.push({ type: "text", text });
+  }
 
   for (const file of files) {
     const data = Buffer.from(file.data).toString("base64");
@@ -354,7 +362,10 @@ const causeKinds: Record<string, BackendFailureKind> = {
  * (429, 401, 404, 504) wins over the SDK's cause.
  */
 export function claudeFailure(turn: ClaudeTurn): BackendFailure | undefined {
-  if (!turn.result || turn.result.ok) return undefined;
+  if (!turn.result || turn.result.ok) {
+    return undefined;
+  }
+
   const { cause, status } = turn.result;
   const byStatus = status === undefined ? undefined : statusKind(status);
 
@@ -387,7 +398,10 @@ export class ClaudeTurn {
 
   /** Returns true when the visible text may have changed. */
   public add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
-    if (isToolFrame(raw)) this.worked = true;
+    if (isToolFrame(raw)) {
+      this.worked = true;
+    }
+
     const init = decodeInitFrame(raw);
 
     if (Option.isSome(init)) {
@@ -398,8 +412,9 @@ export class ClaudeTurn {
 
     const frame = decodeStreamFrame(raw);
 
-    if (Option.isSome(frame))
+    if (Option.isSome(frame)) {
       return this.addStreamEvent(frame.value.event, stage);
+    }
 
     const assistant = decodeAssistantFrame(raw);
 
@@ -422,7 +437,10 @@ export class ClaudeTurn {
         block.type === "text" && block.text ? [block.text] : [],
       );
 
-      if (texts.length === 0) return false;
+      if (texts.length === 0) {
+        return false;
+      }
+
       this.complete.set(id, [...(this.complete.get(id) ?? []), ...texts]);
 
       return true;
@@ -433,9 +451,9 @@ export class ClaudeTurn {
     if (Option.isSome(result)) {
       const { subtype, is_error } = result.value;
 
-      if (subtype === "success" && !is_error)
+      if (subtype === "success" && !is_error) {
         this.result = { ok: true, text: result.value.result ?? "" };
-      else {
+      } else {
         const cause = this.failure ?? subtype;
         const status = result.value.api_error_status;
         this.result = {
@@ -452,40 +470,53 @@ export class ClaudeTurn {
   private addStreamEvent(raw: unknown, stage?: (stage: TurnStage) => void) {
     const event = decodeStreamEvent(raw);
 
-    if (Option.isNone(event)) return false;
+    if (Option.isNone(event)) {
+      return false;
+    }
 
     if (event.value.type === "message_start") {
       stage?.("model");
       this.streaming = event.value.message.id;
       this.seen(this.streaming);
 
-      if (!this.streamed.has(this.streaming))
+      if (!this.streamed.has(this.streaming)) {
         this.streamed.set(this.streaming, new Map());
+      }
 
       return false;
     }
 
     const blocks = this.streaming && this.streamed.get(this.streaming);
 
-    if (blocks === undefined || blocks === "") return false;
+    if (blocks === undefined || blocks === "") {
+      return false;
+    }
 
     if (event.value.type === "content_block_start") {
       const kind = event.value.content_block.type;
 
-      if (kind === "thinking" || kind === "redacted_thinking")
+      if (kind === "thinking" || kind === "redacted_thinking") {
         stage?.("reasoning");
+      }
 
-      if (kind === "tool_use" || kind === "server_tool_use") stage?.("tool");
+      if (kind === "tool_use" || kind === "server_tool_use") {
+        stage?.("tool");
+      }
 
-      if (kind !== "text") return false;
+      if (kind !== "text") {
+        return false;
+      }
+
       stage?.("reply");
       blocks.set(event.value.index, event.value.content_block.text ?? "");
 
       return true;
     }
 
-    if (event.value.delta.type !== "text_delta" || !event.value.delta.text)
+    if (event.value.delta.type !== "text_delta" || !event.value.delta.text) {
       return false;
+    }
+
     blocks.set(
       event.value.index,
       (blocks.get(event.value.index) ?? "") + event.value.delta.text,
@@ -495,7 +526,9 @@ export class ClaudeTurn {
   }
 
   private seen(id: string) {
-    if (!this.order.includes(id)) this.order.push(id);
+    if (!this.order.includes(id)) {
+      this.order.push(id);
+    }
   }
 
   public visible(): string {
@@ -573,11 +606,17 @@ class ClaudeProcess implements SpawnedProcess {
    * PID, and so its group ID, cannot be reused before Stargate reaps it.
    */
   public kill(signal: NodeJS.Signals) {
-    if (!this.running) return false;
+    if (!this.running) {
+      return false;
+    }
+
     this.signalled = true;
 
     try {
-      if (this.child.pid === undefined) return false;
+      if (this.child.pid === undefined) {
+        return false;
+      }
+
       process.kill(-this.child.pid, signal);
 
       return true;
@@ -705,7 +744,10 @@ export class ClaudeBackend implements AgentBackend {
   }: Parameters<AgentBackend["createSession"]>[0]) {
     signal.throwIfAborted();
 
-    if (this.closed) throw new Error("Claude backend is closing");
+    if (this.closed) {
+      throw new Error("Claude backend is closing");
+    }
+
     // The first turn creates the native session with this ID.
     const id = crypto.randomUUID();
     this.titles.set(id, title);
@@ -721,7 +763,10 @@ export class ClaudeBackend implements AgentBackend {
     try {
       directories = await readdir(projects);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return false;
+      }
+
       throw error;
     }
 
@@ -760,13 +805,19 @@ export class ClaudeBackend implements AgentBackend {
 
     signal.throwIfAborted();
 
-    if (this.closed) throw new Error("Claude backend is closing");
+    if (this.closed) {
+      throw new Error("Claude backend is closing");
+    }
 
-    if (!isSessionID(sessionId))
+    if (!isSessionID(sessionId)) {
       throw new ClaudeTurnError("Claude session ID is not valid");
+    }
+
     const id = sessionId;
 
-    if (this.runs.has(id)) throw new ClaudeTurnError("Claude session is busy");
+    if (this.runs.has(id)) {
+      throw new ClaudeTurnError("Claude session is busy");
+    }
 
     const content = claudeInputContent(
       context ? `${sourceLine(context)}\n\n${text}` : text,
@@ -821,17 +872,19 @@ export class ClaudeBackend implements AgentBackend {
 
         const version = /^(\S+)(?: \(Claude Code\))?$/.exec(stdout.trim())?.[1];
 
-        if (!version || !parseVersion(version))
+        if (!version || !parseVersion(version)) {
           throw new ClaudeTurnError(versionFailure);
+        }
 
         if (compareVersions(version, bundled.version) < 0) {
           mcpServersDelivery = "argv";
 
-          if (Object.keys(this.config.mcpServers ?? {}).length > 0)
+          if (Object.keys(this.config.mcpServers ?? {}).length > 0) {
             process.emitWarning(
               "Claude Code is older than the SDK bundled CLI; using MCP argv delivery. MCP environment and headers may be visible to other local users. Update Claude Code to use initialize delivery.",
               { code: "STARGATE_CLAUDE_MCP_ARGV_FALLBACK" },
             );
+          }
         }
       } catch {
         // Probe output and command errors can contain secrets; discard both.
@@ -914,13 +967,16 @@ export class ClaudeBackend implements AgentBackend {
         for await (const frame of query({ prompt: messages(), options })) {
           const changed = turn.add(frame, stage);
 
-          if (turn.session !== undefined && turn.session !== id)
+          if (turn.session !== undefined && turn.session !== id) {
             throw new ClaudeTurnError("Claude session identity changed");
+          }
 
           if (changed && onText) {
             const visible = turn.visible();
 
-            if (visible) onText(visible);
+            if (visible) {
+              onText(visible);
+            }
           }
 
           if (turn.result && !settle) {
@@ -931,10 +987,14 @@ export class ClaudeBackend implements AgentBackend {
         }
       } catch (error) {
         // The result completes the turn; a later teardown error does not.
-        if (signal.aborted) throw error;
+        if (signal.aborted) {
+          throw error;
+        }
 
         // The CLI ended without a result. SDK errors can carry CLI output.
-        if (!turn.result) throw new BackendFailure("crash", crashed);
+        if (!turn.result) {
+          throw new BackendFailure("crash", crashed);
+        }
       } finally {
         clearTimeout(settle);
         answered.resolve();
@@ -942,13 +1002,16 @@ export class ClaudeBackend implements AgentBackend {
 
       signal.throwIfAborted();
 
-      if (!turn.result) throw new BackendFailure("crash", crashed);
+      if (!turn.result) {
+        throw new BackendFailure("crash", crashed);
+      }
 
-      if (!turn.result.ok)
+      if (!turn.result.ok) {
         throw (
           claudeFailure(turn) ??
           new ClaudeTurnError(`Claude turn failed: ${turn.result.cause}`)
         );
+      }
 
       return turn.answer();
     } catch (error) {
@@ -960,18 +1023,24 @@ export class ClaudeBackend implements AgentBackend {
         error instanceof AttachmentInputUnavailable ||
         error instanceof BackendFailure ||
         error instanceof ClaudeTurnError
-      )
+      ) {
         throw error;
+      }
+
       // SDK errors can carry CLI output or request details; never forward them.
       throw new ClaudeTurnError("Claude turn failed");
     } finally {
       signal.removeEventListener("abort", stop);
       await this.finish(run);
 
-      if (temporary)
+      if (temporary) {
         await rm(temporary, { recursive: true, force: true }).catch(() => {});
+      }
 
-      if (this.runs.get(id) === run) this.runs.delete(id);
+      if (this.runs.get(id) === run) {
+        this.runs.delete(id);
+      }
+
       finished.resolve();
     }
   }
@@ -1007,7 +1076,9 @@ export class ClaudeBackend implements AgentBackend {
       once: true,
     });
 
-    if (run.controller.signal.aborted) cli.kill("SIGTERM");
+    if (run.controller.signal.aborted) {
+      cli.kill("SIGTERM");
+    }
 
     return cli;
   }
@@ -1019,7 +1090,9 @@ export class ClaudeBackend implements AgentBackend {
   private async finish(run: Run) {
     const cli = run.process;
 
-    if (!cli) return;
+    if (!cli) {
+      return;
+    }
 
     const exited = async () => {
       const grace = new AbortController();
@@ -1056,7 +1129,10 @@ export class ClaudeBackend implements AgentBackend {
    * only; elsewhere nothing is signalled.
    */
   private async stopOrphan(id: string, signal: AbortSignal) {
-    if (this.runs.get(id)?.process) return;
+    if (this.runs.get(id)?.process) {
+      return;
+    }
+
     const path = join(this.records, `${id}.json`);
     let record: typeof recordSchema.Type;
 
@@ -1087,7 +1163,10 @@ export class ClaudeBackend implements AgentBackend {
   }
 
   public async interrupt(sessionId: string, signal: AbortSignal) {
-    if (!isSessionID(sessionId)) return;
+    if (!isSessionID(sessionId)) {
+      return;
+    }
+
     const run = this.runs.get(sessionId);
 
     if (run) {

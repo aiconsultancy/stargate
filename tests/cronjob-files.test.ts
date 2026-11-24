@@ -46,8 +46,9 @@ async function fixture() {
 }
 
 afterEach(async () => {
-  for (const root of roots.splice(0))
+  for (const root of roots.splice(0)) {
     await rm(root, { recursive: true, force: true });
+  }
 });
 
 describe("cronjob files", () => {
@@ -159,10 +160,12 @@ describe("cronjob files", () => {
       "0 0 9 * * *",
       "61 * * * *",
       "0 0 31 2 *",
-    ])
+    ]) {
       expect(() =>
         parseCronjob(basic.replace("0 9 * * *", schedule), "daily-report", now),
       ).toThrow();
+    }
+
     expect(() =>
       parseCronjob(
         basic.replace("---\n#", "timezone: secret/invalid\n---\n#"),

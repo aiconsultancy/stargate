@@ -30,7 +30,9 @@ import { FakeIrcServer, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const question = (): NativeQuestion =>
@@ -82,14 +84,20 @@ async function fixture(
   store.enqueue(original);
   const job = store.queuedJob(original.botKey, original.eventId);
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
+
   store.running(job.id);
   store.started(job.id);
   store.captainCursor(original.botKey, "ses_captain");
   store.baselineCaptain(original.botKey, "ses_captain", "msg_baseline");
   store.saveInput(original.botKey, job.id, "msg_original", "ses_captain");
 
-  if (source) store.questions.recordQuestionSource(original);
+  if (source) {
+    store.questions.recordQuestionSource(original);
+  }
+
   const published: string[] = [];
   const publicationAttempts: string[] = [];
   const decisions: unknown[] = [];
@@ -162,7 +170,10 @@ async function fixture(
       decisions.push(answer);
       abortReply?.abort();
 
-      if (fail || abortReply) throw new Error("Do not expose provider details");
+      if (fail || abortReply) {
+        throw new Error("Do not expose provider details");
+      }
+
       pending = false;
     },
     async questionInputSettled() {
@@ -187,16 +198,23 @@ async function fixture(
         ready: () => connected,
         human: (user) => user === "jac" || user === "allowed",
         async publish(_job, text, guard) {
-          if (!guard()) throw new Error("Denied");
+          if (!guard()) {
+            throw new Error("Denied");
+          }
+
           publicationAttempts.push(text);
 
-          if (publishFail) throw new Error("IRC unavailable");
+          if (publishFail) {
+            throw new Error("IRC unavailable");
+          }
 
           if (offerGate && text.includes("OpenCode needs clarification")) {
             offerGate.entered.resolve();
             await offerGate.release.promise;
 
-            if (!guard()) throw new Error("Denied offer after wait");
+            if (!guard()) {
+              throw new Error("Denied offer after wait");
+            }
           }
 
           if (
@@ -207,7 +225,9 @@ async function fixture(
             noticeGate.entered.resolve();
             await noticeGate.release.promise;
 
-            if (!guard()) throw new Error("Denied after wait");
+            if (!guard()) {
+              throw new Error("Denied after wait");
+            }
           }
 
           published.push(text);
@@ -239,7 +259,9 @@ async function fixture(
     offer() {
       const offer = store.questions.questionOffers(original.botKey)[0];
 
-      if (!offer) throw new Error("Missing offer");
+      if (!offer) {
+        throw new Error("Missing offer");
+      }
 
       return offer;
     },
@@ -415,14 +437,19 @@ test("an unavailable first session cannot starve another native question", async
   f.store.enqueue(earlier);
   const job = f.store.queuedJob(original.botKey, earlier.eventId);
 
-  if (!job) throw new Error("Missing earlier job");
+  if (!job) {
+    throw new Error("Missing earlier job");
+  }
+
   f.store.running(job.id);
   f.store.saveInput(original.botKey, job.id, "msg_earlier", "aaa_broken");
   f.store.saveSession(earlier.conversation, "aaa_broken");
   f.store.questions.recordQuestionSource(earlier);
   const pending = f.backend.pendingQuestions;
   f.backend.pendingQuestions = async (session, signal) => {
-    if (session === "aaa_broken") throw new Error("Native session unavailable");
+    if (session === "aaa_broken") {
+      throw new Error("Native session unavailable");
+    }
 
     return (await pending?.(session, signal)) ?? [];
   };
@@ -709,7 +736,10 @@ test("lost outcome ACKs back off delivery without retrying the native answer", a
   await f.answer();
   expect(f.publicationAttempts).toHaveLength(2);
 
-  for (let i = 0; i < 5; i++) await f.poll();
+  for (let i = 0; i < 5; i++) {
+    await f.poll();
+  }
+
   expect(f.publicationAttempts).toHaveLength(2);
   const clock = spyOn(Date, "now").mockReturnValue(Date.now() + 2001);
 
@@ -858,7 +888,9 @@ for (const postForm of [false, true]) {
           account: "captain",
           human: (user) => user === "jac" || user === "allowed",
           async publish(_job, text, allowed) {
-            if (allowed()) f.published.push(text);
+            if (allowed()) {
+              f.published.push(text);
+            }
           },
         },
       },
@@ -886,7 +918,10 @@ for (const postForm of [false, true]) {
         { target: "captain", token: f.offer().token, answer: "1" },
       );
 
-      if (postForm) expect(f.decisions).toEqual([]);
+      if (postForm) {
+        expect(f.decisions).toEqual([]);
+      }
+
       f.complete();
       await until(
         () => posts.some((p) => p.text.includes("Native continuation")),
@@ -935,7 +970,7 @@ test("question parser and render never select defaults or accept hidden/auth/ext
     { default: "continue" },
     { type: "external", url: "https://example.test/auth" },
     { when: [{ key: "q1", op: "eq", value: true }] },
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(nativeQuestionSchema)({
@@ -944,6 +979,8 @@ test("question parser and render never select defaults or accept hidden/auth/ext
         }),
       ),
     ).toBe(false);
+  }
+
   expect(questionText(q, "captain", "a".repeat(32))).not.toContain("default");
   expect(questionControl(`other: answer ${"a".repeat(32)} 1`)?.target).toBe(
     "other",
@@ -992,7 +1029,10 @@ test("retention removes settled historical proofs together but preserves active 
   ).toBe(false);
   const job = f.store.jobByInput(original.botKey, "msg_original");
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
+
   expect(f.store.questions.ownsQuestionSource(job)).toBe(false);
   f.restart();
   await f.poll();
@@ -1012,14 +1052,20 @@ test("a session consuming the poll deadline rotates behind other sessions next t
   f.store.enqueue(earlier);
   const job = f.store.queuedJob(original.botKey, earlier.eventId);
 
-  if (!job) throw new Error("No hanging job");
+  if (!job) {
+    throw new Error("No hanging job");
+  }
+
   f.store.running(job.id);
   f.store.saveInput(original.botKey, job.id, "msg_hang", "aaa_hang");
   f.store.saveSession(earlier.conversation, "aaa_hang");
   f.store.questions.recordQuestionSource(earlier);
   const pending = f.backend.pendingQuestions;
   f.backend.pendingQuestions = async (session, signal) => {
-    if (session !== "aaa_hang") return (await pending?.(session, signal)) ?? [];
+    if (session !== "aaa_hang") {
+      return (await pending?.(session, signal)) ?? [];
+    }
+
     await new Promise<void>((_resolve, reject) =>
       signal.addEventListener("abort", () => reject(signal.reason), {
         once: true,
@@ -1048,7 +1094,10 @@ for (const outcome of ["success", "timeout"] as const) {
     const response = Promise.withResolvers<void>();
     const native = f.backend.replyQuestion;
 
-    if (!native) throw new Error("No native question API");
+    if (!native) {
+      throw new Error("No native question API");
+    }
+
     f.backend.replyQuestion = async (question, answer, signal) => {
       await native(question, answer, signal);
       entered.resolve();
@@ -1073,7 +1122,10 @@ for (const outcome of ["success", "timeout"] as const) {
     expect(f.store.jobStatus(original.botKey, f.jobID)).toBe("running");
     expect(f.published).toHaveLength(1);
 
-    if (outcome === "timeout") operation.abort();
+    if (outcome === "timeout") {
+      operation.abort();
+    }
+
     response.resolve();
     await answer;
     const completed = f.store.questions.questionByToken(original.botKey, token);
@@ -1096,7 +1148,10 @@ for (const failure of [false, true]) {
     const f = await fixture();
     await f.poll();
 
-    if (failure) f.failReply();
+    if (failure) {
+      f.failReply();
+    }
+
     const gate = f.pauseNotice();
     const answer = f.answer();
     await gate.entered.promise;
@@ -1212,10 +1267,11 @@ test("retention is indexed and batch-bounded, and never runs on human intake", a
   try {
     const old = Date.now() - 31 * 86_400_000;
     db.transaction(() => {
-      for (let i = 0; i < 300; i++)
+      for (let i = 0; i < 300; i++) {
         db.query(
           "INSERT INTO irc_thread_messages(botKey,channel,msgid,root,recorded) VALUES(?,'#ship',?,?,?)",
         ).run(original.botKey, `old${i}`, `root${i}`, old);
+      }
     })();
 
     const count = () =>
@@ -1295,13 +1351,17 @@ for (const mode of ["in-flight", "read-error"] as const) {
       .questionOffers(original.botKey)
       .find((o) => o.formID === second.id);
 
-    if (!secondOffer) throw new Error("Missing second offer");
+    if (!secondOffer) {
+      throw new Error("Missing second offer");
+    }
+
     const entered = Promise.withResolvers<void>();
     const response = Promise.withResolvers<void>();
     let error = true;
     f.backend.questionState = async (_s, form) => {
-      if (mode === "read-error" && form === second.id && error)
+      if (mode === "read-error" && form === second.id && error) {
         throw new Error("Read unavailable");
+      }
 
       return "missing-session";
     };
@@ -1317,12 +1377,18 @@ for (const mode of ["in-flight", "read-error"] as const) {
         ? f.answer({}, { token: secondOffer.token })
         : undefined;
 
-    if (decision !== undefined) await entered.promise;
+    if (decision !== undefined) {
+      await entered.promise;
+    }
+
     missing = true;
 
-    if (mode === "read-error")
+    if (mode === "read-error") {
       await expect(f.poll()).rejects.toThrow("session unavailable");
-    else await f.poll();
+    } else {
+      await f.poll();
+    }
+
     expect(
       f.store.questions.questionByToken(original.botKey, secondOffer.token)
         ?.recovering,
@@ -1410,7 +1476,9 @@ test("established cancelled native waiter survives another actual gateway restar
         account: "captain",
         human: (user) => user === "jac" || user === "allowed",
         async publish(_job, text, allowed) {
-          if (allowed()) f.published.push(text);
+          if (allowed()) {
+            f.published.push(text);
+          }
         },
       },
     },
@@ -1483,26 +1551,34 @@ for (const cancelled of [false, true]) {
       f.restart();
       await f.bridge.recover(AbortSignal.timeout(3000));
 
-      if (cancelled)
+      if (cancelled) {
         f.store.cancelTurn(
           original.botKey,
           original.conversation,
           original.thread,
         );
+      }
+
       f.resolveForm();
       const settled = f.backend.questionInputSettled;
 
-      if (!settled) throw new Error("Missing native settlement API");
+      if (!settled) {
+        throw new Error("Missing native settlement API");
+      }
 
-      if (phase === "settlement-read-error")
+      if (phase === "settlement-read-error") {
         f.backend.questionInputSettled = async () => {
           throw new Error("Native read unavailable");
         };
+      }
 
       if (phase !== "resolved-before-poll") {
-        if (phase === "settlement-read-error")
+        if (phase === "settlement-read-error") {
           await expect(f.poll()).rejects.toThrow("session unavailable");
-        else await f.poll();
+        } else {
+          await f.poll();
+        }
+
         expect(
           f.store.questions.questionOffers(original.botKey)[0]?.state,
         ).toBe("closed");
@@ -1557,10 +1633,11 @@ for (const failure of ["read-error", "timeout"] as const) {
     ) => {
       reads++;
 
-      if (form !== "frm_unestablished")
+      if (form !== "frm_unestablished") {
         throw new Error(
           "Established hold must not depend on another pending-form read",
         );
+      }
 
       if (failure === "timeout") {
         const deadline = AbortSignal.any([signal, AbortSignal.timeout(25)]);
@@ -1700,7 +1777,10 @@ for (const cleanup of ["ttl", "empty-list"] as const) {
     f.store.enqueue(next);
     const job = f.store.queuedJob(original.botKey, next.eventId);
 
-    if (!job) throw new Error("Missing new job");
+    if (!job) {
+      throw new Error("Missing new job");
+    }
+
     f.store.running(job.id);
     f.store.saveInput(original.botKey, job.id, "msg_next", "ses_captain");
     f.store.questions.recordQuestionSource(next);
@@ -1788,9 +1868,12 @@ for (const activity of ["human", "publication"] as const) {
         f.store.enqueueIrcHuman(reply, false);
         const job = f.store.queuedJob(original.botKey, reply.eventId);
 
-        if (!job) throw new Error("No reply job");
+        if (!job) {
+          throw new Error("No reply job");
+        }
+
         f.store.finish(job.id, "failed");
-      } else
+      } else {
         expect(
           f.store.ircPublished(
             original.botKey,
@@ -1800,6 +1883,8 @@ for (const activity of ["human", "publication"] as const) {
             "m1",
           ),
         ).toBe(true);
+      }
+
       f.store.pruneIrcHistory(original.botKey, Date.now());
       expect(
         f.store.irc.ircThreadParticipating(original.botKey, "#ship", "m1"),
@@ -1863,7 +1948,9 @@ test("recent participation preserves an older reply parent through cleanup and r
       `@account=jac;msgid=${id};+draft/reply=old-parent :jac!u@fixture PRIVMSG #ship :Continue this thread`,
     );
 
-    if (!message) throw new Error("No fixture message");
+    if (!message) {
+      throw new Error("No fixture message");
+    }
 
     return routeIrcMessage(message, {
       config,
@@ -1892,11 +1979,17 @@ test("recent participation preserves an older reply parent through cleanup and r
   try {
     const reply = route("recent");
 
-    if (!reply) throw new Error("No admitted day29reply");
+    if (!reply) {
+      throw new Error("No admitted day29reply");
+    }
+
     expect(f.store.enqueueIrcHuman(reply, false)).toBe(true);
     const job = f.store.queuedJob(original.botKey, reply.eventId);
 
-    if (!job) throw new Error("No reply job");
+    if (!job) {
+      throw new Error("No reply job");
+    }
+
     f.store.finish(job.id, "failed");
     clock.mockReturnValue(start + 31 * 86_400_000);
     f.store.pruneIrcHistory(original.botKey, Date.now());
@@ -1956,7 +2049,10 @@ for (const closed of [false, true]) {
     await f.answer();
     const token = f.offer().token;
 
-    if (closed) await f.poll();
+    if (closed) {
+      await f.poll();
+    }
+
     expect(
       f.store.questions.questionByToken(original.botKey, token)?.state,
     ).toBe(closed ? "closed" : "attempted");
@@ -1985,7 +2081,10 @@ for (const uncertain of [false, true]) {
     f.backend.interruptInput = async (session, input) => {
       scoped.push([session, input]);
 
-      if (uncertain) throw new Error("Unknown native outcome");
+      if (uncertain) {
+        throw new Error("Unknown native outcome");
+      }
+
       f.complete();
     };
 
@@ -1995,14 +2094,16 @@ for (const uncertain of [false, true]) {
 
     f.store.cancelTurn(original.botKey, original.conversation, original.thread);
 
-    if (uncertain)
+    if (uncertain) {
       await expect(
         f.bridge.stop(f.jobID, AbortSignal.timeout(3000)),
       ).rejects.toThrow();
-    else
+    } else {
       expect(await f.bridge.stop(f.jobID, AbortSignal.timeout(3000))).toBe(
         true,
       );
+    }
+
     expect(await f.bridge.stop(f.jobID, AbortSignal.timeout(3000))).toBe(false);
     f.restart();
     await f.bridge.recover(AbortSignal.timeout(3000));
@@ -2120,7 +2221,9 @@ for (const botReply of [false, true]) {
 
     const registration = ship.registrations[0];
 
-    if (!registration) throw new Error("Missing IRC registration");
+    if (!registration) {
+      throw new Error("Missing IRC registration");
+    }
 
     const input = {
       ...original,
@@ -2132,7 +2235,10 @@ for (const botReply of [false, true]) {
     f.store.enqueue(input);
     const job = f.store.queuedJob(registration.key, input.eventId);
 
-    if (!job) throw new Error("Missing saved IRC work");
+    if (!job) {
+      throw new Error("Missing saved IRC work");
+    }
+
     f.store.running(job.id);
     f.store.started(job.id);
     f.store.saveInput(registration.key, job.id, "msg_original", "ses_captain");

@@ -44,7 +44,10 @@ class Clock {
     for (;;) {
       const next = [...this.timers].sort(([, a], [, b]) => a.at - b.at)[0];
 
-      if (!next || next[1].at > end) break;
+      if (!next || next[1].at > end) {
+        break;
+      }
+
       this.now = next[1].at;
       this.timers.delete(next[0]);
       next[1].callback();
@@ -102,7 +105,10 @@ async function fixture(report = false) {
     ],
   }).crew[0];
 
-  if (!member) throw new Error("Missing member");
+  if (!member) {
+    throw new Error("Missing member");
+  }
+
   const peer = state.reservePeer(member.id);
   state.readyPeer(member.id);
   state.reservePiPeer(peer.sessionID);
@@ -149,7 +155,10 @@ async function fixture(report = false) {
   });
 
   const advance = (entries: readonly EntryRecord[] = [], text = "") => {
-    if (!observer) throw new Error("Observer not attached");
+    if (!observer) {
+      throw new Error("Observer not attached");
+    }
+
     const published = Promise.withResolvers<void>();
     publications.push(published);
     observer.advance(
@@ -260,9 +269,13 @@ async function fixture(report = false) {
     );
 
     task = state.promote(queued.id, null)?.task;
-  } else task = state.reserveTask(peer, "captain", "Maintenance assignment");
+  } else {
+    task = state.reserveTask(peer, "captain", "Maintenance assignment");
+  }
 
-  if (!task) throw new Error("Missing task");
+  if (!task) {
+    throw new Error("Missing task");
+  }
 
   const workers = new PiCrewWorkers(
     state,
@@ -432,10 +445,16 @@ for (const outcome of ["success", "failure", "cancel", "close"] as const) {
         ({ callback }) => callback,
       );
 
-      if (outcome === "success") f.succeed();
-      else if (outcome === "failure") f.fail();
-      else if (outcome === "cancel") await f.workers.interrupt(f.peer);
-      else await f.workers.close();
+      if (outcome === "success") {
+        f.succeed();
+      } else if (outcome === "failure") {
+        f.fail();
+      } else if (outcome === "cancel") {
+        await f.workers.interrupt(f.peer);
+      } else {
+        await f.workers.close();
+      }
+
       await f.settled;
       expect(f.progress()).toBe("Latest pending update");
       expect(f.clock.timers.size).toBe(0);
@@ -445,7 +464,10 @@ for (const outcome of ["success", "failure", "cancel", "close"] as const) {
       const saved = f.state.activity.task(f.state.task(f.task.id) ?? f.task);
       void f.emit("Late observer callback");
 
-      for (const callback of callbacks) callback();
+      for (const callback of callbacks) {
+        callback();
+      }
+
       f.clock.advance(10_000);
       expect(f.state.activity.task(f.state.task(f.task.id) ?? f.task)).toEqual(
         saved,
@@ -465,7 +487,10 @@ test("Pi progress storage failures do not stop work or escape timer callbacks", 
     const progress = f.state.activity.progress.bind(f.state.activity);
     let failing = true;
     f.state.activity.progress = (...args) => {
-      if (failing) throw new Error("Private SQLite error");
+      if (failing) {
+        throw new Error("Private SQLite error");
+      }
+
       progress(...args);
     };
 
@@ -544,7 +569,9 @@ test("Pi recovery fails closed for unsupported, missing and unreadable receipts 
       expect(request).toBe(f.task.inputID);
       reads++;
 
-      if (reads === 2) throw new Error("Private native database error");
+      if (reads === 2) {
+        throw new Error("Private native database error");
+      }
 
       return undefined;
     };
@@ -618,7 +645,10 @@ test("Pi receipt arriving after captain abandonment cannot revive old task or co
       "Replacement assignment",
     );
 
-    if (!next) throw new Error("Replacement task is missing");
+    if (!next) {
+      throw new Error("Replacement task is missing");
+    }
+
     release.resolve();
     expect(await recovering).toMatchObject({
       status: "abandoned",

@@ -52,7 +52,9 @@ afterEach(async () => {
   await activeTest?.catch(() => {});
   activeTest = undefined;
 
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    await cleanup();
+  }
 }, diskIntegrationTimeoutMs);
 
 const now = Date.parse("2026-11-18T12:00:00Z");
@@ -93,8 +95,10 @@ test(
   async () => {
     const f = await fixture();
 
-    if (f.config.backend.type !== "opencode")
+    if (f.config.backend.type !== "opencode") {
       throw new Error("Expected OpenCode");
+    }
+
     const settings = await resolveQuestionSettings(f.config);
     await saveQuestionSettings(
       f.config.backend.directory,
@@ -163,7 +167,10 @@ test("question update failure resumes persisted receipt without a second write",
   const raw = f.press("stargate_config_questions_on");
   const update = f.slack.update;
 
-  if (!update) throw new Error("Expected update");
+  if (!update) {
+    throw new Error("Expected update");
+  }
+
   f.slack.update = async () => {
     throw new Error("private failure");
   };
@@ -183,7 +190,10 @@ test("question update failure resumes persisted receipt without a second write",
 test("panel snapshot refuses symbolic or oversized waiting files without following arbitrary content", async () => {
   const f = await fixture();
 
-  if (f.config.backend.type !== "opencode") throw new Error("Invalid fixture");
+  if (f.config.backend.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
+
   const path = waitingSettingsPath(f.config.backend.directory, "adama");
   await f.tool(5);
   await rm(path);
@@ -250,7 +260,10 @@ async function fixture(options: MetaOptions = {}) {
   const directory = await mkdtemp(join(tmpdir(), "config-panel-"));
   const config = Object.assign(bot(), { configPanelEnabled: true });
 
-  if (config.backend.type !== "opencode") throw new Error("Expected OpenCode");
+  if (config.backend.type !== "opencode") {
+    throw new Error("Expected OpenCode");
+  }
+
   config.backend.directory = directory;
   config.backend.agent = "adama";
   let store = openStore(join(directory, "gateway.sqlite"));
@@ -316,7 +329,9 @@ async function fixture(options: MetaOptions = {}) {
       team: { captain: { id: "adama" } },
     },
     async captain(caller: { agent: string }) {
-      if (caller.agent !== "adama") throw new Error("Not captain");
+      if (caller.agent !== "adama") {
+        throw new Error("Not captain");
+      }
     },
   });
 
@@ -347,7 +362,9 @@ async function fixture(options: MetaOptions = {}) {
       .flatMap((block) => (block.type === "actions" ? block.elements : []))
       .find((item) => item.action_id === actionId);
 
-    if (!button) throw new Error(`Missing ${actionId}`);
+    if (!button) {
+      throw new Error(`Missing ${actionId}`);
+    }
 
     return {
       type: "block_actions",
@@ -470,10 +487,11 @@ test("enabled panel has six table-derived rows and bounded plain controls", asyn
   ]);
 
   for (const block of panel.blocks) {
-    if (block.type === "actions")
+    if (block.type === "actions") {
       expect(
         new Set(block.elements.map((button) => button.action_id)).size,
       ).toBe(block.elements.length);
+    }
   }
 
   expect(f.posts[0]).toMatchObject({ channel: "C123", thread: "1.000" });
@@ -567,7 +585,9 @@ type Press = ReturnType<Awaited<ReturnType<typeof fixture>>["press"]>;
 function firstAction(raw: Press) {
   const action = raw.actions[0];
 
-  if (!action) throw new Error("Expected config action");
+  if (!action) {
+    throw new Error("Expected config action");
+  }
 
   return action;
 }
@@ -679,8 +699,12 @@ for (const lookup of [
     f.config.access.users = ["*"];
     f.config.access.peerCaptains = true;
 
-    if (lookup) f.options.isHuman = lookup;
-    else delete f.options.isHuman;
+    if (lookup) {
+      f.options.isHuman = lookup;
+    } else {
+      delete f.options.isHuman;
+    }
+
     await f.publish();
     await f.click();
     expect(await f.delay()).toBe(5000);
@@ -717,20 +741,25 @@ test("typed and tool writes, including ABA, invalidate the posted snapshot", asy
   for (const kind of ["tool", "typed", "ABA"]) {
     const f = await fixture();
 
-    if (kind === "ABA") await f.tool(5);
+    if (kind === "ABA") {
+      await f.tool(5);
+    }
+
     await f.publish();
 
-    if (kind === "typed")
+    if (kind === "typed") {
       await f.meta.receive(
         event("<@UBOT> /config waiting 8", "2.000"),
         f.config,
         identity,
         () => true,
       );
-    else {
+    } else {
       await f.tool(3);
 
-      if (kind === "ABA") await f.tool(5);
+      if (kind === "ABA") {
+        await f.tool(5);
+      }
     }
 
     const before = await f.delay();
@@ -843,7 +872,10 @@ for (const external of [false, true]) {
     const raw = f.press();
     const update = f.slack.update;
 
-    if (!update) throw new Error("Expected update");
+    if (!update) {
+      throw new Error("Expected update");
+    }
+
     f.slack.update = async () => {
       throw new Error("private Slack error");
     };
@@ -853,7 +885,10 @@ for (const external of [false, true]) {
     expect(await f.delay()).toBe(3000);
     f.reopen();
 
-    if (external) await f.tool(8);
+    if (external) {
+      await f.tool(8);
+    }
+
     f.slack.update = update;
     const before = f.updates.length;
     await f.click(raw);
@@ -862,7 +897,10 @@ for (const external of [false, true]) {
     if (external) {
       expect(f.updates).toHaveLength(before);
       expect(f.replies.at(-1)).toContain("stale");
-    } else expect(f.panel().text).toContain("waiting: 3 seconds");
+    } else {
+      expect(f.panel().text).toContain("waiting: 3 seconds");
+    }
+
     expect(f.acks).toHaveLength(2);
   });
 }
@@ -934,8 +972,9 @@ test("transports without update or returned ts never advertise mutable controls"
   for (const missing of ["update", "ts"]) {
     const f = await fixture();
 
-    if (missing === "update") delete f.slack.update;
-    else {
+    if (missing === "update") {
+      delete f.slack.update;
+    } else {
       const post = f.slack.post;
       f.slack.post = async (...args) => {
         await post(...args);
@@ -1083,7 +1122,9 @@ test("a tool write between apply and snapshot cannot be painted as the button's 
   const raw = f.press();
   let reads = 0;
   f.options.listMutes = async () => {
-    if (++reads === 3) await f.tool(8);
+    if (++reads === 3) {
+      await f.tool(8);
+    }
 
     return { settings: [], cursor: null, counts: { channel: 0, thread: 0 } };
   };

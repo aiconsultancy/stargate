@@ -5,7 +5,9 @@ import { TranscriptConflict, type Store } from "../src/gateway/store";
 const stores: Store[] = [];
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 });
 
 test("captain cursor seeds only from its matching root's last started owner", () => {
@@ -22,7 +24,10 @@ test("captain cursor seeds only from its matching root's last started owner", ()
   });
   const job = store.ready("bot", Date.now(), 1)[0];
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
+
   store.running(job.id);
   store.saveSession("source", "captain", "head");
   store.respond(job.id, ["old answer"]);
@@ -67,7 +72,9 @@ test("captain response, cursor and explicit previous-source outbox commit atomic
       .ready("bot", Date.now(), 10)
       .find((job) => job.eventId === eventId);
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
 
     return job;
   };
@@ -138,7 +145,10 @@ test("persisted input anchors failed baselines and cannot cross bot namespaces",
   });
   const job = store.ready("bot", Date.now(), 1)[0];
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
+
   store.running(job.id);
   store.captainCursor("bot", "pin");
   store.saveInput("bot", job.id, "native-input", "pin");
@@ -161,7 +171,10 @@ test("serial ready selection keeps FIFO across sources during delivery backoff",
     ["first-input", "a"],
     ["later-input", "b"],
   ]) {
-    if (!eventId || !conversation) throw new Error("Missing fixture");
+    if (!eventId || !conversation) {
+      throw new Error("Missing fixture");
+    }
+
     store.enqueue({
       eventId,
       botKey: "bot",
@@ -175,7 +188,10 @@ test("serial ready selection keeps FIFO across sources during delivery backoff",
 
   const first = store.ready("bot", Date.now(), 1)[0];
 
-  if (!first) throw new Error("Missing job");
+  if (!first) {
+    throw new Error("Missing job");
+  }
+
   store.running(first.id);
   store.respond(first.id, ["reply"]);
   store.retry(first.id, Date.now() + 60_000);
@@ -199,7 +215,10 @@ test("appendCaptainTranscript refuses while busy, rolls back on duplicate outbox
   });
   const job = store.ready("bot", Date.now(), 1)[0];
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
+
   const initial = store.captainCursor("bot", "pin");
   expect(store.captainBusy("bot")).toBe(true);
   expect(

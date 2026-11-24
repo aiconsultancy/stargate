@@ -51,7 +51,10 @@ function fixture() {
     enqueueScheduled(value) {
       const existing = jobs.get(value.runId);
 
-      if (existing) return existing.id;
+      if (existing) {
+        return existing.id;
+      }
+
       const id = jobs.size + 1;
       jobs.set(value.runId, { id, input: value, status: "running" });
 
@@ -93,10 +96,13 @@ function fixture() {
 }
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 describe("CronScheduler", () => {
@@ -115,7 +121,10 @@ describe("CronScheduler", () => {
     await worker.tick(now + 120_000, signal);
     expect(f.jobs.size).toBe(1);
 
-    if (!job) throw new Error("Expected queued job");
+    if (!job) {
+      throw new Error("Expected queued job");
+    }
+
     job.status = "done";
     await worker.tick(now + 180_000, signal);
     expect(f.jobs.size).toBe(2);
@@ -138,7 +147,10 @@ describe("CronScheduler", () => {
     f.store.add(f.scope, input, now);
     const run = f.store.claimDue(f.scope.botKey, now + 60_000)[0];
 
-    if (!run) throw new Error("Expected due run");
+    if (!run) {
+      throw new Error("Expected due run");
+    }
+
     f.store.announcing(run.id);
     await f.scheduler().tick(now + 60_000, signal);
     expect(f.roots).toEqual([]);
@@ -170,7 +182,10 @@ describe("CronScheduler", () => {
     f.store.add(f.scope, input, now);
     const run = f.store.claimDue(f.scope.botKey, now + 60_000)[0];
 
-    if (!run) throw new Error("Expected due run");
+    if (!run) {
+      throw new Error("Expected due run");
+    }
+
     f.store.announcing(run.id);
     f.store.announced(run.id, "5.000");
     // Simulate a crash after queue commit but before cron's enqueued write.
@@ -301,7 +316,10 @@ describe("CronScheduler", () => {
   test("status polling reaches later batches behind long-running jobs", async () => {
     const f = fixture();
 
-    for (let index = 0; index < 101; index++) f.store.add(f.scope, input, now);
+    for (let index = 0; index < 101; index++) {
+      f.store.add(f.scope, input, now);
+    }
+
     const worker = f.scheduler();
     await worker.tick(now + 60_000, signal);
     await worker.tick(now + 60_000, signal);
@@ -315,12 +333,17 @@ describe("CronScheduler", () => {
       (job) => !firstBatch.has(job.input.runId),
     );
 
-    if (!last) throw new Error("Expected later queued run");
+    if (!last) {
+      throw new Error("Expected later queued run");
+    }
+
     last.status = "done";
 
     // A batch added behind the cursor waits for the next complete scan.
-    for (let pass = 0; pass < 3; pass++)
+    for (let pass = 0; pass < 3; pass++) {
       await worker.tick(now + 60_000, signal);
+    }
+
     expect(f.rows().filter((row) => row.status === "done")).toHaveLength(1);
   });
 });

@@ -29,9 +29,11 @@ function fixture(options: Options = {}) {
         expect(url.searchParams.get("location[directory]")).toBe(directory);
         entered.resolve();
 
-        if (stalled) return new Promise<Response>(() => {});
+        if (stalled) {
+          return new Promise<Response>(() => {});
+        }
 
-        if (missing-- > 0)
+        if (missing-- > 0) {
           return Response.json(
             {
               _tag: "AgentNotFoundError",
@@ -40,6 +42,8 @@ function fixture(options: Options = {}) {
             },
             { status: 404 },
           );
+        }
+
         ready = true;
 
         return Response.json({
@@ -56,8 +60,10 @@ function fixture(options: Options = {}) {
       }
 
       if (url.pathname === "/api/session" && request.method === "POST") {
-        if (options.enforce !== false && options.agent !== false)
+        if (options.enforce !== false && options.agent !== false) {
           expect(ready).toBe(true);
+        }
+
         expect(await request.json()).toMatchObject({
           ...(options.agent === false ? {} : { agent: agentID }),
           location: { directory },
@@ -92,7 +98,10 @@ function fixture(options: Options = {}) {
     ...(options.pinned ? { sessionID: "ses_pinned" } : {}),
   });
 
-  if (config.type !== "opencode") throw new Error("Wrong fixture backend");
+  if (config.type !== "opencode") {
+    throw new Error("Wrong fixture backend");
+  }
+
   const backend = new OpenCodeBackend(config);
 
   return {
@@ -169,8 +178,11 @@ test("a different agent ID or location is refused without fallback or session cr
   for (const wrong of ["agent", "location"]) {
     const f = fixture();
 
-    if (wrong === "agent") f.id = "build";
-    else f.location = "/another/workspace";
+    if (wrong === "agent") {
+      f.id = "build";
+    } else {
+      f.location = "/another/workspace";
+    }
 
     try {
       await expect(f.create()).rejects.toThrow(

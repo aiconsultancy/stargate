@@ -34,8 +34,9 @@ beforeEach(() => {
       "export function later(value: number) {\n  return Promise.resolve(value);\n}\n",
   };
 
-  for (const [name, text] of Object.entries(sources))
+  for (const [name, text] of Object.entries(sources)) {
     writeFileSync(join(cwd, "src", name), text);
+  }
 });
 
 afterEach(() => rmSync(cwd, { recursive: true, force: true }));
@@ -98,6 +99,26 @@ const valid = [general, paramsList, callsList, loopList, promiseList, tests];
 
 test("a configuration with valid lists of both kinds passes", () => {
   expect(run(valid)).toEqual({ code: 0, message: "" });
+});
+
+test("one rule can have different measured ceilings for different files", () => {
+  writeFileSync(
+    join(cwd, "src", "medium.ts"),
+    "export function medium(a: number, b: number, c: number, d: number) { return a + b + c + d; }\n",
+  );
+
+  const mediumList = {
+    files: ["src/medium.ts"],
+    rules: { "eslint/max-params": ["error", { max: 4 }] },
+  };
+
+  expect(run([...valid, mediumList])).toEqual({ code: 0, message: "" });
+  const overlap = run([...valid, mediumList, mediumList]);
+
+  expect(overlap.code).toBe(1);
+  expect(overlap.message).toContain(
+    "eslint/max-params: src/medium.ts is in more than one list",
+  );
 });
 
 test("ceiling lists reject stale entries and limits above the measured maximum", () => {

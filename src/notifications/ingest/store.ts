@@ -92,8 +92,9 @@ export interface NotificationCounters {
 }
 
 function checkTime(now: number) {
-  if (!Number.isSafeInteger(now) || now < 0 || now > 8_640_000_000_000_000)
+  if (!Number.isSafeInteger(now) || now < 0 || now > 8_640_000_000_000_000) {
     throw new StoreUnavailable();
+  }
 }
 
 function privateFile(path: string, create: boolean) {
@@ -106,8 +107,10 @@ function privateFile(path: string, create: boolean) {
   try {
     const stat = fstatSync(fd);
 
-    if (!stat.isFile() || stat.uid !== process.getuid?.() || stat.nlink !== 1)
+    if (!stat.isFile() || stat.uid !== process.getuid?.() || stat.nlink !== 1) {
       throw new StoreUnavailable();
+    }
+
     fchmodSync(fd, 0o600);
 
     return stat;
@@ -117,8 +120,9 @@ function privateFile(path: string, create: boolean) {
 }
 
 function readClaim(row: StoredRow): Claim {
-  if (Result.isFailure(Schema.decodeUnknownResult(StoredRow)(row)))
+  if (Result.isFailure(Schema.decodeUnknownResult(StoredRow)(row))) {
     throw new StoreUnavailable();
+  }
 
   const destination = Schema.decodeUnknownResult(Destination)(
     JSON.parse(row.destination),
@@ -133,8 +137,9 @@ function readClaim(row: StoredRow): Claim {
     Result.isFailure(payload) ||
     !audienceAllowed(row.sourceAudience, destination.success.audience) ||
     physicalKey(destination.success) !== row.destinationKey
-  )
+  ) {
     throw new StoreUnavailable();
+  }
 
   return {
     ...row,
@@ -171,12 +176,17 @@ export class NotifyStore {
     let database: Database | undefined;
 
     try {
-      if (path === ":memory:") throw new StoreUnavailable();
+      if (path === ":memory:") {
+        throw new StoreUnavailable();
+      }
+
       const absolute = resolve(path);
       const directory = dirname(absolute);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
 
-      if (realpathSync(directory) !== directory) throw new StoreUnavailable();
+      if (realpathSync(directory) !== directory) {
+        throw new StoreUnavailable();
+      }
 
       const directoryFd = openSync(
         directory,
@@ -186,7 +196,10 @@ export class NotifyStore {
       try {
         const stat = fstatSync(directoryFd);
 
-        if (stat.uid !== process.getuid?.()) throw new StoreUnavailable();
+        if (stat.uid !== process.getuid?.()) {
+          throw new StoreUnavailable();
+        }
+
         fchmodSync(directoryFd, 0o700);
       } finally {
         closeSync(directoryFd);
@@ -203,8 +216,10 @@ export class NotifyStore {
             error instanceof Error &&
             "code" in error &&
             error.code === "ENOENT"
-          )
+          ) {
             continue;
+          }
+
           throw error;
         }
 
@@ -221,8 +236,10 @@ export class NotifyStore {
             probe
               .query<{ user_version: number }, []>("PRAGMA user_version")
               .get()?.user_version !== 1
-          )
+          ) {
             throw new StoreUnavailable();
+          }
+
           probe
             .query(
               "SELECT scope,signature,admittedAt FROM notify_dedup LIMIT 0",
@@ -234,20 +251,23 @@ export class NotifyStore {
             )
             .all();
 
-          if (probe.query("PRAGMA foreign_key_check").get() !== null)
+          if (probe.query("PRAGMA foreign_key_check").get() !== null) {
             throw new StoreUnavailable();
+          }
 
           for (const row of probe
             .query("SELECT * FROM notify_dedup")
             .iterate()) {
-            if (Result.isFailure(Schema.decodeUnknownResult(DedupRow)(row)))
+            if (Result.isFailure(Schema.decodeUnknownResult(DedupRow)(row))) {
               throw new StoreUnavailable();
+            }
           }
 
           for (const row of probe
             .query<StoredRow, []>("SELECT * FROM notify_outbox")
-            .iterate())
+            .iterate()) {
             readClaim(row);
+          }
         } finally {
           probe.close();
         }
@@ -259,14 +279,16 @@ export class NotifyStore {
         current.dev !== original.dev ||
         current.ino !== original.ino ||
         current.isSymbolicLink()
-      )
+      ) {
         throw new StoreUnavailable();
+      }
+
       database = new Database(absolute, { create: true, strict: true });
       database.run(
         "PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;",
       );
 
-      if (original.size === 0)
+      if (original.size === 0) {
         database
           .transaction(() => {
             database?.run(`
@@ -293,6 +315,8 @@ export class NotifyStore {
         `);
           })
           .immediate();
+      }
+
       this.db = database;
     } catch {
       database?.close();
@@ -301,7 +325,9 @@ export class NotifyStore {
   }
 
   private transaction<A>(run: () => A): A {
-    if (this.closed) throw new StoreUnavailable();
+    if (this.closed) {
+      throw new StoreUnavailable();
+    }
 
     try {
       return this.db.transaction(run).immediate();
@@ -328,7 +354,7 @@ export class NotifyStore {
     if (capacity) {
       const remove = this.count("notify_dedup") - this.limits.dedupRecords + 1;
 
-      if (remove > 0)
+      if (remove > 0) {
         this.db
           .query(`DELETE FROM notify_dedup WHERE rowid IN (
         SELECT d.rowid FROM notify_dedup d WHERE NOT EXISTS (
@@ -336,6 +362,7 @@ export class NotifyStore {
         ) ORDER BY d.admittedAt,d.rowid LIMIT ?
       )`)
           .run(remove);
+      }
     }
   }
 
@@ -350,8 +377,10 @@ export class NotifyStore {
     const checkedSource = Schema.decodeUnknownResult(Source)(source);
     const checkedInput = Schema.decodeUnknownResult(NotificationInput)(input);
 
-    if (Result.isFailure(checkedSource) || Result.isFailure(checkedInput))
+    if (Result.isFailure(checkedSource) || Result.isFailure(checkedInput)) {
       throw new StoreUnavailable();
+    }
+
     const scope = sourceScope(checkedSource.success);
     const sig = signature(checkedSource.success, checkedInput.success);
 
@@ -360,8 +389,10 @@ export class NotifyStore {
         this.db
           .query("SELECT 1 FROM notify_dedup WHERE scope=? AND signature=?")
           .get(scope, sig) !== null
-      )
+      ) {
         return { duplicate: true, evicted: 0 };
+      }
+
       const selected = new Map<string, Destination>();
 
       for (const raw of destinations()) {
@@ -370,8 +401,10 @@ export class NotifyStore {
         if (
           Result.isFailure(decoded) ||
           !audienceAllowed(source.audience, decoded.success.audience)
-        )
+        ) {
           throw new StoreUnavailable();
+        }
+
         const destination = decoded.success;
         const key = physicalKey(destination);
         const existing = selected.get(key);
@@ -380,12 +413,17 @@ export class NotifyStore {
           existing &&
           (existing.registrationId !== destination.registrationId ||
             existing.audience !== destination.audience)
-        )
+        ) {
           throw new StoreUnavailable();
+        }
+
         selected.set(key, destination);
       }
 
-      if (selected.size > 128) throw new StoreUnavailable();
+      if (selected.size > 128) {
+        throw new StoreUnavailable();
+      }
+
       let evicted = 0;
 
       for (const key of selected.keys()) {
@@ -405,12 +443,16 @@ export class NotifyStore {
             )
             .all(key, remove);
 
-          if (victims.length !== remove) throw new StoreUnavailable();
+          if (victims.length !== remove) {
+            throw new StoreUnavailable();
+          }
 
-          for (const victim of victims)
+          for (const victim of victims) {
             this.db
               .query("DELETE FROM notify_outbox WHERE id=? AND state='pending'")
               .run(victim.id);
+          }
+
           evicted += remove;
         }
       }
@@ -420,8 +462,10 @@ export class NotifyStore {
       if (
         this.count("notify_outbox") + selected.size > this.limits.outboxRows ||
         this.count("notify_dedup") >= this.limits.dedupRecords
-      )
+      ) {
         throw new StoreUnavailable();
+      }
+
       this.db
         .query(
           "INSERT INTO notify_dedup(scope,signature,admittedAt) VALUES(?,?,?)",
@@ -456,8 +500,9 @@ export class NotifyStore {
       return { duplicate: false, evicted };
     });
 
-    if (result.duplicate) this.counters.duplicate++;
-    else {
+    if (result.duplicate) {
+      this.counters.duplicate++;
+    } else {
       this.counters.accepted++;
       this.counters.dropped += result.evicted;
     }
@@ -469,7 +514,9 @@ export class NotifyStore {
   public recover(now: number) {
     checkTime(now);
 
-    if (this.active.size > 0) throw new StoreUnavailable();
+    if (this.active.size > 0) {
+      throw new StoreUnavailable();
+    }
 
     const recovered = this.transaction(() => {
       const dropped = this.db
@@ -505,8 +552,9 @@ export class NotifyStore {
 
       this.pruneCompleted(now, false);
 
-      if (this.active.size >= this.limits.concurrency)
+      if (this.active.size >= this.limits.concurrency) {
         return { dropped, claim: undefined };
+      }
 
       const row = this.db
         .query<
@@ -517,7 +565,9 @@ export class NotifyStore {
         ORDER BY nextAt,id LIMIT 1`)
         .get(now);
 
-      if (!row) return { dropped, claim: undefined };
+      if (!row) {
+        return { dropped, claim: undefined };
+      }
 
       const claim = readClaim({
         ...row,
@@ -548,9 +598,11 @@ export class NotifyStore {
     }
 
     // Gates have only configured destination keys and expire when not needed.
-    for (const [key, gate] of this.gates)
-      if (gate <= now && ![...this.active.values()].includes(key))
+    for (const [key, gate] of this.gates) {
+      if (gate <= now && ![...this.active.values()].includes(key)) {
         this.gates.delete(key);
+      }
+    }
 
     return result.claim;
   }
@@ -558,8 +610,9 @@ export class NotifyStore {
   public settle(claim: Claim, outcome: SinkOutcome, now: number) {
     checkTime(now);
 
-    if (this.active.get(claim.id) !== claim.destinationKey)
+    if (this.active.get(claim.id) !== claim.destinationKey) {
       throw new StoreUnavailable();
+    }
 
     try {
       const terminal =
@@ -594,41 +647,51 @@ export class NotifyStore {
       );
 
       this.transaction(() => {
-        if (terminal || dropped)
+        if (terminal || dropped) {
           this.db
             .query("DELETE FROM notify_outbox WHERE id=? AND state='leased'")
             .run(claim.id);
-        else
+        } else {
           this.db
             .query(
               "UPDATE notify_outbox SET state='pending',leaseEnd=NULL,nextAt=? WHERE id=? AND state='leased'",
             )
             .run(nextAt, claim.id);
+        }
 
         // Rate limiting and ambiguity gate the physical channel, not only this row.
-        if (!terminal)
+        if (!terminal) {
           this.db
             .query(
               "UPDATE notify_outbox SET nextAt=max(nextAt,?) WHERE destinationKey=?",
             )
             .run(nextAt, claim.destinationKey);
+        }
       });
 
-      if (!terminal) this.gates.set(claim.destinationKey, nextAt);
+      if (!terminal) {
+        this.gates.set(claim.destinationKey, nextAt);
+      }
 
-      if (outcome.state === "sent") this.counters.sent++;
-      else if (outcome.state === "refused" && !outcome.retryable) {
+      if (outcome.state === "sent") {
+        this.counters.sent++;
+      } else if (outcome.state === "refused" && !outcome.retryable) {
         this.counters.refused++;
         this.counters.dropped++;
-      } else if (dropped) this.counters.dropped++;
-      else if (outcome.state === "unknown") this.counters.replayed++;
+      } else if (dropped) {
+        this.counters.dropped++;
+      } else if (outcome.state === "unknown") {
+        this.counters.replayed++;
+      }
     } finally {
       this.active.delete(claim.id);
     }
   }
 
   public close() {
-    if (this.active.size > 0) throw new StoreUnavailable();
+    if (this.active.size > 0) {
+      throw new StoreUnavailable();
+    }
 
     if (!this.closed) {
       this.db.close();

@@ -55,10 +55,11 @@ test("mail and DM keep trim, code-point bounds, defaults and meaningful paths", 
     { ...send, delivery: "steer" },
     { op: "inbox", after: Number.MAX_SAFE_INTEGER + 1 },
     { op: "inbox", limit: null },
-  ])
+  ]) {
     expect(
       Result.isFailure(Schema.decodeUnknownResult(mailInputSchema)(raw)),
     ).toBe(true);
+  }
 
   const missing = await messageOpenCodeInput(mailInputBranches)[
     "~standard"
@@ -66,7 +67,10 @@ test("mail and DM keep trim, code-point bounds, defaults and meaningful paths", 
 
   expect(missing).toHaveProperty("issues");
 
-  if (!missing.issues) throw new Error("Missing recipient accepted");
+  if (!missing.issues) {
+    throw new Error("Missing recipient accepted");
+  }
+
   expect(missing.issues).toContainEqual(
     expect.objectContaining({ path: ["to"] }),
   );
@@ -148,7 +152,10 @@ test("OpenCode mail/history retain discriminator paths without losing project di
     ]) {
       const parsed = await schema.validate(input);
 
-      if (!parsed.issues) throw new Error("Invalid operation accepted");
+      if (!parsed.issues) {
+        throw new Error("Invalid operation accepted");
+      }
+
       expect(parsed.issues).toContainEqual(
         expect.objectContaining({ path: ["op"] }),
       );
@@ -156,8 +163,10 @@ test("OpenCode mail/history retain discriminator paths without losing project di
 
     const parsed = await schema.validate({ op: "unknown", project: "/bad" });
 
-    if (!parsed.issues)
+    if (!parsed.issues) {
       throw new Error("Invalid project and operation accepted");
+    }
+
     expect(parsed.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ path: ["op"] }),
@@ -176,7 +185,10 @@ test("Pi mail/DM advertise explicit operations and preserve required-default coe
   for (const name of ["stargate_mail", "stargate_dm"]) {
     const tool = extension.tools?.find((tool) => tool.name === name);
 
-    if (!tool) throw new Error(`Missing tool ${name}`);
+    if (!tool) {
+      throw new Error(`Missing tool ${name}`);
+    }
+
     expect(tool.replay).toBe("unsafe");
 
     const parse = (
@@ -262,7 +274,10 @@ test("native RPC codecs retain strict input/output encoding and structured mutab
       Schema.decodeUnknownResult(schema)(invalid),
       Schema.encodeUnknownResult(schema)(invalid),
     ]) {
-      if (Result.isSuccess(result)) throw new Error("Nested extras accepted");
+      if (Result.isSuccess(result)) {
+        throw new Error("Nested extras accepted");
+      }
+
       expect(
         settingsIssues(result.failure.issue).issues.some(
           (issue) => (issue.path?.length ?? 0) > 0,
@@ -334,13 +349,17 @@ test("installed Promise RPC preserves structured values; actual consumers reject
       expect(body).toHaveProperty("input");
       const codec = inputs.get(path.split("/").at(-1) ?? "");
 
-      if (!codec) throw new Error("Unexpected local fixture method");
+      if (!codec) {
+        throw new Error("Unexpected local fixture method");
+      }
+
       // Installed registration decodes recognized native codecs with defaults.
       // Return controlled errors; never leak a decoder exception through Bun.
       const decoded = Schema.decodeUnknownResult(codec)(body.input);
 
-      if (Result.isFailure(decoded))
+      if (Result.isFailure(decoded)) {
         return new Response("Invalid RPC input", { status: 400 });
+      }
 
       const output = path.endsWith("/bind")
         ? { bound: true }
@@ -423,12 +442,17 @@ test("installed Promise RPC preserves structured values; actual consumers reject
       headersEnv: { authorization: "STARGATE_MESSAGES_TEST_AUTH" },
     });
 
-    if (config.type !== "opencode")
+    if (config.type !== "opencode") {
       throw new Error("Invalid fixture configuration");
+    }
+
     const env = { STARGATE_MESSAGES_TEST_AUTH: "Bearer fixture-only" };
     const link = crewLink(config, env);
 
-    if (!link) throw new Error("Missing IRC link");
+    if (!link) {
+      throw new Error("Missing IRC link");
+    }
+
     await expect(link.outbox({ limit: 1 }, options.signal)).rejects.toThrow(
       "Crew stargate_dm outbox unavailable",
     );
@@ -441,9 +465,11 @@ test("installed Promise RPC preserves structured values; actual consumers reject
         backend.resumeActivity("captain", "capture").read(options.signal),
       ).rejects.toBeDefined();
     } finally {
-      if (previous === undefined)
+      if (previous === undefined) {
         delete process.env["STARGATE_MESSAGES_TEST_AUTH"];
-      else process.env["STARGATE_MESSAGES_TEST_AUTH"] = previous;
+      } else {
+        process.env["STARGATE_MESSAGES_TEST_AUTH"] = previous;
+      }
     }
 
     expect(requests).toHaveLength(10);
@@ -453,17 +479,20 @@ test("installed Promise RPC preserves structured values; actual consumers reject
 });
 
 test("waiting separates immediate zero, off and the integer ceiling", () => {
-  for (const seconds of [0, 3600, "off"] as const)
+  for (const seconds of [0, 3600, "off"] as const) {
     expect(Schema.decodeUnknownSync(waitingInputSchema)({ seconds })).toEqual({
       seconds,
     });
+  }
 
-  for (const seconds of [-1, 3601, 1.5, null, false, "0"])
+  for (const seconds of [-1, 3601, 1.5, null, false, "0"]) {
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(waitingInputSchema)({ seconds }),
       ),
     ).toBe(true);
+  }
+
   expect(
     Result.isFailure(
       Schema.decodeUnknownResult(waitingInputSchema)({

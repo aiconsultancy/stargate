@@ -90,8 +90,9 @@ export class ThreadFollowUpRecords {
           .query("SELECT 1 FROM thread_followups WHERE botKey=? AND eventId=?")
           .get(input.botKey, input.eventId) !== null ||
         this.jobs.jobByEvent(input.botKey, input.eventId)
-      )
+      ) {
         return false;
+      }
 
       const owner = this.db
         .query<StoredJob, [string]>(
@@ -99,7 +100,9 @@ export class ThreadFollowUpRecords {
         )
         .get(input.botKey);
 
-      if (!owner) return;
+      if (!owner) {
+        return;
+      }
 
       const root = threadRoot(input, transport);
 
@@ -114,7 +117,9 @@ export class ThreadFollowUpRecords {
         !input.deferDelivery &&
         !input.files?.length;
 
-      if (!eligible && !this.jobs.enqueue(input)) return false;
+      if (!eligible && !this.jobs.enqueue(input)) {
+        return false;
+      }
 
       if (transport === "irc") {
         this.irc.ircThreadMessage(
@@ -124,18 +129,20 @@ export class ThreadFollowUpRecords {
           root,
         );
 
-        if (eligible)
+        if (eligible) {
           this.db
             .query(
               "UPDATE jobs SET replyParent=COALESCE(replyParent,thread) WHERE id=? AND status='running'",
             )
             .run(owner.id);
+        }
 
         if (
           invited ||
           this.irc.ircThreadParticipating(input.botKey, input.channel, root)
-        )
+        ) {
           this.irc.joinIrcThread(input.botKey, input.channel, root);
+        }
       }
 
       this.db
@@ -237,7 +244,7 @@ export class ThreadFollowUpRecords {
             receipt.payload,
             receipt.transport,
           );
-      } else if (state === "uncertain")
+      } else if (state === "uncertain") {
         this.db
           .query(
             "UPDATE thread_followups SET state=?,reconcileAttempts=reconcileAttempts+1,retryAt=? WHERE botKey=? AND eventId=?",
@@ -249,12 +256,13 @@ export class ThreadFollowUpRecords {
             receipt.botKey,
             receipt.eventId,
           );
-      else
+      } else {
         this.db
           .query(
             "UPDATE thread_followups SET state=?,notified=0 WHERE botKey=? AND eventId=?",
           )
           .run(state, receipt.botKey, receipt.eventId);
+      }
     })();
   }
 

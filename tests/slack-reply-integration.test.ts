@@ -28,7 +28,10 @@ function recorder() {
       }));
     },
     async post(_channel, _thread, text, _stop, unit, content) {
-      if (slack.failNext-- > 0) throw new Error("Slack unavailable");
+      if (slack.failNext-- > 0) {
+        throw new Error("Slack unavailable");
+      }
+
       posts.push({ text, content, unit });
 
       return `${posts.length}.000`;
@@ -76,7 +79,9 @@ function gatewayWith(
 function pending(next: () => Job | undefined) {
   const job = next();
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
 
   return job;
 }
@@ -193,10 +198,16 @@ test("live previews prepare each whole snapshot once and hand chunks their conte
 
   live.push("One\n\nTwo");
 
-  while (r.posts.length < 2) await Bun.sleep(1);
+  while (r.posts.length < 2) {
+    await Bun.sleep(1);
+  }
+
   live.push("One\n\nTwo\n\nThree");
 
-  while (r.posts.length < 3) await Bun.sleep(1);
+  while (r.posts.length < 3) {
+    await Bun.sleep(1);
+  }
+
   await live.close();
   expect(r.prepared.map((call) => call.text)).toEqual([
     "One\n\nTwo",
@@ -301,13 +312,19 @@ test("transcript catch-up prepares each reply whole and persists its chunks", as
 
   expect(rows.length).toBeGreaterThan(0);
 
-  for (const row of rows)
-    for (const chunk of row.response) expect(typeof chunk).toBe("object");
+  for (const row of rows) {
+    for (const chunk of row.response) {
+      expect(typeof chunk).toBe("object");
+    }
+  }
+
   expect(r.prepared.every((call) => call.unbounded === true)).toBe(true);
   const preparedCount = r.prepared.length;
 
-  for (let job = f.next(); job; job = f.next())
+  for (let job = f.next(); job; job = f.next()) {
     await f.gateway.process(job, f.signal);
+  }
+
   expect(r.prepared).toHaveLength(preparedCount);
   expect(r.posts.every((post) => post.content !== undefined)).toBe(true);
   f.store.close();
@@ -333,7 +350,10 @@ test("store text readers map prepared chunks to display text", () => {
   });
   const job = store.ready(key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
+
   store.running(job.id);
   expect(store.respond(job.id, chunks)).toEqual(chunks);
   expect(store.scheduledResult(key, job.id)?.text).toBe("Prepared\n\nPlain");

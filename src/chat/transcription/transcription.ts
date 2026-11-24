@@ -154,7 +154,10 @@ export async function transcribeMedia(
       if (text === undefined) {
         const format = extension(file);
 
-        if (!format) throw new Error("Unsupported media format");
+        if (!format) {
+          throw new Error("Unsupported media format");
+        }
+
         const limit = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
         provider = transcriber.label;
         text = await exclusive(limit, () =>

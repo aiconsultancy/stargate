@@ -150,8 +150,9 @@ test("an issue listing longer than one call's page budget returns a cursor to go
   const api = client(f);
   f.http.pageSize = 2;
 
-  for (let n = 0; n < 120; n++)
+  for (let n = 0; n < 120; n++) {
     f.api.add({ id: `i${n}`, identifier: `PRJ-${n}`, assigneeId: CAPTAIN_A });
+  }
 
   // 50 pages of 2 per call; the API's cursor continues the listing.
   const first = await api.assignedIssues(
@@ -178,7 +179,10 @@ test("an issue listing longer than one call's page budget returns a cursor to go
   ).toBe(120);
 
   // Membership needs whole listings, which read past the issue budget.
-  for (let n = 0; n < 120; n++) f.api.fleetProjectIDs.add(`project-${n}`);
+  for (let n = 0; n < 120; n++) {
+    f.api.fleetProjectIDs.add(`project-${n}`);
+  }
+
   expect((await api.fleetProjects(FLEET, signal)).size).toBe(121);
 });
 
@@ -186,16 +190,20 @@ test("a first start longer than one poll's page budget initialises over several 
   const f = await fixture({ http: true });
   f.http.pageSize = 1;
 
-  for (let n = 0; n < 60; n++)
+  for (let n = 0; n < 60; n++) {
     f.api.add({ id: `i${n}`, identifier: `PRJ-${n}`, assigneeId: CAPTAIN_A });
+  }
+
   await f.dispatcher.step(signal);
   expect(f.ledger.initialised).toBe(false);
   f.clock.advance(2 * MINUTE);
   await f.dispatcher.step(signal);
   expect(f.ledger.initialised).toBe(true);
 
-  for (let n = 0; n < 60; n++)
+  for (let n = 0; n < 60; n++) {
     expect(f.ledger.notified(`i${n}`, CAPTAIN_A)).toBe(true);
+  }
+
   expect(f.chat.lines).toEqual([]);
   f.clock.advance(2 * MINUTE);
   f.api.add({ id: "new", identifier: "PRJ-NEW", assigneeId: CAPTAIN_B });
@@ -240,8 +248,11 @@ test("every API failure is a status-only error that names no credential", async 
     f.http.failures.clear();
     f.http.credentialStatus = undefined;
 
-    if (typeof failure === "number") f.http.credentialStatus = failure;
-    else f.http.failures.set("fleet", failure);
+    if (typeof failure === "number") {
+      f.http.credentialStatus = failure;
+    } else {
+      f.http.failures.set("fleet", failure);
+    }
 
     const error = await api
       .fleet("example-fleet", signal)
@@ -249,7 +260,10 @@ test("every API failure is a status-only error that names no credential", async 
 
     expect(error).toBeInstanceOf(DispatchApiError);
 
-    if (!(error instanceof DispatchApiError)) throw new Error("unexpected");
+    if (!(error instanceof DispatchApiError)) {
+      throw new Error("unexpected");
+    }
+
     expect(error.status).toBe(status);
 
     for (const text of [error.message, JSON.stringify(error), String(error)]) {
@@ -329,7 +343,7 @@ const reads: RouteKind[] = [
   "issue",
 ];
 
-for (const mode of ["refused", "timeout", "5xx", "malformed"] as const)
+for (const mode of ["refused", "timeout", "5xx", "malformed"] as const) {
   test(`API ${mode} during each kind of poll: no crash, no duplicate notice, ledger intact, recovers`, async () => {
     for (const route of reads) {
       const { log, lines } = capturedLog();
@@ -356,7 +370,9 @@ for (const mode of ["refused", "timeout", "5xx", "malformed"] as const)
       f.api.add({ id: "i1", identifier: "PRJ-1", assigneeId: CAPTAIN_B });
       f.api.add({ id: "i2", identifier: "PRJ-2", readyForAgents: true });
 
-      if (route !== "me") f.http.failures.set(route, mode);
+      if (route !== "me") {
+        f.http.failures.set(route, mode);
+      }
 
       for (let poll = 0; poll < 2; poll++) {
         await f.dispatcher.step(signal);
@@ -388,8 +404,15 @@ for (const mode of ["refused", "timeout", "5xx", "malformed"] as const)
       f.ledger.close();
     }
   });
+}
 
-for (const mode of ["refused", "timeout", "5xx", "malformed", "lost"] as const)
+for (const mode of [
+  "refused",
+  "timeout",
+  "5xx",
+  "malformed",
+  "lost",
+] as const) {
   test(`API ${mode} during the acceptance write: one assignment, no duplicate notice`, async () => {
     const { log, lines } = capturedLog();
     const f = await fixture({ http: true, log });
@@ -430,6 +453,7 @@ for (const mode of ["refused", "timeout", "5xx", "malformed", "lost"] as const)
     });
     expectNoSecrets(lines);
   });
+}
 
 /** One round with one available captain, then give up. */
 async function giveUpFixture(log: ReturnType<typeof capturedLog>["log"]) {
@@ -443,7 +467,7 @@ async function giveUpFixture(log: ReturnType<typeof capturedLog>["log"]) {
   return f;
 }
 
-for (const write of ["comment", "clear"] as const)
+for (const write of ["comment", "clear"] as const) {
   for (const mode of [
     "refused",
     "timeout",
@@ -452,7 +476,10 @@ for (const write of ["comment", "clear"] as const)
     "lost",
   ] as const) {
     // A lost answer to the comment can repeat it; docs/agent-dispatch.md.
-    if (write === "comment" && mode === "lost") continue;
+    if (write === "comment" && mode === "lost") {
+      continue;
+    }
+
     test(`API ${mode} during the give-up ${write}: one comment, flag cleared, one chat line`, async () => {
       const { log, lines } = capturedLog();
       const f = await giveUpFixture(log);
@@ -475,8 +502,9 @@ for (const write of ["comment", "clear"] as const)
       expectNoSecrets(lines);
     });
   }
+}
 
-for (const status of [401, 403] as const)
+for (const status of [401, 403] as const) {
   test(`a refused credential (${status}) is logged once and plainly, without spinning or leaking`, async () => {
     const { log, lines } = capturedLog();
     const controller = new AbortController();
@@ -490,7 +518,9 @@ for (const status of [401, 403] as const)
         waits.push(ms);
         advance(ms);
 
-        if (waits.length === 3) controller.abort();
+        if (waits.length === 3) {
+          controller.abort();
+        }
       },
     });
 
@@ -517,8 +547,9 @@ for (const status of [401, 403] as const)
     await f.dispatcher.step(signal);
     expect(f.chat.transcript()).toEqual(["offer PRJ-1 -> example-captain-a"]);
   });
+}
 
-for (const variant of ["field missing", "filter refused"] as const)
+for (const variant of ["field missing", "filter refused"] as const) {
   test(`an older API (${variant}): direct assignments only, logged once`, async () => {
     const { log, lines } = capturedLog();
     const f = await fixture({ http: true, log });
@@ -550,3 +581,4 @@ for (const variant of ["field missing", "filter refused"] as const)
       ),
     ).toHaveLength(1);
   });
+}

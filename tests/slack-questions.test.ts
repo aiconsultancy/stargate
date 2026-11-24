@@ -14,7 +14,9 @@ const token = "a".repeat(32);
 const cleanups: (() => void)[] = [];
 
 afterEach(() => {
-  for (const close of cleanups.splice(0)) close();
+  for (const close of cleanups.splice(0)) {
+    close();
+  }
 });
 
 function question(): NativeQuestion {
@@ -57,12 +59,17 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
   });
   const queued = store.queuedJob(key, "C123:1.000");
 
-  if (!queued) throw new Error("Missing fixture job");
+  if (!queued) {
+    throw new Error("Missing fixture job");
+  }
+
   store.running(queued.id);
   store.saveInput(key, queued.id, native.inputID, native.sessionID);
   const job = store.jobByInput(key, native.inputID);
 
-  if (!job) throw new Error("Missing fixture input");
+  if (!job) {
+    throw new Error("Missing fixture input");
+  }
 
   const offer: QuestionOffer = {
     token,
@@ -97,7 +104,10 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
       store,
       {
         async post(_channel, _thread, _text, _stop, unit, content) {
-          if (!unit?.allowed?.()) throw new Error("Denied publication");
+          if (!unit?.allowed?.()) {
+            throw new Error("Denied publication");
+          }
+
           posts.push(content as SlackPanelContent);
 
           return "2.000";
@@ -107,7 +117,10 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
             store.questions.slackQuestion(token)?.revision,
           ).toBeGreaterThan(0);
 
-          if (failUpdate) throw new Error("Slack unavailable");
+          if (failUpdate) {
+            throw new Error("Slack unavailable");
+          }
+
           updates.push(content as SlackPanelContent);
 
           return true;
@@ -119,19 +132,26 @@ function fixture(native = question(), expires = Date.now() + 60_000) {
       () => config,
       identity,
       async () => {
-        if (requireAck) expect(acked).toBe(true);
+        if (requireAck) {
+          expect(acked).toBe(true);
+        }
+
         beforeHuman?.();
 
         return human;
       },
       async () => {
-        if (requireAck) expect(acked).toBe(true);
+        if (requireAck) {
+          expect(acked).toBe(true);
+        }
 
         return { enabled, timeoutMs: 60_000, answer: policy };
       },
       async (_job, _token, answer, user) => {
-        if (failSubmit)
+        if (failSubmit) {
           throw new Error("Submission interrupted before native claim");
+        }
+
         answers.push({ answer, user });
       },
     );
@@ -202,7 +222,10 @@ test("renders literal single-choice buttons with trusted indexed values and nati
   const native = question();
   const field = native.fields[0];
 
-  if (!field) throw new Error("Missing fixture field");
+  if (!field) {
+    throw new Error("Missing fixture field");
+  }
+
   field.custom = false;
   const panel = buildQuestionBlocks(native, token);
   const json = JSON.stringify(panel);
@@ -213,7 +236,10 @@ test("renders literal single-choice buttons with trusted indexed values and nati
   expect(json).not.toContain('"value":"native_go"');
 
   for (const block of panel.blocks) {
-    if (block.type !== "actions") continue;
+    if (block.type !== "actions") {
+      continue;
+    }
+
     const ids = block.elements.map((element) => element.action_id);
     expect(new Set(ids).size).toBe(ids.length);
   }
@@ -282,7 +308,10 @@ test("checkbox change never answers; Submit reads state and ignores labels", asy
     submit.state.values[`${token}:0`]?.stargate_question_select
       .selected_options[0];
 
-  if (!selected) throw new Error("Missing fixture selection");
+  if (!selected) {
+    throw new Error("Missing fixture selection");
+  }
+
   selected.value = `${token}:0:9`;
   await f.click(submit);
   expect(f.answers).toEqual([]);
@@ -314,7 +343,10 @@ test("refuses forged routing, source message, bot user, stale and disabled offer
     },
   ];
 
-  for (const raw of variants) expect(await f.click(raw)).toBe(true);
+  for (const raw of variants) {
+    expect(await f.click(raw)).toBe(true);
+  }
+
   f.human(false);
   await f.click(original);
   f.human(true);
@@ -368,7 +400,10 @@ test("custom intake reserves only explicit bot answer tokens and original thread
   const closed = question();
   const field = closed.fields[0];
 
-  if (!field) throw new Error("Missing fixture field");
+  if (!field) {
+    throw new Error("Missing fixture field");
+  }
+
   field.custom = false;
   const g = fixture(closed);
   await g.publish();
@@ -568,8 +603,9 @@ test("twenty choices fit Slack checkbox limits and submit across all groups", as
 
   expect(checkboxGroups).toHaveLength(2);
 
-  for (const group of checkboxGroups)
+  for (const group of checkboxGroups) {
     expect(group.options.length).toBeLessThanOrEqual(10);
+  }
 
   const raw = {
     ...press("stargate_question_submit", token),

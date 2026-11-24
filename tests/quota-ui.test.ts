@@ -82,16 +82,21 @@ test("usage command ACKs and opens before the read; displays private bounded pla
   expect(JSON.stringify(views.at(-1))).toContain("Reset passed");
   expect(JSON.stringify(views.at(-1))).toContain("not token counts");
 
-  for (const block of views.at(-1)?.blocks ?? [])
+  for (const block of views.at(-1)?.blocks ?? []) {
     expect(block).toMatchObject({
       type: "section",
       text: { type: "plain_text", emoji: false },
     });
+  }
+
   const max = structuredClone(snapshot);
   const account = snapshot.accounts[0];
   const window = account?.windows[0];
 
-  if (!account || !window) throw new Error("Missing quota fixture");
+  if (!account || !window) {
+    throw new Error("Missing quota fixture");
+  }
+
   max.accounts = Array.from({ length: 10 }, (_, i) => ({
     ...account,
     account: `claude-${i + 1}`,
@@ -109,8 +114,9 @@ test("usage command ACKs and opens before the read; displays private bounded pla
       typeof block.text === "object" &&
       block.text &&
       "text" in block.text
-    )
+    ) {
       expect(String(block.text.text).length).toBeLessThanOrEqual(3000);
+    }
   }
 });
 
@@ -155,10 +161,12 @@ test("usage command preserves app/workspace/access/bot boundaries and rechecks b
     { is_bot: true },
     { user_name: "slackbot" },
     { text: "usage extra" },
-  ])
+  ]) {
     await ui.command({ ...command, ...changes }, async (payload) => {
       expect(payload).toMatchObject({ response_type: "ephemeral" });
     });
+  }
+
   expect(reads).toBe(0);
   expect(opens).toBe(0);
   await ui.command(command, async () => {});
@@ -244,7 +252,10 @@ test("quota adapter uses only location-scoped authenticated RPC, no session or i
       headersEnv: { Authorization: "STARGATE_QUOTA_TEST_AUTH" },
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
     expect(await backend.quota(new AbortController().signal)).toEqual(snapshot);
     invalid = true;

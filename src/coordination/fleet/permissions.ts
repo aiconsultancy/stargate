@@ -30,12 +30,17 @@ const literal = /^[A-Za-z0-9_./:@%#=-]+$/;
 type Pattern = { kind: "exact" | "prefix"; text: string };
 
 function pattern(value: string): Pattern | undefined {
-  if (value === "*") return { kind: "prefix", text: "" };
+  if (value === "*") {
+    return { kind: "prefix", text: "" };
+  }
 
-  if (literal.test(value)) return { kind: "exact", text: value };
+  if (literal.test(value)) {
+    return { kind: "exact", text: value };
+  }
 
-  if (value.endsWith("*") && literal.test(value.slice(0, -1)))
+  if (value.endsWith("*") && literal.test(value.slice(0, -1))) {
     return { kind: "prefix", text: value.slice(0, -1) };
+  }
 
   return;
 }
@@ -47,7 +52,9 @@ function matches(value: string, rule: Pattern) {
 }
 
 function potentiallyFleet(supported: Pattern | undefined) {
-  if (supported) return actions.some((action) => matches(action, supported));
+  if (supported) {
+    return actions.some((action) => matches(action, supported));
+  }
 
   // An unsupported expression can contain alternatives or negation: its
   // Apparent leading namespace proves nothing. Only supported exact/prefix
@@ -62,20 +69,25 @@ export function validateFleetPermissions(
   for (const rule of rules) {
     const action = pattern(rule.action);
 
-    if (!potentiallyFleet(action)) continue;
+    if (!potentiallyFleet(action)) {
+      continue;
+    }
 
-    if (!action || !pattern(rule.resource))
+    if (!action || !pattern(rule.resource)) {
       throw new FleetError(
         "Fleet IPC permissions support only exact literals, '*' or a literal prefix followed by '*'.",
       );
+    }
 
-    if (rule.effect === "ask")
+    if (rule.effect === "ask") {
       throw new FleetError(
         "Fleet IPC does not support ask permissions; configure an explicit allow or deny.",
       );
+    }
 
-    if (rule.effect !== "allow" && rule.effect !== "deny")
+    if (rule.effect !== "allow" && rule.effect !== "deny") {
       throw new FleetError("Invalid fleet IPC permission effect.");
+    }
   }
 }
 
@@ -122,7 +134,10 @@ export function fleetRequestAllowed(
     for (const rule of rules) {
       const actionPattern = pattern(rule.action);
 
-      if (!potentiallyFleet(actionPattern)) continue;
+      if (!potentiallyFleet(actionPattern)) {
+        continue;
+      }
+
       const resourcePattern = pattern(rule.resource);
 
       if (
@@ -130,8 +145,9 @@ export function fleetRequestAllowed(
         resourcePattern &&
         matches(action, actionPattern) &&
         matches(resource, resourcePattern)
-      )
+      ) {
         allowed = rule.effect === "allow";
+      }
     }
 
     return allowed;

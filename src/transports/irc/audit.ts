@@ -33,7 +33,10 @@ const withheld = "[not mirrored: may contain credentials]";
  * undefined for ordinary text.
  */
 export function ctcp(text: string) {
-  if (!text.startsWith("\u0001")) return;
+  if (!text.startsWith("\u0001")) {
+    return;
+  }
+
   const body = text.endsWith("\u0001") ? text.slice(1, -1) : text.slice(1);
   const space = body.indexOf(" ");
 
@@ -100,10 +103,13 @@ export function sensitive(text: string) {
 function name(peer: DmEvent["peer"]) {
   const nick = cleanText(peer.nick);
 
-  if (peer.account === null) return `${nick} (no account)`;
+  if (peer.account === null) {
+    return `${nick} (no account)`;
+  }
 
-  if (peer.account === undefined || fold(peer.account) === fold(peer.nick))
+  if (peer.account === undefined || fold(peer.account) === fold(peer.nick)) {
     return nick;
+  }
 
   return `${nick} (${cleanText(peer.account)})`;
 }
@@ -116,10 +122,16 @@ function name(peer: DmEvent["peer"]) {
  * for ACTION, and `[dm <time>]` for a replayed message.
  */
 export function auditLine(event: DmEvent): string | undefined {
-  if (serviceNick(event.peer.nick)) return;
+  if (serviceNick(event.peer.nick)) {
+    return;
+  }
+
   const command = ctcp(event.text);
 
-  if (command && command.verb !== "ACTION") return;
+  if (command && command.verb !== "ACTION") {
+    return;
+  }
+
   const action = command !== undefined;
   const text = command ? command.text : event.text;
 
@@ -129,7 +141,10 @@ export function auditLine(event: DmEvent): string | undefined {
     .join("\n")
     .trim();
 
-  if (!clean) return;
+  if (!clean) {
+    return;
+  }
+
   const shown = sensitive(event.text) || sensitive(clean) ? withheld : clean;
   const peer = name(event.peer);
   const agent = cleanText(event.agent);
@@ -184,13 +199,18 @@ export class IrcAudit {
       if (msgid !== undefined) {
         const key = `${fold(event.agent)} ${msgid}`;
 
-        if (this.seen.has(key)) return false;
+        if (this.seen.has(key)) {
+          return false;
+        }
+
         this.seen.set(key, true);
       }
 
       const line = auditLine(event);
 
-      if (line === undefined) return false;
+      if (line === undefined) {
+        return false;
+      }
 
       if (this.queue.length >= this.limit) {
         this.dropped++;
@@ -228,11 +248,15 @@ export class IrcAudit {
         this.queue.shift();
         retries = 0;
       } catch (error) {
-        if (signal.aborted) break;
+        if (signal.aborted) {
+          break;
+        }
 
         // Lost before the write: post the same entry after the reconnect.
-        if (error instanceof IrcUnavailable && ++retries <= reconnectRetries)
+        if (error instanceof IrcUnavailable && ++retries <= reconnectRetries) {
           continue;
+        }
+
         this.queue.shift();
         retries = 0;
 
@@ -251,19 +275,27 @@ export class IrcAudit {
 
     this.report(true);
 
-    if (this.queue.length > 0)
+    if (this.queue.length > 0) {
       this.log.warn(
         { pending: this.queue.length },
         "IRC DM audit lines not posted at shutdown",
       );
+    }
+
     this.queue.length = 0;
   }
 
   private report(force: boolean) {
-    if (this.dropped === this.reported) return;
+    if (this.dropped === this.reported) {
+      return;
+    }
+
     const now = Date.now();
 
-    if (!force && now - this.lastReport < reportMs) return;
+    if (!force && now - this.lastReport < reportMs) {
+      return;
+    }
+
     this.lastReport = now;
     this.reported = this.dropped;
     this.log.warn(
@@ -323,14 +355,16 @@ export class IrcAudit {
         );
 
       if (parts.length > 1) {
-        for (const unit of packBatches(parts, limits))
+        for (const unit of packBatches(parts, limits)) {
           await client.sendBatch(channel, unit.lines, {}, undefined, "low");
+        }
 
         return;
       }
     }
 
-    for (const text of ircLines(line, client.budget("PRIVMSG", channel, {})))
+    for (const text of ircLines(line, client.budget("PRIVMSG", channel, {}))) {
       await client.privmsg(channel, text, {}, undefined, "low");
+    }
   }
 }

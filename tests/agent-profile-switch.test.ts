@@ -40,7 +40,10 @@ async function fixture() {
     ["before", "low"],
     ["after", "high"],
   ]) {
-    if (!profile || !variant) throw new Error("Invalid test profile");
+    if (!profile || !variant) {
+      throw new Error("Invalid test profile");
+    }
+
     const folder = join(root, profile);
     await mkdir(folder, { recursive: true });
     const route = { name, model: `test/model#${variant}`, weight: 2 };
@@ -120,9 +123,14 @@ async function fixture() {
 
         return null;
       case "/api/agent": {
-        if (state.failAgents) throw new Error("Agent API unavailable");
+        if (state.failAgents) {
+          throw new Error("Agent API unavailable");
+        }
 
-        if (state.malformedAgents) return { data: "invalid" };
+        if (state.malformedAgents) {
+          return { data: "invalid" };
+        }
+
         const stale = state.staleReads-- > 0;
 
         return {
@@ -500,7 +508,9 @@ test("second strict readiness check catches work admitted during validation", as
   let checks = 0;
 
   const api: ProfileApi = async (method, path, signal) => {
-    if (path === "/api/session/active" && ++checks === 2) f.state.busy = true;
+    if (path === "/api/session/active" && ++checks === 2) {
+      f.state.busy = true;
+    }
 
     return f.options.api(method, path, signal);
   };
@@ -631,7 +641,7 @@ test("version 1 manifests and model IDs containing slashes switch without fallba
   }
 
   const api: ProfileApi = async (method, path, signal) => {
-    if (path.startsWith("/api/model"))
+    if (path.startsWith("/api/model")) {
       return {
         data: [
           {
@@ -643,8 +653,9 @@ test("version 1 manifests and model IDs containing slashes switch without fallba
           },
         ],
       };
+    }
 
-    if (path.startsWith("/api/agent"))
+    if (path.startsWith("/api/agent")) {
       return {
         data: routes.map((route) => ({
           id: route.name,
@@ -656,6 +667,7 @@ test("version 1 manifests and model IDs containing slashes switch without fallba
           },
         })),
       };
+    }
 
     return f.options.api(method, path, signal);
   };

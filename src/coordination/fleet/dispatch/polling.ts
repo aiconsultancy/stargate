@@ -156,7 +156,10 @@ export class DispatchPolling {
 
   /** Log a problem once until it clears; never logs bodies or secrets. */
   public warnOnce(key: string, message: string, detail: LogDetail = {}) {
-    if (this.warned.has(key)) return;
+    if (this.warned.has(key)) {
+      return;
+    }
+
     this.warned.add(key);
     this.options.log.warn(detail, message);
   }
@@ -217,7 +220,10 @@ export class DispatchPolling {
       return;
     }
 
-    if (!(await this.checkIdentity(roster, signal))) return;
+    if (!(await this.checkIdentity(roster, signal))) {
+      return;
+    }
+
     this.roster = this.captainsOf(roster, readAt);
 
     try {
@@ -252,16 +258,21 @@ export class DispatchPolling {
     const captains = new Map<string, Captain>();
 
     for (const agent of roster.agents) {
-      if (agent.rank !== "captain") continue;
+      if (agent.rank !== "captain") {
+        continue;
+      }
+
       const account = this.settings.captainAccount(agent.name);
       const reachable = this.settings.enrolled(account);
 
-      if (!reachable)
+      if (!reachable) {
         this.warnOnce(
           `enrolled:${agent.userId}`,
           "Agent dispatch skips a captain whose chat account is not an enrolled fleet agent",
           { captain: agent.name },
         );
+      }
+
       captains.set(agent.userId, {
         userId: agent.userId,
         name: agent.name,
@@ -289,12 +300,16 @@ export class DispatchPolling {
       age !== undefined &&
       age >= 0 &&
       age < this.settings.pollIntervalMs
-    )
+    ) {
       return cached;
+    }
+
     const roster = await this.options.api.fleet(this.settings.fleet, signal);
 
-    if (this.verifiedFleet === undefined || roster.id !== this.verifiedFleet)
+    if (this.verifiedFleet === undefined || roster.id !== this.verifiedFleet) {
       throw new Error("Agent dispatch roster is not the confirmed fleet's");
+    }
+
     this.roster = this.captainsOf(roster, this.now());
 
     return this.roster;
@@ -305,8 +320,9 @@ export class DispatchPolling {
    * the identity's fleet ID must be the roster's, never absent.
    */
   private async checkIdentity(roster: FleetRoster, signal: AbortSignal) {
-    if (this.verifiedFleet !== undefined)
+    if (this.verifiedFleet !== undefined) {
       return this.verifiedFleet === roster.id;
+    }
 
     try {
       const me = await this.options.api.me(signal);
@@ -346,7 +362,10 @@ export class DispatchPolling {
    * an earlier process says nothing about the credential this one holds.
    */
   public async identityConfirmed(signal: AbortSignal) {
-    if (this.verifiedFleet !== undefined) return true;
+    if (this.verifiedFleet !== undefined) {
+      return true;
+    }
+
     let roster: FleetRoster;
 
     try {
@@ -373,8 +392,10 @@ export class DispatchPolling {
   private async fleetProjects(signal: AbortSignal) {
     const fleetId = this.verifiedFleet;
 
-    if (fleetId === undefined)
+    if (fleetId === undefined) {
       throw new Error("Agent dispatch identity is not confirmed");
+    }
+
     const cached = this.membership;
     const age = cached ? this.now() - cached.at : undefined;
 
@@ -383,8 +404,10 @@ export class DispatchPolling {
       age !== undefined &&
       age >= 0 &&
       age < this.settings.pollIntervalMs
-    )
+    ) {
       return cached.projects;
+    }
+
     const projects = await this.options.api.fleetProjects(fleetId, signal);
     this.membership = { fleetId, projects, at: this.now() };
 
@@ -392,14 +415,18 @@ export class DispatchPolling {
   }
 
   private noteReadyField(issues: readonly DispatchIssue[]) {
-    if (issues.some((issue) => issue.readyForAgents === undefined))
+    if (issues.some((issue) => issue.readyForAgents === undefined)) {
       this.markReadyUnsupported();
-    else if (issues.length > 0 && this.readySupported === undefined)
+    } else if (issues.length > 0 && this.readySupported === undefined) {
       this.readySupported = true;
+    }
   }
 
   private markReadyUnsupported() {
-    if (this.readySupported === false) return;
+    if (this.readySupported === false) {
+      return;
+    }
+
     this.readySupported = false;
     this.options.log.warn(
       "Agent dispatch: this Subspace API does not support readyForAgents; round robin offers of ready issues are unavailable and only direct assignments are notified",
@@ -415,14 +442,20 @@ export class DispatchPolling {
   private async pollAssigned(signal: AbortSignal) {
     const roster = this.roster;
 
-    if (!roster) return;
+    if (!roster) {
+      return;
+    }
+
     const { ledger } = this.options;
     const ids = [...roster.captains.keys()].toSorted();
     const first = !ledger.initialised;
 
     // First start ends with the first read of captains' assignments: a fleet
     // That gains its first captain later still records before it notifies.
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      return;
+    }
+
     const saved = ledger.assignmentWalk;
 
     // The API cursor is bound to the filter: a changed roster starts again.
@@ -457,8 +490,10 @@ export class DispatchPolling {
       );
     } catch (error) {
       // A cursor the API no longer accepts starts the listing again.
-      if (resumed && errorStatus(error) === 400)
+      if (resumed && errorStatus(error) === 400) {
         ledger.assignmentWalk = undefined;
+      }
+
       throw error;
     }
 
@@ -478,16 +513,26 @@ export class DispatchPolling {
         Number.isFinite(Date.parse(issue.updatedAt)) &&
         (newest === undefined ||
           Date.parse(issue.updatedAt) > Date.parse(newest))
-      )
+      ) {
         newest = issue.updatedAt;
+      }
+
       const assignee = issue.assignee;
 
-      if (assignee?.kind !== "agent") continue;
+      if (assignee?.kind !== "agent") {
+        continue;
+      }
+
       const captain = roster.captains.get(assignee.userId);
 
-      if (!captain) continue;
+      if (!captain) {
+        continue;
+      }
 
-      if (ledger.notified(issue.id, captain.userId)) continue;
+      if (ledger.notified(issue.id, captain.userId)) {
+        continue;
+      }
+
       // An acceptance whose assignment answer was lost: the offer flow
       // Confirms it in chat; an assignment notice would repeat it.
       const offered = ledger.tracked(issue.id);
@@ -495,8 +540,10 @@ export class DispatchPolling {
       if (
         offered?.state === "accepting" &&
         offered.offer?.captain === captain.userId
-      )
+      ) {
         continue;
+      }
+
       const now = this.now();
 
       if (first || issue.archived || closedStates.has(issue.stateType)) {
@@ -513,7 +560,7 @@ export class DispatchPolling {
       const fresh = now - Date.parse(issue.updatedAt) < noticeRetryMs;
       let sent = false;
 
-      if (captain.reachable)
+      if (captain.reachable) {
         try {
           sent = await this.options.messenger.assigned(captain, issue, signal);
         } catch (error) {
@@ -535,6 +582,7 @@ export class DispatchPolling {
             continue;
           }
         }
+      }
 
       if (sent) {
         ledger.recordNotified(
@@ -552,8 +600,9 @@ export class DispatchPolling {
         if (
           hold === undefined ||
           Date.parse(issue.updatedAt) < Date.parse(hold)
-        )
+        ) {
           hold = issue.updatedAt;
+        }
       } else {
         ledger.recordNotified(
           issue.id,
@@ -570,10 +619,12 @@ export class DispatchPolling {
     }
 
     if (part.next !== undefined) {
-      if (!resumed)
+      if (!resumed) {
         this.options.log.info(
           "Agent dispatch reads a long assignment list over several polls",
         );
+      }
+
       ledger.assignmentWalk = { ...walk, cursor: part.next, newest, hold };
 
       return;
@@ -594,7 +645,9 @@ export class DispatchPolling {
         : reached;
     ledger.assignmentWalk = undefined;
 
-    if (first) ledger.markInitialised();
+    if (first) {
+      ledger.markInitialised();
+    }
   }
 
   /**
@@ -606,18 +659,31 @@ export class DispatchPolling {
     issue: DispatchIssue | undefined,
     signal: AbortSignal,
   ): Promise<WithdrawReason | undefined> {
-    if (!issue) return "missing";
+    if (!issue) {
+      return "missing";
+    }
 
-    if (issue.assignee) return "assigned";
+    if (issue.assignee) {
+      return "assigned";
+    }
 
-    if (issue.archived) return "archived";
+    if (issue.archived) {
+      return "archived";
+    }
 
-    if (closedStates.has(issue.stateType)) return "closed";
+    if (closedStates.has(issue.stateType)) {
+      return "closed";
+    }
 
-    if (issue.readyForAgents !== true) return "unflagged";
+    if (issue.readyForAgents !== true) {
+      return "unflagged";
+    }
+
     const projects = await this.fleetProjects(signal);
 
-    if (!projects.has(issue.projectId)) return "moved";
+    if (!projects.has(issue.projectId)) {
+      return "moved";
+    }
 
     return;
   }
@@ -625,7 +691,10 @@ export class DispatchPolling {
   private async pollReady(signal: AbortSignal) {
     const roster = this.roster;
 
-    if (!roster) return;
+    if (!roster) {
+      return;
+    }
+
     let issues: DispatchIssue[] = [];
 
     if (this.readySupported !== false) {
@@ -638,7 +707,9 @@ export class DispatchPolling {
         this.readyCursor = part.next;
         this.noteReadyField(issues);
       } catch (error) {
-        if (errorStatus(error) !== 400) throw error;
+        if (errorStatus(error) !== 400) {
+          throw error;
+        }
 
         // A refused cursor starts the list again; only a refused first
         // Page means an API without the filter.
@@ -660,7 +731,10 @@ export class DispatchPolling {
       await this.fleetProjects(signal);
 
       for (const issue of issues) {
-        if (await this.unqualified(issue, signal)) continue;
+        if (await this.unqualified(issue, signal)) {
+          continue;
+        }
+
         readyIDs.add(issue.id);
         const tracked = ledger.tracked(issue.id);
 
@@ -668,17 +742,22 @@ export class DispatchPolling {
           if (
             tracked.title !== issue.title ||
             tracked.identifier !== issue.identifier
-          )
+          ) {
             ledger.save({
               ...tracked,
               title: issue.title,
               identifier: issue.identifier,
             });
+          }
+
           continue;
         }
 
         // A finished issue starts again only after someone flags it anew.
-        if (tracked && issue.version <= (tracked.doneVersion ?? -1)) continue;
+        if (tracked && issue.version <= (tracked.doneVersion ?? -1)) {
+          continue;
+        }
+
         const now = this.now();
         ledger.save({
           issue: issue.id,
@@ -698,9 +777,14 @@ export class DispatchPolling {
     // Anything tracked that the list no longer shows is read on its own;
     // With an API that lost the flag this withdraws open offers at once.
     for (const tracked of ledger.active()) {
-      if (readyIDs.has(tracked.issue)) continue;
+      if (readyIDs.has(tracked.issue)) {
+        continue;
+      }
 
-      if (tracked.state !== "asking" && tracked.state !== "waiting") continue;
+      if (tracked.state !== "asking" && tracked.state !== "waiting") {
+        continue;
+      }
+
       let current: DispatchIssue | undefined;
 
       try {
@@ -712,7 +796,9 @@ export class DispatchPolling {
 
       const reason = await this.unqualified(current, signal);
 
-      if (reason) await this.finish(tracked, reason, current?.version, signal);
+      if (reason) {
+        await this.finish(tracked, reason, current?.version, signal);
+      }
     }
   }
 }

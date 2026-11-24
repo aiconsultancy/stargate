@@ -55,15 +55,18 @@ export class FleetLedger {
   private readonly db: Database;
   public constructor(path: string) {
     if (path !== ":memory:") {
-      if (resolve(path) !== path)
+      if (resolve(path) !== path) {
         throw new FleetError(
           "Fleet ledger path must be absolute and normalised.",
         );
+      }
 
-      if (lstatSync(dirname(path)).mode & 0o007)
+      if (lstatSync(dirname(path)).mode & 0o007) {
         throw new FleetError(
           "Fleet ledger directory must exclude other users.",
         );
+      }
+
       let ancestor = dirname(path);
 
       while (true) {
@@ -73,10 +76,14 @@ export class FleetLedger {
           !info.isDirectory() ||
           info.isSymbolicLink() ||
           (info.mode & 0o002 && !(info.mode & 0o1000))
-        )
+        ) {
           throw new FleetError("Fleet ledger directory is unsafe.");
+        }
 
-        if (ancestor === dirname(ancestor)) break;
+        if (ancestor === dirname(ancestor)) {
+          break;
+        }
+
         ancestor = dirname(ancestor);
       }
 
@@ -92,12 +99,15 @@ export class FleetLedger {
       try {
         const info = fstatSync(fd);
 
-        if (!info.isFile() || info.mode & 0o007)
+        if (!info.isFile() || info.mode & 0o007) {
           throw new FleetError("Fleet ledger must be a private regular file.");
+        }
 
         // A shared gateway group may open a file created by another gateway.
         // Only the owner can chmod it; existing group permissions stay intact.
-        if (info.uid === process.getuid?.()) fchmodSync(fd, 0o660);
+        if (info.uid === process.getuid?.()) {
+          fchmodSync(fd, 0o660);
+        }
       } finally {
         closeSync(fd);
       }
@@ -192,7 +202,9 @@ export class FleetLedger {
       )
       .get(account, offerID);
 
-    if (!row) return;
+    if (!row) {
+      return;
+    }
 
     return {
       offer: JSON.parse(row.value) as DispatchOffer,
@@ -230,10 +242,11 @@ export class FleetLedger {
             old.ownerSessionID !== ownerSessionID ||
             old.value !==
               JSON.stringify({ ...source, receivedAt: original.receivedAt })
-          )
+          ) {
             throw new FleetError(
               "Source reference already belongs to different authenticated evidence.",
             );
+          }
 
           return { ...original, ownerSessionID, humanApproval: false as const };
         }
@@ -260,10 +273,11 @@ export class FleetLedger {
       ))`)
       .get(reference, sessionID, sessionID);
 
-    if (!row)
+    if (!row) {
       throw new FleetError(
         "Original source is unavailable to this pinned session.",
       );
+    }
 
     return {
       ...Schema.decodeUnknownSync(sourceSchema)(JSON.parse(row.value)),
@@ -291,10 +305,11 @@ export class FleetLedger {
         const existing = this.read(input.ownerSessionID, input.requestID);
 
         if (existing) {
-          if (existing.fingerprint !== fingerprint)
+          if (existing.fingerprint !== fingerprint) {
             throw new FleetError(
               "Dispatch request ID was already used for different work.",
             );
+          }
 
           return {
             created: false,
@@ -322,10 +337,12 @@ export class FleetLedger {
             !result.dispatchID ||
             input.senderAccount.toLowerCase() ===
               input.target.account.toLowerCase()
-          )
+          ) {
             throw new FleetError(
               "Review coordination requires another ship and a durable dispatch",
             );
+          }
+
           result.review = Schema.decodeUnknownSync(reviewContextSchema)({
             id: result.dispatchID,
             repository: input.review.repository,
@@ -342,8 +359,10 @@ export class FleetLedger {
             dispatchID: result.dispatchID,
           });
 
-          if (input.review.context.includes(`END_REVIEW_${result.review.id}`))
+          if (input.review.context.includes(`END_REVIEW_${result.review.id}`)) {
             throw new FleetError("Ambiguous review context");
+          }
+
           this.db
             .query(
               "INSERT INTO fleet_review_requests(id,context,text) VALUES(?,?,?)",
@@ -381,10 +400,12 @@ export class FleetLedger {
             input.origin,
           );
 
-          if (origin.sessionID !== input.ownerSessionID)
+          if (origin.sessionID !== input.ownerSessionID) {
             throw new FleetError(
               "Fleet result origin does not match its owner pin",
             );
+          }
+
           this.db
             .query(`INSERT INTO fleet_results
             (dispatchID,ownerSessionID,origin,target,sourceReference,senderAccount,assignment)
@@ -419,10 +440,15 @@ export class FleetLedger {
   ): DispatchResult | undefined {
     const row = this.read(sessionID, requestID);
 
-    if (!row) return;
+    if (!row) {
+      return;
+    }
+
     const result = JSON.parse(row.value) as DispatchResult;
 
-    if (!result.dispatchID) return result;
+    if (!result.dispatchID) {
+      return result;
+    }
 
     const outbox = this.db
       .query<
@@ -468,13 +494,17 @@ export class FleetLedger {
     },
     fold: (value: string) => string,
   ): string | undefined {
-    if (!input.text.startsWith("[fleet_dispatch ")) return;
+    if (!input.text.startsWith("[fleet_dispatch ")) {
+      return;
+    }
 
     const dispatchID = /\bdispatch=([a-f0-9]{64}); not human approval\]/.exec(
       input.text,
     )?.[1];
 
-    if (!dispatchID) throw new FleetError("Uncorrelated fleet assignment");
+    if (!dispatchID) {
+      throw new FleetError("Uncorrelated fleet assignment");
+    }
 
     return this.db
       .transaction(() => {
@@ -494,8 +524,10 @@ export class FleetLedger {
           )
           .get(dispatchID);
 
-        if (!row || row.assignment !== input.text)
+        if (!row || row.assignment !== input.text) {
           throw new FleetError("Uncorrelated fleet assignment");
+        }
+
         const target = JSON.parse(row.target) as FleetTarget;
 
         if (
@@ -503,20 +535,23 @@ export class FleetLedger {
           fold(target.account) !== fold(input.account) ||
           fold(target.channel) !== fold(input.channel) ||
           fold(row.senderAccount) !== fold(input.sender)
-        )
+        ) {
           throw new FleetError(
             "Fleet assignment identity does not match its delegation",
           );
+        }
 
         if (
           row.targetEvent !== null &&
           (row.targetEvent !== input.eventId ||
             row.targetBotKey !== input.botKey ||
             row.targetAccount !== input.account)
-        )
+        ) {
           throw new FleetError(
             "Fleet assignment was already admitted as another request",
           );
+        }
+
         this.db
           .query(
             "UPDATE fleet_results SET targetBotKey=?,targetEvent=?,targetAccount=? WHERE dispatchID=?",
@@ -556,7 +591,10 @@ export class FleetLedger {
           )
           .get(completion.dispatchID);
 
-        if (!row) throw new FleetError("Unknown fleet completion delegation");
+        if (!row) {
+          throw new FleetError("Unknown fleet completion delegation");
+        }
+
         const target = JSON.parse(row.target) as FleetTarget;
 
         if (
@@ -566,29 +604,35 @@ export class FleetLedger {
           completion.actor !== account ||
           completion.channel !== target.channel ||
           completion.sourceReference !== row.sourceReference
-        )
+        ) {
           throw new FleetError(
             "Fleet completion does not belong to this gateway target",
           );
+        }
 
         if (
           row.targetEvent !== eventId ||
           row.targetBotKey !== botKey ||
           row.targetInput !== completion.inputID
-        )
+        ) {
           throw new FleetError("Fleet completion native request changed");
+        }
 
         if (
           completion.outcome === "completed" &&
           (!completion.inputID || completion.makers.length === 0)
-        )
+        ) {
           throw new FleetError(
             "Completed fleet work needs native input and maker evidence",
           );
+        }
+
         const text = JSON.stringify(completion);
 
-        if (row.completion !== null && row.completion !== text)
+        if (row.completion !== null && row.completion !== text) {
           throw new FleetError("Fleet completion is immutable");
+        }
+
         this.db
           .query(
             "UPDATE fleet_results SET targetEvent=?,targetInput=?,completion=? WHERE dispatchID=?",
@@ -623,7 +667,10 @@ export class FleetLedger {
           )
           .get(dispatchID);
 
-        if (!row) throw new FleetError("Unknown fleet native request");
+        if (!row) {
+          throw new FleetError("Unknown fleet native request");
+        }
+
         const target = JSON.parse(row.target) as FleetTarget;
 
         if (
@@ -632,10 +679,12 @@ export class FleetLedger {
           row.targetBotKey !== botKey ||
           row.targetEvent !== eventId ||
           (row.targetInput !== null && row.targetInput !== inputID)
-        )
+        ) {
           throw new FleetError(
             "Fleet native input does not match its admitted delegation",
           );
+        }
+
         this.db
           .query("UPDATE fleet_results SET targetInput=? WHERE dispatchID=?")
           .run(inputID, dispatchID);
@@ -673,10 +722,15 @@ export class FleetLedger {
       )
       .get(dispatchID);
 
-    if (!row) return;
+    if (!row) {
+      return;
+    }
+
     const target = JSON.parse(row.target) as FleetTarget;
 
-    if (target.sessionID !== sessionID || row.targetAccount !== account) return;
+    if (target.sessionID !== sessionID || row.targetAccount !== account) {
+      return;
+    }
 
     return { target, sourceReference: row.sourceReference };
   }
@@ -710,7 +764,9 @@ export class FleetLedger {
       )
       .get(reviewID);
 
-    if (!row) return;
+    if (!row) {
+      return;
+    }
 
     const context = Schema.decodeUnknownSync(reviewContextSchema)(
       JSON.parse(row.context),
@@ -719,8 +775,9 @@ export class FleetLedger {
     if (
       context.coordinatorSessionID !== sessionID ||
       context.coordinatorShip !== ship.toLowerCase()
-    )
+    ) {
       return;
+    }
 
     return { context, text: row.text };
   }
@@ -744,15 +801,18 @@ export class FleetLedger {
           )
           .get(input.reviewID);
 
-        if (!request)
+        if (!request) {
           throw new FleetError("Structured review assignment unavailable");
+        }
 
         const context = Schema.decodeUnknownSync(reviewContextSchema)(
           JSON.parse(request.context),
         );
 
-        if (!input.repositories.includes(context.repository))
+        if (!input.repositories.includes(context.repository)) {
           throw new FleetError("Review repository is not permitted");
+        }
+
         const ship = input.ship.toLowerCase();
 
         if (
@@ -760,10 +820,11 @@ export class FleetLedger {
           context.coordinatorShip !== ship ||
           context.authorShip === ship ||
           input.origin.sessionID !== input.ownerSessionID
-        )
+        ) {
           throw new FleetError(
             "Review is not assigned to this independent coordinator",
           );
+        }
 
         const intake = this.db
           .query<
@@ -786,10 +847,12 @@ export class FleetLedger {
           intake.targetAccount?.toLowerCase() !== ship ||
           (intake.targetInput !== null &&
             intake.targetInput !== input.origin.inputID)
-        )
+        ) {
           throw new FleetError(
             "Review must originate from its exact admitted coordinator input",
           );
+        }
+
         this.db
           .query("UPDATE fleet_results SET targetInput=? WHERE dispatchID=?")
           .run(input.origin.inputID, context.dispatchID);
@@ -800,8 +863,10 @@ export class FleetLedger {
           )
           .get(input.reviewID, ship, input.reviewer.agent);
 
-        if (previous)
+        if (previous) {
           return { created: false, record: this.decodeReview(previous) };
+        }
+
         const reviewer = input.reviewer;
 
         const directory =
@@ -902,12 +967,13 @@ export class FleetLedger {
 
         const last = batch.at(-1);
 
-        if (last)
+        if (last) {
           this.db
             .query(
               "INSERT INTO fleet_review_poll_cursors(ownerSessionID,lastID) VALUES(?,?) ON CONFLICT(ownerSessionID) DO UPDATE SET lastID=excluded.lastID",
             )
             .run(ownerSessionID, last.id);
+        }
 
         return batch.map((row) => this.decodeReview(row));
       })
@@ -924,8 +990,10 @@ export class FleetLedger {
           )
           .get(binding.id);
 
-        if (!row || row.binding !== JSON.stringify(binding))
+        if (!row || row.binding !== JSON.stringify(binding)) {
           throw new FleetError("Review native binding changed");
+        }
+
         const context = binding.context;
 
         if (
@@ -944,14 +1012,18 @@ export class FleetLedger {
           parsed.kind !== binding.reviewer.kind ||
           parsed.sessionID !== binding.sessionID ||
           parsed.inputID !== binding.inputID
-        )
+        ) {
           throw new FleetError(
             "Review proof does not match its immutable assignment",
           );
+        }
+
         const text = JSON.stringify(parsed);
 
-        if (row.proof !== null && row.proof !== text)
+        if (row.proof !== null && row.proof !== text) {
           throw new FleetError("Review proof is immutable");
+        }
+
         this.db
           .query(
             "UPDATE fleet_reviews SET state='completed',proof=? WHERE id=?",
@@ -968,7 +1040,9 @@ export class FleetLedger {
       )
       .get(id);
 
-    if (!row?.proof) return;
+    if (!row?.proof) {
+      return;
+    }
 
     const proof = Schema.decodeUnknownSync(reviewProofSchema)(
       JSON.parse(row.proof),

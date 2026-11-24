@@ -165,8 +165,9 @@ export function piCrewExtension(
 
           const text = JSON.stringify(result);
 
-          if (Buffer.byteLength(text, "utf8") > outputLimit)
+          if (Buffer.byteLength(text, "utf8") > outputLimit) {
             throw new CrewError("result too large, retry with a smaller limit");
+          }
 
           return { output: [{ type: "text" as const, text }] };
         } catch (error) {
@@ -262,10 +263,12 @@ function journalToolParameters() {
 
   const text = Predicate.isObject(properties) ? properties["text"] : undefined;
 
-  if (!Predicate.isObject(text))
+  if (!Predicate.isObject(text)) {
     throw new Error(
       "Journal tool advertisement requires an append text schema.",
     );
+  }
+
   // Zod advertised trim's length bounds but no whitespace restriction. Keep
   // The decoded bounds/required fields; only the handler applies trimming.
   delete text["pattern"];

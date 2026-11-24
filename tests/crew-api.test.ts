@@ -193,8 +193,12 @@ test("history uses authenticated API and rejects a server with a different calle
       connectHistoryAPI(team, session, new AbortController().signal),
     ).rejects.toThrow("environment");
   } finally {
-    if (previous === undefined) delete process.env[envName];
-    else process.env[envName] = previous;
+    if (previous === undefined) {
+      delete process.env[envName];
+    } else {
+      process.env[envName] = previous;
+    }
+
     await server.stop(true);
   }
 });

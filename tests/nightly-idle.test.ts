@@ -43,14 +43,18 @@ const control = {
   active: async () => opencode.active,
   pendingInput: async () => opencode.pending,
   parent: async (id: string) => {
-    if (opencode.unreadable.includes(id)) throw new Error("unreadable");
+    if (opencode.unreadable.includes(id)) {
+      throw new Error("unreadable");
+    }
 
     return opencode.parents[id];
   },
 } as unknown as OpenCodeControl;
 
 const connect = async () => {
-  if (opencode.fail) throw new Error("down");
+  if (opencode.fail) {
+    throw new Error("down");
+  }
 
   return control;
 };
@@ -174,12 +178,13 @@ describe("idle gate", () => {
       deadlineMinutes: 10,
     });
 
-    for (const deadlineMinutes of [0, -1, 1.5, 1441])
+    for (const deadlineMinutes of [0, -1, 1.5, 1441]) {
       expect(() =>
         Schema.decodeUnknownSync(maintenanceSchema)({
           drain: { enabled: true, deadlineMinutes },
         }),
       ).toThrow();
+    }
   });
   test("idle when no work is queued, due or running", async () => {
     expect(await checkIdle(input())).toEqual({ idle: true });
@@ -318,7 +323,10 @@ describe("idle gate", () => {
       );
       const run = store.runNow(scope, "quota-watch", now);
 
-      if (!run) throw new Error("Fixture run missing");
+      if (!run) {
+        throw new Error("Fixture run missing");
+      }
+
       expect(store.claimEvaluation(run.id)).toBe(true);
       expect(await checkIdle(input("gateway"))).toEqual({
         idle: false,
@@ -428,11 +436,16 @@ describe("idle gate", () => {
         state.enqueue(chief, "ses_e49d787old", `secret task text ${i}`),
       );
 
-      for (const row of rows.slice(0, 4))
+      for (const row of rows.slice(0, 4)) {
         expect(state.cancelQueued(row.id, "ses_e49d787old")).toBe(true);
+      }
+
       const queued = rows[4];
 
-      if (!queued) throw new Error("no queued task");
+      if (!queued) {
+        throw new Error("no queued task");
+      }
+
       expect(await checkIdle({ ...input(), crews: [real] })).toEqual({
         idle: true,
       });
@@ -530,15 +543,17 @@ describe("idle gate", () => {
         time += ms;
 
         // The gateway claims the 00:15 run and finishes it two minutes later.
-        if (time >= at("00:15:00") && time < at("00:17:00"))
+        if (time >= at("00:15:00") && time < at("00:17:00")) {
           exec(
             cron,
             `UPDATE cron_schedules SET nextAt=${at("01:15:00")};
              INSERT OR IGNORE INTO cron_runs (id,scheduleId,dueAt) VALUES ('r1','hourly',${at("00:15:00")})`,
           );
+        }
 
-        if (time >= at("00:17:00"))
+        if (time >= at("00:17:00")) {
           exec(cron, "UPDATE cron_runs SET status='done' WHERE id='r1'");
+        }
       },
     };
 
@@ -730,7 +745,9 @@ describe("idle gate", () => {
       sleep: async (ms: number) => {
         time += ms;
 
-        if (time >= now + 60_000) opencode.active = [];
+        if (time >= now + 60_000) {
+          opencode.active = [];
+        }
       },
     };
 

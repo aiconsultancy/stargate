@@ -18,7 +18,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const caps = [
@@ -88,7 +90,10 @@ async function setup(
 
   const captain = ship.registrations[0];
 
-  if (!captain) throw new Error("captain missing");
+  if (!captain) {
+    throw new Error("captain missing");
+  }
+
   const controller = new AbortController();
 
   const worker = new Gateway(
@@ -143,7 +148,10 @@ test("IRC thread: escaped parent reaches source and every fallback line", async 
   await delivered();
   const context = prompts[0]?.context;
 
-  if (!context) throw new Error("missing source");
+  if (!context) {
+    throw new Error("missing source");
+  }
+
   expect(context.source.message).toBe(request);
   expect(context.source.thread).toBe(request);
   expect(sourceLine(context)).toContain(`;r=${encodeURIComponent(root)}`);
@@ -205,7 +213,10 @@ test("IRC thread: a reply to our threaded answer flattens to its known root", as
   expect(prompts[0]?.text).toBe("Continue please");
   const context = prompts[0]?.context;
 
-  if (!context) throw new Error("missing source");
+  if (!context) {
+    throw new Error("missing source");
+  }
+
   expect(sourceLine(context)).toContain(";r=thread-root");
   expect(
     lineOf(fake.received("galactica"), "PRIVMSG").every(

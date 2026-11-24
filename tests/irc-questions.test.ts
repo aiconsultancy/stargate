@@ -22,7 +22,9 @@ const controlObservationTimeoutMs = 10_000;
 const questionIntegrationTimeoutMs = 45_000;
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 async function fixture(
@@ -35,8 +37,10 @@ async function fixture(
     isupport: ["CASEMAPPING=rfc1459"],
   });
 
-  if (multiline)
+  if (multiline) {
     server.caps.push("draft/multiline=max-bytes=4096,max-lines=100");
+  }
+
   server.start();
   cleanup.push(() => server.stop());
   const directory = await mkdtemp(join(tmpdir(), "stargate-irc-question-"));
@@ -145,7 +149,9 @@ async function fixture(
         ? ship.registrations.find((r) => r.role === "crew")
         : ship.registrations[0];
 
-    if (!primary) throw new Error("No registration");
+    if (!primary) {
+      throw new Error("No registration");
+    }
 
     const backend: AgentBackend = {
       sessionID: `ses_${account}`,
@@ -156,7 +162,10 @@ async function fixture(
       async prompt(_session, _text, signal, _onText, onInput) {
         prompts.push(account);
 
-        if (account !== "captain") return "[[stargate:silent]]";
+        if (account !== "captain") {
+          return "[[stargate:silent]]";
+        }
+
         onInput?.("msg_original");
         pending = true;
         await Promise.race([
@@ -199,16 +208,18 @@ async function fixture(
       ...(account === "captain"
         ? {
             async transcript(_session: string, after: string | undefined) {
-              if (after === undefined)
+              if (after === undefined) {
                 return { cursor: "msg_baseline", entries: [] };
+              }
 
-              if (!complete)
+              if (!complete) {
                 return {
                   cursor: "msg_original",
                   entries: [],
                   input: "msg_original",
                   pending: true as const,
                 };
+              }
 
               return {
                 cursor: "msg_answer",
@@ -314,7 +325,10 @@ async function fixture(
       const cfg = configs[0];
       const backend = backends[0];
 
-      if (!old || !cfg || !backend) throw new Error("Missing transport");
+      if (!old || !cfg || !backend) {
+        throw new Error("Missing transport");
+      }
+
       await old.close();
 
       const fresh = await IrcShip.create(cfg, store, log, {
@@ -327,7 +341,9 @@ async function fixture(
         ? fresh.registrations.find((r) => r.role === "crew")
         : fresh.registrations[0];
 
-      if (!registration) throw new Error("Missing renewed registration");
+      if (!registration) {
+        throw new Error("Missing renewed registration");
+      }
 
       const renewedGateway = new Gateway(
         registration.settings,
@@ -359,7 +375,9 @@ async function fixture(
         const ship = ships[index];
         const gateway = gateways[index];
 
-        if (!ship || !gateway) throw new Error("Missing policy fixture");
+        if (!ship || !gateway) {
+          throw new Error("Missing policy fixture");
+        }
 
         // Deliberately bypass parser validation, then install the candidate
         // Through the runtime's real reload path. Parsed objects are not live
@@ -376,7 +394,10 @@ async function fixture(
             ? ship.registrations.find((item) => item.role === "crew")
             : ship.registrations[0];
 
-        if (!registration) throw new Error("Missing policy registration");
+        if (!registration) {
+          throw new Error("Missing policy registration");
+        }
+
         gateway.reconfigure(
           registration.settings,
           undefined,
@@ -423,10 +444,15 @@ for (const multiline of [false, true]) {
       );
       const primary = f.ships[0]?.registrations[0];
 
-      if (!primary) throw new Error("No primary");
+      if (!primary) {
+        throw new Error("No primary");
+      }
+
       const offer = f.store.questions.questionOffers(primary.key)[0];
 
-      if (!offer) throw new Error("No offer");
+      if (!offer) {
+        throw new Error("No offer");
+      }
 
       const wire = [
         ...lineOf(f.server.received("captain"), "PRIVMSG"),
@@ -439,7 +465,10 @@ for (const multiline of [false, true]) {
           m.params[1]?.includes("OpenCode needs clarification"),
       );
 
-      if (!body) throw new Error("No question body");
+      if (!body) {
+        throw new Error("No question body");
+      }
+
       const batch = body.tags.get("batch");
 
       const envelope = batch
@@ -497,7 +526,10 @@ for (const multiline of [false, true]) {
           m.command === "PRIVMSG" && m.params[1] === "Clarification received.",
       );
 
-      if (!final) throw new Error("No final continuation");
+      if (!final) {
+        throw new Error("No final continuation");
+      }
+
       const finalBatch = final.tags.get("batch");
 
       const finalEnvelope = finalBatch
@@ -583,8 +615,10 @@ test("enabling questions requires explicit human policy, while default-off non-f
 
   expect(Result.isSuccess(enabled)).toBe(false);
 
-  if (Result.isSuccess(enabled))
+  if (Result.isSuccess(enabled)) {
     throw new Error("Missing human policy was accepted");
+  }
+
   expect(
     settingsIssues(enabled.failure.issue).issues.some((issue) =>
       issue.message.includes("explicit humanAccounts"),
@@ -602,11 +636,16 @@ test("parser-bypassed open access never makes an unknown authenticated untagged 
     "ordinary explicitly open IRC request admitted",
   );
 
-  for (const gateway of f.gateways)
+  for (const gateway of f.gateways) {
     await gateway.pollQuestions(AbortSignal.timeout(3000));
+  }
+
   const key = f.ships[0]?.registrations[0]?.key;
 
-  if (!key) throw new Error("No registration");
+  if (!key) {
+    throw new Error("No registration");
+  }
+
   expect(f.store.questions.questionOffers(key)).toEqual([]);
 
   const at = f.send(
@@ -630,7 +669,10 @@ test("removing explicit human authority blocks untagged bot and original-human r
   f.send("captain: investigate", "m1");
   const key = f.ships[0]?.registrations[0]?.key;
 
-  if (!key) throw new Error("No registration");
+  if (!key) {
+    throw new Error("No registration");
+  }
+
   await until(
     () => f.store.questions.questionOffers(key)[0]?.notified === 1,
     5000,
@@ -638,7 +680,10 @@ test("removing explicit human authority blocks untagged bot and original-human r
   );
   const offer = f.store.questions.questionOffers(key)[0];
 
-  if (!offer) throw new Error("No offer");
+  if (!offer) {
+    throw new Error("No offer");
+  }
+
   await f.dropHumanPolicy();
   f.send(`captain: answer ${offer.token} 1`, "bot-reply", "service-bot", "m1");
 
@@ -679,7 +724,10 @@ for (const target of ["captain", "CAP{TAIN}"]) {
     f.send("Cap[tain]: investigate", "m1");
     const key = f.ships[0]?.registrations[0]?.key;
 
-    if (!key) throw new Error("No registration");
+    if (!key) {
+      throw new Error("No registration");
+    }
+
     await until(
       () => f.store.questions.questionOffers(key)[0]?.notified === 1,
       5000,
@@ -687,7 +735,10 @@ for (const target of ["captain", "CAP{TAIN}"]) {
     );
     const offer = f.store.questions.questionOffers(key)[0];
 
-    if (!offer) throw new Error("No offer");
+    if (!offer) {
+      throw new Error("No offer");
+    }
+
     expect(
       f.server
         .received("captain")
@@ -718,7 +769,10 @@ test("question replies resolve durable own-publication anchors after transport r
   f.send("captain: investigate", "m1");
   const key = f.ships[0]?.registrations[0]?.key;
 
-  if (!key) throw new Error("No registration");
+  if (!key) {
+    throw new Error("No registration");
+  }
+
   await until(
     () => f.store.questions.questionOffers(key)[0]?.notified === 1,
     5000,
@@ -726,13 +780,18 @@ test("question replies resolve durable own-publication anchors after transport r
   );
   const offer = f.store.questions.questionOffers(key)[0];
 
-  if (!offer) throw new Error("No offer");
+  if (!offer) {
+    throw new Error("No offer");
+  }
 
   const received = lineOf(f.server.received("captain"), "PRIVMSG").find((m) =>
     m.params[1]?.includes("OpenCode needs clarification"),
   );
 
-  if (!received) throw new Error("No question line");
+  if (!received) {
+    throw new Error("No question line");
+  }
+
   // The actual server echo ID is correlated by the client, then durably stored.
   const database = new Database(f.path, { readonly: true });
 
@@ -744,7 +803,10 @@ test("question replies resolve durable own-publication anchors after transport r
 
   database.close();
 
-  if (!questionID) throw new Error("No question echo ID");
+  if (!questionID) {
+    throw new Error("No question echo ID");
+  }
+
   await until(
     () => f.store.irc.ircThreadRoot(key, "#ship", questionID) === "m1",
     2000,
@@ -796,7 +858,10 @@ test("crew question publication anchors survive a new IRC connection", async () 
   f.send("worker: investigate", "m1");
   const worker = f.ships[0]?.registrations.find((r) => r.role === "crew");
 
-  if (!worker) throw new Error("No crew");
+  if (!worker) {
+    throw new Error("No crew");
+  }
+
   await until(
     () => f.store.questions.questionOffers(worker.key)[0]?.notified === 1,
     5000,
@@ -804,7 +869,10 @@ test("crew question publication anchors survive a new IRC connection", async () 
   );
   const offer = f.store.questions.questionOffers(worker.key)[0];
 
-  if (!offer) throw new Error("No offer");
+  if (!offer) {
+    throw new Error("No offer");
+  }
+
   const db = new Database(f.path, { readonly: true });
 
   const questionID = db
@@ -816,7 +884,10 @@ test("crew question publication anchors survive a new IRC connection", async () 
   db.close();
   expect(questionID).toBeDefined();
 
-  if (!questionID) throw new Error("No durable crew echo anchor");
+  if (!questionID) {
+    throw new Error("No durable crew echo anchor");
+  }
+
   await f.restartTransport();
   const fresh = f.ships[0]?.registrations.find((r) => r.role === "crew");
   expect(fresh?.client.anchor(questionID)).toBeUndefined();
@@ -842,8 +913,10 @@ test("short hex-like prose remains ordinary while punctuated full tokens stay re
   // Captain, making the count of three a transient snapshot of four prompts.
   const f = await fixture(false, false, { wake: false });
 
-  for (const [index, word] of ["2025...", "decade…", "faded…"].entries())
+  for (const [index, word] of ["2025...", "decade…", "faded…"].entries()) {
     f.send(`other: answer ${word}`, `prose-${index}`);
+  }
+
   await until(
     () => f.prompts.length === 3,
     4000,

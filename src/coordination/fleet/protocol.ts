@@ -53,7 +53,9 @@ export const reviewTargetSchema = settingsStruct({
 
 /** Structural completeness only; the consumer must verify the live full diff. */
 function completeReviewDiff(text: string): boolean {
-  if (!text.endsWith("\n")) return false;
+  if (!text.endsWith("\n")) {
+    return false;
+  }
 
   let files = 0;
   let old = 0;
@@ -73,8 +75,10 @@ function completeReviewDiff(text: string): boolean {
         old !== 0 ||
         next !== 0 ||
         from !== to
-      )
+      ) {
         return false;
+      }
+
       files++;
       hunk = false;
       fileContent = false;
@@ -84,11 +88,17 @@ function completeReviewDiff(text: string): boolean {
       continue;
     }
 
-    if (!files) return false;
+    if (!files) {
+      return false;
+    }
+
     const match = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@(?:.*)$/.exec(line);
 
     if (match) {
-      if (old !== 0 || next !== 0 || !from || !to) return false;
+      if (old !== 0 || next !== 0 || !from || !to) {
+        return false;
+      }
+
       old = Number(match[1] ?? 1);
       next = Number(match[2] ?? 1);
       hunk = true;
@@ -97,7 +107,10 @@ function completeReviewDiff(text: string): boolean {
     }
 
     if (line === "\\ No newline at end of file") {
-      if (!hunk) return false;
+      if (!hunk) {
+        return false;
+      }
+
       continue;
     }
 
@@ -105,22 +118,35 @@ function completeReviewDiff(text: string): boolean {
       if (line.startsWith(" ")) {
         old--;
         next--;
-      } else if (line.startsWith("-")) old--;
-      else if (line.startsWith("+")) next--;
-      else return false;
+      } else if (line.startsWith("-")) {
+        old--;
+      } else if (line.startsWith("+")) {
+        next--;
+      } else {
+        return false;
+      }
 
-      if (old < 0 || next < 0) return false;
+      if (old < 0 || next < 0) {
+        return false;
+      }
+
       continue;
     }
 
     if (line.startsWith("--- ")) {
-      if (from) return false;
+      if (from) {
+        return false;
+      }
+
       from = true;
       continue;
     }
 
     if (line.startsWith("+++ ")) {
-      if (!from || to) return false;
+      if (!from || to) {
+        return false;
+      }
+
       to = true;
       continue;
     }
@@ -134,7 +160,9 @@ function completeReviewDiff(text: string): boolean {
       continue;
     }
 
-    if (/^(index |similarity index |dissimilarity index )/.test(line)) continue;
+    if (/^(index |similarity index |dissimilarity index )/.test(line)) {
+      continue;
+    }
 
     return false;
   }
@@ -206,12 +234,13 @@ export const reviewAgentSchema = settingsStruct({
           (rule.effect === "allow" &&
             !["read", "glob", "grep"].includes(rule.action)),
       )
-    )
+    ) {
       context.addIssue({
         code: "custom",
         message:
           "Review workers permit only explicit read, glob and grep grants; no ask or mutating tools",
       });
+    }
   }),
 );
 
@@ -253,20 +282,23 @@ export const fleetControlSchema = settingsStruct({
 }).check(
   settingsCheck((config, context) => {
     if (config.reviews) {
-      if (config.results !== true)
+      if (config.results !== true) {
         context.addIssue({
           code: "custom",
           message: "Review evidence requires durable fleet results",
         });
+      }
 
       if (
         new Set(config.reviews.reviewers.map((r) => r.agent)).size !==
         config.reviews.reviewers.length
-      )
+      ) {
         context.addIssue({
           code: "custom",
           message: "Review agent IDs must be unique",
         });
+      }
+
       const directories = config.reviews.crewDirectories;
 
       if (directories) {
@@ -286,23 +318,25 @@ export const fleetControlSchema = settingsStruct({
               crew.every((reviewer) => Object.hasOwn(assigned, reviewer.agent))
             );
           })
-        )
+        ) {
           context.addIssue({
             code: "custom",
             message:
               "Review directories must bind each permitted repository to every configured crew reviewer",
           });
+        }
       }
     }
 
     if (
       new Set(config.targets.map((target) => target.id)).size !==
       config.targets.length
-    )
+    ) {
       context.addIssue({
         code: "custom",
         message: "Fleet target IDs must be unique",
       });
+    }
   }),
 );
 
@@ -341,11 +375,12 @@ export const sourceSchema = settingsStruct({
   ),
 }).check(
   settingsCheck((source, context) => {
-    if (source.transport === "fleet" && source.authority !== "agent")
+    if (source.transport === "fleet" && source.authority !== "agent") {
       context.addIssue({
         code: "custom",
         message: "Fleet completion context must remain non-human",
       });
+    }
   }),
 );
 

@@ -20,7 +20,9 @@ const limit = 30_000;
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const backend = {
@@ -109,7 +111,9 @@ async function setup(
   const gateways = ship.registrations.map((registration, index) => {
     const selected = backends[index];
 
-    if (!selected) throw new Error("missing backend");
+    if (!selected) {
+      throw new Error("missing backend");
+    }
 
     return new Gateway(
       registration.settings,
@@ -134,7 +138,9 @@ async function setup(
     const registration = ship.registrations[index];
     const gateway = gateways[index];
 
-    if (!registration || !gateway) throw new Error(`missing ${account}`);
+    if (!registration || !gateway) {
+      throw new Error(`missing ${account}`);
+    }
 
     return { registration, gateway };
   };
@@ -186,7 +192,9 @@ async function setup(
         )
         .get(member(account).registration.key);
 
-      if (!row) throw new Error(`no job of ${account}`);
+      if (!row) {
+        throw new Error(`no job of ${account}`);
+      }
 
       return row.start === 0 ? 0 : row.start - row.received;
     },
@@ -247,7 +255,10 @@ test(
     const [chief] = prompts["galactica-chief"] ?? [];
     const [tyrol] = prompts["galactica-tyrol"] ?? [];
 
-    if (!captain || !chief || !tyrol) throw new Error("missing prompt");
+    if (!captain || !chief || !tyrol) {
+      throw new Error("missing prompt");
+    }
+
     // Captain first, then crew in configuration order, one step apart.
     expect(startDelay("galactica-captain")).toBe(0);
     expect(startDelay("galactica-chief")).toBe(400);
@@ -371,7 +382,10 @@ test(
     );
     const [chief] = prompts["galactica-chief"] ?? [];
 
-    if (!chief) throw new Error("missing prompt");
+    if (!chief) {
+      throw new Error("missing prompt");
+    }
+
     expect(startDelay("galactica-chief")).toBe(400);
     expect(chief.at - sent).toBeGreaterThanOrEqual(380);
     expect(chief.text).toContain("galactica-captain: Fuel at 40%.");

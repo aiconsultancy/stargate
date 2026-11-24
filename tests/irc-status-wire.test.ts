@@ -8,7 +8,9 @@ import { FakeIrcServer, until } from "./irc-fixture";
 const cleanup: (() => Promise<void> | void)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const caps = [
@@ -323,7 +325,10 @@ test.each(["ended", "expired"])(
     try {
       await until(() => blocked.some((line) => line.includes("is thinking")));
 
-      if (cause === "expired") await delay(60);
+      if (cause === "expired") {
+        await delay(60);
+      }
+
       turn.abort();
       await working;
     } finally {

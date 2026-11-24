@@ -15,14 +15,19 @@ export async function checkCodexConfiguration(config: Config, path: string) {
   ];
 
   for (const backend of backends) {
-    if (backend.type !== "codex") continue;
+    if (backend.type !== "codex") {
+      continue;
+    }
 
     const roots =
       backend.sandbox === "read-only"
         ? []
         : [await trustedPath(backend.directory)];
 
-    if (backend.sandbox === "workspace-write") await trustedPath(data, roots);
+    if (backend.sandbox === "workspace-write") {
+      await trustedPath(data, roots);
+    }
+
     await checkCodexPaths(backend, data);
     await codexSearchPath(backend.extraPath, undefined, roots);
   }

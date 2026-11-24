@@ -17,7 +17,10 @@ export class IrcRecords implements IrcOperations {
     since: number;
     scope: { conversation: string } | { channel: string };
   }): number {
-    if (input.botKeys.length === 0) return 0;
+    if (input.botKeys.length === 0) {
+      return 0;
+    }
+
     const keys = input.botKeys.map(() => "?").join(",");
 
     const [column, value] =
@@ -163,8 +166,10 @@ export class IrcRecords implements IrcOperations {
   ) {
     const existing = this.ircThreadRoot(botKey, channel, msgid);
 
-    if (existing !== undefined && existing !== root)
+    if (existing !== undefined && existing !== root) {
       throw new Error("IRC thread ancestry conflict");
+    }
+
     this.db
       .query(
         "INSERT INTO irc_thread_messages(botKey,channel,msgid,root,recorded,request) VALUES (?,?,?,?,?,?) ON CONFLICT(botKey,channel,msgid) DO UPDATE SET recorded=excluded.recorded,request=COALESCE(irc_thread_messages.request,excluded.request)",

@@ -46,10 +46,11 @@ test("worker compaction uses the verified global API stream and waits until conn
       expect(request.headers.get("authorization")).toBe("Bearer fixture-only");
       const path = new URL(request.url).pathname;
 
-      if (path === `/api/session/${worker.id}`)
+      if (path === `/api/session/${worker.id}`) {
         return Response.json({ data: worker });
+      }
 
-      if (path === "/api/event")
+      if (path === "/api/event") {
         return new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
@@ -71,6 +72,7 @@ test("worker compaction uses the verified global API stream and waits until conn
           }),
           { headers: { "content-type": "text/event-stream" } },
         );
+      }
 
       if (path === `/api/session/${worker.id}/compact`) {
         expect(connected).toBe(true);
@@ -131,8 +133,12 @@ test("worker compaction uses the verified global API stream and waits until conn
   } finally {
     clearTimeout(timer);
 
-    if (previous === undefined) delete process.env[envName];
-    else process.env[envName] = previous;
+    if (previous === undefined) {
+      delete process.env[envName];
+    } else {
+      process.env[envName] = previous;
+    }
+
     await server.stop(true);
   }
 });

@@ -23,7 +23,9 @@ export type GatewayAckCompatibility<
 const stores: Store[] = [];
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 });
 
 function fixture(config = bot()) {
@@ -67,7 +69,9 @@ function fixture(config = bot()) {
   function next() {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Expected a job");
+    if (!job) {
+      throw new Error("Expected a job");
+    }
 
     return job;
   }
@@ -118,10 +122,12 @@ test("timeout before native submission cannot read a previous turn as the new re
   Object.assign(f.backend, {
     sessionID: "session-1",
     async prompt(_session: string, _text: string, signal: AbortSignal) {
-      if (!signal.aborted)
+      if (!signal.aborted) {
         await new Promise<void>((resolve) =>
           signal.addEventListener("abort", () => resolve(), { once: true }),
         );
+      }
+
       throw new PromptNotSubmitted();
     },
     async transcript(_session: string, cursor: string | undefined) {
@@ -376,7 +382,10 @@ test("partial delivery resumes after the last confirmed chunk", async () => {
   const f = fixture();
   f.backend.prompt = async () => "x".repeat(3000);
   f.slack.post = async (_channel, _thread, text) => {
-    if (f.delivered.length === 1) throw new Error("delivery failed");
+    if (f.delivered.length === 1) {
+      throw new Error("delivery failed");
+    }
+
     f.delivered.push(text);
   };
 
@@ -428,7 +437,10 @@ test("scheduled prompts enter the durable thread queue once and permit follow-up
   expect(id).toBeNumber();
   expect(f.gateway.enqueueScheduled(scheduled)).toBe(id);
 
-  if (id === undefined) throw new Error("Missing scheduled job");
+  if (id === undefined) {
+    throw new Error("Missing scheduled job");
+  }
+
   expect(f.gateway.scheduledStatus(id)).toBe("queued");
   await f.gateway.process(f.next(), new AbortController().signal);
   expect(f.gateway.scheduledStatus(id)).toBe("done");
@@ -569,7 +581,10 @@ test("roots, scheduled runs and existing sessions never fetch initial context", 
 
     const job = f.next();
 
-    if (kind === "existing") f.store.saveSession(job.conversation, "existing");
+    if (kind === "existing") {
+      f.store.saveSession(job.conversation, "existing");
+    }
+
     await f.gateway.process(job, new AbortController().signal);
     expect(historyCalls).toBe(0);
     expect(f.prompts).toHaveLength(1);
@@ -660,10 +675,11 @@ test("context failures and unsupported delivery fail closed before creating a se
     const f = fixture();
     f.config.threadContext = true;
 
-    if (!missing)
+    if (!missing) {
       f.slack.threadContext = async () => {
         throw new ThreadContextUnavailable();
       };
+    }
 
     f.gateway.accept(initialThreadReply());
     const job = f.next();
@@ -723,7 +739,9 @@ test("a failed poll stops the transcript watch and rejects the worker", async ()
   const ready = f.store.ready.bind(f.store);
   let polls = 0;
   f.store.ready = (...args) => {
-    if (++polls === 2) throw new Error("database is locked");
+    if (++polls === 2) {
+      throw new Error("database is locked");
+    }
 
     return ready(...args);
   };
@@ -792,7 +810,10 @@ test("a job that another writer finished during delivery is left as it is", asyn
   expect(gateway.accept(event())).toBe(true);
   const [queued] = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1);
 
-  if (!queued) throw new Error("Expected a job");
+  if (!queued) {
+    throw new Error("Expected a job");
+  }
+
   job = queued.id;
   await gateway.process(queued, new AbortController().signal);
   // The cursor write was refused and logged; the status was not overwritten.

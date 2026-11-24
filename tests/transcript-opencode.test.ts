@@ -69,8 +69,9 @@ function fixture(time: { busy?: number; idle?: number }) {
     fetch(request) {
       const url = new URL(request.url);
 
-      if (url.pathname === "/api/session/session-1")
+      if (url.pathname === "/api/session/session-1") {
         return Response.json({ data: { id: "session-1", time } });
+      }
 
       if (url.pathname.endsWith("/message")) {
         lists.push(url.searchParams);
@@ -94,7 +95,9 @@ function fixture(time: { busy?: number; idle?: number }) {
     directory: "/workspace",
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
 
   return { backend: new OpenCodeBackend(config), lists, server };
 }
@@ -241,7 +244,10 @@ test("OpenCode watch reports settled sessions and reconnects", async () => {
     directory: "/workspace",
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
+
   const controller = new AbortController();
   const seen: (string | undefined)[] = [];
   const reconnected = Promise.withResolvers<void>();
@@ -250,14 +256,20 @@ test("OpenCode watch reports settled sessions and reconnects", async () => {
   const watch = new OpenCodeBackend(config).watch((session) => {
     seen.push(session);
 
-    if (session === "session-1") settled.resolve();
+    if (session === "session-1") {
+      settled.resolve();
+    }
 
-    if (seen.filter((value) => value === undefined).length === 2)
+    if (seen.filter((value) => value === undefined).length === 2) {
       reconnected.resolve();
+    }
   }, controller.signal);
 
   try {
-    while (connections.length === 0) await Bun.sleep(5);
+    while (connections.length === 0) {
+      await Bun.sleep(5);
+    }
+
     send(connections[0], "session.text.delta", { sessionID: "session-1" });
     send(connections[0], "session.execution.succeeded", {
       sessionID: "session-1",
@@ -290,12 +302,14 @@ test("repairThread resolves the namespace and protects existing state", async ()
     async fetch(request) {
       const url = new URL(request.url);
 
-      if (url.pathname === "/api/session/session-1")
+      if (url.pathname === "/api/session/session-1") {
         return Response.json({ data: { id: "session-1", time: { idle: 99 } } });
+      }
 
       if (url.pathname.endsWith("/message")) {
-        for (const path of [database, `${database}-wal`, `${database}-shm`])
+        for (const path of [database, `${database}-wal`, `${database}-shm`]) {
           modes.push((await stat(path)).mode & 0o777);
+        }
 
         return Response.json({ data: history, cursor: {} });
       }
@@ -307,7 +321,10 @@ test("repairThread resolves the namespace and protects existing state", async ()
   try {
     const config = bot("captain");
 
-    if (config.backend.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.backend.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     config.backend.url = server.url.href;
     const path = join(directory, "stargate.json");
     await Bun.write(
@@ -330,7 +347,10 @@ test("repairThread resolves the namespace and protects existing state", async ()
     );
     const parsed = (await loadConfig(path)).bots[0];
 
-    if (!parsed) throw new Error("Invalid fixture");
+    if (!parsed) {
+      throw new Error("Invalid fixture");
+    }
+
     await mkdir(join(directory, "state"));
     const store = openStore(join(directory, "state", "stargate.sqlite"));
     const key = botKey(parsed, identity);
@@ -351,7 +371,10 @@ test("repairThread resolves the namespace and protects existing state", async ()
       });
       const job = store.queuedJob(key, eventId);
 
-      if (!job) throw new Error("Missing job");
+      if (!job) {
+        throw new Error("Missing job");
+      }
+
       store.running(job.id);
       store.respond(job.id, [...response]);
       store.finish(job.id);
@@ -432,13 +455,18 @@ test("OpenCode reads every page of a long gap, keeps missing cursors, and honour
       const url = new URL(request.url);
       requests.push(url.pathname);
 
-      if (url.pathname === "/api/session/session-1")
+      if (url.pathname === "/api/session/session-1") {
         return Response.json({ data: { id: "session-1", time: { idle: 1 } } });
+      }
 
-      if (!url.pathname.endsWith("/message"))
+      if (!url.pathname.endsWith("/message")) {
         return new Response(null, { status: 404 });
+      }
 
-      if (requests.length > abortAfter) controller.abort();
+      if (requests.length > abortAfter) {
+        controller.abort();
+      }
+
       const start = Number(url.searchParams.get("cursor") ?? 0);
       const end = start + Number(url.searchParams.get("limit"));
 
@@ -456,7 +484,10 @@ test("OpenCode reads every page of a long gap, keeps missing cursors, and honour
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;
     const read = await backend.transcript("session-1", "cursor", signal);
@@ -497,7 +528,7 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
     async fetch(request) {
       const url = new URL(request.url);
 
-      if (deleted)
+      if (deleted) {
         return Response.json(
           {
             _tag: "SessionNotFoundError",
@@ -506,6 +537,7 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
           },
           { status: 404 },
         );
+      }
 
       if (url.pathname.endsWith("/prompt")) {
         inputID = Schema.decodeUnknownSync(
@@ -515,19 +547,25 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
         return Response.json({ data: { id: inputID } });
       }
 
-      if (url.pathname.endsWith("/wait"))
+      if (url.pathname.endsWith("/wait")) {
         return new Response(null, { status: 204 });
+      }
 
-      if (url.pathname === "/api/session/session-1")
+      if (url.pathname === "/api/session/session-1") {
         return Response.json({ data: { id: "session-1", time: { busy: 75 } } });
+      }
 
-      if (!url.pathname.endsWith("/message"))
+      if (!url.pathname.endsWith("/message")) {
         return new Response(null, { status: 404 });
+      }
+
       lists.push(url.searchParams);
 
       // The protocol keeps the first page's order inside its cursor.
-      if (url.searchParams.has("cursor") && url.searchParams.has("order"))
+      if (url.searchParams.has("cursor") && url.searchParams.has("order")) {
         return Response.json({ message: "bad cursor" }, { status: 400 });
+      }
+
       const start = Number(url.searchParams.get("cursor") ?? 0);
       const end = start + 3;
 
@@ -549,7 +587,10 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;
     // Unchanged prompt text: the tool-only step joins as an empty reply.
@@ -617,7 +658,10 @@ test("OpenCode interrupt treats a deleted session as stopped, other failures as 
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;
     await backend.interrupt("session-1", signal);

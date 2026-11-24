@@ -19,7 +19,9 @@ import { bot, event, identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 function fixture(path = ":memory:", pinned = false) {
@@ -123,7 +125,9 @@ function fixture(path = ":memory:", pinned = false) {
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Expected a job");
+    if (!job) {
+      throw new Error("Expected a job");
+    }
 
     return job;
   };
@@ -139,7 +143,9 @@ function fixture(path = ":memory:", pinned = false) {
       deferDelivery,
     });
 
-    if (id === undefined) throw new Error("Scheduled job rejected");
+    if (id === undefined) {
+      throw new Error("Scheduled job rejected");
+    }
 
     return id;
   };
@@ -160,8 +166,9 @@ function fixture(path = ":memory:", pinned = false) {
     next,
     enqueue,
     async drain() {
-      while (store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1).length)
+      while (store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1).length) {
         await gateway.process(next(), signal);
+      }
     },
     async restart() {
       await gateway.close();
@@ -385,8 +392,10 @@ function nativeHistory(f: ReturnType<typeof fixture>) {
     const index =
       cursor === "" ? -1 : history.findIndex((row) => row.id === cursor);
 
-    if (cursor !== undefined && cursor !== "" && index < 0)
+    if (cursor !== undefined && cursor !== "" && index < 0) {
       throw new TranscriptUnavailable("cursor");
+    }
+
     const rows = cursor === undefined ? [] : history.slice(index + 1);
     const input = rows.findLast((row) => row.kind === "input")?.id;
 
@@ -459,7 +468,10 @@ for (const pinned of [false, true]) {
       "Late deferred result",
     );
 
-    if (!pinned) expect(f.calls).toEqual([]);
+    if (!pinned) {
+      expect(f.calls).toEqual([]);
+    }
+
     const before = result;
     f.gateway.settle();
     await f.gateway.catchUp(f.signal);
@@ -551,7 +563,10 @@ test("unreadable deferred history catches up locally without promising a Slack t
   const prompt = f.backend.prompt;
   const transcript = f.backend.transcript;
 
-  if (!transcript) throw new Error("Expected transcript");
+  if (!transcript) {
+    throw new Error("Expected transcript");
+  }
+
   let readable = true;
   f.backend.prompt = async (...args) => {
     const result = await prompt(...args);
@@ -561,7 +576,9 @@ test("unreadable deferred history catches up locally without promising a Slack t
   };
 
   f.backend.transcript = (...args) => {
-    if (!readable) throw new TranscriptUnavailable("cursor");
+    if (!readable) {
+      throw new TranscriptUnavailable("cursor");
+    }
 
     return transcript(...args);
   };

@@ -47,8 +47,9 @@ describe("model families", () => {
       "deepseek-v4.1-flash",
       "gpt-6.1",
       "claude-opus",
-    ])
+    ]) {
       expect(parseModel(id)).toBeNull();
+    }
   });
 
   test("orders versions numerically and deterministically", () => {
@@ -56,7 +57,9 @@ describe("model families", () => {
       const left = parseModel(a);
       const right = parseModel(b);
 
-      if (!left || !right) throw new Error("unparsed");
+      if (!left || !right) {
+        throw new Error("unparsed");
+      }
 
       return compareModels(left, right);
     };

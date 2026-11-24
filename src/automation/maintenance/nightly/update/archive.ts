@@ -34,13 +34,17 @@ function text(block: Uint8Array, start: number, length: number) {
 
 function octal(block: Uint8Array, start: number, length: number) {
   // Base-256 sizes (high bit set) only occur for files above 8 GiB.
-  if ((block[start] ?? 0) & 0x80) throw invalid();
+  if ((block[start] ?? 0) & 0x80) {
+    throw invalid();
+  }
 
   const value = text(block, start, length)
     .replace(/[ \0]+$/, "")
     .trim();
 
-  if (!/^[0-7]*$/.test(value)) throw invalid();
+  if (!/^[0-7]*$/.test(value)) {
+    throw invalid();
+  }
 
   return value ? Number.parseInt(value, 8) : 0;
 }
@@ -48,8 +52,9 @@ function octal(block: Uint8Array, start: number, length: number) {
 function checksum(block: Uint8Array) {
   let sum = 0;
 
-  for (let i = 0; i < 512; i++)
+  for (let i = 0; i < 512; i++) {
     sum += i >= 148 && i < 156 ? 32 : (block[i] ?? 0);
+  }
 
   return sum;
 }
@@ -57,13 +62,18 @@ function checksum(block: Uint8Array) {
 function paxRecords(data: Uint8Array) {
   const records: Record<string, string> = {};
 
-  if (data.at(-1) !== 10) throw invalid();
+  if (data.at(-1) !== 10) {
+    throw invalid();
+  }
+
   let offset = 0;
 
   while (offset < data.length) {
     const space = data.indexOf(32, offset);
 
-    if (space === -1) throw invalid();
+    if (space === -1) {
+      throw invalid();
+    }
 
     const length = Number(
       new TextDecoder().decode(data.subarray(offset, space)),
@@ -73,8 +83,9 @@ function paxRecords(data: Uint8Array) {
       !Number.isInteger(length) ||
       length <= 0 ||
       offset + length > data.length
-    )
+    ) {
       throw invalid();
+    }
 
     const record = new TextDecoder().decode(
       data.subarray(space + 1, offset + length - 1),
@@ -82,10 +93,16 @@ function paxRecords(data: Uint8Array) {
 
     const equals = record.indexOf("=");
 
-    if (equals === -1) throw invalid();
+    if (equals === -1) {
+      throw invalid();
+    }
+
     const key = record.slice(0, equals);
 
-    if (Object.hasOwn(records, key)) throw invalid();
+    if (Object.hasOwn(records, key)) {
+      throw invalid();
+    }
+
     records[key] = record.slice(equals + 1);
     offset += length;
   }
@@ -113,31 +130,48 @@ export function readArchive(
   let offset = 0;
 
   for (let index = 0; ; index++) {
-    if (offset + 512 > tar.length) throw invalid();
+    if (offset + 512 > tar.length) {
+      throw invalid();
+    }
+
     const block = tar.subarray(offset, offset + 512);
 
-    if (block.every((byte) => byte === 0)) break;
+    if (block.every((byte) => byte === 0)) {
+      break;
+    }
 
-    if (octal(block, 148, 8) !== checksum(block)) throw invalid();
+    if (octal(block, 148, 8) !== checksum(block)) {
+      throw invalid();
+    }
+
     // POSIX ustar ("ustar\0" "00", git archive), or old GNU ("ustar  \0",
     // Go/GoReleaser) with its atime/ctime/sparse/realsize area all zero:
     // GNU tar reads sparse maps from that area.
     const magic = new TextDecoder("latin1").decode(block.subarray(257, 265));
     const gnu = magic === "ustar  \0";
 
-    if (magic !== "ustar\u000000" && !gnu) throw invalid();
-
-    if (gnu && block.subarray(345, 500).some((byte) => byte !== 0))
+    if (magic !== "ustar\u000000" && !gnu) {
       throw invalid();
+    }
+
+    if (gnu && block.subarray(345, 500).some((byte) => byte !== 0)) {
+      throw invalid();
+    }
+
     const size = octal(block, 124, 12);
     const type = String.fromCharCode(block[156] ?? 0);
     const data = offset + 512;
     const next = data + Math.ceil(size / 512) * 512;
 
-    if (next > tar.length) throw invalid();
+    if (next > tar.length) {
+      throw invalid();
+    }
+
     offset = next;
 
-    if ((type === "g" || type === "x") && gnu) throw invalid();
+    if ((type === "g" || type === "x") && gnu) {
+      throw invalid();
+    }
 
     if (type === "g") {
       // Only git archive's leading commit comment; tar would apply any
@@ -150,17 +184,26 @@ export function readArchive(
         keys.length !== 1 ||
         keys[0] !== "comment" ||
         !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(records["comment"] ?? "")
-      )
+      ) {
         throw invalid();
+      }
+
       continue;
     }
 
     if (type === "x") {
-      if (pax) throw invalid();
+      if (pax) {
+        throw invalid();
+      }
+
       pax = paxRecords(tar.subarray(data, data + size));
 
-      if (Object.keys(pax).some((key) => key !== "path" && key !== "linkpath"))
+      if (
+        Object.keys(pax).some((key) => key !== "path" && key !== "linkpath")
+      ) {
         throw invalid();
+      }
+
       continue;
     }
 
@@ -173,16 +216,23 @@ export function readArchive(
     const mode = octal(block, 100, 8);
 
     if (type === "0" || type === "\0") {
-      if (own?.["linkpath"] !== undefined) throw invalid();
+      if (own?.["linkpath"] !== undefined) {
+        throw invalid();
+      }
+
       entries.push({ path, type: "file", mode, size });
-    } else if (type === "5" && size === 0 && own?.["linkpath"] === undefined)
+    } else if (type === "5" && size === 0 && own?.["linkpath"] === undefined) {
       entries.push({ path, type: "directory", mode, size: 0 });
-    else if (type === "2" && size === 0)
+    } else if (type === "2" && size === 0) {
       entries.push({ path, type: "symlink", mode, size: 0, link });
-    else throw invalid();
+    } else {
+      throw invalid();
+    }
   }
 
-  if (pax) throw invalid();
+  if (pax) {
+    throw invalid();
+  }
 
   return entries;
 }
@@ -194,12 +244,15 @@ function clean(path: string) {
     path.startsWith("/") ||
     path.includes("\0") ||
     path.includes("\\")
-  )
+  ) {
     throw invalid();
+  }
+
   const parts = path.replace(/\/+$/, "").split("/");
 
-  if (parts.some((part) => part === "" || part === "." || part === ".."))
+  if (parts.some((part) => part === "" || part === "." || part === "..")) {
     throw invalid();
+  }
 
   return parts.join("/");
 }
@@ -212,40 +265,64 @@ export function validateArchive(
   entries: readonly ArchiveEntry[],
   root?: string,
 ) {
-  if (entries.length === 0) throw invalid();
+  if (entries.length === 0) {
+    throw invalid();
+  }
+
   const seen = new Map<string, ArchiveEntry["type"]>();
 
   for (const entry of entries) {
     const path = clean(entry.path);
 
-    if (seen.has(path)) throw invalid();
+    if (seen.has(path)) {
+      throw invalid();
+    }
+
     seen.set(path, entry.type);
 
-    if (root !== undefined && path !== root && !path.startsWith(`${root}/`))
+    if (root !== undefined && path !== root && !path.startsWith(`${root}/`)) {
       throw invalid();
+    }
   }
 
-  if (root !== undefined && seen.get(root) !== "directory") throw invalid();
+  if (root !== undefined && seen.get(root) !== "directory") {
+    throw invalid();
+  }
 
   for (const entry of entries) {
     const path = clean(entry.path);
     const parts = path.split("/");
 
     // Nothing may be written through a symlink created by the archive.
-    for (let i = 1; i < parts.length; i++)
-      if (seen.get(parts.slice(0, i).join("/")) === "symlink") throw invalid();
+    for (let i = 1; i < parts.length; i++) {
+      if (seen.get(parts.slice(0, i).join("/")) === "symlink") {
+        throw invalid();
+      }
+    }
 
-    if (entry.type !== "symlink") continue;
+    if (entry.type !== "symlink") {
+      continue;
+    }
+
     const link = entry.link ?? "";
 
-    if (!link || link.startsWith("/") || link.includes("\0")) throw invalid();
+    if (!link || link.startsWith("/") || link.includes("\0")) {
+      throw invalid();
+    }
+
     const target = posix.normalize(posix.join(posix.dirname(path), link));
 
-    if (target === ".." || target.startsWith("../") || target.startsWith("/"))
+    if (target === ".." || target.startsWith("../") || target.startsWith("/")) {
       throw invalid();
+    }
 
-    if (root !== undefined && target !== root && !target.startsWith(`${root}/`))
+    if (
+      root !== undefined &&
+      target !== root &&
+      !target.startsWith(`${root}/`)
+    ) {
       throw invalid();
+    }
   }
 
   return entries;
@@ -285,8 +362,9 @@ export async function verifyExtracted(
     expected.set(path, entry);
     const parts = path.split("/");
 
-    for (let i = 1; i < parts.length; i++)
+    for (let i = 1; i < parts.length; i++) {
       parents.add(parts.slice(0, i).join("/"));
+    }
   }
 
   const walk = async (path: string): Promise<void> => {
@@ -297,21 +375,31 @@ export async function verifyExtracted(
       const entry = expected.get(key);
 
       if (info.isDirectory()) {
-        if (entry ? entry.type !== "directory" : !parents.has(key))
+        if (entry ? entry.type !== "directory" : !parents.has(key)) {
           throw invalid();
+        }
+
         await walk(full);
       } else if (info.isSymbolicLink()) {
-        if (entry?.type !== "symlink" || (await readlink(full)) !== entry.link)
+        if (
+          entry?.type !== "symlink" ||
+          (await readlink(full)) !== entry.link
+        ) {
           throw invalid();
+        }
+
         links.push(full);
       } else if (info.isFile()) {
         if (
           entry?.type !== "file" ||
           info.nlink !== 1 ||
           info.size !== entry.size
-        )
+        ) {
           throw invalid();
-      } else throw invalid();
+        }
+      } else {
+        throw invalid();
+      }
     }
   };
 
@@ -324,7 +412,8 @@ export async function verifyExtracted(
   for (const link of links) {
     const target = await realpath(link).catch(() => null);
 
-    if (!target || (target !== top && !target.startsWith(`${top}${sep}`)))
+    if (!target || (target !== top && !target.startsWith(`${top}${sep}`))) {
       throw invalid();
+    }
   }
 }

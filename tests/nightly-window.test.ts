@@ -144,10 +144,12 @@ describe("maintenance configuration", () => {
       { unknown: true },
     ];
 
-    for (const value of bad)
+    for (const value of bad) {
       expect(
         Result.isSuccess(Schema.decodeUnknownResult(maintenanceSchema)(value)),
       ).toBe(false);
+    }
+
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(maintenanceSchema)({

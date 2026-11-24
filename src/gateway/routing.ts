@@ -93,10 +93,16 @@ export function routeReaction<T extends Parameters<typeof botKey>[0]>(
   config: T,
   identity: Identity,
 ) {
-  if (!config.slack.inboundReactions || config.access.mentionOnly) return;
+  if (!config.slack.inboundReactions || config.access.mentionOnly) {
+    return;
+  }
+
   const parsed = Schema.decodeUnknownResult(reactionEnvelopeSchema)(raw);
 
-  if (Result.isFailure(parsed)) return;
+  if (Result.isFailure(parsed)) {
+    return;
+  }
+
   const { api_app_id, team_id, event_id, event } = parsed.success;
 
   if (
@@ -107,8 +113,9 @@ export function routeReaction<T extends Parameters<typeof botKey>[0]>(
     event.user === "USLACKBOT" ||
     !isAllowedUser(config, event.user) ||
     !isAllowedChannel(config, event.item.channel)
-  )
+  ) {
     return;
+  }
 
   return {
     eventId: `reaction:${event_id}`,
@@ -136,14 +143,25 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
 ) {
   const parsed = Schema.decodeUnknownResult(envelopeSchema)(raw);
 
-  if (Result.isFailure(parsed)) return;
+  if (Result.isFailure(parsed)) {
+    return;
+  }
+
   const body = parsed.success;
 
-  if (body.api_app_id !== config.slack.appId || body.team_id !== identity.team)
+  if (
+    body.api_app_id !== config.slack.appId ||
+    body.team_id !== identity.team
+  ) {
     return;
+  }
+
   const result = Schema.decodeUnknownResult(eventSchema)(body.event);
 
-  if (Result.isFailure(result)) return;
+  if (Result.isFailure(result)) {
+    return;
+  }
+
   const event = result.success;
 
   const captain =
@@ -157,14 +175,17 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
     (event.subtype && event.subtype !== "file_share") ||
     event.hidden ||
     event.user === identity.user
-  )
+  ) {
     return;
+  }
 
   if (
     !isAllowedUser(config, event.user) ||
     !isAllowedChannel(config, event.channel)
-  )
+  ) {
     return;
+  }
+
   const mention = `<@${identity.user}>`;
   const mentioned = event.text.includes(mention);
   const direct = event.channel_type === "im";
@@ -190,7 +211,9 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
       ? "broadcast"
       : "ordinary";
 
-  if (muted && wake === "ordinary") return;
+  if (muted && wake === "ordinary") {
+    return;
+  }
 
   const named =
     (!mentioned &&
@@ -209,9 +232,14 @@ export function routeEvent<T extends Parameters<typeof botKey>[0]>(
     config.transcription?.spokenMentions?.channels.includes(event.channel) ===
       true;
 
-  if (config.access.mentionOnly && !mentioned && !spoken && !named) return;
+  if (config.access.mentionOnly && !mentioned && !spoken && !named) {
+    return;
+  }
 
-  if (!text && !event.files?.length) return;
+  if (!text && !event.files?.length) {
+    return;
+  }
+
   const key = botKey(config, identity);
 
   return {
@@ -258,8 +286,9 @@ export function chunks(text: string): string[] {
   const truncated = points.length > 60_000;
   const bounded = points.slice(0, 60_000);
 
-  if (truncated)
+  if (truncated) {
     bounded.push(...Array.from("\n[Response truncated by Stargate.]"));
+  }
 
   return markdownChunks(bounded);
 }

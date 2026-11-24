@@ -74,13 +74,16 @@ async function fixture(safeReports = true, root = fixtureRoot()) {
     async get({ sessionID }) {
       const session = native.get(sessionID);
 
-      if (!session) throw { _tag: "Session.NotFoundError" };
+      if (!session) {
+        throw { _tag: "Session.NotFoundError" };
+      }
 
       return session;
     },
     async create(input) {
-      if (!input.id || !input.agent || !input.location)
+      if (!input.id || !input.agent || !input.location) {
         throw new Error("Invalid fake session");
+      }
 
       const session: CrewSession = {
         id: input.id,
@@ -210,7 +213,9 @@ async function fixture(safeReports = true, root = fixtureRoot()) {
       await engine.run({ op: "dispatch", text, crew, queue }, caller(sessionID))
     ).task;
 
-    if (!task) throw new Error("Missing fixture task");
+    if (!task) {
+      throw new Error("Missing fixture task");
+    }
 
     return task;
   };
@@ -218,7 +223,9 @@ async function fixture(safeReports = true, root = fixtureRoot()) {
   const complete = (taskID: string, result: string) => {
     const task = engine.state.task(taskID);
 
-    if (!task) throw new Error("Missing fixture task");
+    if (!task) {
+      throw new Error("Missing fixture task");
+    }
 
     return engine.run(
       { op: "complete", taskID, result },
@@ -257,7 +264,9 @@ async function fixture(safeReports = true, root = fixtureRoot()) {
     reportTask(id: string) {
       const taskID = engine.state.reporting.owned("captain-a", id).reportTaskID;
 
-      if (!taskID) throw new Error("Missing report reservation");
+      if (!taskID) {
+        throw new Error("Missing report reservation");
+      }
 
       return taskID;
     },
@@ -282,7 +291,7 @@ test("reporting is opt-in; state stays private and inactive dispatch collects no
         "activity_tasks",
         "activity_entries",
         "activity_report_tasks",
-      ])
+      ]) {
         expect(
           db
             .query<{ count: number }, []>(
@@ -290,6 +299,7 @@ test("reporting is opt-in; state stays private and inactive dispatch collects no
             )
             .get()?.count,
         ).toBe(0);
+      }
     } finally {
       db.close();
     }
@@ -346,8 +356,10 @@ test("journal-only activity needs no reporter, retains late facts and never call
       let attempt = 0;
       attempt < 10 && final.status === "summarizing";
       attempt++
-    )
+    ) {
       final = await f.read(capture.id);
+    }
+
     expect(final.status).toBe("complete");
     expect(final.summary).toContain("no reporter");
     await f.engine.journal(
@@ -385,7 +397,10 @@ test("saved Stop dry-reads a summarizing capture without admitting a report", as
     });
     const job = store.ready("bot", Date.now(), 1)[0];
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
+
     store.activityRecords.saveActivity(job.id, {
       capture: capture.id,
       ts: "box",
@@ -603,8 +618,10 @@ test(
         "assignment-secret",
         "message-secret",
         "provider-secret",
-      ])
+      ]) {
         expect(visible).not.toContain(secret);
+      }
+
       const db = new Database(f.engine.state.path, { readonly: true });
 
       try {
@@ -656,8 +673,10 @@ test("exact capture ownership rejects other captains, workers, child sessions, a
       location: { directory: "/other" },
     });
 
-    for (const sessionID of ["child", "elsewhere", "missing"])
+    for (const sessionID of ["child", "elsewhere", "missing"]) {
       await expect(f.start("turn", sessionID)).rejects.toThrow();
+    }
+
     const task = await f.dispatch("Worker task");
     await expect(f.start("worker-turn", task.workerSessionID)).rejects.toThrow(
       "captain",
@@ -699,8 +718,10 @@ test(
         let attempt = 0;
         attempt < 10 && final.status === "summarizing";
         attempt++
-      )
+      ) {
         final = await f.read(capture.id);
+      }
+
       expect(final.status).toBe("complete");
       expect(final.summary).toContain("Summary skipped");
       expect(JSON.stringify(final.entries)).toContain("Feature ready");
@@ -712,7 +733,10 @@ test(
         f.caller("captain-b"),
       );
 
-      for (let index = 0; index < 3; index++) await f.read(capture.id);
+      for (let index = 0; index < 3; index++) {
+        await f.read(capture.id);
+      }
+
       expect(f.turns).toHaveLength(1);
     } finally {
       await f.close();
@@ -804,8 +828,10 @@ for (const operation of ["finish", "read"] as const) {
       const capture = await f.start();
       const task = await f.dispatch("Feature");
 
-      if (operation === "read")
+      if (operation === "read") {
         await f.engine.reporting.finish(f.owner(capture.id), f.caller().signal);
+      }
+
       await f.complete(task.id, "Ready");
       const rpc = new AbortController();
       const started = f.started();
@@ -861,7 +887,9 @@ for (const phase of ["reporterFree", "progressReport"] as const) {
           await block(caller.signal);
 
           // A busy admission may return without promoting or throwing.
-          if (caller.signal.aborted) return;
+          if (caller.signal.aborted) {
+            return;
+          }
 
           return original(id, caller);
         };
@@ -884,11 +912,13 @@ for (const phase of ["reporterFree", "progressReport"] as const) {
         });
 
         // Cancellation verifies the RPC caller before it can abort owned work.
-        if (stop === "cancel")
+        if (stop === "cancel") {
           await f.engine.reporting.read(
             { ...f.owner(capture.id), passive: true },
             f.caller().signal,
           );
+        }
+
         expect(ownerSignal?.aborted).toBe(true);
         expect(stopped).toBe(false);
         expect(drained).toBe(false);
@@ -904,7 +934,10 @@ for (const phase of ["reporterFree", "progressReport"] as const) {
             status: "cancelled",
             released: 1,
           });
-        } else expect(reportID).toBeUndefined();
+        } else {
+          expect(reportID).toBeUndefined();
+        }
+
         expect(
           f.engine.state.reporting.owned("captain-a", capture.id).status,
         ).toBe(stop === "cancel" ? "cancelled" : "unavailable");
@@ -1061,10 +1094,12 @@ test("pre-aborted reporting RPCs cannot authorize jobs or cancel captures", asyn
     await f.complete(task.id, "Ready");
     const signal = AbortSignal.abort();
 
-    for (const operation of ["read", "finish", "cancel"] as const)
+    for (const operation of ["read", "finish", "cancel"] as const) {
       await expect(
         f.engine.reporting[operation](f.owner(capture.id), signal),
       ).rejects.toThrow();
+    }
+
     await expect(
       f.engine.reporting.start(
         { sessionID: "captain-a", requestID: "denied" },
@@ -1213,7 +1248,7 @@ test("abandoned capture expires; bounded windows and input redaction survive per
     const capture = await f.start();
     const task = await f.dispatch("A".repeat(2000));
 
-    for (let index = 0; index < 12; index++)
+    for (let index = 0; index < 12; index++) {
       await f.engine.run(
         {
           op: "urgent",
@@ -1228,6 +1263,8 @@ test("abandoned capture expires; bounded windows and input redaction survive per
           id: `urgent-${index}`,
         },
       );
+    }
+
     const current = await f.read(capture.id);
     expect(current.entries).toHaveLength(8);
     expect(current.truncated).toBe(true);
@@ -1267,8 +1304,9 @@ test("abandoned capture expires; bounded windows and input redaction survive per
     "json-secret",
     "another-secret",
     "private-secret",
-  ])
+  ]) {
     expect(redacted).not.toContain(secret);
+  }
 });
 
 test("reporter absence and unsafe backend return truthful unavailable without maintenance inference", async () => {
@@ -1289,8 +1327,10 @@ test("reporter absence and unsafe backend return truthful unavailable without ma
       let attempt = 0;
       attempt < 10 && snapshot.status === "summarizing";
       attempt++
-    )
+    ) {
       snapshot = await f.read(capture.id);
+    }
+
     expect(snapshot.status).toBe("complete");
     expect(snapshot.summary).toContain("Summary skipped");
     expect(f.turns).toHaveLength(0);
@@ -1438,8 +1478,12 @@ test("real Pi reporting uses fresh context and no tools; maintenance conversatio
     await backend?.close();
     await server.stop(true);
 
-    if (previous === undefined) delete process.env[apiKeyEnv];
-    else process.env[apiKeyEnv] = previous;
+    if (previous === undefined) {
+      delete process.env[apiKeyEnv];
+    } else {
+      process.env[apiKeyEnv] = previous;
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -1508,8 +1552,12 @@ test("malicious report tool call cannot execute maintenance", async () => {
     await backend?.close();
     await server.stop(true);
 
-    if (previous === undefined) delete process.env[apiKeyEnv];
-    else process.env[apiKeyEnv] = previous;
+    if (previous === undefined) {
+      delete process.env[apiKeyEnv];
+    } else {
+      process.env[apiKeyEnv] = previous;
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });

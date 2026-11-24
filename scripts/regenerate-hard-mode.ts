@@ -18,18 +18,21 @@ if (
   );
 }
 
-if (git("rev-parse", "--show-prefix").trim())
+if (git("rev-parse", "--show-prefix").trim()) {
   throw new Error("Run from the repository root");
+}
 
 const branch = git("branch", "--show-current").trim();
 
-if (!branch || branch === "main" || branch === "master")
+if (!branch || branch === "main" || branch === "master") {
   throw new Error("Use a feature branch");
+}
 
 const status = ["status", "--porcelain=v1", "--untracked-files=all"];
 
-if (git(...status))
+if (git(...status)) {
   throw new Error("Refusing to regenerate from a dirty checkout");
+}
 
 if (patch) {
   if (git("rev-parse", "HEAD") !== git("rev-parse", "origin/main")) {
@@ -81,7 +84,10 @@ for (const row of git("diff", "--numstat", "--no-renames", "-z")
   .filter(Boolean)) {
   const match = /^(\d+)\t(\d+)\t(.+)$/s.exec(row);
 
-  if (!match?.[3]) throw new Error(`Unexpected non-text change: ${row}`);
+  if (!match?.[3]) {
+    throw new Error(`Unexpected non-text change: ${row}`);
+  }
+
   const folder = match[3].includes("/") ? (match[3].split("/")[0] ?? ".") : ".";
   const counts = folders.get(folder) ?? { files: 0, added: 0, removed: 0 };
   counts.files++;

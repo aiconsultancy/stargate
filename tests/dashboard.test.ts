@@ -279,8 +279,10 @@ test("history query bounds count Unicode code points", async () => {
   for (const path of [
     `/api/ships/a/sessions?parent=${emoji(512)}&cursor=${emoji(4096)}`,
     `/api/ships/a/entries?session=${emoji(512)}&cursor=${emoji(4096)}`,
-  ])
+  ]) {
     expect((await f.get(path)).status, path.slice(0, 40)).toBe(200);
+  }
+
   expect(f.calls).toHaveLength(2);
 
   for (const path of [
@@ -340,8 +342,9 @@ test("source exceptions produce one route-only warning and safe 502", async () =
     /SECRET|session-id|private-url|parent=|session=|\/api/,
   );
 
-  for (const route of ["fleet", "ship", "sessions", "entries"])
+  for (const route of ["fleet", "ship", "sessions", "entries"]) {
     expect(JSON.stringify(f.warnings)).toContain(`"route":"${route}"`);
+  }
 });
 
 test("deadline aborts source and returns 504 without logging source failure", async () => {
@@ -535,7 +538,10 @@ test("opt-in shared Unix socket inherits the protected operator group and serves
 
   const socket = join(directory, "http.sock");
 
-  if (!process.getuid || !process.getgid) throw new Error("POSIX IDs required");
+  if (!process.getuid || !process.getgid) {
+    throw new Error("POSIX IDs required");
+  }
+
   await chown(directory, process.getuid(), process.getgid());
   await chmod(directory, 0o2750);
 
@@ -598,7 +604,10 @@ test("shared dashboard refuses missing setgid, writable parents, symlinks and no
   const directory = join(root, "operator");
   await mkdir(directory, { mode: 0o700 });
 
-  if (!process.getuid || !process.getgid) throw new Error("POSIX IDs required");
+  if (!process.getuid || !process.getgid) {
+    throw new Error("POSIX IDs required");
+  }
+
   await chown(directory, process.getuid(), process.getgid());
 
   const options = {

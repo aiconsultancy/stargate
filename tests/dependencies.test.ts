@@ -93,7 +93,9 @@ test("dependency provenance checks every page, signature, count, and current hea
 
   const filter = script?.split("jq -e")[1]?.match(/'([\s\S]+)'/)?.[1];
 
-  if (!filter) throw new Error("Missing dependency provenance filter");
+  if (!filter) {
+    throw new Error("Missing dependency provenance filter");
+  }
 
   const trusted = {
     sha: "head",

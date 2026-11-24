@@ -43,7 +43,10 @@ function shipDetail({
     crewMembers: ship.crewMembers.map((member) => ({
       ...member,
       contexts: member.contexts.map(({ git, ...context }) => {
-        if (!git) return { ...context, git };
+        if (!git) {
+          return { ...context, git };
+        }
+
         const { checkedAt: _checkedAt, ...state } = git;
 
         return { ...context, git: state };
@@ -85,8 +88,9 @@ function outcomes({ recent, lastOutcome }: V1CrewContext) {
       task.status === "cancelled" ||
       task.status === "uncertain" ||
       task.status === "abandoned"
-    )
+    ) {
       tasks.set(task.id, task);
+    }
   }
 
   return tasks;
@@ -109,7 +113,10 @@ function contextEvents(
   const priorOutcomes = outcomes(previous);
 
   for (const [id, outcome] of outcomes(next)) {
-    if (priorOutcomes.get(id)?.status === outcome.status) continue;
+    if (priorOutcomes.get(id)?.status === outcome.status) {
+      continue;
+    }
+
     emit(
       "outcome",
       quoted(
@@ -123,9 +130,9 @@ function contextEvents(
     );
   }
 
-  if (current && next.activity === "running" && current.id !== old?.id)
+  if (current && next.activity === "running" && current.id !== old?.id) {
     emit("dispatch", quoted(`${name} started `, current.summary));
-  else if (current && old?.id === current.id && old.phase !== current.phase) {
+  } else if (current && old?.id === current.id && old.phase !== current.phase) {
     const phase = clean(current.phase, 45);
     emit(
       "phase",
@@ -202,7 +209,10 @@ export function diffEvents(
   next: V1EventSnapshot,
   now: number,
 ): V1Event[] {
-  if (!prev) return [];
+  if (!prev) {
+    return [];
+  }
+
   const events: V1Event[] = [];
 
   if (!isDeepStrictEqual(fleetSummary(prev.fleet), fleetSummary(next.fleet))) {
@@ -212,29 +222,39 @@ export function diffEvents(
     for (const ship of next.fleet.ships) {
       const previous = prior.get(ship.id);
 
-      if (previous && previous.available !== ship.available)
+      if (previous && previous.available !== ship.available) {
         events.push(availability(ship, now));
+      }
     }
   }
 
   for (const id of Object.keys(next.ships).toSorted()) {
     const ship = next.ships[id];
 
-    if (!ship) continue;
+    if (!ship) {
+      continue;
+    }
+
     const previous = Object.hasOwn(prev.ships, id) ? prev.ships[id] : undefined;
 
-    if (!previous || !isDeepStrictEqual(shipDetail(previous), shipDetail(ship)))
+    if (
+      !previous ||
+      !isDeepStrictEqual(shipDetail(previous), shipDetail(ship))
+    ) {
       events.push({ type: "ship", data: ship });
-    else if (
+    } else if (
       ship.detailUpdatedAt !== undefined &&
       ship.detailUpdatedAt !== previous.detailUpdatedAt
-    )
+    ) {
       events.push({
         type: "ship-sampled",
         data: { id, detailUpdatedAt: ship.detailUpdatedAt },
       });
+    }
 
-    if (!previous) continue;
+    if (!previous) {
+      continue;
+    }
 
     const activity = (
       member: string | null,
@@ -254,7 +274,9 @@ export function diffEvents(
     for (const member of ship.crewMembers) {
       const prior = oldMembers.get(member.id);
 
-      if (!prior) continue;
+      if (!prior) {
+        continue;
+      }
 
       const contexts = new Map(
         prior.contexts.map((context) => [context.project, context]),
@@ -263,7 +285,7 @@ export function diffEvents(
       for (const context of member.contexts) {
         const old = contexts.get(context.project);
 
-        if (old)
+        if (old) {
           contextEvents(
             old,
             context,
@@ -272,6 +294,7 @@ export function diffEvents(
               activity(member.id, kind, text, extra);
             },
           );
+        }
       }
     }
   }

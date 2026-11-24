@@ -107,16 +107,19 @@ async function nativeCodexPolicy(path: string, now: number) {
         (stat.mode & 0o077) !== 0 ||
         stat.uid !== process.getuid?.() ||
         stat.size > 256
-      )
+      ) {
         return;
+      }
+
       const native = decodeNativeQuota(JSON.parse(await file.readFile("utf8")));
       const seen = native.observedAt * 1000;
 
       if (
         !fresh(seen, now) ||
         (native.resetAt !== null && native.resetAt * 1000 <= now)
-      )
+      ) {
         return;
+      }
 
       return policy(native.remainingPercent, seen);
     } finally {
@@ -135,25 +138,35 @@ function currentPolicy(
 ): Observation | undefined {
   const accounts = snapshot.accounts.filter((row) => row.provider === provider);
 
-  if (accounts.length === 0) return;
+  if (accounts.length === 0) {
+    return;
+  }
+
   let remaining = 0;
   let observedAt = now;
 
   for (const account of accounts) {
     const seen = account.observedAt;
 
-    if (account.status !== "ok" || seen === null || !fresh(seen, now)) return;
+    if (account.status !== "ok" || seen === null || !fresh(seen, now)) {
+      return;
+    }
 
     const windows = account.windows.filter(
       (window) => window.scope === "subscription" && window.active !== false,
     );
 
-    if (windows.length === 0) return;
+    if (windows.length === 0) {
+      return;
+    }
+
     let usable = 100;
 
     for (const { remainingPercent, resetAt } of windows) {
-      if (remainingPercent === null || (resetAt !== null && resetAt <= now))
+      if (remainingPercent === null || (resetAt !== null && resetAt <= now)) {
         return;
+      }
+
       usable = Math.min(usable, remainingPercent);
     }
 
@@ -210,23 +223,30 @@ export class QuotaWatch {
 
       const previous = before[provider];
 
-      if (!current || (previous && current.observedAt <= previous.observedAt))
+      if (!current || (previous && current.observedAt <= previous.observedAt)) {
         continue;
+      }
+
       after[provider] = current;
       updated = true;
 
       if (
         previous?.mode === current.mode ||
         (!previous && current.mode === "normal")
-      )
+      ) {
         continue;
+      }
+
       const name = provider === "claude" ? "Claude" : "Codex";
       notices.push(
         `${name} crew quota: ${heading[current.mode]} ${message[current.mode]}`,
       );
     }
 
-    if (!updated) return;
+    if (!updated) {
+      return;
+    }
+
     await mkdir(dirname(this.config.stateFile), {
       recursive: true,
       mode: 0o700,
@@ -238,7 +258,9 @@ export class QuotaWatch {
       0o600,
     );
 
-    if (notices.length === 0 || signal.aborted) return;
+    if (notices.length === 0 || signal.aborted) {
+      return;
+    }
 
     try {
       await this.announce(notices.join("\n\n"), signal);
@@ -254,8 +276,9 @@ export class QuotaWatch {
       try {
         await this.tick(signal);
       } catch {
-        if (!signal.aborted)
+        if (!signal.aborted) {
           this.log.warn("Crew quota policy could not be updated");
+        }
       }
 
       await delay(pollMs, undefined, { signal }).catch(() => {});

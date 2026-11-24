@@ -26,7 +26,9 @@ import { bot, identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 // Shapes copied from the live workspace (IDs replaced), not invented.
@@ -102,7 +104,9 @@ function lookup() {
     async lookup(user: string) {
       calls.push(user);
 
-      if (fail) throw new Error("users.info PRIVATE_SLACK_ERROR");
+      if (fail) {
+        throw new Error("users.info PRIVATE_SLACK_ERROR");
+      }
 
       return directory[user] ?? { ok: false, error: "user_not_found" };
     },
@@ -138,8 +142,9 @@ test("captain names: the -captain suffix in any Slack name form", () => {
     ["galactica-captain"],
     [undefined, "Enterprise Captain"],
     ["solkar_captain"],
-  ])
+  ]) {
     expect(isCaptainName(names)).toBe(true);
+  }
 
   for (const names of [
     ["captain"],
@@ -148,8 +153,9 @@ test("captain names: the -captain suffix in any Slack name form", () => {
     ["Deploy Bot", "deploybot"],
     ["-captain"],
     [undefined],
-  ])
+  ]) {
     expect(isCaptainName(names)).toBe(false);
+  }
 });
 
 test("the directory admits only a live same-workspace captain bot bound to its bot ID", async () => {
@@ -167,8 +173,10 @@ test("the directory admits only a live same-workspace captain bot bound to its b
     { user: "UHUMAN", bot: "BHUMAN" },
     { user: "UGONE", bot: "BGONE" },
     { user: "UMISSING", bot: "BMISSING" },
-  ])
+  ]) {
     expect(await peers.verify(sender, signal)).toBe(false);
+  }
+
   // Results are cached for ten minutes, positive and negative.
   const calls = f.calls.length;
   expect(await peers.verify(defiant, signal)).toBe(true);
@@ -232,7 +240,7 @@ test("routing admits a verified captain only with the setting, and never the own
   expect(human && "sender" in human).toBe(false);
 
   // Edits and legacy bot_message posts stay rejected.
-  for (const subtype of ["message_changed", "bot_message"])
+  for (const subtype of ["message_changed", "bot_message"]) {
     expect(
       routeEvent(
         { ...request, event: { ...request.event, subtype } },
@@ -241,6 +249,7 @@ test("routing admits a verified captain only with the setting, and never the own
         defiant,
       ),
     ).toBeUndefined();
+  }
 });
 
 test("deny lists and allow lists still apply to a verified captain", () => {
@@ -362,8 +371,11 @@ function gatewayFixture(peerCaptains = true, pinned = true) {
       let jobs = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20);
       jobs.length;
       jobs = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20)
-    )
-      for (const job of jobs) await gateway.process(job, signal);
+    ) {
+      for (const job of jobs) {
+        await gateway.process(job, signal);
+      }
+    }
   };
 
   return {
@@ -457,14 +469,17 @@ test("the OpenCode source line carries k=captain only for a peer captain", async
     directory: "/workspace",
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
+
   const backend = new OpenCodeBackend(config);
   const source = { channel: "C1", thread: "1.0", message: "2.0", user: "U9" };
 
   for (const context of [
     { source },
     { source: { ...source, sender: "captain" as const } },
-  ])
+  ]) {
     await backend
       .prompt(
         "ses",
@@ -476,6 +491,8 @@ test("the OpenCode source line carries k=captain only for a peer captain", async
         context,
       )
       .catch(() => {});
+  }
+
   expect(lines).toEqual([
     "s=slack;c=C1;t=1.0;m=2.0;u=U9",
     "s=slack;c=C1;t=1.0;m=2.0;u=U9;k=captain",
@@ -490,10 +507,12 @@ test("loop cap: a peer captain gets five turns per thread per hour; people are n
     await f.gateway.receive(message("<@UBOT> start", ts(0), defiant)),
   ).toBe(true);
 
-  for (let i = 1; i < peerTurnsPerHour; i++)
+  for (let i = 1; i < peerTurnsPerHour; i++) {
     expect(
       await f.gateway.receive(message(`reply ${i}`, ts(i), defiant, ts(0))),
     ).toBe(true);
+  }
+
   expect(
     await f.gateway.receive(message("one more", ts(10), defiant, ts(0))),
   ).toBe(false);
@@ -519,7 +538,7 @@ test("loop cap: a peer captain gets five turns per thread per hour; people are n
     message("<@UBOT> start", `${past}.000100`, defiant),
   );
 
-  for (let i = 1; i < peerTurnsPerHour + 3; i++)
+  for (let i = 1; i < peerTurnsPerHour + 3; i++) {
     old.store.enqueue({
       eventId: `C123:${past + i}.000100`,
       botKey: old.gateway.key,
@@ -530,6 +549,8 @@ test("loop cap: a peer captain gets five turns per thread per hour; people are n
       text: "old",
       sender: "captain",
     });
+  }
+
   expect(
     await old.gateway.receive(
       message("fresh", ts(20), defiant, `${past}.000100`),
@@ -566,8 +587,10 @@ test("the cap uses Slack message time, so host clock skew cannot disable it", as
   const ts = (offset: number) => `${base + offset}.000100`;
   await f.gateway.receive(message("<@UBOT> start", ts(0), defiant));
 
-  for (let i = 1; i < peerTurnsPerHour; i++)
+  for (let i = 1; i < peerTurnsPerHour; i++) {
     await f.gateway.receive(message(`reply ${i}`, ts(i), defiant, ts(0)));
+  }
+
   expect(
     await f.gateway.receive(message("one more", ts(30), defiant, ts(0))),
   ).toBe(false);

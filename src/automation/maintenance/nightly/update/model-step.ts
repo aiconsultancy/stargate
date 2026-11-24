@@ -80,10 +80,12 @@ export async function readModelInputs(input: {
       }
     : undefined;
 
-  if (globalCatalog)
+  if (globalCatalog) {
     refs.push(
       ...catalogRefs(globalCatalog.text, settings.families, settings.providers),
     );
+  }
+
   let snapshot: ProfilesSnapshot | undefined;
 
   if (settings.agentProfiles) {
@@ -93,26 +95,32 @@ export async function readModelInputs(input: {
 
   const documents: ModelInputs["documents"] = [];
 
-  for (const path of settings.teamFiles)
+  for (const path of settings.teamFiles) {
     documents.push({
       path,
       scope: "team-file",
       text: await readFile(path, "utf8"),
     });
+  }
 
-  for (const crew of input.crews)
-    for (const root of crew.roots)
+  for (const crew of input.crews) {
+    for (const root of crew.roots) {
       documents.push({
         path: root.configPath,
         scope: "opencode-config",
         text: await readFile(root.configPath, "utf8"),
       });
+    }
+  }
 
-  for (const document of documents) refs.push(...modelRefs(document.text));
+  for (const document of documents) {
+    refs.push(...modelRefs(document.text));
+  }
+
   const live: ModelInputs["live"] = [];
   const opencode = await input.connect().catch(() => {});
 
-  if (opencode)
+  if (opencode) {
     for (const session of input.sessions.slice(0, 500)) {
       const model = await opencode
         .sessionModel(session.id, input.signal)
@@ -123,6 +131,7 @@ export async function readModelInputs(input: {
         refs.push(model);
       }
     }
+  }
 
   return {
     providers: settings.providers,
@@ -168,7 +177,7 @@ export async function selectModelUpgrades(input: {
     const match = /^(.*)-(?:fast|ultrafast)$/.exec(id);
     const family = match?.[1] ? parseModel(match[1]) : null;
 
-    if (family && settings.families.includes(family.family))
+    if (family && settings.families.includes(family.family)) {
       rejected.push({
         scope: "catalog",
         target: "proxy-new-product",
@@ -177,13 +186,17 @@ export async function selectModelUpgrades(input: {
         status: "skipped",
         reason: "new-product",
       });
+    }
   }
 
   if (!input.probe) {
     const upgrades = new Map<string, string>();
 
-    for (const [from, list] of candidates)
-      if (list[0]) upgrades.set(from, list[0]);
+    for (const [from, list] of candidates) {
+      if (list[0]) {
+        upgrades.set(from, list[0]);
+      }
+    }
 
     return { upgrades, rejected };
   }
@@ -203,7 +216,7 @@ export async function selectModelUpgrades(input: {
       ).additions
     : [];
 
-  for (const miss of failed)
+  for (const miss of failed) {
     rejected.push({
       scope: "catalog",
       target: "proxy-probe",
@@ -212,6 +225,7 @@ export async function selectModelUpgrades(input: {
       status: "skipped",
       reason: "probe-failed",
     });
+  }
 
   const opencode =
     chosen.size > 0 ? await input.connect().catch(() => {}) : undefined;
@@ -247,7 +261,10 @@ export async function selectModelUpgrades(input: {
             ),
         );
 
-      if (ok) continue;
+      if (ok) {
+        continue;
+      }
+
       chosen.delete(from);
       rejected.push({
         scope: "catalog",
@@ -260,7 +277,7 @@ export async function selectModelUpgrades(input: {
     }
   }
 
-  if (!opencode)
+  if (!opencode) {
     for (const [from, to] of chosen) {
       chosen.delete(from);
       rejected.push({
@@ -272,6 +289,7 @@ export async function selectModelUpgrades(input: {
         reason: "catalog-missing",
       });
     }
+  }
 
   return { upgrades: chosen, rejected };
 }
@@ -290,7 +308,10 @@ export function buildModelWork(
     changes: [],
   };
 
-  if (upgrades.size === 0) return work;
+  if (upgrades.size === 0) {
+    return work;
+  }
+
   const { providers } = inputs;
 
   if (inputs.globalCatalog) {
@@ -308,7 +329,7 @@ export function buildModelWork(
         expected: inputs.globalCatalog.text,
       });
 
-      for (const addition of catalog.additions)
+      for (const addition of catalog.additions) {
         work.changes.push({
           scope: "catalog",
           target: inputs.globalCatalog.path,
@@ -316,6 +337,8 @@ export function buildModelWork(
           to: formatRef(addition.to),
           status: "planned",
         });
+      }
+
       work.catalogChecks = {
         directories: [undefined, ...(inputs.directories ?? [])],
         refs: [
@@ -336,25 +359,29 @@ export function buildModelWork(
     try {
       const result = upgradeProfiles(inputs.snapshot, upgrades, providers);
 
-      for (const write of result.writes)
+      for (const write of result.writes) {
         work.files.push({ path: write.path, text: write.content });
+      }
+
       work.profileLinks.push(...result.links);
       work.agents.push(...result.live);
 
-      for (const change of result.changes)
+      for (const change of result.changes) {
         work.changes.push({
           scope: "agent-profile",
           ...change,
           status: "planned",
         });
+      }
 
-      for (const change of result.skipped)
+      for (const change of result.skipped) {
         work.changes.push({
           scope: "agent-profile",
           ...change,
           status: "skipped",
           reason: "config-format",
         });
+      }
     } catch (error) {
       work.changes.push({
         scope: "agent-profile",
@@ -374,10 +401,13 @@ export function buildModelWork(
           ? upgradeTeamFile(document.text, upgrades, providers)
           : upgradeOpenCodeProfile(document.text, upgrades, providers);
 
-      if (result.changes.length === 0) continue;
+      if (result.changes.length === 0) {
+        continue;
+      }
+
       work.files.push({ path: document.path, text: result.text });
 
-      for (const change of result.changes)
+      for (const change of result.changes) {
         work.changes.push({
           scope: document.scope,
           target: `${document.path}#${change.target}`,
@@ -385,6 +415,7 @@ export function buildModelWork(
           to: change.to,
           status: "planned",
         });
+      }
     } catch (error) {
       work.changes.push({
         scope: document.scope,
@@ -402,7 +433,10 @@ export function buildModelWork(
       ? upgrades.get(model.id)
       : undefined;
 
-    if (!next) continue;
+    if (!next) {
+      continue;
+    }
+
     const to = { ...model, id: next };
     work.sessions.push({ session, from: model, to });
     work.changes.push({
@@ -436,7 +470,9 @@ export async function applyLiveModels(
   for (const directory of work.catalogChecks?.directories ?? []) {
     const remaining = clock.until - clock.now();
 
-    if (remaining < openCodeCallMs) return { ok: false, skipped };
+    if (remaining < openCodeCallMs) {
+      return { ok: false, skipped };
+    }
 
     const catalogSignal = AbortSignal.any([
       signal,
@@ -458,8 +494,9 @@ export async function applyLiveModels(
             (!ref.variant || model.variants.includes(ref.variant)),
         ),
       )
-    )
+    ) {
       return { ok: false, skipped };
+    }
   }
 
   for (const item of work.sessions) {
@@ -472,7 +509,10 @@ export async function applyLiveModels(
       const current = await opencode.sessionModel(item.session.id, signal);
 
       // The session moved on its own since planning: leave it alone.
-      if (!current || formatRef(current) !== formatRef(item.from)) continue;
+      if (!current || formatRef(current) !== formatRef(item.from)) {
+        continue;
+      }
+
       await journal.set("sessions", [
         ...(journal.get("sessions") ?? []),
         { id: item.session.id, from: item.from },
@@ -480,8 +520,9 @@ export async function applyLiveModels(
       await opencode.switchModel(item.session.id, item.to, signal);
       const after = await opencode.sessionModel(item.session.id, signal);
 
-      if (!after || formatRef(after) !== formatRef(item.to))
+      if (!after || formatRef(after) !== formatRef(item.to)) {
         return { ok: false, skipped };
+      }
     } catch {
       signal.throwIfAborted();
 
@@ -489,7 +530,10 @@ export async function applyLiveModels(
     }
   }
 
-  if (work.agents.length === 0) return { ok: true, skipped };
+  if (work.agents.length === 0) {
+    return { ok: true, skipped };
+  }
+
   const agents = await opencode.agents(undefined, signal).catch(() => null);
 
   return {

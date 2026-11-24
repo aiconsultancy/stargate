@@ -38,8 +38,10 @@ test("cron identities survive credential reordering, disabling, removal and rest
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
-      if (new URL(request.url).pathname === "/v8/management/credentials")
+      if (new URL(request.url).pathname === "/v8/management/credentials") {
         return Response.json({ files });
+      }
+
       const body = await request.json();
 
       return Response.json({
@@ -126,7 +128,9 @@ test("cron identities survive credential reordering, disabling, removal and rest
     const admitted = store.claimQuota(owner.botKey, initial, clock);
     expect(admitted).toHaveLength(1);
 
-    for (const run of admitted) store.finish(run.id, "done", clock);
+    for (const run of admitted) {
+      store.finish(run.id, "done", clock);
+    }
 
     files = [second, first];
     clock += 61_000;

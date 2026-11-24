@@ -24,8 +24,10 @@ test("the nightly timer's systemd quote copy matches the service copy", async ()
     ['a "b" \\c % $HOME', true],
     ['a "b" \\c % $HOME', false],
     ["PATH=/a b:/c", false],
-  ] as const)
+  ] as const) {
     expect(timerQuote(value, command)).toBe(serviceQuote(value, command));
+  }
+
   expect(() => timerQuote("a\nb")).toThrow(
     "Service paths cannot contain control characters.",
   );

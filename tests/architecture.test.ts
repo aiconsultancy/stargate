@@ -46,8 +46,10 @@ test("source architecture introduces no new structural or boundary violations", 
     "plugins/opencode/crew/plugin.ts",
     "plugins/opencode/fleet/plugin.ts",
     "src/fleet/plugin.ts",
-  ])
+  ]) {
     expect(physical.has(entry)).toBe(true);
+  }
+
   const source = normalizeGraph(physical, policy);
 
   const violations = [
@@ -292,7 +294,10 @@ describe("stable module identities", () => {
     ).toThrow("unknown source path");
     const ambiguous = movablePolicy();
 
-    if (!ambiguous.aliases) throw new Error("Missing fixture aliases");
+    if (!ambiguous.aliases) {
+      throw new Error("Missing fixture aliases");
+    }
+
     ambiguous.aliases["src/private.ts"] = [
       "src/private.ts",
       "src/alpha/entry.ts",
@@ -305,7 +310,10 @@ describe("stable module identities", () => {
   test("root limits use physical paths, not the normalized module IDs", () => {
     const policy = movablePolicy();
 
-    if (!policy.aliases) throw new Error("Missing fixture aliases");
+    if (!policy.aliases) {
+      throw new Error("Missing fixture aliases");
+    }
+
     policy.aliases["src/alpha.ts"] = ["src/alpha.ts", "src/renamed-root.ts"];
 
     const normalized = normalizeGraph(
@@ -328,7 +336,7 @@ describe("stable module identities", () => {
 });
 
 describe("source size gate", () => {
-  for (const ending of ["\n", "\r\n"])
+  for (const ending of ["\n", "\r\n"]) {
     test(`counts non-blank lines with ${JSON.stringify(ending)}`, async () => {
       const root = await fixture({ "src/alpha/entry.ts": "" });
 
@@ -352,6 +360,7 @@ describe("source size gate", () => {
         }
       }
     });
+  }
 
   test("rejects a new source module with 1001 non-blank lines", async () => {
     const root = await fixture({
@@ -444,6 +453,30 @@ describe("source size gate", () => {
     ]);
   });
 
+  test("brace migration ceilings permit only the named paths and measured sizes", async () => {
+    const path = "src/alpha/entry.ts";
+    const root = await fixture({ [path]: "// counted\n".repeat(1002) });
+
+    const policy = {
+      ...fixturePolicy(),
+      braceMigrationFileLimits: { [path]: 1002 },
+    };
+
+    expect(await sizeRegressions(root, policy, [])).toEqual([]);
+    await writeFile(join(root, path), "// counted\n".repeat(1003));
+    expect(await sizeRegressions(root, policy, [])).toEqual([
+      `new:large-file:${path}:${path}:1003 non-blank lines > 1002`,
+    ]);
+    await writeFile(join(root, path), "// counted\n".repeat(1000));
+    expect(await sizeRegressions(root, policy, [])).toEqual([
+      `stale:brace-migration-file-limit:${path}`,
+    ]);
+    await rm(join(root, path));
+    expect(await sizeRegressions(root, policy, [])).toEqual([
+      `invalid:brace-migration-file-limit:${path}:1002`,
+    ]);
+  });
+
   test("approved renames retain only the exact stable Gateway exception", async () => {
     const policy: ArchitecturePolicy = {
       slices: {
@@ -508,7 +541,10 @@ describe("architecture policy mechanics", () => {
     const policy = fixturePolicy();
     const alpha = policy.slices["alpha"];
 
-    if (!alpha) throw new Error("Missing fixture owner");
+    if (!alpha) {
+      throw new Error("Missing fixture owner");
+    }
+
     alpha.files.push("src/beta/private.ts");
     alpha.public.push("src/not-owned.ts");
 
@@ -573,7 +609,10 @@ describe("architecture policy mechanics", () => {
     const alpha = policy.slices["alpha"];
     const app = policy.slices["app"];
 
-    if (!alpha || !app) throw new Error("Missing fixture owner");
+    if (!alpha || !app) {
+      throw new Error("Missing fixture owner");
+    }
+
     alpha.contracts = ["src/alpha/entry.ts"];
     app.layer = "config";
 
@@ -656,7 +695,10 @@ describe("architecture policy mechanics", () => {
     const policy = fixturePolicy();
     const beta = policy.slices["beta"];
 
-    if (!beta) throw new Error("Missing fixture owner");
+    if (!beta) {
+      throw new Error("Missing fixture owner");
+    }
+
     beta.retained = { "src/beta/private.ts": "store" };
 
     const failures = boundaryViolations(

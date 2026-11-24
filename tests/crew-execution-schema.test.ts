@@ -81,10 +81,12 @@ test("crew SDK advertisements retain frozen input and Pi contracts", () => {
   ] as const;
 
   // Frozen c6 advertisements, canonical JSON object keys only; array order stays.
-  for (const [json, hash] of values)
+  for (const [json, hash] of values) {
     expect(
       createHash("sha256").update(settingsCanonical(json)).digest("hex"),
     ).toBe(hash);
+  }
+
   expect(Schema.isSchema(CrewRecovery.methods.run.input)).toBe(true);
 });
 
@@ -134,8 +136,10 @@ test("crew envelope preserves native field transforms but not top-level defaults
     acknowledgeDiscard: false,
   });
 
-  if (Result.isSuccess(invalid))
+  if (Result.isSuccess(invalid)) {
     throw new Error("False acknowledgement accepted");
+  }
+
   expect(invalid.failure.message).toContain('["acknowledgeDiscard"]');
 });
 
@@ -192,10 +196,11 @@ test("crew defaults and optional protection preserve input distinctions", () => 
     expected: { controlID: null },
   });
 
-  for (const idleAt of [1, Number.MAX_SAFE_INTEGER])
+  for (const idleAt of [1, Number.MAX_SAFE_INTEGER]) {
     expect(
       decode({ ...resume, expected: { ...resume.expected, idleAt } }),
     ).toMatchObject({ expected: { idleAt } });
+  }
 
   for (const idleAt of [
     0,
@@ -205,7 +210,7 @@ test("crew defaults and optional protection preserve input distinctions", () => 
     null,
     undefined,
     "1",
-  ])
+  ]) {
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(crewInputSchema)({
@@ -214,6 +219,7 @@ test("crew defaults and optional protection preserve input distinctions", () => 
         }),
       ),
     ).toBe(true);
+  }
 });
 
 test("project raw-key rejection precedes record stripping and path rules stay distinct", () => {
@@ -270,8 +276,10 @@ test("OpenCode envelope is strict and raw; Pi keeps union/default requirements a
     additionalProperties: false,
   });
 
-  for (const key of ["anyOf", "oneOf", "allOf"])
+  for (const key of ["anyOf", "oneOf", "allOf"]) {
     expect(json).not.toHaveProperty(key);
+  }
+
   expect(
     await standard.validate({
       ...resume,
@@ -286,7 +294,10 @@ test("OpenCode envelope is strict and raw; Pi keeps union/default requirements a
 
   const tool = extension.tools?.find((tool) => tool.name === "stargate_crew");
 
-  if (!tool) throw new Error("Missing native crew tool");
+  if (!tool) {
+    throw new Error("Missing native crew tool");
+  }
+
   expect(tool.parameters).toHaveProperty("oneOf");
 
   const parse = (
@@ -397,8 +408,9 @@ test("recovery acknowledgements retain field paths in native and Standard input"
 
       const parsed = decode(input);
 
-      if (Result.isSuccess(parsed))
+      if (Result.isSuccess(parsed)) {
         throw new Error("Invalid recovery acknowledgement accepted");
+      }
 
       const expected = expect.arrayContaining([
         expect.objectContaining({ path: ["request", field] }),

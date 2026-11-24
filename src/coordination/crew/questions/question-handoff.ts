@@ -115,9 +115,13 @@ export class CrewQuestionHandoff {
   }
 
   public route(preference?: boolean, externalHistory = false) {
-    if (preference === false) return "direct";
+    if (preference === false) {
+      return "direct";
+    }
 
-    if (preference || this.hasConsumer()) return "gateway";
+    if (preference || this.hasConsumer()) {
+      return "gateway";
+    }
 
     // A configured history service may be read-only. Its URL and credentials
     // Do not establish authority to read the exact form or submit an answer.
@@ -125,7 +129,10 @@ export class CrewQuestionHandoff {
   }
 
   public take(captain: string) {
-    if (captain !== this.captain) return { work: null };
+    if (captain !== this.captain) {
+      return { work: null };
+    }
+
     this.lastTake = this.now();
 
     for (const entry of this.pending.values()) {
@@ -133,8 +140,10 @@ export class CrewQuestionHandoff {
         entry.work.owner.captain !== captain ||
         entry.taken ||
         !entry.current()
-      )
+      ) {
         continue;
+      }
+
       entry.taken = true;
 
       return { work: entry.work };
@@ -153,8 +162,10 @@ export class CrewQuestionHandoff {
       entry.confirmed ||
       entry.work.action.kind !== "write" ||
       !entry.current()
-    )
+    ) {
       return { approved: false };
+    }
+
     entry.confirmed = true;
 
     return { approved: true };
@@ -163,8 +174,10 @@ export class CrewQuestionHandoff {
   public finish(captain: string, id: string, result: CrewQuestionReceipt) {
     const entry = this.pending.get(id);
 
-    if (!entry || entry.work.owner.captain !== captain || !entry.taken)
+    if (!entry || entry.work.owner.captain !== captain || !entry.taken) {
       return { received: false };
+    }
+
     entry.finish(
       entry.confirmed || entry.current() ? result : { status: "failed" },
     );
@@ -190,8 +203,10 @@ export class CrewQuestionHandoff {
     };
 
     const request = async (action: Action, signal: AbortSignal) => {
-      if (!current() || this.pending.size >= 64)
+      if (!current() || this.pending.size >= 64) {
         throw new Error("Crew question handoff unavailable");
+      }
+
       const deadline = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
       deadline.throwIfAborted();
       const id = randomUUID();
@@ -215,8 +230,9 @@ export class CrewQuestionHandoff {
       try {
         const result = await promise;
 
-        if (result.status === "failed")
+        if (result.status === "failed") {
           throw new Error("Crew question handoff unavailable");
+        }
 
         return result;
       } finally {
@@ -227,11 +243,15 @@ export class CrewQuestionHandoff {
 
     return {
       async pendingQuestions(session: string, signal: AbortSignal) {
-        if (session !== owner.session) return [];
+        if (session !== owner.session) {
+          return [];
+        }
+
         const result = await request({ kind: "list" }, signal);
 
-        if (result.status !== "ok" || !result.forms)
+        if (result.status !== "ok" || !result.forms) {
           throw new Error("Crew question list unavailable");
+        }
 
         return result.forms
           .map((raw) =>
@@ -267,8 +287,9 @@ export class CrewQuestionHandoff {
               signal,
             )
           ).status !== "ok"
-        )
+        ) {
           throw new Error("Crew answer outcome unconfirmed");
+        }
       },
       async outcome(form: string, fingerprint: string, signal: AbortSignal) {
         const { status } = await request(

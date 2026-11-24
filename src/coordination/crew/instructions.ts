@@ -72,7 +72,9 @@ export function workingAgreementContext(
 
     const changed = await notice(`${event.agent}:${event.sessionID}`);
 
-    if (changed) event.system.push({ type: "text", text: changed });
+    if (changed) {
+      event.system.push({ type: "text", text: changed });
+    }
   };
 }
 

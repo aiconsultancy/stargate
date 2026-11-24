@@ -87,8 +87,9 @@ function advertised(key: string, variants: Record<string, unknown>[]) {
     variants.length === 1 &&
     only?.["type"] === "boolean" &&
     Object.keys(only).length === 1
-  )
+  ) {
     return only;
+  }
 
   return {
     anyOf: variants.map((variant) => {
@@ -113,17 +114,20 @@ function jsonTarget(
   json: Record<string, unknown>,
   target: StandardJSONSchemaV1.Target,
 ) {
-  if (target === "draft-2020-12")
+  if (target === "draft-2020-12") {
     return structuredClone({
       $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12,
       ...json,
     });
+  }
 
-  if (target === "draft-07")
+  if (target === "draft-07") {
     return structuredClone({
       $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
       ...json,
     });
+  }
+
   throw new Error(`Unsupported cron schema target: ${target}`);
 }
 
@@ -136,7 +140,7 @@ export function cronToolInput(): StandardSchemaV1<Record<string, unknown>> &
   StandardJSONSchemaV1<Record<string, unknown>> {
   const fields = new Map<string, Schema.Constraint[]>();
 
-  for (const branch of cronOperationBranches.members)
+  for (const branch of cronOperationBranches.members) {
     for (const [key, field] of Object.entries<Schema.Constraint>(
       branch.fields,
     )) {
@@ -144,6 +148,7 @@ export function cronToolInput(): StandardSchemaV1<Record<string, unknown>> &
       variants.push(field);
       fields.set(key, variants);
     }
+  }
 
   const properties: Record<string, unknown> = {};
   const decoders = new Map<string, FieldDecoder[]>();
@@ -189,8 +194,10 @@ export function cronToolInput(): StandardSchemaV1<Record<string, unknown>> &
       validate: (raw) => {
         const object = decodeObject(raw);
 
-        if (Result.isFailure(object))
+        if (Result.isFailure(object)) {
           return settingsIssues(object.failure.issue);
+        }
+
         const input = object.success;
         const issues: StandardSchemaV1.Issue[] = [];
         const value: Record<string, unknown> = {};
@@ -212,8 +219,10 @@ export function cronToolInput(): StandardSchemaV1<Record<string, unknown>> &
           if (
             operationChecked.has(key) ||
             (field === undefined && key !== "op")
-          )
+          ) {
             continue;
+          }
+
           const results = variants.map((decode) => decode(field));
           const decoded = results.find((result) => Result.isSuccess(result));
 
@@ -230,27 +239,39 @@ export function cronToolInput(): StandardSchemaV1<Record<string, unknown>> &
             continue;
           }
 
-          for (const issue of settingsIssues(only.failure.issue).issues)
+          for (const issue of settingsIssues(only.failure.issue).issues) {
             issues.push({ ...issue, path: [key, ...(issue.path ?? [])] });
+          }
 
-          if (!continues(only.failure.issue)) stop = true;
+          if (!continues(only.failure.issue)) {
+            stop = true;
+          }
         }
 
         const unknown: string[] = [];
 
-        for (const key in input) if (!decoders.has(key)) unknown.push(key);
+        for (const key in input) {
+          if (!decoders.has(key)) {
+            unknown.push(key);
+          }
+        }
 
-        if (unknown.length > 0)
+        if (unknown.length > 0) {
           issues.push({
             path: [],
             message: `Unrecognized key${unknown.length === 1 ? "" : "s"}: ${unknown.map((key) => JSON.stringify(key)).join(", ")}`,
           });
+        }
 
-        if (stop) return { issues };
+        if (stop) {
+          return { issues };
+        }
+
         const operation = decodeOperation(value);
 
-        if (Result.isFailure(operation))
+        if (Result.isFailure(operation)) {
           issues.push(...settingsIssues(operation.failure.issue).issues);
+        }
 
         return issues.length > 0 ? { issues } : { value };
       },
@@ -275,16 +296,18 @@ export class CrewCron {
   public async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
     const parsed = Schema.decodeUnknownResult(cronOperationSchema)(raw);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError(
         "Invalid stargate_cron input. Use the declared fields.",
       );
+    }
 
     const cancelled = () => {
-      if (caller.signal.aborted)
+      if (caller.signal.aborted) {
         throw new CrewError(
           "Cronjob operation cancelled; inspect retained status before retrying.",
         );
+      }
     };
 
     cancelled();
@@ -292,7 +315,10 @@ export class CrewCron {
     try {
       await this.authority.captain(caller);
     } catch (error) {
-      if (error instanceof CrewError) throw error;
+      if (error instanceof CrewError) {
+        throw error;
+      }
+
       throw new CrewError(
         "Captain verification unavailable; raw details withheld.",
       );
@@ -301,10 +327,12 @@ export class CrewCron {
     cancelled();
     const { captainDirectory, cron } = this.authority.options;
 
-    if (!cron)
+    if (!cron) {
       throw new CrewError(
         "Cronjobs unavailable: configure this captain's cron configPath and bot binding first.",
       );
+    }
+
     const input = parsed.success;
 
     // Stable host tool identity makes a retry reuse its durable admission.

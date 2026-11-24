@@ -32,10 +32,13 @@ const input = {
 const model = "openai-proxy/gpt-6-luna#medium";
 
 afterEach(async () => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 
-  for (const path of paths.splice(0))
+  for (const path of paths.splice(0)) {
     await rm(path, { recursive: true, force: true });
+  }
 });
 
 async function fixture(advanced = true) {
@@ -307,7 +310,9 @@ test("control validates explicit models and shows selection in add, list and rep
       _directory: string,
       selected: { model?: string },
     ) {
-      if (selected.model !== model) throw new Error("Unavailable model");
+      if (selected.model !== model) {
+        throw new Error("Unavailable model");
+      }
 
       return { model };
     },
@@ -503,7 +508,10 @@ test("advanced-off file sync fails accepted occurrences without forwarding file 
   expect(job).toBeDefined();
   f.store.runNow(f.scope, input.name, now);
 
-  if (!f.config.cronjobs) throw new Error("Fixture cron configuration missing");
+  if (!f.config.cronjobs) {
+    throw new Error("Fixture cron configuration missing");
+  }
+
   worker.reconfigure({
     ...f.config,
     cronjobs: { ...f.config.cronjobs, advanced: false },
@@ -611,8 +619,10 @@ test("a timed-out tools-off occurrence fails without replay and the next occurre
       calls++;
       expect(current.aborted).toBe(false);
 
-      if (calls > 1)
+      if (calls > 1) {
         return { model, text: "Future occurrence", verdict: "act" };
+      }
+
       queueMicrotask(() =>
         deadline.abort(new DOMException("Deadline", "TimeoutError")),
       );

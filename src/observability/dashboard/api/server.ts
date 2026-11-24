@@ -45,10 +45,13 @@ function failure(status: number, code: string) {
 export const apiRequestMs = 20_000;
 
 function deadline(value: number | undefined, ceiling: number) {
-  if (value === undefined) return ceiling;
+  if (value === undefined) {
+    return ceiling;
+  }
 
-  if (!Number.isInteger(value) || value <= 0 || value > ceiling)
+  if (!Number.isInteger(value) || value <= 0 || value > ceiling) {
     throw new Error("Invalid API deadline");
+  }
 
   return value;
 }
@@ -60,7 +63,9 @@ function requestHeaders(request: IncomingMessage) {
     const key = request.rawHeaders[i];
     const value = request.rawHeaders[i + 1];
 
-    if (key !== undefined && value !== undefined) headers.append(key, value);
+    if (key !== undefined && value !== undefined) {
+      headers.append(key, value);
+    }
   }
 
   return headers;
@@ -116,7 +121,9 @@ function readBody(
     request.once("error", onError);
     signal.addEventListener("abort", onAbort, { once: true });
 
-    if (signal.aborted) onAbort();
+    if (signal.aborted) {
+      onAbort();
+    }
   });
 }
 
@@ -134,7 +141,10 @@ async function writeResponse(
 
   output.statusCode = response.status;
 
-  for (const [key, value] of response.headers) output.setHeader(key, value);
+  for (const [key, value] of response.headers) {
+    output.setHeader(key, value);
+  }
+
   // One request per connection bounds rejected bodies and pipelined work too.
   output.setHeader("Connection", "close");
   output.flushHeaders();
@@ -156,12 +166,16 @@ async function writeResponse(
   signal.addEventListener("abort", cancel, { once: true });
 
   try {
-    if (signal.aborted) cancel();
+    if (signal.aborted) {
+      cancel();
+    }
 
     while (!signal.aborted) {
       const chunk = await reader.read();
 
-      if (chunk.done) break;
+      if (chunk.done) {
+        break;
+      }
 
       if (!output.write(chunk.value)) {
         await new Promise<void>((resolve) => {
@@ -174,12 +188,16 @@ async function writeResponse(
           output.once("drain", done);
           signal.addEventListener("abort", done, { once: true });
 
-          if (signal.aborted) done();
+          if (signal.aborted) {
+            done();
+          }
         });
       }
     }
 
-    if (!output.destroyed) output.end();
+    if (!output.destroyed) {
+      output.end();
+    }
   } finally {
     signal.removeEventListener("abort", cancel);
     cancel();
@@ -192,8 +210,10 @@ async function writeResponse(
 export async function startApiServer(options: Options) {
   const routes = apiRoutes(options.routes ?? []);
 
-  if (routes.length > 0 && !("unix" in options.listen))
+  if (routes.length > 0 && !("unix" in options.listen)) {
     throw new Error("Additional API routes require private Unix mode");
+  }
+
   const headersMs = deadline(options.timing?.headersMs, 10_000);
   const requestMs = deadline(options.timing?.requestMs, apiRequestMs);
   options.signal.throwIfAborted();
@@ -215,7 +235,9 @@ export async function startApiServer(options: Options) {
     (request, output) => {
       const timer = sockets.get(request.socket);
 
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+      }
 
       if (started.has(request.socket) || lifetime.signal.aborted) {
         request.socket.destroy();
@@ -278,7 +300,9 @@ export async function startApiServer(options: Options) {
     };
 
     const closed = () => {
-      if (!output.writableFinished) disconnected();
+      if (!output.writableFinished) {
+        disconnected();
+      }
     };
 
     output.once("close", closed);
@@ -301,7 +325,9 @@ export async function startApiServer(options: Options) {
     let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
     const clearFlush = () => {
-      if (flushTimer) clearTimeout(flushTimer);
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+      }
     };
 
     const destroy = () => {
@@ -310,7 +336,9 @@ export async function startApiServer(options: Options) {
     };
 
     const abort = () => {
-      if (!flushTimer) destroy();
+      if (!flushTimer) {
+        destroy();
+      }
     };
 
     request.socket.once("close", clearFlush);
@@ -338,7 +366,9 @@ export async function startApiServer(options: Options) {
 
           controller.abort();
 
-          if (!flushTimer) output.destroy();
+          if (!flushTimer) {
+            output.destroy();
+          }
         }, duration);
 
     signal.addEventListener("abort", abort, { once: true });
@@ -366,15 +396,17 @@ export async function startApiServer(options: Options) {
             ? { allowed: false as const, response: failure(403, "forbidden") }
             : route.authorize(headers);
 
-          if (!auth.allowed) response = auth.response;
-          else if (
+          if (!auth.allowed) {
+            response = auth.response;
+          } else if (
             Number(headers.get("Content-Length") ?? 0) >
             route.limits.maxBodyBytes
-          )
+          ) {
             response = failure(413, "body_too_large");
-          else {
-            if (headers.get("Expect")?.toLowerCase() === "100-continue")
+          } else {
+            if (headers.get("Expect")?.toLowerCase() === "100-continue") {
               output.writeContinue();
+            }
 
             const body = await readBody(
               request,
@@ -395,17 +427,27 @@ export async function startApiServer(options: Options) {
           }
         }
 
-        for (const key of [...response.headers.keys()])
-          if (key.startsWith("access-control-")) response.headers.delete(key);
+        for (const key of [...response.headers.keys()]) {
+          if (key.startsWith("access-control-")) {
+            response.headers.delete(key);
+          }
+        }
       } else if (fleet) {
-        if (streaming ? streams >= maxFleetStreams : reads >= maxFleetReads)
+        if (streaming ? streams >= maxFleetStreams : reads >= maxFleetReads) {
           response = failure(503, "unavailable");
-        else {
-          if (streaming) streams++;
-          else reads++;
+        } else {
+          if (streaming) {
+            streams++;
+          } else {
+            reads++;
+          }
+
           admitted = true;
 
-          if (streaming) request.socket.setTimeout(60_000, destroy);
+          if (streaming) {
+            request.socket.setTimeout(60_000, destroy);
+          }
+
           response = await options.fleet(
             new Request(`http://localhost${request.url}`, {
               method: request.method ?? "GET",
@@ -415,10 +457,13 @@ export async function startApiServer(options: Options) {
             "unix" in options.listen ? undefined : request.socket.remoteAddress,
           );
         }
-      } else response = failure(404, "not_found");
+      } else {
+        response = failure(404, "not_found");
+      }
+
       await writeResponse(response, output, signal, request.method === "HEAD");
     } catch (error) {
-      if (!signal.aborted)
+      if (!signal.aborted) {
         await writeResponse(
           failure(
             error instanceof BodyLimit ? 413 : 500,
@@ -428,8 +473,12 @@ export async function startApiServer(options: Options) {
           signal,
           request.method === "HEAD",
         );
+      }
     } finally {
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+      }
+
       signal.removeEventListener("abort", abort);
       output.off("close", closed);
       request.off("aborted", disconnected);
@@ -439,8 +488,11 @@ export async function startApiServer(options: Options) {
         if (route) {
           notifications--;
           counts.set(route.owner, (counts.get(route.owner) ?? 1) - 1);
-        } else if (streaming) streams--;
-        else reads--;
+        } else if (streaming) {
+          streams--;
+        } else {
+          reads--;
+        }
       }
     }
   }
@@ -448,7 +500,9 @@ export async function startApiServer(options: Options) {
   const closeAdmission = () => {
     accepting = false;
 
-    for (const controller of producers) controller.abort();
+    for (const controller of producers) {
+      controller.abort();
+    }
   };
 
   const cancel = () => {
@@ -466,12 +520,12 @@ export async function startApiServer(options: Options) {
   try {
     options.signal.throwIfAborted();
 
-    if ("unix" in options.listen)
+    if ("unix" in options.listen) {
       identity = await listenOnUnixSocket(server, options.listen.unix, {
         mode: 0o600,
         signal: options.signal,
       });
-    else {
+    } else {
       const listen = options.listen;
       await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
@@ -488,16 +542,21 @@ export async function startApiServer(options: Options) {
     cancel();
 
     try {
-      if (server.listening)
+      if (server.listening) {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {
-            if (error) reject(error);
-            else resolve();
+            if (error) {
+              reject(error);
+            } else {
+              resolve();
+            }
           });
         });
+      }
 
-      if ("unix" in options.listen)
+      if ("unix" in options.listen) {
         unlinkOwnSocket(options.listen.unix, identity);
+      }
     } finally {
       await Promise.allSettled(work);
     }
@@ -515,20 +574,27 @@ export async function startApiServer(options: Options) {
   }
 
   const stop = () => {
-    if (stopping !== undefined) return stopping;
+    if (stopping !== undefined) {
+      return stopping;
+    }
+
     options.signal.removeEventListener("abort", onAbort);
     cancel();
     stopping = (async () => {
       try {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {
-            if (error) reject(error);
-            else resolve();
+            if (error) {
+              reject(error);
+            } else {
+              resolve();
+            }
           });
         });
 
-        if ("unix" in options.listen)
+        if ("unix" in options.listen) {
           unlinkOwnSocket(options.listen.unix, identity);
+        }
       } finally {
         await Promise.allSettled(work);
       }

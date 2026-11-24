@@ -38,7 +38,10 @@ export function nativeCodex() {
   const platform = `${process.platform}-${process.arch}`;
   const target = codexTargets[platform];
 
-  if (!target) throw new Error(`Codex CLI is not available for ${platform}`);
+  if (!target) {
+    throw new Error(`Codex CLI is not available for ${platform}`);
+  }
+
   const entry = import.meta.resolve("@openai/codex-sdk");
   const sdk = createRequire(entry);
   const cliPackage = sdk.resolve("@openai/codex/package.json");
@@ -77,8 +80,10 @@ export async function realPath(path: string): Promise<string> {
       const code = (error as NodeJS.ErrnoException).code;
       const parent = dirname(current);
 
-      if ((code !== "ENOENT" && code !== "ENOTDIR") || parent === current)
+      if ((code !== "ENOENT" && code !== "ENOTDIR") || parent === current) {
         throw error;
+      }
+
       missing.push(basename(current));
       current = parent;
     }
@@ -109,14 +114,19 @@ async function walk(
   ) => Promise<void> | void,
   cache = new Map<string, Stats | undefined>(),
 ): Promise<string> {
-  if (!path.startsWith("/")) throw new Error("Codex paths must be absolute");
+  if (!path.startsWith("/")) {
+    throw new Error("Codex paths must be absolute");
+  }
+
   const pending = path.split("/").filter(Boolean);
   let resolved = "/";
 
   for (let links = 0; pending.length > 0;) {
     const name = pending.shift() ?? "";
 
-    if (name === ".") continue;
+    if (name === ".") {
+      continue;
+    }
 
     if (name === "..") {
       resolved = dirname(resolved);
@@ -125,17 +135,25 @@ async function walk(
 
     const next = join(resolved, name);
 
-    if (!cache.has(next))
+    if (!cache.has(next)) {
       cache.set(
         next,
         await lstat(next).catch((error: NodeJS.ErrnoException): undefined => {
-          if (error.code === "ENOENT") return;
+          if (error.code === "ENOENT") {
+            return;
+          }
+
           throw error;
         }),
       );
+    }
+
     const entry = cache.get(next);
 
-    if (!entry) return join(next, ...pending);
+    if (!entry) {
+      return join(next, ...pending);
+    }
+
     await visit(next, entry, resolved);
 
     if (!entry.isSymbolicLink()) {
@@ -143,10 +161,16 @@ async function walk(
       continue;
     }
 
-    if (++links > 40) throw new Error("Codex path has too many links");
+    if (++links > 40) {
+      throw new Error("Codex path has too many links");
+    }
+
     const target = await readlink(next);
 
-    if (target.startsWith("/")) resolved = "/";
+    if (target.startsWith("/")) {
+      resolved = "/";
+    }
+
     pending.unshift(...target.split("/").filter(Boolean));
   }
 
@@ -169,10 +193,11 @@ export async function trustedPath(
       entry.isSymbolicLink() &&
       ((await writable(directory)) ||
         roots.some((root) => within(directory, root)))
-    )
+    ) {
       throw new Error(
         "Codex paths must not pass through a symbolic link that Stargate's user or the sandbox can change",
       );
+    }
   });
 }
 
@@ -189,8 +214,9 @@ async function rootChain(path: string, cache?: Map<string, Stats | undefined>) {
       if (
         entry.uid !== 0 ||
         (!entry.isSymbolicLink() && (entry.mode & 0o022) !== 0)
-      )
+      ) {
         throw new Error("not root-controlled");
+      }
     },
     cache,
   ).then(
@@ -202,9 +228,13 @@ async function rootChain(path: string, cache?: Map<string, Stats | undefined>) {
 /** True when no component of the absolute `path` is a symbolic link. */
 export async function linkFree(path: string) {
   for (let current = path; ; current = dirname(current)) {
-    if ((await lstat(current)).isSymbolicLink()) return false;
+    if ((await lstat(current)).isSymbolicLink()) {
+      return false;
+    }
 
-    if (dirname(current) === current) return true;
+    if (dirname(current) === current) {
+      return true;
+    }
   }
 }
 
@@ -217,7 +247,9 @@ export function within(path: string, root: string) {
 
 /** The directories that tool commands can write: Codex's writable roots. */
 export function writableRoots(config: CodexConfig, temporary?: string) {
-  if (config.sandbox === "read-only") return [];
+  if (config.sandbox === "read-only") {
+    return [];
+  }
 
   return [config.directory, ...(temporary ? [temporary] : [])];
 }
@@ -238,7 +270,10 @@ export async function checkCodexPaths(
   temporary?: string,
   env: NodeJS.ProcessEnv = process.env,
 ) {
-  if (config.sandbox !== "workspace-write") return;
+  if (config.sandbox !== "workspace-write") {
+    return;
+  }
+
   const directory = await realPath(config.directory);
   const turn = temporary ? await realPath(temporary) : undefined;
 
@@ -248,23 +283,27 @@ export async function checkCodexPaths(
     ["the Codex SDK and CLI", nativeCodex().packages],
   ];
 
-  for (const [name, paths] of named)
+  for (const [name, paths] of named) {
     for (const path of await Promise.all(paths.map((item) => realPath(item)))) {
-      if (within(path, directory) || within(directory, path))
+      if (within(path, directory) || within(directory, path)) {
         throw new Error(
           `Codex workspace-write directory must not contain or be inside ${name}`,
         );
+      }
 
-      if (turn && within(path, turn))
+      if (turn && within(path, turn)) {
         throw new Error(`Codex turn TMPDIR must not contain ${name}`);
+      }
     }
+  }
 
   const home = env["HOME"];
 
-  if (home && within(await realPath(home), directory))
+  if (home && within(await realPath(home), directory)) {
     throw new Error(
       "Codex workspace-write directory must not contain the home directory",
     );
+  }
 }
 
 /** System directories that the CLI's `PATH` can hold, in this order. */
@@ -279,17 +318,27 @@ export const searchDirectories = ["/usr/local/bin", "/usr/bin", "/bin"];
 async function systemDirectory(
   path: string,
 ): Promise<{ path: string } | { reason: string }> {
-  if (!(await lstat(path).catch(() => {}))) return { reason: "missing" };
+  if (!(await lstat(path).catch(() => {}))) {
+    return { reason: "missing" };
+  }
+
   const cache = new Map<string, Stats | undefined>();
 
-  if (!(await rootChain(path, cache))) return { reason: "not root-controlled" };
+  if (!(await rootChain(path, cache))) {
+    return { reason: "not root-controlled" };
+  }
+
   const real = await realpath(path);
 
-  if (!(await stat(real)).isDirectory()) return { reason: "not a directory" };
+  if (!(await stat(real)).isDirectory()) {
+    return { reason: "not a directory" };
+  }
 
-  for (const name of await readdir(real))
-    if (!(await rootChain(join(real, name), cache)))
+  for (const name of await readdir(real)) {
+    if (!(await rootChain(join(real, name), cache))) {
       return { reason: `${name} in it is not root-controlled` };
+    }
+  }
 
   return { path: real };
 }
@@ -309,8 +358,11 @@ export async function systemDirectories(
       reason: "unreadable",
     }));
 
-    if ("reason" in result) reasons.push(`${directory}: ${result.reason}`);
-    else if (!found.includes(result.path)) found.push(result.path);
+    if ("reason" in result) {
+      reasons.push(`${directory}: ${result.reason}`);
+    } else if (!found.includes(result.path)) {
+      found.push(result.path);
+    }
   }
 
   return { found, reasons };
@@ -326,27 +378,31 @@ export async function systemDirectories(
 async function extraDirectory(path: string, roots: readonly string[]) {
   const real = await trustedPath(path, roots);
 
-  if (!(await stat(real).catch(() => {}))?.isDirectory())
+  if (!(await stat(real).catch(() => {}))?.isDirectory()) {
     throw new Error("Codex extraPath entries must be existing directories");
+  }
 
   const inside = (candidate: string) =>
     roots.some((root) => within(candidate, root));
 
-  if (inside(real))
+  if (inside(real)) {
     throw new Error("Codex extraPath must not be inside a writable directory");
+  }
 
   for (const name of await readdir(real)) {
     const target = await walk(join(real, name), (_, entry, directory) => {
-      if (entry.isSymbolicLink() && inside(directory))
+      if (entry.isSymbolicLink() && inside(directory)) {
         throw new Error(
           "Codex extraPath programs must not link through a writable directory",
         );
+      }
     });
 
-    if (inside(target))
+    if (inside(target)) {
       throw new Error(
         "Codex extraPath programs must not run from a writable directory",
       );
+    }
   }
 
   return real;
@@ -370,19 +426,26 @@ export async function codexSearchPath(
 ) {
   const system = await systemDirectories(directories);
 
-  if (system.found.length === 0 && extra.length === 0)
+  if (system.found.length === 0 && extra.length === 0) {
     throw new Error(
       `Codex found no root-controlled system directory for PATH (${system.reasons.join("; ")}). Make root own those programs, or list directories that you trust in the backend's extraPath.`,
     );
+  }
+
   const entries: string[] = helpers ? [helpers] : [];
 
-  for (const directory of system.found)
-    if (!entries.includes(directory)) entries.push(directory);
+  for (const directory of system.found) {
+    if (!entries.includes(directory)) {
+      entries.push(directory);
+    }
+  }
 
   for (const directory of extra) {
     const real = await extraDirectory(directory, roots);
 
-    if (!entries.includes(real)) entries.push(real);
+    if (!entries.includes(real)) {
+      entries.push(real);
+    }
   }
 
   return entries.join(":");
@@ -402,10 +465,13 @@ async function rootControlled(path: string) {
     if (
       entry.uid !== 0 ||
       (!entry.isSymbolicLink() && (entry.mode & 0o022) !== 0)
-    )
+    ) {
       return false;
+    }
 
-    if (dirname(current) === current) return true;
+    if (dirname(current) === current) {
+      return true;
+    }
   }
 }
 
@@ -427,7 +493,10 @@ export async function trustedUtilities(
     for (const directory of directories) {
       const candidate = join(directory, name);
 
-      if (!(await lstat(candidate).catch(() => {}))) continue;
+      if (!(await lstat(candidate).catch(() => {}))) {
+        continue;
+      }
+
       const real = await realpath(candidate);
 
       if (
@@ -444,10 +513,11 @@ export async function trustedUtilities(
       }
     }
 
-    if (!found[name])
+    if (!found[name]) {
       throw new Error(
         `Codex backend needs a root-owned ${name} in ${directories.join(" or ")}`,
       );
+    }
   }
 
   return found as Record<"sh" | "mkfifo" | "cat" | "rm", string>;

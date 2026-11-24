@@ -52,7 +52,10 @@ export function markdownChunks(points: string[]): string[] {
     let state: Fence | undefined;
 
     for (const line of fences) {
-      if (line.end > position) break;
+      if (line.end > position) {
+        break;
+      }
+
       state = line.after;
     }
 
@@ -74,7 +77,9 @@ export function markdownChunks(points: string[]): string[] {
         (line) => line.start < end && end < line.end,
       );
 
-      if (crossing) end = crossing.start;
+      if (crossing) {
+        end = crossing.start;
+      }
 
       if (end < points.length) {
         const minimum = start + Math.floor((end - start) / 2);
@@ -89,7 +94,9 @@ export function markdownChunks(points: string[]): string[] {
               newline = i + 1;
               break;
             }
-          } else if (points[i] === " " || points[i] === "\t") space ||= i + 1;
+          } else if (points[i] === " " || points[i] === "\t") {
+            space ||= i + 1;
+          }
         }
 
         end = newline || (stateAt(end) ? 0 : space) || end;
@@ -101,7 +108,10 @@ export function markdownChunks(points: string[]): string[] {
         : "";
       const overflow = end - start + Array.from(suffix).length - capacity;
 
-      if (overflow <= 0) break;
+      if (overflow <= 0) {
+        break;
+      }
+
       end -= overflow;
     }
 

@@ -118,7 +118,9 @@ function queued(store: Store, eventId = "event") {
   });
   const job = store.queuedJob("bot", eventId);
 
-  if (!job) throw new Error("missing job");
+  if (!job) {
+    throw new Error("missing job");
+  }
 
   return job.id;
 }

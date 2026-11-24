@@ -162,7 +162,9 @@ export class AgentDispatcher {
     for (const tracked of this.options.ledger.active()) {
       const at = this.dueAt(tracked);
 
-      if (at !== undefined && (due === undefined || at < due)) due = at;
+      if (at !== undefined && (due === undefined || at < due)) {
+        due = at;
+      }
     }
 
     return due;
@@ -191,7 +193,10 @@ export class AgentDispatcher {
         due = Math.min(nextPoll, this.nextDue() ?? nextPoll);
         this.polling.cleared("cycle");
       } catch {
-        if (signal.aborted) return;
+        if (signal.aborted) {
+          return;
+        }
+
         due = nextPoll;
         this.polling.warnOnce(
           "cycle",
@@ -199,7 +204,9 @@ export class AgentDispatcher {
         );
       }
 
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        return;
+      }
 
       const wait = Math.min(
         Math.max(1000, due - this.now()),
@@ -239,7 +246,7 @@ export class AgentDispatcher {
       updatedAt: this.now(),
     });
 
-    if (open)
+    if (open) {
       await this.announce(
         {
           kind: "withdrawn",
@@ -250,6 +257,7 @@ export class AgentDispatcher {
         },
         signal,
       );
+    }
   }
 
   private async announce(event: DispatchEvent, signal: AbortSignal) {
@@ -267,13 +275,17 @@ export class AgentDispatcher {
   private async timers(signal: AbortSignal) {
     // Nothing moves until this process has read the roster: at a poll, or
     // Before an acceptance write as a confirmed identity.
-    if (!this.polling.roster) return;
+    if (!this.polling.roster) {
+      return;
+    }
 
     for (const tracked of this.options.ledger.active()) {
       signal.throwIfAborted();
       const retry = this.retryAt.get(tracked.issue);
 
-      if (retry !== undefined && this.now() < retry) continue;
+      if (retry !== undefined && this.now() < retry) {
+        continue;
+      }
 
       try {
         await this.due(tracked, signal);
@@ -302,7 +314,9 @@ export class AgentDispatcher {
     if (tracked.state === "asking") {
       const offer = tracked.offer;
 
-      if (!offer) return;
+      if (!offer) {
+        return;
+      }
 
       // Declined, timed out or never delivered: move on without waiting.
       if (tracked.closedOffer === offer.id) {
@@ -315,7 +329,10 @@ export class AgentDispatcher {
         return;
       }
 
-      if (now < offer.deadline) return;
+      if (now < offer.deadline) {
+        return;
+      }
+
       const closed: TrackedIssue = { ...tracked, closedOffer: offer.id };
       this.options.ledger.save(closed);
       await this.announce(
@@ -335,12 +352,16 @@ export class AgentDispatcher {
       );
       await this.askNext(closed, closed.position + 1, signal);
     } else if (tracked.state === "waiting") {
-      if (tracked.nextRoundAt !== undefined && now < tracked.nextRoundAt)
+      if (tracked.nextRoundAt !== undefined && now < tracked.nextRoundAt) {
         return;
+      }
+
       await this.startRound(tracked, signal);
-    } else if (tracked.state === "accepting")
+    } else if (tracked.state === "accepting") {
       await this.assignAccepted(tracked, signal);
-    else if (tracked.state === "clearing") await this.giveUp(tracked, signal);
+    } else if (tracked.state === "clearing") {
+      await this.giveUp(tracked, signal);
+    }
   }
 
   /**
@@ -364,10 +385,16 @@ export class AgentDispatcher {
   private async startRound(tracked: TrackedIssue, signal: AbortSignal) {
     const roster = this.polling.roster;
 
-    if (!roster) return;
+    if (!roster) {
+      return;
+    }
+
     const current = await this.stillReady(tracked, signal);
 
-    if (!current) return;
+    if (!current) {
+      return;
+    }
+
     const ids = [...roster.captains.keys()].toSorted();
     const shift = ids.length > 0 ? tracked.start % ids.length : 0;
     const order = [...ids.slice(shift), ...ids.slice(0, shift)];
@@ -398,20 +425,29 @@ export class AgentDispatcher {
   ) {
     const roster = this.polling.roster;
 
-    if (!roster) return;
+    if (!roster) {
+      return;
+    }
+
     let version = checked;
 
     if (version === undefined && position < tracked.order.length) {
       const current = await this.stillReady(tracked, signal);
 
-      if (!current) return;
+      if (!current) {
+        return;
+      }
+
       version = current.version;
     }
 
     for (let index = position; index < tracked.order.length; index++) {
       const captain = roster.captains.get(tracked.order[index] ?? "");
 
-      if (!captain?.available || !captain.reachable) continue;
+      if (!captain?.available || !captain.reachable) {
+        continue;
+      }
+
       const now = this.now();
 
       const asking: TrackedIssue = {
@@ -431,7 +467,10 @@ export class AgentDispatcher {
 
       const offer = asking.offer;
 
-      if (!offer) continue;
+      if (!offer) {
+        continue;
+      }
+
       // Recorded before it is sent: a restart keeps waiting for this offer.
       this.options.ledger.save(asking);
       let sent: { messageID: string | undefined } | undefined;
@@ -481,13 +520,17 @@ export class AgentDispatcher {
       }
 
       // The captain is not online under its account now: like unavailable.
-      if (!sent) continue;
+      if (!sent) {
+        continue;
+      }
 
-      if (sent.messageID === undefined)
+      if (sent.messageID === undefined) {
         this.polling.warnOnce(
           "message-id",
           "Agent dispatch offer has no server message ID; answers to it cannot be matched",
         );
+      }
+
       this.options.ledger.save({
         ...asking,
         offer: {
@@ -541,7 +584,10 @@ export class AgentDispatcher {
     const { api, ledger } = this.options;
 
     // Never write as an identity this process has not confirmed.
-    if (!(await this.polling.identityConfirmed(signal))) return;
+    if (!(await this.polling.identityConfirmed(signal))) {
+      return;
+    }
+
     let state = tracked;
 
     for (let attempt = 0; attempt < maxEditAttempts; attempt++) {
@@ -574,7 +620,10 @@ export class AgentDispatcher {
 
       const result = await api.clearReady(state.issue, current.version, signal);
 
-      if (result.conflict) continue;
+      if (result.conflict) {
+        continue;
+      }
+
       await this.gaveUp(state, result.version ?? current.version + 1, signal);
 
       return;
@@ -665,7 +714,9 @@ export class AgentDispatcher {
   private async assignAccepted(tracked: TrackedIssue, signal: AbortSignal) {
     const offer = tracked.offer;
 
-    if (!offer) return;
+    if (!offer) {
+      return;
+    }
 
     if (!(await this.polling.identityConfirmed(signal))) {
       this.polling.warnOnce(
@@ -688,7 +739,7 @@ export class AgentDispatcher {
         if (current?.assignee) {
           const mine = current.assignee.userId === offer.captain;
 
-          if (mine)
+          if (mine) {
             ledger.recordNotified(
               tracked.issue,
               offer.captain,
@@ -696,6 +747,8 @@ export class AgentDispatcher {
               this.now(),
               false,
             );
+          }
+
           ledger.save({
             ...tracked,
             state: "done",
@@ -732,7 +785,9 @@ export class AgentDispatcher {
           return;
         }
 
-        if (!current) return;
+        if (!current) {
+          return;
+        }
 
         // The offer's stored user ID is not proof: the captain may have left
         // The fleet, been demoted or been renamed to another chat account.
@@ -752,7 +807,10 @@ export class AgentDispatcher {
           signal,
         );
 
-        if (result.conflict) continue;
+        if (result.conflict) {
+          continue;
+        }
+
         // The captain accepted: no separate assignment notice follows.
         ledger.recordNotified(
           tracked.issue,
@@ -805,7 +863,9 @@ export class AgentDispatcher {
       throw error;
     }
 
-    if (refused) await this.refuseAcceptance(tracked, refused, signal);
+    if (refused) {
+      await this.refuseAcceptance(tracked, refused, signal);
+    }
   }
 
   /**
@@ -819,7 +879,9 @@ export class AgentDispatcher {
   ) {
     const offer = tracked.offer;
 
-    if (!offer) return;
+    if (!offer) {
+      return;
+    }
 
     const declined: TrackedIssue = {
       ...tracked,

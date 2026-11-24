@@ -27,10 +27,15 @@ export function upgradeCandidates(
   const result = new Map<string, string[]>();
 
   for (const ref of inUse) {
-    if (!providers.includes(ref.providerID) || result.has(ref.id)) continue;
+    if (!providers.includes(ref.providerID) || result.has(ref.id)) {
+      continue;
+    }
+
     const newer = newerModels(ref.id, catalog, families);
 
-    if (newer.length > 0) result.set(ref.id, newer);
+    if (newer.length > 0) {
+      result.set(ref.id, newer);
+    }
   }
 
   return result;
@@ -78,7 +83,10 @@ export function upgradeRef(
 ) {
   const ref = parseRef(value);
 
-  if (!ref || !providers.includes(ref.providerID)) return null;
+  if (!ref || !providers.includes(ref.providerID)) {
+    return null;
+  }
+
   const next = upgrades.get(ref.id);
 
   return next ? formatRef({ ...ref, id: next }) : null;
@@ -97,8 +105,9 @@ function parseCanonical(text: string): unknown {
     throw new StepError("config-format");
   }
 
-  if (`${JSON.stringify(parsed, null, 2)}\n` !== text)
+  if (`${JSON.stringify(parsed, null, 2)}\n` !== text) {
     throw new StepError("config-format");
+  }
 
   return parsed;
 }
@@ -113,10 +122,16 @@ function setString(
 ) {
   const value = owner[key];
 
-  if (typeof value !== "string") return;
+  if (typeof value !== "string") {
+    return;
+  }
+
   const next = upgradeRef(value, upgrades, providers);
 
-  if (!next) return;
+  if (!next) {
+    return;
+  }
+
   owner[key] = next;
   changes.push({ target: pointer, from: value, to: next });
 }
@@ -129,9 +144,11 @@ function upgradeTeamObject(
   providers: readonly string[],
   changes: Change[],
 ) {
-  if (!isObject(team)) return;
+  if (!isObject(team)) {
+    return;
+  }
 
-  if (isObject(team["captain"]))
+  if (isObject(team["captain"])) {
     setString(
       team["captain"],
       "model",
@@ -140,12 +157,16 @@ function upgradeTeamObject(
       providers,
       changes,
     );
+  }
+
   const crew = team["crew"];
 
-  if (!Array.isArray(crew)) return;
+  if (!Array.isArray(crew)) {
+    return;
+  }
 
   for (const [index, member] of crew.entries()) {
-    if (isObject(member) && member["backend"] === undefined)
+    if (isObject(member) && member["backend"] === undefined) {
       setString(
         member,
         "model",
@@ -154,6 +175,7 @@ function upgradeTeamObject(
         providers,
         changes,
       );
+    }
   }
 }
 
@@ -183,9 +205,9 @@ export function upgradeOpenCodeProfile(
     setString(parsed, "model", "/model", upgrades, providers, changes);
     const agents = parsed["agents"];
 
-    if (isObject(agents))
-      for (const [name, agent] of Object.entries(agents))
-        if (isObject(agent))
+    if (isObject(agents)) {
+      for (const [name, agent] of Object.entries(agents)) {
+        if (isObject(agent)) {
           setString(
             agent,
             "model",
@@ -194,11 +216,15 @@ export function upgradeOpenCodeProfile(
             providers,
             changes,
           );
+        }
+      }
+    }
+
     const plugins = parsed["plugins"];
 
-    if (Array.isArray(plugins))
+    if (Array.isArray(plugins)) {
       for (const [index, plugin] of plugins.entries()) {
-        if (isObject(plugin) && isObject(plugin["options"]))
+        if (isObject(plugin) && isObject(plugin["options"])) {
           upgradeTeamObject(
             plugin["options"]["team"],
             `/plugins/${index}/options/team`,
@@ -206,7 +232,9 @@ export function upgradeOpenCodeProfile(
             providers,
             changes,
           );
+        }
       }
+    }
   }
 
   return { text: `${JSON.stringify(parsed, null, 2)}\n`, changes };
@@ -217,24 +245,36 @@ export function modelRefs(text: string) {
   const refs: ModelRef[] = [];
 
   const walk = (value: unknown, key?: string) => {
-    if (key === "backend" && isObject(value) && value["type"] === "pi-durable")
+    if (
+      key === "backend" &&
+      isObject(value) &&
+      value["type"] === "pi-durable"
+    ) {
       return;
+    }
 
     if (typeof value === "string" && key === "model") {
       const ref = parseRef(value);
 
-      if (ref) refs.push(ref);
+      if (ref) {
+        refs.push(ref);
+      }
     } else if (Array.isArray(value)) {
-      for (const item of value) walk(item);
+      for (const item of value) {
+        walk(item);
+      }
     } else if (isObject(value)) {
       if (
         key === "model" &&
         typeof value["providerID"] === "string" &&
         typeof value["id"] === "string"
-      )
+      ) {
         refs.push({ providerID: value["providerID"], id: value["id"] });
+      }
 
-      for (const [name, item] of Object.entries(value)) walk(item, name);
+      for (const [name, item] of Object.entries(value)) {
+        walk(item, name);
+      }
     }
   };
 
@@ -276,13 +316,19 @@ export async function readProfiles(root: string): Promise<ProfilesSnapshot> {
   const folders: Record<string, ProfileFolder> = {};
 
   for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !managedFolder.test(entry.name)) continue;
+    if (!entry.isDirectory() || !managedFolder.test(entry.name)) {
+      continue;
+    }
+
     const folder = join(root, entry.name);
     const files: Record<string, string> = {};
 
-    for (const file of await readdir(folder))
-      if (agentFile.test(file))
+    for (const file of await readdir(folder)) {
+      if (agentFile.test(file)) {
         files[file] = await readFile(join(folder, file), "utf8");
+      }
+    }
+
     folders[entry.name] = {
       routesText: await readFile(join(folder, "routes.json"), "utf8"),
       profileText: await readFile(join(folder, "PROFILE"), "utf8"),
@@ -295,7 +341,10 @@ export async function readProfiles(root: string): Promise<ProfilesSnapshot> {
   for (const name of await readdir(agentsDirectory).catch(
     () => [] as string[],
   )) {
-    if (!name.endsWith("-subagent.md")) continue;
+    if (!name.endsWith("-subagent.md")) {
+      continue;
+    }
+
     const path = join(agentsDirectory, name);
     links[name] = (await lstat(path)).isSymbolicLink()
       ? await readlink(path)
@@ -312,7 +361,9 @@ export async function readProfiles(root: string): Promise<ProfilesSnapshot> {
 type Route = { name: string; model: string };
 
 function routesOf(manifest: unknown): Route[] {
-  if (!isObject(manifest)) throw new StepError("config-format");
+  if (!isObject(manifest)) {
+    throw new StepError("config-format");
+  }
 
   const list =
     manifest["version"] === 1
@@ -325,15 +376,18 @@ function routesOf(manifest: unknown): Route[] {
           )
         : undefined;
 
-  if (!Array.isArray(list)) throw new StepError("config-format");
+  if (!Array.isArray(list)) {
+    throw new StepError("config-format");
+  }
 
   return list.map((route) => {
     if (
       !isObject(route) ||
       typeof route["name"] !== "string" ||
       typeof route["model"] !== "string"
-    )
+    ) {
       throw new StepError("config-format");
+    }
 
     return route as Route;
   });
@@ -342,12 +396,15 @@ function routesOf(manifest: unknown): Route[] {
 export function refsInProfiles(snapshot: ProfilesSnapshot) {
   const refs: ModelRef[] = [];
 
-  for (const folder of Object.values(snapshot.folders))
+  for (const folder of Object.values(snapshot.folders)) {
     for (const route of routesOf(JSON.parse(folder.routesText))) {
       const ref = parseRef(route.model);
 
-      if (ref) refs.push(ref);
+      if (ref) {
+        refs.push(ref);
+      }
     }
+  }
 
   return refs;
 }
@@ -363,8 +420,8 @@ function replaceRefs(
 ) {
   let next = text;
 
-  for (const [from, to] of upgrades)
-    for (const provider of providers)
+  for (const [from, to] of upgrades) {
+    for (const provider of providers) {
       next = next.replace(
         new RegExp(
           `${escapeRegExp(`${provider}/${from}`)}(?=[#\\s)|,"]|$)`,
@@ -372,22 +429,31 @@ function replaceRefs(
         ),
         `${provider}/${to}`,
       );
+    }
+  }
 
   return next;
 }
 
 function setDisabled(content: string, disabled: boolean) {
-  if (!content.startsWith("---\n")) throw new StepError("config-format");
+  if (!content.startsWith("---\n")) {
+    throw new StepError("config-format");
+  }
+
   const end = content.indexOf("\n---\n", 3);
 
-  if (end === -1) throw new StepError("config-format");
+  if (end === -1) {
+    throw new StepError("config-format");
+  }
 
   const head = content
     .slice(4, end)
     .split("\n")
     .filter((line) => line !== "disabled: true");
 
-  if (disabled) head.push("disabled: true");
+  if (disabled) {
+    head.push("disabled: true");
+  }
 
   return `---\n${head.join("\n")}${content.slice(end)}`;
 }
@@ -408,12 +474,15 @@ export function upgradeProfiles(
   const renames = new Map<string, { name: string; from: string; to: string }>();
   const skipped: Change[] = [];
 
-  for (const folder of Object.values(snapshot.folders))
+  for (const folder of Object.values(snapshot.folders)) {
     for (const route of routesOf(JSON.parse(folder.routesText))) {
       const to = upgradeRef(route.model, upgrades, providers);
       const ref = parseRef(route.model);
 
-      if (!to || !ref) continue;
+      if (!to || !ref) {
+        continue;
+      }
+
       const toRef = parseRef(to);
       const oldToken = parseModel(ref.id)?.token;
       const newToken = toRef ? parseModel(toRef.id)?.token : undefined;
@@ -426,10 +495,13 @@ export function upgradeProfiles(
       const name = `${newToken}${route.name.slice(oldToken.length)}`;
       const prior = renames.get(route.name);
 
-      if (prior && (prior.name !== name || prior.to !== to))
+      if (prior && (prior.name !== name || prior.to !== to)) {
         throw new StepError("config-format");
+      }
+
       renames.set(route.name, { name, from: route.model, to });
     }
+  }
 
   const writes: { path: string; content: string }[] = [];
   const changes: Change[] = [];
@@ -444,7 +516,10 @@ export function upgradeProfiles(
     for (const route of routes) {
       const rename = renames.get(route.name);
 
-      if (!rename || route.model !== rename.from) continue;
+      if (!rename || route.model !== rename.from) {
+        continue;
+      }
+
       changes.push({
         target: `${folderName}/${route.name}`,
         from: rename.from,
@@ -462,7 +537,9 @@ export function upgradeProfiles(
       const newFile = `${rename.name}.md`;
       const original = folder.files[oldFile];
 
-      if (original === undefined) continue;
+      if (original === undefined) {
+        continue;
+      }
 
       const content = setDisabled(
         replaceRefs(original, upgrades, providers),
@@ -471,40 +548,48 @@ export function upgradeProfiles(
 
       const existing = folder.files[newFile];
 
-      if (existing !== undefined && existing !== content)
+      if (existing !== undefined && existing !== content) {
         throw new StepError("config-format");
+      }
 
-      if (existing === undefined)
+      if (existing === undefined) {
         writes.push({
           path: join(snapshot.root, folderName, newFile),
           content,
         });
+      }
 
       if (!routed.has(oldName)) {
         const disabled = setDisabled(original, true);
 
-        if (disabled !== original)
+        if (disabled !== original) {
           writes.push({
             path: join(snapshot.root, folderName, oldFile),
             content: disabled,
           });
+        }
       }
 
       changed = true;
     }
 
-    if (!changed) continue;
+    if (!changed) {
+      continue;
+    }
+
     writes.push({
       path: join(snapshot.root, folderName, "routes.json"),
       content: `${JSON.stringify(manifest, null, 2)}\n`,
     });
     let profile = replaceRefs(folder.profileText, upgrades, providers);
 
-    for (const [oldName, rename] of renames)
+    for (const [oldName, rename] of renames) {
       profile = profile.replace(
         new RegExp(`\\b${escapeRegExp(oldName)}\\b`, "g"),
         rename.name,
       );
+    }
+
     writes.push({
       path: join(snapshot.root, folderName, "PROFILE"),
       content: profile,

@@ -12,7 +12,9 @@ import { bot, event, identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const sessionID = "ses_captain";
@@ -90,28 +92,33 @@ function fixture() {
     async fetch(request) {
       const path = new URL(request.url).pathname;
 
-      if (path === `/api/session/${sessionID}/form`)
+      if (path === `/api/session/${sessionID}/form`) {
         return Response.json({
           data: form ? [{ id: "frm_1", sessionID }] : [],
         });
+      }
 
-      if (path.endsWith("/form/frm_1"))
+      if (path.endsWith("/form/frm_1")) {
         return Response.json({ data: { state: { status: "pending" } } });
+      }
 
-      if (path === `/api/session/${sessionID}/permission`)
+      if (path === `/api/session/${sessionID}/permission`) {
         return Response.json({
           data: permission ? [{ id: "perm_1", sessionID }] : [],
         });
+      }
 
-      if (path === `/api/session/${sessionID}/inbox`)
+      if (path === `/api/session/${sessionID}/inbox`) {
         return Response.json({ data: queued ? [{ id: promptID }] : [] });
+      }
 
-      if (path === "/api/session/active")
+      if (path === "/api/session/active") {
         return Response.json({
           data: idle ? {} : { [sessionID]: { type: "running" } },
         });
+      }
 
-      if (path === `/api/session/${sessionID}`)
+      if (path === `/api/session/${sessionID}`) {
         return Response.json({
           data: {
             id: sessionID,
@@ -120,9 +127,11 @@ function fixture() {
             time: { busy: 1, ...(idle ? { idle: 9 } : {}) },
           },
         });
+      }
 
-      if (path === `/api/session/${sessionID}/message`)
+      if (path === `/api/session/${sessionID}/message`) {
         return Response.json({ data: messages(), cursor: {} });
+      }
 
       if (path.startsWith(`/api/session/${sessionID}/message/`)) {
         const message = messages().find(
@@ -145,7 +154,7 @@ function fixture() {
           }),
         )(body);
 
-        if (!failWrite && !pendingDelivery)
+        if (!failWrite && !pendingDelivery) {
           synthetic = Schema.decodeUnknownSync(
             Schema.Struct({
               id: Schema.String,
@@ -153,9 +162,11 @@ function fixture() {
               metadata: Schema.Record(Schema.String, Schema.Unknown),
             }),
           )(body);
+        }
 
-        if (failWrite || loseReceipt)
+        if (failWrite || loseReceipt) {
           return new Response(null, { status: 500 });
+        }
 
         return Response.json({
           data: {
@@ -195,7 +206,10 @@ function fixture() {
     sessionID,
   });
 
-  if (config.type !== "opencode") throw new Error("Expected OpenCode");
+  if (config.type !== "opencode") {
+    throw new Error("Expected OpenCode");
+  }
+
   const backend = new OpenCodeBackend(config);
 
   const input: SteerInput = {
@@ -232,23 +246,41 @@ function fixture() {
         | "pendingDelivery"
         | "local",
     ) {
-      if (value === "idle") idle = true;
+      if (value === "idle") {
+        idle = true;
+      }
 
-      if (value === "foreign") foreign = true;
+      if (value === "foreign") {
+        foreign = true;
+      }
 
-      if (value === "queued") queued = true;
+      if (value === "queued") {
+        queued = true;
+      }
 
-      if (value === "form") form = true;
+      if (value === "form") {
+        form = true;
+      }
 
-      if (value === "permission") permission = true;
+      if (value === "permission") {
+        permission = true;
+      }
 
-      if (value === "failWrite") failWrite = true;
+      if (value === "failWrite") {
+        failWrite = true;
+      }
 
-      if (value === "loseReceipt") loseReceipt = true;
+      if (value === "loseReceipt") {
+        loseReceipt = true;
+      }
 
-      if (value === "pendingDelivery") pendingDelivery = true;
+      if (value === "pendingDelivery") {
+        pendingDelivery = true;
+      }
 
-      if (value === "local") local = false;
+      if (value === "local") {
+        local = false;
+      }
     },
     finish() {
       synthetic ??= pendingSynthetic;
@@ -334,11 +366,14 @@ test("native inbox acceptance alone does not claim the running turn received a f
   expect(f.writes).toHaveLength(1);
 });
 
-for (const delayed of [false, true])
+for (const delayed of [false, true]) {
   test(`real OpenCode synthetic boundary keeps final gateway answer and link on original thread, delayed=${delayed}`, async () => {
     const f = fixture();
 
-    if (delayed) f.set("pendingDelivery");
+    if (delayed) {
+      f.set("pendingDelivery");
+    }
+
     const config = bot();
     config.backend = f.config;
     config.slack.steerThreadFollowUps = true;
@@ -374,7 +409,10 @@ for (const delayed of [false, true])
     gateway.accept(event());
     const job = store.ready(gateway.key, Date.now(), 1, true)[0];
 
-    if (!job) throw new Error("Missing original job");
+    if (!job) {
+      throw new Error("Missing original job");
+    }
+
     const process = gateway.process(job, AbortSignal.timeout(5000));
     await f.submitted.promise;
     const follow = event("<@UBOT> revised scope", "2.000");
@@ -401,3 +439,4 @@ for (const delayed of [false, true])
       done: 1,
     });
   });
+}

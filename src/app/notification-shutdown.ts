@@ -25,7 +25,10 @@ export class NotificationShutdown {
   ) {}
 
   public closeAdmission() {
-    if (!this.enabled || this.closing) return;
+    if (!this.enabled || this.closing) {
+      return;
+    }
+
     this.closing = true;
     // Referenced and armed before interruption or any unbounded stop wait.
     this.timer ??= setTimeout(
@@ -34,7 +37,10 @@ export class NotificationShutdown {
           "Notification shutdown did not settle; terminating process",
         );
 
-        if (this.options?.terminate) this.options.terminate();
+        if (this.options?.terminate) {
+          this.options.terminate();
+        }
+
         process.exit(1);
       },
       Math.min(this.options?.shutdownGraceMs ?? 25_000, 25_000),
@@ -45,18 +51,27 @@ export class NotificationShutdown {
   }
 
   public readonly stop = () => {
-    if (!this.enabled) return Promise.resolve();
+    if (!this.enabled) {
+      return Promise.resolve();
+    }
+
     this.closeAdmission();
     this.stopping ??= (async () => {
       const result = await this.core?.shutdown();
 
-      if (result?.state === "unresolved") await new Promise<never>(() => {});
+      if (result?.state === "unresolved") {
+        await new Promise<never>(() => {});
+      }
+
       await this.api?.stop();
 
-      if (this.scope)
+      if (this.scope) {
         await Effect.runPromise(Scope.close(this.scope, Exit.void));
+      }
 
-      if (this.timer) clearTimeout(this.timer);
+      if (this.timer) {
+        clearTimeout(this.timer);
+      }
     })().catch(async () => {
       // Cleanup failure cannot prove quiescence. Keep ownership to hard exit.
       this.log.error("Notification cleanup did not establish settlement");

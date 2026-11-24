@@ -80,7 +80,9 @@ async function fixture(parent = fixtureRoot()) {
   const peer = (id: string) => {
     const value = peers.get(id);
 
-    if (!value) throw new Error("Missing test peer");
+    if (!value) {
+      throw new Error("Missing test peer");
+    }
 
     return value;
   };
@@ -89,10 +91,16 @@ async function fixture(parent = fixtureRoot()) {
     const worker = peer(id);
     const task = state.reserveTask(worker, "captain", "private assignment");
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     state.savePiTaskConversation(task.id, conversationID);
 
-    if (report) state.reporting.markReport(task.id, "test-capture");
+    if (report) {
+      state.reporting.markReport(task.id, "test-capture");
+    }
+
     state.complete(task.id, worker.sessionID, "private result");
     state.release(task.id);
   };
@@ -286,7 +294,9 @@ test(
         },
       ]);
 
-      if (!first.cursor) throw new Error("Missing cursor");
+      if (!first.cursor) {
+        throw new Error("Missing cursor");
+      }
 
       const second = await f.rpc.historyChildren(
         { parentID: root, limit: 1, cursor: first.cursor },
@@ -367,8 +377,10 @@ test("history RPC children cursors are exact string records", async () => {
       encode([root, "18"]),
       encode(null),
       "not-json",
-    ])
+    ]) {
       await expect(children(cursor), cursor).rejects.toThrow(unavailable);
+    }
+
     expect(f.reads).toEqual([]);
   } finally {
     await f.close();
@@ -543,7 +555,10 @@ test("Pi history owner shutdown cancels active reads without interrupting work",
     ],
   }).crew[0];
 
-  if (!member) throw new Error("Missing member");
+  if (!member) {
+    throw new Error("Missing member");
+  }
+
   let interrupts = 0;
 
   const history: SessionHistory = {

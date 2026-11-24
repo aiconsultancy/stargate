@@ -19,7 +19,9 @@ const openssl =
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 async function fixture(
@@ -57,7 +59,9 @@ async function fixture(
       { cwd: dir, stdio: "ignore" },
     );
 
-    if (result.status !== 0) throw new Error("openssl test certificate failed");
+    if (result.status !== 0) {
+      throw new Error("openssl test certificate failed");
+    }
 
     return {
       cert: await Bun.file(join(dir, `${name}.pem`)).text(),
@@ -97,8 +101,10 @@ async function fixture(
     (socket) => {
       connections.push(socket);
 
-      if (!socket.authorized && !allowPlain)
+      if (!socket.authorized && !allowPlain) {
         throw new Error("fixture accepted an untrusted peer");
+      }
+
       let buffer = "";
       let nick = "enterprisecaptain";
       socket.on("data", (data) => {
@@ -119,34 +125,44 @@ async function fixture(
             presented.set(nick, Array.isArray(cn) ? cn[0] : cn);
           }
 
-          if (line === "CAP LS 302")
+          if (line === "CAP LS 302") {
             socket.write(":ergo CAP * LS :sasl=EXTERNAL,PLAIN account-tag\r\n");
+          }
 
-          if (line.startsWith("CAP REQ "))
+          if (line.startsWith("CAP REQ ")) {
             socket.write(`:ergo CAP * ACK :${line.slice(8)}\r\n`);
+          }
 
-          if (line === "AUTHENTICATE EXTERNAL" || line === "AUTHENTICATE PLAIN")
+          if (
+            line === "AUTHENTICATE EXTERNAL" ||
+            line === "AUTHENTICATE PLAIN"
+          ) {
             socket.write("AUTHENTICATE +\r\n");
+          }
 
           if (
             line === "AUTHENTICATE +" ||
             (line.startsWith("AUTHENTICATE ") &&
               !["AUTHENTICATE EXTERNAL", "AUTHENTICATE PLAIN"].includes(line))
           ) {
-            if (account || crew.length)
+            if (account || crew.length) {
               socket.write(
                 `:ergo 900 ${nick} * ${crew.length ? nick : account} :Logged in\r\n`,
               );
+            }
+
             socket.write(`:ergo 903 ${nick} :SASL successful\r\n`);
           }
 
-          if (line === "CAP END")
+          if (line === "CAP END") {
             socket.write(
               `:ergo 001 ${nick} :Welcome\r\n:ergo 422 ${nick} :No MOTD\r\n`,
             );
+          }
 
-          if (line.startsWith("JOIN "))
+          if (line.startsWith("JOIN ")) {
             socket.write(`:${nick}!u@local JOIN ${line.slice(5)}\r\n`);
+          }
         }
       });
       socket.on("error", () => {});
@@ -155,12 +171,17 @@ async function fixture(
 
   await new Promise<void>((resolve) => server.listen(0, resolve));
   cleanup.push(async () => {
-    for (const socket of connections) socket.destroy();
+    for (const socket of connections) {
+      socket.destroy();
+    }
+
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
   const address = server.address();
 
-  if (!address || typeof address === "string") throw new Error("missing port");
+  if (!address || typeof address === "string") {
+    throw new Error("missing port");
+  }
 
   return {
     ca: local.cert,
@@ -227,7 +248,9 @@ test.skipIf(!openssl)(
     const chief = f.peers.get("enterprisechief");
     const apollo = f.peers.get("enterpriseapollo");
 
-    if (!chief || !apollo) throw new Error("missing synthetic peer");
+    if (!chief || !apollo) {
+      throw new Error("missing synthetic peer");
+    }
 
     const backend = {
       type: "opencode",
@@ -277,7 +300,10 @@ test.skipIf(!openssl)(
     const rotated = structuredClone(next);
     const first = rotated.crew[0];
 
-    if (!first) throw new Error("missing chief");
+    if (!first) {
+      throw new Error("missing chief");
+    }
+
     first.clientPemFile = apollo.file;
     await expect(ship.prepareReload(rotated, {})).rejects.toThrow(
       "restart required",
@@ -306,7 +332,9 @@ test.skipIf(!openssl)(
 
     const chief = f.peers.get("enterprisechief");
 
-    if (!chief) throw new Error("missing synthetic peer");
+    if (!chief) {
+      throw new Error("missing synthetic peer");
+    }
 
     const backend = {
       type: "opencode",
@@ -387,7 +415,9 @@ test.skipIf(!openssl)(
     const chief = f.peers.get("enterprisechief");
     const captain = f.peers.get("enterprisecaptain");
 
-    if (!chief || !captain) throw new Error("missing synthetic peers");
+    if (!chief || !captain) {
+      throw new Error("missing synthetic peers");
+    }
 
     const backend = {
       type: "opencode",

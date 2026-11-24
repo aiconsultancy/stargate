@@ -38,10 +38,11 @@ export function subspaceUpstream(
       Object.entries(section.api.headersEnv).map(([name, variable]) => {
         const value = env[variable]?.trim();
 
-        if (!value)
+        if (!value) {
           throw new SubspaceUpstreamError(
             "A Subspace API access header variable is not set",
           );
+        }
 
         return [name, value];
       }),
@@ -52,14 +53,20 @@ export function subspaceUpstream(
 export async function boundedText(response: Response, maxBytes: number) {
   const reader = response.body?.getReader();
 
-  if (!reader) return "";
+  if (!reader) {
+    return "";
+  }
+
   const chunks: Uint8Array[] = [];
   let size = 0;
 
   for (;;) {
     const { done, value } = await reader.read();
 
-    if (done) break;
+    if (done) {
+      break;
+    }
+
     size += value.byteLength;
 
     if (size > maxBytes) {

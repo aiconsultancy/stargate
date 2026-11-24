@@ -69,18 +69,25 @@ const saved = new Map<string, string | undefined>();
 const cleanup: (() => Promise<unknown>)[] = [];
 
 beforeEach(() => {
-  for (const name of [apiKeyEnv, ...Object.keys(hostSecrets)])
+  for (const name of [apiKeyEnv, ...Object.keys(hostSecrets)]) {
     saved.set(name, process.env[name]);
+  }
+
   Object.assign(process.env, hostSecrets, { [apiKeyEnv]: key });
 });
 
 afterEach(async () => {
   for (const [name, value] of saved) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
   }
 
-  for (const step of cleanup.splice(0).reverse()) await step();
+  for (const step of cleanup.splice(0).reverse()) {
+    await step();
+  }
 });
 
 // The tests' own programs; see `codex-toolchain.ts`.
@@ -185,7 +192,10 @@ async function until(check: () => Promise<boolean> | boolean, ms = 10_000) {
   const deadline = Date.now() + ms;
 
   while (!(await check())) {
-    if (Date.now() > deadline) throw new Error("Condition not reached");
+    if (Date.now() > deadline) {
+      throw new Error("Condition not reached");
+    }
+
     await delay(25);
   }
 }
@@ -194,7 +204,10 @@ async function until(check: () => Promise<boolean> | boolean, ms = 10_000) {
 function overrides(argv: readonly string[]) {
   const map = new Map<string, string>();
   argv.forEach((argument, index) => {
-    if (argument !== "--config") return;
+    if (argument !== "--config") {
+      return;
+    }
+
     const value = argv[index + 1] ?? "";
     const at = value.indexOf("=");
     map.set(value.slice(0, at), value.slice(at + 1));
@@ -216,8 +229,10 @@ test("Codex turn streams agent messages only and returns this turn's answer", as
   expect(answer).toBe("Hello world\n\nDone.");
   expect(previews).toEqual(["Hello world", "Hello world\n\nDone."]);
 
-  for (const text of previews)
+  for (const text of previews) {
     expect(text).not.toMatch(/private|SECRETOUTPUT|cat \/secret|raw/);
+  }
+
   const [first] = await prompts();
   expect(first?.prompt).toBe("Say hello");
 });
@@ -234,8 +249,10 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
   expect(argv[argv.indexOf("--cd") + 1]).toBe(join(root, "workspace"));
   expect(argv).toContain("--skip-git-repo-check");
 
-  for (const flag of argv)
+  for (const flag of argv) {
     expect(flag).not.toMatch(/dangerously|--trust|--profile|^-p$|bypass/);
+  }
+
   const map = overrides(argv);
   expect(map.get("approval_policy")).toBe('"never"');
   expect(map.get("sandbox_workspace_write.network_access")).toBe("false");
@@ -260,7 +277,9 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
   expect(map.get("shell_environment_policy.set.SHLVL")).toBe('"1"');
 
   // The key travels only in the environment, never in arguments.
-  for (const flag of argv) expect(flag).not.toContain(key);
+  for (const flag of argv) {
+    expect(flag).not.toContain(key);
+  }
 
   // Explicit widening maps to the CLI's own enforcement.
   const widened = await open({
@@ -290,8 +309,12 @@ test("Codex child receives only a minimal, explicit environment", async () => {
   const [run] = await runs();
   const env = run?.env ?? {};
 
-  for (const name of Object.keys(hostSecrets))
-    if (name !== "CODEX_HOME") expect(env[name]).toBeUndefined();
+  for (const name of Object.keys(hostSecrets)) {
+    if (name !== "CODEX_HOME") {
+      expect(env[name]).toBeUndefined();
+    }
+  }
+
   expect(env["STARGATE_CODEX_PROVIDER_KEY"]).toBe(key);
   expect(env["CODEX_HOME"]).toBe(join(dataDirectory, "codex"));
   expect(env["ZDOTDIR"]).toBe(join(dataDirectory, "codex-shell"));
@@ -413,8 +436,11 @@ test("one Codex turn runs per thread at a time", async () => {
 test("no tool process outlives its Codex turn, even one ignoring SIGTERM", async () => {
   const { backend, grandchildren } = await open();
   cleanup.push(async () => {
-    for (const pid of await grandchildren())
-      if (alive(pid)) process.kill(pid, "SIGKILL");
+    for (const pid of await grandchildren()) {
+      if (alive(pid)) {
+        process.kill(pid, "SIGKILL");
+      }
+    }
   });
   const id = await session(backend);
 
@@ -457,8 +483,11 @@ test("a Codex CLI that ignores SIGTERM cannot keep a turn pending", async () => 
     for (const pid of [
       ...(await runs().catch(() => [])).map((run) => run.pid),
       ...(await grandchildren()),
-    ])
-      if (alive(pid)) process.kill(pid, "SIGKILL");
+    ]) {
+      if (alive(pid)) {
+        process.kill(pid, "SIGKILL");
+      }
+    }
   });
 
   const started = async (count: number) =>
@@ -518,8 +547,11 @@ test.skipIf(process.platform !== "linux")(
       for (const pid of [
         ...(await runs().catch(() => [])).map((run) => run.pid),
         ...(await grandchildren()),
-      ])
-        if (alive(pid)) process.kill(pid, "SIGKILL");
+      ]) {
+        if (alive(pid)) {
+          process.kill(pid, "SIGKILL");
+        }
+      }
     });
 
     /** Pipes and socket pairs open here: Bun gives children socket pairs. */
@@ -529,7 +561,9 @@ test.skipIf(process.platform !== "linux")(
       for (const fd of await readdir("/proc/self/fd")) {
         const target = await readlink(`/proc/self/fd/${fd}`).catch(() => "");
 
-        if (/^(pipe|socket):/.test(target)) count++;
+        if (/^(pipe|socket):/.test(target)) {
+          count++;
+        }
       }
 
       return count;
@@ -559,7 +593,10 @@ test.skipIf(process.platform !== "linux")(
 
     expect(holders.length).toBe(3);
 
-    for (const pid of holders) expect(alive(pid)).toBe(true);
+    for (const pid of holders) {
+      expect(alive(pid)).toBe(true);
+    }
+
     expect(await pipes()).toBeLessThanOrEqual(baseline);
   },
 );
@@ -692,8 +729,10 @@ test("a writable Codex directory never holds what runs outside the sandbox", asy
     },
   });
 
-  for (const name of ["STARGATE_CODEX_TEST_APP", "STARGATE_CODEX_TEST_BOT"])
+  for (const name of ["STARGATE_CODEX_TEST_APP", "STARGATE_CODEX_TEST_BOT"]) {
     saved.set(name, process.env[name]);
+  }
+
   process.env["STARGATE_CODEX_TEST_APP"] = "xapp-test";
   process.env["STARGATE_CODEX_TEST_BOT"] = "xoxb-test";
   // The default data directory `.stargate` is next to the configuration file.
@@ -821,12 +860,13 @@ test("the CLI's PATH holds only the helper and root-owned system directories", a
   for (const directory of [join(workspace, "bin"), user]) {
     await mkdir(directory, { recursive: true });
 
-    for (const name of ["sh", "mkfifo", "cat", "rm", "git", "rg"])
+    for (const name of ["sh", "mkfifo", "cat", "rm", "git", "rg"]) {
       await writeFile(
         join(directory, name),
         `#!/bin/sh\n: > ${join(root, `ran-${name}`)}\nexit 1\n`,
         { mode: 0o755 },
       );
+    }
   }
 
   const path = process.env["PATH"] ?? "/usr/bin:/bin";
@@ -839,7 +879,9 @@ test("the CLI's PATH holds only the helper and root-owned system directories", a
   // Host without one (hosted CI runners) gets a clear start-up failure.
   const { found } = await systemDirectories();
 
-  for (const entry of found) expect((await lstat(entry)).uid).toBe(0);
+  for (const entry of found) {
+    expect((await lstat(entry)).uid).toBe(0);
+  }
 
   if (found.length === 0) {
     await expect(
@@ -955,8 +997,11 @@ test("without a root-controlled system directory, start-up fails clearly", async
       });
 
   cleanup.push(async () => {
-    for (const pid of await children())
-      if (alive(pid)) process.kill(pid, "SIGKILL");
+    for (const pid of await children()) {
+      if (alive(pid)) {
+        process.kill(pid, "SIGKILL");
+      }
+    }
   });
   const controller = new AbortController();
 
@@ -986,9 +1031,13 @@ test("extraPath adds only directories whose programs stay out of the workspace",
     const directory = join(root, name);
     await mkdir(directory);
 
-    for (const [entry, target] of Object.entries(entries))
-      if (target) await symlink(target, join(directory, entry));
-      else await writeFile(join(directory, entry), program, { mode: 0o755 });
+    for (const [entry, target] of Object.entries(entries)) {
+      if (target) {
+        await symlink(target, join(directory, entry));
+      } else {
+        await writeFile(join(directory, entry), program, { mode: 0o755 });
+      }
+    }
 
     return directory;
   };
@@ -1019,7 +1068,7 @@ test("extraPath adds only directories whose programs stay out of the workspace",
     ],
   ];
 
-  for (const [directory, reason] of refused)
+  for (const [directory, reason] of refused) {
     await expect(
       CodexBackend.open(
         config(
@@ -1029,6 +1078,8 @@ test("extraPath adds only directories whose programs stay out of the workspace",
         { dataDirectory: join(root, "data") },
       ),
     ).rejects.toThrow(reason);
+  }
+
   expect(await readdir(root)).not.toContain("ran");
 });
 
@@ -1177,8 +1228,10 @@ test("Codex frames keep optional text and errors without accepting malformed fie
       { id: "m", type: "agent_message", text: null },
       { id: "m", type: "agent_message", text: 1 },
       { type: "agent_message", text: "hidden" },
-    ])
+    ]) {
       expect(turn.add({ type, item })).toBe(false);
+    }
+
     expect(turn.answer()).toBe("visible");
     turn.add({ type, item: { id: "tool", type: "command_execution" } });
     expect(turn.worked).toBe(true);
@@ -1235,8 +1288,11 @@ test("Codex recovery records preserve strict keys, UUID spelling and safe bounds
     await writeFile(path, text);
     await backend.interrupt(id, signal());
 
-    if (accepted) await expect(readFile(path)).rejects.toThrow();
-    else expect(await readFile(path, "utf8")).toBe(text);
+    if (accepted) {
+      await expect(readFile(path)).rejects.toThrow();
+    } else {
+      expect(await readFile(path, "utf8")).toBe(text);
+    }
   }
 
   const overflow = `{"turn":"${record.turn}","since":1e400}`;
@@ -1318,7 +1374,9 @@ test.skipIf(process.platform !== "linux")(
 
       const pid = child.pid ?? 0;
       cleanup.push(async () => {
-        if (alive(pid)) process.kill(pid, "SIGKILL");
+        if (alive(pid)) {
+          process.kill(pid, "SIGKILL");
+        }
       });
       await until(async () =>
         (await readFile(`/proc/${pid}/cmdline`, "utf8")).includes(argument),
@@ -1350,7 +1408,10 @@ test.skipIf(process.platform !== "linux")(
     );
 
     // The tool may share the older process's clock tick; then it is kept too.
-    if ((await start(tool)) <= (await start(older))) return;
+    if ((await start(tool)) <= (await start(older))) {
+      return;
+    }
+
     await backend.interrupt(id, signal());
     await until(() => !alive(tool));
     expect(alive(other)).toBe(true);
@@ -1389,8 +1450,10 @@ test("Codex attachments become images or inline text, or fail closed", async () 
     file("application/zip"),
     file("text/plain", "\u0000"),
     file("image/png", "png", "../../etc/passwd"),
-  ])
+  ]) {
     expect(() => codexInput("x", [bad])).toThrow(AttachmentInputUnavailable);
+  }
+
   const { backend, prompts } = await open();
   await backend.prompt(
     await session(backend),
@@ -1429,8 +1492,9 @@ test("Codex configuration is strict and fails closed", () => {
     { baseURL: "http://127.0.0.1:8317", apiKeyEnv },
     { baseURL: "http://127.0.0.1:8317/v1", apiKeyEnv: "lower-case" },
     { baseURL: "http://127.0.0.1:8317/v1", apiKey: "sk-value" },
-  ])
+  ]) {
     expect(parse({ provider })).toBe(false);
+  }
 
   for (const extra of [
     { directory: "relative" },
@@ -1449,24 +1513,29 @@ test("Codex configuration is strict and fails closed", () => {
     { config: { model_provider: "openai" } },
     { env: { OPENAI_API_KEY: "x" } },
     { reasoningEffort: "ultra" },
-  ])
+  ]) {
     expect(parse(extra)).toBe(false);
+  }
 
   for (const extra of [
     { sandbox: "workspace-write" },
     { sandbox: "workspace-write", network: true },
     { sandbox: "danger-full-access", network: true },
     { projectDocs: true, reasoningEffort: "medium", systemPrompt: "Brief." },
-  ])
+  ]) {
     expect(parse(extra)).toBe(true);
+  }
+
   // Code, instructions and tools from outside Stargate's configuration stay off.
   const features = codexConfig(config())["features"];
   expect(Object.values(features as object).every((on) => on === false)).toBe(
     true,
   );
 
-  for (const name of ["plugins", "apps", "hooks", "shell_snapshot", "goals"])
+  for (const name of ["plugins", "apps", "hooks", "shell_snapshot", "goals"]) {
     expect(Object.keys(features as object)).toContain(name);
+  }
+
   // IRC captains and crew accept the backend too.
   expect(
     Result.isSuccess(
@@ -1559,8 +1628,10 @@ test("Codex maps what the CLI reports to one shared failure category", async () 
     ["crash", "provider:crash:0:ran"],
   ];
 
-  for (const [prompt, cause] of cases)
+  for (const [prompt, cause] of cases) {
     expect([prompt, await failure(prompt)]).toEqual([prompt, cause]);
+  }
+
   // A message that names no provider failure keeps the generic failure.
   expect(await failure("fail")).toBe("Error: Codex turn failed");
 });
@@ -1571,11 +1642,13 @@ test("Codex request progress exposes event kinds without tool data or reasoning"
   const stage = (s: string) => stages.push(s);
   turn.add({ type: "turn.started" }, stage);
 
-  for (const type of ["reasoning", "command_execution", "agent_message"])
+  for (const type of ["reasoning", "command_execution", "agent_message"]) {
     turn.add(
       { type: "item.started", item: { id: type, type, text: "private" } },
       stage,
     );
+  }
+
   turn.add(
     {
       type: "item.updated",

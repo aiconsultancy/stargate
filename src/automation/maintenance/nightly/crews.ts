@@ -90,7 +90,10 @@ export async function profilePath(directory: string) {
     try {
       await lstat(path);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+
       throw unknown();
     }
 
@@ -102,7 +105,9 @@ export async function profilePath(directory: string) {
       throw unknown();
     }
 
-    if (!info.isFile()) throw unknown();
+    if (!info.isFile()) {
+      throw unknown();
+    }
 
     return path;
   }
@@ -129,13 +134,20 @@ async function readPlugin(path: string) {
 
   const parsed = decodeProfile(raw);
 
-  if (Result.isFailure(parsed)) throw unknown();
+  if (Result.isFailure(parsed)) {
+    throw unknown();
+  }
 
   for (const plugin of parsed.success.plugins) {
-    if (!looksLikeStargate(plugin.options)) continue;
+    if (!looksLikeStargate(plugin.options)) {
+      continue;
+    }
+
     const options = decodePluginOptions(plugin.options);
 
-    if (Result.isFailure(options) || !plugin.package) throw unknown();
+    if (Result.isFailure(options) || !plugin.package) {
+      throw unknown();
+    }
 
     return { pluginPackage: plugin.package, options: options.success };
   }
@@ -157,13 +169,22 @@ export async function discoverCrews(
   for (const bot of draining
     ? [...config.bots, ...(config.teams ?? []), ...(config.irc ?? [])]
     : config.bots) {
-    if (bot.backend.type !== "opencode") continue;
+    if (bot.backend.type !== "opencode") {
+      continue;
+    }
+
     const captainPath = await profilePath(bot.backend.directory);
 
-    if (!captainPath) continue;
+    if (!captainPath) {
+      continue;
+    }
+
     const captain = await readPlugin(captainPath);
 
-    if (!captain || seen.has(captain.options.namespace)) continue;
+    if (!captain || seen.has(captain.options.namespace)) {
+      continue;
+    }
+
     seen.add(captain.options.namespace);
 
     const pi = new Set(
@@ -183,14 +204,17 @@ export async function discoverCrews(
     if (draining && captain.options.projects !== undefined) {
       const parsed = decodeProjects(captain.options.projects);
 
-      if (Result.isFailure(parsed)) throw unknown();
+      if (Result.isFailure(parsed)) {
+        throw unknown();
+      }
 
-      for (const [key, project] of Object.entries(parsed.success))
+      for (const [key, project] of Object.entries(parsed.success)) {
         contexts.push({
           namespace: `${captain.options.namespace}:project:${key}`,
           stateDirectory: join(captain.options.stateDirectory, "projects", key),
           worktrees: project.worktrees,
         });
+      }
     }
 
     for (const context of contexts) {
@@ -203,11 +227,17 @@ export async function discoverCrews(
       ];
 
       for (const [id, directory] of Object.entries(context.worktrees)) {
-        if (pi.has(id)) continue;
+        if (pi.has(id)) {
+          continue;
+        }
+
         const path = await profilePath(directory);
         const plugin = path ? await readPlugin(path) : undefined;
 
-        if (!path || !plugin) throw unknown();
+        if (!path || !plugin) {
+          throw unknown();
+        }
+
         roots.push({
           directory,
           configPath: path,

@@ -57,8 +57,10 @@ export function apiRoutes(routes: readonly ApiRoute[]) {
 
     const key = `${parsed.method} ${parsed.path}`;
 
-    if (owners.has(parsed.owner) || paths.has(key))
+    if (owners.has(parsed.owner) || paths.has(key)) {
       throw new Error("Duplicate API route owner or method/path");
+    }
+
     owners.add(parsed.owner);
     paths.add(key);
 

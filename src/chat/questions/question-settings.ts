@@ -49,11 +49,15 @@ const missing = (error: unknown) =>
 
 /** Distinguish a missing file from a broken link or invalid state directory. */
 async function questionSettingsAbsent(directory: string, path: string) {
-  if (!(await stat(directory)).isDirectory()) return false;
+  if (!(await stat(directory)).isDirectory()) {
+    return false;
+  }
 
   for (const parent of [join(directory, ".local"), dirname(path)]) {
     try {
-      if (!(await lstat(parent)).isDirectory()) return false;
+      if (!(await lstat(parent)).isDirectory()) {
+        return false;
+      }
     } catch (error) {
       return missing(error);
     }
@@ -81,12 +85,16 @@ export async function resolveQuestionSettings(
           enableWhenMissing &&
           missing(error) &&
           (await questionSettingsAbsent(backend.directory, path))
-        )
+        ) {
           return;
+        }
+
         throw error;
       });
 
-      if (!file) return { ...defaults, enabled: true };
+      if (!file) {
+        return { ...defaults, enabled: true };
+      }
 
       try {
         const before = await file.stat({ bigint: true });
@@ -98,12 +106,17 @@ export async function resolveQuestionSettings(
           (before.mode & 0o077n) !== 0n ||
           uid === undefined ||
           before.uid !== BigInt(uid)
-        )
+        ) {
           throw new Error("Private question settings required");
+        }
+
         const bytes = Buffer.alloc(4097);
         const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
 
-        if (bytesRead > 4096) throw new Error("Question settings too large");
+        if (bytesRead > 4096) {
+          throw new Error("Question settings too large");
+        }
+
         const after = await file.stat({ bigint: true });
         const current = await lstat(path, { bigint: true });
 
@@ -113,8 +126,9 @@ export async function resolveQuestionSettings(
         if (
           identity(before) !== identity(after) ||
           identity(after) !== identity(current)
-        )
+        ) {
           throw new Error("Question settings changed during read");
+        }
 
         return decodeQuestionSettings(
           JSON.parse(bytes.subarray(0, bytesRead).toString("utf8")),

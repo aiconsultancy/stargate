@@ -17,7 +17,10 @@ export function fleetSourceReference(
 export function fleetResultSource(job: {
   fleet?: FleetJob | undefined;
 }): PromptSourceContext["source"] | undefined {
-  if (job.fleet?.kind !== "result") return;
+  if (job.fleet?.kind !== "result") {
+    return;
+  }
+
   const result = job.fleet.completion;
   const reference = `fleet-result-${result.dispatchID}`;
 

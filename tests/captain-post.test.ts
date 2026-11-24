@@ -27,8 +27,9 @@ import { settingsIssues } from "../src/config/settings-schema";
 const directories: string[] = [];
 
 afterEach(async () => {
-  for (const path of directories.splice(0))
+  for (const path of directories.splice(0)) {
     await rm(path, { recursive: true, force: true });
+  }
 });
 
 const signal = () => new AbortController().signal;
@@ -193,7 +194,9 @@ async function fixture(initial: FixtureOptions = {}) {
     calls.push({ method, params });
 
     const json = (value: unknown) => {
-      if (value instanceof Error) throw value;
+      if (value instanceof Error) {
+        throw value;
+      }
 
       return Response.json(value);
     };
@@ -342,14 +345,18 @@ test("posts need captainPost.channels and inbound access; denies override", asyn
   });
 
   // Inbound `*` never widens outbound posting; DMs and group DMs need an ID.
-  for (const channel of ["CSECRET", "CUNLISTED", "D999", "GMPIM2"])
+  for (const channel of ["CSECRET", "CUNLISTED", "D999", "GMPIM2"]) {
     await expect(
       f.post({ channel, text: "hello", key: channel }),
     ).rejects.toThrow("not allowed");
+  }
+
   expect(f.calls).toHaveLength(0);
 
-  for (const channel of ["C123", "D777", "GMPIM1"])
+  for (const channel of ["C123", "D777", "GMPIM1"]) {
     await f.post({ channel, text: "hello" });
+  }
+
   expect(f.posts().map(({ params }) => params.get("channel"))).toEqual([
     "C123",
     "D777",
@@ -380,7 +387,7 @@ test("disabled bots and mismatched bindings refuse before Slack", async () => {
     { ...f.binding, expectedDirectory: "/other" },
     { ...f.binding, captainSessionID: "ses_other" },
     { ...f.binding, bot: "other" },
-  ])
+  ]) {
     await expect(
       runCaptainPost(
         { channel: "C123", text: "x" },
@@ -389,6 +396,8 @@ test("disabled bots and mismatched bindings refuse before Slack", async () => {
         f.dependencies,
       ),
     ).rejects.toThrow(CaptainPostError);
+  }
+
   expect(off.calls).toHaveLength(0);
   expect(f.calls).toHaveLength(0);
 });
@@ -465,10 +474,12 @@ test("files must be canonical regular files inside post directories", async () =
   const hidden = join(f.files, ".hidden.txt");
   await writeFile(hidden, "hidden");
 
-  for (const path of [outside, linked, hidden, "relative.txt"])
+  for (const path of [outside, linked, hidden, "relative.txt"]) {
     await expect(
       f.post({ channel: "C123", text: "proof", files: [path] }),
     ).rejects.toThrow("nothing was posted");
+  }
+
   expect(f.calls.filter(({ method }) => method !== "auth.test")).toHaveLength(
     0,
   );
@@ -556,15 +567,18 @@ test("captainPost config needs explicit channels and an OpenCode backend", () =>
   expect(Result.isSuccess(check({ channels: ["C1", "G2", "D3"] }))).toBe(true);
   expect(Result.isSuccess(check({ channels: ["C1"] }, "module"))).toBe(false);
 
-  for (const invalid of [{}, { channels: [] }, { channels: ["#general"] }])
+  for (const invalid of [{}, { channels: [] }, { channels: ["#general"] }]) {
     expect(Result.isSuccess(check(invalid))).toBe(false);
+  }
+
   const wildcard = check({ channels: ["*"] });
   expect(Result.isSuccess(wildcard)).toBe(false);
 
-  if (Result.isFailure(wildcard))
+  if (Result.isFailure(wildcard)) {
     expect(
       JSON.stringify(settingsIssues(wildcard.failure.issue).issues),
     ).toContain("* is not accepted");
+  }
 });
 
 function crew() {
@@ -577,7 +591,9 @@ function crew() {
       cron: { configPath: "/private/stargate.json", bot: "galactica" },
     },
     async captain(caller: CrewCaller) {
-      if (caller.agent !== "adama") throw new CrewError("Captain only.");
+      if (caller.agent !== "adama") {
+        throw new CrewError("Captain only.");
+      }
     },
   };
 
@@ -673,13 +689,17 @@ test("default file roots follow OpenCode's tmpdir rule at call time", async () =
     for (const path of [
       join(opencode, ".git", "config"),
       join(f.files, "elsewhere.txt"),
-    ])
+    ]) {
       await expect(
         f.post({ channel: "C123", text: "x", files: [path] }),
       ).rejects.toThrow("nothing was posted");
+    }
   } finally {
-    if (previous === undefined) delete process.env["TMPDIR"];
-    else process.env["TMPDIR"] = previous;
+    if (previous === undefined) {
+      delete process.env["TMPDIR"];
+    } else {
+      process.env["TMPDIR"] = previous;
+    }
   }
 
   expect(f.posts()).toHaveLength(1);

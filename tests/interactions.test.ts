@@ -25,7 +25,10 @@ test("configuration buttons use the existing interaction path without consuming 
     },
     undefined,
     async (body, ack) => {
-      if (body !== "panel") return false;
+      if (body !== "panel") {
+        return false;
+      }
+
       calls.push("panel");
       await ack();
 
@@ -61,7 +64,9 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
     (body) => {
       const stop = body === "stop";
 
-      if (stop) calls.push("stop");
+      if (stop) {
+        calls.push("stop");
+      }
 
       return stop;
     },
@@ -111,8 +116,9 @@ test("exact namespaces dispatch pairing, cron and Stop; unknown commands stay pr
 
   expect(acks).toHaveLength(4);
 
-  for (const payload of acks)
+  for (const payload of acks) {
     expect(payload).toMatchObject({ response_type: "ephemeral" });
+  }
 
   for (const text of [
     "pair extra",

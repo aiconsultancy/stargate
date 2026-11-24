@@ -68,8 +68,10 @@ function candidate(message: ShellContextRecord) {
     message.type !== "synthetic" ||
     typeof message.text !== "string" ||
     message.text.length > 1024 * 1024
-  )
+  ) {
     return;
+  }
+
   const metadata = Schema.decodeUnknownResult(notice)(message.metadata);
   const description = Schema.decodeUnknownResult(command)(message.description);
 
@@ -77,8 +79,10 @@ function candidate(message: ShellContextRecord) {
     Result.isFailure(metadata) ||
     Result.isFailure(description) ||
     metadata.success.jobID !== metadata.success.shellID
-  )
+  ) {
     return;
+  }
+
   const prefix = `<shell id="${metadata.success.jobID}" state="${metadata.success.state}" command="${description.success}">\n`;
   const suffix = "\n</shell>";
 
@@ -86,8 +90,9 @@ function candidate(message: ShellContextRecord) {
     !message.text.startsWith(prefix) ||
     !message.text.endsWith(suffix) ||
     message.text.length < prefix.length + suffix.length
-  )
+  ) {
     return;
+  }
 
   return { shellID: metadata.success.shellID, command: description.success };
 }
@@ -136,13 +141,17 @@ export class ShellCompletionContext {
   public track(message: ShellContextRecord): boolean {
     const order = this.order++;
 
-    if (this.order > 10_000) this.valid = false;
+    if (this.order > 10_000) {
+      this.valid = false;
+    }
 
     if (message.type === "assistant") {
       for (const part of message.content ?? []) {
         const parsed = Schema.decodeUnknownResult(launch)(part);
 
-        if (Result.isFailure(parsed)) continue;
+        if (Result.isFailure(parsed)) {
+          continue;
+        }
 
         if (++this.witnesses > 10_000) {
           this.valid = false;
@@ -164,7 +173,9 @@ export class ShellCompletionContext {
 
     const parsed = candidate(message);
 
-    if (!parsed) return false;
+    if (!parsed) {
+      return false;
+    }
 
     if (this.callbacks.length >= 10_000) {
       this.valid = false;
@@ -179,8 +190,10 @@ export class ShellCompletionContext {
 
   /** Native descending order proves the launch precedes its callback. */
   public finish(inputCreated: number): boolean {
-    if (!this.valid || !Number.isFinite(inputCreated) || inputCreated < 0)
+    if (!this.valid || !Number.isFinite(inputCreated) || inputCreated < 0) {
       return false;
+    }
+
     const seen = new Set<string>();
 
     for (const callback of this.callbacks) {
@@ -198,8 +211,10 @@ export class ShellCompletionContext {
         witness.order <= callback.order ||
         witness.created < inputCreated ||
         witness.created > callback.created
-      )
+      ) {
         return false;
+      }
+
       seen.add(callback.shellID);
     }
 

@@ -56,8 +56,9 @@ if (import.meta.main) {
   try {
     const [emptyPath, historyPath, storePath] = paths;
 
-    if (!emptyPath || !historyPath || !storePath)
+    if (!emptyPath || !historyPath || !storePath) {
       throw new Error("Missing asset path");
+    }
 
     const state = await CrewState.open(
       join(directory, "source"),
@@ -80,7 +81,9 @@ if (import.meta.main) {
 
       empty
         .transaction(() => {
-          for (const row of ddl) empty.exec(row.sql);
+          for (const row of ddl) {
+            empty.exec(row.sql);
+          }
         })
         .immediate();
     } finally {
@@ -127,7 +130,9 @@ if (import.meta.main) {
     for (const [i, asset] of assets.entries()) {
       const path = paths[i];
 
-      if (!path) throw new Error("Missing asset path");
+      if (!path) {
+        throw new Error("Missing asset path");
+      }
 
       // Close every writer first; never copy a main file without its live WAL.
       for (const suffix of ["-wal", "-shm", "-journal"]) {
@@ -136,11 +141,15 @@ if (import.meta.main) {
             () => true,
             () => false,
           )
-        )
+        ) {
           throw new Error(`Unsettled database sidecar: ${path}${suffix}`);
+        }
       }
 
-      if (process.argv.includes("--write")) await copyFile(path, asset);
+      if (process.argv.includes("--write")) {
+        await copyFile(path, asset);
+      }
+
       // SQLite can create WAL/SHM even on a read-only open. Inspect a private
       // Copy so checking never opens or changes the canonical saved fixture.
       const checkPath = join(directory, `check-${i}.sqlite`);
@@ -181,7 +190,10 @@ if (import.meta.main) {
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
           )
           .all()) {
-          if (!/^[a-z_]+$/.test(name)) throw new Error("Unexpected table name");
+          if (!/^[a-z_]+$/.test(name)) {
+            throw new Error("Unexpected table name");
+          }
+
           const sql = `SELECT * FROM "${name}" ORDER BY rowid`;
           assert.deepStrictEqual(
             saved.query(sql).all(),
@@ -199,10 +211,11 @@ if (import.meta.main) {
             () => true,
             () => false,
           )
-        )
+        ) {
           throw new Error(
             `Saved fixture has a sidecar: ${fileURLToPath(asset)}${suffix}`,
           );
+        }
       }
     }
 

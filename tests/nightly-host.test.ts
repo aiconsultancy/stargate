@@ -43,7 +43,7 @@ const server = Bun.serve({
   fetch(request): Response {
     const path = new URL(request.url).pathname;
 
-    if (path === "/repos/router-for-me/CLIProxyAPI/releases")
+    if (path === "/repos/router-for-me/CLIProxyAPI/releases") {
       return Response.json([
         {
           id: 1,
@@ -66,8 +66,11 @@ const server = Bun.serve({
           ],
         },
       ]);
+    }
 
-    if (path === "/download") return new Response(asset);
+    if (path === "/download") {
+      return new Response(asset);
+    }
 
     return new Response("missing", { status: 404 });
   },
@@ -90,7 +93,9 @@ const settings = (dir: string) => {
     agentClis: { prefix: "/home/me/.local" },
   });
 
-  if (!parsed.cliproxyapi || !parsed.agentClis) throw new Error("config");
+  if (!parsed.cliproxyapi || !parsed.agentClis) {
+    throw new Error("config");
+  }
 
   return { cpa: parsed.cliproxyapi, clis: parsed.agentClis };
 };
@@ -146,7 +151,9 @@ describe("CLIProxyAPI asset pinning", () => {
     const { cpa } = settings(dir);
     const candidate = await cliProxyCandidate(cpa, now);
 
-    if (!candidate) throw new Error("no candidate");
+    if (!candidate) {
+      throw new Error("no candidate");
+    }
 
     return cliProxyPrepare(
       cpa,

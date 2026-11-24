@@ -32,8 +32,9 @@ function fixture() {
           !authorized ||
           input.agent !== "adama" ||
           input.sessionID !== "captain"
-        )
+        ) {
           throw new Error("Not captain");
+        }
       },
     },
     {
@@ -55,7 +56,9 @@ function fixture() {
           waiting.add(done);
           signal.addEventListener("abort", abort, { once: true });
 
-          if (signal.aborted) abort();
+          if (signal.aborted) {
+            abort();
+          }
         }),
     },
   );
@@ -66,7 +69,9 @@ function fixture() {
       now += ms;
     },
     tick: () => {
-      for (const resolve of [...waiting]) resolve();
+      for (const resolve of [...waiting]) {
+        resolve();
+      }
     },
     deny: () => {
       authorized = false;
@@ -103,7 +108,9 @@ test("maintenance requires confirmed notice delivery and the full opt-out window
   const notice = gate.read(owner);
   expect(notice?.plan).toBe("Restart Stargate");
 
-  if (!notice) throw new Error("Notice missing");
+  if (!notice) {
+    throw new Error("Notice missing");
+  }
 
   const advance = (ms: number) => {
     while (ms > 0) {
@@ -133,7 +140,9 @@ test("maintenance requires confirmed notice delivery and the full opt-out window
   });
   gate.close(owner);
 
-  for (const resolve of waits) resolve();
+  for (const resolve of waits) {
+    resolve();
+  }
 });
 
 test("cancellation, disposal, expired lease and failed authority never grant permission", async () => {
@@ -151,12 +160,19 @@ test("cancellation, disposal, expired lease and failed authority never grant per
     await Promise.resolve();
     const notice = f.gate.read(owner);
 
-    if (!notice) throw new Error("Missing notice");
+    if (!notice) {
+      throw new Error("Missing notice");
+    }
+
     f.gate.delivered({ ...owner, noticeID: notice.id });
 
-    if (action === "cancel") stop.abort();
+    if (action === "cancel") {
+      stop.abort();
+    }
 
-    if (action === "dispose") f.gate.dispose();
+    if (action === "dispose") {
+      f.gate.dispose();
+    }
 
     if (action === "disconnect") {
       f.advance(10_001);
@@ -229,7 +245,10 @@ test("duplicate delivery cannot shorten the window and expired gateway cannot re
   await Promise.resolve();
   const notice = f.gate.read(owner);
 
-  if (!notice) throw new Error("Missing notice");
+  if (!notice) {
+    throw new Error("Missing notice");
+  }
+
   f.gate.delivered({ ...owner, noticeID: notice.id });
   f.advance(5000);
   f.gate.delivered({ ...owner, noticeID: notice.id });

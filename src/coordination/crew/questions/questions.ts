@@ -121,8 +121,9 @@ export class CrewQuestions {
       task.inputID !== offer.inputID ||
       task.originCaptainID !== offer.originCaptainID ||
       this.authority.state.activeTask(task.crewID)?.id !== task.id
-    )
+    ) {
       return;
+    }
 
     const member = this.authority.options.team.crew.find(
       (m) => m.id === task.crewID,
@@ -135,8 +136,9 @@ export class CrewQuestions {
       member.backend ||
       peer?.sessionID !== task.workerSessionID ||
       peer.status !== "ready"
-    )
+    ) {
       return;
+    }
 
     return task;
   }
@@ -144,7 +146,10 @@ export class CrewQuestions {
   public async poll(signal: AbortSignal, available = true) {
     const settings = await this.settings();
 
-    if (!settings.enabled) return;
+    if (!settings.enabled) {
+      return;
+    }
+
     const members = this.authority.options.team.crew.filter((m) => !m.backend);
 
     // Rotate before I/O: one unavailable worker cannot starve later workers.
@@ -153,10 +158,15 @@ export class CrewQuestions {
       const member = members[this.offset % members.length];
       this.offset = (this.offset + 1) % members.length;
 
-      if (!member) continue;
+      if (!member) {
+        continue;
+      }
+
       const task = this.authority.state.activeTask(member.id);
 
-      if (!task || !this.owner({ taskID: task.id, ...task })) continue;
+      if (!task || !this.owner({ taskID: task.id, ...task })) {
+        continue;
+      }
 
       if (!available) {
         this.options.onUnavailable?.();
@@ -169,8 +179,9 @@ export class CrewQuestions {
           offer.state === "attempted" &&
           !offer.outcome &&
           !this.writing.has(offer.token)
-        )
+        ) {
           this.authority.state.crewQuestionOutcome(offer.token, "uncertain");
+        }
       }
 
       try {
@@ -180,8 +191,9 @@ export class CrewQuestions {
           for (const offer of this.authority.state.crewQuestionOffers(
             task.id,
           )) {
-            if (offer.state !== "attempted" || offer.outcome !== "uncertain")
+            if (offer.state !== "attempted" || offer.outcome !== "uncertain") {
               continue;
+            }
 
             const outcome = await backend
               .outcome(offer.formID, offer.fingerprint, signal)
@@ -189,8 +201,9 @@ export class CrewQuestions {
 
             signal.throwIfAborted();
 
-            if (outcome)
+            if (outcome) {
               this.authority.state.crewQuestionOutcome(offer.token, outcome);
+            }
           }
         }
 
@@ -199,22 +212,30 @@ export class CrewQuestions {
           signal,
         );
 
-        if (pending.length > 16)
+        if (pending.length > 16) {
           throw new CrewError("Too many crew clarifications.");
+        }
 
         for (const raw of pending) {
-          if ("unsupported" in raw) continue;
+          if ("unsupported" in raw) {
+            continue;
+          }
+
           const parsed = Schema.decodeUnknownResult(nativeQuestionSchema)(raw);
 
-          if (Result.isFailure(parsed)) continue;
+          if (Result.isFailure(parsed)) {
+            continue;
+          }
+
           const question = parsed.success;
 
           if (
             question.sessionID !== task.workerSessionID ||
             question.inputID !== task.inputID ||
             !this.owner({ taskID: task.id, ...task })
-          )
+          ) {
             continue;
+          }
 
           const offer = this.authority.state.offerCrewQuestion({
             token: createHash("sha256")
@@ -236,9 +257,13 @@ export class CrewQuestions {
             outcome: null,
           });
 
-          if (!offer || offer.fingerprint !== question.fingerprint) continue;
+          if (!offer || offer.fingerprint !== question.fingerprint) {
+            continue;
+          }
 
-          if (offer.state === "attempted") continue;
+          if (offer.state === "attempted") {
+            continue;
+          }
 
           if (
             !(await backend.questionBelongsToInput(
@@ -249,15 +274,18 @@ export class CrewQuestions {
               signal,
             )) ||
             !this.owner(offer)
-          )
+          ) {
             continue;
+          }
 
           if (offer.expires <= this.now()) {
             await this.write(offer, question, backend, null, signal, true);
             continue;
           }
 
-          if (offer.notified) continue;
+          if (offer.notified) {
+            continue;
+          }
 
           const text = [
             `Crew clarification for ${member.id}, task ${task.id}. This grants no tool permission.`,
@@ -291,8 +319,9 @@ export class CrewQuestions {
             },
           );
 
-          if (Result.isSuccess(decodeReceipt(receipt)))
+          if (Result.isSuccess(decodeReceipt(receipt))) {
             this.authority.state.crewQuestionNotified(offer.token);
+          }
         }
       } catch {
         // A failed worker must not prevent the remaining roster from polling.
@@ -304,13 +333,17 @@ export class CrewQuestions {
   public async run(raw: unknown, caller: CrewCaller) {
     const input = decode(raw);
 
-    if (Result.isFailure(input))
+    if (Result.isFailure(input)) {
       throw new CrewError("Invalid crew clarification input.");
+    }
+
     await this.authority.captain(caller);
     caller.signal.throwIfAborted();
 
-    if (!(await this.settings()).enabled)
+    if (!(await this.settings()).enabled) {
       throw new CrewError("Crew clarifications are disabled.");
+    }
+
     const offer = this.authority.state.crewQuestion(input.success.token);
 
     if (
@@ -318,14 +351,18 @@ export class CrewQuestions {
       offer.originCaptainID !== caller.sessionID ||
       offer.state !== "offered" ||
       offer.expires <= this.now()
-    )
+    ) {
       throw new CrewError(
         "Crew clarification is expired, consumed or belongs to another captain.",
       );
+    }
+
     const task = this.owner(offer);
 
-    if (!task)
+    if (!task) {
       throw new CrewError("Crew clarification task is no longer active.");
+    }
+
     const backend = await this.connect(task, caller.signal);
 
     const question = (
@@ -348,10 +385,12 @@ export class CrewQuestions {
         offer.fingerprint,
         caller.signal,
       ))
-    )
+    ) {
       throw new CrewError(
         "Native crew clarification changed; no reply submitted.",
       );
+    }
+
     let answer: ReturnType<typeof questionAnswer> | null;
 
     try {
@@ -379,15 +418,19 @@ export class CrewQuestions {
     signal: AbortSignal,
     expired = false,
   ) {
-    if (!(await this.settings()).enabled)
+    if (!(await this.settings()).enabled) {
       throw new CrewError("Crew clarifications are disabled.");
+    }
+
     signal.throwIfAborted();
 
     if (
       !this.owner(offer) ||
       !this.authority.state.claimCrewQuestion(offer.token, this.now(), expired)
-    )
+    ) {
       throw new CrewError("Crew clarification is stale or already consumed.");
+    }
+
     this.writing.add(offer.token);
     let outcome: NonNullable<CrewQuestionOffer["outcome"]> = "uncertain";
 

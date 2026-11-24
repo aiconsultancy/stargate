@@ -114,10 +114,16 @@ function git(
 ): Promise<{ text: string; truncated: boolean }> {
   const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" };
 
-  for (const [name, value] of Object.entries(process.env))
-    if (value !== undefined && !name.startsWith("GIT_")) env[name] = value;
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value !== undefined && !name.startsWith("GIT_")) {
+      env[name] = value;
+    }
+  }
 
-  if (!options.write) env["GIT_OPTIONAL_LOCKS"] = "0";
+  if (!options.write) {
+    env["GIT_OPTIONAL_LOCKS"] = "0";
+  }
+
   const limit = options.limit ?? 1024 * 1024;
 
   return new Promise((resolve, reject) => {
@@ -147,7 +153,9 @@ function git(
     let truncated = false;
     let failed = false;
     child.stdout.on("data", (chunk: Buffer) => {
-      if (truncated) return;
+      if (truncated) {
+        return;
+      }
 
       if (length + chunk.length > limit) {
         chunks.push(chunk.subarray(0, limit - length));
@@ -166,15 +174,19 @@ function git(
     child.on("close", (code) => {
       const text = Buffer.concat(chunks).toString("utf8");
 
-      if (truncated && options.truncate) resolve({ text, truncated });
-      else if (truncated)
+      if (truncated && options.truncate) {
+        resolve({ text, truncated });
+      } else if (truncated) {
         reject(
           new CrewError(
             "Workspace changes exceed Stargate's bounded inspection; review them natively. No Git change made.",
           ),
         );
-      else if (failed || code !== 0) reject(new CrewError(options.failure));
-      else resolve({ text, truncated });
+      } else if (failed || code !== 0) {
+        reject(new CrewError(options.failure));
+      } else {
+        resolve({ text, truncated });
+      }
     });
   });
 }
@@ -195,12 +207,15 @@ export async function projectRepository(
 ) {
   const info = await lstat(directory).catch(() => null);
 
-  if (!info?.isDirectory() || info.isSymbolicLink())
+  if (!info?.isDirectory() || info.isSymbolicLink()) {
     throw new CrewError("Project must be an existing real Git checkout.");
+  }
+
   const root = await realpath(directory);
 
-  if (root !== resolve(directory))
+  if (root !== resolve(directory)) {
     throw new CrewError("Project directory contains a symbolic-link alias.");
+  }
 
   const read = (args: string[]) =>
     git(root, args, {
@@ -212,8 +227,9 @@ export async function projectRepository(
     (await realpath(await read(["rev-parse", "--show-toplevel"])).catch(
       () => "",
     )) !== root
-  )
+  ) {
     throw new CrewError("Project must be its exact Git checkout root.");
+  }
 
   const common = await realpath(
     resolve(root, await read(["rev-parse", "--git-common-dir"])),
@@ -234,28 +250,32 @@ export async function workspaceRoot(
 
   const info = await lstat(configured).catch(() => null);
 
-  if (!info?.isDirectory() || info.isSymbolicLink())
+  if (!info?.isDirectory() || info.isSymbolicLink()) {
     throw new CrewError(
       "Configured worker worktree must be an existing real directory, not a symlink or file.",
     );
+  }
+
   const root = await realpath(configured);
 
   const captain = await realpath(captainDirectory).catch(() =>
     resolve(captainDirectory),
   );
 
-  if (within(root, captain) || within(captain, root))
+  if (within(root, captain) || within(captain, root)) {
     throw new CrewError("Worker worktree overlaps the captain directory.");
+  }
 
   const read = (directory: string, args: string[]) =>
     git(directory, args, { signal, failure }).then(({ text }) => text.trim());
 
   const top = await read(root, ["rev-parse", "--show-toplevel"]);
 
-  if ((await realpath(top).catch(() => "")) !== root)
+  if ((await realpath(top).catch(() => "")) !== root) {
     throw new CrewError(
       "Configured worktree is not its own Git worktree root; nested or foreign repositories are refused.",
     );
+  }
 
   const common = async (directory: string) =>
     realpath(
@@ -270,10 +290,11 @@ export async function workspaceRoot(
     common(projectDirectory),
   ]);
 
-  if (!worker || worker !== project)
+  if (!worker || worker !== project) {
     throw new CrewError(
       "Configured worktree does not belong to this team's project repository.",
     );
+  }
 
   return root;
 }
@@ -285,20 +306,31 @@ async function untrackedHash(
 ): Promise<string> {
   const absolute = join(root, path);
 
-  if (!within(root, absolute)) throw new CrewError("Invalid workspace path.");
+  if (!within(root, absolute)) {
+    throw new CrewError("Invalid workspace path.");
+  }
+
   const info = await lstat(absolute).catch(() => null);
 
-  if (!info) return "missing";
+  if (!info) {
+    return "missing";
+  }
 
-  if (info.isSymbolicLink()) return `link:${await readlink(absolute)}`;
+  if (info.isSymbolicLink()) {
+    return `link:${await readlink(absolute)}`;
+  }
 
-  if (!info.isFile()) return "other";
+  if (!info.isFile()) {
+    return "other";
+  }
+
   budget.bytes += info.size;
 
-  if (budget.bytes > hashLimit)
+  if (budget.bytes > hashLimit) {
     throw new CrewError(
       "Untracked files exceed Stargate's bounded inspection; review them natively. No Git change made.",
     );
+  }
 
   return createHash("sha256")
     .update(await readFile(absolute))
@@ -355,12 +387,18 @@ export async function inspectWorkspace(
       const path = entry.slice(2);
 
       // Git shows a nested repository as one untracked directory.
-      if (path.endsWith("/")) nested = true;
+      if (path.endsWith("/")) {
+        nested = true;
+      }
+
       changes.push({ path, index: "?", worktree: "?", kind: "untracked" });
     } else if (type === "1" || type === "u") {
       const xy = fields[1] ?? "..";
 
-      if (fields[2]?.startsWith("S")) nested = true;
+      if (fields[2]?.startsWith("S")) {
+        nested = true;
+      }
+
       changes.push({
         path: fields.slice(type === "1" ? 8 : 10).join(" "),
         index: xy[0] ?? ".",
@@ -389,11 +427,13 @@ export async function inspectWorkspace(
   const budget = { bytes: 0 };
   const untracked: string[] = [];
 
-  for (const change of changes)
-    if (change.kind === "untracked" && !change.path.endsWith("/"))
+  for (const change of changes) {
+    if (change.kind === "untracked" && !change.path.endsWith("/")) {
       untracked.push(
         `${change.path}\0${await untrackedHash(root, change.path, budget)}`,
       );
+    }
+  }
 
   const diffstat = numstat
     .split("\0")
@@ -483,9 +523,16 @@ async function refuseObstructions(root: string, action: string) {
   const files = new Set(split(tree.text));
   const directories = new Set<string>();
 
-  for (const path of files)
-    for (let at = path.indexOf("/"); at !== -1; at = path.indexOf("/", at + 1))
+  for (const path of files) {
+    for (
+      let at = path.indexOf("/");
+      at !== -1;
+      at = path.indexOf("/", at + 1)
+    ) {
       directories.add(path.slice(0, at));
+    }
+  }
+
   const blocked: string[] = [];
 
   for (const entry of split(others.text)) {
@@ -496,13 +543,16 @@ async function refuseObstructions(root: string, action: string) {
       let at = path.indexOf("/");
       !hit && at !== -1;
       at = path.indexOf("/", at + 1)
-    )
+    ) {
       hit = files.has(path.slice(0, at));
+    }
 
-    if (hit) blocked.push(entry);
+    if (hit) {
+      blocked.push(entry);
+    }
   }
 
-  if (blocked.length > 0)
+  if (blocked.length > 0) {
     throw new CrewError(
       `Untracked or ignored entries occupy paths that HEAD would restore (${blocked.length}: ${blocked
         .slice(0, 5)
@@ -511,6 +561,7 @@ async function refuseObstructions(root: string, action: string) {
           ", ",
         )}). Move or commit them natively, then inspect again. Nothing ${action}.`,
     );
+  }
 }
 
 const restore = (root: string, oid: string) =>
@@ -529,7 +580,9 @@ async function findStash(root: string, message: string) {
   for (const line of text.split("\n")) {
     const [oid, subject] = line.split("\t", 2);
 
-    if (oid && subject?.endsWith(message)) return oid;
+    if (oid && subject?.endsWith(message)) {
+      return oid;
+    }
   }
 
   return null;
@@ -556,15 +609,17 @@ export async function stashWorkspace(
   });
   const oid = await findStash(root, message);
 
-  if (!oid)
+  if (!oid) {
     throw new CrewError(
       "git stash did not record a Stargate stash; inspect the worktree again.",
     );
+  }
 
-  if (failed)
+  if (failed) {
     throw new CrewError(
       `git stash recorded ${oid} but did not finish; inspect before ${restore(root, oid)}.`,
     );
+  }
 
   return { oid, message, restore: restore(root, oid) };
 }
@@ -592,7 +647,10 @@ export async function resetWorkspace(
     "Checkpoint creation failed; nothing reset.",
   );
 
-  if (!oid) return null;
+  if (!oid) {
+    return null;
+  }
+
   await write(
     ["stash", "store", "-m", message, oid],
     `Checkpoint ${oid} was not retained; nothing reset.`,
@@ -604,10 +662,12 @@ export async function resetWorkspace(
     `HEAD unreadable; nothing reset. Checkpoint ${oid} is retained.`,
   );
 
-  if (current !== head)
+  if (current !== head) {
     throw new CrewError(
       `HEAD moved before reset; nothing reset. Checkpoint ${oid} is retained.`,
     );
+  }
+
   await write(
     ["reset", "--hard", "--quiet", "HEAD"],
     `Reset did not finish; inspect before ${checkpoint.restore}.`,
