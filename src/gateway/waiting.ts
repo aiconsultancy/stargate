@@ -21,6 +21,7 @@ type WaitingRegistration = {
 };
 
 const overrideSchema = settingsStruct({ delayMs: waitingDelaySchema });
+const decodeOverride = Schema.decodeUnknownSync(overrideSchema);
 
 /** Shared captain workspace settings, isolated by configured agent identity. */
 export function waitingSettingsPath(directory: string, agent: string): string {
@@ -38,7 +39,7 @@ export async function resolveWaiting<
   if (backend.type !== "opencode" || !backend.agent) return bot.waiting;
 
   try {
-    const override = Schema.decodeUnknownSync(overrideSchema)(
+    const override = decodeOverride(
       await Bun.file(
         waitingSettingsPath(backend.directory, backend.agent),
       ).json(),
@@ -57,7 +58,7 @@ export async function saveWaitingDelay(
   delayMs: number | null,
   signal: AbortSignal,
 ): Promise<void> {
-  const settings = Schema.decodeUnknownSync(overrideSchema)({ delayMs });
+  const settings = decodeOverride({ delayMs });
   signal.throwIfAborted();
   const path = waitingSettingsPath(directory, agent);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
