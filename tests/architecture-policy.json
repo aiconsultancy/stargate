@@ -1145,6 +1145,7 @@
         "src/gateway/store-types.ts",
         "src/gateway/row-codec.ts",
         "src/gateway/store-schema.ts",
+        "src/gateway/thread-followup-store.ts",
         "src/gateway/transcript-store.ts",
         "src/peers.ts",
         "src/routing.ts",

@@ -556,7 +556,10 @@ export class Gateway {
   private admitChat(input: Incoming, bot: BotConfig) {
     const accepted =
       (bot.slack.steerThreadFollowUps && this.backend.sessionID
-        ? this.store.admitFollowUp(input, this.backend.sessionID)
+        ? this.store.threadFollowUps.admitFollowUp(
+            input,
+            this.backend.sessionID,
+          )
         : undefined) ?? this.store.enqueue(input);
 
     if (
@@ -587,9 +590,12 @@ export class Gateway {
   }
 
   private async deliverFollowUps(signal: AbortSignal, finalOwner?: number) {
-    for (const receipt of this.store.followUps(this.key, finalOwner)) {
+    for (const receipt of this.store.threadFollowUps.followUps(
+      this.key,
+      finalOwner,
+    )) {
       signal.throwIfAborted();
-      const input = this.store.followUpInput(receipt);
+      const input = this.store.threadFollowUps.followUpInput(receipt);
       let state = receipt.state;
       const owner = this.store.jobByInput(this.key, receipt.inputID);
       const source = owner ? this.transport.source(input) : undefined;
@@ -603,7 +609,7 @@ export class Gateway {
           ? this.bot.slack.steerThreadFollowUps
           : "steerThreadFollowUps" in this.config &&
             this.config.steerThreadFollowUps) &&
-        this.store.ownsFollowUp(receipt);
+        this.store.threadFollowUps.ownsFollowUp(receipt);
 
       const native: SteerInput | undefined = source
         ? {
@@ -616,7 +622,10 @@ export class Gateway {
           }
         : undefined;
 
-      if (state === "pending" && this.store.claimFollowUp(receipt)) {
+      if (
+        state === "pending" &&
+        this.store.threadFollowUps.claimFollowUp(receipt)
+      ) {
         let result: SteerResult = { status: "refused" };
 
         if (native && allowed() && this.backend.steer) {
@@ -631,7 +640,7 @@ export class Gateway {
         }
 
         state = result.status === "refused" ? "queued" : result.status;
-        this.store.settleFollowUp(receipt, state);
+        this.store.threadFollowUps.settleFollowUp(receipt, state);
       } else if (
         (state === "writing" || state === "uncertain") &&
         (finalOwner === receipt.owner ||
@@ -652,7 +661,7 @@ export class Gateway {
         }
 
         state = result.status === "accepted" ? "accepted" : "uncertain";
-        this.store.settleFollowUp(receipt, state);
+        this.store.threadFollowUps.settleFollowUp(receipt, state);
       }
 
       if ((receipt.notified && state === receipt.state) || !this.allowed(input))
@@ -665,7 +674,7 @@ export class Gateway {
 
         if (queued !== false && queued !== null)
           this.notificationDispatch(queued);
-        this.store.notifiedFollowUp(receipt);
+        this.store.threadFollowUps.notifiedFollowUp(receipt);
         continue;
       }
 
@@ -691,7 +700,7 @@ export class Gateway {
           );
         }
 
-        this.store.notifiedFollowUp(receipt);
+        this.store.threadFollowUps.notifiedFollowUp(receipt);
       } catch {
         this.log.warn("Follow-up notification unavailable");
       }
@@ -1428,7 +1437,7 @@ export class Gateway {
   }
 
   private followUpAnswer(owner: number, text: string): string {
-    const links = this.store.followUpLinks(owner);
+    const links = this.store.threadFollowUps.followUpLinks(owner);
 
     return links && text.trim()
       ? `${text}\n\nFollow-ups included:\n${links}`

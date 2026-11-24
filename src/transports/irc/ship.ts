@@ -1659,7 +1659,7 @@ export class IrcShip {
       this.config.features.steerThreadFollowUps &&
       this.config.backend.type === "opencode" &&
       this.config.backend.sessionID
-        ? this.store.admitFollowUp(
+        ? this.store.threadFollowUps.admitFollowUp(
             input,
             this.config.backend.sessionID,
             "irc",
