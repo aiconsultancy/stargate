@@ -5,7 +5,12 @@ import {
   equalCredential,
   producerCredentials,
 } from "./config";
-import { NotificationInput, type ShuttingDown, Source } from "./model";
+import {
+  NotificationInput,
+  type PublishError,
+  type ShuttingDown,
+  Source,
+} from "./model";
 import type { NotificationCore } from "./notifications";
 
 type NotificationRoute = {
@@ -49,6 +54,22 @@ function failure(status: number, code: string, retry = 1) {
 // Typed as the last member only: a new publish failure fails typecheck here.
 function shuttingDownFailure(_failure: ShuttingDown) {
   return failure(503, "shutting_down");
+}
+
+function publishFailure(failed: PublishError) {
+  if (Predicate.isTagged(failed, "InvalidNotification"))
+    return failure(400, "invalid_notification");
+
+  if (Predicate.isTagged(failed, "TopicNotGranted"))
+    return failure(403, "topic_not_granted");
+
+  if (Predicate.isTagged(failed, "QueueFull"))
+    return failure(503, "queue_full");
+
+  if (Predicate.isTagged(failed, "StoreUnavailable"))
+    return failure(503, "store_unavailable");
+
+  return shuttingDownFailure(failed);
 }
 
 /** Header-only policy; body bounds and work reservations belong to the host. */
@@ -169,21 +190,7 @@ export function notificationRoutes(
               },
             });
 
-          const failed = result.failure;
-
-          if (Predicate.isTagged(failed, "InvalidNotification"))
-            return failure(400, "invalid_notification");
-
-          if (Predicate.isTagged(failed, "TopicNotGranted"))
-            return failure(403, "topic_not_granted");
-
-          if (Predicate.isTagged(failed, "QueueFull"))
-            return failure(503, "queue_full");
-
-          if (Predicate.isTagged(failed, "StoreUnavailable"))
-            return failure(503, "store_unavailable");
-
-          return shuttingDownFailure(failed);
+          return publishFailure(result.failure);
         } catch {
           return failure(503, "unavailable");
         }
