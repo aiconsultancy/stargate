@@ -23,7 +23,7 @@ import {
   reloadConfigSchema,
 } from "../config";
 import type { SubspaceAgentsConfig } from "../config/composition";
-import { clientPem } from "../transports/irc/client-pem";
+import { checkIrcCredentials } from "../transports/irc/credential-preflight";
 import {
   type NotifyConfig,
   checkProducerCredentials,
@@ -121,32 +121,6 @@ function validBot(input: unknown): BotConfig {
   }
 
   return parsed.success;
-}
-
-async function checkIrcCredentials(
-  registration: IrcConfig,
-  env: NodeJS.ProcessEnv,
-) {
-  const members = [registration, ...registration.crew];
-
-  // Presence only: values are never printed or sent anywhere.
-  for (const { passwordEnv } of members)
-    if (passwordEnv && !env[passwordEnv]?.trim())
-      throw new Error(
-        "Missing IRC password environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
-      );
-
-  const pemFiles = new Set(
-    members.flatMap(({ clientPemFile }) =>
-      clientPemFile ? [clientPemFile] : [],
-    ),
-  );
-
-  for (const path of pemFiles) await clientPem(path);
-  const ca = registration.server.caFile;
-
-  if (ca && !(await lstat(ca).catch(() => {}))?.isFile())
-    throw new Error("IRC caFile is not a readable file.");
 }
 
 /**

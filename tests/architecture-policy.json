@@ -1774,6 +1774,7 @@
         "src/irc/burst.ts",
         "src/irc/client-pem.ts",
         "src/irc/client.ts",
+        "src/transports/irc/credential-preflight.ts",
         "src/irc/crew-link.ts",
         "src/irc/crew-question-gateway.ts",
         "src/irc/delivery.ts",
@@ -1790,6 +1791,7 @@
       ],
       "public": [
         "src/irc/client.ts",
+        "src/transports/irc/credential-preflight.ts",
         "src/irc/protocol.ts",
         "src/irc/routing.ts",
         "src/irc/ship.ts",
