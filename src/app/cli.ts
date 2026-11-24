@@ -1,9 +1,9 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Result, Schema } from "effect";
-import { apiToken } from "../observability/dashboard/api/v1/token";
+import { configuredApiToken } from "../observability/dashboard/api/v1/operator-token";
 import { checkCodexConfiguration } from "../backends/codex/preflight";
 import { loadConfig } from "../config";
 import { teamSchema } from "../coordination/crew/team";
@@ -515,13 +515,7 @@ export async function runCli(args: string[]): Promise<CliResult> {
   } else if (command === "api" && p[1] === "token" && p.length === 2) {
     const config = await readConfiguration(configPath);
 
-    if (!config.api)
-      throw new Error("Enable api in the Stargate configuration first.");
-
-    const token = await apiToken(
-      resolve(dirname(configPath), config.dataDirectory),
-      v.rotate,
-    );
+    const token = await configuredApiToken(config, configPath, v.rotate);
 
     process.stdout.write(`${token}\n`);
   } else if (command === "subspace" && p.length >= 2) {
