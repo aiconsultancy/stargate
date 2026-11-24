@@ -1617,6 +1617,7 @@
         "src/pi-model.ts",
         "src/backends/config.ts",
         "src/backends/opencode/config.ts",
+        "src/backends/opencode/crew-status.ts",
         "src/backends/opencode/questions.ts",
         "src/backends/claude/config.ts",
         "src/backends/codex/config.ts"
