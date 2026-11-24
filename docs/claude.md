@@ -156,6 +156,11 @@ access. Neither `allowedTools: []` nor the working directory confines those
 programs. Only the explicitly configured servers are loaded from bot
 configuration.
 
+With the optional [Subspace API agent identity](subspace-agents.md) enabled,
+an officer whose `registration` names this backend also gets a `subspace`
+stdio server: Stargate's own bridge to that officer's signing socket. It is
+added only then, and a configured server with that name is refused.
+
 Stargate sends MCP configuration over stdin with the SDK's
 `mcpServersDelivery: "initialize"`. Before each turn it checks the executable's
 `--version` against the installed SDK's `claudeCodeVersion`. An equal or newer

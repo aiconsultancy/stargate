@@ -45,7 +45,7 @@ import {
 import { transcriptionSchema } from "../transcription/config";
 import { waitingSchema } from "./waiting";
 
-import { backendSchema } from "../backends/config";
+import { type BackendConfig, backendSchema } from "../backends/config";
 
 const userRule = Schema.Union([
   Schema.Literal("*"),
@@ -332,6 +332,219 @@ export function agentDispatchTarget(
   return { registration, channel: joined };
 }
 
+const normalisedPath = absolutePath.check(
+  settingsRefine((path) => resolve(path) === path, {
+    message: "An absolute normalised path is required",
+  }),
+);
+
+const subspaceLine = (maximum: number) =>
+  Schema.Trim.check(Schema.isMinCodePoints(1))
+    .check(Schema.isMaxCodePoints(maximum))
+    .check(
+      settingsRefine((value) => !/\p{Cc}/u.test(value), {
+        message: "Use one line without control characters",
+      }),
+    );
+
+/** Headers the Subspace signing proxy and enrolment set or always drop. */
+const reservedSubspaceHeaders = new Set([
+  ...reservedDispatchHeaders,
+  "cookie",
+  "origin",
+  "x-subspace-agent",
+]);
+
+/** One officer whose Subspace API identity the gateway holds. */
+const subspaceOfficerSchema = settingsStruct({
+  /** The agent's name in the Subspace API; also its bundle's file name. */
+  name: Schema.String.check(settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/)),
+  rank: Schema.Literals(["rearAdmiral", "captain"]),
+  /** A captain's ship; a rear admiral has none. */
+  ship: Schema.optional(subspaceLine(64)),
+  model: subspaceLine(100),
+  ircNick: Schema.optional(
+    Schema.String.check(settingsPattern(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)),
+  ),
+  /** A registration whose gateway-launched (Claude) backend gets the bridge. */
+  registration: Schema.optional(
+    Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  ),
+  /** Key and certificate; default `<stateDirectory>/<name>.pem`. */
+  bundlePath: Schema.optional(normalisedPath),
+  /** This officer's signing proxy; absent opens no endpoint for it. */
+  socketPath: Schema.optional(normalisedPath),
+}).check(
+  settingsCheck((officer, context) => {
+    if ((officer.rank === "captain") !== (officer.ship !== undefined))
+      context.addIssue({
+        code: "custom",
+        path: ["ship"],
+        message: "A captain needs a ship; a rear admiral has none",
+      });
+  }),
+);
+
+/**
+ * Optional Subspace API agent identity (docs/subspace-agents.md): one key
+ * per officer, enrolled with the API, and a signing proxy per officer.
+ * Absent or `enabled: false` loads, opens and contacts nothing.
+ */
+export const subspaceAgentsSchema = settingsStruct({
+  enabled: Schema.Literal(true),
+  api: settingsStruct({
+    /**
+     * The API's origin, with no path: its routes are `/api/v1/` and `/mcp`.
+     * HTTPS, or HTTP on loopback.
+     */
+    baseUrl: secureLocalOrHttpsURL.check(
+      settingsRefine((value) => new URL(value).pathname === "/", {
+        message: "Use the API's origin, with no path",
+      }),
+    ),
+    /**
+     * The API's public origin (its `AGENT_TOKEN_AUDIENCE`) for `aud`, when
+     * Stargate reaches it by another address; defaults to the origin of `baseUrl`.
+     */
+    audience: Schema.optional(
+      Schema.String.check(
+        settingsRefine(
+          (value) =>
+            URL.canParse(value) &&
+            /^https?:$/.test(new URL(value).protocol) &&
+            new URL(value).origin === value,
+          { message: "Use an origin: scheme, host and optional port only" },
+        ),
+      ),
+    ),
+    /** Extra headers for private access (for example a zero-trust service token). */
+    headersEnv: settingsRecord(
+      Schema.String.check(
+        settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/),
+      ).check(
+        settingsRefine(
+          (name) => !reservedSubspaceHeaders.has(name.toLowerCase()),
+          { message: "Stargate sets or drops this header itself" },
+        ),
+      ),
+      envName,
+    ).pipe(settingsDefault({})),
+    /** Bound on each upstream request, in seconds. */
+    timeoutSeconds: dispatchSeconds(1, 300).pipe(settingsDefault(60)),
+  }),
+  /** The fleet's one-time enrolment token: a private file or a variable. */
+  enrolment: Schema.optional(
+    settingsStruct({
+      tokenFile: Schema.optional(normalisedPath),
+      tokenEnv: Schema.optional(envName),
+    }).check(
+      settingsCheck((enrolment, context) => {
+        if (
+          (enrolment.tokenFile === undefined) ===
+          (enrolment.tokenEnv === undefined)
+        )
+          context.addIssue({
+            code: "custom",
+            message: "Set exactly one of tokenFile or tokenEnv",
+          });
+      }),
+    ),
+  ),
+  /** Key type for new bundles; an existing bundle keeps its own. */
+  keyAlgorithm: Schema.Literals(["ed25519", "ecdsa-p256"]).pipe(
+    settingsDefault("ed25519"),
+  ),
+  /** Private (0700) directory for bundles and enrolment records. */
+  stateDirectory: Schema.optional(normalisedPath),
+  officers: Schema.mutable(Schema.Array(subspaceOfficerSchema))
+    .check(Schema.isMinLength(1))
+    .check(Schema.isMaxLength(64)),
+});
+
+export type SubspaceAgentsConfig = typeof subspaceAgentsSchema.Type;
+
+/** A section, of any content, that does not say `enabled: true`. */
+const switchedOff = (input: unknown) =>
+  typeof input === "object" &&
+  input !== null &&
+  !Array.isArray(input) &&
+  (!("enabled" in input) || input.enabled === false);
+
+/**
+ * A section without `enabled: true` is the same as none: its other keys are
+ * not validated, and it decodes to undefined, so adding, changing or removing
+ * a switched-off section changes nothing, a reload included.
+ */
+export const subspaceAgentsSection = Schema.Unknown.pipe(
+  Schema.decodeTo(
+    Schema.Unknown,
+    SchemaTransformation.transform({
+      decode: (input) => (switchedOff(input) ? undefined : input),
+      encode: (input) => input,
+    }),
+  ),
+  Schema.decodeTo(Schema.UndefinedOr(subspaceAgentsSchema)),
+);
+
+const repeated = (values: readonly string[]) =>
+  new Set(values).size !== values.length;
+
+/** Cross-checks of an enabled section; a disabled one names nothing that must exist. */
+function subspaceAgentsIssues(
+  section: SubspaceAgentsConfig,
+  registrations: readonly { id: string; backend: BackendConfig }[],
+): [PropertyKey[], string][] {
+  const issues: [PropertyKey[], string][] = [];
+  const officers = section.officers;
+
+  if (repeated(officers.map((officer) => officer.name.toLowerCase())))
+    issues.push([["officers"], "Officer names must be unique"]);
+
+  if (repeated(officers.flatMap((officer) => officer.bundlePath ?? [])))
+    issues.push([["officers"], "Each officer needs its own bundlePath"]);
+
+  if (
+    repeated(
+      officers.flatMap((officer) =>
+        officer.socketPath ? [dirname(officer.socketPath)] : [],
+      ),
+    )
+  )
+    issues.push([
+      ["officers"],
+      "Each officer's socketPath needs its own directory",
+    ]);
+
+  if (repeated(officers.flatMap((officer) => officer.registration ?? [])))
+    issues.push([["officers"], "A registration can belong to one officer"]);
+
+  for (const [index, officer] of officers.entries()) {
+    if (officer.registration === undefined) continue;
+
+    const backend = registrations.find(
+      (registration) => registration.id === officer.registration,
+    )?.backend;
+
+    if (!backend)
+      issues.push([
+        ["officers", index, "registration"],
+        "Name a Slack, IRC or Teams registration",
+      ]);
+    else if (backend.type === "claude" && !officer.socketPath)
+      issues.push([
+        ["officers", index, "socketPath"],
+        "A Claude officer needs socketPath for its MCP bridge",
+      ]);
+    else if (backend.type === "claude" && backend.mcpServers?.["subspace"])
+      issues.push([
+        ["officers", index, "registration"],
+        "Remove the registration's own subspace MCP server; Stargate adds it",
+      ]);
+  }
+
+  return issues;
+}
+
 /** Bot Framework transport: exact sender IDs, no credential values in config. */
 export const teamsSchema = settingsStruct({
   livePresence: Schema.optional(Schema.Boolean),
@@ -471,6 +684,8 @@ const configFields = settingsStruct({
   quotaWatch: Schema.optional(quotaWatchSchema),
   /** Rear admiral agent dispatch from Subspace issues; off by default. */
   agentDispatch: Schema.optional(agentDispatchSchema),
+  /** Officers' Subspace API keys and signing proxy; absent by default. */
+  subspaceAgents: Schema.optional(subspaceAgentsSection),
 });
 
 const configCheck = (liveNotificationPolicy = false) =>
@@ -487,6 +702,7 @@ const configCheck = (liveNotificationPolicy = false) =>
         notify,
         api,
         agentDispatch,
+        subspaceAgents,
       },
       context,
     ) => {
@@ -501,6 +717,18 @@ const configCheck = (liveNotificationPolicy = false) =>
             message: target,
           });
       }
+
+      if (subspaceAgents?.enabled)
+        for (const [path, message] of subspaceAgentsIssues(subspaceAgents, [
+          ...bots,
+          ...irc,
+          ...teams,
+        ]))
+          context.addIssue({
+            code: "custom",
+            path: ["subspaceAgents", ...path],
+            message,
+          });
 
       if (notify) {
         const message = notifyConfigError(

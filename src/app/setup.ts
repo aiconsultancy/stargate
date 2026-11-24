@@ -22,6 +22,7 @@ import {
   configSchema,
   reloadConfigSchema,
 } from "../config";
+import type { SubspaceAgentsConfig } from "../config/composition";
 import { clientPem } from "../transports/irc/client-pem";
 import {
   type NotifyConfig,
@@ -135,6 +136,7 @@ export async function checkCredentials(
   notify?: NotifyConfig,
   dataDirectory = ".stargate",
   agentDispatch?: AgentDispatchConfig,
+  subspaceAgents?: SubspaceAgentsConfig,
 ): Promise<NodeJS.ProcessEnv> {
   let companion: NodeJS.ProcessEnv = {};
 
@@ -186,6 +188,13 @@ export async function checkCredentials(
       if (!env[name]?.trim())
         throw new Error(
           "Missing agent dispatch API environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
+        );
+
+  if (subspaceAgents?.enabled)
+    for (const name of Object.values(subspaceAgents.api.headersEnv))
+      if (!env[name]?.trim())
+        throw new Error(
+          "Missing Subspace agent API environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
         );
 
   for (const bot of bots) {
