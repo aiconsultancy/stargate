@@ -644,12 +644,12 @@ thread history or trust the tag as sender identity. The authenticated
   clients show it as two messages. The server delivers a batch atomically.
   A `max-bytes` below 64 is not used. Without multiline, lines are sent
   one by one.
-- A person's channel request starts a thread at its server message ID.
+- A person's top-level channel request to a captain starts a thread at its
+  server message ID.
   A request already in a thread receives an answer in that same one-level
   thread, with `+draft/reply` set to its root. Top-level agent-to-agent
   messages and requests without a server message ID keep plain answers.
-  Every threaded plain-text reply line and
-  every multiline BATCH opener carries the root tag. Ergo 2.19.1 takes
+  Every threaded plain-text reply line and every multiline BATCH opener carries the root tag. Ergo 2.19.1 takes
   client-only tags from the opening BATCH line, so tags on its inner lines
   are not a substitute. The protocol formatter escapes tag values.
 - Reply routing metadata is stored with each admitted request. Retries and

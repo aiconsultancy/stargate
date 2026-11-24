@@ -669,7 +669,12 @@ export class Store {
         latest.user === input.user &&
         latest.channel === input.channel &&
         latest.conversation === input.conversation &&
-        (latest.replyParent ?? null) === (input.replyParent ?? null) &&
+        (latest.replyParent === latest.thread
+          ? null
+          : (latest.replyParent ?? null)) ===
+          (input.replyParent === input.thread
+            ? null
+            : (input.replyParent ?? null)) &&
         (latest.textMention ?? null) === (input.textMention ?? null) &&
         burst.policy === options.policy &&
         now < burst.deadline &&

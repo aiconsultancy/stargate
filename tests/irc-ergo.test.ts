@@ -595,14 +595,7 @@ test.skipIf(!available)(
       ).toBe(true);
     }
 
-    // Reply to the first answer.
-    // The original request remains the thread root for each relayed line.
-    const priorAnswer = reply[0]?.tags.get("msgid");
-
-    if (!priorAnswer) {
-      throw new Error("captain answer has no server msgid");
-    }
-
+    // Reply to the human request's thread root without mentioning the captain.
     // The delivery ACK is on another socket. A round trip on Jack's socket
     // Consumes all earlier lines before the second request's boundary.
     jack.send("PING :thread-boundary");
@@ -614,8 +607,8 @@ test.skipIf(!available)(
     );
     const offset = jack.lines.length;
     jack.send(
-      formatMessage("PRIVMSG", ["#galactica", "galactica: threaded status?"], {
-        "+draft/reply": priorAnswer,
+      formatMessage("PRIVMSG", ["#galactica", "threaded status?"], {
+        "+draft/reply": request,
       }),
     );
     await until(
