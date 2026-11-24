@@ -17,8 +17,8 @@ import {
   dispatchRequestTurn,
   ircDispatchOffer,
   isRearAdmiral,
-} from "../../dispatch/irc";
-import { dispatchTag } from "../../dispatch/protocol";
+} from "../../coordination/fleet/dispatch/irc";
+import { dispatchTag } from "../../coordination/fleet/dispatch/protocol";
 import type {
   DispatchOffer,
   FleetSource,

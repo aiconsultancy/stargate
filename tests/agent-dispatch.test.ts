@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import type { AgentDispatcher } from "../src/dispatch/dispatcher";
-import { DispatchLedger } from "../src/dispatch/ledger";
+import type { AgentDispatcher } from "../src/coordination/fleet/dispatch/dispatcher";
+import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
 import {
   answer,
   CAPTAIN_A,

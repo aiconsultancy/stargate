@@ -1,5 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { DispatchApiError, SubspaceApi } from "../src/dispatch/api";
+import {
+  DispatchApiError,
+  SubspaceApi,
+} from "../src/coordination/fleet/dispatch/api";
 import {
   ACCESS,
   answer,

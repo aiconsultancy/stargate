@@ -967,8 +967,8 @@
         "src/coordination/captain/captain-post.ts",
         "src/coordination/crew/execution/engine.ts",
         "src/coordination/crew/messaging/messaging.ts",
+        "src/coordination/fleet/dispatch/polling.ts",
         "src/coordination/fleet/protocol.ts",
-        "src/dispatch/polling.ts",
         "src/gateway/gateway.ts",
         "src/gateway/routing.ts",
         "src/transports/irc/client.ts",
@@ -1455,7 +1455,7 @@
       }
     },
     {
-      "files": ["src/dispatch/dispatcher.ts"],
+      "files": ["src/coordination/fleet/dispatch/dispatcher.ts"],
       "rules": {
         "oxc/no-accumulating-spread": "off"
       }

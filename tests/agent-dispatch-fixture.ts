@@ -10,7 +10,7 @@ import {
   type FleetRoster,
   type ListingPart,
   SubspaceApi,
-} from "../src/dispatch/api";
+} from "../src/coordination/fleet/dispatch/api";
 import {
   AgentDispatcher,
   type AgentDispatcherOptions,
@@ -18,9 +18,9 @@ import {
   type DispatchEvent,
   type DispatchMessenger,
   UndeliverableIssue,
-} from "../src/dispatch/dispatcher";
-import { DispatchLedger } from "../src/dispatch/ledger";
-import type { IssueLabel } from "../src/dispatch/protocol";
+} from "../src/coordination/fleet/dispatch/dispatcher";
+import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
+import type { IssueLabel } from "../src/coordination/fleet/dispatch/protocol";
 
 export const FLEET = "00000000-0000-4000-8000-0000000000f1";
 export const OTHER_FLEET = "00000000-0000-4000-8000-0000000000f2";

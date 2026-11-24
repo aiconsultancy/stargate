@@ -622,6 +622,38 @@
       "src/dashboard/dashboard.ts",
       "src/observability/dashboard/dashboard.ts"
     ],
+    "src/dispatch/api.ts": [
+      "src/dispatch/api.ts",
+      "src/coordination/fleet/dispatch/api.ts"
+    ],
+    "src/dispatch/dispatcher.ts": [
+      "src/dispatch/dispatcher.ts",
+      "src/coordination/fleet/dispatch/dispatcher.ts"
+    ],
+    "src/dispatch/irc.ts": [
+      "src/dispatch/irc.ts",
+      "src/coordination/fleet/dispatch/irc.ts"
+    ],
+    "src/dispatch/ledger.ts": [
+      "src/dispatch/ledger.ts",
+      "src/coordination/fleet/dispatch/ledger.ts"
+    ],
+    "src/dispatch/polling.ts": [
+      "src/dispatch/polling.ts",
+      "src/coordination/fleet/dispatch/polling.ts"
+    ],
+    "src/dispatch/protocol.ts": [
+      "src/dispatch/protocol.ts",
+      "src/coordination/fleet/dispatch/protocol.ts"
+    ],
+    "src/dispatch/routes.ts": [
+      "src/dispatch/routes.ts",
+      "src/coordination/fleet/dispatch/routes.ts"
+    ],
+    "src/dispatch/start.ts": [
+      "src/dispatch/start.ts",
+      "src/coordination/fleet/dispatch/start.ts"
+    ],
     "src/effect.ts": ["src/effect.ts", "src/lib/effect.ts"],
     "src/fleet-irc.ts": [
       "src/fleet-irc.ts",

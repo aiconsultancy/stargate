@@ -1,4 +1,4 @@
-import { fold } from "../transports/irc/protocol";
+import { fold } from "../../../transports/irc/protocol";
 import type { TrackedIssue } from "./ledger";
 import {
   type AgentDispatcherOptions,
