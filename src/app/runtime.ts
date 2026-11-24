@@ -35,6 +35,12 @@ import {
   ReloadRejected,
   readReloadCandidate,
 } from "./config-reload";
+import {
+  type IrcBinding,
+  type IrcRuntimeRegistration,
+  prepareIrcRoster,
+  resolveIrcRosterUpdates,
+} from "./irc-reload";
 import type { CrewUIApi } from "../transports/slack/crew-ui";
 import { CrewUI } from "../transports/slack/crew-ui";
 import {
@@ -1026,19 +1032,14 @@ export function serve(
         }
       };
 
-      type Registration = Awaited<ReturnType<typeof buildRegistration>>;
-
-      const ircBindings = new Map<
-        string,
-        { ship: IrcShip; entries: Map<string, Registration> }
-      >();
+      const ircBindings = new Map<string, IrcBinding>();
 
       for (const irc of config.irc ?? []) {
         const ship = yield* Effect.promise(() =>
           (dependencies.irc ?? IrcShip.create)(irc, store, log),
         );
 
-        const entries = new Map<string, Registration>();
+        const entries = new Map<string, IrcRuntimeRegistration>();
 
         for (const registration of ship.registrations) {
           const entry = yield* Effect.acquireRelease(
@@ -1399,7 +1400,7 @@ export function serve(
 
       // Dynamic backend resources close after worker interruption, before the
       // Stores. The single finalizer also owns later roster additions.
-      const addedResources: Registration[] = [];
+      const addedResources: IrcRuntimeRegistration[] = [];
       yield* Effect.addFinalizer(() =>
         Effect.all(
           addedResources.map((entry) =>
@@ -1429,7 +1430,7 @@ export function serve(
       if (reload) {
         const apply = async (candidate: ReloadCandidate) => {
           const staged: {
-            entry: Registration;
+            entry: IrcRuntimeRegistration;
             start: Deferred.Deferred<void>;
           }[] = [];
 
@@ -1451,48 +1452,36 @@ export function serve(
               };
             });
 
-            const plans = [];
-
-            for (const next of candidate.config.irc) {
-              const binding = ircBindings.get(next.id);
-
-              if (!binding) throw new ReloadRejected("unavailable");
-
-              const plan = await binding.ship.prepareReload(
-                next,
-                candidate.environment,
-              );
-
-              for (const registration of plan.added) {
-                const entry = await buildRegistration(registration, next);
-                const start = Deferred.makeUnsafe<void>();
-                staged.push({ entry, start });
-                // A staged worker cannot recover or process anything until the
-                // Synchronous commit publishes the whole candidate.
-                await Effect.runPromise(
-                  FiberMap.run(
-                    fibers,
-                    registration.key,
-                    Deferred.await(start).pipe(
-                      Effect.andThen(
-                        supervise(registration.log, "gateway", (signal) =>
-                          entry.gateway.work(signal),
+            const plans =
+              candidate.config.irc.length === 0
+                ? []
+                : await prepareIrcRoster(
+                    candidate.config.irc,
+                    candidate.environment,
+                    ircBindings,
+                    async (registration, next) => {
+                      const entry = await buildRegistration(registration, next);
+                      const start = Deferred.makeUnsafe<void>();
+                      staged.push({ entry, start });
+                      // A staged worker cannot recover or process anything until the
+                      // Synchronous commit publishes the whole candidate.
+                      await Effect.runPromise(
+                        FiberMap.run(
+                          fibers,
+                          registration.key,
+                          Deferred.await(start).pipe(
+                            Effect.andThen(
+                              supervise(registration.log, "gateway", (signal) =>
+                                entry.gateway.work(signal),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ),
-                );
-              }
+                      );
 
-              plans.push({
-                binding,
-                plan,
-                next,
-                transcriber: next.transcription
-                  ? createTranscriber(next.transcription)
-                  : undefined,
-              });
-            }
+                      return entry;
+                    },
+                  );
 
             if (!open || requests.signal.aborted)
               throw new ReloadRejected("unavailable");
@@ -1509,34 +1498,7 @@ export function serve(
             if (paused.some((gateway) => !gateway.isIdle()))
               throw new ReloadRejected("busy");
 
-            // Resolve every entry and namespace before publishing anything.
-            const updates = plans.flatMap(
-              ({ binding, plan, transcriber, next }) => {
-                const removed = new Set(plan.removed);
-
-                const registrations = [
-                  ...binding.ship.registrations.filter(
-                    (registration) => !removed.has(registration),
-                  ),
-                  ...plan.added,
-                ];
-
-                return registrations.map((registration) => {
-                  const entry =
-                    staged.find(
-                      ({ entry }) => entry.registration === registration,
-                    )?.entry ?? binding.entries.get(registration.key);
-
-                  if (
-                    !entry ||
-                    entry.gateway.key !== registration.transport.key
-                  )
-                    throw new ReloadRejected("unavailable");
-
-                  return { binding, registration, entry, transcriber, next };
-                });
-              },
-            );
+            const updates = resolveIrcRosterUpdates(plans);
 
             // No awaits: publish all access/settings and roster references in
             // One JS turn. Admission cannot observe a half-applied candidate.
