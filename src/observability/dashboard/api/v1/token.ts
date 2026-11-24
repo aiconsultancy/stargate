@@ -41,6 +41,30 @@ async function readToken(path: string) {
   }
 }
 
+async function publishToken(
+  temporary: string,
+  path: string,
+  token: string,
+  rotate: boolean,
+) {
+  if (rotate) {
+    await rename(temporary, path);
+  } else {
+    try {
+      await link(temporary, path);
+    } catch (error) {
+      if (!hasCode(error, "EEXIST")) throw error;
+      const existing = await readToken(path);
+
+      if (!existing) throw error;
+
+      return existing;
+    }
+  }
+
+  return token;
+}
+
 /** Create once across concurrent CLI and service starts, or atomically rotate. */
 export async function apiToken(dataDirectory: string, rotate = false) {
   const path = join(dataDirectory, "api-token");
@@ -75,21 +99,7 @@ export async function apiToken(dataDirectory: string, rotate = false) {
         await file.close();
       }
 
-      if (rotate) await rename(temporary, path);
-      else {
-        try {
-          await link(temporary, path);
-        } catch (error) {
-          if (!hasCode(error, "EEXIST")) throw error;
-          const existing = await readToken(path);
-
-          if (!existing) throw error;
-
-          return existing;
-        }
-      }
-
-      return token;
+      return await publishToken(temporary, path, token, rotate);
     } finally {
       await rm(temporary, { force: true });
     }
