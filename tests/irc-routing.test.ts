@@ -321,6 +321,51 @@ test("only a top-level human channel request starts a new captain thread", () =>
   ).toBeUndefined();
 });
 
+test("only people can reach a participating captain without a reply to its own message", () => {
+  const context = {
+    config,
+    member: captain,
+    currentNick: captain.nick,
+    sent: () => false,
+    participating: (channel: string, root: string) =>
+      channel === "#galactica" && root === "request",
+    now: () => 0,
+    fold,
+  };
+
+  const reply = { account: "jack", "+draft/reply": "request" };
+  const followUp = message("#galactica", "continue", reply);
+
+  expect(routeIrcMessage(followUp, context)?.replyParent).toBe("request");
+  expect(
+    routeIrcMessage(followUp, { ...context, member: chief }),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", { ...reply, bot: "" }),
+      context,
+    ),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", {
+        ...reply,
+        account: "galactica-chief",
+      }),
+      context,
+    ),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", {
+        ...reply,
+        "+draft/reply": "another",
+      }),
+      context,
+    ),
+  ).toBeUndefined();
+});
+
 test("irc routing: direct messages are per account and captain-only", () => {
   const direct = route("galactica", "hello there");
   expect(direct?.channel).toBe("jack");

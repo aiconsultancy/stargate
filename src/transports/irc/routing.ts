@@ -617,7 +617,8 @@ export function routeIrcMessage(
   const replied =
     !strict &&
     validReply &&
-    (context.sent(reply) || (!direct && person && root !== undefined));
+    (context.sent(reply) ||
+      (!direct && member.role === "captain" && person && root !== undefined));
 
   // Captain text mentions and all-calls; the matched word becomes the
   // Turn's text mention, so the session sees why it was admitted.

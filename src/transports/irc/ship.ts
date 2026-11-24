@@ -1225,6 +1225,7 @@ export class IrcShip {
           }
         },
         published: ({ target, msgid, request, root }) => {
+          // Ordinary captain channels also need the published root for replies.
           if (
             detached() ||
             (identity.role !== "captain" && !this.config.features.questions) ||
