@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import type { TransportDelivery } from "./ports";
 import { chunks } from "./routing";
-import { type ReplyChunk, replyText } from "../shared/slack-format";
+import type { ReplyChunk } from "../shared/slack-format";
 import type { Job, Store } from "./store";
 
 export type LiveReplyOptions = {
@@ -12,6 +12,14 @@ export type LiveReplyOptions = {
   phrase?: (name: string, index: number) => string;
   wait?: (ms: number, signal: AbortSignal) => Promise<void>;
 };
+
+function previewContent(part: ReplyChunk) {
+  if (typeof part === "string")
+    return { body: part, content: undefined, key: part };
+  const { text: body, content } = part;
+
+  return { body, content, key: JSON.stringify({ text: body, content }) };
+}
 
 /** Coalesce text snapshots; no network wait in the backend's event callback. */
 export class LiveReply {
@@ -51,8 +59,7 @@ export class LiveReply {
 
   public readonly push = (text: string) => {
     if (!text.trim()) return;
-    this.hasText = true;
-    this.waitingStop.abort();
+    this.quiet();
 
     if (this.held) return;
     this.enqueue(text);
@@ -67,8 +74,7 @@ export class LiveReply {
   /** Confirm a cancellable notice before its opt-out timer can start. */
   public async announce(text: string) {
     this.held = true;
-    this.hasText = true;
-    this.waitingStop.abort();
+    this.quiet();
     await this.task;
     this.signal.throwIfAborted();
 
@@ -188,13 +194,7 @@ export class LiveReply {
         const part = parts[i];
 
         if (part === undefined) continue;
-        const body = replyText(part);
-        const content = typeof part === "string" ? undefined : part.content;
-
-        const key =
-          typeof part === "string"
-            ? part
-            : JSON.stringify({ text: body, content });
+        const { body, content, key } = previewContent(part);
 
         if (this.shown.get(i) === key) continue;
         const ts = previews.get(i);
