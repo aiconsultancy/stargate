@@ -3,6 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/app/cli";
+import {
+  buildManifest,
+  manifestUrl,
+  slackInstructions,
+} from "../src/app/setup";
 
 test("maintenance cleanup requires a dry-run flag and documents its scope", async () => {
   const output = spyOn(console, "log").mockImplementation(() => {});
@@ -66,6 +71,29 @@ test("maintenance update parses its flags and keeps them off other commands", as
         runCli([...args, "--config", "/missing/config"]),
       ).rejects.toThrow("not supported");
   } finally {
+    output.mockRestore();
+  }
+});
+
+test("manifest owns stdout and adds the setup guide only without --json", async () => {
+  const stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
+  const output = spyOn(console, "log").mockImplementation(() => {});
+  const manifest = `${JSON.stringify(buildManifest("Test app"), null, 2)}\n`;
+
+  try {
+    expect(await runCli(["manifest", "--name", "Test app", "--json"])).toEqual({
+      command: "exit",
+    });
+    expect(stdout.mock.calls).toEqual([[manifest]]);
+    stdout.mockClear();
+    await runCli(["manifest", "--name", "Test app"]);
+    expect(stdout.mock.calls).toEqual([
+      [manifest],
+      [`\n${manifestUrl("Test app")}\n\n${slackInstructions}\n`],
+    ]);
+    expect(output).not.toHaveBeenCalled();
+  } finally {
+    stdout.mockRestore();
     output.mockRestore();
   }
 });

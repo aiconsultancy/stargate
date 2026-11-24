@@ -535,10 +535,14 @@ export async function runCli(args: string[]): Promise<CliResult> {
 
     if (code !== 0) process.exitCode = code;
   } else if (command === "manifest" && p.length === 1) {
-    console.log(JSON.stringify(buildManifest(v.name), null, 2));
+    // The manifest is command output, not a log line, and has no secrets.
+    // One stream keeps the setup guide after the manifest when piped.
+    process.stdout.write(`${JSON.stringify(buildManifest(v.name), null, 2)}\n`);
 
     if (!v.json)
-      console.log(`\n${manifestUrl(v.name)}\n\n${slackInstructions}`);
+      process.stdout.write(
+        `\n${manifestUrl(v.name)}\n\n${slackInstructions}\n`,
+      );
   } else if (
     command === "service" &&
     p.length === 2 &&
