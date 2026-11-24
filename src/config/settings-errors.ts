@@ -6,6 +6,13 @@ type Issue = ReturnType<typeof settingsIssues>["issues"][number];
 const pathOf = (issue: Issue): PropertyKey[] =>
   issue.path?.map((part) => (typeof part === "object" ? part.key : part)) ?? [];
 
+function decodeShape(ast: SchemaAST.AST, input: unknown, errors?: "all") {
+  return Schema.decodeUnknownResult(Schema.make<Schema.Codec<unknown>>(ast), {
+    disableChecks: true,
+    ...(errors && { errors }),
+  })(input);
+}
+
 /** Failure-only diagnostics: execute the original custom checks on values
  * decoded by the original codec with constraints disabled. Structural failures
  * still stop that node's domain checks; sibling nodes remain independently
@@ -21,10 +28,7 @@ function customIssues(
   let decoded: Result.Result<unknown, Schema.SchemaError> | undefined;
 
   try {
-    decoded = Schema.decodeUnknownResult(
-      Schema.make<Schema.Codec<unknown>>(ast),
-      { disableChecks: true, errors: "all" },
-    )(input);
+    decoded = decodeShape(ast, input, "all");
   } catch {
     // A transform may require a previously checked format (for example a URL).
     // Its authoritative failure is already present; do not invent diagnostics.
@@ -97,14 +101,7 @@ function customIssues(
   } else if (Predicate.isTagged(ast, "Union")) {
     for (const member of ast.types) {
       try {
-        if (
-          Result.isSuccess(
-            Schema.decodeUnknownResult(
-              Schema.make<Schema.Codec<unknown>>(member),
-              { disableChecks: true },
-            )(input),
-          )
-        ) {
+        if (Result.isSuccess(decodeShape(member, input))) {
           customIssues(member, input, path, issues);
           break;
         }
