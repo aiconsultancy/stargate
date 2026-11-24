@@ -214,7 +214,9 @@ requests on a per-officer Unix socket. Keys: `enabled`, `api.baseUrl`,
 `enrolment.tokenFile` or `enrolment.tokenEnv`, `keyAlgorithm` (default
 `ed25519`), `stateDirectory` (default `<dataDirectory>/subspace-agents`) and
 `officers` (`name`, `rank`, `ship`, `model`, `ircNick`, `bundlePath`,
-`socketPath`, `registration`). Every key requires a restart. See
+`socketPath`, `registration`). A section without `enabled: true` is treated
+as absent and its other keys are not validated. Every change to an enabled
+section requires a restart. See
 [Subspace API agent identity](subspace-agents.md).
 
 ## Backend configuration

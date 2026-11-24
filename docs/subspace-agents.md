@@ -2,7 +2,9 @@
 
 This integration is optional. It is off unless the top-level
 `subspaceAgents` object is present and `subspaceAgents.enabled` is `true`, and
-no configuration has it by default. Absent or disabled, Stargate does not load
+no configuration has it by default. A section without `enabled: true` counts
+as no section at all: its other keys are not validated, and adding, changing
+or removing it needs no restart. Absent or disabled, Stargate does not load
 its code: it creates no key, file or socket, makes no request, runs no start-up
 check and writes no log line about it, and `stargate config check` behaves as
 it does without it.
@@ -63,7 +65,7 @@ Stargate and holds no credential of its own.
 
 | Key                       | Default                           | Meaning                                                                                                                                                                                          |
 | ------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `enabled`                 | `false`                           | The feature flag. Off: nothing below is used or checked against other registrations.                                                                                                             |
+| `enabled`                 | `false`                           | The feature flag. Off (`false` or left out): the section is treated as absent, and nothing below is validated or used.                                                                           |
 | `api.baseUrl`             | Required                          | The API's origin, with no path: its routes are `/api/v1/` and `/mcp`. HTTPS, or HTTP on loopback.                                                                                                |
 | `api.audience`            | The origin of `api.baseUrl`       | The API's public origin (its `AGENT_TOKEN_AUDIENCE`), the `aud` of every token. Set it only when Stargate reaches the API by another address, such as a tunnel to `http://127.0.0.1:3000`.       |
 | `api.headersEnv`          | `{}`                              | Private-access headers: header name → environment variable name. `Authorization`, `Cookie`, `Origin`, `X-Subspace-Agent` and the headers agent dispatch reserves are refused.                    |
@@ -81,8 +83,9 @@ Stargate and holds no credential of its own.
 | `officers[].socketPath`   | None                              | The officer's signing proxy socket. Absent opens no endpoint for that officer. Each officer needs its own directory.                                                                             |
 | `officers[].registration` | None                              | A Slack, IRC or Teams registration ID. When that registration's backend is `claude`, Stargate gives it the bridge (see [harnesses](#point-a-harness-at-the-bridge)); it then needs `socketPath`. |
 
-Every change needs a restart; a reload that changes the section is refused as
-restart-only. With the section enabled, `stargate config check` also checks
+Every change to an enabled section needs a restart; a reload that switches the
+section on or changes it while on is refused as restart-only. With the section
+enabled, `stargate config check` also checks
 that the `api.headersEnv` variables are set. The enrolment token is not
 checked there, because an enrolled fleet no longer needs it.
 

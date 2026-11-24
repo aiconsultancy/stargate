@@ -7,6 +7,7 @@ import { decodeJwt, decodeProtectedHeader } from "jose";
 import { configSchema } from "../src/config";
 import { decodeSettings } from "../src/config/settings-errors";
 import { checkCredentials } from "../src/app/setup";
+import { restartRequired } from "../src/app/config-reload";
 import { runCli } from "../src/app/cli";
 import {
   bundleText,
@@ -84,26 +85,34 @@ function refusal(raw: Record<string, unknown>) {
   return "accepted";
 }
 
-test("configuration: absent by default, disabled in the example, with defaults", () => {
+test("configuration: absent by default; switched off is the same as absent, unvalidated", () => {
   const { subspaceAgents: _shown, ...withoutSection } = example;
 
-  expect(decodeConfig({ subspaceAgents: undefined }).subspaceAgents).toBe(
-    undefined,
-  );
   expect(
     decodeSettings(configSchema, withoutSection).subspaceAgents,
   ).toBeUndefined();
-  // The example shows the section switched off.
-  expect(decodeConfig({}).subspaceAgents?.enabled).toBe(false);
 
   const { enabled: _enabled, ...withoutEnabled } = enabledRaw();
 
+  // The example shows the section switched off; it decodes as no section.
+  for (const section of [
+    undefined,
+    example.subspaceAgents,
+    { enabled: false },
+    withoutEnabled,
+    { enabled: false, api: "not checked", officers: 7, unknown: true },
+  ])
+    expect(decodeConfig({ subspaceAgents: section }).subspaceAgents).toBe(
+      undefined,
+    );
+
+  // An enabled section is validated in full, with its defaults.
   const decoded: unknown = decodeConfig({
-    subspaceAgents: withoutEnabled,
+    subspaceAgents: enabledRaw(),
   }).subspaceAgents;
 
   expect(decoded).toEqual({
-    enabled: false,
+    enabled: true,
     api: {
       baseUrl: "https://subspace.example.test",
       headersEnv: {},
@@ -112,6 +121,36 @@ test("configuration: absent by default, disabled in the example, with defaults",
     keyAlgorithm: "ed25519",
     officers: [captain("example-captain")],
   });
+
+  for (const section of [
+    { enabled: "yes" },
+    { enabled: true },
+    enabledRaw({ unknown: true }),
+    "on",
+  ])
+    expect(refusal({ subspaceAgents: section })).not.toBe("accepted");
+});
+
+test("reload: adding, changing or removing a switched-off section needs no restart", () => {
+  const candidate = (subspaceAgents?: unknown) => ({
+    config: decodeConfig({ subspaceAgents }),
+    environment: {},
+  });
+
+  const off = { ...enabledRaw(), enabled: false };
+
+  expect(restartRequired(candidate(), candidate({ enabled: false }))).toEqual(
+    [],
+  );
+  expect(restartRequired(candidate(), candidate(off))).toEqual([]);
+  expect(
+    restartRequired(candidate(off), candidate({ enabled: false })),
+  ).toEqual([]);
+  expect(restartRequired(candidate(off), candidate())).toEqual([]);
+  // Switching it on is a restart, as for any enabled section.
+  expect(restartRequired(candidate(off), candidate(enabledRaw()))).toEqual([
+    "subspaceAgents",
+  ]);
 });
 
 test("configuration: a disabled section is not cross-checked; an enabled one is", () => {

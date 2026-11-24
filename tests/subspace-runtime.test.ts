@@ -10,6 +10,7 @@ import {
   type SlackApp,
   serve,
 } from "../src/app/runtime";
+import { subspaceAgentsSection } from "../src/config/composition";
 import { parseBundle } from "../src/subspace/certificate";
 import { identity } from "./fixtures";
 import { until } from "./irc-fixture";
@@ -172,14 +173,17 @@ for (const variant of ["absent", "enabled: false"] as const)
     const stub = stubApi();
     const socketPath = await officerSocket();
 
+    // Decoded as configuration is: a switched-off section is no section.
     const gateway = await runGateway(
       variant === "absent"
         ? undefined
-        : section(
-            stub.url,
-            [captain("captain-a", { registration: "captain-a", socketPath })],
-            { enabled: false },
-          ),
+        : Schema.decodeUnknownSync(subspaceAgentsSection)({
+            enabled: false,
+            api: { baseUrl: stub.url },
+            officers: [
+              captain("captain-a", { registration: "captain-a", socketPath }),
+            ],
+          }),
     );
 
     expect(gateway.outcome).toBe("started");

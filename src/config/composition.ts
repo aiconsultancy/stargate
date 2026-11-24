@@ -406,7 +406,7 @@ const subspaceOfficerSchema = settingsStruct({
  * Absent or `enabled: false` loads, opens and contacts nothing.
  */
 export const subspaceAgentsSchema = settingsStruct({
-  enabled: Schema.Boolean.pipe(settingsDefault(false)),
+  enabled: Schema.Literal(true),
   api: settingsStruct({
     /**
      * The API's origin, with no path: its routes are `/api/v1/` and `/mcp`.
@@ -477,6 +477,29 @@ export const subspaceAgentsSchema = settingsStruct({
 });
 
 export type SubspaceAgentsConfig = typeof subspaceAgentsSchema.Type;
+
+/** A section, of any content, that does not say `enabled: true`. */
+const switchedOff = (input: unknown) =>
+  typeof input === "object" &&
+  input !== null &&
+  !Array.isArray(input) &&
+  (!("enabled" in input) || input.enabled === false);
+
+/**
+ * A section without `enabled: true` is the same as none: its other keys are
+ * not validated, and it decodes to undefined, so adding, changing or removing
+ * a switched-off section changes nothing, a reload included.
+ */
+export const subspaceAgentsSection = Schema.Unknown.pipe(
+  Schema.decodeTo(
+    Schema.Unknown,
+    SchemaTransformation.transform({
+      decode: (input) => (switchedOff(input) ? undefined : input),
+      encode: (input) => input,
+    }),
+  ),
+  Schema.decodeTo(Schema.UndefinedOr(subspaceAgentsSchema)),
+);
 
 const repeated = (values: readonly string[]) =>
   new Set(values).size !== values.length;
@@ -677,7 +700,7 @@ const configFields = settingsStruct({
   /** Rear admiral agent dispatch from Subspace issues; off by default. */
   agentDispatch: Schema.optional(agentDispatchSchema),
   /** Officers' Subspace API keys and signing proxy; absent by default. */
-  subspaceAgents: Schema.optional(subspaceAgentsSchema),
+  subspaceAgents: Schema.optional(subspaceAgentsSection),
 });
 
 const configCheck = (liveNotificationPolicy = false) =>
