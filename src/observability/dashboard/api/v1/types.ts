@@ -123,7 +123,9 @@ export type V1Subagent = {
 };
 
 export type V1CrewMember = {
+  /** Configured crew ID: the key of its state, the `{member}` route segment. */
   id: string;
+  /** Configured crew name, which may differ from the ID; else the ID. */
   name: string;
   /** Configured specialism, when the roster declares one. */
   role: string | null;

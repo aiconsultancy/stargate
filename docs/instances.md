@@ -3,8 +3,10 @@
 Use this procedure to prepare another Stargate installation with a different
 captain and crew. It does not copy an existing installation or its credentials.
 The example selects Cain, Shaw, Fisk and a tools-off Pi helper, Twiki.
-Names and normalized agent IDs must
-match. Do not retain hidden Mario, Luigi, Daisy, Toad or Bowser aliases.
+A captain's name and normalized agent ID must match. A crew member's name may
+differ from its ID, which keeps its state
+([team JSON](agents/default-opencode.md)). Give a new team its own IDs rather
+than reusing the starter roster's Mario, Luigi, Daisy, Toad or Bowser.
 
 Preparation is local. Creating Slack apps, installing services and starting
 model work require separate operator approval. Do not run a second listener

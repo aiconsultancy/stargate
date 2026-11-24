@@ -1638,7 +1638,10 @@ describe("Fleet API projection", () => {
       context("new", { provisioned: "unprovisioned" }),
     ]);
     const ship = await f.source.ship("captain", signal);
+    // A crew name that differs from its ID keeps the ID and model beside it.
     expect(ship?.crewMembers[0]).toMatchObject({
+      id: "pilot",
+      name: "Test Pilot",
       role: "Flight testing",
       model: "test/custom",
       activity: "running",
@@ -1652,7 +1655,10 @@ describe("Fleet API projection", () => {
         { project: "tools", activity: "unprovisioned", git: null },
       ],
     });
+    // An unnamed member is shown by its ID, as before.
     expect(ship?.crewMembers[1]).toMatchObject({
+      id: "new",
+      name: "new",
       activity: "unprovisioned",
       since: null,
       idleSince: null,
