@@ -23,6 +23,13 @@ const defaults = {
   attemptMs: 30_000,
 };
 
+function retryDelay(
+  attempt: number,
+  { retryMs, maxRetryMs }: Pick<typeof defaults, "retryMs" | "maxRetryMs">,
+) {
+  return Math.min(retryMs * 2 ** Math.min(attempt, 10), maxRetryMs);
+}
+
 const networkCodes = new Set([
   "EAI_AGAIN",
   "ENOTFOUND",
@@ -98,14 +105,9 @@ export async function retrySlack<A>(
     } catch (error) {
       if (boundedSignal.aborted || !retryable(error))
         throw new Error("Slack connection unavailable");
-      await delay(
-        Math.min(
-          defaults.retryMs * 2 ** Math.min(attempt++, 10),
-          defaults.maxRetryMs,
-        ),
-        undefined,
-        { signal: boundedSignal },
-      );
+      await delay(retryDelay(attempt++, defaults), undefined, {
+        signal: boundedSignal,
+      });
     }
   }
 }
@@ -173,8 +175,7 @@ export class SlackSocket {
         if (attempt)
           await delay(
             Math.min(
-              this.timing.retryMs * 2 ** Math.min(attempt - 1, 10),
-              this.timing.maxRetryMs,
+              retryDelay(attempt - 1, this.timing),
               deadline - Date.now(),
             ),
             undefined,
