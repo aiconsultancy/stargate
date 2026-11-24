@@ -10,7 +10,11 @@ import type {
 import type { piDurableBackendSchema } from "../../../backends/pi/config";
 import { redactCredentials } from "../../../lib/credentials";
 import type { SessionHistory } from "../../../shared/session-history";
-import { piDefinitionPath, piMemberDefinition } from "../instructions";
+import {
+  piDefinitionPath,
+  piMemberDefinition,
+  workingAgreementNotice,
+} from "../instructions";
 import { type PiCrewBinding, piCrewExtension } from "./pi-extension";
 import {
   CrewError,
@@ -224,9 +228,11 @@ export class PiCrewWorkers {
           await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
           await chmod(dataDirectory, 0o700);
 
-          const instructions = this.captainDirectory
+          const captainDirectory = this.captainDirectory;
+
+          const instructions = captainDirectory
             ? await readFile(
-                piDefinitionPath(this.captainDirectory, member),
+                piDefinitionPath(captainDirectory, member),
                 "utf8",
               ).catch((error: unknown) => {
                 if (
@@ -238,7 +244,7 @@ export class PiCrewWorkers {
                   return piMemberDefinition(
                     member,
                     directory,
-                    this.captainDirectory ?? "",
+                    captainDirectory,
                   );
                 }
 
@@ -263,9 +269,12 @@ export class PiCrewWorkers {
             },
             {
               dataDirectory,
-              ...(this.captainDirectory && {
+              ...(captainDirectory && {
                 workingAgreement: {
-                  path: join(this.captainDirectory, "WAYS_OF_WORKING.md"),
+                  createNotice: () =>
+                    workingAgreementNotice(
+                      join(captainDirectory, "WAYS_OF_WORKING.md"),
+                    ),
                   owns: (id: string) => {
                     const owner = owners.values().next().value;
                     const peer = owner?.state.peer(member.id);

@@ -405,7 +405,10 @@ export type TurnActivityRecorder = {
 
 export type BackendContext = {
   dataDirectory: string;
-  workingAgreement?: { path: string; owns(conversationID: string): boolean };
+  workingAgreement?: {
+    createNotice(): (conversationID: string) => Promise<string | undefined>;
+    owns(conversationID: string): boolean;
+  };
   /** Present when the Fleet API serves officer activity. */
   activity?: TurnActivityRecorder;
 };

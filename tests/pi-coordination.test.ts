@@ -7,6 +7,7 @@ import { defineExtension } from "@earendil-works/pi-durable";
 import { Schema } from "effect";
 import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
+import { workingAgreementNotice } from "../src/coordination/crew/instructions";
 import {
   type PiCrewBinding,
   piCrewExtension,
@@ -353,6 +354,7 @@ for (const tools of ["coding", "none"] as const) {
     const previous = process.env[apiKeyEnv];
     process.env[apiKeyEnv] = "fixture-only";
     const requests: Record<string, unknown>[] = [];
+    const observed: string[] = [];
 
     const server = Bun.serve({
       port: 0,
@@ -386,7 +388,18 @@ for (const tools of ["coding", "none"] as const) {
         }),
         {
           dataDirectory: directory,
-          workingAgreement: { path, owns: (id) => id === saved },
+          workingAgreement: {
+            createNotice: () => {
+              const notice = workingAgreementNotice(path);
+
+              return (id) => {
+                observed.push(id);
+
+                return notice(id);
+              };
+            },
+            owns: (id) => id === saved,
+          },
         },
       );
       saved = await backend.createSession({
@@ -394,6 +407,7 @@ for (const tools of ["coding", "none"] as const) {
         title: "Member",
         signal,
       });
+      expect(observed).toEqual([]);
       await backend.prompt(saved, "Initial request", signal);
       expect(notices()).toBe(0);
       await backend.prompt(saved, "Next request", signal);
@@ -408,6 +422,7 @@ for (const tools of ["coding", "none"] as const) {
 
       await backend.prompt(foreign, "Foreign request", signal);
       expect(notices()).toBe(0);
+      expect(observed).toEqual([saved, saved]);
       await backend.prompt(saved, "Request after update", signal);
       expect(notices()).toBe(1);
       expect(JSON.stringify(requests.at(-1)?.["messages"])).toContain(path);
