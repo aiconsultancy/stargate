@@ -188,6 +188,11 @@ export class InputBoundaryReader {
     if (cursor) return new Map();
     records.reverse();
 
+    return this.foldShellOrigins(records);
+  }
+
+  /** Match only unique, earlier launch witnesses from a complete history read. */
+  private foldShellOrigins(records: readonly Compact[]) {
     const launches = new Map<
       string,
       { position: number; command: string; input: string | undefined }[]
