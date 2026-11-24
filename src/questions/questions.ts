@@ -5,13 +5,12 @@ import {
   type OperatorRoute,
 } from "./background-questions";
 import { operatorControl } from "./question-settings";
-import { containsCredential } from "../lib/credentials";
-import { settingsRecord } from "../config/settings-schema";
 import {
   type NativeQuestion,
   type PendingQuestion,
   type QuestionAnswer,
   nativeQuestionSchema,
+  questionAnswer,
 } from "./native-question";
 import type { Incoming, Job } from "../gateway/store-types";
 
@@ -78,92 +77,6 @@ export function questionControl(text: string): QuestionControl | undefined {
       renew: true as const,
     }),
   };
-}
-
-export function questionAnswer(
-  question: NativeQuestion,
-  text: string,
-): QuestionAnswer {
-  if (text.length > 4000 || containsCredential(text))
-    throw new Error("Unsafe question answer");
-  let input: unknown;
-
-  if (question.fields.length === 1 && !text.trimStart().startsWith("{")) {
-    const f = question.fields[0];
-
-    if (!f) throw new Error("Missing question field");
-    const choices = text.split(",").map((v) => v.trim());
-
-    const selected = choices.map((v) =>
-      /^\d+$/.test(v) ? f.options?.[Number(v) - 1]?.value : undefined,
-    );
-
-    const value = selected.every((v) => v !== undefined)
-      ? f.type === "multiselect"
-        ? selected
-        : selected.length === 1
-          ? selected[0]
-          : undefined
-      : f.type === "string"
-        ? text
-        : choices;
-
-    input = { [f.key]: value };
-  } else input = JSON.parse(text);
-
-  const parsed = Schema.decodeUnknownSync(
-    settingsRecord(
-      Schema.String,
-      Schema.Union([
-        Schema.String.check(Schema.isMaxCodePoints(2000)),
-        Schema.mutable(
-          Schema.Array(Schema.String.check(Schema.isMaxCodePoints(2000))),
-        ).check(Schema.isMaxLength(20)),
-      ]),
-    ),
-  )(input);
-
-  if (
-    Object.keys(parsed).some(
-      (key) => !question.fields.some((f) => f.key === key),
-    )
-  )
-    throw new Error("Unknown answer field");
-
-  for (const f of question.fields) {
-    const value = parsed[f.key];
-
-    if (value === undefined) {
-      if (f.required !== false) throw new Error("Missing answer field");
-      continue;
-    }
-
-    if (f.type === "string" ? typeof value !== "string" : !Array.isArray(value))
-      throw new Error("Wrong answer type");
-    const values = typeof value === "string" ? [value] : value;
-
-    if (
-      new Set(values).size !== values.length ||
-      values.some((v) => !v.trim() || containsCredential(v))
-    )
-      throw new Error("Invalid answer");
-    const options = f.options;
-
-    if (
-      options &&
-      !f.custom &&
-      values.some((v) => !options.some((o) => o.value === v))
-    )
-      throw new Error("Unknown answer choice");
-
-    if (
-      f.type === "multiselect" &&
-      (values.length < (f.minItems ?? 1) || values.length > (f.maxItems ?? 20))
-    )
-      throw new Error("Wrong selection count");
-  }
-
-  return parsed;
 }
 
 function questionFields(question: NativeQuestion) {
