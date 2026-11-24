@@ -1761,6 +1761,7 @@
         "src/irc/crew-link.ts",
         "src/irc/crew-question-gateway.ts",
         "src/irc/delivery.ts",
+        "src/transports/irc/dm-copies.ts",
         "src/irc/filehost.ts",
         "src/irc/protocol.ts",
         "src/irc/routing.ts",

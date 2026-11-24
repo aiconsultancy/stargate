@@ -38,7 +38,7 @@ import { questionFingerprint } from "../../questions/native-question";
 import { type Identity, backendFingerprint } from "../../gateway/routing";
 import type { Incoming, Store } from "../../gateway/store";
 import { turnProgressText } from "../../shared/turn-progress";
-import { IrcAudit, ctcp, sensitive, serviceNick } from "./audit";
+import { IrcAudit, ctcp, serviceNick } from "./audit";
 import { ircBurstEligible } from "./burst";
 import {
   IrcClient,
@@ -50,6 +50,7 @@ import { clientPem } from "./client-pem";
 import { type CrewLink, crewLink } from "./crew-link";
 import { CrewQuestionGateway } from "./crew-question-gateway";
 import { IrcDelivery } from "./delivery";
+import { copyTag, copyText, isOwnDmCopy } from "./dm-copies";
 import { Filehost, filehostURL } from "./filehost";
 import {
   type IrcMessage,
@@ -164,38 +165,7 @@ type ShipOptions = {
   copyPollMs?: number;
 };
 
-/** An IRC copy of a stargate_dm: its text limit, and how long it is retried. */
-const copyBytes = 1800;
 const copyRetryMs = 10 * 60_000;
-
-/** Client-only tag of an IRC copy: the stargate_dm's Mesij receipt ID. */
-const copyTag = "+stargate/dm";
-
-/**
- * IRC text of a stargate_dm copy: marked `[stargate_dm]`, plain text, at most
- * `copyBytes`, and withheld entirely when it may carry a credential (the
- * server stores every DM).
- */
-export function copyText(item: { id: string; text: string }) {
-  const clean = item.text
-    .split("\n")
-    .map((item) => cleanText(item))
-    .join("\n")
-    .trim();
-
-  if (sensitive(item.text) || sensitive(clean))
-    return `[stargate_dm ${item.id}: not copied to IRC, it may contain credentials. Read it with stargate_mail.]`;
-  const marked = `[stargate_dm] ${clean}`;
-
-  if (Buffer.byteLength(marked) <= copyBytes) return marked;
-  const suffix = " … (truncated; full text in stargate_mail)";
-  let cut = marked;
-
-  while (Buffer.byteLength(cut + suffix) > copyBytes)
-    cut = Array.from(cut).slice(0, -64).join("");
-
-  return `${cut.trimEnd()}${suffix}`;
-}
 
 /** Crew IRC session binding: one attempt's limit. */
 const bindMs = 10_000;
@@ -1013,7 +983,7 @@ export class IrcShip {
 
           // Our own stargate_dm copy: delivered natively already, and mirrored
           // As the sender's outgoing DM. Never a turn, never mirrored twice.
-          if (this.ownCopy(client, message)) {
+          if (isOwnDmCopy(this.config, client, message, this.store.irc)) {
             this.advance(identity, client, message);
 
             return;
@@ -1842,28 +1812,6 @@ export class IrcShip {
     } catch {
       return "retry";
     }
-  }
-
-  /**
-   * A DM to this connection that is one of this ship's own stargate_dm copies:
-   * from a ship account, tagged with a receipt ID this process recorded.
-   * An unknown ID is an ordinary ship DM.
-   */
-  private ownCopy(client: IrcClient, message: IrcMessage) {
-    const id = message.tags.get(copyTag);
-    const account = message.tags.get("account");
-    const target = message.params[0] ?? "";
-
-    return (
-      message.command === "PRIVMSG" &&
-      id !== undefined &&
-      /^[a-f0-9]{32}$/.test(id) &&
-      account !== undefined &&
-      !client.isChannel(target) &&
-      client.fold(target) === client.fold(client.nick) &&
-      shipAccounts(this.config, client.fold).has(client.fold(account)) &&
-      this.store.irc.stargateDmCopy(id)
-    );
   }
 
   /**
