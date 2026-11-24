@@ -1,8 +1,14 @@
 {
-  "baselineSha256": "79e9fa06d7dcc665e365129ce05b55813c4c12d09fe7ae6d405890c421bd7b86",
-  "closureAdditions": [
-    "src/coordination/crew/workspace/git-runner.ts",
-    "src/coordination/crew/workspace/git-state.ts",
-    "src/coordination/crew/workspace/git-status.ts"
+  "baselineSha256": "393afbe4a163834d48cfc0fc0fa591a05d17595c3274456a8fdf8d7cd5579b02",
+  "pruneStale": true,
+  "rekeyExceptions": [
+    {
+      "oldKey": "direction:src/store.ts -> src/irc/burst.ts",
+      "newKey": "direction:src/gateway/irc-admission.ts -> src/irc/burst.ts"
+    },
+    {
+      "oldKey": "private:src/store.ts -> src/irc/burst.ts",
+      "newKey": "private:src/gateway/irc-admission.ts -> src/irc/burst.ts"
+    }
   ]
 }
