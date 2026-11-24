@@ -184,6 +184,7 @@ test("origin wildcards match exactly one ASCII label", () => {
     ...defaultCorsOrigins,
     "https://subspace.*",
     "https://console.example.com:8443",
+    "https://*.space.*:8443",
   ]);
 
   for (const origin of [
@@ -191,6 +192,7 @@ test("origin wildcards match exactly one ASCII label", () => {
     "https://subspace.space-123",
     "https://subspace.123",
     "https://console.example.com:8443",
+    "https://fleet-1.space.example:8443",
   ])
     expect(allows(origin)).toBe(true);
 
@@ -206,6 +208,8 @@ test("origin wildcards match exactly one ASCII label", () => {
     "https://subspace.space_123",
     "https://console.example.com",
     "https://consoleXexampleXcom:8443",
+    "https://fleet-1.space.example:8444",
+    "https://fleet.extra.space.example:8443",
     "https://subspace.Space",
     "http://subspace.space",
   ])
