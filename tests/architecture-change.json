@@ -1,5 +1,3 @@
 {
-  "baselineSha256": "6fd7f6ccfcfab3b9f093725d9f5e851a9718d3b0e8744ce726842a22e8cc4b5b",
-  "pruneStale": true,
-  "closureAdditions": ["src/coordination/crew/protocol/project-key.ts"]
+  "baselineSha256": "1fe497b4e5bb39b6a9c41878e7fa83320a9c09dda153ffffd30e67afb6435b02"
 }

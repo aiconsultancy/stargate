@@ -28,19 +28,10 @@ import {
   secret,
 } from "../config";
 import { officerFleetSockets } from "../config/composition";
-import {
-  ConfigReload,
-  type ReloadCandidate,
-  ReloadRejected,
-  readReloadCandidate,
-} from "./config-reload";
+import { ConfigReload, readReloadCandidate } from "./config-reload";
 import { NotificationShutdown } from "./notification-shutdown";
-import {
-  type IrcBinding,
-  type IrcRuntimeRegistration,
-  prepareIrcRoster,
-  resolveIrcRosterUpdates,
-} from "./irc-reload";
+import type { IrcBinding, IrcRuntimeRegistration } from "./irc-reload";
+import { reloadTransaction } from "./reload-transaction";
 import type { CrewUIApi } from "../transports/slack/crew-ui";
 import { CrewUI } from "../transports/slack/crew-ui";
 import {
@@ -1402,199 +1393,32 @@ export function serve(
       }
 
       if (reload) {
-        const apply = async (candidate: ReloadCandidate) => {
-          const staged: {
-            entry: IrcRuntimeRegistration;
-            start: Deferred.Deferred<void>;
-          }[] = [];
-
-          const paused: Gateway[] = [];
-          let committed = false;
-
-          try {
-            const bots = candidate.config.bots.map((next) => {
-              const publish = botBindings.get(next.id);
-
-              if (!publish) {
-                throw new ReloadRejected("unavailable");
-              }
-
-              return {
-                publish,
-                next,
-                transcriber: next.transcription
-                  ? createTranscriber(next.transcription)
-                  : undefined,
+        const unsubscribe = reload.listen(
+          reloadTransaction({
+            admitting: () => open && !requests.signal.aborted,
+            addedResources,
+            botBindings,
+            buildRegistration,
+            fibers,
+            fleetDashboard,
+            ircBindings,
+            log,
+            publishNotificationView: (next) => {
+              notificationView = {
+                notify: next.notify,
+                registrations: notificationRegistrations.map(
+                  ({ bot, identity }) => ({
+                    bot: next.bots.find(({ id }) => id === bot.id) ?? bot,
+                    identity,
+                  }),
+                ),
               };
-            });
+            },
+            ships,
+            supervise,
+          }),
+        );
 
-            const plans =
-              candidate.config.irc.length === 0
-                ? []
-                : await prepareIrcRoster(
-                    candidate.config.irc,
-                    candidate.environment,
-                    ircBindings,
-                    async (registration, next) => {
-                      const entry = await buildRegistration(registration, next);
-                      const start = Deferred.makeUnsafe<void>();
-                      staged.push({ entry, start });
-                      // A staged worker cannot recover or process anything until the
-                      // Synchronous commit publishes the whole candidate.
-                      await Effect.runPromise(
-                        FiberMap.run(
-                          fibers,
-                          registration.key,
-                          Deferred.await(start).pipe(
-                            Effect.andThen(
-                              supervise(registration.log, "gateway", (signal) =>
-                                entry.gateway.work(signal),
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-
-                      return entry;
-                    },
-                  );
-
-            if (!open || requests.signal.aborted) {
-              throw new ReloadRejected("unavailable");
-            }
-
-            for (const { binding, plan } of plans) {
-              for (const registration of plan.removed) {
-                const entry = binding.entries.get(registration.key);
-
-                if (!entry) {
-                  throw new ReloadRejected("unavailable");
-                }
-
-                entry.gateway.pause();
-                paused.push(entry.gateway);
-              }
-            }
-
-            if (paused.some((gateway) => !gateway.isIdle())) {
-              throw new ReloadRejected("busy");
-            }
-
-            const updates = resolveIrcRosterUpdates(plans);
-
-            // No awaits: publish all access/settings and roster references in
-            // One JS turn. Admission cannot observe a half-applied candidate.
-            for (const { binding, plan } of plans) {
-              plan.commit(
-                (key) => binding.entries.get(key)?.gateway.isIdle() ?? false,
-              );
-            }
-
-            for (const bot of bots) {
-              bot.publish(bot.next, bot.transcriber);
-            }
-
-            for (const {
-              binding,
-              registration,
-              entry,
-              transcriber,
-              next,
-            } of updates) {
-              entry.gateway.reconfigure(
-                registration.settings,
-                transcriber,
-                registration.transport,
-              );
-              Object.assign(
-                entry.dashboard,
-                ircDashboardShip(registration, next, entry.resource.backend),
-              );
-
-              if (!ships.includes(entry.dashboard)) {
-                ships.push(entry.dashboard);
-              }
-
-              binding.entries.set(registration.key, entry);
-            }
-
-            notificationView = {
-              notify: candidate.config.notify,
-              registrations: notificationRegistrations.map(
-                ({ bot, identity }) => ({
-                  bot:
-                    candidate.config.bots.find((next) => next.id === bot.id) ??
-                    bot,
-                  identity,
-                }),
-              ),
-            };
-
-            // Retire all removed Fleet backends before a crew refresh can
-            // Sample an alias that is waiting for asynchronous cleanup.
-            for (const { binding, plan } of plans) {
-              for (const registration of plan.removed) {
-                const entry = binding.entries.get(registration.key);
-
-                if (entry) {
-                  const index = ships.indexOf(entry.dashboard);
-
-                  if (index !== -1) {
-                    ships.splice(index, 1);
-                  }
-
-                  fleetDashboard?.retireFleetBackend(entry.resource.backend);
-                }
-              }
-            }
-
-            committed = true;
-            fleetDashboard?.invalidateFleetCrew();
-
-            for (const { entry, start } of staged) {
-              addedResources.push(entry);
-              Effect.runSync(Deferred.succeed(start, undefined));
-            }
-
-            // Removed members are already detached. They were idle, so worker
-            // Cancellation and cleanup cannot discard queued or active work.
-            for (const { binding, plan } of plans) {
-              for (const registration of plan.removed) {
-                const entry = binding.entries.get(registration.key);
-                binding.entries.delete(registration.key);
-                await Effect.runPromise(
-                  FiberMap.remove(fibers, registration.key),
-                ).catch(() => {
-                  log.warn("Retired worker cleanup failed");
-                });
-                await entry?.resource.close().catch(() => {
-                  log.warn("Retired backend cleanup failed");
-                });
-              }
-
-              await plan.retire().catch(() => {
-                log.warn("Retired IRC cleanup failed");
-              });
-            }
-          } finally {
-            if (!committed) {
-              for (const gateway of paused) {
-                gateway.pause(false);
-              }
-
-              for (const { entry } of staged) {
-                await Effect.runPromise(
-                  FiberMap.remove(fibers, entry.registration.key),
-                );
-                await entry.resource.close().catch(() => {
-                  log.warn("Staged backend cleanup failed");
-                });
-              }
-            }
-          }
-        };
-
-        const unsubscribe = reload.listen(apply);
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
             unsubscribe();
