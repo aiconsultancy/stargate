@@ -14,6 +14,23 @@ export const topicMatches = (pattern: string, topic: string) =>
     ? topic.startsWith(pattern.slice(0, -1))
     : pattern === topic;
 
+function matchesSubscription(
+  subscription: Subscription,
+  input: NotificationInput,
+) {
+  return (
+    topicMatches(subscription.topic, input.topic) &&
+    Object.entries(subscription.tags ?? {}).every(([key, values]) => {
+      const tag =
+        input.tags && Object.hasOwn(input.tags, key)
+          ? input.tags[key]
+          : undefined;
+
+      return tag !== undefined && values.includes(tag);
+    })
+  );
+}
+
 /** Trusted topology is bounded and snapshotted before admission starts. */
 export function resolveSubscriptions(
   source: Source,
@@ -31,18 +48,7 @@ export function resolveSubscriptions(
     if (Result.isFailure(checked)) throw new StoreUnavailable();
     const subscription = checked.success;
 
-    if (
-      !topicMatches(subscription.topic, input.topic) ||
-      !Object.entries(subscription.tags ?? {}).every(([key, values]) => {
-        const tag =
-          input.tags && Object.hasOwn(input.tags, key)
-            ? input.tags[key]
-            : undefined;
-
-        return tag !== undefined && values.includes(tag);
-      })
-    )
-      continue;
+    if (!matchesSubscription(subscription, input)) continue;
 
     for (const alias of subscription.to) {
       const decoded = Schema.decodeUnknownResult(Destination)(
