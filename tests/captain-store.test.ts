@@ -184,3 +184,62 @@ test("serial ready selection keeps FIFO across sources during delivery backoff",
     "later-input",
   ]);
 });
+
+test("appendCaptainTranscript refuses while busy, rolls back on duplicate outbox, and baselineCaptain does not overwrite", () => {
+  const store = openStore(":memory:");
+  stores.push(store);
+  store.enqueue({
+    eventId: "source",
+    botKey: "bot",
+    conversation: "D123",
+    channel: "D123",
+    thread: "1.000",
+    user: "U123",
+    text: "source",
+  });
+  const job = store.ready("bot", Date.now(), 1)[0];
+
+  if (!job) throw new Error("Missing job");
+  const initial = store.captainCursor("bot", "pin");
+  expect(store.captainBusy("bot")).toBe(true);
+  expect(
+    store.appendCaptainTranscript({
+      botKey: "bot",
+      sessionID: "pin",
+      from: initial,
+      cursor: "c1",
+      owner: job.id,
+      replies: [],
+    }),
+  ).toBe(false);
+  expect(store.captainCursor("bot", "pin")).toEqual(initial);
+  store.running(job.id);
+  store.respond(job.id, ["answer"]);
+  expect(store.captainBusy("bot")).toBe(false);
+  expect(store.baselineCaptain("bot", "pin", "base")).toEqual({
+    cursor: "base",
+    owner: null,
+  });
+  expect(store.baselineCaptain("bot", "pin", "ignored")).toEqual({
+    cursor: "base",
+    owner: null,
+  });
+  expect(() =>
+    store.appendCaptainTranscript({
+      botKey: "bot",
+      sessionID: "pin",
+      from: { cursor: "base", owner: null },
+      cursor: "c1",
+      owner: job.id,
+      replies: [
+        { job: job.id, eventId: "transcript:dup", chunks: ["first"] },
+        { job: job.id, eventId: "transcript:dup", chunks: ["duplicate"] },
+      ],
+    }),
+  ).toThrow(TranscriptConflict);
+  expect(store.captainCursor("bot", "pin")).toEqual({
+    cursor: "base",
+    owner: null,
+  });
+  expect(store.jobByEvent("bot", "transcript:dup")).toBeNull();
+});

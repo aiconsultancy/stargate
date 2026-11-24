@@ -1140,6 +1140,7 @@
       "files": [
         "src/cancellation.ts",
         "src/gateway.ts",
+        "src/gateway/captain-transcript-store.ts",
         "src/gateway/fleet-job-store.ts",
         "src/gateway/ports.ts",
         "src/gateway/store-types.ts",
