@@ -136,13 +136,22 @@ export class IrcRecords implements IrcOperations {
     botKey: string,
     channel: string,
     root: string,
+    requester?: string,
   ): boolean {
+    const member = this.db
+      .query(
+        "SELECT 1 FROM irc_thread_memberships WHERE botKey=? AND channel=? AND root=?",
+      )
+      .get(botKey, channel, root);
+
     return (
-      this.db
-        .query(
-          "SELECT 1 FROM irc_thread_memberships WHERE botKey=? AND channel=? AND root=?",
-        )
-        .get(botKey, channel, root) !== null
+      member !== null &&
+      (requester === undefined ||
+        this.db
+          .query(
+            "SELECT 1 FROM jobs WHERE botKey=? AND channel=? AND thread=? AND user=?",
+          )
+          .get(botKey, channel, root, requester) !== null)
     );
   }
 

@@ -49,7 +49,7 @@ export type IrcRouteContext = {
   anchor?(msgid: string): string | undefined;
   /** Durable ancestry and membership, scoped to this registration and channel. */
   threadRoot?(channel: string, msgid: string): string | undefined;
-  participating?(channel: string, root: string): boolean;
+  participating?(channel: string, root: string, requester?: string): boolean;
   replay?: boolean;
   now(): number;
   /** Case folding under the server's CASEMAPPING. */
@@ -263,6 +263,24 @@ function visitorAddressed(text: string, nick: string, caseFold: Fold) {
     caseFold(text.trim()) !== caseFold(`@${nick}`) &&
     withoutAddress(text.trim(), [nick], caseFold, true).trim() !== ""
   );
+}
+
+/** An explicit address in a threaded follow-up wins over participation. */
+function addressesAnotherOfficer(
+  config: IrcConfig,
+  text: string,
+  caseFold: Fold,
+) {
+  const names = [
+    ...config.crew.flatMap(({ account, nick }) =>
+      nick ? [account, nick] : [account],
+    ),
+    ...(config.access.peerCaptains ?? []),
+  ];
+
+  const body = caseFold(text);
+
+  return names.some((nick) => mentions(body, caseFold(nick)));
 }
 
 /** In results mode, a leading fleet address selects one recipient. */
@@ -545,8 +563,22 @@ export function routeIrcMessage(
       !message.tags.has("+reply") ||
       message.tags.get("+draft/reply") === message.tags.get("+reply"));
 
+  const ship = shipAccounts(config, caseFold);
+
+  const sender = ship.has(user)
+    ? ("crew" as const)
+    : config.access.peerCaptains.some((peer) => caseFold(peer) === user)
+      ? ("captain" as const)
+      : undefined;
+
+  const person =
+    !sender && (!config.fleetPolicy || human) && !message.tags.has("bot");
+
+  const standardCaptainReply =
+    !strict && !direct && !visitorTag && member.role === "captain" && person;
+
   const knownRoot =
-    protectedHuman && validReply
+    !direct && member.role === "captain" && validReply
       ? context.threadRoot?.(channel, reply)
       : undefined;
 
@@ -603,7 +635,21 @@ export function routeIrcMessage(
     return;
   }
 
-  const replied = !strict && validMsgid(reply) && context.sent(reply);
+  const participatingReply =
+    standardCaptainReply &&
+    human === true &&
+    root !== undefined &&
+    context.participating?.(channel, root, user) === true;
+
+  const replied =
+    !strict &&
+    validReply &&
+    !(
+      standardCaptainReply &&
+      mentioned !== true &&
+      addressesAnotherOfficer(config, body, caseFold)
+    ) &&
+    (context.sent(reply) || participatingReply);
 
   // Captain text mentions and all-calls; the matched word becomes the
   // Turn's text mention, so the session sees why it was admitted.
@@ -658,14 +704,6 @@ export function routeIrcMessage(
       ? body
       : content;
 
-  const ship = shipAccounts(config, caseFold);
-
-  const sender = ship.has(user)
-    ? ("crew" as const)
-    : config.access.peerCaptains.some((peer) => caseFold(peer) === user)
-      ? ("captain" as const)
-      : undefined;
-
   const time = Date.parse(message.tags.get("time") ?? "");
   const received = Number.isFinite(time) ? time : context.now();
 
@@ -678,11 +716,18 @@ export function routeIrcMessage(
 
   const files = filehostLinks(body, context.filehost);
 
+  // Persist the root at intake. In-flight answers keep their wire shape on upgrade.
   const parent = validMsgid(reply)
     ? protectedHuman
       ? (root ?? reply)
-      : (context.anchor?.(reply) ?? reply)
-    : undefined;
+      : (root ?? context.anchor?.(reply) ?? reply)
+    : member.role === "captain" &&
+        !hasReply &&
+        !direct &&
+        person &&
+        validMsgid(tagged)
+      ? tagged
+      : undefined;
 
   return {
     eventId: `${channel}:${msgid}`,

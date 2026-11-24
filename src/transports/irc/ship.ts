@@ -309,6 +309,7 @@ function ircSource(
     thread: job.thread,
     message: job.eventId.slice(job.channel.length + 1),
     ...(job.replyParent &&
+      job.replyParent !== job.thread &&
       validMsgid(job.replyParent) && { replyParent: job.replyParent }),
     user: job.user,
     ...(config.fleetControl && {
@@ -1224,11 +1225,13 @@ export class IrcShip {
           }
         },
         published: ({ target, msgid, request, root }) => {
+          // Ordinary captain channels also need the published root for replies.
           if (
             detached() ||
             (identity.role !== "captain" && !this.config.features.questions) ||
             (!this.config.access.humanWakeChannels?.length &&
-              !this.config.features.questions) ||
+              !this.config.features.questions &&
+              (!client.isChannel(target) || !root)) ||
             this.isAuditChannel(client, target)
           ) {
             return;
@@ -1507,8 +1510,13 @@ export class IrcShip {
           : undefined) ?? client.anchor(msgid),
       threadRoot: (channel, msgid) =>
         this.store.irc.ircThreadRoot(member.key, channel, msgid),
-      participating: (channel, root) =>
-        this.store.irc.ircThreadParticipating(member.key, channel, root),
+      participating: (channel, root, requester) =>
+        this.store.irc.ircThreadParticipating(
+          member.key,
+          channel,
+          root,
+          requester,
+        ),
       replay,
       now: Date.now,
       fold: client.fold,

@@ -233,7 +233,9 @@ test("irc ship: a mention reaches the pinned captain and replies as plain IRC li
   });
   const lines = lineOf(fake.received("galactica"), "PRIVMSG");
   expect(lines[0]?.params).toEqual(["#galactica", "Report"]);
-  expect(lines.every((line) => !line.tags.has("+draft/reply"))).toBe(true);
+  expect(lines.every((line) => line.tags.get("+draft/reply") === msgid)).toBe(
+    true,
+  );
   expect(lines[1]?.params[1]?.startsWith("Status: all systems")).toBe(true);
 
   for (const line of fake.received("galactica")) {
@@ -284,8 +286,8 @@ test("irc ship: crew hear each other by nick, with a per-channel ship limit", as
     "galactica: is CI green?",
   );
   // Jack → captain; captain → chief (1); chief → tyrol (2); tyrol → captain
-  // (3). Main-channel answers carry no reply tag, so the chief's answer
-  // Does not also trigger the captain. A fourth ship mention is refused.
+  // (3). Ship messages use their explicit mentions for routing.
+  // A fourth ship mention is refused.
   await until(() => backends.tyrol.prompts.length === 1, 5000, "tyrol prompt");
   await until(
     () => backends.captain.prompts.length === 2,

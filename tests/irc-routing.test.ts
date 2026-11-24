@@ -258,6 +258,7 @@ test("irc routing: account tag is identity; own and denied accounts never admit"
     conversation: JSON.stringify(["captain-key", "#galactica"]),
     channel: "#galactica",
     thread: "abc123",
+    replyParent: "abc123",
     user: "jack",
     text: "status?",
     received: Date.parse("2026-11-12T10:00:00.000Z"),
@@ -303,6 +304,115 @@ test("irc routing: channel triggers are mentions, text mentions and replies", ()
   ).toBeUndefined();
   expect(route("#galactica", "\u0001ACTION galactica\u0001")).toBeUndefined();
   expect(route("#galactica", "galactica:")).toBeUndefined();
+});
+
+test("only a top-level human channel request starts a new captain thread", () => {
+  const ask = "galactica: status?";
+
+  expect(route("#galactica", ask)?.replyParent).toBe("abc123");
+  expect(
+    route("#galactica", ask, { account: "jack", msgid: "" })?.replyParent,
+  ).toBeUndefined();
+  expect(
+    route("#galactica", ask, { account: "guest-bot", bot: "" })?.replyParent,
+  ).toBeUndefined();
+  expect(
+    route("#galactica", ask, { account: "galactica-chief" })?.replyParent,
+  ).toBeUndefined();
+});
+
+test("only an enrolled human requester can reach a captain via the thread root", () => {
+  const context = {
+    config: shipConfig({
+      fleetPolicy: {
+        role: "captain",
+        humanAccounts: ["jack"],
+        agentAccounts: ["galactica", "galactica-chief"],
+        assignedCheckout: "/workspace",
+        capabilities: ["read_code"],
+      },
+    }),
+    member: captain,
+    currentNick: captain.nick,
+    sent: () => false,
+    threadRoot: (channel: string, msgid: string) =>
+      channel === "#galactica" && msgid === "answer" ? "request" : undefined,
+    participating: (channel: string, root: string, requester?: string) =>
+      channel === "#galactica" &&
+      root === "request" &&
+      (requester === undefined || requester === "jack"),
+    now: () => 0,
+    fold,
+  };
+
+  const reply = { account: "jack", "+draft/reply": "request" };
+  const followUp = message("#galactica", "continue", reply);
+
+  expect(routeIrcMessage(followUp, context)?.replyParent).toBe("request");
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", { ...reply, "+draft/reply": "answer" }),
+      context,
+    )?.replyParent,
+  ).toBe("request");
+  expect(
+    routeIrcMessage(
+      message("#galactica", "galactica-chief: continue", reply),
+      context,
+    ),
+  ).toBeUndefined();
+
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", { ...reply, account: "unknown-bot" }),
+      context,
+    ),
+  ).toBeUndefined();
+
+  expect(routeIrcMessage(followUp, { ...context, config })).toBeUndefined();
+
+  const answer = { ...reply, "+draft/reply": "answer" };
+  const sent = { ...context, sent: () => true };
+
+  expect(
+    routeIrcMessage(
+      message("#galactica", "galactica-chief: continue", answer),
+      sent,
+    ),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "Could galactica-chief continue?", answer),
+      sent,
+    ),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(followUp, { ...context, member: chief }),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", { ...reply, bot: "" }),
+      context,
+    ),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", {
+        ...reply,
+        account: "galactica-chief",
+      }),
+      context,
+    ),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", {
+        ...reply,
+        "+draft/reply": "another",
+      }),
+      context,
+    ),
+  ).toBeUndefined();
 });
 
 test("irc routing: direct messages are per account and captain-only", () => {
