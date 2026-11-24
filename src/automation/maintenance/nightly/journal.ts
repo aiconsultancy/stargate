@@ -535,15 +535,17 @@ export async function restoreBackup(
   // Every entry is checked before anything is restored: one external change
   // Stops the whole restore, never half of it.
   const entries = await readBackup(config, runID);
-  const states = [];
+  const checked = [];
 
-  for (const entry of entries) states.push(await backupState(entry));
+  for (const entry of entries)
+    checked.push({ entry, state: await backupState(entry) });
 
-  if (states.includes("changed")) throw new StepError("external-change");
+  if (checked.some(({ state }) => state === "changed"))
+    throw new StepError("external-change");
   let changing = false;
 
-  for (const [index, entry] of entries.entries()) {
-    if (states[index] === "previous") continue;
+  for (const { entry, state } of checked) {
+    if (state === "previous") continue;
 
     if (!changing) await beforeChange();
     changing = true;
