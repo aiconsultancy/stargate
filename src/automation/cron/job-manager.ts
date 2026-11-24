@@ -45,6 +45,22 @@ export function cronjobPrompt(definition: CronjobDefinition, path: string) {
   return `Cronjob: ${definition.name}\nDefinition: ${JSON.stringify(path)}\nSupporting files resolve relative to its directory. The accepted task body is below; do not substitute a newer definition for this run.\n${skills}Reporting: ${definition.report === "daily" ? "deferred to the daily Slack digest; do not post to Slack yourself" : "Stargate delivers the final answer to Slack"}. Return a concise verified result, failures and deferred work; never credentials, tool transcripts or private reasoning.\n\n${definition.prompt}`;
 }
 
+function compileFile(
+  directory: string,
+  definition: CronjobDefinition,
+  raw: Omit<CronInput, "prompt">,
+  now: number,
+) {
+  const source = join(directory, raw.name, "CRONJOB.md");
+
+  const { input } = validateCronInput(
+    { ...raw, prompt: cronjobPrompt(definition, source) },
+    now,
+  );
+
+  return { source, input };
+}
+
 /** Files define tasks; SQLite owns admission, retries and execution state. */
 export class CronjobManager {
   public readonly key: string;
@@ -101,14 +117,14 @@ export class CronjobManager {
           };
 
           if (!this.allowed(scope)) throw new Error("Cronjob access denied.");
-          const source = join(settings.directory, name, "CRONJOB.md");
 
-          const { input } = validateCronInput(
+          const { source, input } = compileFile(
+            settings.directory,
+            definition,
             {
               name,
               expression: definition.schedule ?? "",
               timezone: definition.timezone,
-              prompt: cronjobPrompt(definition, source),
               report: definition.report,
               trigger: definition.trigger,
               model: definition.model,
@@ -174,12 +190,12 @@ export class CronjobManager {
       arbiter: input.arbiter,
     };
 
-    const source = join(settings.directory, definition.name, "CRONJOB.md");
-
-    const compiled = validateCronInput(
-      { ...input, prompt: cronjobPrompt(definition, source) },
+    const { source, input: compiled } = compileFile(
+      settings.directory,
+      definition,
+      input,
       now,
-    ).input;
+    );
 
     await writeCronjob(settings.directory, definition, now);
 
