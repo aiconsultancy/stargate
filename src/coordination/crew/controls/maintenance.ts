@@ -91,6 +91,17 @@ export class CrewMaintenance {
     return turn;
   }
 
+  private async waitForDisconnect(
+    turn: Turn,
+    signal: AbortSignal,
+  ): Promise<never> {
+    while (true) {
+      await this.wait(1000, signal);
+      signal.throwIfAborted();
+      this.owned(turn);
+    }
+  }
+
   public read(owner: Owner): MaintenanceNotice | null {
     const turn = this.owned(owner);
     turn.seenAt = this.now();
@@ -157,16 +168,12 @@ export class CrewMaintenance {
       release: permit.resolve,
     };
 
-    const connected = (async () => {
-      while (true) {
-        await this.wait(1000, signal);
-        signal.throwIfAborted();
-        this.owned(turn);
-      }
-    })();
-
     try {
-      const result = await Promise.race([permit.promise, connected]);
+      const result = await Promise.race([
+        permit.promise,
+        this.waitForDisconnect(turn, signal),
+      ]);
+
       signal.throwIfAborted();
 
       return result;
