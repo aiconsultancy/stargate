@@ -8,40 +8,23 @@ import { canExpandCrew } from "./identity";
 import { IrcSessions } from "../messaging/irc";
 import { MemberActivityStore } from "../reporting/member-activity";
 import { MailRoutes } from "../messaging/messaging";
-import { CrewError, queuedPendingTask, reportTask } from "../pending";
+import {
+  CrewError,
+  type CrewID,
+  type CrewTask,
+  queuedPendingTask,
+  reportTask,
+} from "../pending";
+import { CrewDrainRecords } from "./drain-records";
 
-export { CrewError } from "../pending";
+export { type CrewID, CrewError, type CrewTask } from "../pending";
 
 import { ReportingStore } from "../reporting/reporting";
-
-export type CrewID = string;
 
 export type Peer = {
   crewID: CrewID;
   sessionID: string;
   status: "pending" | "ready";
-};
-
-export type CrewTask = {
-  id: string;
-  crewID: CrewID;
-  workerSessionID: string;
-  originCaptainID: string;
-  originInputID: string | null;
-  inputID: string;
-  status:
-    | "queued"
-    | "cancelled"
-    | "dispatching"
-    | "running"
-    | "completed"
-    | "cancelling"
-    | "uncertain"
-    /** Captain released it without a result; external stop is in the audit. */
-    | "abandoned";
-  result: string | null;
-  released: number;
-  notifying: number;
 };
 
 export type CrewNotice = { id: number; taskID: string; text: string };
@@ -151,6 +134,7 @@ const controlID = (token: string) =>
 
 export class CrewState {
   public readonly updateNotices: UpdateNotices;
+  private readonly drainRecords: CrewDrainRecords;
   public readonly reporting: ReportingStore;
   public readonly activity: MemberActivityStore;
   public readonly mailRoutes: MailRoutes;
@@ -162,6 +146,7 @@ export class CrewState {
     public readonly captainSessionID?: string,
   ) {
     this.updateNotices = new UpdateNotices(db);
+    this.drainRecords = new CrewDrainRecords(db, this.updateNotices);
     this.reporting = new ReportingStore(db, (id) => this.captainRoute(id));
     this.activity = new MemberActivityStore(db);
     this.mailRoutes = new MailRoutes(db);
@@ -1251,12 +1236,7 @@ export class CrewState {
 
         if (!task) throw new CrewError("Queue reservation failed.");
 
-        if (drainRunID)
-          this.db
-            .query(
-              "INSERT OR IGNORE INTO maintenance_queued_tasks (taskID,runID) VALUES (?,?)",
-            )
-            .run(id, drainRunID);
+        if (drainRunID) this.drainRecords.markQueued(id, drainRunID);
 
         if (reportCaptureID) this.reporting.markReport(id, reportCaptureID);
         else this.reporting.assignment(task, text);
@@ -1328,54 +1308,17 @@ export class CrewState {
     return cancelled;
   }
 
-  /** Drain-queued tasks still waiting, oldest first; spent marks are pruned. */
   public drainQueued(): CrewTask[] {
-    this.db
-      .query(
-        `DELETE FROM maintenance_queued_tasks WHERE taskID NOT IN
-         (SELECT id FROM pending_tasks WHERE ${queuedPendingTask})`,
-      )
-      .run();
-
-    return this.db
-      .query<CrewTask, []>(
-        `SELECT p.id,p.crewID,p.workerSessionID,p.originCaptainID,p.originInputID,p.inputID,p.status,p.result,p.released,p.notifying
-         FROM pending_tasks p JOIN maintenance_queued_tasks m ON m.taskID=p.id
-         WHERE p.status='queued' ORDER BY p.sequence`,
-      )
-      .all();
+    return this.drainRecords.drainQueued();
   }
 
-  /**
-   * Passive context for one session, once per ID even after it was consumed.
-   * An unread older drain notice is withdrawn: only the newest phase remains.
-   */
   public queueDrainNotice(
     sessionID: string,
     id: string,
     text: string,
     scope: string,
   ): "queued" | "unchanged" {
-    return this.db
-      .transaction(() => {
-        const first =
-          this.db
-            .query(
-              "INSERT OR IGNORE INTO drain_notice_receipts (sessionID,id) VALUES (?,?)",
-            )
-            .run(sessionID, id).changes === 1;
-
-        if (!first) return "unchanged" as const;
-        this.db
-          .query(
-            "DELETE FROM update_notice_context WHERE scope=? AND sessionID=? AND id LIKE 'drain\\_%' ESCAPE '\\'",
-          )
-          .run(scope, sessionID);
-        this.updateNotices.queueExternalContext(sessionID, id, text, scope);
-
-        return "queued" as const;
-      })
-      .immediate();
+    return this.drainRecords.queueDrainNotice(sessionID, id, text, scope);
   }
 
   public reserveControl(crewID: string): string {
