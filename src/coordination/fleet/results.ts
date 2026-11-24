@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Result, Schema } from "effect";
-import type { AgentBackend, PromptSourceContext } from "../../backends/backend";
+import type { AgentBackend } from "../../backends/backend";
 import { type ReplyChunk, replyText } from "../../shared/slack-format";
 import type { Job, Store } from "../../gateway/store";
 import type { FleetControl } from "./control";
@@ -23,25 +23,6 @@ export function fleetOrigin(
   if (!job?.input) return;
 
   return { ...source.origin, sessionID, inputID: job.input };
-}
-
-export function fleetResultSource(
-  job: Pick<Job, "fleet">,
-): PromptSourceContext["source"] | undefined {
-  if (job.fleet?.kind !== "result") return;
-  const result = job.fleet.completion;
-  const reference = `fleet-result-${result.dispatchID}`;
-
-  return {
-    transport: "fleet",
-    authority: "agent",
-    reference,
-    user: result.actor,
-    sender: "captain",
-    channel: result.channel,
-    thread: result.inputID ?? reference,
-    message: reference,
-  };
 }
 
 /** Trusted gateway recovery only. No IPC operation can manufacture completion. */
