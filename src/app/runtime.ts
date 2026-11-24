@@ -9,7 +9,6 @@ import {
   Data,
   Deferred,
   Effect,
-  Exit,
   FiberMap,
   Result,
   Schema,
@@ -35,6 +34,7 @@ import {
   ReloadRejected,
   readReloadCandidate,
 } from "./config-reload";
+import { NotificationShutdown } from "./notification-shutdown";
 import {
   type IrcBinding,
   type IrcRuntimeRegistration,
@@ -91,10 +91,7 @@ import {
 import { coreLimits, notifyEnabled } from "../notifications/ingest/config";
 import { notificationRoutes } from "../notifications/ingest/http";
 import { ShuttingDown } from "../notifications/ingest/model";
-import {
-  type NotificationCore,
-  makeNotifications,
-} from "../notifications/ingest/notifications";
+import { makeNotifications } from "../notifications/ingest/notifications";
 import type { NotificationSink } from "../notifications/ingest/sink";
 import {
   type NotificationSlack,
@@ -436,65 +433,17 @@ export function serve(
       };
 
       const notificationConnections = new Map<string, NotificationSlack>();
-      let notificationCore: NotificationCore | undefined;
-      let notificationScope: Scope.Closeable | undefined;
-      let producer: ReturnType<typeof notificationRoutes> | undefined;
-      let apiServer: Awaited<ReturnType<typeof startApiV1Server>> | undefined;
-      let notificationTimer: ReturnType<typeof setTimeout> | undefined;
-      let notificationStop: Promise<void> | undefined;
-      let notificationClosing = false;
 
-      const beginNotificationClose = () => {
-        if (!notify || notificationClosing) return;
-        notificationClosing = true;
-        // Referenced and armed before interruption or any unbounded stop wait.
-        notificationTimer ??= setTimeout(
-          () => {
-            log.error(
-              "Notification shutdown did not settle; terminating process",
-            );
-
-            if (dependencies.notification?.terminate)
-              dependencies.notification.terminate();
-            process.exit(1);
-          },
-          Math.min(
-            dependencies.notification?.shutdownGraceMs ?? 25_000,
-            25_000,
-          ),
-        );
-        producer?.closeAdmission();
-        apiServer?.closeAdmission();
-        notificationCore?.closeAdmission();
-      };
-
-      const stopNotifications = () => {
-        if (!notify) return Promise.resolve();
-        beginNotificationClose();
-        notificationStop ??= (async () => {
-          const result = await notificationCore?.shutdown();
-
-          if (result?.state === "unresolved")
-            await new Promise<never>(() => {});
-          await apiServer?.stop();
-
-          if (notificationScope)
-            await Effect.runPromise(Scope.close(notificationScope, Exit.void));
-
-          if (notificationTimer) clearTimeout(notificationTimer);
-        })().catch(async () => {
-          // Cleanup failure cannot prove quiescence. Keep ownership to hard exit.
-          log.error("Notification cleanup did not establish settlement");
-          await new Promise<never>(() => {});
-        });
-
-        return notificationStop;
-      };
+      const notificationShutdown = new NotificationShutdown(
+        !!notify,
+        log,
+        dependencies.notification,
+      );
 
       const closeIntake = (only?: () => Promise<void>) =>
         Effect.sync(() => {
           open = false;
-          beginNotificationClose();
+          notificationShutdown.closeAdmission();
           requests.abort();
         }).pipe(
           Effect.andThen(
@@ -511,7 +460,9 @@ export function serve(
 
       const stopped = yield* Deferred.make<void, RuntimeStopped>();
       // Covers startup failure too. No timeout can release the outer lock.
-      yield* Effect.addFinalizer(() => Effect.promise(stopNotifications));
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(notificationShutdown.stop),
+      );
 
       const supervise = (
         botLog: Logger,
@@ -1334,7 +1285,7 @@ export function serve(
         });
 
         fleetDashboard = dashboard;
-        apiServer = yield* Effect.acquireRelease(
+        notificationShutdown.api = yield* Effect.acquireRelease(
           Effect.promise(async () =>
             startApiV1Server({
               config: api,
@@ -1365,7 +1316,7 @@ export function serve(
               signal: viewers.signal,
               ...(notify && {
                 composeRoutes: (token: string) => {
-                  producer = notificationRoutes(
+                  notificationShutdown.producer = notificationRoutes(
                     notify,
                     dependencies.notification?.environment ??
                       reload?.current.environment ??
@@ -1373,19 +1324,19 @@ export function serve(
                     token,
                     {
                       publish: (source, input) =>
-                        notificationCore?.publish(source, input) ??
+                        notificationShutdown.core?.publish(source, input) ??
                         Effect.fail(new ShuttingDown()),
                     },
                   );
 
-                  return producer.routes;
+                  return notificationShutdown.producer.routes;
                 },
               }),
             }),
           ),
           (server) =>
             notify
-              ? Effect.promise(stopNotifications)
+              ? Effect.promise(notificationShutdown.stop)
               : Effect.sync(() => {
                   viewers.abort();
                 }).pipe(
@@ -1629,8 +1580,8 @@ export function serve(
 
       if (notify) {
         const destinations = notificationDestinations ?? {};
-        notificationScope = yield* Scope.make();
-        notificationCore = yield* makeNotifications({
+        notificationShutdown.scope = yield* Scope.make();
+        notificationShutdown.core = yield* makeNotifications({
           path: join(config.dataDirectory, "notify.sqlite"),
           destinations,
           subscriptions: notify.subscriptions,
@@ -1642,11 +1593,11 @@ export function serve(
               current: () => notificationView,
               connections: notificationConnections,
             }),
-        }).pipe(Scope.provide(notificationScope));
+        }).pipe(Scope.provide(notificationShutdown.scope));
         yield* FiberMap.run(
           fibers,
           "notifications",
-          notificationCore.failure.pipe(
+          notificationShutdown.core.failure.pipe(
             Effect.catch(() =>
               Deferred.fail(stopped, new RuntimeStopped({ worker: "runtime" })),
             ),
@@ -1654,7 +1605,9 @@ export function serve(
         );
         // Latest owner also covers failures after acquisition but before ready.
         yield* Effect.addFinalizer(() =>
-          closeIntake().pipe(Effect.andThen(Effect.promise(stopNotifications))),
+          closeIntake().pipe(
+            Effect.andThen(Effect.promise(notificationShutdown.stop)),
+          ),
         );
       }
 
