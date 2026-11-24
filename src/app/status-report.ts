@@ -277,6 +277,25 @@ function logTime(value: unknown): number {
   }
 }
 
+function logRecord(line: string) {
+  let value: unknown;
+
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return;
+  }
+
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return;
+  const record = value as Record<string, unknown>;
+  const time = logTime(record["time"]);
+
+  if (Number.isFinite(time)) return { record, time };
+
+  return;
+}
+
 export function summarizeLog(
   text: string,
   bot: string,
@@ -290,29 +309,14 @@ export function summarizeLog(
 
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
-    let value: unknown;
+    const decoded = logRecord(line);
 
-    try {
-      value = JSON.parse(line);
-    } catch {
+    if (!decoded) {
       malformed++;
       continue;
     }
 
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      malformed++;
-      continue;
-    }
-
-    const record = value as Record<string, unknown>;
-
-    const time = logTime(record["time"]);
-
-    if (!Number.isFinite(time)) {
-      malformed++;
-      continue;
-    }
-
+    const { record, time } = decoded;
     earliest = Math.min(earliest, time);
 
     if (time < now - windowMs || time > now) continue;
