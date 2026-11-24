@@ -895,6 +895,12 @@ export function createGitReader(
   const cache = new Map<string, { expiresAt: number; value: V1Git | null }>();
   let sweptAt = Number.NEGATIVE_INFINITY;
 
+  function cachedResult(directory: string) {
+    const entry = cache.get(directory);
+
+    return entry && entry.expiresAt > monotonic() ? entry : undefined;
+  }
+
   function cacheResult(directory: string, value: V1Git | null, ms = ttl) {
     const at = monotonic();
 
@@ -924,9 +930,9 @@ export function createGitReader(
     signal.throwIfAborted();
 
     if (!directory || !isAbsolute(directory)) return null;
-    const cached = cache.get(directory);
+    const cached = cachedResult(directory);
 
-    if (cached && cached.expiresAt > monotonic()) return cached.value;
+    if (cached) return cached.value;
     // A timeout is this checkout's own when the read got its permit with at
     // Least half of its budget left. Cache that answer for the usual time.
     // A read that mostly waited for a slot says little about the checkout.
@@ -945,9 +951,9 @@ export function createGitReader(
           permits.withPermit(
             abortable(async (reading) => {
               startedAt = monotonic();
-              const saved = cache.get(directory);
+              const saved = cachedResult(directory);
 
-              if (saved && saved.expiresAt > monotonic()) {
+              if (saved) {
                 reply.resolve(saved.value);
 
                 return;
@@ -994,9 +1000,9 @@ export function createGitReader(
 
       if (!(error instanceof DOMException && error.name === "TimeoutError"))
         throw error;
-      const saved = cache.get(directory);
+      const saved = cachedResult(directory);
 
-      if (saved && saved.expiresAt > monotonic()) return saved.value;
+      if (saved) return saved.value;
       const timedOut = { ...emptyState(now()), error: "Git read timed out." };
 
       const own =
