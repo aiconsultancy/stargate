@@ -4,6 +4,7 @@ import {
   settingsCheck,
   settingsDiscriminatedUnion,
   settingsPattern,
+  settingsRecord,
   settingsStruct,
 } from "../config/settings-schema";
 import { containsCredential } from "../lib/credentials";
@@ -170,4 +171,91 @@ export function questionFingerprint(value: unknown): string {
   return createHash("sha256")
     .update(JSON.stringify(canonical(value)))
     .digest("hex");
+}
+
+export function questionAnswer(
+  question: NativeQuestion,
+  text: string,
+): QuestionAnswer {
+  if (text.length > 4000 || containsCredential(text))
+    throw new Error("Unsafe question answer");
+  let input: unknown;
+
+  if (question.fields.length === 1 && !text.trimStart().startsWith("{")) {
+    const f = question.fields[0];
+
+    if (!f) throw new Error("Missing question field");
+    const choices = text.split(",").map((v) => v.trim());
+
+    const selected = choices.map((v) =>
+      /^\d+$/.test(v) ? f.options?.[Number(v) - 1]?.value : undefined,
+    );
+
+    const value = selected.every((v) => v !== undefined)
+      ? f.type === "multiselect"
+        ? selected
+        : selected.length === 1
+          ? selected[0]
+          : undefined
+      : f.type === "string"
+        ? text
+        : choices;
+
+    input = { [f.key]: value };
+  } else input = JSON.parse(text);
+
+  const answerText = Schema.String.check(Schema.isMaxCodePoints(2000));
+
+  const answerList = Schema.mutable(Schema.Array(answerText)).check(
+    Schema.isMaxLength(20),
+  );
+
+  const answerSchema = settingsRecord(
+    Schema.String,
+    Schema.Union([answerText, answerList]),
+  );
+
+  const parsed = Schema.decodeUnknownSync(answerSchema)(input);
+
+  if (
+    Object.keys(parsed).some(
+      (key) => !question.fields.some((f) => f.key === key),
+    )
+  )
+    throw new Error("Unknown answer field");
+
+  for (const f of question.fields) {
+    const value = parsed[f.key];
+
+    if (value === undefined) {
+      if (f.required !== false) throw new Error("Missing answer field");
+      continue;
+    }
+
+    if (f.type === "string" ? typeof value !== "string" : !Array.isArray(value))
+      throw new Error("Wrong answer type");
+    const values = typeof value === "string" ? [value] : value;
+
+    if (
+      new Set(values).size !== values.length ||
+      values.some((v) => !v.trim() || containsCredential(v))
+    )
+      throw new Error("Invalid answer");
+    const options = f.options;
+
+    if (
+      options &&
+      !f.custom &&
+      values.some((v) => !options.some((o) => o.value === v))
+    )
+      throw new Error("Unknown answer choice");
+
+    if (
+      f.type === "multiselect" &&
+      (values.length < (f.minItems ?? 1) || values.length > (f.maxItems ?? 20))
+    )
+      throw new Error("Wrong selection count");
+  }
+
+  return parsed;
 }
