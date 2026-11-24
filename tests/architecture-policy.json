@@ -1547,6 +1547,7 @@
         "src/api/v1/github-repository.ts",
         "src/api/v1/host.ts",
         "src/api/v1/network.ts",
+        "src/observability/dashboard/api/v1/operator-token.ts",
         "src/api/v1/projection.ts",
         "src/api/v1/pulls.ts",
         "src/observability/dashboard/api/v1/runtime-api.ts",
@@ -1560,6 +1561,7 @@
         "src/dashboard.ts"
       ],
       "public": [
+        "src/observability/dashboard/api/v1/operator-token.ts",
         "src/observability/dashboard/api/v1/runtime-api.ts",
         "src/dashboard-model.ts",
         "src/dashboard-source.ts",
