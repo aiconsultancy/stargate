@@ -16,6 +16,16 @@ export interface IrcOperations {
     scope: { conversation: string } | { channel: string };
   }): number;
   ircReplyParent(botKey: string, thread: string): string | undefined;
+  ircBurst(
+    job: number,
+  ): { policy: string; deadline: number; maximum: number } | null;
+  startIrcBurst(
+    job: number,
+    policy: string,
+    deadline: number,
+    maximum: number,
+  ): void;
+  extendIrcBurst(job: number, deadline: number): void;
   ircBurstMessages(job: number): IrcBurstMessage[];
   ircBurstRequest(
     botKey: string,

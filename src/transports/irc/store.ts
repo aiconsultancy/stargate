@@ -51,6 +51,33 @@ export class IrcRecords implements IrcOperations {
     );
   }
 
+  public ircBurst(job: number) {
+    return this.db
+      .query<{ policy: string; deadline: number; maximum: number }, [number]>(
+        "SELECT policy,deadline,maximum FROM irc_bursts WHERE job=?",
+      )
+      .get(job);
+  }
+
+  public startIrcBurst(
+    job: number,
+    policy: string,
+    deadline: number,
+    maximum: number,
+  ) {
+    this.db
+      .query(
+        "INSERT INTO irc_bursts(job,policy,deadline,maximum) VALUES(?,?,?,?)",
+      )
+      .run(job, policy, deadline, maximum);
+  }
+
+  public extendIrcBurst(job: number, deadline: number) {
+    this.db
+      .query("UPDATE irc_bursts SET deadline=? WHERE job=?")
+      .run(deadline, job);
+  }
+
   /** Original accepted text and source labels, retained across restarts. */
   public ircBurstMessages(job: number): IrcBurstMessage[] {
     return this.db
