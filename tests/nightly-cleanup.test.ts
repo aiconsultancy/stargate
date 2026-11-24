@@ -19,9 +19,9 @@ import { Result, Schema } from "effect";
 import {
   type CleanupInput,
   runCleanup as cleanup,
-  cleanupPathUse,
   scratchBatch,
 } from "../src/automation/maintenance/nightly/cleanup/cleanup";
+import { cleanupPathUse } from "../src/automation/maintenance/nightly/cleanup/cleanup-path-use";
 import {
   cleanupResultSchema,
   cleanupSchema,
