@@ -155,6 +155,41 @@ function modelValidator(
   };
 }
 
+function listCronjobs(
+  input: Extract<typeof cronOperationSchema.Type, { op: "list" }>,
+  bot: BotConfig,
+  identity: Identity,
+  store: CronStore,
+  manager: CronjobManager,
+) {
+  const { channel, user, page } = input;
+
+  if (
+    (channel !== undefined && !isAllowedChannel(bot, channel)) ||
+    (user !== undefined &&
+      (user === identity.user || !isAllowedUser(bot, user)))
+  )
+    throw new CronControlError("Cronjob user or channel is not allowed.");
+
+  return {
+    jobs: store
+      .listDestinations({ botKey: manager.key, channel, user }, page)
+      .map((job) => {
+        const { prompt, ...metadata } = job;
+
+        return {
+          ...metadata,
+          model: job.model ?? "captain",
+          ...(channel !== undefined &&
+            user !== undefined &&
+            manager.allowed(job) && { prompt }),
+        };
+      }),
+    filter: { channel: channel ?? null, user: user ?? null },
+    page,
+  };
+}
+
 /** Supported local operator interface; agents never access runtime SQL directly. */
 export async function runCronOperation(
   raw: unknown,
@@ -242,38 +277,11 @@ export async function runCronOperation(
           definitionErrors: errors,
         };
 
-      if (input.op === "list") {
-        if (
-          (input.channel !== undefined &&
-            !isAllowedChannel(bot, input.channel)) ||
-          (input.user !== undefined &&
-            (input.user === identity.user || !isAllowedUser(bot, input.user)))
-        )
-          throw new CronControlError("Cronjob user or channel is not allowed.");
-
-        const filter = {
-          botKey: manager.key,
-          channel: input.channel,
-          user: input.user,
-        };
-
+      if (input.op === "list")
         return {
-          jobs: store.listDestinations(filter, input.page).map((job) => {
-            const { prompt, ...metadata } = job;
-
-            return {
-              ...metadata,
-              model: job.model ?? "captain",
-              ...(input.channel !== undefined &&
-                input.user !== undefined &&
-                manager.allowed(job) && { prompt }),
-            };
-          }),
-          filter: { channel: input.channel ?? null, user: input.user ?? null },
-          page: input.page,
+          ...listCronjobs(input, bot, identity, store, manager),
           definitionErrors: errors,
         };
-      }
 
       if (input.op === "remove") {
         const job = store.findDestination(manager.key, input.id);
