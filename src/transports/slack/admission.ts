@@ -7,15 +7,29 @@ type Admission = (write: () => boolean) => boolean | Promise<boolean>;
 
 type Reaction = NonNullable<ReturnType<typeof routeReaction>>;
 
+type Intake = ReturnType<Gateway["slackIntake"]>;
+
 export class SlackAdmission {
   private tail = Promise.resolve();
 
-  public constructor(
-    private readonly intake: ReturnType<Gateway["slackIntake"]>,
-  ) {}
+  public constructor(private readonly intake: Intake) {}
 
   public handler(open: () => boolean) {
     return async (body: unknown) => open() && this.receive(body, open);
+  }
+
+  private resumeBefore(input: NonNullable<ReturnType<Intake["route"]>>) {
+    const before = input.eventId.slice(input.channel.length + 1);
+
+    if (
+      before !== input.thread &&
+      !input.startsConversation &&
+      !input.gate &&
+      !this.intake.store.follows(input.conversation)
+    )
+      return before;
+
+    return;
   }
 
   public async receive(body: unknown, open: () => boolean = () => true) {
@@ -75,7 +89,7 @@ export class SlackAdmission {
     open: () => boolean,
     admit: Admission = (write) => write(),
   ) {
-    const { identity, peers, slack, store } = this.intake;
+    const { identity, peers, slack } = this.intake;
     const sender = botSender(body);
 
     if (sender && bot.access.peerCaptains && peers) {
@@ -94,14 +108,9 @@ export class SlackAdmission {
       const input = this.intake.route(body);
 
       if (!input) return false;
-      const before = input.eventId.slice(input.channel.length + 1);
+      const before = this.resumeBefore(input);
 
-      if (
-        before !== input.thread &&
-        !input.startsConversation &&
-        !input.gate &&
-        !store.follows(input.conversation)
-      ) {
+      if (before !== undefined) {
         // No ACK on a transient lookup failure: Slack can redeliver.
         const history = await slack.threadContext({
           channel: input.channel,
