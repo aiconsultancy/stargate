@@ -25,6 +25,21 @@ export class MaintenanceOutbox {
     private readonly log: Pick<Logger, "warn">,
   ) {}
 
+  private async deliverClaimed(claimed: string, signal: AbortSignal) {
+    try {
+      const notice = decodeNotice(JSON.parse(await readFile(claimed, "utf8")));
+
+      if (!this.channelAllowed(notice.channel)) return "refused";
+      await this.announce(notice.channel, notice.text, signal);
+
+      return "sent";
+    } catch {
+      this.log.warn("Maintenance summary delivery uncertain; not repeated");
+
+      return "failed";
+    }
+  }
+
   public async deliver(signal: AbortSignal) {
     const directory = join(maintenanceDirectory(this.dataDirectory), "outbox");
     let names: string[];
@@ -50,22 +65,9 @@ export class MaintenanceOutbox {
         continue;
       }
 
-      let status = "failed";
+      const status = await this.deliverClaimed(claimed, signal);
 
-      try {
-        const notice = decodeNotice(
-          JSON.parse(await readFile(claimed, "utf8")),
-        );
-
-        if (this.channelAllowed(notice.channel)) {
-          await this.announce(notice.channel, notice.text, signal);
-          status = "sent";
-          sent++;
-        } else status = "refused";
-      } catch {
-        this.log.warn("Maintenance summary delivery uncertain; not repeated");
-      }
-
+      if (status === "sent") sent++;
       await rename(claimed, `${path}.${status}`).catch(() => {});
     }
 
