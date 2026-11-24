@@ -12,6 +12,19 @@ import type { ActivityRecords } from "./store";
 
 const noop = () => {};
 
+/** A durable Stop permits a facts refresh, never another report. */
+function stoppedSnapshot(snapshot: ActivitySnapshot): ActivitySnapshot {
+  if (snapshot.status !== "collecting" && snapshot.status !== "summarizing")
+    return snapshot;
+
+  return {
+    ...snapshot,
+    status: "cancelled",
+    summaryCurrent: false,
+    summary: "Activity collection stopped; later facts remain in the journal.",
+  };
+}
+
 export type ActivityHandle = { finish(): void; cancel(): void };
 
 type Pending = {
@@ -200,19 +213,7 @@ export class ActivityDelivery {
             throw error;
           }
 
-          // A durable Stop is not permission to finish an unconfirmed capture
-          // After restart. Refresh its facts once, without another report.
-          if (
-            saved?.done &&
-            ["collecting", "summarizing"].includes(snapshot.status)
-          )
-            snapshot = {
-              ...snapshot,
-              status: "cancelled",
-              summaryCurrent: false,
-              summary:
-                "Activity collection stopped; later facts remain in the journal.",
-            };
+          if (saved?.done) snapshot = stoppedSnapshot(snapshot);
           latest = snapshot;
 
           if (finishNow) finished = true;
