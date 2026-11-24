@@ -1003,10 +1003,6 @@
     "src/fleet/reviews.ts": [
       "src/fleet/reviews.ts",
       "src/coordination/fleet/reviews.ts"
-    ],
-    "src/fleet/store.ts": [
-      "src/fleet/store.ts",
-      "src/coordination/fleet/store.ts"
     ]
   },
   "slices": {
@@ -1143,6 +1139,7 @@
       "files": [
         "src/cancellation.ts",
         "src/gateway.ts",
+        "src/gateway/fleet-job-store.ts",
         "src/gateway/ports.ts",
         "src/gateway/store-types.ts",
         "src/gateway/row-codec.ts",
@@ -1491,7 +1488,6 @@
         "src/fleet/plugin.ts",
         "src/fleet/protocol.ts",
         "src/fleet/results.ts",
-        "src/fleet/store.ts",
         "src/fleet/reviews.ts",
         "src/dispatch/polling.ts"
       ],
@@ -1502,8 +1498,7 @@
         "src/fleet-policy.ts",
         "src/fleet-source.ts",
         "src/fleet/plugin.ts",
-        "src/fleet/protocol.ts",
-        "src/fleet/store.ts"
+        "src/fleet/protocol.ts"
       ],
       "contracts": [
         "src/dispatch/protocol.ts",
