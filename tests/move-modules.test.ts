@@ -79,7 +79,7 @@ async function expectFailure(work: Promise<void>, message?: string) {
     expect(error.message).toContain(message);
 }
 
-test("moves modules and updates all four code roots without changing other strings", async () => {
+test("moves modules and updates all code roots without changing other strings", async () => {
   const consumer = [
     'import { value } from "../src/item";',
     "import '../src/item.ts';",
@@ -100,6 +100,8 @@ test("moves modules and updates all four code roots without changing other strin
     "tests/use.ts": consumer,
     "scripts/use.ts": consumer,
     "perf/use.ts": consumer,
+    "plugins/opencode/crew/plugin.ts":
+      'export { value } from "../../../src/item";\n',
   });
 
   await moveModules(root, [["src/item.ts", "src/domain/item.ts"]]);
@@ -124,6 +126,9 @@ test("moves modules and updates all four code roots without changing other strin
   }
 
   expect(await text(root, "src/use.ts")).toContain('from "./domain/item"');
+  expect(await text(root, "plugins/opencode/crew/plugin.ts")).toBe(
+    'export { value } from "../../../src/domain/item";\n',
+  );
   expect(git(root, "diff", "--cached", "--name-status")).toContain(
     "src/domain/item.ts",
   );
@@ -335,7 +340,8 @@ test("preserves unrelated staged, unstaged, untracked and ignored content", asyn
 test.each([
   ["src/main.ts", "src/new.ts", "Locked"],
   ["src/config.ts", "src/new.ts", "Locked"],
-  ["src/crew/plugin.ts", "src/new.ts", "Locked"],
+  ["plugins/opencode/crew/plugin.ts", "src/new.ts", "Locked"],
+  ["plugins/opencode/fleet/plugin.ts", "src/new.ts", "Locked"],
   ["src/fleet/plugin.ts", "src/new.ts", "Locked"],
   ["src/missing.ts", "src/new.ts", "Unknown"],
   ["src/item.ts", "src/other.ts", "collision"],
@@ -354,7 +360,8 @@ test.each([
       "src/other.ts": "export const other = 2;\n",
       "src/main.ts": "export {};\n",
       "src/config.ts": "export {};\n",
-      "src/crew/plugin.ts": "export {};\n",
+      "plugins/opencode/crew/plugin.ts": "export {};\n",
+      "plugins/opencode/fleet/plugin.ts": "export {};\n",
       "src/fleet/plugin.ts": "export {};\n",
     });
 
