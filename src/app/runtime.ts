@@ -15,10 +15,7 @@ import {
   Scope,
 } from "effect";
 import pino, { type Logger } from "pino";
-import { diffEvents } from "../observability/dashboard/api/v1/diff";
-import { gatewayVersion } from "../observability/dashboard/api/v1/gateway";
-import { createApiV1Source } from "../observability/dashboard/api/v1/projection";
-import { startApiV1Server } from "../observability/dashboard/api/v1/server";
+import { startRuntimeApi } from "../observability/dashboard/api/v1/runtime-api";
 import type { AgentBackend, BackendContext } from "../backends/backend";
 import { createBackend, openCodeServerVersion } from "../backends/factory";
 import {
@@ -1287,10 +1284,10 @@ export function serve(
         fleetDashboard = dashboard;
         notificationShutdown.api = yield* Effect.acquireRelease(
           Effect.promise(async () =>
-            startApiV1Server({
+            startRuntimeApi({
               config: api,
               dataDirectory: config.dataDirectory,
-              source: createApiV1Source({
+              projection: {
                 requests: (registration, at) => {
                   if (registration.kind !== "irc") return [];
                   const cfg = registration.config;
@@ -1306,13 +1303,8 @@ export function serve(
                 dashboard,
                 config: () => reload?.current.config ?? config,
                 dataDirectory: config.dataDirectory,
-              }),
-              diff: diffEvents,
-              gateway: {
-                version: await gatewayVersion(),
-                startedAt: Math.round(performance.timeOrigin),
-                opencodeVersion: (signal) => openCodeVersion(ships, signal),
               },
+              opencodeVersion: (signal) => openCodeVersion(ships, signal),
               signal: viewers.signal,
               ...(notify && {
                 composeRoutes: (token: string) => {

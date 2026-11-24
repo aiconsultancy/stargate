@@ -1549,6 +1549,7 @@
         "src/api/v1/network.ts",
         "src/api/v1/projection.ts",
         "src/api/v1/pulls.ts",
+        "src/observability/dashboard/api/v1/runtime-api.ts",
         "src/api/v1/server.ts",
         "src/api/v1/token.ts",
         "src/api/v1/types.ts",
@@ -1559,6 +1560,7 @@
         "src/dashboard.ts"
       ],
       "public": [
+        "src/observability/dashboard/api/v1/runtime-api.ts",
         "src/dashboard-model.ts",
         "src/dashboard-source.ts",
         "src/dashboard.ts"
