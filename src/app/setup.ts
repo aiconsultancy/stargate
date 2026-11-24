@@ -123,6 +123,32 @@ function validBot(input: unknown): BotConfig {
   return parsed.success;
 }
 
+async function checkIrcCredentials(
+  registration: IrcConfig,
+  env: NodeJS.ProcessEnv,
+) {
+  const members = [registration, ...registration.crew];
+
+  // Presence only: values are never printed or sent anywhere.
+  for (const { passwordEnv } of members)
+    if (passwordEnv && !env[passwordEnv]?.trim())
+      throw new Error(
+        "Missing IRC password environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
+      );
+
+  const pemFiles = new Set(
+    members.flatMap(({ clientPemFile }) =>
+      clientPemFile ? [clientPemFile] : [],
+    ),
+  );
+
+  for (const path of pemFiles) await clientPem(path);
+  const ca = registration.server.caFile;
+
+  if (ca && !(await lstat(ca).catch(() => {}))?.isFile())
+    throw new Error("IRC caFile is not a readable file.");
+}
+
 /**
  * Validates credential references and returns the effective environment:
  * the `<config>.env` companion, overridden by `environment`. Neither input is
@@ -154,31 +180,7 @@ export async function checkCredentials(
     resolve(dirname(resolve(path)), dataDirectory),
   );
 
-  // Presence only: values are never printed or sent anywhere.
-  for (const registration of irc) {
-    for (const name of [
-      ...(registration.passwordEnv ? [registration.passwordEnv] : []),
-      ...registration.crew.flatMap((member) =>
-        member.passwordEnv ? [member.passwordEnv] : [],
-      ),
-    ])
-      if (!env[name]?.trim())
-        throw new Error(
-          "Missing IRC password environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
-        );
-
-    const pemFiles = new Set(
-      [registration, ...registration.crew].flatMap((member) =>
-        member.clientPemFile ? [member.clientPemFile] : [],
-      ),
-    );
-
-    for (const path of pemFiles) await clientPem(path);
-    const ca = registration.server.caFile;
-
-    if (ca && !(await lstat(ca).catch(() => {}))?.isFile())
-      throw new Error("IRC caFile is not a readable file.");
-  }
+  for (const registration of irc) await checkIrcCredentials(registration, env);
 
   if (agentDispatch?.enabled)
     for (const name of [
