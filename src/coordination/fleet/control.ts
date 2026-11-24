@@ -282,6 +282,23 @@ export class FleetControl {
     this.ledger.acknowledgeResult(this.options.sessionID, dispatchID);
   }
 
+  private resultOrigin(source: VerifiedSource) {
+    if (!this.resultsEnabled) return;
+    const origin = this.options.origin?.(source);
+
+    if (
+      !origin ||
+      !source.origin ||
+      origin.botKey !== source.origin.botKey ||
+      origin.eventId !== source.origin.eventId
+    )
+      throw new FleetError(
+        "Fleet result origin has no retained ingress job/native input",
+      );
+
+    return origin;
+  }
+
   private async dispatch(
     input: DispatchInput,
     caller: FleetCaller,
@@ -316,20 +333,7 @@ export class FleetControl {
         "Context-only messages cannot authorise fleet assignments.",
       );
 
-    const origin = this.resultsEnabled
-      ? this.options.origin?.(source)
-      : undefined;
-
-    if (
-      this.resultsEnabled &&
-      (!origin ||
-        !source.origin ||
-        origin.botKey !== source.origin.botKey ||
-        origin.eventId !== source.origin.eventId)
-    )
-      throw new FleetError(
-        "Fleet result origin has no retained ingress job/native input",
-      );
+    const origin = this.resultOrigin(source);
 
     const reserved = this.ledger.reserve({
       ownerSessionID: caller.sessionID,
