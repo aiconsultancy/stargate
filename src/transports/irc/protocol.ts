@@ -18,6 +18,43 @@ export const lineBytes = 510;
 /** Received lines are refused above this size: 8191 tag bytes + 512. */
 export const maxReceivedBytes = 8703;
 
+/** Build one chat message from a received draft/multiline batch. */
+export function assembleMultiline(
+  open: IrcMessage,
+  parts: readonly IrcMessage[],
+): IrcMessage | undefined {
+  const [first] = parts;
+
+  if (!first) return;
+  const tags = new Map(open.tags);
+
+  for (const key of ["account", "time"])
+    if (!tags.has(key)) {
+      const value = first.tags.get(key);
+
+      if (value !== undefined) tags.set(key, value);
+    }
+
+  tags.delete("batch");
+
+  const text = parts
+    .map((part, index) =>
+      index && !part.tags.has("draft/multiline-concat")
+        ? `\n${part.params[1] ?? ""}`
+        : (part.params[1] ?? ""),
+    )
+    .join("");
+
+  const source = open.source ?? first.source;
+
+  return {
+    tags,
+    ...(source && { source }),
+    command: first.command,
+    params: [open.params[2] ?? first.params[0] ?? "", text],
+  };
+}
+
 /** Message IDs used in tags and event IDs: printable ASCII, bounded. */
 export function validMsgid(value: string | undefined): value is string {
   return value !== undefined && /^[!-~]{1,128}$/.test(value);
