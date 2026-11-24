@@ -17,7 +17,16 @@ import {
   utf8Bytes,
   validMsgid,
 } from "./protocol";
-import { IrcStatus, type StatusResult, type StatusTiming } from "./status";
+import {
+  IrcStatus,
+  type StatusResult,
+  type StatusTiming,
+  classifyStatusMetadataReply,
+  formatStatusMetadataSet,
+  parseStatusMetadataLimit,
+  statusMetadataMaxValueBytes,
+  statusMetadataSupported,
+} from "./status";
 
 const line = (names: readonly string[]) =>
   formatMessage("JOIN", [names.join(",")]);
@@ -300,8 +309,7 @@ export class IrcClient {
   private lastData = 0;
   private lastPing = 0;
   private readonly status: IrcStatus | undefined;
-  // Ergo: key + value <=350 bytes; "status" owns six.
-  private statusLimit = 344;
+  private statusLimit = statusMetadataMaxValueBytes;
   private metadataPending:
     | {
         value: string | undefined;
@@ -647,8 +655,7 @@ export class IrcClient {
   ): Promise<StatusResult> {
     if (
       !this.registeredNow ||
-      !this.hasCap("draft/metadata-2") ||
-      !this.hasCap("batch") ||
+      !statusMetadataSupported((name) => this.hasCap(name)) ||
       this.metadataPending
     )
       return Promise.resolve({ kind: "unavailable" });
@@ -662,14 +669,7 @@ export class IrcClient {
       valid();
 
     const item: Queued = {
-      lines: [
-        formatMessage(
-          "METADATA",
-          value === undefined
-            ? ["*", "SET", "status"]
-            : ["*", "SET", "status", value],
-        ),
-      ],
+      lines: [formatStatusMetadataSet(value)],
       guard,
       done: (error) => {
         if (error) pending.finish({ kind: "unavailable" });
@@ -698,47 +698,19 @@ export class IrcClient {
     return result.promise;
   }
 
-  /** Ergo 2.19.1 uses 761/766, including subscriber notifications; ACK only our own key/value. */
   private metadataReply(message: IrcMessage): void {
     const pending = this.metadataPending;
 
-    if (!pending || message.source?.includes("!")) return;
-    const { command, params } = message;
-    const own = this.fold(params[1] ?? "") === this.fold(this.currentNick);
+    if (!pending) return;
 
-    if (
-      command === "761" &&
-      own &&
-      params[2] === "status" &&
-      params[4] === pending.value
-    )
-      pending.finish({ kind: "ok" });
-    else if (
-      command === "766" &&
-      own &&
-      params[2] === "status" &&
-      pending.value === undefined
-    )
-      pending.finish({ kind: "ok" });
-    else if (command === "FAIL" && params[0] === "METADATA") {
-      if (
-        params[1] === "KEY_NOT_SET" &&
-        params[3] === "status" &&
-        pending.value === undefined
-      )
-        pending.finish({ kind: "ok" });
-      else if (params[1] === "RATE_LIMITED" && params[3] === "status") {
-        const seconds = /^\d+$/.test(params[4] ?? "") ? Number(params[4]) : 120;
-        pending.finish({
-          kind: "rate-limited",
-          retryAfterMs:
-            Number.isSafeInteger(seconds) && seconds > 0
-              ? seconds * 1000
-              : 120_000,
-        });
-      } else if (params.includes("status"))
-        pending.finish({ kind: "rejected" });
-    }
+    const outcome = classifyStatusMetadataReply(
+      message,
+      pending.value,
+      this.currentNick,
+      this.fold,
+    );
+
+    if (outcome !== undefined) pending.finish(outcome);
   }
 
   /** True while `nick` is bound to `account` in both directions. */
@@ -1911,14 +1883,7 @@ export class IrcClient {
       } else this.multilineOffer = undefined;
       const presence = this.options.presence;
       const metadata = offered.get("draft/metadata-2");
-      this.statusLimit = 344;
-
-      for (const token of metadata?.split(",") ?? []) {
-        if (!token.startsWith("max-value-bytes=")) continue;
-        const limit = Number(token.slice("max-value-bytes=".length));
-        this.statusLimit =
-          Number.isSafeInteger(limit) && limit > 0 ? Math.min(344, limit) : 0;
-      }
+      this.statusLimit = parseStatusMetadataLimit(metadata);
 
       const wanted = [
         ...required,
@@ -1970,7 +1935,7 @@ export class IrcClient {
       for (const name of (params.at(-1) ?? "").split(" "))
         this.caps.delete(name);
 
-      if (!this.hasCap("draft/metadata-2") || !this.hasCap("batch"))
+      if (!statusMetadataSupported((name) => this.hasCap(name)))
         this.status?.disconnected();
     }
   }
@@ -2020,7 +1985,7 @@ export class IrcClient {
 
     this.registeredNow = true;
 
-    if (this.hasCap("draft/metadata-2") && this.hasCap("batch"))
+    if (statusMetadataSupported((name) => this.hasCap(name)))
       this.status?.connected(this.statusLimit);
     this.readyFilehost = this.advertisedFilehost;
     this.options.log.info("IRC registered");

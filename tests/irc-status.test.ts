@@ -1,5 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
-import { IrcStatus, type StatusResult } from "../src/transports/irc/status";
+import {
+  classifyStatusMetadataReply,
+  formatStatusMetadataSet,
+  IrcStatus,
+  parseStatusMetadataLimit,
+  statusMetadataSupported,
+  type StatusResult,
+} from "../src/transports/irc/status";
+import { fold, parseMessage } from "../src/transports/irc/protocol";
 import { waitingPhrase } from "../src/gateway/waiting";
 
 type Attempt = {
@@ -430,4 +438,188 @@ test("irc status: hard value cap applies; tiny advertised caps still permit clea
 
     await status.shutdown();
   }
+});
+
+function parsed(line: string) {
+  const message = parseMessage(line);
+
+  if (!message) throw new Error(`unparseable IRC test line: ${line}`);
+
+  return message;
+}
+
+test("irc status metadata: reply classification enforces sender, own nick, casemapping, key, value and rate limit", () => {
+  const rfcFold = (value: string) => fold(value, "rfc1459");
+  const asciiFold = (value: string) => fold(value, "ascii");
+
+  // 761 ACKs matching own nick (under active casemapping), key, and exact value.
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server 761 Cap[1] Cap{1} status * :Apollo is thinking…"),
+      "Apollo is thinking…",
+      "Cap[1]",
+      rfcFold,
+    ),
+  ).toEqual({ kind: "ok" });
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server 761 Cap[1] Cap{1} status * :Apollo is thinking…"),
+      "Apollo is thinking…",
+      "Cap[1]",
+      asciiFold,
+    ),
+  ).toBeUndefined();
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server 761 captain other status * :Apollo is thinking…"),
+      "Apollo is thinking…",
+      "captain",
+      asciiFold,
+    ),
+  ).toBeUndefined();
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server 761 captain captain other * :Apollo is thinking…"),
+      "Apollo is thinking…",
+      "captain",
+      asciiFold,
+    ),
+  ).toBeUndefined();
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server 761 captain captain status * :Apollo is mulling…"),
+      "Apollo is thinking…",
+      "captain",
+      asciiFold,
+    ),
+  ).toBeUndefined();
+  // User-sourced (nick!user@host) messages are ignored.
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":spoof!u@h 761 captain captain status * :Apollo is thinking…"),
+      "Apollo is thinking…",
+      "captain",
+      asciiFold,
+    ),
+  ).toBeUndefined();
+  // 766 ACKs only a pending clear on own nick and status key.
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server 766 Cap[1] Cap{1} status :Key deleted"),
+      undefined,
+      "Cap[1]",
+      rfcFold,
+    ),
+  ).toEqual({ kind: "ok" });
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server 766 captain captain status :Key deleted"),
+      "Apollo is thinking…",
+      "captain",
+      asciiFold,
+    ),
+  ).toBeUndefined();
+  // FAIL METADATA KEY_NOT_SET ACKs a pending clear; rejects when setting a value.
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server FAIL METADATA KEY_NOT_SET captain status :not set"),
+      undefined,
+      "captain",
+      asciiFold,
+    ),
+  ).toEqual({ kind: "ok" });
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server FAIL METADATA KEY_NOT_SET captain status :not set"),
+      "Apollo is thinking…",
+      "captain",
+      asciiFold,
+    ),
+  ).toEqual({ kind: "rejected" });
+  // FAIL METADATA RATE_LIMITED parses positive integer seconds and falls back to 120s.
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server FAIL METADATA RATE_LIMITED captain status 15 :slow down"),
+      undefined,
+      "captain",
+      asciiFold,
+    ),
+  ).toEqual({ kind: "rate-limited", retryAfterMs: 15_000 });
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server FAIL METADATA RATE_LIMITED captain status 0 :slow down"),
+      undefined,
+      "captain",
+      asciiFold,
+    ),
+  ).toEqual({ kind: "rate-limited", retryAfterMs: 120_000 });
+  expect(
+    classifyStatusMetadataReply(
+      parsed(
+        ":server FAIL METADATA RATE_LIMITED captain status nope :slow down",
+      ),
+      undefined,
+      "captain",
+      asciiFold,
+    ),
+  ).toEqual({ kind: "rate-limited", retryAfterMs: 120_000 });
+  expect(
+    classifyStatusMetadataReply(
+      parsed(
+        ":server FAIL METADATA RATE_LIMITED captain status 9007199254740993 :slow down",
+      ),
+      undefined,
+      "captain",
+      asciiFold,
+    ),
+  ).toEqual({ kind: "rate-limited", retryAfterMs: 120_000 });
+  // Other FAIL METADATA mentioning status rejects; unrelated keys or commands ignore.
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server FAIL METADATA KEY_NO_PERMISSION captain status :denied"),
+      undefined,
+      "captain",
+      asciiFold,
+    ),
+  ).toEqual({ kind: "rejected" });
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server FAIL METADATA KEY_NO_PERMISSION captain other :denied"),
+      undefined,
+      "captain",
+      asciiFold,
+    ),
+  ).toBeUndefined();
+  expect(
+    classifyStatusMetadataReply(
+      parsed(":server FAIL OTHER KEY_NO_PERMISSION captain status :denied"),
+      undefined,
+      "captain",
+      asciiFold,
+    ),
+  ).toBeUndefined();
+});
+
+test("irc status metadata: formatting, limit parsing and capability gating match protocol", () => {
+  expect(formatStatusMetadataSet(undefined)).toBe("METADATA * SET status");
+  expect(formatStatusMetadataSet("Apollo is thinking…")).toBe(
+    "METADATA * SET status :Apollo is thinking…",
+  );
+  expect(parseStatusMetadataLimit(undefined)).toBe(344);
+  expect(parseStatusMetadataLimit("before-connect,max-keys=100")).toBe(344);
+  expect(parseStatusMetadataLimit("max-value-bytes=120")).toBe(120);
+  expect(parseStatusMetadataLimit("max-value-bytes=500")).toBe(344);
+  expect(parseStatusMetadataLimit("max-value-bytes=0")).toBe(0);
+  expect(parseStatusMetadataLimit("max-value-bytes=bad")).toBe(0);
+  expect(
+    statusMetadataSupported((cap) =>
+      new Set(["draft/metadata-2", "batch"]).has(cap),
+    ),
+  ).toBe(true);
+  expect(
+    statusMetadataSupported((cap) => new Set(["draft/metadata-2"]).has(cap)),
+  ).toBe(false);
+  expect(statusMetadataSupported((cap) => new Set(["batch"]).has(cap))).toBe(
+    false,
+  );
 });
