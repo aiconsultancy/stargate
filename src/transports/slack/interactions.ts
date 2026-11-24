@@ -27,6 +27,26 @@ const pairingAction = Schema.Union([
   }),
 ]);
 
+const decodeCommand = Schema.decodeUnknownResult(commandName);
+const decodePairing = Schema.decodeUnknownResult(pairingAction);
+
+function commandTarget(body: unknown) {
+  const parsed = decodeCommand(body);
+
+  if (Result.isFailure(parsed)) return;
+  const { command, text } = parsed.success;
+
+  if (command === "/cron") return "cron";
+
+  if (command !== "/stargate") return;
+
+  if (text === "pair") return "pairing";
+
+  if (/^(?:crew|usage)(?:\s|$)/.test(text ?? "")) return "crew";
+
+  return;
+}
+
 /** Route exact control namespaces, never slash-command text to a model. */
 export function controlInteractions(
   cron: SlackInteractions,
@@ -40,23 +60,11 @@ export function controlInteractions(
 ): SlackInteractions {
   return {
     async command(body, ack) {
-      const parsed = Schema.decodeUnknownResult(commandName)(body);
+      const target = commandTarget(body);
 
-      if (
-        Result.isSuccess(parsed) &&
-        parsed.success.command === "/stargate" &&
-        parsed.success.text === "pair"
-      )
-        await pairing.command(body, ack);
-      else if (
-        Result.isSuccess(parsed) &&
-        parsed.success.command === "/stargate" &&
-        /^(?:crew|usage)(?:\s|$)/.test(parsed.success.text ?? "") &&
-        crew
-      )
-        await crew.command(body, ack);
-      else if (Result.isSuccess(parsed) && parsed.success.command === "/cron")
-        await cron.command(body, ack);
+      if (target === "pairing") await pairing.command(body, ack);
+      else if (target === "crew" && crew) await crew.command(body, ack);
+      else if (target === "cron") await cron.command(body, ack);
       else
         await ack({
           response_type: "ephemeral",
@@ -64,7 +72,7 @@ export function controlInteractions(
         });
     },
     async interactive(body, ack) {
-      if (Result.isSuccess(Schema.decodeUnknownResult(pairingAction)(body)))
+      if (Result.isSuccess(decodePairing(body)))
         await pairing.interactive(body, ack);
       else if (config && (await config(body, ack))) return;
       else if (cancel(body)) await ack();
