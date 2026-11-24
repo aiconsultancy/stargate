@@ -8,11 +8,9 @@ import {
   settingsInputAdvertisement,
 } from "../../../config/settings-legacy";
 import { settingsIssues } from "../../../config/settings-schema";
-import {
-  effectProjectKeySchema,
-  effectProjectToolInput,
-} from "../input/project-options";
+import { effectProjectToolInput } from "../input/project-options";
 import type { EffectToolInput } from "../input/tool-input";
+import { effectProjectKeySchema } from "../protocol/project-key";
 
 function jsonTarget(
   json: Record<string, unknown>,

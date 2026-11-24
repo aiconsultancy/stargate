@@ -35,10 +35,10 @@ import type {
 } from "../src/coordination/crew/messaging/mesij";
 import plugin from "../plugins/opencode/crew/plugin";
 import {
-  effectProjectKeySchema,
   effectProjectToolInput,
   projectsSchema,
 } from "../src/coordination/crew/input/project-options";
+import { effectProjectKeySchema } from "../src/coordination/crew/protocol/project-key";
 import { CrewProjects } from "../src/coordination/crew/workspace/projects";
 import { teamSchema } from "../src/coordination/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
