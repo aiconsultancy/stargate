@@ -66,11 +66,8 @@ import {
   peerWindowMs,
 } from "./peers";
 import { resolveQuestionSettings } from "../questions/question-settings";
-import {
-  type QuestionPort,
-  Questions,
-  type questionControl,
-} from "../questions/questions";
+import { type QuestionPort, Questions } from "../questions/questions";
+import type { QuestionControl } from "../questions/text-controls";
 import { parseReactionReply } from "../shared/reactions";
 import {
   AttachmentInputUnavailable,
@@ -957,10 +954,7 @@ export class Gateway {
   }
 
   /** Only transport-verified controls reach this method; they never enter a model. */
-  public async answerQuestion(
-    input: Incoming,
-    control: NonNullable<ReturnType<typeof questionControl>>,
-  ) {
+  public async answerQuestion(input: Incoming, control: QuestionControl) {
     if (this.questionLifetime.signal.aborted) return;
     await this.questions?.answer(
       input,
