@@ -62,13 +62,12 @@ export function cronRisk(input: string, output: string, risks?: CronRisks) {
   );
 }
 
-export function cronObservation(raw: string) {
-  if (raw.length > 100_000) return;
-
+function parseResponse<T>(
+  raw: string,
+  decode: (value: unknown) => Result.Result<T, Schema.SchemaError>,
+) {
   try {
-    const decoded = Schema.decodeUnknownResult(cronObservationSchema)(
-      JSON.parse(raw),
-    );
+    const decoded = decode(JSON.parse(raw));
 
     if (Result.isSuccess(decoded)) return decoded.success;
   } catch {
@@ -78,23 +77,23 @@ export function cronObservation(raw: string) {
   return;
 }
 
+const decodeObservation = Schema.decodeUnknownResult(cronObservationSchema);
+const decodeDecision = Schema.decodeUnknownResult(cronDecisionSchema);
+
+export function cronObservation(raw: string) {
+  if (raw.length > 100_000) return;
+
+  return parseResponse(raw, decodeObservation);
+}
+
 export function cronDecision(raw: string, input: string, output: string) {
   if (raw.length > 2000 || cronRisk(input, output)) return "escalate";
 
-  try {
-    const decoded = Schema.decodeUnknownResult(cronDecisionSchema)(
-      JSON.parse(raw),
-    );
+  const decoded = parseResponse(raw, decodeDecision);
 
-    if (Result.isSuccess(decoded))
-      return cronRisk(input, output, decoded.success.risks)
-        ? "escalate"
-        : decoded.success.verdict;
-  } catch {
-    // Unknown, incomplete or extra fields fail closed.
-  }
-
-  return "escalate";
+  return !decoded || cronRisk(input, output, decoded.risks)
+    ? "escalate"
+    : decoded.verdict;
 }
 
 export function cronPublicText(text: string, limit = 12_000) {
