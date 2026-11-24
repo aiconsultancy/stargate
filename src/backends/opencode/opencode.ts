@@ -62,6 +62,7 @@ import {
 import type { MaintenanceDrain } from "../../automation/maintenance/maintenance-drain";
 import type { NativeQuestion } from "../../chat/questions/native-question";
 import type { CrewStatusInput } from "../../shared/crew-status";
+import type { CrewGitInput } from "../../coordination/crew/reporting/fleet-status";
 import { quotaObservationSchema, quotaSnapshotSchema } from "../quota/quota";
 import {
   BackendFailure,
@@ -770,6 +771,10 @@ export class OpenCodeBackend implements AgentBackend {
 
   public fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
     return this.crewStatusProbe.fleetCrewStatus(input, signal);
+  }
+
+  public crewGit(input: CrewGitInput, signal: AbortSignal) {
+    return this.crewStatusProbe.crewGit(input, signal);
   }
 
   public updateNoticeContext(

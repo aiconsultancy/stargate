@@ -202,6 +202,28 @@ enrichment times out after the overview is ready, the response uses the latest
 host and gateway metrics. Before the first host sample, the
 fallback omits disk usage.
 
+The captain's crew plugin reads Git state for the captain's project checkout
+and each configured crew worktree, as the Linux user that owns them, and
+reports it over its internal `crewGit` RPC. The gateway can run as a user
+that cannot read the captain's home, so it uses that report whenever the
+captain answers. A captain whose plugin is older than this method is asked
+again after a minute; until then, and when the RPC fails or takes more than
+six seconds, the gateway reads the checkout itself as described below. The
+plugin uses the crew workspace tool's Git helper, without the gateway's index
+snapshot: repository hooks, fsmonitor and optional locks are off. It caches
+each checkout's result for 15 seconds, with a five-second read limit.
+
+Each `git` object may carry these optional fields, added without changing the
+existing ones:
+
+| Field      | Meaning                                                                 |
+| ---------- | ----------------------------------------------------------------------- |
+| `worktree` | Absolute path of the checkout on the fleet VM                           |
+| `commit`   | Full object ID of `HEAD`; null when unborn or unknown                   |
+| `dirty`    | `changedFiles > 0`; absent when the count is unknown                    |
+| `source`   | `captain` (the crew plugin) or `gateway` (the Fleet API process itself) |
+
+Without a captain report, the gateway's own reader below applies.
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
 submodules. Status runs in a private Git directory with snapshots of the
 primary and shared indexes and access to the checkout's objects. The SHA and
@@ -251,9 +273,12 @@ cause an unchanged file to count as changed.
 
 To enable pull request lookups, set `api.pullRequestRepositories` in
 `stargate.json` and restart Stargate. Each key is the exact absolute,
-normalized path of a local crew checkout as configured in the crew project
-registry. Each value is the GitHub `owner/repository` whose PR metadata
-you want to share with Fleet API viewers.
+normalized path of a crew worktree as the crew plugin reports it in
+`git.worktree`: the crew project registry's `worktrees` entry for that member
+and project. Each value is the GitHub `owner/repository` whose PR metadata
+you want to share with Fleet API viewers. The Fleet API process runs `gh`
+from its `PATH`; `gh auth status --hostname github.com` must succeed for its
+user, with read access to each bound repository.
 
 ```json
 {

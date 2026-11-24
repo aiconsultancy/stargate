@@ -21,7 +21,11 @@ import {
   type CrewSession,
   type CrewSessions,
 } from "../src/coordination/crew/execution/engine";
-import { fleetCrewStatusSchema } from "../src/coordination/crew/reporting/fleet-status";
+import {
+  crewGitSchema,
+  fleetCrewStatusSchema,
+} from "../src/coordination/crew/reporting/fleet-status";
+import { createCrewGitReader } from "../src/coordination/crew/workspace/workspace";
 import { journalInputSchema } from "../src/coordination/crew/reporting/journal";
 import type {
   MesijClient,
@@ -704,6 +708,85 @@ test("status and history identify all project contexts while legacy output stays
     expect(await readFile(join(f.root, "default/.git/HEAD"), "utf8")).toContain(
       "main",
     );
+  } finally {
+    await projects.close();
+    await f.close();
+  }
+});
+
+test("crew Git state covers every configured worktree, read as the captain", async () => {
+  const f = await fixture(2);
+  const projects = await CrewProjects.open(f.options, f.factory);
+  const read = createCrewGitReader(() => 7);
+
+  try {
+    // Not provisioned: the worktree exists but no worker session does.
+    const all = Schema.decodeUnknownSync(crewGitSchema)(
+      await projects.crewGit({}, read, new AbortController().signal),
+    );
+
+    expect(all.project).toMatchObject({
+      directory: f.base.projectDirectory,
+      git: { branch: "main", changedFiles: 0, checkedAt: 7 },
+    });
+    expect(
+      all.contexts.map(({ member, project, directory, git }) => [
+        member,
+        project,
+        directory,
+        git?.branch,
+        git?.commit?.length,
+      ]),
+    ).toEqual([
+      [
+        "worker",
+        null,
+        join(f.root, "worker-default"),
+        "task/default/worker",
+        40,
+      ],
+      [
+        "worker2",
+        null,
+        join(f.root, "worker2-default"),
+        "task/default/worker2",
+        40,
+      ],
+      [
+        "worker",
+        "stargate",
+        join(f.root, "worker-stargate"),
+        "task/stargate/worker",
+        40,
+      ],
+      [
+        "worker2",
+        "stargate",
+        join(f.root, "worker2-stargate"),
+        "task/stargate/worker2",
+        40,
+      ],
+    ]);
+
+    const one = await projects.crewGit(
+      { member: "worker2" },
+      read,
+      new AbortController().signal,
+    );
+
+    expect(one.contexts.map(({ member }) => member)).toEqual([
+      "worker2",
+      "worker2",
+    ]);
+    expect(
+      (
+        await projects.crewGit(
+          { crew: false },
+          read,
+          new AbortController().signal,
+        )
+      ).contexts,
+    ).toEqual([]);
   } finally {
     await projects.close();
     await f.close();

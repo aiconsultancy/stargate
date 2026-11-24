@@ -62,7 +62,11 @@ export type V1Task = {
   finishedAt: number | null;
 };
 
-/** Git state of one crew checkout, read on the fleet VM and cached briefly. */
+/**
+ * Git state of one crew checkout, read on the fleet VM and cached briefly.
+ * The captain's crew plugin reads it when it can, because the gateway may run
+ * as a user that cannot read the captain's home.
+ */
 export type V1Git = {
   /** Null on a detached HEAD. */
   branch: string | null;
@@ -83,6 +87,17 @@ export type V1Git = {
   checkedAt: number;
   /** A safe reason when the read failed; other fields are then null. */
   error?: string;
+  /** Full object ID of HEAD; null when unborn or unknown. */
+  commit?: string | null;
+  /** Absolute path of the checkout on the fleet VM, when known. */
+  worktree?: string;
+  /** True when `changedFiles` is above zero; absent when the count is unknown. */
+  dirty?: boolean;
+  /**
+   * Who read the state: `captain` is the captain's crew plugin, running as
+   * the user that owns the worktree; `gateway` is this process.
+   */
+  source?: "captain" | "gateway";
 };
 
 export type V1PullRequest = {
