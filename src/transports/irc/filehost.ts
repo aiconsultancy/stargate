@@ -150,6 +150,26 @@ function uploadDisposition(name: string) {
     : `attachment; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
+function uploadedLocation(response: Response, target: URL) {
+  if (response.status !== 201)
+    throw refusedStatuses.has(response.status)
+      ? new UploadRefused()
+      : new Error("FILEHOST upload unconfirmed");
+  const location = response.headers.get("location");
+
+  if (!location) throw new Error("FILEHOST upload unconfirmed");
+
+  // Public links must stay on the FILEHOST origin and omit credentials.
+  const url = URL.canParse(location, target)
+    ? new URL(location, target)
+    : undefined;
+
+  if (!url || !safeFileURL(url, target))
+    throw new Error("FILEHOST returned an unsafe location");
+
+  return url.href;
+}
+
 export type FilehostOptions = {
   account: string;
   password: string;
@@ -281,24 +301,7 @@ export class Filehost {
     }
 
     try {
-      if (response.status !== 201)
-        throw refusedStatuses.has(response.status)
-          ? new UploadRefused()
-          : new Error("FILEHOST upload unconfirmed");
-      const location = response.headers.get("location");
-
-      if (!location) throw new Error("FILEHOST upload unconfirmed");
-
-      // The link is posted in public: only a plain URL on the FILEHOST's own
-      // Origin, never one that carries credentials.
-      const url = URL.canParse(location, target)
-        ? new URL(location, target)
-        : undefined;
-
-      if (!url || !safeFileURL(url, target))
-        throw new Error("FILEHOST returned an unsafe location");
-
-      return url.href;
+      return uploadedLocation(response, target);
     } finally {
       await response.body?.cancel().catch(() => {});
     }
