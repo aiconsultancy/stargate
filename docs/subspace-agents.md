@@ -27,6 +27,10 @@ Stargate and holds no credential of its own.
   `stargate subspace mcp --socket PATH` relays MCP over the socket to the API's
   `/mcp`. `stargate subspace request` makes a plain REST call the same
   way, for agent skills.
+- **Fleet API.** Beside each officer's socket, `fleet.sock` serves the
+  gateway's own [Fleet API](api.md#officers) read-only, for the whole fleet,
+  with no token. `stargate fleet request` reads it. See
+  [read the fleet](#read-the-fleet).
 
 ## Configuration
 
@@ -207,6 +211,10 @@ The socket sits in a directory per officer:
 A directory with mode `0700` admits only the gateway user, which is what a
 gateway-launched (Claude) officer needs.
 
+The officer's read-only [Fleet API socket](api.md#officers), `fleet.sock`,
+lives in the same directory under the same rules, so the same processes
+reach it. Do not name `socketPath` `fleet.sock`.
+
 A missing socket directory stops start-up by design. The examples use
 `/run/stargate/subspace/…`, and `/run` is emptied at boot, so recreate each
 directory at boot, before the gateway starts. For example, a tmpfiles.d entry
@@ -290,12 +298,43 @@ stargate subspace request --socket /run/stargate/subspace/example-captain/api.so
 The answer's body goes to standard output; the exit status is 0 for a 2xx
 answer, 1 otherwise, with the status and the API's title on standard error.
 
+## Read the fleet
+
+An officer, and its crew running as its user, can read what the fleet's
+people see in Fleet Console: the fleet overview, each ship and each crew
+member, for every ship of the gateway, read-only. The gateway serves its
+[Fleet API](api.md#officers) on `fleet.sock` in each officer's socket
+directory, with no token: who can reach the directory is who can read. There
+is nothing to switch on; it comes with the officer's `socketPath`, and it
+works whether or not the gateway's `api` listener is configured.
+
+```sh
+stargate fleet request --socket /run/stargate/subspace/example-captain/fleet.sock /api/v1/fleet
+stargate fleet request --socket /run/stargate/subspace/example-captain/fleet.sock /api/v1/ships/example-ship
+stargate fleet request --socket /run/stargate/subspace/example-captain/fleet.sock \
+  /api/v1/ships/example-ship/crew/example-member
+```
+
+Set `STARGATE_FLEET_SOCKET` to the socket in the officer's environment to
+leave out `--socket`. The command needs no configuration and no credential.
+It exits 0 with the JSON on standard output, 1 with the status on standard
+error (404 for an unknown ship or member) and 2 for a path that is not a
+Fleet API path. Nothing on the socket changes anything: writes get 405, and
+other paths 404. `/api/v1/events` streams events until the gateway closes it
+or the command is stopped, so give it a time limit in a harness.
+
+For an OpenCode officer whose shell runs commands through a permission
+policy, allow the command with its socket, for example the bash pattern
+`<bun> <stargate>/src/main.ts fleet request --socket /run/stargate/subspace/example-captain/fleet.sock *`.
+There is no MCP tool for it: the command works in every harness with a
+shell, including crew.
+
 ## Not verified yet
 
 The tests use local stand-ins for the API, the harness and the sockets. This
 integration has not run against a real Subspace API with agent key
 credentials, a real OpenCode engine or Claude Code session, or a fleet VM
-with per-officer users and groups.
+with per-officer users and groups; nor have the officers' Fleet API sockets.
 
 ## Tests
 
@@ -309,5 +348,7 @@ and header filtering, redirects, upstream failures, socket directory checks,
 the stdio bridge with JSON and streamed answers, the REST command and the
 `stargate subspace mcp` command in a child process.
 `tests/subspace-runtime.test.ts` runs the gateway with the section absent,
-disabled and enabled, and with a bundle others can read. No test contacts a
-real service.
+disabled and enabled (with the officer's Fleet API socket and no `api`
+listener), and with a bundle others can read.
+`tests/api-v1-officers.test.ts` covers the officers' Fleet API sockets and
+`stargate fleet request`. No test contacts a real service.

@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Result, Schema } from "effect";
 import { configuredApiToken } from "../observability/dashboard/api/v1/operator-token";
@@ -46,6 +46,7 @@ Commands:
   cron              List, add, run, remove, or report cronjobs
   config check      Validate config, Slack token and IRC credential references
   api token         Print the Fleet API bearer token
+  fleet request     Read the Fleet API through an officer's own socket
   subspace          Optional officer keys and Subspace API signing proxy
   maintenance       Nightly self-update and host maintenance (plan/run/timer)
   manifest          Print Slack manifest JSON and prefilled creation URL
@@ -145,6 +146,14 @@ Does not contact Slack or IRC, or check provider credentials.`,
   api: `Usage: stargate api token [--config PATH] [--rotate]\n${common}
 Print the Fleet API bearer token to stdout, creating it if missing.
 --rotate  Replace the token. Restart Stargate to use it.`,
+  fleet: `Usage: stargate fleet request [--socket PATH] /api/v1/...
+For an officer and its crew: one read-only Fleet API request through the
+officer's own fleet.sock, with no token; see docs/api.md#officers.
+  --socket PATH  The officer's Fleet API socket (default: $STARGATE_FLEET_SOCKET)
+Paths: /api/v1/fleet, /api/v1/ships/{id}, /api/v1/ships/{id}/crew/{member},
+and /api/v1/events (a stream, until the gateway closes it or you stop it).
+The answer goes to stdout. Exit 0 for 2xx, 1 otherwise (the status goes to
+stderr), 2 for a path that is not a Fleet API path. Reads no configuration.`,
   cron: `Usage: stargate cron <list|add|run|remove|report> --bot ID [options]
 --bot ID       Configured bot registration (required)
 --input PATH   Add only: JSON definition file, at most 64 KiB
@@ -552,6 +561,31 @@ export async function runCli(args: string[]): Promise<CliResult> {
     const token = await configuredApiToken(config, configPath, v.rotate);
 
     process.stdout.write(`${token}\n`);
+  } else if (command === "fleet" && p[1] === "request" && p.length === 3) {
+    // Run by officers, who cannot read the gateway's configuration.
+    const socket = v.socket ?? process.env["STARGATE_FLEET_SOCKET"];
+
+    if (!socket || !isAbsolute(socket)) {
+      throw new Error(
+        "Pass --socket with the officer's absolute fleet.sock path, or set STARGATE_FLEET_SOCKET.",
+      );
+    }
+
+    const { runFleetRequest } =
+      await import("../observability/dashboard/api/v1/officers");
+
+    const code = await runFleetRequest({
+      socketPath: socket,
+      path: p[2] ?? "",
+      output: process.stdout,
+      report: (text) => {
+        process.stderr.write(`${text}\n`);
+      },
+    });
+
+    if (code !== 0) {
+      process.exitCode = code;
+    }
   } else if (command === "subspace" && p.length >= 2) {
     // Loaded only for this command: nothing of it runs otherwise.
     const { subspaceCli } = await import("../subspace/cli");
@@ -798,6 +832,8 @@ function commandOptions(
       ];
     case "manifest":
       return ["name", "json"];
+    case "fleet":
+      return sub === "request" ? ["socket"] : [];
     case "subspace":
       return subspaceOptions[sub ?? ""] ?? [];
     case "service":

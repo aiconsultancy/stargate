@@ -172,8 +172,15 @@ separate maintenance procedure.
 ## Fleet API
 
 The optional top-level `api` object enables the read-only
-[Fleet API](api.md). Omit it to keep the listener off. Every `api` setting
-requires a restart.
+[Fleet API](api.md)'s operator listener. Omit it to keep the listener off.
+Every `api` setting requires a restart.
+
+Officers read the same API without `api` and without the token: a gateway
+with `subspaceAgents` enabled serves it on `fleet.sock` beside each officer's
+`socketPath`, read-only and for the whole fleet, whether or not `api` is set.
+There is no key or switch for it; the officer's socket directory decides who
+can connect. With `api` set, the officers' sockets use its `fleetName` and
+`pullRequestRepositories`. See [officers](api.md#officers).
 
 | Field                     | Default                                                                                                | Accepted values                                                                                                                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -187,8 +194,8 @@ requires a restart.
 directory must be owned by the service user with mode 0700 and safe ancestors.
 `allowedNetworks` remains valid configuration but only checks TCP peers.
 The Fleet operator bearer and browser-origin policy still apply in Unix mode.
-There is no `enabled` alias, simultaneous second API listener or notification
-route in this version. For downgrade, restore the prior TCP `listen` or omit
+There is no `enabled` alias, simultaneous second operator listener or
+notification route in this version. For downgrade, restore the prior TCP `listen` or omit
 `api` when no Fleet API is needed; keep private state. See [API limits and Unix
 access](api.md#private-unix-mode).
 
@@ -216,7 +223,9 @@ requests on a per-officer Unix socket. Keys: `enabled`, `api.baseUrl`,
 `officers` (`name`, `rank`, `ship`, `model`, `ircNick`, `bundlePath`,
 `socketPath`, `registration`). A section without `enabled: true` is treated
 as absent and its other keys are not validated. Every change to an enabled
-section requires a restart. See
+section requires a restart. Each officer with a `socketPath` also gets a
+read-only [Fleet API socket](api.md#officers), `fleet.sock`, in the same
+directory; that file name is therefore refused as a `socketPath`. See
 [Subspace API agent identity](subspace-agents.md).
 
 ## Backend configuration

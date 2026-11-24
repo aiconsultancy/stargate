@@ -961,19 +961,6 @@
       }
     },
     {
-      "files": ["src/observability/dashboard/api/v1/server.ts"],
-      "rules": {
-        "eslint/max-lines-per-function": [
-          "error",
-          {
-            "max": 273,
-            "skipBlankLines": true,
-            "skipComments": true
-          }
-        ]
-      }
-    },
-    {
       "files": ["src/transports/irc/client.ts"],
       "rules": {
         "eslint/max-lines-per-function": [
@@ -1100,7 +1087,6 @@
     {
       "files": [
         "src/coordination/fleet/protocol.ts",
-        "src/observability/dashboard/api/v1/server.ts",
         "src/transports/irc/config.ts"
       ],
       "rules": {
@@ -1165,7 +1151,7 @@
         "eslint/max-statements": [
           "error",
           {
-            "max": 186
+            "max": 185
           }
         ]
       }

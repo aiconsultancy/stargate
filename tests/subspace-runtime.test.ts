@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { chmod, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -11,6 +11,10 @@ import {
   serve,
 } from "../src/app/runtime";
 import { subspaceAgentsSection } from "../src/config/composition";
+import {
+  flockCommand,
+  setDefaultLockCommandForTests,
+} from "../src/lib/unix-socket";
 import { parseBundle } from "../src/subspace/certificate";
 import { identity } from "./fixtures";
 import { until } from "./irc-fixture";
@@ -31,6 +35,18 @@ import {
 } from "./subspace-fixture";
 
 const cleanup: (() => unknown)[] = [];
+
+// Officers' Fleet API sockets use the default start-up lock command; util-linux
+// Flock is absent on some development hosts.
+beforeAll(() => {
+  if (ownership.lockCommand) {
+    setDefaultLockCommandForTests(ownership.lockCommand);
+  }
+});
+
+afterAll(() => {
+  setDefaultLockCommandForTests(flockCommand);
+});
 
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) {
@@ -197,7 +213,8 @@ for (const variant of ["absent", "enabled: false"] as const) {
       false,
     );
     expect(existsSync(socketPath)).toBe(false);
-    expect(gateway.lines.join("\n")).not.toMatch(/[Ss]ubspace/);
+    expect(existsSync(join(socketPath, "..", "fleet.sock"))).toBe(false);
+    expect(gateway.lines.join("\n")).not.toMatch(/[Ss]ubspace|Fleet API/);
     // The backend receives its configuration exactly as written.
     expect(gateway.backends).toEqual([slackBot(claude).backend]);
     await gateway.stop();
@@ -262,8 +279,26 @@ test("runtime: enabled, keys are made, the socket signs, enrolment runs in the b
     ).payload.sub,
   ).toBe(key.fingerprint);
   expect(gateway.lines.join("\n")).toContain("Subspace agent identity enabled");
+
+  // Beside it, the officer's read-only Fleet API socket, with no api section.
+  const fleetSocket = join(socketPath, "..", "fleet.sock");
+
+  await until(() => existsSync(fleetSocket), 3000, "Fleet API socket");
+
+  const fleet = await overSocket(fleetSocket, "GET", "/api/v1/fleet");
+
+  expect(fleet.status).toBe(200);
+  expect(JSON.parse(fleet.body)).toMatchObject({
+    ships: [{ id: "captain-a" }],
+  });
+  expect((await overSocket(fleetSocket, "POST", "/api/v1/fleet")).status).toBe(
+    405,
+  );
+  expect(existsSync(join(gateway.dataDirectory, "api-token"))).toBe(false);
+  expect(gateway.lines.join("\n")).toContain("Fleet API listening");
   await gateway.stop();
   expect(existsSync(socketPath)).toBe(false);
+  expect(existsSync(fleetSocket)).toBe(false);
 });
 
 test("runtime: a bundle others can read stops start-up and says why", async () => {

@@ -219,6 +219,10 @@ test("configuration: a disabled section is not cross-checked; an enabled one is"
       "Each officer's socketPath needs its own directory",
     ],
     [
+      [captain("example-a", { socketPath: "/run/example/a/fleet.sock" })],
+      "fleet.sock is the officer's Fleet API socket",
+    ],
+    [
       [
         captain("example-a", { bundlePath: "/srv/keys/one.pem" }),
         captain("example-b", { bundlePath: "/srv/keys/one.pem" }),

@@ -1,5 +1,8 @@
+import type { Logger } from "pino";
+import { officerFleetSockets } from "../../../../config/composition";
 import { diffEvents } from "./diff";
 import { type OpenCodeVersionLookup, gatewayVersion } from "./gateway";
+import { OfficerSocketError } from "./officers";
 import { type ApiV1Deps, createApiV1Source } from "./projection";
 import { startApiV1Server } from "./server";
 
@@ -9,16 +12,27 @@ type RuntimeApiOptions = Pick<
 > & {
   projection: ApiV1Deps;
   opencodeVersion: OpenCodeVersionLookup;
+  log: Pick<Logger, "info" | "error">;
 };
 
-/** Compose the Fleet API without making its implementation modules public. */
+/**
+ * Compose the Fleet API without making its implementation modules public:
+ * the operator listener when `api` is configured, and officers' read-only
+ * sockets whenever officers have socket directories (docs/api.md#officers).
+ */
 export async function startRuntimeApi({
   projection,
   opencodeVersion,
+  log,
   ...server
 }: RuntimeApiOptions) {
-  return startApiV1Server({
+  // Each officer with a Subspace socket also gets a Fleet API socket. The
+  // Section needs a restart to change, so the loaded settings decide.
+  const officers = officerFleetSockets(projection.config().subspaceAgents);
+
+  const started = await startApiV1Server({
     ...server,
+    officers,
     source: createApiV1Source(projection),
     diff: diffEvents,
     gateway: {
@@ -26,5 +40,22 @@ export async function startRuntimeApi({
       startedAt: Math.round(performance.timeOrigin),
       opencodeVersion,
     },
+  }).catch((error: unknown) => {
+    // Name the officer whose socket directory stopped start-up.
+    if (error instanceof OfficerSocketError) {
+      log.error(error.message);
+    }
+
+    throw error;
   });
+
+  log.info(
+    {
+      ...(server.config && { listen: server.config.listen }),
+      officers: officers.length,
+    },
+    "Fleet API listening",
+  );
+
+  return started;
 }

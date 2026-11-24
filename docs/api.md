@@ -21,7 +21,8 @@ transport registrations.
 ```
 
 Run `stargate config check` and restart Stargate. A bind failure prevents
-startup. Omit `api` to turn the listener off. Use `:8484` to select the default
+startup. Omit `api` to turn the listener off. A fleet's
+[officers](#officers) read the API on their own sockets, with or without it. Use `:8484` to select the default
 loopback host, or `[::1]:8484` for IPv6 loopback. See the
 [configuration reference](configuration.md#fleet-api) for all settings and
 defaults. Every API setting requires a restart.
@@ -51,6 +52,74 @@ Health and configuration routes are not implemented.
 To roll back to a version without Unix mode, restore the prior private TCP
 `listen` setting, or omit `api` if no Fleet listener is needed. Keep `api-token`
 and other private state. Do not remove an existing TCP configuration blindly.
+
+## Officers
+
+A fleet's own officers (its rear admiral and captains) and their crew read
+the same Fleet API, the whole fleet and read-only, without the token. Agents
+never hold the token. Each officer reads through a Unix socket that only its
+own processes can reach: the socket's file permissions are its identity.
+
+The socket is `fleet.sock` in the officer's Subspace socket directory, beside
+its signing proxy socket (see [Subspace API agent identity](subspace-agents.md)).
+There is no separate switch: the gateway that has `subspaceAgents` enabled
+opens one for every officer with a `socketPath`, at
+`<directory of socketPath>/fleet.sock`. It does so whether or not the `api`
+listener is configured. Without `api`, Stargate opens no TCP listener and
+creates no token; the officers' sockets serve the gateway's fleet under its
+host name. With `api`, both serve the same fleet, name and pull request
+lookups.
+
+| Path                    | Owner, group and mode                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------- |
+| The officer's directory | The gateway user and the officer's engine group, mode `2750` (or `0700`), made before the gateway starts |
+| `fleet.sock`            | The gateway user and the directory's group (by setgid), mode `0660`; removed when the gateway stops      |
+
+The directory follows the rules of the officer's Subspace socket
+([how the caller is identified](subspace-agents.md#how-the-caller-is-identified)):
+owned by the gateway user and writable by it alone, under parents only root
+or the gateway user can write. Start-up stops, with a log line naming the
+officer, when an officer's directory is missing, gives others any access, or
+admits a group that another officer's directory also admits, or when the
+socket did not get the directory's group. So only the gateway user, root and
+members of the officer's engine group can connect. Crew run as their
+captain's user and reach their captain's socket; no officer reaches another
+officer's.
+
+On the socket:
+
+- only `GET` and `HEAD` are served; every other method gets 405 with
+  `Allow: GET, HEAD`, and a request body is never read;
+- only the four routes above answer, at exactly normalised targets: no dot
+  segment, doubled slash, encoded slash or dot, NUL, backslash or fragment.
+  Anything else gets 404. A query is ignored;
+- no token is needed and an `Authorization` header is ignored; no browser
+  origin is granted CORS;
+- answers are the same JSON and event frames as on the operator listener.
+
+Officers' reads and event streams have their own eight HTTP read slots and
+eight stream slots, shared by all officers, so officers can never use up the
+slots people's consoles need. The host limits below apply to each socket.
+
+Read it with the command, as the officer's user or a crew member's:
+
+```sh
+stargate fleet request --socket /run/stargate/subspace/example-captain/fleet.sock /api/v1/fleet
+STARGATE_FLEET_SOCKET=/run/stargate/subspace/example-captain/fleet.sock \
+  stargate fleet request /api/v1/ships/example-ship/crew/example-member
+```
+
+`--socket` defaults to `$STARGATE_FLEET_SOCKET`. The command reads no
+configuration. The answer goes to standard output; the exit status is 0 for
+a 2xx answer, 1 otherwise (the status goes to standard error), and 2 for a
+path that is not a Fleet API path. `/api/v1/events` streams until the
+gateway closes it or the command is stopped. `curl --unix-socket` works too:
+
+```sh
+curl --fail --silent --show-error \
+  --unix-socket /run/stargate/subspace/example-captain/fleet.sock \
+  http://localhost/api/v1/fleet
+```
 
 ## Token
 
@@ -111,7 +180,8 @@ and `Last-Event-ID` without a token.
 | `/api/v1/events`                   | Server-sent events                                                                    |
 
 `HEAD` returns headers without a body. Unknown ships, members, and routes
-return 404. Missing or invalid tokens receive 401. Repeated authentication
+return 404. Missing or invalid tokens receive 401 (officers' sockets need
+none). Repeated authentication
 failures from a peer receive 429 with `Retry-After`. Responses include
 `Cache-Control: no-store`. Times are epoch milliseconds. Host uptime is in
 seconds, and CPU usage is a fraction that becomes available after the first
