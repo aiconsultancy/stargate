@@ -4,7 +4,16 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { settingsDefault, settingsStruct } from "../../config/settings-schema";
-import { Audience, Id, type Limits, Subscription, TopicPattern } from "./model";
+import { isAllowedChannel } from "../../shared/registration";
+import {
+  Audience,
+  Id,
+  type Limits,
+  Subscription,
+  TopicPattern,
+  audienceAllowed,
+  topicMatches,
+} from "./model";
 
 const digest = (value: string) => createHash("sha256").update(value).digest();
 
@@ -75,6 +84,94 @@ export const notifySchema = settingsStruct({
 });
 
 export type NotifyConfig = typeof notifySchema.Type;
+
+type BotConfig = Parameters<typeof isAllowedChannel>[0];
+
+/** Offline identity uncertainty must not permit possible peer echo. */
+export function notifyConfigError(
+  notify: NotifyConfig,
+  bots: readonly BotConfig[],
+  listen?: string,
+  live = false,
+): string | undefined {
+  const paths = new Set<string>();
+
+  for (const adapter of Object.values(notify.adapters)) {
+    if (adapter.enabled && listen !== "unix")
+      return "Notification HTTP requires Unix API mode";
+
+    if (paths.has(adapter.path)) return "Duplicate notification mount";
+    paths.add(adapter.path);
+
+    if (
+      new Set(adapter.sources.map((source) => source.id)).size !==
+      adapter.sources.length
+    )
+      return "Duplicate notification source";
+  }
+
+  const aliases = new Map<string, string>();
+
+  for (const destination of Object.values(notify.destinations)) {
+    const sender = bots.find((bot) => bot.id === destination.slack.bot);
+
+    if (
+      !sender ||
+      (!live && !isAllowedChannel(sender, destination.slack.channel))
+    )
+      return "Notification destination must name an allowed Slack channel and registration";
+
+    if (
+      !live &&
+      bots.some(
+        (receiver) =>
+          receiver.id !== sender.id &&
+          receiver.access.peerCaptains &&
+          isAllowedChannel(receiver, destination.slack.channel) &&
+          !receiver.access.deniedUsers.includes("*"),
+      )
+    )
+      return "Notification destination may echo into a local receiver";
+
+    const key = JSON.stringify([
+      destination.slack.bot,
+      destination.slack.channel,
+    ]);
+
+    if (aliases.has(key) && aliases.get(key) !== destination.audience)
+      return "Conflicting notification destination aliases";
+    aliases.set(key, destination.audience);
+  }
+
+  for (const subscription of notify.subscriptions) {
+    for (const alias of subscription.to) {
+      if (!Object.hasOwn(notify.destinations, alias))
+        return "Unknown notification destination alias";
+      const destination = notify.destinations[alias];
+
+      if (!destination) return "Unknown notification destination alias";
+
+      for (const adapter of Object.values(notify.adapters))
+        for (const source of adapter.sources)
+          if (
+            !audienceAllowed(source.audience, destination.audience) &&
+            source.topics.some((grant) =>
+              patternsOverlap(grant, subscription.topic),
+            )
+          )
+            return "Notification audience is not allowed";
+    }
+  }
+
+  return undefined;
+}
+
+function patternsOverlap(left: string, right: string) {
+  return (
+    topicMatches(left, right.replace(/\.\*$/, ".x")) ||
+    topicMatches(right, left.replace(/\.\*$/, ".x"))
+  );
+}
 
 export const notifyEnabled = (config: NotifyConfig | undefined) =>
   Object.values(config?.adapters ?? {}).some((adapter) => adapter.enabled);

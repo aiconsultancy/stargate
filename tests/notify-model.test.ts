@@ -5,13 +5,11 @@ import {
   NotificationInput,
   notificationLimits,
   type Source,
+  topicMatches,
   utcMillis,
 } from "../src/notifications/ingest/model";
 import { signature } from "../src/notifications/ingest/signature";
-import {
-  resolveSubscriptions,
-  topicMatches,
-} from "../src/notifications/ingest/subscriptions";
+import { resolveSubscriptions } from "../src/notifications/ingest/subscriptions";
 
 const source: Source = {
   adapter: "http",

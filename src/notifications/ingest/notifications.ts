@@ -22,10 +22,11 @@ import {
   StoreUnavailable,
   Subscription,
   TopicNotGranted,
+  topicMatches,
 } from "./model";
 import type { NotificationSink, SinkOutcome } from "./sink";
 import { type NotificationCounters, NotifyStore } from "./store";
-import { resolveSubscriptions, topicMatches } from "./subscriptions";
+import { resolveSubscriptions } from "./subscriptions";
 
 export class Notifications extends Context.Service<
   Notifications,

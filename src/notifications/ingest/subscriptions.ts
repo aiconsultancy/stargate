@@ -7,12 +7,8 @@ import {
   Subscription,
   audienceAllowed,
   physicalKey,
+  topicMatches,
 } from "./model";
-
-export const topicMatches = (pattern: string, topic: string) =>
-  pattern.endsWith(".*")
-    ? topic.startsWith(pattern.slice(0, -1))
-    : pattern === topic;
 
 function matchesSubscription(
   subscription: Subscription,
