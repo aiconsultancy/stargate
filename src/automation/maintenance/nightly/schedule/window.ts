@@ -106,30 +106,31 @@ export function currentWindow(now: number, spec: WindowSpec, jitter: number) {
   return;
 }
 
-/** The next window whose planned start is after `now`. */
-export function nextWindow(now: number, spec: WindowSpec, jitter: number) {
-  let date = localDate(now, spec.timeZone).subtract({ days: 1 });
+function adjacentWindow(
+  now: number,
+  spec: WindowSpec,
+  jitter: number,
+  step: 1 | -1,
+) {
+  let date = localDate(now, spec.timeZone).subtract({ days: step });
 
-  for (let day = 0; day < 4; day++, date = date.add({ days: 1 })) {
+  for (let day = 0; day < 4; day++, date = date.add({ days: step })) {
     const window = occurrence(date, spec, jitter);
 
-    if (window.start > now) return window;
+    if (step === 1 ? window.start > now : window.start <= now) return window;
   }
 
   throw new Error("No maintenance window found.");
 }
 
+/** The next window whose planned start is after `now`. */
+export function nextWindow(now: number, spec: WindowSpec, jitter: number) {
+  return adjacentWindow(now, spec, jitter, 1);
+}
+
 /** The latest window whose planned start is at or before `now`. */
 export function previousWindow(now: number, spec: WindowSpec, jitter: number) {
-  let date = localDate(now, spec.timeZone).add({ days: 1 });
-
-  for (let day = 0; day < 4; day++, date = date.subtract({ days: 1 })) {
-    const window = occurrence(date, spec, jitter);
-
-    if (window.start <= now) return window;
-  }
-
-  throw new Error("No maintenance window found.");
+  return adjacentWindow(now, spec, jitter, -1);
 }
 
 /** Local `HH:MM` plus minutes, wrapped to the day. */
