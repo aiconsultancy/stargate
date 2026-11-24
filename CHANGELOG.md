@@ -26,6 +26,9 @@
   streams and 256 KiB per viewer; `api.agentActivity` now covers the event
   too.
 
+- Unmasked Fleet API crew text: none. By owner decision this behaviour change
+  ships without a flag, an exception to the flag rule for large features.
+
 ### Changes
 
 - Add the usage guard for rear admiral quota notices in each ship channel
@@ -53,6 +56,11 @@
   PATH] /api/v1/...` reads it. A `socketPath` named `fleet-api.sock` is
   refused, and start-up stops, naming both, if another configured socket is
   at that path. Fleet Control's `fleet.sock` may share the directory.
+- Fleet API v1 reports crew task text and Git branch and base names as the
+  crew wrote them, without credential redaction or `[checkout]` path
+  replacement. Ship detail and the `ship` event keep the 180/80/400 character
+  limits; the crew member route adds no limit. The crew plugin still stores
+  task text bounded and redacted.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`

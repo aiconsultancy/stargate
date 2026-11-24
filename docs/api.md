@@ -191,6 +191,16 @@ and `Last-Event-ID` without a token.
 has that `id`, its configured `name` (which may differ from the ID; the ID
 when no name is set), `role` and `model`.
 
+Crew task text (`summary`, `phase` and `progress`) and Git branch and base
+names appear exactly as the crew wrote them: the API neither redacts
+credential-shaped text nor replaces checkout paths. Ship detail and the
+`ship` event keep task text to at most 180, 80 and 400 characters (the fleet
+overview carries no task text); the crew member route applies no limit of
+its own. The crew plugin currently still stores task text bounded to 180, 80
+and 400 characters and redacted, so the API cannot show more than that yet;
+a follow-up removes that. Activity events quote task text and branch names
+unredacted, with whitespace collapsed.
+
 `HEAD` returns headers without a body. Unknown ships, members, and routes
 return 404. Missing or invalid tokens receive 401 (officers' sockets need
 none). Repeated authentication
@@ -319,11 +329,11 @@ returns 404. The route is on whenever the Fleet API is, behind the same
 token, network check and `Cache-Control: no-store`; the gateway feature
 `api.agentActivity` reports it.
 
-Unlike the other routes, this one is neither redacted nor truncated. It
-serves tool input and output, provider errors, reply and reasoning text
-exactly as the agent saw them, including any secret a tool printed. Treat the
-API token accordingly. Officers' [sockets](#officers) do not serve it: it
-answers 404 there, so no officer reads another officer's turns.
+This route serves tool input and output, provider errors, reply and reasoning
+text without redaction or truncation, exactly as the agent saw them, including
+any secret a tool printed. Treat the API token accordingly. Officers'
+[sockets](#officers) return 404 for this route, so no officer reads another
+officer's turns.
 
 The response is `V1AgentActivity`: `{ agent, turns, cursor }`. Turns are
 oldest first. Turn IDs are unique across restarts, and item IDs (`i1`, `i2`,

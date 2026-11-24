@@ -2,10 +2,7 @@ import { hostname } from "node:os";
 import { Semaphore } from "effect";
 import type { AgentBackend } from "../../../../backends/backend";
 import { ircFeedbackDefaults } from "../../../../config";
-import {
-  containsCredential,
-  redactCredentials,
-} from "../../../../lib/credentials";
+import { redactCredentials } from "../../../../lib/credentials";
 import type {
   CrewGit,
   CrewGitInput,
@@ -93,9 +90,6 @@ const activityOrder: readonly V1Activity[] = [
 
 const hour = 3_600_000;
 
-const safeRef = (ref: string | null) =>
-  ref !== null && !containsCredential(ref) ? ref : null;
-
 /** Git state reported by the captain's crew plugin, in the v1 shape. */
 export function reportedGit(
   state: CrewGitState | null,
@@ -125,9 +119,9 @@ export function reportedGit(
 
   return {
     ...empty,
-    branch: safeRef(state.branch),
+    branch: state.branch,
     head: state.commit?.slice(0, 7) ?? null,
-    base: safeRef(state.base),
+    base: state.base,
     ahead: state.ahead,
     behind: state.behind,
     changedFiles: state.changedFiles,
@@ -232,6 +226,7 @@ function knownTime(
       : Math.min(...times);
 }
 
+/** Configured names, roles and models; crew task text does not pass through here. */
 function checkoutText(metadata?: Metadata) {
   const paths = [
     metadata?.projectDirectory,
@@ -257,7 +252,15 @@ function checkoutText(metadata?: Metadata) {
 
 type CrewText = ReturnType<typeof checkoutText>;
 
-function safeTask(task: CrewStatusTask, text: CrewText): V1Task {
+/** Crew output is shown as written; only its length may be bounded. */
+type TaskText = (text: string, limit: number) => string;
+
+const boundedText: TaskText = (text, limit) =>
+  Array.from(text).slice(0, limit).join("");
+
+const fullText: TaskText = (text) => text;
+
+function safeTask(task: CrewStatusTask, text: TaskText): V1Task {
   return {
     id: task.id,
     status: task.status,
@@ -272,7 +275,7 @@ function safeTask(task: CrewStatusTask, text: CrewText): V1Task {
   };
 }
 
-function projectContext(context: Context, text: CrewText): V1CrewContext {
+function projectContext(context: Context, text: TaskText): V1CrewContext {
   const task = (value: CrewStatusTask) => safeTask(value, text);
 
   return {
@@ -505,6 +508,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     person: DashboardCrewMember,
     at: number,
     text: CrewText,
+    taskText: TaskText,
     metadata?: Metadata,
     sessions?: HistorySession[],
   ): V1CrewMember[] {
@@ -519,7 +523,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     );
 
     const contexts = person.contexts.map((context) =>
-      projectContext(context, text),
+      projectContext(context, taskText),
     );
 
     const activity =
@@ -707,7 +711,15 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     );
 
     const crewMembers = people.flatMap((person) =>
-      crewMember(id, person, at, text, metadata, view.sessions),
+      crewMember(
+        id,
+        person,
+        at,
+        text,
+        only ? fullText : boundedText,
+        metadata,
+        view.sessions,
+      ),
     );
 
     if (only && crewMembers.length === 0) {
@@ -880,7 +892,14 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         const text = checkoutText(metadata);
 
         const people = (row.members ?? []).flatMap((person) =>
-          crewMember(summary.id, person, fleet.generatedAt, text, metadata),
+          crewMember(
+            summary.id,
+            person,
+            fleet.generatedAt,
+            text,
+            boundedText,
+            metadata,
+          ),
         );
 
         for (const member of people) {
