@@ -8,7 +8,7 @@ import type {
 } from "../src/backends/backend";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, botSchema } from "../src/config";
-import { Gateway } from "../src/gateway/gateway";
+import { SlackGateway as Gateway } from "./slack-gateway-fixture";
 import type { TransportDelivery } from "../src/gateway/ports";
 import {
   botSender,

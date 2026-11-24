@@ -7,7 +7,7 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { botSchema } from "../src/config";
 import { CrewWaiting } from "../src/coordination/crew/controls/waiting";
-import { Gateway } from "../src/gateway/gateway";
+import { SlackGateway as Gateway } from "./slack-gateway-fixture";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { MetaOptions } from "../src/meta-commands/meta-commands";
 import type { MetaRecords } from "../src/meta-commands/store";

@@ -6,7 +6,7 @@ import type {
   PromptSourceContext,
 } from "../src/backends/backend";
 import { botSchema } from "../src/config";
-import { Gateway } from "../src/gateway/gateway";
+import { SlackGateway as Gateway } from "./slack-gateway-fixture";
 import type { TransportDelivery } from "../src/gateway/ports";
 import {
   findMention,

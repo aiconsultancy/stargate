@@ -5,7 +5,7 @@ import {
   latestInput,
   TranscriptUnavailable,
 } from "../src/backends/backend";
-import { Gateway } from "../src/gateway/gateway";
+import { SlackGateway as Gateway } from "./slack-gateway-fixture";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { PromptNotSubmitted } from "../src/shared/request-failure";
 import { handleSlackRequest } from "../src/transports/slack/slack";

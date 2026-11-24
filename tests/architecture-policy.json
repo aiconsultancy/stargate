@@ -1187,6 +1187,7 @@
     "slack": {
       "layer": "transports",
       "files": [
+        "src/transports/slack/admission.ts",
         "src/bot-web.ts",
         "src/crew-ui.ts",
         "src/interactions.ts",
@@ -1196,7 +1197,12 @@
         "src/slack-files.ts",
         "src/slack.ts"
       ],
-      "public": ["src/bot-web.ts", "src/markdown-chunks.ts", "src/slack.ts"],
+      "public": [
+        "src/bot-web.ts",
+        "src/markdown-chunks.ts",
+        "src/slack.ts",
+        "src/transports/slack/admission.ts"
+      ],
       "neighbours": [
         "activity",
         "attachments",
