@@ -461,6 +461,23 @@ async function managedTargets(config: Config) {
   };
 }
 
+async function readBackupEntry(
+  path: string,
+  managed: Awaited<ReturnType<typeof managedTargets>>,
+) {
+  if (!(await privatePath(path, "file"))) throw new StepError("unknown");
+  const entry = decodeBackupEntry(JSON.parse(await readFile(path, "utf8")));
+
+  if (
+    entry.kind === "link"
+      ? !managed.link(entry.path, entry.target)
+      : !managed.file(entry.path)
+  )
+    throw new StepError("unknown");
+
+  return entry;
+}
+
 /**
  * A backup manifest, newest entry first. The directory and every entry must
  * be private, and every path must be in the managed set; otherwise nothing
@@ -478,20 +495,8 @@ async function readBackup(config: Config, runID: string) {
   const managed = await managedTargets(config);
   const entries: BackupEntry[] = [];
 
-  for (const name of names) {
-    const path = join(backup, name);
-
-    if (!(await privatePath(path, "file"))) throw new StepError("unknown");
-    const entry = decodeBackupEntry(JSON.parse(await readFile(path, "utf8")));
-
-    if (
-      entry.kind === "link"
-        ? !managed.link(entry.path, entry.target)
-        : !managed.file(entry.path)
-    )
-      throw new StepError("unknown");
-    entries.push(entry);
-  }
+  for (const name of names)
+    entries.push(await readBackupEntry(join(backup, name), managed));
 
   return entries;
 }
