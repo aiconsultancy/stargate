@@ -1096,6 +1096,7 @@
       "files": [
         "src/cli.ts",
         "src/config-reload.ts",
+        "src/app/irc-reload.ts",
         "src/main.ts",
         "src/profile.ts",
         "src/provision.ts",

@@ -895,7 +895,7 @@
       "rules": {
         "eslint/max-lines-per-function": [
           "error",
-          { "max": 1349, "skipBlankLines": true, "skipComments": true }
+          { "max": 1315, "skipBlankLines": true, "skipComments": true }
         ]
       }
     },
@@ -920,7 +920,7 @@
         "src/transports/irc/routing.ts",
         "src/transports/irc/ship.ts"
       ],
-      "rules": { "eslint/max-statements": ["error", { "max": 185 }] }
+      "rules": { "eslint/max-statements": ["error", { "max": 184 }] }
     },
     {
       "files": [
