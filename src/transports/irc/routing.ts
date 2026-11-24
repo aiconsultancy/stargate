@@ -96,6 +96,19 @@ export function isIrcChannel(target: string) {
   return target.startsWith("#") || target.startsWith("&");
 }
 
+function routeTarget(
+  target: string,
+  account: string,
+  nick: string,
+  caseFold: Fold,
+) {
+  const direct = !isIrcChannel(target);
+
+  if (direct && caseFold(target) !== caseFold(nick)) return;
+
+  return { direct, channel: caseFold(direct ? account : target) };
+}
+
 /** Folded accounts of this ship: the captain and every crew member. */
 export function shipAccounts(config: IrcConfig, caseFold: Fold = rfc1459) {
   return new Set(
@@ -391,10 +404,10 @@ export function routeIrcMessage(
   const [target = "", raw = ""] = message.params;
 
   if (raw.startsWith("\u0001")) return;
-  const direct = !isIrcChannel(target);
+  const routed = routeTarget(target, account, context.currentNick, caseFold);
 
-  if (direct && caseFold(target) !== caseFold(context.currentNick)) return;
-  const channel = caseFold(direct ? account : target);
+  if (!routed) return;
+  const { direct, channel } = routed;
 
   if (!ircAllowed(config, member, user, channel, caseFold)) return;
   const strict = config.access.channelRequests === "nick-mention";
@@ -689,10 +702,10 @@ export function routeIrcStop(message: IrcMessage, context: IrcStopContext) {
   )
     return;
   const target = message.params[0] ?? "";
-  const direct = !isIrcChannel(target);
+  const routed = routeTarget(target, account, context.currentNick, caseFold);
 
-  if (direct && caseFold(target) !== caseFold(context.currentNick)) return;
-  const channel = caseFold(direct ? account : target);
+  if (!routed) return;
+  const { channel } = routed;
 
   if (!ircAllowed(config, member, user, channel, caseFold)) return;
 
