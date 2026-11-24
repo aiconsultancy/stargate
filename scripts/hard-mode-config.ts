@@ -1,7 +1,9 @@
 import { Schema } from "effect";
 
 const path = Schema.String.check(
-  Schema.isPattern(/^(src|tests|scripts|perf)\/(?:[\w-]+\/)*[\w.-]+\.ts$/),
+  Schema.isPattern(
+    /^(src|plugins|tests|scripts|perf)\/(?:[\w-]+\/)*[\w.-]+\.ts$/,
+  ),
 );
 
 const config = Schema.Struct({
@@ -16,7 +18,7 @@ const config = Schema.Struct({
 });
 
 export const spacingRule = "anti-slop/require-readable-spacing";
-export const lintRoots = ["src", "tests", "scripts", "perf"];
+export const lintRoots = ["src", "plugins", "tests", "scripts", "perf"];
 
 export async function hardModeConfig() {
   const input: unknown = await Bun.file(".oxlintrc.json").json();

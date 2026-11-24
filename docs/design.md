@@ -116,8 +116,10 @@ references or a complete file inventory.
 | `backends/`                                           | Contract, factory, opencode/, pi/, claude, codex                                                                                                                    |
 | `coordination/crew/`                                  | Crew protocol, execution, Pi, messaging and reporting                                                                                                               |
 
-The current paths `src/main.ts`, `src/config.ts`, `src/crew/plugin.ts` and
-`src/fleet/plugin.ts` are fixed and must never move. Tests stay flat in `tests/`.
+Keep `src/main.ts` and `src/config.ts` fixed. OpenCode plugin entry points
+live in `plugins/opencode/`. The repository root still loads Crew.
+`src/fleet/` temporarily forwards to the canonical Fleet package.
+Tests stay flat in `tests/`.
 `gateway.ts` has a permanent exception to the limit of 1,000 non-blank lines.
 The O1 decision in [architecture review](architecture-review.md) is unchanged.
 

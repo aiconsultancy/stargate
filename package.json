@@ -12,15 +12,15 @@
   },
   "type": "module",
   "exports": {
-    ".": "./src/crew/plugin.ts"
+    ".": "./plugins/opencode/crew/plugin.ts"
   },
   "scripts": {
     "start": "bun run src/main.ts",
     "test": "bun test",
     "typecheck": "tsrs --noEmit",
     "typecheck:tsc": "tsc --noEmit",
-    "lint": "(bun scripts/check-lint-lists.ts && bun ./node_modules/.bin/oxlint --type-aware --deny-warnings src tests scripts perf && oxlint --config tools/oxlint/no-zod.json --disable-nested-config --ignore-pattern 'tools/oxlint/anti-slop/vendor/**' tools/oxlint && oxfmt --check) || { printf '%s\\n' 'For tool-fixable lint and formatting findings, run make format.' >&2; exit 1; }",
-    "oxlint": "oxlint --type-aware -c tools/oxlint/oxlint.config.ts --disable-nested-config src tests scripts perf",
+    "lint": "(bun scripts/check-lint-lists.ts && bun ./node_modules/.bin/oxlint --type-aware --deny-warnings src plugins tests scripts perf && oxlint --config tools/oxlint/no-zod.json --disable-nested-config --ignore-pattern 'tools/oxlint/anti-slop/vendor/**' tools/oxlint && oxfmt --check) || { printf '%s\\n' 'For tool-fixable lint and formatting findings, run make format.' >&2; exit 1; }",
+    "oxlint": "oxlint --type-aware -c tools/oxlint/oxlint.config.ts --disable-nested-config src plugins tests scripts perf",
     "format": "bun scripts/format.ts",
     "check": "bun run typecheck && bun run lint && bun test"
   },

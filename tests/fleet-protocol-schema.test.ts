@@ -9,7 +9,7 @@ import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "effect/StandardSchema";
-import { installFleetTools } from "../src/fleet/plugin";
+import { installFleetTools } from "../plugins/opencode/fleet/plugin";
 import * as protocol from "../src/coordination/fleet/protocol";
 import { settingsIssues } from "../src/config/settings-schema";
 import { openStore } from "../src/app/open-store";

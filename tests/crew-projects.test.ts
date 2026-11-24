@@ -27,7 +27,7 @@ import type {
   MesijClient,
   MesijMessage,
 } from "../src/coordination/crew/messaging/mesij";
-import plugin from "../src/crew/plugin";
+import plugin from "../plugins/opencode/crew/plugin";
 import {
   effectProjectKeySchema,
   effectProjectToolInput,

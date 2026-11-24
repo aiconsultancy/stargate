@@ -21,11 +21,11 @@ type Finding = { filename: string; labels: [{ span: { offset: number } }] };
 const fixed = [
   "src/main.ts",
   "src/config.ts",
-  "src/crew/plugin.ts",
-  "src/fleet/plugin.ts",
+  "plugins/opencode/crew/plugin.ts",
+  "plugins/opencode/fleet/plugin.ts",
 ];
 
-const roots = ["src", "scripts", "perf"];
+const roots = ["src", "plugins", "scripts", "perf"];
 
 const categories = Object.fromEntries(
   [

@@ -31,7 +31,7 @@ type Entry = { mode: string; bytes: Buffer };
 
 type Tree = Map<string, Entry>;
 
-const code = /^(src|tests|scripts|perf)\/.*\.(?:[cm]?[jt]s|[jt]sx)$/;
+const code = /^(src|plugins|tests|scripts|perf)\/.*\.(?:[cm]?[jt]s|[jt]sx)$/;
 
 const extensions = [
   ".ts",
@@ -48,7 +48,8 @@ const extensions = [
 const locked = new Set([
   "src/main.ts",
   "src/config.ts",
-  "src/crew/plugin.ts",
+  "plugins/opencode/crew/plugin.ts",
+  "plugins/opencode/fleet/plugin.ts",
   "src/fleet/plugin.ts",
 ]);
 
@@ -749,7 +750,7 @@ export async function moveModules(
 
 const help = `Usage: bun scripts/move-modules.ts [--check [--base REF]] OLD NEW [OLD NEW ...]
 
-Move tracked modules in src/tests/scripts/perf with git mv. Update relative
+Move tracked modules in src, plugins, tests, scripts, or perf with git mv. Update relative
 imports/exports/literal import() and exact src/... documentation references,
 including canonical document-relative ../src/... links. Paths must be canonical,
 retain their extension and avoid locked entries.

@@ -33,9 +33,9 @@ export const structuralOverrides = [
   {
     name: "fixed entries",
     files: [
+      "plugins/opencode/crew/plugin.ts",
+      "plugins/opencode/fleet/plugin.ts",
       "src/config.ts",
-      "src/crew/plugin.ts",
-      "src/fleet/plugin.ts",
       "src/main.ts",
     ],
   },
