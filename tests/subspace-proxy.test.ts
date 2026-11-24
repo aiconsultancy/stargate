@@ -569,6 +569,42 @@ test("bridge: streamed answers become one line per event", async () => {
   ]);
 });
 
+test("bridge: a character split across streamed chunks arrives whole", async () => {
+  const answer = {
+    jsonrpc: "2.0",
+    id: 1,
+    result: { content: [{ type: "text", text: "Café, naïve ☕" }] },
+  };
+
+  const bytes = Buffer.from(
+    `event: message\ndata: ${JSON.stringify(answer)}\n\n`,
+    "utf8",
+  );
+
+  // Inside the two bytes of "é", so each write ends mid-character.
+  const cut = bytes.indexOf(Buffer.from("é", "utf8")) + 1;
+
+  const { socket } = await officers(
+    ["captain-a"],
+    () =>
+      new Response(
+        new ReadableStream({
+          async start(controller) {
+            controller.enqueue(bytes.subarray(0, cut));
+            await Bun.sleep(100);
+            controller.enqueue(bytes.subarray(cut));
+            controller.close();
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+
+  const { written } = await bridge(socket("captain-a"), [initialize]);
+
+  expect(written).toEqual([answer]);
+});
+
 test("bridge: refusals become JSON-RPC errors for requests, and diagnostics for notifications", async () => {
   const { socket } = await officers(["captain-a"], (request) =>
     request.body.includes("refuse")

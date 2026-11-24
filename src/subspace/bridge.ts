@@ -121,12 +121,15 @@ function eventData(block: string) {
 
 /** JSON values from a `text/event-stream` body, one per event. */
 async function* streamedEvents(body: Readable) {
+  // One decoder for the whole stream: a character split across two chunks
+  // Must not become two replacement characters.
+  const decoder = new TextDecoder();
   let buffer = "";
   let size = 0;
 
   for await (const chunk of body) {
-    const text = (chunk as Buffer).toString("utf8");
-    size += text.length;
+    const bytes = chunk as Buffer;
+    size += bytes.length;
 
     if (size > maxResponseBytes) {
       body.destroy();
@@ -134,7 +137,7 @@ async function* streamedEvents(body: Readable) {
       return;
     }
 
-    buffer += text;
+    buffer += decoder.decode(bytes, { stream: true });
     let end = /\r?\n\r?\n/.exec(buffer);
 
     while (end) {
@@ -146,7 +149,7 @@ async function* streamedEvents(body: Readable) {
     }
   }
 
-  const rest = eventData(buffer);
+  const rest = eventData(buffer + decoder.decode());
 
   if (rest) yield rest;
 }
