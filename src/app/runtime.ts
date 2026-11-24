@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { parseEnv } from "node:util";
 import {
   Cause,
   Data,
@@ -120,16 +119,6 @@ import {
   type UpdateSnapshot,
   buildUpdateSnapshot,
 } from "../automation/maintenance/update-notice";
-
-export async function loadEnvironment(configPath: string) {
-  const file = Bun.file(`${configPath}.env`);
-
-  if (await file.exists()) {
-    for (const [key, value] of Object.entries(parseEnv(await file.text()))) {
-      process.env[key] ??= value;
-    }
-  }
-}
 
 export function lockInstance(path: string) {
   const lock = new Database(path, { create: true });

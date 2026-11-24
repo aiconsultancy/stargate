@@ -1058,6 +1058,7 @@
       "layer": "config",
       "files": [
         "src/config.ts",
+        "src/config/companion-environment.ts",
         "src/config/composition.ts",
         "src/settings-errors.ts",
         "src/settings-legacy.ts",
@@ -1067,6 +1068,7 @@
       ],
       "public": [
         "src/config.ts",
+        "src/config/companion-environment.ts",
         "src/config/composition.ts",
         "src/settings-errors.ts",
         "src/settings-legacy.ts",

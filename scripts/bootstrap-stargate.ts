@@ -13,7 +13,7 @@ import {
   switchCurrent,
   verifyOrigin,
 } from "../src/automation/maintenance/nightly/update/release";
-import { loadEnvironment } from "../src/app/runtime";
+import { loadEnvironment } from "../src/config/companion-environment";
 
 const decodeCommit = Schema.decodeUnknownSync(
   Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/)),

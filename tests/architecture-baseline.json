@@ -13,7 +13,7 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 304,
+  "sourceFiles": 305,
   "sourceEdges": 1259,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
@@ -181,7 +181,6 @@
     "direction:src/dispatch/start.ts -> src/irc/ship.ts",
     "direction:src/fleet/results.ts -> src/store.ts",
     "direction:src/health.ts -> src/status-report.ts",
-    "direction:src/nightly/cli.ts -> src/runtime.ts",
     "direction:src/nightly/idle.ts -> src/store.ts",
     "direction:src/notification-control.ts -> src/bot-web.ts",
     "direction:src/notifications.ts -> src/notification-store.ts",

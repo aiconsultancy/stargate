@@ -11,7 +11,7 @@ import {
   conversationKey,
   transcriptChunks,
 } from "../gateway/routing";
-import { loadEnvironment } from "../app/runtime";
+import { loadEnvironment } from "../config/companion-environment";
 import { type ReplyChunk, replySource } from "../shared/slack-format";
 import { openStore } from "../app/open-store";
 import { type Store } from "../gateway/store";

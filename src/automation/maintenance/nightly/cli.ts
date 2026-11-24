@@ -231,7 +231,9 @@ export async function maintenanceCli(
     return 0;
   }
 
-  const { loadEnvironment } = await import("../../../app/runtime");
+  const { loadEnvironment } =
+    await import("../../../config/companion-environment");
+
   await loadEnvironment(options.configPath);
   const config = await loadConfig(options.configPath);
 
