@@ -45,6 +45,18 @@ function label(progress?: TurnProgress): Label {
 export class TeamsPresence {
   private readonly slots = new Map<string, Slot>();
   public constructor(private readonly refreshMs = 3000) {}
+
+  private reserveSlot(channel: string, anchor: string, now: number) {
+    for (const [key, item] of this.slots)
+      if (item.expires <= now) this.slots.delete(key);
+
+    if (this.slots.has(channel) || this.slots.size >= 200) return;
+    const slot: Slot = { anchor, expires: now + 600_000 };
+    this.slots.set(channel, slot);
+
+    return slot;
+  }
+
   public async working(
     channel: string,
     anchor: string,
@@ -56,16 +68,7 @@ export class TeamsPresence {
   ) {
     if (signal.aborted || !allowed()) return;
     const now = Date.now();
-
-    for (const [key, item] of this.slots)
-      if (item.expires <= now) this.slots.delete(key);
-
-    const slot =
-      !this.slots.has(channel) && this.slots.size < 200
-        ? ({ anchor, expires: now + 600_000 } as Slot)
-        : undefined;
-
-    if (slot) this.slots.set(channel, slot);
+    const slot = this.reserveSlot(channel, anchor, now);
 
     let sequence = 0;
     let previous = "";
