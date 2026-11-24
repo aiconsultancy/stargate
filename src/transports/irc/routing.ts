@@ -637,6 +637,7 @@ export function routeIrcMessage(
 
   const participatingReply =
     standardCaptainReply &&
+    human === true &&
     root !== undefined &&
     context.participating?.(channel, root, user) === true;
 

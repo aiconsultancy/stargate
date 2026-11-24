@@ -321,9 +321,17 @@ test("only a top-level human channel request starts a new captain thread", () =>
   ).toBeUndefined();
 });
 
-test("only the requester can reach a participating captain via the thread root", () => {
+test("only an enrolled human requester can reach a captain via the thread root", () => {
   const context = {
-    config,
+    config: shipConfig({
+      fleetPolicy: {
+        role: "captain",
+        humanAccounts: ["jack"],
+        agentAccounts: ["galactica", "galactica-chief"],
+        assignedCheckout: "/workspace",
+        capabilities: ["read_code"],
+      },
+    }),
     member: captain,
     currentNick: captain.nick,
     sent: () => false,
@@ -360,6 +368,8 @@ test("only the requester can reach a participating captain via the thread root",
       context,
     ),
   ).toBeUndefined();
+
+  expect(routeIrcMessage(followUp, { ...context, config })).toBeUndefined();
 
   const answer = { ...reply, "+draft/reply": "answer" };
   const sent = { ...context, sent: () => true };

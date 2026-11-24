@@ -645,9 +645,10 @@ thread history or trust the tag as sender identity. The authenticated
   A `max-bytes` below 64 is not used. Without multiline, lines are sent
   one by one.
 - A person's top-level channel request to a captain starts a thread at its
-  server message ID. In standard channels the same authenticated requester can
-  continue a thread after the captain's answer, without naming the captain
-  again. An explicit address to another officer takes precedence. Replies
+  server message ID. In standard channels, a requester enrolled as human in
+  the fleet policy can continue their thread after the captain's answer
+  without naming the captain again. An explicit address to another officer
+  takes precedence. Replies
   already in a thread stay in that one-level thread. Top-level agent-to-agent
   messages and requests without a server message ID keep plain answers.
   Every threaded plain-text reply line and every multiline BATCH opener

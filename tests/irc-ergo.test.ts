@@ -301,7 +301,14 @@ test.skipIf(!available)(
         // One worker isolates wire framing from overlapping delivery polls.
         concurrency: 1,
         // Exercise plain-line tags here; fake-wire tests cover BATCH tags.
-        features: { multiline: false },
+        features: { multiline: false, questions: false },
+        fleetPolicy: {
+          role: "captain",
+          humanAccounts: ["jack"],
+          agentAccounts: ["galactica", "galactica-chief"],
+          assignedCheckout: "/workspace",
+          capabilities: ["read_code"],
+        },
         crew: [
           {
             id: "chief",
@@ -347,7 +354,7 @@ test.skipIf(!available)(
         _files,
         context,
       ) {
-        prompts.push(text);
+        prompts.push(text.split("\n\n").at(-1) ?? text);
         contexts.push(context);
 
         if (prompts.length === 1) {
