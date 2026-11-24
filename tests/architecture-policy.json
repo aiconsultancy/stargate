@@ -1912,6 +1912,7 @@
         "src/irc/burst.ts",
         "src/irc/client-pem.ts",
         "src/irc/client.ts",
+        "src/transports/irc/client-capabilities.ts",
         "src/transports/irc/credential-preflight.ts",
         "src/irc/crew-link.ts",
         "src/irc/crew-question-gateway.ts",
