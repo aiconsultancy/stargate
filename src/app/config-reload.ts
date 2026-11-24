@@ -100,6 +100,25 @@ function byId<T extends { readonly id: string }>(
       if (!before.has(id)) out.push(`${path}[${id}]`);
 }
 
+function compareIrcRegistration(
+  path: string,
+  before: Config["irc"][number],
+  after: Config["irc"][number],
+  out: string[],
+) {
+  fields(before, after, path, ["access", "transcription", "crew"], out);
+  byId(
+    `${path}.crew`,
+    before.crew,
+    after.crew,
+    (member, a, b) => {
+      diff(a, b, member, out);
+    },
+    "live",
+    out,
+  );
+}
+
 /**
  * Field paths, never values, that need a restart. Empty means the whole
  * candidate can be applied live. Live: an existing Slack bot's `access` and
@@ -130,17 +149,7 @@ export function restartRequired(
     current.config.irc,
     next.config.irc,
     (path, before, after) => {
-      fields(before, after, path, ["access", "transcription", "crew"], out);
-      byId(
-        `${path}.crew`,
-        before.crew,
-        after.crew,
-        (member, a, b) => {
-          diff(a, b, member, out);
-        },
-        "live",
-        out,
-      );
+      compareIrcRegistration(path, before, after, out);
     },
     "restart",
     out,
