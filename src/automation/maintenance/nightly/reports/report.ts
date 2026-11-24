@@ -238,6 +238,89 @@ export type ComponentReport = typeof componentSchema.Type;
 
 export type ModelChange = typeof modelChangeSchema.Type;
 
+export class ReportRecorder {
+  public components: ComponentReport[] = [];
+  public models: ModelChange[] = [];
+  public readonly steps: Report["steps"] = [];
+  public readonly rollbacks: Report["rollbacks"] = [];
+  public readonly restarts: Report["restarts"] = [];
+  public notes: NonNullable<Report["notes"]> = [];
+  public constructor(private readonly clock: { now(): number }) {}
+  public at() {
+    return new Date(this.clock.now()).toISOString();
+  }
+  public step(
+    name: string,
+    status: "ok" | "failed" | "skipped",
+    reason?: Reason,
+  ) {
+    this.steps.push({
+      name,
+      status,
+      at: this.at(),
+      ...(reason && { reason }),
+    });
+  }
+  public component(entry: ComponentReport) {
+    const index = this.components.findIndex((c) => c.id === entry.id);
+
+    if (index !== -1) this.components[index] = entry;
+    else this.components.push(entry);
+  }
+  public update(id: string, patch: Partial<ComponentReport>) {
+    const entry = this.components.find((c) => c.id === id);
+
+    if (!entry) return;
+    Object.assign(entry, patch);
+
+    if (patch.status === "updated" || patch.status === "unchanged")
+      delete entry.reason;
+  }
+  public restart(service: "gateway" | "opencode" | "cliproxyapi", ok: boolean) {
+    this.restarts.push({
+      service,
+      status: ok ? "ok" : "failed",
+      at: this.at(),
+    });
+  }
+  public replanModels(changes: ModelChange[]) {
+    this.models = [
+      ...this.models.filter((m) => m.status !== "planned"),
+      ...changes,
+    ];
+  }
+  public markModels(status: ModelChange["status"], reason?: Reason) {
+    for (const change of this.models)
+      if (change.status === "planned") {
+        change.status = status;
+
+        if (reason) change.reason = reason;
+      }
+  }
+
+  public outcome(): Report["outcome"] {
+    const statuses = [
+      ...this.components.map((c) => c.status),
+      ...this.models.map((c) => c.status),
+    ];
+
+    const applied = statuses.some((s) => s === "updated" || s === "applied");
+    const bad = statuses.some((s) => s === "failed" || s === "rolled-back");
+    const rolled = statuses.some((s) => s === "rolled-back");
+    const pending = statuses.some((s) => s === "deferred");
+
+    if (applied) return bad || pending ? "partial" : "completed";
+
+    if (pending) return "deferred";
+
+    if (rolled) return "rolled-back";
+
+    if (bad) return "failed";
+
+    return "no-op";
+  }
+}
+
 const decodeReport = Schema.decodeUnknownResult(reportSchema);
 const decodeReportSync = Schema.decodeUnknownSync(reportSchema);
 

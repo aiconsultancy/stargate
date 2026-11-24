@@ -97,9 +97,8 @@ import {
   switchCurrent,
 } from "./update/release";
 import {
-  type ComponentReport,
-  type ModelChange,
   type Report,
+  ReportRecorder,
   noticeSchemaID,
   queueNotice,
   reportSchemaID,
@@ -239,67 +238,6 @@ class Defer extends Error {
   }
 }
 
-class Recorder {
-  public components: ComponentReport[] = [];
-  public models: ModelChange[] = [];
-  public readonly steps: Report["steps"] = [];
-  public readonly rollbacks: Report["rollbacks"] = [];
-  public readonly restarts: Report["restarts"] = [];
-  public notes: NonNullable<Report["notes"]> = [];
-  public constructor(private readonly clock: Clock) {}
-  public at() {
-    return new Date(this.clock.now()).toISOString();
-  }
-  public step(
-    name: string,
-    status: "ok" | "failed" | "skipped",
-    reason?: Reason,
-  ) {
-    this.steps.push({
-      name,
-      status,
-      at: this.at(),
-      ...(reason && { reason }),
-    });
-  }
-  public component(entry: ComponentReport) {
-    const index = this.components.findIndex((c) => c.id === entry.id);
-
-    if (index !== -1) this.components[index] = entry;
-    else this.components.push(entry);
-  }
-  public update(id: string, patch: Partial<ComponentReport>) {
-    const entry = this.components.find((c) => c.id === id);
-
-    if (!entry) return;
-    Object.assign(entry, patch);
-
-    if (patch.status === "updated" || patch.status === "unchanged")
-      delete entry.reason;
-  }
-  public restart(service: "gateway" | "opencode" | "cliproxyapi", ok: boolean) {
-    this.restarts.push({
-      service,
-      status: ok ? "ok" : "failed",
-      at: this.at(),
-    });
-  }
-  public replanModels(changes: ModelChange[]) {
-    this.models = [
-      ...this.models.filter((m) => m.status !== "planned"),
-      ...changes,
-    ];
-  }
-  public markModels(status: ModelChange["status"], reason?: Reason) {
-    for (const change of this.models)
-      if (change.status === "planned") {
-        change.status = status;
-
-        if (reason) change.reason = reason;
-      }
-  }
-}
-
 function lock(dataDirectory: string) {
   const path = join(maintenanceDirectory(dataDirectory), "run.sqlite");
   const db = new Database(path, { create: true });
@@ -367,29 +305,7 @@ function windowReport(
   };
 }
 
-function outcome(rec: Recorder): Report["outcome"] {
-  const statuses = [
-    ...rec.components.map((c) => c.status),
-    ...rec.models.map((c) => c.status),
-  ];
-
-  const applied = statuses.some((s) => s === "updated" || s === "applied");
-  const bad = statuses.some((s) => s === "failed" || s === "rolled-back");
-  const rolled = statuses.some((s) => s === "rolled-back");
-  const pending = statuses.some((s) => s === "deferred");
-
-  if (applied) return bad || pending ? "partial" : "completed";
-
-  if (pending) return "deferred";
-
-  if (rolled) return "rolled-back";
-
-  if (bad) return "failed";
-
-  return "no-op";
-}
-
-function recordUndo(rec: Recorder) {
+function recordUndo(rec: ReportRecorder) {
   return (event: UndoEvent) => {
     if (event.kind === "restart") rec.restart(event.service, event.ok);
     else if (event.kind === "deferred")
@@ -408,7 +324,7 @@ function recordUndo(rec: Recorder) {
 function undoContext(
   config: Config,
   deps: Dependencies,
-  rec?: Recorder,
+  rec?: ReportRecorder,
 ): UndoContext {
   const never = new AbortController().signal;
 
@@ -890,7 +806,7 @@ export async function runMaintenance(
   });
   const held = mode === "run" ? lock(config.dataDirectory) : undefined;
   const runID = deps.uuid();
-  const rec = new Recorder(clock);
+  const rec = new ReportRecorder(clock);
   const remaining = () => window.deadline - clock.now();
   const toClose = () => window.closes - clock.now();
   let attention = false;
@@ -1981,7 +1897,7 @@ export async function runMaintenance(
     if (mode === "plan") return await finish("planned", undefined);
 
     if (!rec.components.some((c) => c.status === "planned"))
-      return await finish(outcome(rec), undefined);
+      return await finish(rec.outcome(), undefined);
 
     // Forward path: abort-aware. Undo always uses the plain runner.
     const run: CommandRunner = {
@@ -2062,7 +1978,7 @@ export async function runMaintenance(
       (work?.files.length ?? 0) > 0 || (work?.sessions.length ?? 0) > 0;
 
     if (!staged && !proxyDigest && agentUpdates.length === 0 && !modelWork())
-      return await finish(outcome(rec), undefined);
+      return await finish(rec.outcome(), undefined);
 
     // A release with the crew plugin that OpenCode already runs changes the
     // Gateway only: OpenCode is not restarted and crew work can continue.
@@ -2183,7 +2099,7 @@ export async function runMaintenance(
     return await finish(
       deferred && !rec.components.some((c) => c.status === "updated")
         ? "deferred"
-        : outcome(rec),
+        : rec.outcome(),
       endReason,
     );
   } catch (error) {
@@ -2220,7 +2136,7 @@ export function restoreCutoff(
 async function discoverStargate(
   m: Maintenance,
   deps: Dependencies,
-  rec: Recorder,
+  rec: ReportRecorder,
   now: number,
   state: Awaited<ReturnType<typeof readState>>,
   update?: RunInput["update"],
@@ -2316,7 +2232,7 @@ async function discoverStargate(
 
 async function discoverProxy(
   m: Maintenance,
-  rec: Recorder,
+  rec: ReportRecorder,
   now: number,
 ): Promise<{ candidate: ProxyCandidate; before: string } | undefined> {
   if (!m.components.cliproxyapi || !m.cliproxyapi) return undefined;
@@ -2369,7 +2285,7 @@ async function switchProxy(
   version: string,
   run: CommandRunner,
   deps: Dependencies,
-  rec: Recorder,
+  rec: ReportRecorder,
   signal: AbortSignal,
 ) {
   const cpa = m.cliproxyapi;
@@ -2456,7 +2372,7 @@ async function restartOpenCode(
   crews: readonly Crew[],
   run: CommandRunner,
   deps: Dependencies,
-  rec: Recorder,
+  rec: ReportRecorder,
   signal: AbortSignal,
 ) {
   const result = await run.run(m.services.openCodeRestart, {
@@ -2504,7 +2420,7 @@ async function startGateway(
   unit: string,
   run: CommandRunner,
   deps: Dependencies,
-  rec: Recorder,
+  rec: ReportRecorder,
   signal: AbortSignal,
 ) {
   const version = await currentVersion(config);
