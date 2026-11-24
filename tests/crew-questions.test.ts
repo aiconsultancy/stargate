@@ -5,11 +5,11 @@ import type { CrewCaller } from "../src/coordination/crew/execution/engine";
 import { CrewQuestions } from "../src/coordination/crew/questions/questions";
 import { CrewError, CrewState } from "../src/coordination/crew/execution/state";
 import { defaultTeam } from "../src/coordination/crew/team";
-import { saveQuestionSettings } from "../src/questions/question-settings";
+import { saveQuestionSettings } from "../src/chat/questions/question-settings";
 import type {
   NativeQuestion,
   QuestionAnswer,
-} from "../src/questions/native-question";
+} from "../src/chat/questions/native-question";
 import { fixtureRoot } from "./fixture-root";
 
 const cleanup: (() => Promise<void>)[] = [];

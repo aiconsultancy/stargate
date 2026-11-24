@@ -6,7 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { Schema } from "effect";
 import pino from "pino";
-import { opencodeScratchDirectory } from "../src/attachments/attachments";
+import { opencodeScratchDirectory } from "../src/chat/attachments/attachments";
 import {
   type AgentBackend,
   latestInput,

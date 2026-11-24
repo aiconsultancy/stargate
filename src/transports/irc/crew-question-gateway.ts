@@ -8,7 +8,7 @@ import {
   CrewQuestionRpc,
   type CrewQuestionWork,
 } from "../../coordination/crew/questions/question-handoff";
-import { questionFingerprint } from "../../questions/native-question";
+import { questionFingerprint } from "../../chat/questions/native-question";
 
 type Config = typeof opencodeBackendSchema.Type;
 

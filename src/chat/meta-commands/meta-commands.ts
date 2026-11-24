@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Result, Schema } from "effect";
-import type { BotConfig } from "../config";
+import type { BotConfig } from "../../config";
 import {
   type ConfigPanelRow,
   type MutePage,
@@ -16,7 +16,7 @@ import {
   readConfigSnapshot,
   sameConfigSnapshot,
 } from "./config-panel";
-import { notificationKey } from "../notifications/preferences/notifications";
+import { notificationKey } from "../../notifications/preferences/notifications";
 import {
   type QuestionSettings,
   resolveQuestionSettings,
@@ -26,11 +26,14 @@ import {
   type Identity,
   isAllowedChannel,
   isAllowedUser,
-} from "../shared/registration";
-import { settingsPattern, settingsRecord } from "../config/settings-schema";
+} from "../../shared/registration";
+import { settingsPattern, settingsRecord } from "../../config/settings-schema";
 import type { ConfigPanelRecord, MetaRecords } from "./store";
-import { resolveWaiting, saveWaitingDelay } from "../config/waiting-overrides";
-import type { SlackContent } from "../shared/slack-format";
+import {
+  resolveWaiting,
+  saveWaitingDelay,
+} from "../../config/waiting-overrides";
+import type { SlackContent } from "../../shared/slack-format";
 
 type MetaDelivery = {
   ephemeral?(

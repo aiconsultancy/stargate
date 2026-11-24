@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Schema } from "effect";
-import type { BotConfig } from "../config";
+import type { BotConfig } from "../../config";
 
 const questionSettingsSchema = Schema.Struct({
   enabled: Schema.Boolean,

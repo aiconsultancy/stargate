@@ -11,17 +11,17 @@ import { Gateway } from "../src/gateway/gateway";
 import { parseMessage } from "../src/transports/irc/protocol";
 import { routeIrcMessage } from "../src/transports/irc/routing";
 import { IrcShip } from "../src/transports/irc/ship";
-import { Questions } from "../src/questions/questions";
+import { Questions } from "../src/chat/questions/questions";
 import {
   type QuestionControl,
   questionControl,
   questionText,
-} from "../src/questions/text-controls";
+} from "../src/chat/questions/text-controls";
 import {
   questionAnswer,
   type NativeQuestion,
   nativeQuestionSchema,
-} from "../src/questions/native-question";
+} from "../src/chat/questions/native-question";
 import { openStore } from "../src/app/open-store";
 import { type Incoming } from "../src/gateway/store";
 import { bot, identity } from "./fixtures";

@@ -6,19 +6,19 @@ import { Schema } from "effect";
 import {
   buildConfigPanel,
   readConfigSnapshot,
-} from "../src/meta-commands/config-panel";
+} from "../src/chat/meta-commands/config-panel";
 import { CrewWaiting } from "../src/coordination/crew/controls/waiting";
 import type { TransportDelivery } from "../src/gateway/ports";
 import {
   configPanelRows,
   MetaCommands,
   type MetaOptions,
-} from "../src/meta-commands/meta-commands";
+} from "../src/chat/meta-commands/meta-commands";
 import { notificationKey } from "../src/notifications/preferences/notifications";
 import {
   resolveQuestionSettings,
   saveQuestionSettings,
-} from "../src/questions/question-settings";
+} from "../src/chat/questions/question-settings";
 import { openStore } from "../src/app/open-store";
 import {
   resolveWaiting,

@@ -6,8 +6,8 @@ import {
   settingsPattern,
   settingsRecord,
   settingsStruct,
-} from "../config/settings-schema";
-import { containsCredential } from "../lib/credentials";
+} from "../../config/settings-schema";
+import { containsCredential } from "../../lib/credentials";
 
 const option = settingsStruct({
   value: Schema.String.check(

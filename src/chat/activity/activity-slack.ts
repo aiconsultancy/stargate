@@ -1,5 +1,5 @@
 import type { ActivityView } from "./activity";
-import { slackContent } from "../shared/slack-format";
+import { slackContent } from "../../shared/slack-format";
 
 const statuses = {
   collecting: "Collecting activity",

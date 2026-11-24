@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { Schema } from "effect";
-import { settingsStruct } from "../config/settings-schema";
+import { settingsStruct } from "../../config/settings-schema";
 
 const activityProgress = settingsStruct({
   ts: Schema.optional(Schema.String),

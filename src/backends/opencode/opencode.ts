@@ -12,11 +12,11 @@ import { Schema } from "effect";
 import {
   type ActivityWatch,
   activitySnapshotSchema,
-} from "../../activity/activity";
+} from "../../chat/activity/activity";
 import {
   type Attachment,
   checkAttachments,
-} from "../../attachments/attachments";
+} from "../../chat/attachments/attachments";
 import {
   type AgentBackend,
   type PromptSourceContext,
@@ -60,7 +60,7 @@ import {
   maintenanceNoticeSchema,
 } from "../../automation/maintenance/maintenance";
 import type { MaintenanceDrain } from "../../automation/maintenance/maintenance-drain";
-import type { NativeQuestion } from "../../questions/native-question";
+import type { NativeQuestion } from "../../chat/questions/native-question";
 import type { CrewStatusInput } from "../../shared/crew-status";
 import { quotaObservationSchema, quotaSnapshotSchema } from "../quota/quota";
 import {

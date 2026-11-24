@@ -113,7 +113,7 @@ import {
 import { openStore } from "./open-store";
 import { type Store } from "../gateway/store";
 import { TeamsRegistration } from "../transports/teams/registration";
-import { createTranscriber } from "../transcription/startup";
+import { createTranscriber } from "../chat/transcription/startup";
 import {
   type UpdateReceipt,
   type UpdateSnapshot,

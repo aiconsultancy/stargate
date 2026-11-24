@@ -8,7 +8,7 @@ import pino from "pino";
 import {
   maxAttachmentBytes,
   UploadRefused,
-} from "../src/attachments/attachments";
+} from "../src/chat/attachments/attachments";
 import type {
   AgentBackend,
   PromptSourceContext,
@@ -20,7 +20,7 @@ import { fold, parseMessage } from "../src/transports/irc/protocol";
 import { routeIrcMessage } from "../src/transports/irc/routing";
 import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
-import type { Transcriber } from "../src/transcription/transcription";
+import type { Transcriber } from "../src/chat/transcription/transcription";
 import { publishedFileDirectory } from "./file-fixture";
 import { FakeFilehost, FakeIrcServer, lineOf, until } from "./irc-fixture";
 

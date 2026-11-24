@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import type { QuestionOffer } from "../src/questions/questions";
-import type { NativeQuestion } from "../src/questions/native-question";
+import type { QuestionOffer } from "../src/chat/questions/questions";
+import type { NativeQuestion } from "../src/chat/questions/native-question";
 import { botKey, conversationKey } from "../src/gateway/routing";
 import type { SlackPanelContent } from "../src/shared/slack-format";
 import {
   buildQuestionBlocks,
   SlackQuestionControls,
-} from "../src/questions/slack-questions";
+} from "../src/chat/questions/slack-questions";
 import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 

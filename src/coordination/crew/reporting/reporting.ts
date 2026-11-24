@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { Result, Schema } from "effect";
-import type { ActivitySnapshot } from "../../../activity/activity";
+import type { ActivitySnapshot } from "../../../chat/activity/activity";
 import { redactCredentials } from "../../../lib/credentials";
 import { JournalStore } from "./journal";
 import { reportTask } from "../pending";

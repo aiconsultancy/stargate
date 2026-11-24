@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { Predicate, Schema } from "effect";
 import { redactCredentials } from "../../lib/credentials";
-import { metaCommandSyntax } from "../../meta-commands/meta-command-syntax";
+import { metaCommandSyntax } from "../../chat/meta-commands/meta-command-syntax";
 import { compareVersions, parseVersion } from "./nightly/update/versions";
 
 const digest = (value: unknown) =>

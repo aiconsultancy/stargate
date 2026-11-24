@@ -34,7 +34,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Option, Schema, SchemaTransformation } from "effect";
-import type { Attachment } from "../../attachments/attachments";
+import type { Attachment } from "../../chat/attachments/attachments";
 import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import type { piDurableBackendSchema } from "./config";
 import { redactCredentials, secret } from "../../lib/credentials";

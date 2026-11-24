@@ -1,6 +1,6 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
-import { activitySnapshotSchema } from "../../../activity/activity";
+import { activitySnapshotSchema } from "../../../chat/activity/activity";
 import {
   crewStatusInputSchema,
   crewStatusSchema,

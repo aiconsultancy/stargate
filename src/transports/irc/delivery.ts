@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
-import type { AttachmentTransport } from "../../attachments/attachment-delivery";
+import type { AttachmentTransport } from "../../chat/attachments/attachment-delivery";
 import type {
   DeliveryUnit,
   IrcTurnStatus,

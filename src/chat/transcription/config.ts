@@ -1,13 +1,13 @@
 import { Schema } from "effect";
-import { isLoopbackHost } from "../lib/loopback";
-import { mentionRuleSchema } from "../shared/mentions";
+import { isLoopbackHost } from "../../lib/loopback";
+import { mentionRuleSchema } from "../../shared/mentions";
 import {
   settingsDefault,
   settingsPattern,
   settingsRefine,
   settingsStruct,
   settingsURL,
-} from "../config/settings-schema";
+} from "../../config/settings-schema";
 
 const endpoint = settingsURL.check(
   settingsRefine(

@@ -17,7 +17,7 @@ import {
   questionFields,
   questionText,
 } from "./text-controls";
-import type { Incoming, Job } from "../gateway/store-types";
+import type { Incoming, Job } from "../../gateway/store-types";
 
 export type QuestionOffer = {
   token: string;

@@ -6,7 +6,7 @@ import {
   claudeToolNames,
 } from "../backends/claude/config";
 import { codexBackendSchema } from "../backends/codex/config";
-import { crewActivitySchema } from "../activity/activity";
+import { crewActivitySchema } from "../chat/activity/activity";
 import { apiV1ConfigSchema } from "../observability/dashboard/api/v1/config";
 import { captainPostSchema } from "../coordination/captain/config";
 import { cronjobsSchema } from "../automation/cron/config";
@@ -44,7 +44,7 @@ import {
   settingsURL,
   settingsUUID,
 } from "./settings-schema";
-import { transcriptionSchema } from "../transcription/config";
+import { transcriptionSchema } from "../chat/transcription/config";
 import { waitingSchema } from "./waiting";
 
 import { type BackendConfig, backendSchema } from "../backends/config";

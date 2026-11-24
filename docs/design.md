@@ -102,16 +102,16 @@ references or a complete file inventory.
 | `gateway/`                                            | Turn engine only: gateway, ports, routing, store core, streaming, request-failure, turn-progress, cancellation, thread-context, reactions, mentions, peers, waiting |
 | `transports/slack/`                                   | Transport only: connection, format, files, interactions, bot-web, pairing, crew-ui                                                                                  |
 | `transports/irc/`, `transports/teams/`                | Transport implementations                                                                                                                                           |
-| `questions/`                                          | questions, background-questions, question-settings, slack-questions                                                                                                 |
-| `activity/`                                           | activity, activity-delivery, activity-slack                                                                                                                         |
-| `attachments/`                                        | attachments, attachment-delivery                                                                                                                                    |
-| `meta-commands/`                                      | meta-commands, config-panel                                                                                                                                         |
+| `chat/questions/`                                     | questions, background-questions, question-settings, slack-questions                                                                                                 |
+| `chat/activity/`                                      | activity, activity-delivery, activity-slack                                                                                                                         |
+| `chat/attachments/`                                   | attachments, attachment-delivery                                                                                                                                    |
+| `chat/meta-commands/`                                 | meta-commands, config-panel                                                                                                                                         |
 | `coordination/captain/`                               | captain-post, config                                                                                                                                                |
 | `automation/cron/`                                    | cron, cron-advanced, cron-control, cron-decision, cron-input, cron-store, cron-ui, config, cronjob-files, cronjob-manager                                           |
 | `notifications/preferences/`, `notifications/ingest/` | Notification preferences and ingestion                                                                                                                              |
 | `automation/maintenance/`                             | maintenance modules, update-notice, nightly/                                                                                                                        |
 | `backends/quota/`                                     | Provider quota reads and watches; a separate architecture slice                                                                                                     |
-| `coordination/fleet/`, `transcription/`               | Their named domains                                                                                                                                                 |
+| `coordination/fleet/`, `chat/transcription/`          | Their named domains                                                                                                                                                 |
 | `observability/dashboard/`, `observability/health/`   | Dashboard and health, as separate slices                                                                                                                            |
 | `backends/`                                           | Contract, factory, opencode/, pi/, claude, codex                                                                                                                    |
 | `coordination/crew/`                                  | Crew protocol, execution, Pi, messaging and reporting                                                                                                               |
@@ -120,6 +120,10 @@ The current paths `src/main.ts`, `src/config.ts`, `src/crew/plugin.ts` and
 `src/fleet/plugin.ts` are fixed and must never move. Tests stay flat in `tests/`.
 `gateway.ts` has a permanent exception to the limit of 1,000 non-blank lines.
 The O1 decision in [architecture review](architecture-review.md) is unchanged.
+
+`chat/` groups questions, attachments, transcription, meta commands, and activity.
+They remain separate slices. Notification preferences and ingestion stay under
+`notifications/`.
 
 The `transports/` directory groups IRC, Slack and Teams for navigation.
 They remain three separate slices with unchanged dependency rules. The
@@ -348,7 +352,7 @@ records hold only the marker and start time. See [Codex backend](codex.md).
 the capture. OpenCode implements it through the location-scoped Stargate reporting
 RPC. Other adapters remain compatible without it. The gateway manages report
 delivery separately from answer delivery, with its own deadline and access
-rechecks. See [crew activity](crew-activity.md) and [`activity.ts`](../src/activity/activity.ts).
+rechecks. See [crew activity](crew-activity.md) and [`activity.ts`](../src/chat/activity/activity.ts).
 `resumeActivity` reopens a saved capture through read/finish/cancel, not start.
 The gateway persists its Slack timestamp, capture ID, revision and done flag
 in `jobs.activity`. Post-response loops have a separate bound and survive

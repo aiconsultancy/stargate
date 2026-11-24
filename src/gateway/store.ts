@@ -1,9 +1,9 @@
 import { Database } from "bun:sqlite";
 import { Schema } from "effect";
-import { ActivityRecords } from "../activity/store";
-import type { PublishedFile } from "../attachments/attachments";
-import { AttachmentRecords } from "../attachments/store";
-import { BackgroundCases } from "../questions/background-questions";
+import { ActivityRecords } from "../chat/activity/store";
+import type { PublishedFile } from "../chat/attachments/attachments";
+import { AttachmentRecords } from "../chat/attachments/store";
+import { BackgroundCases } from "../chat/questions/background-questions";
 import { cancellationNotice } from "./cancellation";
 import { fleetJobSchema } from "../coordination/fleet/protocol";
 import {
@@ -28,10 +28,10 @@ import {
   ThreadFollowUpRecords,
 } from "./thread-followup-store";
 import { TranscriptRecords } from "./transcript-store";
-import { MetaRecords } from "../meta-commands/store";
+import { MetaRecords } from "../chat/meta-commands/store";
 import { notificationContextSchema } from "../notifications/preferences/notifications";
-import type { QuestionOffer } from "../questions/questions";
-import { QuestionRecords } from "../questions/store";
+import type { QuestionOffer } from "../chat/questions/questions";
+import { QuestionRecords } from "../chat/questions/store";
 import { type RequestFailure, failureText } from "../shared/request-failure";
 import type { ReplyChunk } from "../shared/slack-format";
 import type { Incoming, Job } from "./store-types";

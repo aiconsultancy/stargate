@@ -10,7 +10,7 @@ import {
   type QuestionAnswer,
   nativeQuestionSchema,
   questionFingerprint,
-} from "../../questions/native-question";
+} from "../../chat/questions/native-question";
 import {
   type InputBoundaryRecord,
   boundaryRecord,

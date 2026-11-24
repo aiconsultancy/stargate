@@ -358,13 +358,23 @@
     ],
     "src/activity-delivery.ts": [
       "src/activity-delivery.ts",
-      "src/activity/activity-delivery.ts"
+      "src/activity/activity-delivery.ts",
+      "src/chat/activity/activity-delivery.ts"
     ],
     "src/activity-slack.ts": [
       "src/activity-slack.ts",
-      "src/activity/activity-slack.ts"
+      "src/activity/activity-slack.ts",
+      "src/chat/activity/activity-slack.ts"
     ],
-    "src/activity.ts": ["src/activity.ts", "src/activity/activity.ts"],
+    "src/activity.ts": [
+      "src/activity.ts",
+      "src/activity/activity.ts",
+      "src/chat/activity/activity.ts"
+    ],
+    "src/activity/store.ts": [
+      "src/activity/store.ts",
+      "src/chat/activity/store.ts"
+    ],
     "src/agent-profile-switch.ts": [
       "src/agent-profile-switch.ts",
       "src/ops/agent-profile-switch.ts"
@@ -461,11 +471,17 @@
     ],
     "src/attachment-delivery.ts": [
       "src/attachment-delivery.ts",
-      "src/attachments/attachment-delivery.ts"
+      "src/attachments/attachment-delivery.ts",
+      "src/chat/attachments/attachment-delivery.ts"
     ],
     "src/attachments.ts": [
       "src/attachments.ts",
-      "src/attachments/attachments.ts"
+      "src/attachments/attachments.ts",
+      "src/chat/attachments/attachments.ts"
+    ],
+    "src/attachments/store.ts": [
+      "src/attachments/store.ts",
+      "src/chat/attachments/store.ts"
     ],
     "src/backend.ts": ["src/backend.ts", "src/backends/backend.ts"],
     "src/backends/opencode-history.ts": [
@@ -490,7 +506,8 @@
     ],
     "src/background-questions.ts": [
       "src/background-questions.ts",
-      "src/questions/background-questions.ts"
+      "src/questions/background-questions.ts",
+      "src/chat/questions/background-questions.ts"
     ],
     "src/bot-web.ts": [
       "src/bot-web.ts",
@@ -515,7 +532,8 @@
     "src/cli.ts": ["src/cli.ts", "src/app/cli.ts"],
     "src/config-panel.ts": [
       "src/config-panel.ts",
-      "src/meta-commands/config-panel.ts"
+      "src/meta-commands/config-panel.ts",
+      "src/chat/meta-commands/config-panel.ts"
     ],
     "src/config-reload.ts": [
       "src/config-reload.ts",
@@ -718,7 +736,16 @@
     "src/mentions.ts": ["src/mentions.ts", "src/shared/mentions.ts"],
     "src/meta-commands.ts": [
       "src/meta-commands.ts",
-      "src/meta-commands/meta-commands.ts"
+      "src/meta-commands/meta-commands.ts",
+      "src/chat/meta-commands/meta-commands.ts"
+    ],
+    "src/meta-commands/meta-command-syntax.ts": [
+      "src/meta-commands/meta-command-syntax.ts",
+      "src/chat/meta-commands/meta-command-syntax.ts"
+    ],
+    "src/meta-commands/store.ts": [
+      "src/meta-commands/store.ts",
+      "src/chat/meta-commands/store.ts"
     ],
     "src/notification-control.ts": [
       "src/notification-control.ts",
@@ -787,9 +814,26 @@
     "src/provision.ts": ["src/provision.ts", "src/app/provision.ts"],
     "src/question-settings.ts": [
       "src/question-settings.ts",
-      "src/questions/question-settings.ts"
+      "src/questions/question-settings.ts",
+      "src/chat/questions/question-settings.ts"
     ],
-    "src/questions.ts": ["src/questions.ts", "src/questions/questions.ts"],
+    "src/questions.ts": [
+      "src/questions.ts",
+      "src/questions/questions.ts",
+      "src/chat/questions/questions.ts"
+    ],
+    "src/questions/native-question.ts": [
+      "src/questions/native-question.ts",
+      "src/chat/questions/native-question.ts"
+    ],
+    "src/questions/store.ts": [
+      "src/questions/store.ts",
+      "src/chat/questions/store.ts"
+    ],
+    "src/questions/text-controls.ts": [
+      "src/questions/text-controls.ts",
+      "src/chat/questions/text-controls.ts"
+    ],
     "src/quota-watch.ts": [
       "src/quota-watch.ts",
       "src/quota/quota-watch.ts",
@@ -837,7 +881,8 @@
     ],
     "src/slack-questions.ts": [
       "src/slack-questions.ts",
-      "src/questions/slack-questions.ts"
+      "src/questions/slack-questions.ts",
+      "src/chat/questions/slack-questions.ts"
     ],
     "src/slack.ts": [
       "src/slack.ts",
@@ -895,7 +940,16 @@
     "src/transcript.ts": ["src/transcript.ts", "src/ops/transcript.ts"],
     "src/transcription.ts": [
       "src/transcription.ts",
-      "src/transcription/transcription.ts"
+      "src/transcription/transcription.ts",
+      "src/chat/transcription/transcription.ts"
+    ],
+    "src/transcription/config.ts": [
+      "src/transcription/config.ts",
+      "src/chat/transcription/config.ts"
+    ],
+    "src/transcription/startup.ts": [
+      "src/transcription/startup.ts",
+      "src/chat/transcription/startup.ts"
     ],
     "src/turn-progress.ts": [
       "src/turn-progress.ts",
@@ -909,7 +963,8 @@
     "src/waiting.ts": ["src/waiting.ts", "src/config/waiting-overrides.ts"],
     "src/transcribers/azure-openai.ts": [
       "src/transcribers/azure-openai.ts",
-      "src/transcription/azure-openai.ts"
+      "src/transcription/azure-openai.ts",
+      "src/chat/transcription/azure-openai.ts"
     ],
     "src/settings-errors.ts": [
       "src/settings-errors.ts",

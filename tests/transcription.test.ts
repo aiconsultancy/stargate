@@ -2,22 +2,22 @@ import { afterEach, expect, test } from "bun:test";
 import { Writable } from "node:stream";
 import { Result, Schema } from "effect";
 import pino from "pino";
-import type { Attachment } from "../src/attachments/attachments";
+import type { Attachment } from "../src/chat/attachments/attachments";
 import type { AgentBackend } from "../src/backends/backend";
 import { botSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import type { RequestFailure } from "../src/shared/request-failure";
 import { openStore } from "../src/app/open-store";
-import { AzureOpenAITranscriber } from "../src/transcription/azure-openai";
-import { createTranscriber } from "../src/transcription/startup";
+import { AzureOpenAITranscriber } from "../src/chat/transcription/azure-openai";
+import { createTranscriber } from "../src/chat/transcription/startup";
 import {
   maxTranscriptCharacters,
   type Transcriber,
   TranscriptionUnavailable,
   transcribeMedia,
-} from "../src/transcription/transcription";
-import { transcriptionSchema } from "../src/transcription/config";
+} from "../src/chat/transcription/transcription";
+import { transcriptionSchema } from "../src/chat/transcription/config";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

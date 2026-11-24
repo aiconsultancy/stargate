@@ -4,12 +4,12 @@ import type { AgentBackend } from "../../../backends/backend";
 import {
   type QuestionSettings,
   resolveQuestionSettings,
-} from "../../../questions/question-settings";
+} from "../../../chat/questions/question-settings";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
   questionAnswer,
-} from "../../../questions/native-question";
+} from "../../../chat/questions/native-question";
 import type { CrewCaller } from "../execution/engine";
 import {
   CrewError,

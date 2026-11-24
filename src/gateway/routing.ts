@@ -14,7 +14,7 @@ export {
 } from "../shared/registration";
 
 import { Result, Schema } from "effect";
-import { maxAttachments } from "../attachments/attachments";
+import { maxAttachments } from "../chat/attachments/attachments";
 import { markdownChunks } from "../transports/slack/markdown-chunks";
 import { findMention, visibleText } from "../shared/mentions";
 import {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { metaCommandSyntax } from "../src/meta-commands/meta-command-syntax";
-import { MetaCommands } from "../src/meta-commands/meta-commands";
+import { metaCommandSyntax } from "../src/chat/meta-commands/meta-command-syntax";
+import { MetaCommands } from "../src/chat/meta-commands/meta-commands";
 import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 

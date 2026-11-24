@@ -16,7 +16,7 @@ import {
 import { PeerDirectory } from "../src/gateway/peers";
 import { handleSlackRequest } from "../src/transports/slack/slack";
 import { openStore } from "../src/app/open-store";
-import type { Transcriber } from "../src/transcription/transcription";
+import type { Transcriber } from "../src/chat/transcription/transcription";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

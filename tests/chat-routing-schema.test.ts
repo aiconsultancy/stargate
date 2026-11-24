@@ -3,13 +3,13 @@ import { Result, Schema } from "effect";
 import {
   configActionSchema,
   configSnapshotSchema,
-} from "../src/meta-commands/config-panel";
+} from "../src/chat/meta-commands/config-panel";
 import { ircBurstMessageSchema } from "../src/transports/irc/burst";
-import type { QuestionSettings } from "../src/questions/question-settings";
+import type { QuestionSettings } from "../src/chat/questions/question-settings";
 import {
   questionAnswer,
   nativeQuestionSchema,
-} from "../src/questions/native-question";
+} from "../src/chat/questions/native-question";
 import { envelopeSchema } from "../src/gateway/routing";
 import { activitySchema } from "../src/transports/teams/registration";
 import { activity } from "./teams-support";

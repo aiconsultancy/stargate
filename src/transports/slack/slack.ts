@@ -3,8 +3,8 @@ import { LogLevel, WebClient, type WebClientOptions } from "@slack/web-api";
 import type { ViewsOpenArguments } from "@slack/web-api";
 import { Result, Schema } from "effect";
 import type { Logger } from "pino";
-import type { ActivityView } from "../../activity/activity";
-import { activityContent } from "../../activity/activity-slack";
+import type { ActivityView } from "../../chat/activity/activity";
+import { activityContent } from "../../chat/activity/activity-slack";
 import type { CrewUIApi } from "./crew-ui";
 import type {
   ReactionTargetRequest,

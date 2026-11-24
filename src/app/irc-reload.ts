@@ -2,7 +2,7 @@ import type { AgentBackend } from "../backends/backend";
 import type { IrcConfig } from "../config";
 import type { Gateway } from "../gateway/gateway";
 import type { ircDashboardShip } from "../observability/dashboard/dashboard-source";
-import { createTranscriber } from "../transcription/startup";
+import { createTranscriber } from "../chat/transcription/startup";
 import type {
   IrcRegistration,
   IrcReload,

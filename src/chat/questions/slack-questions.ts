@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect";
-import type { BotConfig } from "../config";
+import type { BotConfig } from "../../config";
 import type { QuestionOffer } from "./questions";
 import {
   type NativeQuestion,
@@ -12,9 +12,12 @@ import {
   botKey,
   isAllowedChannel,
   isAllowedUser,
-} from "../shared/registration";
-import type { SlackContent, SlackPanelContent } from "../shared/slack-format";
-import type { Job, Store } from "../gateway/store";
+} from "../../shared/registration";
+import type {
+  SlackContent,
+  SlackPanelContent,
+} from "../../shared/slack-format";
+import type { Job, Store } from "../../gateway/store";
 
 const button = (action: string, value: string, label: string) => ({
   type: "button" as const,
