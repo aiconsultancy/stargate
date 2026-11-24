@@ -13,11 +13,11 @@ import { routeIrcMessage } from "../src/transports/irc/routing";
 import { IrcShip } from "../src/transports/irc/ship";
 import {
   Questions,
-  questionAnswer,
   questionControl,
   questionText,
 } from "../src/questions/questions";
 import {
+  questionAnswer,
   type NativeQuestion,
   nativeQuestionSchema,
 } from "../src/questions/native-question";

@@ -1,10 +1,11 @@
 import { Option, Schema } from "effect";
 import type { BotConfig } from "../config";
-import { type QuestionOffer, questionAnswer } from "./questions";
+import type { QuestionOffer } from "./questions";
 import {
   type NativeQuestion,
   type QuestionAnswer,
   nativeQuestionSchema,
+  questionAnswer,
 } from "./native-question";
 import {
   type Identity,

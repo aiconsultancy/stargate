@@ -5,10 +5,10 @@ import {
   type QuestionSettings,
   resolveQuestionSettings,
 } from "../../../questions/question-settings";
-import { questionAnswer } from "../../../questions/questions";
 import {
   type NativeQuestion,
   nativeQuestionSchema,
+  questionAnswer,
 } from "../../../questions/native-question";
 import type { CrewCaller } from "../execution/engine";
 import {

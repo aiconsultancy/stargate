@@ -985,7 +985,6 @@
         "src/backends/pi/pi-durable.ts",
         "src/gateway/cancellation.ts",
         "src/gateway/routing.ts",
-        "src/questions/questions.ts",
         "src/transports/irc/config.ts",
         "src/transports/irc/delivery.ts"
       ],
