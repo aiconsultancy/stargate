@@ -21,13 +21,16 @@ import { Session } from "@opencode/schema/session";
 import { SessionMessage } from "@opencode/schema/session-message";
 import { Tool } from "@opencode/schema/tool";
 import { Result, Schema } from "effect";
+import crewPlugin from "../plugins/opencode/crew/plugin";
 import { fleetRequest } from "../src/coordination/fleet/client";
 import {
   FleetControl,
   type FleetControlOptions,
 } from "../src/coordination/fleet/control";
 import { FleetLedger } from "../src/coordination/fleet/ledger";
-import { installFleetTools } from "../plugins/opencode/fleet/plugin";
+import fleetPlugin, {
+  installFleetTools,
+} from "../plugins/opencode/fleet/plugin";
 import {
   type FleetCaller,
   FleetError,
@@ -538,6 +541,16 @@ test("private ledger rejects symlinks and world-accessible existing files", asyn
   }
 });
 
+async function loadDefaultPlugin(entry: string): Promise<unknown> {
+  const loaded = await Host.load(entry);
+
+  if (!loaded || typeof loaded !== "object" || !("default" in loaded)) {
+    throw new Error("Missing OpenCode plugin export");
+  }
+
+  return loaded.default;
+}
+
 test("the real V2 loader resolves the canonical and compatibility Fleet packages", async () => {
   const root = join(import.meta.dir, "..");
 
@@ -556,16 +569,10 @@ test("the real V2 loader resolves the canonical and compatibility Fleet packages
     throw new Error("Missing Fleet plugin entry point");
   }
 
-  const current = await Host.load(canonical);
-
-  if (!current || typeof current !== "object" || !("default" in current)) {
-    throw new Error("Missing Fleet plugin export");
-  }
-
-  expect(current).toMatchObject({
-    default: { id: "stargate.fleet", effect: expect.any(Function) },
-  });
-  expect(await Host.load(compatibility)).toEqual({ default: current.default });
+  expect(await loadDefaultPlugin(canonical)).toBe(fleetPlugin);
+  expect(await loadDefaultPlugin(compatibility)).toBe(fleetPlugin);
+  expect(fleetPlugin.id).toBe("stargate.fleet");
+  expect(typeof fleetPlugin.effect).toBe("function");
 });
 
 test("the repository root still resolves and loads the Crew plugin", async () => {
@@ -577,9 +584,9 @@ test("the repository root still resolves and loads the Crew plugin", async () =>
     throw new Error("Missing Crew plugin entry point");
   }
 
-  expect(await Host.load(entry)).toMatchObject({
-    default: { id: "stargate.crew", effect: expect.any(Function) },
-  });
+  expect(await loadDefaultPlugin(entry)).toBe(crewPlugin);
+  expect(crewPlugin.id).toBe("stargate.crew");
+  expect(typeof crewPlugin.effect).toBe("function");
 });
 
 test("OpenCode tools assert native permission and bind native caller, never model fields", async () => {
