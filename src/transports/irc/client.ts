@@ -1222,11 +1222,8 @@ export class IrcClient {
     for (const item of [...this.queue.splice(0), ...this.background.splice(0)])
       item.done?.(error);
 
-    for (const [label, pending] of this.labels) {
-      clearTimeout(pending.timer);
-      this.labels.delete(label);
-      pending.reject(error);
-    }
+    for (const label of this.labels.keys())
+      this.takeLabel(label)?.reject(error);
   }
 
   /** Control writes and already-throttled queue items retain their wire order. */
@@ -1727,12 +1724,20 @@ export class IrcClient {
       this.accountNicks.delete(this.fold(account));
   }
 
-  private settle(label: string, message: IrcMessage) {
+  private takeLabel(label: string) {
     const pending = this.labels.get(label);
 
     if (!pending) return;
     clearTimeout(pending.timer);
     this.labels.delete(label);
+
+    return pending;
+  }
+
+  private settle(label: string, message: IrcMessage) {
+    const pending = this.takeLabel(label);
+
+    if (!pending) return;
 
     if (failure(message))
       pending.reject(new Error("IRC server refused the message"));
@@ -1772,11 +1777,9 @@ export class IrcClient {
 
     if (owner === undefined) return;
     this.labelBatches.delete(id);
-    const pending = this.labels.get(owner);
+    const pending = this.takeLabel(owner);
 
     if (!pending) return;
-    clearTimeout(pending.timer);
-    this.labels.delete(owner);
 
     if (pending.failed)
       pending.reject(new Error("IRC server refused the message"));
