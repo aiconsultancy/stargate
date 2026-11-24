@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Result, Schema } from "effect";
 import { apiToken } from "../observability/dashboard/api/v1/token";
-import { checkCodexConfiguration } from "../backends/codex-paths";
+import { checkCodexConfiguration } from "../backends/codex/preflight";
 import { loadConfig } from "../config";
 import { teamSchema } from "../coordination/crew/team";
 import {

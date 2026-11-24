@@ -13,8 +13,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 301,
-  "sourceEdges": 1254,
+  "sourceFiles": 302,
+  "sourceEdges": 1256,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -202,7 +202,6 @@
     "private:src/backends/pi-durable.ts -> src/crew/pi-extension.ts",
     "private:src/captain-post.ts -> src/slack-files.ts",
     "private:src/cli.ts -> src/api/v1/token.ts",
-    "private:src/cli.ts -> src/backends/codex-paths.ts",
     "private:src/cli.ts -> src/cron-control.ts",
     "private:src/cli.ts -> src/nightly/cli.ts",
     "private:src/config/composition.ts -> src/api/v1/config.ts",

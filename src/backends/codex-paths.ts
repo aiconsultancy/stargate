@@ -16,7 +16,7 @@ import {
 import { createRequire } from "node:module";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BackendConfig, Config } from "../config";
+import type { BackendConfig } from "../config";
 import { installationDirectory } from "../lib/installation-paths";
 
 type CodexConfig = Extract<BackendConfig, { type: "codex" }>;
@@ -265,32 +265,6 @@ export async function checkCodexPaths(
     throw new Error(
       "Codex workspace-write directory must not contain the home directory",
     );
-}
-
-/** Every Codex backend of a configuration, for `stargate config check`. */
-export async function checkCodexConfiguration(config: Config, path: string) {
-  const data = resolve(dirname(resolve(path)), config.dataDirectory);
-
-  const backends = [
-    ...config.bots.map((bot) => bot.backend),
-    ...config.irc.flatMap((irc) => [
-      irc.backend,
-      ...irc.crew.map((member) => member.backend),
-    ]),
-  ];
-
-  for (const backend of backends) {
-    if (backend.type !== "codex") continue;
-
-    const roots =
-      backend.sandbox === "read-only"
-        ? []
-        : [await trustedPath(backend.directory)];
-
-    if (backend.sandbox === "workspace-write") await trustedPath(data, roots);
-    await checkCodexPaths(backend, data);
-    await codexSearchPath(backend.extraPath, undefined, roots);
-  }
 }
 
 /** System directories that the CLI's `PATH` can hold, in this order. */
