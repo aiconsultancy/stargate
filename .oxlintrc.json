@@ -1275,7 +1275,6 @@
     },
     {
       "files": [
-        "src/backends/claude.ts",
         "src/notifications/ingest/model.ts",
         "src/shared/request-failure.ts",
         "src/transports/irc/client.ts"
