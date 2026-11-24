@@ -42,6 +42,14 @@ export const ircBurstMessageSchema = settingsStruct({
   ).check(Schema.isMaxLength(10)),
 });
 
+const decodeMessage = Schema.decodeUnknownResult(ircBurstMessageSchema);
+
+function fitsBurstPayload(
+  message: IrcBurstMessage | readonly IrcBurstMessage[],
+) {
+  return Buffer.byteLength(JSON.stringify(message)) <= ircBurstLimits.bytes;
+}
+
 /** Transport admission remains separate; only ordinary human jobs can group. */
 export function ircBurstEligible(input: Incoming): boolean {
   return (
@@ -75,8 +83,8 @@ export function prepareIrcBurstMessage(
 
   if (
     message.files.length > ircBurstLimits.files ||
-    Buffer.byteLength(JSON.stringify(message)) > ircBurstLimits.bytes ||
-    Result.isFailure(Schema.decodeUnknownResult(ircBurstMessageSchema)(message))
+    !fitsBurstPayload(message) ||
+    Result.isFailure(decodeMessage(message))
   )
     return;
 
@@ -94,7 +102,7 @@ export function combineIrcBurstMessages(
   if (
     combined.length > ircBurstLimits.messages ||
     files.length > ircBurstLimits.files ||
-    Buffer.byteLength(JSON.stringify(combined)) > ircBurstLimits.bytes ||
+    !fitsBurstPayload(combined) ||
     Buffer.byteLength(text) > ircBurstLimits.bytes
   )
     return;
