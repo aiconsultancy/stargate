@@ -57,7 +57,8 @@ export function resolveDestinations(
     if (Result.isFailure(decoded) || echo(decoded.success, registrations))
       throw new Error("Unsafe notification destination binding");
     const destination = decoded.success;
-    const previous = physical.get(physicalKey(destination));
+    const key = physicalKey(destination);
+    const previous = physical.get(key);
 
     if (
       previous &&
@@ -65,7 +66,7 @@ export function resolveDestinations(
         previous.registrationId !== destination.registrationId)
     )
       throw new Error("Conflicting notification destination aliases");
-    physical.set(physicalKey(destination), destination);
+    physical.set(key, destination);
     result[alias] = destination;
   }
 
@@ -86,10 +87,14 @@ export function bindingAllowed(
     return false;
 
   try {
-    const aliases = Object.entries(admitted).filter(
-      ([, value]) =>
-        physicalKey(value) === physicalKey(destination) &&
-        value.registrationId === destination.registrationId,
+    const key = physicalKey(destination);
+
+    const sameBinding = (value: Destination) =>
+      value.registrationId === destination.registrationId &&
+      physicalKey(value) === key;
+
+    const aliases = Object.entries(admitted).filter(([, value]) =>
+      sameBinding(value),
     );
 
     const destinations: NotifyConfig["destinations"] = Object.fromEntries(
@@ -114,8 +119,7 @@ export function bindingAllowed(
 
         return (
           value !== undefined &&
-          value.registrationId === destination.registrationId &&
-          physicalKey(value) === physicalKey(destination) &&
+          sameBinding(value) &&
           value.audience === destination.audience
         );
       })
