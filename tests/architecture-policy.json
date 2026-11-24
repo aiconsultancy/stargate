@@ -1225,6 +1225,7 @@
         "src/questions.ts",
         "src/questions/native-question.ts",
         "src/questions/store.ts",
+        "src/questions/text-controls.ts",
         "src/slack-questions.ts"
       ],
       "public": [
@@ -1232,6 +1233,7 @@
         "src/questions.ts",
         "src/questions/native-question.ts",
         "src/questions/store.ts",
+        "src/questions/text-controls.ts",
         "src/slack-questions.ts"
       ],
       "contracts": [

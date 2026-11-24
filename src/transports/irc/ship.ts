@@ -30,7 +30,10 @@ import {
 import { fleetSourceReference } from "../../coordination/fleet/fleet-source";
 import type { GatewayConfig } from "../../gateway/gateway";
 import type { GatewayTransport } from "../../gateway/ports";
-import { questionControl } from "../../questions/questions";
+import {
+  type QuestionControl,
+  questionControl,
+} from "../../questions/text-controls";
 import { questionFingerprint } from "../../questions/native-question";
 import { type Identity, backendFingerprint } from "../../gateway/routing";
 import type { Incoming, Store } from "../../gateway/store";
@@ -79,10 +82,7 @@ export type IrcRegistration = IrcMember & {
     text: string,
     connected: () => boolean,
   ) => Promise<void>;
-  answerQuestion?: (
-    input: Incoming,
-    control: NonNullable<ReturnType<typeof questionControl>>,
-  ) => Promise<void>;
+  answerQuestion?: (input: Incoming, control: QuestionControl) => Promise<void>;
   /** Effective FILEHOST upload URL now, or undefined. */
   filehost(): URL | undefined;
   /** Settings of the latest committed config; a reload replaces the object. */

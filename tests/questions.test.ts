@@ -11,11 +11,12 @@ import { Gateway } from "../src/gateway/gateway";
 import { parseMessage } from "../src/transports/irc/protocol";
 import { routeIrcMessage } from "../src/transports/irc/routing";
 import { IrcShip } from "../src/transports/irc/ship";
+import { Questions } from "../src/questions/questions";
 import {
-  Questions,
+  type QuestionControl,
   questionControl,
   questionText,
-} from "../src/questions/questions";
+} from "../src/questions/text-controls";
 import {
   questionAnswer,
   type NativeQuestion,
@@ -244,7 +245,7 @@ async function fixture(
     },
     async answer(
       changes: Partial<Incoming> = {},
-      overrides: Partial<NonNullable<ReturnType<typeof questionControl>>> = {},
+      overrides: Partial<QuestionControl> = {},
     ) {
       const token =
         store.questions.questionOffers(original.botKey)[0]?.token ??
