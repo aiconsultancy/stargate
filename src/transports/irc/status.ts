@@ -1,3 +1,4 @@
+import { type IrcMessage, formatMessage } from "./protocol";
 import { waitingPhrase } from "../../shared/waiting";
 
 export type StatusResult =
@@ -5,6 +6,94 @@ export type StatusResult =
   | { kind: "unavailable" }
   | { kind: "rejected" }
   | { kind: "rate-limited"; retryAfterMs: number };
+
+/** Ergo: key + value <=350 bytes; "status" owns six. */
+export const statusMetadataMaxValueBytes = 344;
+
+const statusMetadataKey = "status";
+
+export function parseStatusMetadataLimit(offered: string | undefined): number {
+  let limit = statusMetadataMaxValueBytes;
+
+  for (const token of offered?.split(",") ?? []) {
+    if (!token.startsWith("max-value-bytes=")) continue;
+    const advertised = Number(token.slice("max-value-bytes=".length));
+    limit =
+      Number.isSafeInteger(advertised) && advertised > 0
+        ? Math.min(statusMetadataMaxValueBytes, advertised)
+        : 0;
+  }
+
+  return limit;
+}
+
+export function statusMetadataSupported(
+  hasCap: (name: string) => boolean,
+): boolean {
+  return hasCap("draft/metadata-2") && hasCap("batch");
+}
+
+export function formatStatusMetadataSet(value: string | undefined): string {
+  return formatMessage(
+    "METADATA",
+    value === undefined
+      ? ["*", "SET", statusMetadataKey]
+      : ["*", "SET", statusMetadataKey, value],
+  );
+}
+
+/** Ergo 2.19.1 uses 761/766, including subscriber notifications; ACK only our own key/value. */
+export function classifyStatusMetadataReply(
+  message: IrcMessage,
+  pendingValue: string | undefined,
+  currentNick: string,
+  fold: (value: string) => string,
+): StatusResult | undefined {
+  if (message.source?.includes("!")) return undefined;
+  const { command, params } = message;
+  const own = fold(params[1] ?? "") === fold(currentNick);
+
+  if (
+    command === "761" &&
+    own &&
+    params[2] === statusMetadataKey &&
+    params[4] === pendingValue
+  )
+    return { kind: "ok" };
+
+  if (
+    command === "766" &&
+    own &&
+    params[2] === statusMetadataKey &&
+    pendingValue === undefined
+  )
+    return { kind: "ok" };
+
+  if (command === "FAIL" && params[0] === "METADATA") {
+    if (
+      params[1] === "KEY_NOT_SET" &&
+      params[3] === statusMetadataKey &&
+      pendingValue === undefined
+    )
+      return { kind: "ok" };
+
+    if (params[1] === "RATE_LIMITED" && params[3] === statusMetadataKey) {
+      const seconds = /^\d+$/.test(params[4] ?? "") ? Number(params[4]) : 120;
+
+      return {
+        kind: "rate-limited",
+        retryAfterMs:
+          Number.isSafeInteger(seconds) && seconds > 0
+            ? seconds * 1000
+            : 120_000,
+      };
+    }
+
+    if (params.includes(statusMetadataKey)) return { kind: "rejected" };
+  }
+
+  return undefined;
+}
 
 export type StatusTiming = {
   intervalMs: number;
@@ -40,7 +129,7 @@ export class IrcStatus {
   private revision = 0;
   private clearPending = false;
   private dirty = false;
-  private maxValueBytes = 344;
+  private maxValueBytes = statusMetadataMaxValueBytes;
   private phrase = 0;
   private lastNonclearAt = Number.NEGATIVE_INFINITY;
   private backoffUntil = 0;
@@ -82,9 +171,12 @@ export class IrcStatus {
     this.online = true;
     this.maxValueBytes =
       maxValueBytes === undefined
-        ? 344
+        ? statusMetadataMaxValueBytes
         : Number.isFinite(maxValueBytes)
-          ? Math.max(0, Math.min(344, Math.floor(maxValueBytes)))
+          ? Math.max(
+              0,
+              Math.min(statusMetadataMaxValueBytes, Math.floor(maxValueBytes)),
+            )
           : 0;
     // Always-on/multiclient servers can retain another connection's old value.
     this.clearPending = true;
