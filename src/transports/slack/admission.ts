@@ -89,7 +89,7 @@ export class SlackAdmission {
     open: () => boolean,
     admit: Admission = (write) => write(),
   ) {
-    const { identity, peers, slack } = this.intake;
+    const { peers } = this.intake;
     const sender = botSender(body);
 
     if (sender && bot.access.peerCaptains && peers) {
@@ -104,7 +104,20 @@ export class SlackAdmission {
       );
     }
 
-    if (bot.resumeSlackThreads && slack.threadContext && !sender) {
+    if (sender) return admit(() => this.intake.accept(body));
+
+    return this.receiveHumanMessage(body, bot, open, admit);
+  }
+
+  private async receiveHumanMessage(
+    body: unknown,
+    bot: BotConfig,
+    open: () => boolean,
+    admit: Admission,
+  ) {
+    const { identity, slack } = this.intake;
+
+    if (bot.resumeSlackThreads && slack.threadContext) {
       const input = this.intake.route(body);
 
       if (!input) return false;
