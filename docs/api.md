@@ -60,20 +60,21 @@ the same Fleet API, the whole fleet and read-only, without the token. Agents
 never hold the token. Each officer reads through a Unix socket that only its
 own processes can reach: the socket's file permissions are its identity.
 
-The socket is `fleet.sock` in the officer's Subspace socket directory, beside
-its signing proxy socket (see [Subspace API agent identity](subspace-agents.md)).
-There is no separate switch: the gateway that has `subspaceAgents` enabled
-opens one for every officer with a `socketPath`, at
-`<directory of socketPath>/fleet.sock`. It does so whether or not the `api`
-listener is configured. Without `api`, Stargate opens no TCP listener and
-creates no token; the officers' sockets serve the gateway's fleet under its
-host name. With `api`, both serve the same fleet, name and pull request
-lookups.
+The socket is `fleet-api.sock` in the officer's Subspace socket directory,
+beside its signing proxy socket (see [Subspace API agent identity](subspace-agents.md)).
+The name is not `fleet.sock`, which is [Fleet Control](fleet-tools.md)'s
+socket and may share the directory. There is no separate switch: the gateway
+that has `subspaceAgents` enabled opens one for every officer with a
+`socketPath`, at `<directory of socketPath>/fleet-api.sock`. It does so
+whether or not the `api` listener is configured. Without `api`, Stargate
+opens no TCP listener and creates no token; the officers' sockets serve the
+gateway's fleet under its host name. With `api`, both serve the same fleet,
+name and pull request lookups.
 
 | Path                    | Owner, group and mode                                                                                    |
 | ----------------------- | -------------------------------------------------------------------------------------------------------- |
 | The officer's directory | The gateway user and the officer's engine group, mode `2750` (or `0700`), made before the gateway starts |
-| `fleet.sock`            | The gateway user and the directory's group (by setgid), mode `0660`; removed when the gateway stops      |
+| `fleet-api.sock`        | The gateway user and the directory's group (by setgid), mode `0660`; removed when the gateway stops      |
 
 The directory follows the rules of the officer's Subspace socket
 ([how the caller is identified](subspace-agents.md#how-the-caller-is-identified)):
@@ -81,10 +82,12 @@ owned by the gateway user and writable by it alone, under parents only root
 or the gateway user can write. Start-up stops, with a log line naming the
 officer, when an officer's directory is missing, gives others any access, or
 admits a group that another officer's directory also admits, or when the
-socket did not get the directory's group. So only the gateway user, root and
-members of the officer's engine group can connect. Crew run as their
-captain's user and reach their captain's socket; no officer reaches another
-officer's.
+socket did not get the directory's group. It also stops, naming both
+sockets, when the configuration puts another socket (a Fleet Control, Teams
+or dashboard socket) at an officer's `fleet-api.sock`. So only the gateway
+user, root and members of the officer's engine group can connect. Crew run
+as their captain's user and reach their captain's socket; no officer
+reaches another officer's.
 
 On the socket:
 
@@ -104,20 +107,21 @@ slots people's consoles need. The host limits below apply to each socket.
 Read it with the command, as the officer's user or a crew member's:
 
 ```sh
-stargate fleet request --socket /run/stargate/subspace/example-captain/fleet.sock /api/v1/fleet
-STARGATE_FLEET_SOCKET=/run/stargate/subspace/example-captain/fleet.sock \
+stargate fleet request --socket /run/stargate/subspace/example-captain/fleet-api.sock /api/v1/fleet
+STARGATE_FLEET_API_SOCKET=/run/stargate/subspace/example-captain/fleet-api.sock \
   stargate fleet request /api/v1/ships/example-ship/crew/example-member
 ```
 
-`--socket` defaults to `$STARGATE_FLEET_SOCKET`. The command reads no
+`--socket` defaults to `$STARGATE_FLEET_API_SOCKET`. The command reads no
 configuration. The answer goes to standard output; the exit status is 0 for
-a 2xx answer, 1 otherwise (the status goes to standard error), and 2 for a
-path that is not a Fleet API path. `/api/v1/events` streams until the
-gateway closes it or the command is stopped. `curl --unix-socket` works too:
+a 2xx answer, 1 otherwise (the status goes to standard error), and 2,
+without connecting, for any path but the four routes above.
+`/api/v1/events` streams until the gateway closes it or the command is
+stopped. `curl --unix-socket` works too:
 
 ```sh
 curl --fail --silent --show-error \
-  --unix-socket /run/stargate/subspace/example-captain/fleet.sock \
+  --unix-socket /run/stargate/subspace/example-captain/fleet-api.sock \
   http://localhost/api/v1/fleet
 ```
 

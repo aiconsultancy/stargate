@@ -480,8 +480,11 @@ export const subspaceAgentsSchema = settingsStruct({
 
 export type SubspaceAgentsConfig = typeof subspaceAgentsSchema.Type;
 
-/** The file name of an officer's Fleet API socket, in its socket directory. */
-export const officerFleetSocketName = "fleet.sock";
+/**
+ * The file name of an officer's Fleet API socket, in its socket directory.
+ * Not `fleet.sock`: that is Fleet Control's socket (docs/fleet-tools.md).
+ */
+export const officerFleetSocketName = "fleet-api.sock";
 
 /**
  * Each officer's read-only Fleet API socket (docs/api.md#officers): beside

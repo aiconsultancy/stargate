@@ -15,6 +15,7 @@ import {
 } from "../src/lib/unix-socket";
 import {
   type OfficerSocket,
+  checkOfficerSocketPaths,
   officerTarget,
   runFleetRequest,
 } from "../src/observability/dashboard/api/v1/officers";
@@ -124,7 +125,7 @@ async function officerDirectories(modes: Record<string, number>) {
       officer,
       socketPath: join(
         await childDirectory(parent, officer, mode),
-        "fleet.sock",
+        "fleet-api.sock",
       ),
     });
   }
@@ -250,7 +251,7 @@ test("officers: a directory others may enter, or one officer's group in another'
     start([
       {
         officer: "captain-a",
-        socketPath: join(parent, "absent", "fleet.sock"),
+        socketPath: join(parent, "absent", "fleet-api.sock"),
       },
     ]),
   ).rejects.toThrow("captain-a's socket directory is missing");
@@ -274,11 +275,11 @@ test("officers: two officers each get a socket in their own directory only", asy
   expect(officerFleetSockets(section)).toEqual([
     {
       officer: "captain-a",
-      socketPath: "/run/example/agents/captain-a/fleet.sock",
+      socketPath: "/run/example/agents/captain-a/fleet-api.sock",
     },
     {
       officer: "captain-b",
-      socketPath: "/run/example/agents/captain-b/fleet.sock",
+      socketPath: "/run/example/agents/captain-b/fleet-api.sock",
     },
   ]);
   expect(officerFleetSockets(undefined)).toEqual([]);
@@ -293,6 +294,29 @@ test("officers: two officers each get a socket in their own directory only", asy
   await start(officers.slice(0, 1));
   expect(existsSync(officers[0]?.socketPath ?? "")).toBe(true);
   expect(existsSync(officers[1]?.socketPath ?? "")).toBe(false);
+});
+
+test("officers: nothing else configured may be at an officer's Fleet API socket", () => {
+  const directory = "/run/example/agents/captain-a";
+
+  const officers = [
+    { officer: "captain-a", socketPath: `${directory}/fleet-api.sock` },
+  ];
+
+  const name = "the Fleet Control socket of IRC registration example-ship";
+
+  // Fleet Control's own name, beside it, is fine.
+  checkOfficerSocketPaths(officers, [
+    { path: `${directory}/fleet.sock`, name },
+  ]);
+
+  expect(() => {
+    checkOfficerSocketPaths(officers, [
+      { path: `${directory}/../captain-a/fleet-api.sock`, name },
+    ]);
+  }).toThrow(
+    `captain-a's Fleet API socket ${directory}/fleet-api.sock is also ${name}`,
+  );
 });
 
 test("officers: nothing is writable, and only exact Fleet API targets answer", async () => {
@@ -498,8 +522,19 @@ test("request command: a read through the officer's socket; exit 1 unless 2xx, 2
     reports: ["The Fleet API answered HTTP 404"],
   });
 
-  for (const path of ["/api/v1/../admin", "/admin", "api/v1/fleet"]) {
-    expect((await fleetRequest(socketPath, path)).code).toBe(2);
+  // Not a Fleet API route, even under /api/v1/: a malformed command, not a 404.
+  for (const path of [
+    "/api/v1/../admin",
+    "/admin",
+    "api/v1/fleet",
+    "/api/v1/unknown",
+    "/api/v1/ships/explorer/logs",
+  ]) {
+    expect(await fleetRequest(socketPath, path)).toEqual({
+      code: 2,
+      output: "",
+      reports: [expect.stringContaining("must be a Fleet API route")],
+    });
   }
 
   const absent = await fleetRequest(
@@ -513,7 +548,7 @@ test("request command: a read through the officer's socket; exit 1 unless 2xx, 2
   );
 });
 
-test("command: stargate fleet request runs as a child process, with --socket or STARGATE_FLEET_SOCKET", async () => {
+test("command: stargate fleet request runs as a child process, with --socket or STARGATE_FLEET_API_SOCKET", async () => {
   const officers = await officerDirectories({ "captain-a": 0o700 });
   const socketPath = officers[0]?.socketPath ?? "";
 
@@ -551,7 +586,7 @@ test("command: stargate fleet request runs as a child process, with --socket or 
   });
 
   const fromEnvironment = await run(["/api/v1/ships/explorer"], {
-    STARGATE_FLEET_SOCKET: socketPath,
+    STARGATE_FLEET_API_SOCKET: socketPath,
   });
 
   expect(fromEnvironment.code).toBe(0);

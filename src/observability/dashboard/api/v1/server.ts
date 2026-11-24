@@ -26,6 +26,7 @@ import {
   checkOfficerSocketGroup,
   officerDirectories,
   officerTarget,
+  shipRoute,
 } from "./officers";
 import { apiToken } from "./token";
 import type { ApiV1Source, V1Fleet, V1Gateway, V1Snapshot } from "./types";
@@ -263,9 +264,7 @@ async function answer(
       return Response.json(result, { headers });
     }
 
-    const match = /^\/api\/v1\/ships\/([^/]+)(?:\/crew\/([^/]+))?$/.exec(
-      pathname,
-    );
+    const match = shipRoute.exec(pathname);
 
     const id = match?.[1] && routeId(match[1]);
 

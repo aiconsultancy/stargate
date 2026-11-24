@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { type Stats, lstatSync } from "node:fs";
 import { type IncomingMessage, request } from "node:http";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 
 /**
  * Officers read the whole fleet's Fleet API, read-only and with no token,
@@ -12,6 +12,30 @@ export type OfficerSocket = { officer: string; socketPath: string };
 
 /** A refusal about an officer's socket directory; names the officer. */
 export class OfficerSocketError extends Error {}
+
+/** Another socket the gateway's configuration names, as a refusal names it. */
+export type ConfiguredSocket = { path: string; name: string };
+
+/**
+ * Nothing else configured may be at an officer's Fleet API socket: whichever
+ * bound first would stop the other. The refusal names both.
+ */
+export function checkOfficerSocketPaths(
+  officers: readonly OfficerSocket[],
+  others: readonly ConfiguredSocket[],
+) {
+  for (const { officer, socketPath } of officers) {
+    const other = others.find(
+      (socket) => resolve(socket.path) === resolve(socketPath),
+    );
+
+    if (other) {
+      throw new OfficerSocketError(
+        `${officer}'s Fleet API socket ${socketPath} is also ${other.name}; give that socket another path`,
+      );
+    }
+  }
+}
 
 /**
  * The path of an officer's request target, or undefined. Only origin-form
@@ -47,6 +71,13 @@ export function officerTarget(target: string) {
 
   return path;
 }
+
+/** The ship and crew member routes; the server matches them with it too. */
+export const shipRoute = /^\/api\/v1\/ships\/([^/]+)(?:\/crew\/([^/]+))?$/;
+
+/** Whether a target's path is one of the Fleet API's four routes. */
+const fleetRoute = (path: string) =>
+  path === "/api/v1/fleet" || path === "/api/v1/events" || shipRoute.test(path);
 
 /**
  * Each officer's socket directory, checked before anything listens: a real
@@ -181,12 +212,14 @@ export type FleetRequestOptions = {
  * One Fleet API read through the officer's socket, for an officer or its
  * crew. The body goes to `output` as it arrives (an event stream until the
  * gateway closes it); the exit code is 0 for a 2xx answer, 1 otherwise and 2
- * for a path that is not a Fleet API path.
+ * for a path that is not one of the Fleet API's routes.
  */
 export async function runFleetRequest(options: FleetRequestOptions) {
-  if (officerTarget(options.path) === undefined) {
+  const path = officerTarget(options.path);
+
+  if (path === undefined || !fleetRoute(path)) {
     options.report(
-      "The path must be a Fleet API path such as /api/v1/fleet, /api/v1/ships/{id} or /api/v1/ships/{id}/crew/{member}",
+      "The path must be a Fleet API route: /api/v1/fleet, /api/v1/ships/{id}, /api/v1/ships/{id}/crew/{member} or /api/v1/events",
     );
 
     return 2;
@@ -198,7 +231,7 @@ export async function runFleetRequest(options: FleetRequestOptions) {
     response = await get(options.socketPath, options.path);
   } catch {
     options.report(
-      "The officer's Fleet API socket is unavailable: is the gateway running, and is this the officer's own fleet.sock?",
+      "The officer's Fleet API socket is unavailable: is the gateway running, and is this the officer's own fleet-api.sock?",
     );
 
     return 1;

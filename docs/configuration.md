@@ -176,11 +176,11 @@ The optional top-level `api` object enables the read-only
 Every `api` setting requires a restart.
 
 Officers read the same API without `api` and without the token: a gateway
-with `subspaceAgents` enabled serves it on `fleet.sock` beside each officer's
-`socketPath`, read-only and for the whole fleet, whether or not `api` is set.
-There is no key or switch for it; the officer's socket directory decides who
-can connect. With `api` set, the officers' sockets use its `fleetName` and
-`pullRequestRepositories`. See [officers](api.md#officers).
+with `subspaceAgents` enabled serves it on `fleet-api.sock` beside each
+officer's `socketPath`, read-only and for the whole fleet, whether or not
+`api` is set. There is no key or switch for it; the officer's socket
+directory decides who can connect. With `api` set, the officers' sockets use
+its `fleetName` and `pullRequestRepositories`. See [officers](api.md#officers).
 
 | Field                     | Default                                                                                                | Accepted values                                                                                                                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -224,7 +224,7 @@ requests on a per-officer Unix socket. Keys: `enabled`, `api.baseUrl`,
 `socketPath`, `registration`). A section without `enabled: true` is treated
 as absent and its other keys are not validated. Every change to an enabled
 section requires a restart. Each officer with a `socketPath` also gets a
-read-only [Fleet API socket](api.md#officers), `fleet.sock`, in the same
+read-only [Fleet API socket](api.md#officers), `fleet-api.sock`, in the same
 directory; that file name is therefore refused as a `socketPath`. See
 [Subspace API agent identity](subspace-agents.md).
 

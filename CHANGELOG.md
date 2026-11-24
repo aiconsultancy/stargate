@@ -46,17 +46,19 @@
 - Officers' Fleet API sockets: none, by the project lead's decision that
   people and a fleet's own officers see everything. They come with
   `subspaceAgents` (itself off by default): each officer with a `socketPath`
-  gets a read-only `fleet.sock` beside it.
+  gets a read-only `fleet-api.sock` beside it.
 
 ### Changes
 
 - Let a fleet's officers and their crew read the whole fleet's Fleet API,
   read-only and without the fleet token ([docs](docs/api.md#officers)). The
   gateway with `subspaceAgents` enabled serves `GET` and `HEAD` for the four
-  Fleet API routes on `fleet.sock` in each officer's socket directory (mode
+  Fleet API routes on `fleet-api.sock` in each officer's socket directory (mode
   `0660`, the directory's group), with or without the `api` listener, using
   officers' own read and stream slots. `stargate fleet request [--socket
-  PATH] /api/v1/...` reads it. A `socketPath` named `fleet.sock` is refused.
+  PATH] /api/v1/...` reads it. A `socketPath` named `fleet-api.sock` is
+  refused, and start-up stops, naming both, if another configured socket is
+  at that path. Fleet Control's `fleet.sock` may share the directory.
 
 - Move OpenCode plugin implementations under `plugins/opencode/`. Crew still
   loads from the repository root. Fleet configurations can keep using

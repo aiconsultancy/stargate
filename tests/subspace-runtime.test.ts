@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { chmod, readFile, stat } from "node:fs/promises";
+import { chmod, chown, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Effect, Schema } from "effect";
 import type { AgentBackend } from "../src/backends/backend";
@@ -93,6 +93,7 @@ const claude = {
 async function runGateway(
   subspaceAgents: ReturnType<typeof section> | undefined,
   dataDirectory?: string,
+  more: Partial<Parameters<typeof serve>[0]> = {},
 ) {
   const directory = dataDirectory ?? (await privateDirectory());
   const backends: BackendConfig[] = [];
@@ -156,6 +157,7 @@ async function runGateway(
         dataDirectory: directory,
         bots: [slackBot(claude)],
         ...(subspaceAgents && { subspaceAgents }),
+        ...more,
       },
       log,
       controller.signal,
@@ -178,7 +180,15 @@ async function runGateway(
 
   cleanup.push(stop);
 
-  return { outcome, dataDirectory: directory, backends, fetches, lines, stop };
+  return {
+    outcome,
+    running,
+    dataDirectory: directory,
+    backends,
+    fetches,
+    lines,
+    stop,
+  };
 }
 
 async function officerSocket() {
@@ -213,7 +223,7 @@ for (const variant of ["absent", "enabled: false"] as const) {
       false,
     );
     expect(existsSync(socketPath)).toBe(false);
-    expect(existsSync(join(socketPath, "..", "fleet.sock"))).toBe(false);
+    expect(existsSync(join(socketPath, "..", "fleet-api.sock"))).toBe(false);
     expect(gateway.lines.join("\n")).not.toMatch(/[Ss]ubspace|Fleet API/);
     // The backend receives its configuration exactly as written.
     expect(gateway.backends).toEqual([slackBot(claude).backend]);
@@ -281,7 +291,7 @@ test("runtime: enabled, keys are made, the socket signs, enrolment runs in the b
   expect(gateway.lines.join("\n")).toContain("Subspace agent identity enabled");
 
   // Beside it, the officer's read-only Fleet API socket, with no api section.
-  const fleetSocket = join(socketPath, "..", "fleet.sock");
+  const fleetSocket = join(socketPath, "..", "fleet-api.sock");
 
   await until(() => existsSync(fleetSocket), 3000, "Fleet API socket");
 
@@ -299,6 +309,48 @@ test("runtime: enabled, keys are made, the socket signs, enrolment runs in the b
   await gateway.stop();
   expect(existsSync(socketPath)).toBe(false);
   expect(existsSync(fleetSocket)).toBe(false);
+});
+
+test("runtime: another socket at an officer's Fleet API socket stops start-up, naming both", async () => {
+  const stub = stubApi();
+  const sockets = await privateDirectory("sg-");
+  const directory = await childDirectory(sockets, "captain-a", 0o750);
+
+  // The dashboard's shared directory is exactly 2750. Setgid sticks only with
+  // One of our own groups; a BSD temporary directory's group may not be.
+  await chown(directory, process.getuid?.() ?? 0, process.getgid?.() ?? 0);
+  await chmod(directory, 0o2750);
+  const fleetSocket = join(directory, "fleet-api.sock");
+
+  const gateway = await runGateway(
+    section(stub.url, [
+      captain("captain-a", {
+        registration: "captain-a",
+        socketPath: join(directory, "api.sock"),
+      }),
+    ]),
+    undefined,
+    {
+      dashboard: true,
+      dashboardSocket: { path: fleetSocket, groupAccess: true },
+    },
+  );
+
+  // The Fleet API starts after the transports: the gateway then stops.
+  const refusal = `captain-a's Fleet API socket ${fleetSocket} is also the dashboard socket; give that socket another path`;
+
+  await until(
+    () => gateway.lines.join("\n").includes(refusal),
+    3000,
+    "the refusal",
+  );
+  expect(
+    await gateway.running.then(
+      () => "stopped",
+      () => "failed",
+    ),
+  ).toBe("failed");
+  expect(gateway.lines.join("\n")).not.toContain("Fleet API listening");
 });
 
 test("runtime: a bundle others can read stops start-up and says why", async () => {

@@ -219,8 +219,8 @@ test("configuration: a disabled section is not cross-checked; an enabled one is"
       "Each officer's socketPath needs its own directory",
     ],
     [
-      [captain("example-a", { socketPath: "/run/example/a/fleet.sock" })],
-      "fleet.sock is the officer's Fleet API socket",
+      [captain("example-a", { socketPath: "/run/example/a/fleet-api.sock" })],
+      "fleet-api.sock is the officer's Fleet API socket",
     ],
     [
       [
@@ -234,6 +234,65 @@ test("configuration: a disabled section is not cross-checked; an enabled one is"
       message,
     );
   }
+});
+
+test("configuration: Fleet Control's fleet.sock may share an officer's socket directory", () => {
+  const directory = "/run/example/agents/example-captain";
+
+  const fleetControl = {
+    irc: [
+      {
+        ...ircCaptain("example-ship", {
+          ...example.bots[0]?.backend,
+          sessionID: "ses_example",
+        }),
+        fleetPolicy: {
+          role: "captain",
+          humanAccounts: ["example-human"],
+          agentAccounts: ["example-peer"],
+          assignedCheckout: "/workspace",
+          capabilities: ["dispatch"],
+        },
+        fleetControl: {
+          socketPath: `${directory}/fleet.sock`,
+          statePath: "/var/lib/example/fleet.sqlite",
+          targets: [
+            {
+              id: "example-peer",
+              account: "example-peer",
+              role: "captain",
+              channel: "#example-peer",
+              sessionID: "ses_peer",
+            },
+          ],
+        },
+      },
+    ],
+  };
+
+  // Valid before officers had Fleet API sockets, and still valid: theirs is
+  // Fleet-api.sock beside api.sock.
+  expect(
+    refusal({
+      ...fleetControl,
+      subspaceAgents: enabledRaw({
+        officers: [
+          captain("example-captain", { socketPath: `${directory}/api.sock` }),
+        ],
+      }),
+    }),
+  ).toBe("accepted");
+
+  // Fleet.sock is no longer a reserved socketPath name.
+  expect(
+    refusal({
+      subspaceAgents: enabledRaw({
+        officers: [
+          captain("example-captain", { socketPath: `${directory}/fleet.sock` }),
+        ],
+      }),
+    }),
+  ).toBe("accepted");
 });
 
 test("configuration: officer fields, headers and the enrolment source are bounded", () => {
