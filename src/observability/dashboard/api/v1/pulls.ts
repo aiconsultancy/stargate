@@ -98,6 +98,26 @@ export function mapPullRequest(
   }
 }
 
+function matchingPull(
+  input: unknown,
+  repository: string,
+  branch: string,
+  number: number,
+) {
+  const { headRefName, headRepository, headRepositoryOwner } =
+    decodeHead(input);
+
+  if (
+    headRefName !== branch ||
+    `${headRepositoryOwner.login}/${headRepository.name}`.toLowerCase() !==
+      repository
+  )
+    return;
+  const pr = mapPullRequest(input, repository);
+
+  return pr?.number === number ? pr : undefined;
+}
+
 /** Cached PR lookup. The caller always returns before auth or network I/O. */
 export function createPullReader(
   now: () => number = Date.now,
@@ -197,20 +217,13 @@ export function createPullReader(
         );
 
         if (details?.code !== 0) return;
-        const input: unknown = JSON.parse(details.stdout);
 
-        const { headRefName, headRepository, headRepositoryOwner } =
-          decodeHead(input);
-
-        if (
-          headRefName !== branch ||
-          `${headRepositoryOwner.login}/${headRepository.name}`.toLowerCase() !==
-            repository
-        )
-          return;
-        const pr = mapPullRequest(input, repository);
-
-        return pr?.number === number ? pr : undefined;
+        return matchingPull(
+          JSON.parse(details.stdout),
+          repository,
+          branch,
+          number,
+        );
       }
 
       return incomplete ? undefined : null;
