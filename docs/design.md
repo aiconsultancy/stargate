@@ -127,6 +127,13 @@ Each path was capped at its measured post-migration size in PR #336. Lower
 the cap when its file shrinks. Remove the entry at 1,000 lines or fewer.
 The O1 decision in [architecture review](architecture-review.md) is unchanged.
 
+NET-1792 extracts OpenCode review admission and evidence into the private
+`backends/opencode/reviews.ts` module. Its methods and imports move from the
+existing adapter, already in the crew plugin closure; no new capability is
+added to that closure. The next adapter-size cluster is native input ownership
+and reconciliation; keep its session and cancellation checks together when
+designing that extraction.
+
 `chat/` groups questions, attachments, transcription, meta commands, and activity.
 They remain separate slices. Notification preferences and ingestion stay under
 `notifications/`.
