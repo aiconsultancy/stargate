@@ -46,6 +46,10 @@
 
 ### Changes
 
+- Move OpenCode plugin implementations under `plugins/opencode/`. Crew still
+  loads from the repository root. Fleet configurations can keep using
+  `src/fleet/` temporarily; new installs use `plugins/opencode/fleet/`.
+
 - Add optional Subspace API agent identity
   ([docs](docs/subspace-agents.md)). `stargate subspace enrol` gives each
   configured officer a private Ed25519 key and self-signed certificate and

@@ -9,6 +9,7 @@ import { join } from "node:path";
 // Explicit opt-in to the old local full-suite fallback; CI remains the full gate.
 const UNTRUSTED_MODE = process.env["STARGATE_UNTRUSTED_TESTS"] ?? "defer";
 const testFile = /\.test\.ts$/;
+const directories = ["src", "plugins", "tests", "scripts", "perf"];
 
 // Files read at runtime have no import edge. Keep their readers in this table.
 const readers = [
@@ -19,6 +20,10 @@ const readers = [
   {
     path: /^tests\/architecture-(baseline|policy)\.json$/,
     tests: /^tests\/architecture\.test\.ts$/,
+  },
+  {
+    path: /^(?:plugins\/opencode\/fleet|src\/fleet)\/package\.json$/,
+    tests: /^tests\/fleet-tools\.test\.ts$/,
   },
   {
     path: /^(docs\/.*\.md|AGENTS\.md|README\.md|CONTRIBUTING\.md)$/,
@@ -102,7 +107,7 @@ async function snapshot(root: string, env: NodeJS.ProcessEnv) {
   await mkdir(root);
   git(["checkout-index", "--all", `--prefix=${root}/`], env);
 
-  for (const directory of ["src", "tests", "scripts", "perf"])
+  for (const directory of directories)
     await mkdir(join(root, directory), { recursive: true });
   const modules = join(process.cwd(), "node_modules");
 
@@ -176,7 +181,6 @@ async function affected(existing: Set<string>) {
     const { buildGraph, importClosure } =
       await import("../../tests/architecture-graph");
 
-    const directories = ["src", "tests", "scripts", "perf"];
     const before = await buildGraph(join(root, "head"), directories);
 
     const deleted = new Set(
@@ -207,7 +211,7 @@ async function affected(existing: Set<string>) {
 
       // Global package/tool/workflow inputs remain untrusted even if imported.
       const graphAllowed =
-        status !== "T" && /^(src|tests|scripts|perf)\//.test(path);
+        status !== "T" && /^(src|plugins|tests|scripts|perf)\//.test(path);
 
       const reached = graphAllowed
         ? closures.filter(({ before, after }) => {
@@ -217,7 +221,7 @@ async function affected(existing: Set<string>) {
             return (
               (status !== "A" && before.includes(path)) ||
               (status !== "D" && after.includes(path)) ||
-              (path.startsWith("src/") &&
+              ((path.startsWith("src/") || path.startsWith("plugins/")) &&
                 (before.includes(scanner) || after.includes(scanner)))
             );
           })

@@ -21,7 +21,7 @@ import {
   FleetControl,
   type FleetControlOptions,
 } from "../src/coordination/fleet/control";
-import { installFleetTools } from "../src/fleet/plugin";
+import { installFleetTools } from "../plugins/opencode/fleet/plugin";
 import {
   type FleetOrigin,
   type FleetRequest,

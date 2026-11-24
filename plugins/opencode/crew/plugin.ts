@@ -8,80 +8,83 @@ import {
   Error as ToolError,
 } from "@opencode/plugin/promise/tool";
 import { Effect } from "effect";
-import { OpenCodeQuestions } from "../backends/opencode/questions";
-import { postInputSchema } from "../coordination/captain/captain-post";
-import { abortable, resourceScope } from "../lib/effect";
+import { OpenCodeQuestions } from "../../../src/backends/opencode/questions";
+import { postInputSchema } from "../../../src/coordination/captain/captain-post";
+import { abortable, resourceScope } from "../../../src/lib/effect";
 import {
   MaintenanceRPC,
   maintenancePlanSchema,
-} from "../automation/maintenance/maintenance";
-import { activeMaintenanceDrain } from "../automation/maintenance/maintenance-drain";
-import { noticeTools } from "../automation/maintenance/update-notice";
+} from "../../../src/automation/maintenance/maintenance";
+import { activeMaintenanceDrain } from "../../../src/automation/maintenance/maintenance-drain";
+import { noticeTools } from "../../../src/automation/maintenance/update-notice";
 import {
   connectHistoryAPI,
   historyVisible,
-} from "../coordination/crew/history/api";
-import { compactOnServer } from "../coordination/crew/history/compaction";
+} from "../../../src/coordination/crew/history/api";
+import { compactOnServer } from "../../../src/coordination/crew/history/compaction";
 import {
   crewOpenCodeInput,
   quotaToolInput,
-} from "../coordination/crew/input/crew-tool-input";
-import { CrewCron, cronToolInput } from "../coordination/crew/cron/cron";
-import { CrewCronExecution } from "../coordination/crew/cron/cron-execution";
-import { CrewEngine } from "../coordination/crew/execution/engine";
+} from "../../../src/coordination/crew/input/crew-tool-input";
+import {
+  CrewCron,
+  cronToolInput,
+} from "../../../src/coordination/crew/cron/cron";
+import { CrewCronExecution } from "../../../src/coordination/crew/cron/cron-execution";
+import { CrewEngine } from "../../../src/coordination/crew/execution/engine";
 import {
   CrewHistory,
   historyInputBranches,
-} from "../coordination/crew/history/history";
-import { workingAgreementContext } from "../coordination/crew/instructions";
-import { CrewIrc } from "../coordination/crew/messaging/irc-rpc";
-import { journalInputSchema } from "../coordination/crew/reporting/journal";
+} from "../../../src/coordination/crew/history/history";
+import { workingAgreementContext } from "../../../src/coordination/crew/instructions";
+import { CrewIrc } from "../../../src/coordination/crew/messaging/irc-rpc";
+import { journalInputSchema } from "../../../src/coordination/crew/reporting/journal";
 import {
   feedbackCallIdentity,
   feedbackInput,
   feedbackReviewInput,
-} from "../coordination/crew/reporting/reporting";
-import { effectObjectToolInput } from "../coordination/crew/input/tool-input";
-import { CrewMaintenance } from "../coordination/crew/controls/maintenance";
+} from "../../../src/coordination/crew/reporting/reporting";
+import { effectObjectToolInput } from "../../../src/coordination/crew/input/tool-input";
+import { CrewMaintenance } from "../../../src/coordination/crew/controls/maintenance";
 import {
   messageOpenCodeInput,
   messagePortableSchema,
-} from "../coordination/crew/messaging/message-tool-input";
+} from "../../../src/coordination/crew/messaging/message-tool-input";
 import {
   dmInputSchema,
   mailInputBranches,
-} from "../coordination/crew/messaging/messaging";
+} from "../../../src/coordination/crew/messaging/messaging";
 import {
   CrewModels,
   modelToolInputSchema,
-} from "../coordination/crew/controls/models";
-import { nativeWait } from "../coordination/crew/execution/native-wait";
+} from "../../../src/coordination/crew/controls/models";
+import { nativeWait } from "../../../src/coordination/crew/execution/native-wait";
 import {
   CrewNotifications,
   notificationToolInput,
-} from "../coordination/crew/controls/notifications";
-import { CrewPost } from "../coordination/crew/controls/post";
-import { effectProjectToolInput } from "../coordination/crew/input/project-options";
-import { CrewProjects } from "../coordination/crew/workspace/projects";
+} from "../../../src/coordination/crew/controls/notifications";
+import { CrewPost } from "../../../src/coordination/crew/controls/post";
+import { effectProjectToolInput } from "../../../src/coordination/crew/input/project-options";
+import { CrewProjects } from "../../../src/coordination/crew/workspace/projects";
 import {
   CrewQuestionHandoff,
   CrewQuestionRpc,
   crewQuestionConsumerLeaseMs,
-} from "../coordination/crew/questions/question-handoff";
+} from "../../../src/coordination/crew/questions/question-handoff";
 import {
   CrewQuestions,
   crewQuestionInputSchema,
-} from "../coordination/crew/questions/questions";
+} from "../../../src/coordination/crew/questions/questions";
 import {
   CrewRecovery,
   runRecoveryOperator,
-} from "../coordination/crew/execution/recovery-rpc";
-import { CrewReporting } from "../coordination/crew/reporting/report-rpc";
-import { CrewError } from "../coordination/crew/execution/state";
+} from "../../../src/coordination/crew/execution/recovery-rpc";
+import { CrewReporting } from "../../../src/coordination/crew/reporting/report-rpc";
+import { CrewError } from "../../../src/coordination/crew/execution/state";
 import {
   CrewWaiting,
   waitingInputSchema,
-} from "../coordination/crew/controls/waiting";
+} from "../../../src/coordination/crew/controls/waiting";
 
 // Greybeard: configured shared workers; only explicit DM wakes a captain.
 // Host tools and the general HTTP API are not an OS sandbox.

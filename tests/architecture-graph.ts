@@ -65,7 +65,7 @@ export function sourceIdentities(
   const paths = new Map<string, string>();
 
   const validPath = (path: string) =>
-    path.startsWith("src/") &&
+    (path.startsWith("src/") || path.startsWith("plugins/opencode/")) &&
     path === posix.normalize(path) &&
     !path.includes("\\") &&
     sourceExtension.test(path);
@@ -152,7 +152,7 @@ export async function sizeRegressions(
   policy: ArchitecturePolicy,
   largeFiles: string[],
 ): Promise<string[]> {
-  const files = (await sourceFiles(join(root, "src"))).map((file) =>
+  const files = (await projectFiles(root)).map((file) =>
     portable(relative(root, file)),
   );
 
@@ -459,6 +459,17 @@ async function sourceFiles(directory: string): Promise<string[]> {
   return files.sort();
 }
 
+async function projectFiles(root: string, directories?: readonly string[]) {
+  const roots = directories ?? [
+    "src",
+    ...(await readdir(root)).filter((name) => name === "plugins"),
+  ];
+
+  return (
+    await Promise.all(roots.map((name) => sourceFiles(join(root, name))))
+  ).flat();
+}
+
 async function resolveLocal(
   root: string,
   from: string,
@@ -625,15 +636,13 @@ function importsOf(node: Node, strictFile?: string): string[] {
 /** Parse only. Never import, transpile, or execute a production module. */
 export async function buildGraph(
   directory: string,
-  directories: string[] = ["src"],
+  directories?: readonly string[],
   deleted: ReadonlySet<string> = new Set(),
   strictImports: ReadonlySet<string> = new Set(),
 ): Promise<SourceGraph> {
   const root = await realpath(directory);
 
-  const files = (
-    await Promise.all(directories.map((name) => sourceFiles(join(root, name))))
-  ).flat();
+  const files = await projectFiles(root, directories);
 
   const graph = new Map<string, Set<string>>(
     files.map((file) => [portable(relative(root, file)), new Set<string>()]),
@@ -697,7 +706,7 @@ export async function buildGraph(
           // Affected-test graphs retain imported data and known deleted targets.
           // The default architecture graph remains source-only.
           if (
-            directories.includes("tests") &&
+            directories?.includes("tests") &&
             (!sourceExtension.test(target) || deleted.has(target)) &&
             !graph.has(target)
           )

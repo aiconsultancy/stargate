@@ -27,7 +27,7 @@ import {
   type FleetControlOptions,
 } from "../src/coordination/fleet/control";
 import { FleetLedger } from "../src/coordination/fleet/ledger";
-import { installFleetTools } from "../src/fleet/plugin";
+import { installFleetTools } from "../plugins/opencode/fleet/plugin";
 import {
   type FleetCaller,
   FleetError,
@@ -537,16 +537,41 @@ test("private ledger rejects symlinks and world-accessible existing files", asyn
   }
 });
 
-test("the real V2 loader resolves the local fleet package and Effect adapter", async () => {
-  const entry = Host.resolve({
-    directory: join(import.meta.dir, "../src/fleet"),
+test("the real V2 loader resolves the canonical and compatibility Fleet packages", async () => {
+  const root = join(import.meta.dir, "..");
+
+  const canonical = Host.resolve({
+    directory: join(root, "plugins/opencode/fleet"),
   }).server;
 
-  expect(entry?.endsWith("/src/fleet/plugin.ts")).toBe(true);
+  const compatibility = Host.resolve({
+    directory: join(root, "src/fleet"),
+  }).server;
 
-  if (!entry) throw new Error("Missing fleet plugin entrypoint");
-  expect(await Host.load(entry)).toMatchObject({
+  expect(canonical?.endsWith("/plugins/opencode/fleet/plugin.ts")).toBe(true);
+  expect(compatibility?.endsWith("/src/fleet/plugin.ts")).toBe(true);
+
+  if (!canonical || !compatibility)
+    throw new Error("Missing Fleet plugin entry point");
+  const current = await Host.load(canonical);
+
+  if (!current || typeof current !== "object" || !("default" in current))
+    throw new Error("Missing Fleet plugin export");
+
+  expect(current).toMatchObject({
     default: { id: "stargate.fleet", effect: expect.any(Function) },
+  });
+  expect(await Host.load(compatibility)).toEqual({ default: current.default });
+});
+
+test("the repository root still resolves and loads the Crew plugin", async () => {
+  const entry = Host.resolve({ directory: join(import.meta.dir, "..") }).server;
+
+  expect(entry?.endsWith("/plugins/opencode/crew/plugin.ts")).toBe(true);
+
+  if (!entry) throw new Error("Missing Crew plugin entry point");
+  expect(await Host.load(entry)).toMatchObject({
+    default: { id: "stargate.crew", effect: expect.any(Function) },
   });
 });
 

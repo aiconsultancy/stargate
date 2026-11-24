@@ -35,7 +35,7 @@ import {
   type ModelSessions,
 } from "../src/coordination/crew/controls/models";
 import { nativeWait } from "../src/coordination/crew/execution/native-wait";
-import plugin from "../src/crew/plugin";
+import plugin from "../plugins/opencode/crew/plugin";
 import type {
   CrewInspectionAPI,
   EvidenceMessage,

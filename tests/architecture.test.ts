@@ -43,7 +43,8 @@ test("source architecture introduces no new structural or boundary violations", 
   for (const entry of [
     "src/main.ts",
     "src/config.ts",
-    "src/crew/plugin.ts",
+    "plugins/opencode/crew/plugin.ts",
+    "plugins/opencode/fleet/plugin.ts",
     "src/fleet/plugin.ts",
   ])
     expect(physical.has(entry)).toBe(true);

@@ -77,7 +77,7 @@ Load the plugin **directory**, which has its own package manifest, in OpenCode:
 {
   "plugins": [
     {
-      "package": "/srv/stargate/src/fleet",
+      "package": "/srv/stargate/plugins/opencode/fleet",
       "options": {
         "socketPath": "/run/stargate/coordinator/fleet.sock"
       }
@@ -85,6 +85,10 @@ Load the plugin **directory**, which has its own package manifest, in OpenCode:
   ]
 }
 ```
+
+Existing OpenCode configurations can still load `/srv/stargate/src/fleet`
+through a temporary forwarding package. Use the new path for new installs.
+Configure only one of these paths, not both.
 
 Allow the native actions only for the intended profile. The default
 permissions remain deny. A profile may permit verification/status while denying

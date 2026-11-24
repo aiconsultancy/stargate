@@ -1200,8 +1200,8 @@
       "files": [
         "src/main.ts",
         "src/config.ts",
-        "src/crew/plugin.ts",
-        "src/fleet/plugin.ts"
+        "plugins/opencode/crew/plugin.ts",
+        "plugins/opencode/fleet/plugin.ts"
       ],
       "rules": {
         "anti-slop-effect/no-manual-effect-error-tag": "off",

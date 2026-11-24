@@ -2,6 +2,10 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "aliases": {
+    "src/crew/plugin.ts": [
+      "src/crew/plugin.ts",
+      "plugins/opencode/crew/plugin.ts"
+    ],
     "src/crew/messaging.ts": [
       "src/crew/messaging.ts",
       "src/crew/messaging/messaging.ts",
@@ -1593,6 +1597,7 @@
         "src/fleet/ledger.ts",
         "src/fleet/permissions.ts",
         "src/fleet/plugin.ts",
+        "plugins/opencode/fleet/plugin.ts",
         "src/fleet/protocol.ts",
         "src/fleet/results.ts",
         "src/coordination/fleet/review-prompts.ts",
@@ -1606,6 +1611,7 @@
         "src/fleet-policy.ts",
         "src/fleet-source.ts",
         "src/fleet/plugin.ts",
+        "plugins/opencode/fleet/plugin.ts",
         "src/coordination/fleet/review-prompts.ts",
         "src/fleet/protocol.ts"
       ],

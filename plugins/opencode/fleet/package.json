@@ -1,0 +1,8 @@
+{
+  "name": "stargate-fleet-tools",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./plugin.ts"
+  }
+}

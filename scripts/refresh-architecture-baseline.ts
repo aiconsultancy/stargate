@@ -222,7 +222,7 @@ const policy = JSON.parse(policyBytes) as ArchitecturePolicy;
 
 const source = await buildGraph(
   root,
-  ["src"],
+  undefined,
   new Set(),
   new Set(allowedClosureFiles),
 );
