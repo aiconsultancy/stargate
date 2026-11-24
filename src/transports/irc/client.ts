@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 import {
   type Casemapping,
   type IrcMessage,
+  assembleMultiline,
   casemapping,
   fold,
   formatMessage,
@@ -1782,47 +1783,17 @@ export class IrcClient {
     else pending.resolve();
   }
 
-  /**
-   * A received draft/multiline batch as one message: the opening BATCH's
-   * tags (msgid, time, account, client tags) and the lines joined with line
-   * breaks, or directly for draft/multiline-concat parts.
-   */
   private assemble(batch: {
     open: IrcMessage;
     label: string | undefined;
     parts: IrcMessage[];
   }) {
-    const [first] = batch.parts;
+    const message = assembleMultiline(batch.open, batch.parts);
 
-    if (!first) return;
-    const tags = new Map(batch.open.tags);
-
-    for (const key of ["account", "time"])
-      if (!tags.has(key)) {
-        const value = first.tags.get(key);
-
-        if (value !== undefined) tags.set(key, value);
-      }
-
-    tags.delete("batch");
+    if (!message) return;
     const outer = batch.open.tags.get("batch");
-
-    const text = batch.parts
-      .map((part, index) =>
-        index && !part.tags.has("draft/multiline-concat")
-          ? `\n${part.params[1] ?? ""}`
-          : (part.params[1] ?? ""),
-      )
-      .join("");
-
-    const source = batch.open.source ?? first.source;
     this.chat(
-      {
-        tags,
-        ...(source && { source }),
-        command: first.command,
-        params: [batch.open.params[2] ?? first.params[0] ?? "", text],
-      },
+      message,
       batch.label,
       outer !== undefined && this.replayBatches.has(outer),
     );
