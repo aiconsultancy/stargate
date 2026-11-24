@@ -18,7 +18,7 @@ import type {
   IrcBurstMessage,
   IrcOperations,
 } from "../transports/irc/store-contract";
-import { FleetRecords } from "../coordination/fleet/store";
+import { FleetJobRecords } from "./fleet-job-store";
 import { type StoredJob, decodeJob, decodeStoredJob } from "./row-codec";
 import { TranscriptRecords } from "./transcript-store";
 import { MetaRecords } from "../meta-commands/store";
@@ -148,7 +148,7 @@ export class Store {
   public readonly meta: MetaRecords;
   public readonly attachmentRecords: AttachmentRecords;
   public readonly activityRecords: ActivityRecords;
-  public readonly fleet: FleetRecords<StoredJob, Job>;
+  public readonly fleet: FleetJobRecords;
   public readonly transcript: TranscriptRecords;
   public readonly irc: IrcOperations;
   private readonly db: Database;
@@ -361,7 +361,7 @@ export class Store {
     this.meta = new MetaRecords(this.db);
     this.attachmentRecords = new AttachmentRecords(this.db);
     this.activityRecords = new ActivityRecords(this.db);
-    this.fleet = new FleetRecords(this.db, decodeStoredJob);
+    this.fleet = new FleetJobRecords(this.db);
     this.transcript = new TranscriptRecords(this.db);
     this.irc = createIrcRecords(this.db);
   }

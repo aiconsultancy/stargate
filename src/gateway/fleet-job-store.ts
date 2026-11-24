@@ -1,20 +1,22 @@
 import type { Database } from "bun:sqlite";
 import { Schema } from "effect";
-import { type NativeMaker, nativeMakerSchema } from "./protocol";
+import {
+  type NativeMaker,
+  nativeMakerSchema,
+} from "../coordination/fleet/protocol";
+import { type StoredJob, decodeStoredJob } from "./row-codec";
+import type { Job } from "./store-types";
 
-export class FleetRecords<TStored, TJob> {
-  public constructor(
-    private readonly db: Database,
-    private readonly decodeStoredJob: (row: TStored) => TJob,
-  ) {}
+export class FleetJobRecords {
+  public constructor(private readonly db: Database) {}
 
-  public pendingFleetJobs(botKey: string): TJob[] {
+  public pendingFleetJobs(botKey: string): Job[] {
     return this.db
-      .query<TStored, [string]>(
+      .query<StoredJob, [string]>(
         "SELECT * FROM jobs WHERE botKey=? AND json_extract(fleet_context,'$.kind')='assignment' AND fleet_exported=0 ORDER BY id LIMIT 100",
       )
       .all(botKey)
-      .map((item) => this.decodeStoredJob(item));
+      .map((item) => decodeStoredJob(item));
   }
 
   public fleetPublished(id: number) {
