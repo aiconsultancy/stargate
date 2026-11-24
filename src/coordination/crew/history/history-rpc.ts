@@ -32,6 +32,14 @@ const decodeDescribe = Schema.decodeUnknownSync(historyDescribeInputSchema);
 const decodeChildren = Schema.decodeUnknownSync(historyChildrenInputSchema);
 const decodeEntries = Schema.decodeUnknownSync(historyEntriesInputSchema);
 
+function childSession(
+  id: string,
+  parentID: string,
+  title: string,
+): HistorySession {
+  return { id, harness: "pi-durable", kind: "conversation", parentID, title };
+}
+
 /** Root: pi:<peer session>. Child: pi:<peer session>~<native numeric ID>.
  * Peer IDs are generated ses_<uuid>, never contain '~'. IDs stay below 512
  * characters. Every component is authorized from state, not from this encoding.
@@ -135,13 +143,13 @@ export class CrewHistoryRPC {
 
           if (root) sessions.push(root);
         } else
-          sessions.push({
-            id,
-            harness: "pi-durable",
-            kind: "conversation",
-            parentID: `${piHistoryPrefix}${owned.sessionID}`,
-            title: "task conversation",
-          });
+          sessions.push(
+            childSession(
+              id,
+              `${piHistoryPrefix}${owned.sessionID}`,
+              "task conversation",
+            ),
+          );
       }
 
       return { sessions };
@@ -183,12 +191,12 @@ export class CrewHistoryRPC {
       const selected = rows.slice(0, input.limit);
 
       return {
-        sessions: selected.map((row): HistorySession => ({
-          id: `${piHistoryPrefix}${owned.sessionID}~${row.conversationID}`,
-          harness: "pi-durable",
-          kind: "conversation",
-          parentID: input.parentID,
-          title: row.title,
+        sessions: selected.map((row) => ({
+          ...childSession(
+            `${piHistoryPrefix}${owned.sessionID}~${row.conversationID}`,
+            input.parentID,
+            row.title,
+          ),
           ...(input.updatedSince !== undefined &&
             row.updatedAt !== null && { updatedAt: row.updatedAt }),
         })),
