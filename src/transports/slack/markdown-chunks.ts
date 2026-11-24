@@ -2,11 +2,7 @@ type Fence = { opening: string; marker: string };
 
 type FenceLine = { start: number; end: number; after: Fence | undefined };
 
-// Greybeard: balance ordinary top-level fences, not a Markdown AST. Fence
-// Lines over 512 codepoints fall back to plain splitting so wrappers cannot
-// Consume the message budget. Nested containers, tables and inline constructs
-// Need a Markdown parser if preserving their structure becomes a requirement.
-export function markdownChunks(points: string[]): string[] {
+function scanFences(points: string[]): FenceLine[] {
   const fences: FenceLine[] = [];
   let active: Fence | undefined;
   let offset = 0;
@@ -41,6 +37,16 @@ export function markdownChunks(points: string[]): string[] {
 
     offset += length;
   }
+
+  return fences;
+}
+
+// Greybeard: balance ordinary top-level fences, not a Markdown AST. Fence
+// Lines over 512 codepoints fall back to plain splitting so wrappers cannot
+// Consume the message budget. Nested containers, tables and inline constructs
+// Need a Markdown parser if preserving their structure becomes a requirement.
+export function markdownChunks(points: string[]): string[] {
+  const fences = scanFences(points);
 
   const stateAt = (position: number) => {
     let state: Fence | undefined;
