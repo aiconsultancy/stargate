@@ -1614,6 +1614,7 @@
         "src/pi-model.ts",
         "src/backends/config.ts",
         "src/backends/opencode/config.ts",
+        "src/backends/opencode/questions.ts",
         "src/backends/claude/config.ts",
         "src/backends/codex/config.ts"
       ],
@@ -1622,6 +1623,7 @@
         "src/backends/factory.ts",
         "src/backends/config.ts",
         "src/backends/opencode/config.ts",
+        "src/backends/opencode/questions.ts",
         "src/pi-model.ts",
         "src/backends/claude/config.ts",
         "src/backends/codex/config.ts"

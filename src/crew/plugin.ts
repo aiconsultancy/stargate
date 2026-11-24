@@ -8,7 +8,7 @@ import {
   Error as ToolError,
 } from "@opencode/plugin/promise/tool";
 import { Effect } from "effect";
-import { OpenCodeBackend } from "../backends/opencode/opencode";
+import { OpenCodeQuestions } from "../backends/opencode/questions";
 import { postInputSchema } from "../coordination/captain/captain-post";
 import { abortable, resourceScope } from "../lib/effect";
 import {
@@ -244,17 +244,7 @@ const plugin = Plugin.define({
             signal,
           );
 
-          return new OpenCodeBackend(
-            {
-              type: "opencode",
-              url: selected.options.team.historyAPI?.url ?? "http://localhost",
-              directory: worker.location.directory,
-              sessionID: worker.id,
-              headersEnv: {},
-              permissions: [],
-            },
-            client,
-          );
+          return new OpenCodeQuestions(client, worker.id);
         },
         {
           project:
