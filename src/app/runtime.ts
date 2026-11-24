@@ -21,8 +21,7 @@ import { gatewayVersion } from "../observability/dashboard/api/v1/gateway";
 import { createApiV1Source } from "../observability/dashboard/api/v1/projection";
 import { startApiV1Server } from "../observability/dashboard/api/v1/server";
 import type { AgentBackend, BackendContext } from "../backends/backend";
-import { createBackend } from "../backends/factory";
-import { OpenCodeBackend } from "../backends/opencode/opencode";
+import { createBackend, openCodeServerVersion } from "../backends/factory";
 import {
   type BackendConfig,
   type BotConfig,
@@ -221,9 +220,11 @@ async function openCodeVersion(
   ships: readonly DashboardShip[],
   signal: AbortSignal,
 ): Promise<string | null> {
-  for (const ship of ships)
-    if (ship.backend instanceof OpenCodeBackend)
-      return ship.backend.serverVersion(signal);
+  for (const ship of ships) {
+    const version = openCodeServerVersion(ship.backend, signal);
+
+    if (version) return version;
+  }
 
   return null;
 }
