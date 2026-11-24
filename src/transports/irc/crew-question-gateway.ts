@@ -1,7 +1,8 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { OpenCode, type OpenCodeClient } from "@opencode/client";
 import { OpenCodeBackend } from "../../backends/opencode/opencode";
-import { type BackendConfig, secret } from "../../config";
+import type { opencodeBackendSchema } from "../../backends/opencode/config";
+import { secret } from "../../lib/credentials";
 import {
   type CrewQuestionReceipt,
   CrewQuestionRpc,
@@ -9,7 +10,7 @@ import {
 } from "../../coordination/crew/questions/question-handoff";
 import { questionFingerprint } from "../../questions/native-question";
 
-type Config = Extract<BackendConfig, { type: "opencode" }>;
+type Config = typeof opencodeBackendSchema.Type;
 
 /** Only the owning gateway connects to the native form API. All RPC calls use
  * its fixed captain location. Worker commands contain no endpoint or credentials. */

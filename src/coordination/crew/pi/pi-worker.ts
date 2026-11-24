@@ -7,7 +7,7 @@ import type {
   BackendContext,
   TextSink,
 } from "../../../backends/backend";
-import type { BackendConfig } from "../../../config";
+import type { piDurableBackendSchema } from "../../../backends/pi/config";
 import { redactCredentials } from "../../../lib/credentials";
 import type { SessionHistory } from "../../../shared/session-history";
 import { piDefinitionPath, piMemberDefinition } from "../instructions";
@@ -20,7 +20,7 @@ import {
 } from "../execution/state";
 import type { CrewMember } from "../team";
 
-type PiConfig = Extract<BackendConfig, { type: "pi-durable" }>;
+type PiConfig = typeof piDurableBackendSchema.Type;
 
 export interface PiWorkerBackend extends AgentBackend {
   waitForIdle?(sessionID: string, signal: AbortSignal): Promise<void>;

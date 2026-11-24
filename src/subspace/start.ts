@@ -2,10 +2,8 @@ import { lstatSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Logger } from "pino";
-import type {
-  BackendConfig,
-  SubspaceAgentsConfig,
-} from "../config/composition";
+import type { BackendConfig } from "../config";
+import type { SubspaceAgentsConfig } from "../config/composition";
 import type { Ownership } from "../lib/unix-socket";
 import type { AgentKey } from "./certificate";
 import { enrolOfficers } from "./enrol";

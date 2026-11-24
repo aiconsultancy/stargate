@@ -35,7 +35,6 @@ import {
   secureLocalOrHttpsURL,
   settingsCheck,
   settingsDefault,
-  settingsDiscriminatedUnion,
   settingsPattern,
   settingsRecord,
   settingsRefine,
@@ -46,7 +45,7 @@ import {
 import { transcriptionSchema } from "../transcription/config";
 import { waitingSchema } from "./waiting";
 
-import { opencodeBackendSchema } from "../backends/opencode/config";
+import { type BackendConfig, backendSchema } from "../backends/config";
 
 const userRule = Schema.Union([
   Schema.Literal("*"),
@@ -128,20 +127,6 @@ const pairingSchema = settingsStruct({
     .check(Schema.isMinLength(1))
     .check(Schema.isMaxLength(5)),
 });
-
-export const backendSchema = settingsDiscriminatedUnion("type", [
-  opencodeBackendSchema,
-  piDurableBackendSchema,
-  claudeBackendSchema,
-  codexBackendSchema,
-  settingsStruct({
-    type: Schema.Literal("module"),
-    module: absolutePath,
-    options: settingsRecord(Schema.String, Schema.Unknown).pipe(
-      settingsDefault({}),
-    ),
-  }),
-]);
 
 export const botSchema = settingsStruct({
   id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
@@ -938,23 +923,10 @@ export const configSchema = configFields.check(configCheck());
  * The reload planner still requires identical notification topology. */
 export const reloadConfigSchema = configFields.check(configCheck(true));
 
-export type BackendConfig = typeof backendSchema.Type;
-
 export type BotConfig = typeof botSchema.Type;
 
 /** Loaded configuration; `dataDirectory` is absolute. */
 export type Config = typeof configSchema.Type;
-
-export function secret(
-  name: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  const value = env[name];
-
-  if (!value?.trim()) throw new Error(`Missing environment variable: ${name}`);
-
-  return value;
-}
 
 export async function loadConfig(path: string) {
   const config = decodeSettings(configSchema, await Bun.file(path).json());
