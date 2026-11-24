@@ -15,7 +15,7 @@
     "src/store.ts"
   ],
   "sourceFiles": 286,
-  "sourceEdges": 1195,
+  "sourceEdges": 1194,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -243,7 +243,6 @@
     "private:src/runtime.ts -> src/api/v1/gateway.ts",
     "private:src/runtime.ts -> src/api/v1/projection.ts",
     "private:src/runtime.ts -> src/api/v1/server.ts",
-    "private:src/runtime.ts -> src/backends/opencode.ts",
     "private:src/runtime.ts -> src/crew-ui.ts",
     "private:src/runtime.ts -> src/cron-store.ts",
     "private:src/runtime.ts -> src/cron-ui.ts",

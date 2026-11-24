@@ -4,6 +4,16 @@ import type { BackendConfig } from "./config";
 import { OpenCodeBackend } from "./opencode/opencode";
 import { PiDurableBackend } from "./pi/pi-durable";
 
+/** Only the built-in OpenCode adapter exposes a connected server version. */
+export function openCodeServerVersion(
+  backend: AgentBackend,
+  signal: AbortSignal,
+): Promise<string> | undefined {
+  return backend instanceof OpenCodeBackend
+    ? backend.serverVersion(signal)
+    : undefined;
+}
+
 /** Any function can be called with any arguments; its result is unchecked. */
 const callable = (value: unknown): value is (...args: unknown[]) => unknown =>
   typeof value === "function";

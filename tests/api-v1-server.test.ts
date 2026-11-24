@@ -26,6 +26,7 @@ import type {
   V1Host,
   V1ShipDetail,
 } from "../src/observability/dashboard/api/v1/types";
+import { openCodeServerVersion } from "../src/backends/factory";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import { decodeSettings } from "../src/config/settings-errors";
@@ -1975,7 +1976,7 @@ test("OpenCode version lookup uses V2 server info and refuses redirects", async 
 
     try {
       const signal = new AbortController().signal;
-      expect(await backend.serverVersion(signal)).toBe("2.3.2");
+      expect(await openCodeServerVersion(backend, signal)).toBe("2.3.2");
       redirect = true;
 
       const cached = cacheOpenCodeVersion(
