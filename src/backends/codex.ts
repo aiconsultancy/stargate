@@ -351,6 +351,10 @@ const decodeStartedEvent = Schema.decodeUnknownOption(startedEvent);
 const decodeItemEvent = Schema.decodeUnknownOption(itemEvent);
 const decodeEndEvent = Schema.decodeUnknownOption(endEvent);
 
+const isTurnStarted = Schema.is(
+  Schema.Struct({ type: Schema.Literal("turn.started") }),
+);
+
 /** Items that mean the turn did work outside the model. */
 const workItems = new Set([
   "command_execution",
@@ -408,11 +412,7 @@ export class CodexTurn {
 
   /** Returns true when the visible text may have changed. */
   public add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
-    if (
-      stage &&
-      Schema.is(Schema.Struct({ type: Schema.Literal("turn.started") }))(raw)
-    )
-      stage("model");
+    if (stage && isTurnStarted(raw)) stage("model");
     const started = decodeStartedEvent(raw);
 
     if (Option.isSome(started)) {
@@ -425,14 +425,15 @@ export class CodexTurn {
 
     if (Option.isSome(item)) {
       const { id, type, text } = item.value.item;
+      const worked = workItems.has(type);
 
       if (item.value.type === "item.started") {
         if (type === "reasoning") stage?.("reasoning");
-        else if (workItems.has(type)) stage?.("tool");
+        else if (worked) stage?.("tool");
         else if (type === "agent_message") stage?.("reply");
       }
 
-      if (workItems.has(type)) this.worked = true;
+      if (worked) this.worked = true;
 
       if (type !== "agent_message" || text === undefined) return false;
 
