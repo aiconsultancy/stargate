@@ -1,4 +1,4 @@
 {
-  "baselineSha256": "4949a0406aa8b37dd068ea2f0de52689b12505b4cbb461da17378ca2cc54202a",
-  "closureAdditions": ["src/coordination/crew/execution/drain-records.ts"]
+  "baselineSha256": "c7ceea9c66beec57385c3624f9007c16bb122752a3a454374ff75886a3520b4e",
+  "closureAdditions": ["src/automation/cron/report-receipts.ts"]
 }

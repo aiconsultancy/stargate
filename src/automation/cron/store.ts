@@ -19,6 +19,7 @@ import {
   cronQuotaEventSchema,
 } from "./advanced";
 import { type CronInput, validateCronInput } from "./input";
+import { claimDailyReport, finishDailyReport } from "./report-receipts";
 import {
   type QuotaObservation,
   quotaObservationSchema,
@@ -283,18 +284,6 @@ function checkRequestId(requestId: string | undefined) {
 function checkTime(now: number) {
   if (!Number.isSafeInteger(now) || !Number.isFinite(new Date(now).getTime()))
     throw new Error("Invalid cron reference time.");
-}
-
-function checkReportDate(date: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
-    throw new Error("Invalid cron report date.");
-  const parsed = new Date(`${date}T00:00:00Z`);
-
-  if (
-    !Number.isFinite(parsed.getTime()) ||
-    parsed.toISOString().slice(0, 10) !== date
-  )
-    throw new Error("Invalid cron report date.");
 }
 
 function runtimeRegistration(registration: string, signature: string): string {
@@ -1207,14 +1196,8 @@ export class CronStore {
 
   public claimDailyReport(scope: CronScope, date: string): boolean {
     checkScope(scope);
-    checkReportDate(date);
 
-    return (
-      this.db
-        .query(`INSERT OR IGNORE INTO cron_daily_reports
-      (botKey,channel,user,date) VALUES (?,?,?,?)`)
-        .run(scope.botKey, scope.channel, scope.user, date).changes > 0
-    );
+    return claimDailyReport(this.db, scope, date);
   }
 
   public finishDailyReport(
@@ -1223,14 +1206,7 @@ export class CronStore {
     status: "done" | "failed",
   ): void {
     checkScope(scope);
-    checkReportDate(date);
-
-    if (status !== "done" && status !== "failed")
-      throw new Error("Invalid cron report status.");
-    this.db
-      .query(`UPDATE cron_daily_reports SET status=?
-      WHERE botKey=? AND channel=? AND user=? AND date=? AND status='announcing'`)
-      .run(status, scope.botKey, scope.channel, scope.user, date);
+    finishDailyReport(this.db, scope, date, status);
   }
 
   public recoverAnnouncements(botKey: string): number {
