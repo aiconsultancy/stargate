@@ -184,6 +184,22 @@ export type ReloadResult =
       readonly paths: readonly string[];
     };
 
+/** A candidate that needs no runtime call, or undefined if it must apply. */
+function compareCandidates(current: ReloadCandidate, next: ReloadCandidate) {
+  const paths = restartRequired(current, next);
+
+  if (paths.length > 0)
+    return {
+      status: "restart-required",
+      message: `Configuration reload refused: restart required for ${paths.join(", ")}. ${unchangedNote}`,
+      paths,
+    } as const;
+
+  if (isDeepStrictEqual(current, next)) return "unchanged" as const;
+
+  return;
+}
+
 /**
  * Serialized reloads: read, compare with the current candidate, then hand a
  * live-safe candidate to the runtime. `current` advances only after `apply`
@@ -244,22 +260,15 @@ export class ConfigReload {
       const apply = this.#apply;
 
       if (this.#closed || !apply) return this.#report("unavailable");
-      const paths = restartRequired(this.#current, next);
+      const comparison = compareCandidates(this.#current, next);
 
-      if (paths.length > 0) {
-        const result = {
-          status: "restart-required",
-          message: `Configuration reload refused: restart required for ${paths.join(", ")}. ${unchangedNote}`,
-          paths,
-        } as const;
+      if (comparison === "unchanged") return this.#report(comparison);
 
-        this.log.warn({ paths }, result.message);
+      if (comparison) {
+        this.log.warn({ paths: comparison.paths }, comparison.message);
 
-        return result;
+        return comparison;
       }
-
-      if (isDeepStrictEqual(this.#current, next))
-        return this.#report("unchanged");
 
       try {
         await apply(next);
