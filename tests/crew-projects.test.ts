@@ -1091,13 +1091,13 @@ function feedbackTools(host: Awaited<ReturnType<typeof nativeHost>>) {
   };
 }
 
-test("feedback tools require an enabled pinned ship and native permission", async () => {
+test("feedback tools default on for pinned ships and still require native permission", async () => {
   const f = await fixture();
 
   try {
     for (const options of [
-      f.options,
-      { ...f.options, feedbackEnabled: true, captainSessionID: undefined },
+      { ...f.options, feedbackEnabled: false },
+      { ...f.options, captainSessionID: undefined },
     ]) {
       const host = await nativeHost(f, options);
 
@@ -1109,11 +1109,7 @@ test("feedback tools require an enabled pinned ship and native permission", asyn
       }
     }
 
-    const host = await nativeHost(
-      f,
-      { ...f.options, feedbackEnabled: true },
-      () => false,
-    );
+    const host = await nativeHost(f, f.options, () => false);
 
     try {
       const { submit, review } = feedbackTools(host);
