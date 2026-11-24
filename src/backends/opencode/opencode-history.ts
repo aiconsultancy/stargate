@@ -92,6 +92,13 @@ const FAILURE =
 
 const DESCRIBE_CONCURRENCY = 5;
 
+function pageCursor(page: Page<unknown>, limit: number) {
+  if (page.data.length > limit) throw new Error(FAILURE);
+  const cursor = page.cursor.next;
+
+  return cursor === null || cursor === undefined ? {} : { cursor };
+}
+
 function modelName(model: ModelRef): string {
   return `${model.providerID}/${model.id}${model.variant !== undefined ? `#${model.variant}` : ""}`.slice(
     0,
@@ -376,12 +383,11 @@ export class OpenCodeHistory implements SessionHistory {
         { signal },
       );
 
-      if (page.data.length > request.limit) throw new Error(FAILURE);
+      const cursor = pageCursor(page, request.limit);
 
       return decodeSessionPage({
         sessions: page.data.map(sessionInfo),
-        ...(page.cursor.next !== null &&
-          page.cursor.next !== undefined && { cursor: page.cursor.next }),
+        ...cursor,
       });
     });
   }
@@ -408,7 +414,7 @@ export class OpenCodeHistory implements SessionHistory {
         { signal },
       );
 
-      if (page.data.length > request.limit) throw new Error(FAILURE);
+      const cursor = pageCursor(page, request.limit);
 
       return decodeEntryPage({
         entries: page.data.flatMap((message) => {
@@ -416,8 +422,7 @@ export class OpenCodeHistory implements SessionHistory {
 
           return result ? [result] : [];
         }),
-        ...(page.cursor.next !== null &&
-          page.cursor.next !== undefined && { cursor: page.cursor.next }),
+        ...cursor,
       });
     });
   }
