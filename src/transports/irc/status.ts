@@ -262,16 +262,7 @@ export class IrcStatus {
     );
   }
 
-  private pump(): void {
-    if (this.stopped || !this.online || this.inFlight) return;
-    const clear = this.clearPending;
-
-    if (!clear && (this.closing || this.active === 0)) return;
-    const value = clear ? undefined : this.busyValue();
-
-    if (!clear && value === undefined) return;
-    const now = Date.now();
-
+  private sendDue(clear: boolean, now: number) {
     while (
       this.attempts.length > 0 &&
       (this.attempts[0] ?? now) + this.timing.windowMs <= now
@@ -296,6 +287,22 @@ export class IrcStatus {
         due = Math.max(due, oldest + this.timing.windowMs);
       }
     }
+
+    return due;
+  }
+
+  private pump(): void {
+    if (this.stopped || !this.online || this.inFlight) return;
+    const clear = this.clearPending;
+
+    if (!clear && (this.closing || this.active === 0)) return;
+    const value = clear ? undefined : this.busyValue();
+
+    if (!clear && value === undefined) return;
+    const now = Date.now();
+    const due = this.sendDue(clear, now);
+
+    if (due === undefined) return;
 
     if (due > now) {
       this.wake(due - now);
