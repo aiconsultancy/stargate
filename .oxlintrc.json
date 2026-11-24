@@ -876,7 +876,6 @@
     {
       "files": [
         "scripts/test-compare.ts",
-        "src/activity/activity-delivery.ts",
         "src/app/cli.ts",
         "src/app/runtime.ts",
         "src/automation/maintenance/nightly/cleanup/cleanup.ts",
