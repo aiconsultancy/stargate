@@ -33,7 +33,8 @@ import {
   requestSchema,
   reviewRepositorySchema,
 } from "./protocol";
-import { FleetReviews, reviewContextPrompt } from "./reviews";
+import { reviewContextPrompt } from "./review-prompts";
+import { FleetReviews } from "./reviews";
 
 export type FleetControlOptions = {
   config: FleetControlConfig;

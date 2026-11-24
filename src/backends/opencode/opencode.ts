@@ -46,7 +46,7 @@ import type {
 import {
   reviewContextPrompt,
   reviewNativePrompt,
-} from "../../coordination/fleet/reviews";
+} from "../../coordination/fleet/review-prompts";
 import {
   InputBoundaryFold,
   type InputBoundaryRecord,

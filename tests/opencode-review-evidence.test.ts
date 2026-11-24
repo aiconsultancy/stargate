@@ -10,7 +10,7 @@ import {
 import {
   reviewContextPrompt,
   reviewNativePrompt,
-} from "../src/coordination/fleet/reviews";
+} from "../src/coordination/fleet/review-prompts";
 import { zodStringRecord } from "./fixtures/zod-string-record";
 
 const diff =

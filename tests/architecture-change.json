@@ -1,4 +1,5 @@
 {
-  "baselineSha256": "b5c88bd24528ad309655e4a56a331e65696ee241b4932239481a709053411747",
-  "closureAdditions": ["src/coordination/crew/execution/update-notices.ts"]
+  "baselineSha256": "25390abec1468aefdfb81a733c06c07711718d6faad109d734b3657e3008e674",
+  "pruneStale": true,
+  "closureAdditions": ["src/coordination/fleet/review-prompts.ts"]
 }

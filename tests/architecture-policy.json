@@ -1496,6 +1496,7 @@
         "src/fleet/plugin.ts",
         "src/fleet/protocol.ts",
         "src/fleet/results.ts",
+        "src/coordination/fleet/review-prompts.ts",
         "src/fleet/reviews.ts",
         "src/dispatch/polling.ts"
       ],
@@ -1506,6 +1507,7 @@
         "src/fleet-policy.ts",
         "src/fleet-source.ts",
         "src/fleet/plugin.ts",
+        "src/coordination/fleet/review-prompts.ts",
         "src/fleet/protocol.ts"
       ],
       "contracts": [

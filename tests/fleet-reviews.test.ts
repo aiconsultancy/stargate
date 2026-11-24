@@ -35,7 +35,7 @@ import {
   reviewContextSchema,
   reviewProofSchema,
 } from "../src/coordination/fleet/protocol";
-import { reviewContextPrompt } from "../src/coordination/fleet/reviews";
+import { reviewContextPrompt } from "../src/coordination/fleet/review-prompts";
 import { IrcShip } from "../src/transports/irc/ship";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, until } from "./irc-fixture";
