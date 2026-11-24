@@ -8,16 +8,27 @@ changes wait until a person approves a release.
 
 ## Merge policy
 
-Use short-lived branches and ready PRs. When a PR is ready, enable
-`gh pr merge --auto --squash`. Main protection requires only **Quality
-checks** on the PR's exact head, with no approving review. The pre-push
-hook enforces the rebase-before-push policy: every branch push must
-contain the freshly fetched `origin/main`. If `main` moves, `git fetch
-origin && git rebase origin/main`, then re-run checks. A requested Go or
-No go from another captain is advice, not a merge gate. GitHub deletes
-the remote branch after merge.
+Use short-lived branches and ready PRs. Before merging any PR:
 
-The gate is before a release: the release workflow publishes only the current
+1. Run the [thermo-nuclear code quality review](../.agents/skills/thermo-nuclear-code-quality-review/SKILL.md)
+   on the final diff. The author may run it. Record the reviewed commit,
+   findings, and how the PR resolves them in the PR discussion.
+2. Have a reviewer other than the author or latest pusher check the diff and
+   findings. In their GitHub approval, state that they confirm the
+   thermo-nuclear review for the latest commit. A generic approval does not
+   meet this policy.
+3. Require successful **Quality checks** and the approving review. Only then
+   enable `gh pr merge --auto --squash`. GitHub deletes the remote branch
+   after merge.
+
+GitHub enforces the approval and the Quality checks, including for admins.
+The reviewer confirms that the approval covers the thermo-nuclear review.
+The pre-push hook requires every branch push to contain the freshly fetched
+`origin/main`. If `main` moves, rebase and run checks again. A changed diff
+requires a new quality review. Ask for fresh approval after a rebase even if
+the reviewer can reuse the previous findings.
+
+The release workflow publishes only the current
 `main` commit, and only after **Quality checks**, including the full test suite
 and the self-update environment test, have passed on that commit.
 
