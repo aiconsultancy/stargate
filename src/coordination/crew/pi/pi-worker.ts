@@ -11,7 +11,7 @@ import type { piDurableBackendSchema } from "../../../backends/pi/config";
 import { redactCredentials } from "../../../lib/credentials";
 import type { SessionHistory } from "../../../shared/session-history";
 import { piDefinitionPath, piMemberDefinition } from "../instructions";
-import type { PiCrewBinding } from "./pi-extension";
+import { type PiCrewBinding, piCrewExtension } from "./pi-extension";
 import {
   CrewError,
   type CrewState,
@@ -21,6 +21,8 @@ import {
 import type { CrewMember } from "../team";
 
 type PiConfig = typeof piDurableBackendSchema.Type;
+
+type PiWorkerContext = BackendContext & { crew?: PiCrewBinding };
 
 export interface PiWorkerBackend extends AgentBackend {
   waitForIdle?(sessionID: string, signal: AbortSignal): Promise<void>;
@@ -59,7 +61,7 @@ export interface PiWorkerBackend extends AgentBackend {
 
 export type PiWorkerFactory = ((
   config: PiConfig,
-  context: BackendContext,
+  context: PiWorkerContext,
 ) => Promise<PiWorkerBackend>) & {
   /** Must inspect committed receipts without scheduling or submitting work. */
   recover?: (
@@ -71,11 +73,15 @@ export type PiWorkerFactory = ((
 };
 
 const nativeFactory: PiWorkerFactory = Object.assign(
-  async (config: PiConfig, context: BackendContext) => {
+  async (config: PiConfig, { crew, ...context }: PiWorkerContext) => {
     const { PiDurableBackend } =
       await import("../../../backends/pi/pi-durable");
 
-    return PiDurableBackend.open(config, context);
+    return PiDurableBackend.open(
+      config,
+      context,
+      crew && ((readHistory) => piCrewExtension(crew, readHistory)),
+    );
   },
   {
     async recover(

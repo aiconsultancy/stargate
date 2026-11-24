@@ -1,3 +1,4 @@
 {
-  "baselineSha256": "1fe497b4e5bb39b6a9c41878e7fa83320a9c09dda153ffffd30e67afb6435b02"
+  "baselineSha256": "6989e0bd4f16cef98d3d2a89f87f01775481a2e9168c4d974556bcbf84cca2d7",
+  "pruneStale": true
 }
