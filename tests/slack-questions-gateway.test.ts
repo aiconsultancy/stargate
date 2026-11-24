@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
-import { Gateway } from "../src/gateway/gateway";
+import { SlackGateway as Gateway } from "./slack-gateway-fixture";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { saveQuestionSettings } from "../src/questions/question-settings";
 import type { NativeQuestion } from "../src/questions/native-question";

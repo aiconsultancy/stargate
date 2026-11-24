@@ -61,9 +61,6 @@ import {
 import {
   type PeerDirectory,
   type PeerSender,
-  botSender,
-  isSlackHuman,
-  peerLookupMs,
   peerPrefix,
   peerTurnsPerHour,
   peerWindowMs,
@@ -92,7 +89,7 @@ import {
   isAllowedChannel,
   isAllowedUser,
   routeEvent,
-  routeReaction,
+  type routeReaction,
   transcriptChunks,
 } from "./routing";
 import { type ReplyChunk, replyText } from "../shared/slack-format";
@@ -189,8 +186,6 @@ export type GatewayConfig =
       | "transcription"
     > & { steerThreadFollowUps?: boolean });
 
-type SlackAdmission = (write: () => boolean) => boolean | Promise<boolean>;
-
 /** The failure a thrown error names when no signal ended the turn. */
 function errorFailure(error: unknown): RequestFailure {
   if (error instanceof BackendFailure) return error.failure;
@@ -260,7 +255,6 @@ export function slackTransport(
 
 export class Gateway {
   private followUpTask: Promise<void> | undefined;
-  private slackAdmissionTail = Promise.resolve();
   private readonly meta: MetaCommands;
   private readonly activity: ActivityDelivery;
   private readonly cancellations = new Map<number, AbortController>();
@@ -855,183 +849,61 @@ export class Gateway {
     );
   }
 
-  /**
-   * Slack intake. A bot message is admitted only after Slack's directory
-   * proves a peer captain; a failed or slow lookup admits nothing. `open` is
-   * checked again after the lookup, before anything is stored.
-   */
-  public async receive(body: unknown, open: () => boolean = () => true) {
-    const bot = this.bot;
+  public slackIntake() {
+    const slack: Pick<
+      TransportDelivery,
+      "threadContext" | "userInfo" | "reactionThread"
+    > = this.slack;
 
-    if (!bot || !open()) return false;
-    const current = () => open() && this.bot === bot;
-    const reaction = routeReaction(body, bot, this.identity);
+    const store: Pick<Store, "follows" | "slackReplyThread"> = this.store;
 
-    if (reaction)
-      return this.orderSlackAdmission(current, (admit) =>
-        this.receiveReaction(reaction, bot, current, admit),
-      );
-    const question = this.slackQuestions?.receive(body, current);
-
-    if (question !== undefined && question !== false && (await question))
-      return false;
-    const meta = this.meta.receive(body, bot, this.identity, current);
-
-    if (meta !== false) {
-      await meta;
-
-      return false;
-    }
-
-    return bot.slack.inboundReactions
-      ? this.orderSlackAdmission(current, (admit) =>
-          this.receiveMessage(body, bot, current, admit),
-        )
-      : this.receiveMessage(body, bot, open);
+    return {
+      key: this.key,
+      identity: this.identity,
+      slack,
+      store,
+      lifetime: this.questionLifetime.signal,
+      peers: this.peers,
+      bot: () => this.bot,
+      question: (body: unknown, open: () => boolean) =>
+        this.slackQuestions?.receive(body, open) ?? false,
+      meta: (body: unknown, bot: BotConfig, open: () => boolean) =>
+        this.meta.receive(body, bot, this.identity, open),
+      route: (body: unknown) => this.route(body),
+      accept: this.accept.bind(this),
+      reaction: this.admitReaction.bind(this),
+    };
   }
 
-  /** Start lookups on arrival; only the durable writes wait their turn. */
-  private async orderSlackAdmission(
-    open: () => boolean,
-    receive: (admit: SlackAdmission) => Promise<boolean>,
-  ) {
-    const before = this.slackAdmissionTail;
-    const slot = Promise.withResolvers<void>();
-    this.slackAdmissionTail = slot.promise;
-
-    try {
-      return await receive(async (write) => {
-        await before;
-
-        return open() && write();
-      });
-    } finally {
-      // A rejected event must not let a later event pass an earlier lookup.
-      await before;
-      slot.resolve();
-    }
-  }
-
-  private async receiveMessage(
-    body: unknown,
-    bot: BotConfig,
-    open: () => boolean,
-    admit: SlackAdmission = (write) => write(),
-  ) {
-    const sender = botSender(body);
-
-    if (sender && bot.access.peerCaptains && this.peers) {
-      const verified = await this.peers
-        .verify(sender, AbortSignal.timeout(peerLookupMs))
-        .catch(() => false);
-
-      if (!open()) return false;
-
-      return admit(() => this.accept(body, verified ? sender : undefined));
-    }
-
-    if (bot.resumeSlackThreads && this.slack.threadContext && !sender) {
-      const input = this.route(body);
-
-      if (!input) return false;
-      const before = input.eventId.slice(input.channel.length + 1);
-
-      if (
-        before !== input.thread &&
-        !input.startsConversation &&
-        !input.gate &&
-        !this.store.follows(input.conversation)
-      ) {
-        // No ACK on a transient lookup failure: Slack can redeliver.
-        const history = await this.slack.threadContext({
-          channel: input.channel,
-          thread: input.thread,
-          before,
-          user: input.user,
-          botUser: this.identity.user,
-          appId: bot.slack.appId,
-          team: this.identity.team,
-          signal: AbortSignal.timeout(1800),
-        });
-
-        if (!open() || this.bot !== bot) return false;
-
-        return admit(() =>
-          this.accept(
-            body,
-            undefined,
-            history.messages.some((message) => message.author === "this_bot"),
-          ),
-        );
-      }
-    }
-
-    return admit(() => this.accept(body));
-  }
-
-  private async receiveReaction(
+  private admitReaction(
     input: NonNullable<ReturnType<typeof routeReaction>>,
+    thread: string,
     bot: BotConfig,
-    open: () => boolean,
-    admit: SlackAdmission,
   ) {
     const {
       channel,
-      user,
-      slackReaction: { ts, name, action },
+      slackReaction: { name, action },
     } = input;
 
-    let thread = this.store.slackReplyThread(this.key, channel, ts);
+    if (!this.allowed(input)) return false;
 
-    if (!this.slack.userInfo || (!thread && !this.slack.reactionThread))
-      return false;
+    const admission = this.routeNotifications((read) => {
+      const notification = channel.startsWith("D")
+        ? undefined
+        : read?.(channel, thread);
 
-    // Both reads share the Socket Mode acknowledgement budget.
-    const signal = AbortSignal.any([
-      this.questionLifetime.signal,
-      AbortSignal.timeout(2200),
-    ]);
+      if (notification?.mode === "addressed-only") return;
 
-    try {
-      if (!isSlackHuman(await this.slack.userInfo(user, signal), user))
-        return false;
-
-      if (signal.aborted || !open()) return false;
-      thread ??= await this.slack.reactionThread?.({
-        channel,
-        ts,
-        appId: bot.slack.appId,
-        identity: this.identity,
-        signal,
-      });
-    } catch {
-      return false;
-    }
-
-    if (!thread || signal.aborted) return false;
-    const root = thread;
-
-    return admit(() => {
-      if (!this.allowed(input)) return false;
-
-      const admission = this.routeNotifications((read) => {
-        const notification = channel.startsWith("D")
-          ? undefined
-          : read?.(channel, root);
-
-        if (notification?.mode === "addressed-only") return;
-
-        return {
-          ...input,
-          conversation: conversationKey(this.key, channel, root),
-          thread: root,
-          text: `Slack reaction :${name}: ${action}.`,
-          ...(notification && { notification: { wake: "ordinary" as const } }),
-        };
-      });
-
-      return admission ? this.admitChat(admission, bot) : false;
+      return {
+        ...input,
+        conversation: conversationKey(this.key, channel, thread),
+        thread,
+        text: `Slack reaction :${name}: ${action}.`,
+        ...(notification && { notification: { wake: "ordinary" as const } }),
+      };
     });
+
+    return admission ? this.admitChat(admission, bot) : false;
   }
 
   /** Commit the exact requester-authorized target before Socket Mode ACK. */

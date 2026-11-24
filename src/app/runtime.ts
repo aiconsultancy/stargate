@@ -63,6 +63,7 @@ import { Gateway } from "../gateway/gateway";
 import type { TransportDelivery } from "../gateway/ports";
 import { createHealthReader } from "../observability/health/health";
 import { controlInteractions } from "../transports/slack/interactions";
+import { SlackAdmission } from "../transports/slack/admission";
 import { type IrcRegistration, IrcShip, ircKey } from "../transports/irc/ship";
 import { templatesDirectory } from "../lib/installation-paths";
 import { DrainRuntime } from "../automation/maintenance/maintenance-drain";
@@ -921,7 +922,7 @@ export function serve(
 
         yield* Effect.promise(() =>
           slack.start(
-            async (body) => open && gateway.receive(body, () => open),
+            new SlackAdmission(gateway.slackIntake()).handler(() => open),
             botLog,
             interactions,
             () => open,

@@ -3,7 +3,7 @@ import { Result, Schema } from "effect";
 import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { botSchema } from "../src/config";
-import { Gateway } from "../src/gateway/gateway";
+import { SlackGateway as Gateway } from "./slack-gateway-fixture";
 import type { TransportDelivery } from "../src/gateway/ports";
 import {
   NotificationStore,

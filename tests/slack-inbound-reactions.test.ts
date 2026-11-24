@@ -8,7 +8,7 @@ import {
   type SteerInput,
   sourceLine,
 } from "../src/backends/backend";
-import { Gateway } from "../src/gateway/gateway";
+import { SlackGateway as Gateway } from "./slack-gateway-fixture";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { NotificationStore } from "../src/notifications/preferences/notification-store";
 import type { NotificationReader } from "../src/notifications/preferences/notifications";
