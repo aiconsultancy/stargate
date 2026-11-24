@@ -188,7 +188,7 @@ its `fleetName` and `pullRequestRepositories`. See [officers](api.md#officers).
 | `allowedNetworks`         | `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `::1/128`, `fc00::/7` | Nonempty list of CIDRs wholly contained in the default ranges. Bind addresses must also be in these ranges.                                                     |
 | `corsOrigins`             | `["subspace://*"]`                                                                                     | Exact serialized origins or hostname patterns with a whole-label `*`. An empty list disables CORS.                                                              |
 | `fleetName`               | Hostname                                                                                               | Nonempty display name.                                                                                                                                          |
-| `pullRequestRepositories` | Omitted                                                                                                | Map of exact absolute, normalized crew checkout paths to GitHub `owner/repository` values for [Fleet PR lookup](api.md).                                        |
+| `pullRequestRepositories` | Omitted                                                                                                | Map of exact absolute, normalized crew worktree paths (as in `git.worktree`) to GitHub `owner/repository` values for [Fleet PR lookup](api.md).                 |
 
 `listen: "unix"` replaces TCP with one owner-only mode-0600 socket. The data
 directory must be owned by the service user with mode 0700 and safe ancestors.

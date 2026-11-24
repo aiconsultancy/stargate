@@ -1,7 +1,9 @@
 import type { OpenCodeClient } from "@opencode/client";
 import { Schema } from "effect";
 import {
+  type CrewGitInput,
   type FleetCrewStatus,
+  crewGitSchema,
   fleetCrewStatusSchema,
 } from "../../coordination/crew/reporting/fleet-status";
 import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
@@ -12,6 +14,14 @@ import {
 } from "../../shared/crew-status";
 
 const maxFleetStatusProbeMs = 6400;
+const crewGitTimeoutMs = 6000;
+
+/** An older crew plugin that lacks the called RPC method. */
+const isMethodNotFound = (error: unknown) =>
+  error !== null &&
+  typeof error === "object" &&
+  "type" in error &&
+  error.type === "rpc.method_not_found";
 
 /** Reads location-scoped crew status and coalesced fleet status probes. */
 export class OpenCodeCrewStatus {
@@ -27,6 +37,8 @@ export class OpenCodeCrewStatus {
     controller: AbortController;
     waiters: number;
   };
+
+  private crewGitRetryAt = 0;
 
   public constructor(
     private readonly client: OpenCodeClient,
@@ -51,6 +63,41 @@ export class OpenCodeCrewStatus {
       throw new Error(
         "Crew status unavailable; check the captain location and crew plugin.",
       );
+    }
+  }
+
+  /**
+   * Git state read by the crew plugin as the captain. Undefined when the
+   * plugin is older, unreachable or slow; the caller then reads locally.
+   */
+  public async crewGit(input: CrewGitInput, signal: AbortSignal) {
+    signal.throwIfAborted();
+
+    if (performance.now() < this.crewGitRetryAt) {
+      return;
+    }
+
+    try {
+      const result = await readWithDeadline(
+        signal,
+        crewGitTimeoutMs,
+        (reading) =>
+          this.client.rpc(CrewReporting).crewGit(input, {
+            location: { directory: this.directory() },
+            signal: reading,
+          }),
+      ).result;
+
+      return Schema.decodeUnknownSync(crewGitSchema)(result);
+    } catch (error) {
+      signal.throwIfAborted();
+
+      // Older plugins lack the method. Probe again after an upgrade.
+      if (isMethodNotFound(error)) {
+        this.crewGitRetryAt = performance.now() + 60_000;
+      }
+
+      return;
     }
   }
 
@@ -153,13 +200,7 @@ export class OpenCodeCrewStatus {
           );
         } else {
           // Older plugins still serve ordinary status. Probe again after an upgrade.
-          const unsupported =
-            error !== null &&
-            typeof error === "object" &&
-            "type" in error &&
-            error.type === "rpc.method_not_found";
-
-          this.recordFleetStatusFailure(unsupported);
+          this.recordFleetStatusFailure(isMethodNotFound(error));
           failureCounted = true;
         }
 

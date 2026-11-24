@@ -2,8 +2,16 @@ import { hostname } from "node:os";
 import { Semaphore } from "effect";
 import type { AgentBackend } from "../../../../backends/backend";
 import { ircFeedbackDefaults } from "../../../../config";
-import { redactCredentials } from "../../../../lib/credentials";
-import type { FleetCrewStatus } from "../../../../coordination/crew/reporting/fleet-status";
+import {
+  containsCredential,
+  redactCredentials,
+} from "../../../../lib/credentials";
+import type {
+  CrewGit,
+  CrewGitInput,
+  CrewGitState,
+  FleetCrewStatus,
+} from "../../../../coordination/crew/reporting/fleet-status";
 import {
   type CrewStatus,
   type CrewStatusTask,
@@ -25,7 +33,7 @@ import {
   gatewayFeatures,
   registrationFeatures,
 } from "./features";
-import { createGitReader } from "./git";
+import { createGitReader, githubRepository } from "./git";
 import { createPullReader } from "./pulls";
 import {
   API_V1_VERSION,
@@ -64,6 +72,11 @@ type Context = CrewStatus["members"][number];
 
 type Metadata = FleetCrewStatus["metadata"];
 
+type CheckoutGit = (
+  member: string,
+  context: Pick<V1CrewContext, "project" | "provisioned">,
+) => Promise<{ path: string | undefined; state: V1Git | null }>;
+
 type Timing = {
   activity: V1Activity;
   since: number | null;
@@ -79,6 +92,65 @@ const activityOrder: readonly V1Activity[] = [
 ];
 
 const hour = 3_600_000;
+
+const safeRef = (ref: string | null) =>
+  ref !== null && !containsCredential(ref) ? ref : null;
+
+/** Git state reported by the captain's crew plugin, in the v1 shape. */
+export function reportedGit(
+  state: CrewGitState | null,
+  directory: string,
+): V1Git | null {
+  if (!state) {
+    return null;
+  }
+
+  const empty: V1Git = {
+    branch: null,
+    head: null,
+    base: null,
+    ahead: null,
+    behind: null,
+    changedFiles: null,
+    repository: null,
+    checkedAt: state.checkedAt,
+    commit: null,
+    worktree: directory,
+    source: "captain",
+  };
+
+  if (state.error) {
+    return { ...empty, error: state.error };
+  }
+
+  return {
+    ...empty,
+    branch: safeRef(state.branch),
+    head: state.commit?.slice(0, 7) ?? null,
+    base: safeRef(state.base),
+    ahead: state.ahead,
+    behind: state.behind,
+    changedFiles: state.changedFiles,
+    repository: state.remote === null ? null : githubRepository(state.remote),
+    commit: state.commit,
+    ...(state.changedFiles !== null && { dirty: state.changedFiles > 0 }),
+  };
+}
+
+/** Git state this process read itself, marked with its checkout. */
+function localGit(state: V1Git | null, directory: string | undefined) {
+  if (!state || !directory) {
+    return state;
+  }
+
+  return {
+    ...state,
+    worktree: directory,
+    ...(state.changedFiles !== null && { dirty: state.changedFiles > 0 }),
+    source: "gateway" as const,
+  };
+}
+
 const subagentLimit = 3;
 
 function runningTask(task: V1Task | null): boolean {
@@ -307,6 +379,96 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   const backendIdentities = new WeakMap<AgentBackend, number>();
   let nextBackendIdentity = 0;
 
+  /** Undefined when the captain's crew plugin cannot answer. */
+  async function captainGit(
+    registration: Registration,
+    input: CrewGitInput,
+    signal: AbortSignal,
+  ): Promise<CrewGit | undefined> {
+    const backend = dashboard.fleetBackend(registration.config.id);
+
+    if (!backend?.crewGit) {
+      return;
+    }
+
+    try {
+      return await backend.crewGit(input, signal);
+    } catch {
+      signal.throwIfAborted();
+
+      return;
+    }
+  }
+
+  /** The captain's project checkout, read as the captain when it answers. */
+  async function projectGit(
+    registration: Registration,
+    directory: string | undefined,
+    reported: CrewGit | undefined,
+    signal: AbortSignal,
+  ) {
+    const report =
+      reported ?? (await captainGit(registration, { crew: false }, signal));
+
+    return report
+      ? reportedGit(report.project.git, report.project.directory)
+      : localGit(await git(directory, signal), directory);
+  }
+
+  /**
+   * One crew checkout reader per detail read. The captain owns the worktrees
+   * and the gateway may not be able to read them, so its report wins; without
+   * one, the gateway reads the provisioned checkouts itself.
+   */
+  async function crewCheckouts(
+    registration: Registration,
+    metadata: Metadata | undefined,
+    only: string | undefined,
+    signal: AbortSignal,
+  ): Promise<{ read: CheckoutGit; reported?: CrewGit }> {
+    const reported = await captainGit(
+      registration,
+      only ? { member: only } : {},
+      signal,
+    );
+
+    if (reported) {
+      return {
+        reported,
+        read: (member, { project }) => {
+          const entry = reported.contexts.find(
+            (candidate) =>
+              candidate.member === member && candidate.project === project,
+          );
+
+          return Promise.resolve(
+            entry
+              ? {
+                  path: entry.directory,
+                  state: reportedGit(entry.git, entry.directory),
+                }
+              : { path: undefined, state: null },
+          );
+        },
+      };
+    }
+
+    const local = localCheckout(registration);
+
+    return {
+      read: async (member, { project, provisioned }) => {
+        const path =
+          local && provisioned === "ready"
+            ? metadata?.contexts.find(
+                (entry) => entry.member === member && entry.project === project,
+              )?.directory
+            : undefined;
+
+        return { path, state: localGit(await git(path, signal), path) };
+      },
+    };
+  }
+
   function captain(
     registration: Registration,
     name: string,
@@ -403,6 +565,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     signal: AbortSignal,
     error?: string,
     metadata?: Metadata,
+    reported?: CrewGit,
   ): Promise<V1Ship> {
     const backend = registration.config.backend;
 
@@ -417,7 +580,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         : undefined;
 
     const [project, features] = await Promise.all([
-      git(directory, signal),
+      projectGit(registration, directory, reported, signal),
       registrationFeatures(registration),
     ]);
 
@@ -556,21 +719,14 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       .filter((session) => session.kind === "crew")
       .slice(0, HISTORY_PAGE);
 
+    const checkouts = await crewCheckouts(registration, metadata, only, signal);
+
     const enriched = await Promise.all(
       crewMembers.map(async (member) => {
         const [contexts, children] = await Promise.all([
           Promise.all(
             member.contexts.map(async (context) => {
-              const path =
-                localCheckout(registration) && context.provisioned === "ready"
-                  ? metadata?.contexts.find(
-                      (entry) =>
-                        entry.member === member.id &&
-                        entry.project === context.project,
-                    )?.directory
-                  : undefined;
-
-              const state = await git(path, signal);
+              const { path, state } = await checkouts.read(member.id, context);
               const repository = path && repositories?.[path];
 
               const pr =
@@ -599,7 +755,13 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       }),
     );
 
-    return { officer, view, metadata, crewMembers: enriched };
+    return {
+      officer,
+      view,
+      metadata,
+      crewMembers: enriched,
+      reported: checkouts.reported,
+    };
   }
 
   async function shipDetail(
@@ -613,7 +775,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       return;
     }
 
-    const { officer, view, metadata, crewMembers } = result;
+    const { officer, view, metadata, crewMembers, reported } = result;
 
     const summary = await shipSummary(
       registration,
@@ -623,6 +785,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       signal,
       view.crewError,
       metadata,
+      reported,
     );
 
     return {

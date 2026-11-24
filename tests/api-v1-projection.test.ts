@@ -1,5 +1,12 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OpenCode } from "@opencode/client";
@@ -7,7 +14,10 @@ import { Schema } from "effect";
 import { diffEvents } from "../src/observability/dashboard/api/v1/diff";
 import { createEventStreams } from "../src/observability/dashboard/api/v1/events";
 import type { ApiV1Config } from "../src/observability/dashboard/api/v1/features";
+import { createGitReader } from "../src/observability/dashboard/api/v1/git";
 import { createApiV1Source } from "../src/observability/dashboard/api/v1/projection";
+import type { CrewGitInput } from "../src/coordination/crew/reporting/fleet-status";
+import { createCrewGitReader } from "../src/coordination/crew/workspace/workspace";
 import { startApiV1Server } from "../src/observability/dashboard/api/v1/server";
 import { apiToken } from "../src/observability/dashboard/api/v1/token";
 import type {
@@ -86,6 +96,7 @@ function fixture(
     Parameters<typeof createApiV1Source>[0],
     "git" | "pullRequest" | "requests"
   >,
+  captainGit?: AgentBackend["crewGit"],
 ) {
   let at = 4_000_000;
 
@@ -219,6 +230,7 @@ function fixture(
       async crewStatus(input) {
         return status(id, input);
       },
+      ...(id === "captain" && captainGit && { crewGit: captainGit }),
       ...(id === "captain"
         ? {
             async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
@@ -1121,6 +1133,66 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("an older OpenCode plugin without crewGit is skipped for a minute", async () => {
+    const methods: string[] = [];
+    let missing = false;
+
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        methods.push(new URL(request.url).pathname.split("/").at(-1) ?? "");
+
+        if (missing) {
+          return Response.json(
+            {
+              _tag: "RpcError",
+              type: "rpc.method_not_found",
+              message: "Fixture RPC failure",
+            },
+            { status: 400 },
+          );
+        }
+
+        return Response.json({
+          output: {
+            project: { directory: "/fixture", git: null },
+            contexts: [],
+          },
+        });
+      },
+    });
+
+    try {
+      const config = Schema.decodeUnknownSync(backendSchema)({
+        type: "opencode",
+        url: server.url.href,
+        directory: "/",
+      });
+
+      if (config.type !== "opencode") {
+        throw new Error("Invalid backend fixture");
+      }
+
+      const backend = new OpenCodeBackend(config);
+
+      try {
+        expect(await backend.crewGit({ member: "pilot" }, signal)).toEqual({
+          project: { directory: "/fixture", git: null },
+          contexts: [],
+        });
+        missing = true;
+        expect(await backend.crewGit({}, signal)).toBeUndefined();
+        expect(await backend.crewGit({}, signal)).toBeUndefined();
+        expect(methods).toEqual(["crewGit", "crewGit"]);
+      } finally {
+        await backend.close();
+      }
+    } finally {
+      await server.stop(true);
+    }
+  });
+
   test("backs off after repeated fleet-status failures with a different wire format", async () => {
     const methods: string[] = [];
 
@@ -1299,6 +1371,138 @@ describe("Fleet API projection", () => {
       streams.stop();
       held.resolve({ members: [], total: 0, truncated: false });
     }
+  });
+
+  test("the captain's crew plugin reads a worktree the gateway cannot", async () => {
+    const root = await realpath(
+      await mkdtemp(join(tmpdir(), "stargate-api-captain-git-")),
+    );
+
+    const home = join(root, "captain-home");
+    const worktree = join(home, "worktrees", "pilot");
+
+    try {
+      await mkdir(worktree, { recursive: true });
+
+      for (const args of [
+        ["init", "-q", "-b", "task/pilot"],
+        [
+          "-c",
+          "user.name=Fixture",
+          "-c",
+          "user.email=fixture@example.invalid",
+          "commit",
+          "-q",
+          "--allow-empty",
+          "-m",
+          "first",
+        ],
+        ["remote", "add", "origin", "https://github.com/example/project.git"],
+      ]) {
+        expect(
+          Bun.spawnSync(["git", ...args], { cwd: worktree }).exitCode,
+        ).toBe(0);
+      }
+
+      await writeFile(join(worktree, "draft.txt"), "draft\n");
+
+      // The captain owns the worktree and reads it before the home is closed.
+      const captainState = await createCrewGitReader(() => 7)(worktree, signal);
+      await chmod(home, 0o000);
+      const gatewayRead = createGitReader(() => 7);
+
+      // Root ignores permissions; the boundary only exists for other users.
+      if (process.getuid?.() !== 0) {
+        expect(await gatewayRead(worktree, signal)).toMatchObject({
+          branch: null,
+          error: "Git state unavailable.",
+        });
+      }
+
+      const requests: CrewGitInput[] = [];
+      const pullRequest = mock(() => null);
+
+      const f = fixture(
+        undefined,
+        { git: gatewayRead, pullRequest },
+        async (input) => {
+          requests.push(input);
+
+          return {
+            project: { directory: root, git: null },
+            contexts: [
+              {
+                member: "pilot",
+                project: null,
+                directory: worktree,
+                git: captainState,
+              },
+            ],
+          };
+        },
+      );
+
+      f.set("captain", [context("pilot")]);
+      f.useConfig((config) => ({
+        ...config,
+        api: {
+          listen: ":8484",
+          pullRequestRepositories: { [worktree]: "example/project" },
+        },
+      }));
+
+      const detail = await f.source.crew("captain", "pilot", signal);
+      expect(requests).toContainEqual({ member: "pilot" });
+      expect(detail?.member.contexts[0]?.git).toEqual({
+        branch: "task/pilot",
+        head: captainState?.commit?.slice(0, 7) ?? "missing",
+        base: null,
+        ahead: null,
+        behind: null,
+        changedFiles: 1,
+        repository: "example/project",
+        checkedAt: 7,
+        commit: captainState?.commit ?? "missing",
+        worktree,
+        dirty: true,
+        source: "captain",
+      });
+      expect(detail?.member.contexts[0]).toMatchObject({
+        pullRequest: null,
+        pullRequestKnown: true,
+      });
+      expect(pullRequest).toHaveBeenCalledWith("example/project", "task/pilot");
+    } finally {
+      await chmod(home, 0o700).catch(() => {});
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("an older captain plugin leaves the gateway reading Git itself", async () => {
+    const f = fixture(undefined, undefined, async () => undefined);
+    f.set("captain", [context("pilot")]);
+    const detail = await f.source.crew("captain", "pilot", signal);
+
+    expect(f.calls.git).toEqual([`${privateProject}-pilot-default`]);
+    expect(detail?.member.contexts[0]?.git).toMatchObject({
+      branch: "test/change",
+      worktree: `${privateProject}-pilot-default`,
+      dirty: false,
+      source: "gateway",
+    });
+  });
+
+  test("a reported context the plugin does not know has no Git state", async () => {
+    const f = fixture(undefined, undefined, async () => ({
+      project: { directory: "/fixture", git: null },
+      contexts: [],
+    }));
+
+    f.set("captain", [context("pilot")]);
+    const detail = await f.source.crew("captain", "pilot", signal);
+
+    expect(f.calls.git).toEqual([]);
+    expect(detail?.member.contexts[0]?.git).toBeNull();
   });
 
   test("only a configured checkout binding can authorize a PR lookup", async () => {
@@ -1710,7 +1914,7 @@ describe("Fleet API projection", () => {
     ).toBe(uncertain);
   });
 
-  test("uses only scoped roots, returns the newest three children and keeps paths private", async () => {
+  test("uses only scoped roots, returns the newest three children and shows paths only as worktrees", async () => {
     const f = fixture();
     f.set("captain", [
       context("pilot", {
@@ -1745,7 +1949,18 @@ describe("Fleet API projection", () => {
       `${privateProject}-pilot-default`,
       `${privateProject}-pilot-ops`,
     ]);
-    expect(JSON.stringify(detail)).not.toContain(privateProject);
+    // The checkout path appears only as the context's Git worktree.
+    expect(
+      detail?.member.contexts.map((context) => context.git?.worktree),
+    ).toEqual([
+      `${privateProject}-pilot-default`,
+      `${privateProject}-pilot-ops`,
+    ]);
+    expect(
+      JSON.stringify(detail, (key, value: unknown) =>
+        key === "worktree" ? undefined : value,
+      ),
+    ).not.toContain(privateProject);
     expect(JSON.stringify(detail)).not.toContain("fixture-value");
     expect(detail?.member.contexts[1]?.current).toMatchObject({
       summary: "Project assignment",

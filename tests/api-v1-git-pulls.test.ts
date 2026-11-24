@@ -3,10 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  countChangedPaths,
   githubRepository,
   createGitReader as makeGitReader,
-  parseAheadBehind,
 } from "../src/observability/dashboard/api/v1/git";
 import {
   createPullReader,
@@ -27,31 +25,6 @@ function createGitReader(
 }
 
 afterAll(() => Promise.all(readers.map((reader) => reader.stop())));
-
-test("porcelain -z counts rename/copy records once and accepts literal path whitespace", () => {
-  expect(countChangedPaths("")).toBe(0);
-  expect(
-    countChangedPaths(
-      [
-        " M file with spaces",
-        "?? path\nwith a newline",
-        "R  new path",
-        "old path",
-        " C new copy",
-        "source",
-        " D file-to-remove",
-        "A  new file",
-        "",
-      ].join("\0"),
-    ),
-  ).toBe(6);
-  expect(countChangedPaths("R  incomplete\0")).toBeNull();
-  expect(countChangedPaths("?? missing terminator")).toBeNull();
-  expect(parseAheadBehind("2\t7\n")).toEqual({ ahead: 7, behind: 2 });
-  expect(parseAheadBehind("0 0")).toEqual({ ahead: 0, behind: 0 });
-  expect(parseAheadBehind("log output")).toBeNull();
-  expect(parseAheadBehind("2 9007199254740992")).toBeNull();
-});
 
 test("parses only GitHub owner/repo from URL and scp-like remotes", () => {
   for (const remote of [
@@ -106,6 +79,8 @@ test("reads real Git state, respects the 15-second cache and handles a detached 
     if (command.exitCode !== 0) {
       throw new Error(command.stderr.toString());
     }
+
+    return command.stdout.toString().trim();
   };
 
   try {
@@ -118,9 +93,11 @@ test("reads real Git state, respects the 15-second cache and handles a detached 
     git("switch", "-c", "work");
     git("branch", "--set-upstream-to=origin/trunk");
     git("commit", "--allow-empty", "-m", "Feature");
+    const commit = git("rev-parse", "HEAD");
     expect(await read(directory, signal)).toMatchObject({
       branch: "work",
-      head: expect.stringMatching(/^[a-f0-9]+$/),
+      head: commit.slice(0, 7),
+      commit,
       base: "origin/trunk",
       ahead: 1,
       behind: 0,

@@ -65,6 +65,7 @@ import {
 } from "../../../src/coordination/crew/controls/notifications";
 import { CrewPost } from "../../../src/coordination/crew/controls/post";
 import { effectProjectToolInput } from "../../../src/coordination/crew/input/project-options";
+import { createCrewGitReader } from "../../../src/coordination/crew/workspace/workspace";
 import { CrewProjects } from "../../../src/coordination/crew/workspace/projects";
 import {
   CrewQuestionHandoff,
@@ -291,6 +292,8 @@ const plugin = Plugin.define({
       async () => new CrewMaintenance(engine),
       (maintenance) => maintenance.dispose(),
     );
+
+    const gitStates = createCrewGitReader();
 
     const report = async <T>(
       signal: AbortSignal,
@@ -564,6 +567,10 @@ const plugin = Plugin.define({
           report(context.signal, async () => projects.status(input)),
         fleetStatus: (input, context) =>
           report(context.signal, async () => projects.fleetStatus(input)),
+        crewGit: (input, context) =>
+          report(context.signal, () =>
+            projects.crewGit(input, gitStates, context.signal),
+          ),
         historyRoots: (_input, context) =>
           report(context.signal, () => projects.historyRoots(context.signal)),
         historyDescribe: (input, context) =>

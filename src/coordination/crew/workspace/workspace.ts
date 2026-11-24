@@ -1,14 +1,21 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, readFile, readlink, realpath } from "node:fs/promises";
+import { lstat, readFile, readlink, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { Schema } from "effect";
+import { Schema, Semaphore } from "effect";
 import {
   settingsDefault,
   settingsPattern,
   settingsStartsWith,
   settingsStruct,
 } from "../../../config/settings-schema";
+import { abortable, runAbortable } from "../../../lib/effect";
+import { readWithDeadline } from "../../../lib/read-deadline";
+import {
+  type CrewGitState,
+  countChangedPaths,
+  parseAheadBehind,
+} from "../reporting/fleet-status";
 import { CrewError } from "../execution/state";
 import { agentIDSchema } from "../team";
 
@@ -674,4 +681,236 @@ export async function resetWorkspace(
   );
 
   return checkpoint;
+}
+
+// Read-only checkout state for the Fleet API, read as the captain.
+const gitStateTTL = 15_000;
+const gitStateTimeout = 5000;
+const statusLimit = 16 * 1024 * 1024;
+const gitUnavailable = "Git state unavailable.";
+
+/** The remote URL without user information, which can hold a credential. */
+export function remoteWithoutUser(remote: string): string | null {
+  const value = remote.trim();
+
+  if (!value || value.length > 2048 || /[\0\n\r]/.test(value)) {
+    return null;
+  }
+
+  const url = URL.parse(value);
+
+  if (!url || url.protocol === "file:") {
+    return value;
+  }
+
+  url.username = "";
+  url.password = "";
+
+  return url.href;
+}
+
+const name = (value: string | null | undefined) => {
+  const text = value?.trim();
+
+  return text && text.length <= 255 && !/[\0\n\r]/.test(text) ? text : null;
+};
+
+function emptyState(checkedAt: number): CrewGitState {
+  return {
+    branch: null,
+    commit: null,
+    base: null,
+    ahead: null,
+    behind: null,
+    changedFiles: null,
+    remote: null,
+    checkedAt,
+  };
+}
+
+async function inspect(
+  directory: string,
+  signal: AbortSignal,
+  now: () => number,
+): Promise<CrewGitState | null> {
+  try {
+    if (!(await stat(directory)).isDirectory()) {
+      return { ...emptyState(now()), error: gitUnavailable };
+    }
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+
+    return { ...emptyState(now()), error: gitUnavailable };
+  }
+
+  const run = async (args: string[], limit?: number) =>
+    (
+      await git(directory, args, {
+        signal,
+        failure: gitUnavailable,
+        ...(limit !== undefined && { limit }),
+      })
+    ).text;
+
+  // Expected non-zero exits: detached HEAD, unborn branch, no upstream.
+  const optional = (args: string[]) =>
+    run(args).catch(() => {
+      signal.throwIfAborted();
+
+      return null;
+    });
+
+  try {
+    if (
+      (await run(["rev-parse", "--is-inside-work-tree", "--show-prefix"])) !==
+      "true\n\n"
+    ) {
+      throw new Error(gitUnavailable);
+    }
+
+    const ref = (await optional(["symbolic-ref", "-q", "HEAD"]))?.trim();
+
+    const branch = ref?.startsWith("refs/heads/")
+      ? ref.slice("refs/heads/".length)
+      : null;
+
+    const resolved = (
+      await optional([
+        "rev-parse",
+        "--verify",
+        "-q",
+        "--end-of-options",
+        "HEAD^{commit}",
+      ])
+    )?.trim();
+
+    const commit = resolved === undefined || resolved === "" ? null : resolved;
+
+    if (commit !== null && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) {
+      throw new Error(gitUnavailable);
+    }
+
+    const upstream = branch
+      ? await optional([
+          "rev-parse",
+          "--verify",
+          "-q",
+          "--abbrev-ref",
+          "--symbolic-full-name",
+          "--end-of-options",
+          `${branch}@{upstream}`,
+        ])
+      : null;
+
+    const base = name(
+      upstream ??
+        (await optional([
+          "symbolic-ref",
+          "--short",
+          "-q",
+          "refs/remotes/origin/HEAD",
+        ])),
+    );
+
+    const [status, remote, counts] = await Promise.all([
+      run(
+        [
+          "status",
+          "--porcelain=v1",
+          "-z",
+          "--untracked-files=all",
+          // Count changed gitlinks without reading submodule worktrees.
+          "--ignore-submodules=dirty",
+        ],
+        statusLimit,
+      ),
+      optional(["remote", "get-url", "origin"]),
+      base && commit
+        ? run([
+            "rev-list",
+            "--left-right",
+            "--count",
+            "--end-of-options",
+            `${base}...${commit}`,
+            "--",
+          ])
+        : null,
+    ]);
+
+    const changedFiles = countChangedPaths(status);
+    const divergence = counts === null ? null : parseAheadBehind(counts);
+
+    if (changedFiles === null || (counts !== null && divergence === null)) {
+      throw new Error(gitUnavailable);
+    }
+
+    return {
+      branch: name(branch),
+      commit,
+      base,
+      ahead: divergence?.ahead ?? null,
+      behind: divergence?.behind ?? null,
+      changedFiles,
+      remote: remote === null ? null : remoteWithoutUser(remote),
+      checkedAt: now(),
+    };
+  } catch {
+    signal.throwIfAborted();
+
+    return { ...emptyState(now()), error: gitUnavailable };
+  }
+}
+
+export type CrewGitReader = (
+  directory: string,
+  signal: AbortSignal,
+) => Promise<CrewGitState | null>;
+
+/**
+ * Reads checkouts as the captain, who owns them. Results are cached briefly
+ * and a read continues after its caller leaves, so the next poll is warm.
+ */
+export function createCrewGitReader(
+  now: () => number = Date.now,
+  monotonic: () => number = () => performance.now(),
+  timeout = gitStateTimeout,
+): CrewGitReader {
+  const permits = Semaphore.makeUnsafe(4);
+
+  const cache = new Map<
+    string,
+    { expiresAt: number; value: Promise<CrewGitState | null> }
+  >();
+
+  return (directory, signal) => {
+    const at = monotonic();
+
+    for (const [path, entry] of cache) {
+      if (entry.expiresAt <= at) {
+        cache.delete(path);
+      }
+    }
+
+    let entry = cache.get(directory);
+
+    if (!entry) {
+      const deadline = AbortSignal.timeout(timeout);
+
+      const value = runAbortable(
+        permits.withPermit(
+          abortable((reading) => inspect(directory, reading, now)),
+        ),
+        deadline,
+      ).catch(() => ({ ...emptyState(now()), error: "Git read timed out." }));
+
+      entry = { expiresAt: at + gitStateTTL, value };
+      cache.set(directory, entry);
+    }
+
+    const { value } = entry;
+
+    return readWithDeadline(signal, undefined, () => value).result;
+  };
 }

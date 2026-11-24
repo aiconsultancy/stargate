@@ -21,6 +21,10 @@ import { Semaphore } from "effect";
 import { containsCredential } from "../../../../lib/credentials";
 import { abortable, runAbortable } from "../../../../lib/effect";
 import { readWithDeadline } from "../../../../lib/read-deadline";
+import {
+  countChangedPaths,
+  parseAheadBehind,
+} from "../../../../coordination/crew/reporting/fleet-status";
 import { readCommand } from "./command";
 import { githubRepository, isGitHubRepositoryName } from "./github-repository";
 import type { V1Git } from "./types";
@@ -41,53 +45,6 @@ class MetadataLimitExceeded extends Error {}
 // Pulling this file, which looks up its own location, into the crew plugin's
 // Digest.
 export { githubRepository, isGitHubRepositoryName };
-
-export function parseAheadBehind(output: string) {
-  const match = /^(\d+)[\t ]+(\d+)$/.exec(output.trim());
-
-  if (!match) {
-    return null;
-  }
-
-  // The command compares base...HEAD, so the left side is behind.
-  const behind = Number(match[1]);
-  const ahead = Number(match[2]);
-
-  return Number.isSafeInteger(ahead) && Number.isSafeInteger(behind)
-    ? { ahead, behind }
-    : null;
-}
-
-export function countChangedPaths(output: string): number | null {
-  if (output === "") {
-    return 0;
-  }
-
-  const entries = output.split("\0");
-
-  if (entries.pop() !== "") {
-    return null;
-  }
-
-  let count = 0;
-
-  for (let index = 0; index < entries.length; index++) {
-    const entry = entries[index];
-
-    if (!entry || !/^[ MTADRCU?!]{2} .+/s.test(entry)) {
-      return null;
-    }
-
-    // In porcelain -z, a rename/copy has a second NUL-delimited path.
-    if (/^[RC]|^.[RC]/.test(entry) && !entries[++index]) {
-      return null;
-    }
-
-    count++;
-  }
-
-  return count;
-}
 
 const safeRef = (ref: string) =>
   ref.length <= 255 && !containsCredential(ref) ? ref : null;
@@ -956,6 +913,7 @@ async function inspect(
         oid?.startsWith(abbreviation) && /^[a-f0-9]{4,64}$/.test(abbreviation)
           ? abbreviation
           : null,
+      commit: oid ?? null,
       base: baseRef ? safeRef(baseRef) : null,
       ...counts,
       changedFiles,

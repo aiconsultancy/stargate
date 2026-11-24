@@ -1,6 +1,10 @@
 import type { ActivityWatch } from "../chat/activity/activity";
 import type { Attachment } from "../chat/attachments/attachments";
-import type { FleetCrewStatus } from "../coordination/crew/reporting/fleet-status";
+import type {
+  CrewGit,
+  CrewGitInput,
+  FleetCrewStatus,
+} from "../coordination/crew/reporting/fleet-status";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
 import type { CronAdvanced, CronEvaluation } from "../automation/cron/advanced";
 import type {
@@ -282,6 +286,14 @@ export interface AgentBackend {
     input: CrewStatusInput,
     signal: AbortSignal,
   ): Promise<FleetCrewStatus | undefined>;
+  /**
+   * Git state of the captain's project and crew checkouts, read by the crew
+   * plugin as the captain. Undefined when the plugin cannot answer.
+   */
+  crewGit?(
+    input: CrewGitInput,
+    signal: AbortSignal,
+  ): Promise<CrewGit | undefined>;
   /** Sanitized subscription limits; never runs a model or creates a session. */
   quota?(signal: AbortSignal): Promise<QuotaSnapshot>;
   cronQuota?(signal: AbortSignal): Promise<QuotaObservation>;

@@ -14,7 +14,12 @@ import {
   type CrewOptions,
   crewOptionsSchema,
 } from "../execution/engine";
-import type { FleetCrewStatus } from "../reporting/fleet-status";
+import type {
+  CrewGit,
+  CrewGitInput,
+  FleetCrewStatus,
+} from "../reporting/fleet-status";
+import type { CrewGitReader } from "./workspace";
 import { effectProjectKeySchema } from "../input/project-options";
 import { CrewError } from "../execution/state";
 import { defaultTeam } from "../team";
@@ -346,6 +351,47 @@ export class CrewProjects {
         projectDirectory: this.default.options.projectDirectory,
         contexts,
       },
+    };
+  }
+
+  /** Git state of the project checkout and each configured crew worktree. */
+  public async crewGit(
+    input: CrewGitInput,
+    read: CrewGitReader,
+    signal: AbortSignal,
+  ): Promise<CrewGit> {
+    const projectDirectory = this.default.options.projectDirectory;
+
+    const targets =
+      input.crew === false
+        ? []
+        : [...this.contexts].flatMap(([project, engine]) =>
+            engine.options.team.crew.flatMap(({ id }) => {
+              const directory = engine.options.worktrees[id];
+
+              return directory && (!input.member || input.member === id)
+                ? [
+                    {
+                      member: id,
+                      project: project === "default" ? null : project,
+                      directory,
+                    },
+                  ]
+                : [];
+            }),
+          );
+
+    const [project, ...states] = await Promise.all([
+      read(projectDirectory, signal),
+      ...targets.map(({ directory }) => read(directory, signal)),
+    ]);
+
+    return {
+      project: { directory: projectDirectory, git: project ?? null },
+      contexts: targets.map((target, index) => ({
+        ...target,
+        git: states[index] ?? null,
+      })),
     };
   }
 
