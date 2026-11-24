@@ -31,8 +31,9 @@ import {
 import { settingsIssues } from "../config/settings-schema";
 
 export function buildManifest(name = "Stargate") {
-  if (!name.trim() || name.length > 80)
+  if (!name.trim() || name.length > 80) {
     throw new Error("App name must be 1–80 characters.");
+  }
 
   return {
     display_information: { name, description: "AI assistant for Slack" },
@@ -108,10 +109,11 @@ Messages from bots are never allowed. Backend permissions are separate.`;
 function validBot(input: unknown): BotConfig {
   const parsed = Schema.decodeUnknownResult(botSchema)(input);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     throw new Error(
       "Invalid bot configuration. Check IDs, backend options, and nonempty user/channel allowlists.",
     );
+  }
 
   if (
     parsed.success.backend.type === "pi-durable" &&
@@ -143,8 +145,9 @@ export async function checkCredentials(
   try {
     companion = parseEnv(await readFile(`${path}.env`, "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw new Error("Cannot read credential companion.");
+    }
   }
 
   const env = { ...companion, ...environment };
@@ -154,24 +157,32 @@ export async function checkCredentials(
     resolve(dirname(resolve(path)), dataDirectory),
   );
 
-  for (const registration of irc) await checkIrcCredentials(registration, env);
+  for (const registration of irc) {
+    await checkIrcCredentials(registration, env);
+  }
 
-  if (agentDispatch?.enabled)
+  if (agentDispatch?.enabled) {
     for (const name of [
       agentDispatch.api.tokenEnv,
       ...Object.values(agentDispatch.api.headersEnv),
-    ])
-      if (!env[name]?.trim())
+    ]) {
+      if (!env[name]?.trim()) {
         throw new Error(
           "Missing agent dispatch API environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
         );
+      }
+    }
+  }
 
-  if (subspaceAgents?.enabled)
-    for (const name of Object.values(subspaceAgents.api.headersEnv))
-      if (!env[name]?.trim())
+  if (subspaceAgents?.enabled) {
+    for (const name of Object.values(subspaceAgents.api.headersEnv)) {
+      if (!env[name]?.trim()) {
         throw new Error(
           "Missing Subspace agent API environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
         );
+      }
+    }
+  }
 
   for (const bot of bots) {
     if (
@@ -197,7 +208,10 @@ export async function readConfiguration(
   let input: unknown;
 
   try {
-    if (!(await lstat(path)).isFile()) throw new Error("Not a regular file");
+    if (!(await lstat(path)).isFile()) {
+      throw new Error("Not a regular file");
+    }
+
     input = JSON.parse(await readFile(path, "utf8"));
   } catch {
     throw new Error(invalid);
@@ -207,7 +221,9 @@ export async function readConfiguration(
     notificationReload ? reloadConfigSchema : configSchema,
   )(input);
 
-  if (Result.isSuccess(parsed)) return parsed.success;
+  if (Result.isSuccess(parsed)) {
+    return parsed.success;
+  }
 
   const apiIssues = settingsIssues(parsed.failure.issue).issues.flatMap(
     ({ path, message }) =>
@@ -246,7 +262,10 @@ async function exists(path: string) {
 
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+
     throw new Error("Cannot inspect configuration path.");
   }
 }
@@ -292,10 +311,11 @@ export async function addBot(
       bots: [...previous.bots, bot],
     });
 
-    if (Result.isFailure(next))
+    if (Result.isFailure(next)) {
       throw new Error(
         "Cannot add bot: duplicate identity/token reference or invalid configuration.",
       );
+    }
 
     // Env names must be unique across both token kinds, too.
     const names = next.success.bots.flatMap((entry) => [
@@ -303,16 +323,19 @@ export async function addBot(
       entry.slack.botTokenEnv,
     ]);
 
-    if (new Set(names).size !== names.length)
+    if (new Set(names).size !== names.length) {
       throw new Error("Token environment references must be unique.");
+    }
 
     if (tokens) {
       const envPath = `${path}.env`;
       let contents = "";
 
       if (await exists(envPath)) {
-        if (!(await lstat(envPath)).isFile())
+        if (!(await lstat(envPath)).isFile()) {
           throw new Error("Credential companion must be a regular file.");
+        }
+
         contents = await readFile(envPath, "utf8");
       }
 
@@ -340,15 +363,20 @@ export async function addBot(
 }
 
 export async function setupWizard(configPath: string) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY)
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error(
       "Wizard requires a terminal. Use bot add flags for scripted setup.",
     );
+  }
+
   let hidden = false;
 
   const output = new Writable({
     write(chunk: Buffer, _encoding, callback) {
-      if (!hidden) process.stdout.write(chunk);
+      if (!hidden) {
+        process.stdout.write(chunk);
+      }
+
       callback();
     },
   });
@@ -371,8 +399,10 @@ export async function setupWizard(configPath: string) {
   try {
     const id = await ask("Bot ID (lowercase letters, numbers, _ or -): ");
 
-    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id))
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) {
       throw new Error("Invalid bot ID.");
+    }
+
     console.log(slackInstructions);
     console.log(manifestUrl(id));
 
@@ -392,7 +422,9 @@ export async function setupWizard(configPath: string) {
           console.log("Open the printed Slack link manually.");
         });
         browser.unref();
-      } else console.log("Open the printed Slack link manually.");
+      } else {
+        console.log("Open the printed Slack link manually.");
+      }
     }
 
     const appId = await ask("Slack App ID: ");
@@ -473,7 +505,10 @@ export async function setupWizard(configPath: string) {
       console.log(
         "Pi defaults to chat only. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in the service environment or private .env companion. Optional tools=coding enables trusted read/write/edit/bash; it is not a sandbox.",
       );
-    } else throw new Error("Unknown backend.");
+    } else {
+      throw new Error("Unknown backend.");
+    }
+
     const prefix = `STARGATE_${id.toUpperCase().replaceAll("-", "_")}`;
 
     const bot = validBot({

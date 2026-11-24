@@ -78,7 +78,12 @@ class TestClock implements NotificationTiming {
   async advance(ms: number) {
     this.time += ms;
 
-    for (const item of [...this.waits]) if (item.at <= this.time) item.finish();
+    for (const item of [...this.waits]) {
+      if (item.at <= this.time) {
+        item.finish();
+      }
+    }
+
     await turn();
   }
 }
@@ -99,7 +104,10 @@ async function open(
         ),
       );
 
-  if (directory) directories.push(directory);
+  if (directory) {
+    directories.push(directory);
+  }
+
   const databasePath = path ?? join(directory ?? "", "notify.sqlite");
   const clock = new TestClock();
   const scope = Effect.runSync(Scope.make());
@@ -127,8 +135,9 @@ afterEach(async () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   }
 
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 function disk(path: string) {
@@ -409,7 +418,10 @@ test("four destinations progress independently, claims persist before send, spac
   await clock.advance(25);
   expect(started).toEqual(["C0", "C1", "C2", "C3", "C4"]);
 
-  for (const release of releases.values()) release({ state: "sent" });
+  for (const release of releases.values()) {
+    release({ state: "sent" });
+  }
+
   await turn();
   expect(disk(path).rows).toHaveLength(0);
   expect(core.counters.sent).toBe(5);
@@ -642,9 +654,9 @@ test.each(["before-commit", "after-commit", "after-claim", "after-acceptance"])(
       try {
         const before = disk(path);
 
-        if (point === "before-commit")
+        if (point === "before-commit") {
           expect(before).toEqual({ dedup: 0, rows: [] });
-        else {
+        } else {
           const attempts = point === "after-commit" ? 0 : 1;
           expect(before).toMatchObject({
             dedup: 1,
@@ -680,7 +692,10 @@ test.each(["before-commit", "after-commit", "after-claim", "after-acceptance"])(
         expect(accepted.duplicate).toBe(point !== "before-commit");
         const claim = store.claim(2000);
 
-        if (!claim) throw new Error("recovered claim missing");
+        if (!claim) {
+          throw new Error("recovered claim missing");
+        }
+
         expect(claim.attempts).toBe(
           point === "after-claim" || point === "after-acceptance" ? 2 : 1,
         );

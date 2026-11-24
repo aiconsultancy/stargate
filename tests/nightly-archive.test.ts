@@ -77,25 +77,29 @@ describe("release archive validation", () => {
       [...base, { path: `${root}/./x`, data: "x" }],
       [...base, { path: `${root}/src/main.ts`, data: "again" }],
       [...base, { path: `${root}/ok`, pax: { path: `${root}/../../x` } }],
-    ] satisfies TarEntry[][])
+    ] satisfies TarEntry[][]) {
       expect(() => check(entries)).toThrow("archive-invalid");
+    }
   });
 
   test("rejects hard links, devices and FIFOs", () => {
-    for (const type of ["1", "3", "6"] as const)
+    for (const type of ["1", "3", "6"] as const) {
       expect(() =>
         check([
           ...base,
           { path: `${root}/x`, type, link: `${root}/src/main.ts` },
         ]),
       ).toThrow("archive-invalid");
+    }
   });
 
   test("rejects links that leave the root", () => {
-    for (const link of ["../../etc/passwd", "/etc/passwd", "../"])
+    for (const link of ["../../etc/passwd", "/etc/passwd", "../"]) {
       expect(() =>
         check([...base, { path: `${root}/x`, type: "2", link }]),
       ).toThrow("archive-invalid");
+    }
+
     // Without a root (proxy assets) a link may not leave the archive either.
     expect(() => loose([{ path: "a", type: "2", link: "../outside" }])).toThrow(
       "archive-invalid",
@@ -124,13 +128,15 @@ describe("release archive validation", () => {
       { path: "../escape" },
       { comment: "not a commit" },
       { ...comment, "GNU.sparse.size": "16777216" },
-    ])
+    ]) {
       expect(() =>
         check([
           { path: `${root}/`, type: "5", global },
           { path: `${root}/bin`, type: "2", link: "src/main.ts" },
         ]),
       ).toThrow("archive-invalid");
+    }
+
     // A global header anywhere but first is refused too.
     expect(() =>
       check([...base, { path: `${root}/late`, data: "x", global: comment }]),
@@ -160,8 +166,9 @@ describe("release archive validation", () => {
         },
       ],
       [...base, { path: `${root}/dirdata`, type: "5", size: 512 }],
-    ] satisfies TarEntry[][])
+    ] satisfies TarEntry[][]) {
       expect(() => check(entries)).toThrow("archive-invalid");
+    }
   });
 
   test("old-GNU headers with an empty GNU area are accepted (release assets)", () => {

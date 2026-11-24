@@ -104,32 +104,36 @@ export const teamSchema = settingsStruct({
 }).check(
   settingsCheck((team, context) => {
     for (const [index, agent] of [team.captain, ...team.crew].entries()) {
-      if (agent.name && agent.id !== agentIDForName(agent.name))
+      if (agent.name && agent.id !== agentIDForName(agent.name)) {
         context.addIssue({
           code: "custom",
           path: index === 0 ? ["captain", "id"] : ["crew", index - 1, "id"],
           message:
             "Agent IDs must match assigned names; hidden legacy aliases are not allowed.",
         });
+      }
     }
 
-    if (team.captain.id === "all")
+    if (team.captain.id === "all") {
       context.addIssue({
         code: "custom",
         path: ["captain", "id"],
         message: "Captain ID collides with a reserved alias.",
       });
+    }
+
     const ids = new Set([team.captain.id, "captain", "all"]);
 
     const agents = [team.captain, ...team.crew].map(
       (member) => member.agent ?? member.id,
     );
 
-    if (new Set(agents).size !== agents.length)
+    if (new Set(agents).size !== agents.length) {
       context.addIssue({
         code: "custom",
         message: "Native agent definitions must be distinct within a team.",
       });
+    }
 
     for (const [index, member] of team.crew.entries()) {
       if (ids.has(member.id)) {
@@ -141,12 +145,13 @@ export const teamSchema = settingsStruct({
       }
 
       if (member.backend) {
-        if (member.model)
+        if (member.model) {
           context.addIssue({
             code: "custom",
             path: ["crew", index, "model"],
             message: "Pi workers select their model in backend.model.",
           });
+        }
       }
 
       ids.add(member.id);

@@ -60,7 +60,10 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
+
   await removeDirectories();
 });
 
@@ -193,10 +196,12 @@ test("configuration: Stargate's own headers cannot be set from headersEnv, and r
     "Content-Length",
     "Connection",
     "Transfer-Encoding",
-  ])
+  ]) {
     expect(
       decode({ api: { ...dispatchRaw.api, headersEnv: { [name]: "VALUE" } } }),
     ).toBe(false);
+  }
+
   expect(
     decode({
       api: { ...dispatchRaw.api, headersEnv: { "CF-Access-Client-Id": "ID" } },
@@ -226,7 +231,9 @@ test("credential check: enabled dispatch needs its token and header variables; d
 
   const dispatch = config.agentDispatch;
 
-  if (!dispatch) throw new Error("missing dispatch");
+  if (!dispatch) {
+    throw new Error("missing dispatch");
+  }
 
   const check = (env: NodeJS.ProcessEnv, enabled = true) =>
     checkCredentials(
@@ -358,7 +365,10 @@ async function serveAdmiral(
   let stopped = false;
 
   const stop = async () => {
-    if (stopped) return;
+    if (stopped) {
+      return;
+    }
+
     stopped = true;
     controller.abort();
     await running;
@@ -377,7 +387,7 @@ async function serveAdmiral(
   return { fake, api, http, dataDirectory, lines, stop };
 }
 
-for (const variant of ["absent", "enabled: false"] as const)
+for (const variant of ["absent", "enabled: false"] as const) {
   test(`runtime: agentDispatch ${variant} starts no dispatcher and makes no API call`, async () => {
     const admiral = await serveAdmiral(
       variant === "absent" ? undefined : { ...dispatchRaw, enabled: false },
@@ -393,6 +403,7 @@ for (const variant of ["absent", "enabled: false"] as const)
     ).toBe(false);
     await admiral.stop();
   });
+}
 
 test("runtime end to end: an offer in the command channel, an answer reply from the asked account, one assignment", async () => {
   const admiral = await serveAdmiral(
@@ -454,8 +465,9 @@ test("runtime end to end: an offer in the command channel, an answer reply from 
     "title notice",
   );
 
-  for (const message of lineOf(sent(), "PRIVMSG"))
+  for (const message of lineOf(sent(), "PRIVMSG")) {
     expect(titleLine(message.params[1] ?? "")).toBe(false);
+  }
 
   const titleNotice = lineOf(sent(), "NOTICE").find((m) =>
     titleLine(m.params[1] ?? ""),
@@ -519,8 +531,10 @@ test("runtime end to end: an offer in the command channel, an answer reply from 
   expect(accepted?.tags.get("+draft/reply")).toBe(messageID);
   expect(api.edits).toHaveLength(1);
 
-  for (const request of http.requests)
+  for (const request of http.requests) {
     expect(request.headers.get("x-access-id")).toBe(ACCESS);
+  }
+
   expect(admiral.lines.join("\n")).not.toContain(TOKEN);
   expect(admiral.lines.join("\n")).not.toContain(ACCESS);
   await admiral.stop();
@@ -601,7 +615,9 @@ test("rear admiral intake: an answer reaches the dispatcher only past the regist
     const channel = message.params[0] ?? "";
     const answer = ircDispatchAnswer(message, channel, Date.now(), caseFold);
 
-    if (answer) counted.push(`${answer.account} ${channel}`);
+    if (answer) {
+      counted.push(`${answer.account} ${channel}`);
+    }
   };
 
   let open = true;
@@ -612,7 +628,10 @@ test("rear admiral intake: an answer reaches the dispatcher only past the regist
   });
   const [admiral] = ship.registrations;
 
-  if (!admiral) throw new Error("missing registration");
+  if (!admiral) {
+    throw new Error("missing registration");
+  }
+
   await until(
     () =>
       admiral.client.inChannel("#fleet-command") &&
@@ -668,7 +687,10 @@ test("rear admiral: only an enrolled agent configured as the fleet's rear_admira
   expect(isRearAdmiral(withoutControl, "rear-admiral", fold)).toBe(false);
   const policyOnly = config.fleetPolicy;
 
-  if (!policyOnly) throw new Error("missing policy");
+  if (!policyOnly) {
+    throw new Error("missing policy");
+  }
+
   expect(
     isRearAdmiral(
       {
@@ -707,7 +729,10 @@ test("captain intake: only the rear admiral's request passes the peer limit and 
   });
   const [captain] = ship.registrations;
 
-  if (!captain) throw new Error("missing registration");
+  if (!captain) {
+    throw new Error("missing registration");
+  }
+
   await until(
     () =>
       captain.client.inChannel("#fleet-command") &&
@@ -806,7 +831,10 @@ test("captain intake: only the rear admiral's request passes the peer limit and 
   // Results mode, which reads the stored text's address.
   const control = config.fleetControl;
 
-  if (!control) throw new Error("missing fleet control");
+  if (!control) {
+    throw new Error("missing fleet control");
+  }
+
   const results = { ...config, fleetControl: { ...control, results: true } };
 
   for (const [channel, id] of [
@@ -857,8 +885,9 @@ async function controlFixture(
     allowDispatch: false,
     permissions: [{ action: "*", resource: "*", effect: "allow" }],
     async authorize(caller) {
-      if (caller.messageID !== "msg_native")
+      if (caller.messageID !== "msg_native") {
         throw new Error("Unverified native input");
+      }
     },
     async send() {},
     answer,
@@ -946,7 +975,10 @@ test("answer tool: an unconfirmed send can be answered again after checking the 
   const sent: string[] = [];
 
   const { control, request } = await controlFixture(async (_offer, choice) => {
-    if (fail) throw new Error("IRC unavailable");
+    if (fail) {
+      throw new Error("IRC unavailable");
+    }
+
     sent.push(choice);
   });
 
@@ -1074,7 +1106,10 @@ test("IRC answer intake: only an authenticated reply with an answer marker in th
     "PRIVMSG",
   );
 
-  if (!offer) throw new Error("unparsed");
+  if (!offer) {
+    throw new Error("unparsed");
+  }
+
   expect(isDispatchRequest(offer)).toBe(true);
   expect(ircDispatchOffer(offer)).toEqual({ offerID: OFFER, messageID: "m7" });
 
@@ -1083,11 +1118,17 @@ test("IRC answer intake: only an authenticated reply with an answer marker in th
     "PRIVMSG",
   );
 
-  if (!bare) throw new Error("unparsed");
+  if (!bare) {
+    throw new Error("unparsed");
+  }
+
   expect(isDispatchRequest(bare)).toBe(false);
   const status = line({ [dispatchTag]: `timeout,${OFFER}` }, "NOTICE");
 
-  if (!status) throw new Error("unparsed");
+  if (!status) {
+    throw new Error("unparsed");
+  }
+
   expect(isDispatchRequest(status)).toBe(false);
 });
 
@@ -1196,7 +1237,10 @@ test("IRC messenger: no request PRIVMSG carries the issue title; a best-effort N
         sent.push({ command: "PRIVMSG", text, tags });
       },
       async send(command, params, tags = {}) {
-        if (failNotice) throw new IrcUnavailable();
+        if (failNotice) {
+          throw new IrcUnavailable();
+        }
+
         sent.push({ command, text: params[1] ?? "", tags });
       },
       inChannel: () => true,
@@ -1325,7 +1369,7 @@ test("IRC messenger: an assignment notice whose identifier the marker cannot car
 
   const abort = new AbortController().signal;
 
-  for (const identifier of ["PRJ 1", "PRJ-1\r\nQUIT", ""])
+  for (const identifier of ["PRJ 1", "PRJ-1\r\nQUIT", ""]) {
     await expect(
       messenger.assigned(
         captain,
@@ -1333,6 +1377,8 @@ test("IRC messenger: an assignment notice whose identifier the marker cannot car
         abort,
       ),
     ).rejects.toBeInstanceOf(UndeliverableIssue);
+  }
+
   expect(sent).toEqual([]);
   expect(ready).toBe(0);
   expect(

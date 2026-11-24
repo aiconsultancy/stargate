@@ -4,7 +4,9 @@ export function parseVersion(text: string): [number, number, number] | null {
     text.trim(),
   );
 
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
 
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
@@ -13,7 +15,9 @@ function compareParts(a: readonly number[], b: readonly number[]) {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const difference = (a[i] ?? 0) - (b[i] ?? 0);
 
-    if (difference) return Math.sign(difference);
+    if (difference) {
+      return Math.sign(difference);
+    }
   }
 
   return 0;
@@ -24,7 +28,9 @@ export function compareVersions(a: string, b: string) {
   const left = parseVersion(a);
   const right = parseVersion(b);
 
-  if (!left || !right) throw new Error("Invalid version.");
+  if (!left || !right) {
+    throw new Error("Invalid version.");
+  }
 
   return compareParts(left, right);
 }
@@ -97,7 +103,10 @@ export function newerModels(
 ) {
   const base = parseModel(current);
 
-  if (!base || !families.includes(base.family)) return [];
+  if (!base || !families.includes(base.family)) {
+    return [];
+  }
+
   const seen = new Set<string>();
 
   return catalog
@@ -109,8 +118,10 @@ export function newerModels(
         seen.has(id) ||
         parsed.family !== base.family ||
         compareModels(parsed, base) <= 0
-      )
+      ) {
         return [];
+      }
+
       seen.add(id);
 
       return [{ id, parsed }];
@@ -127,7 +138,9 @@ export type ModelRef = { providerID: string; id: string; variant?: string };
 export function parseRef(text: string): ModelRef | null {
   const match = /^([^/\s#]+)\/([^\s#]+)(?:#([^\s#]+))?$/.exec(text);
 
-  if (!match?.[1] || !match[2]) return null;
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
 
   return {
     providerID: match[1],

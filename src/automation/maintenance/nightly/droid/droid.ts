@@ -125,7 +125,9 @@ async function readDroidState(
 ): Promise<DroidState | null | undefined> {
   const text = await readOptional(statePath(directory)).catch(() => "");
 
-  if (text === null) return undefined;
+  if (text === null) {
+    return undefined;
+  }
 
   try {
     const parsed = decodeState(JSON.parse(text));
@@ -211,11 +213,18 @@ function secretNames(config: Config) {
 
   const walk = (value: unknown, env: boolean) => {
     if (typeof value === "string") {
-      if (env && /^[A-Z_][A-Z0-9_]*$/.test(value)) names.add(value);
-    } else if (Array.isArray(value)) for (const item of value) walk(item, env);
-    else if (value !== null && typeof value === "object")
-      for (const [key, item] of Object.entries(value))
+      if (env && /^[A-Z_][A-Z0-9_]*$/.test(value)) {
+        names.add(value);
+      }
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        walk(item, env);
+      }
+    } else if (value !== null && typeof value === "object") {
+      for (const [key, item] of Object.entries(value)) {
         walk(item, env || key.endsWith("Env"));
+      }
+    }
   };
 
   walk(config, false);
@@ -247,10 +256,11 @@ export function droidScrubber(config: Config, env: NodeJS.ProcessEnv) {
     .map((value) => {
       const prefixes: string[] = [];
 
-      for (let length = value.length - 1; length >= 12; length--)
+      for (let length = value.length - 1; length >= 12; length--) {
         prefixes.push(
           value.slice(0, length).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
         );
+      }
 
       return new RegExp(`(?:${prefixes.join("|")})(?=…|\\r?\\n|$)`, "g");
     })
@@ -259,7 +269,9 @@ export function droidScrubber(config: Config, env: NodeJS.ProcessEnv) {
   const prefixes = (input: string) => {
     let clean = input;
 
-    for (const cut of cuts) clean = clean.replace(cut, "[REDACTED]");
+    for (const cut of cuts) {
+      clean = clean.replace(cut, "[REDACTED]");
+    }
 
     return clean;
   };
@@ -267,7 +279,10 @@ export function droidScrubber(config: Config, env: NodeJS.ProcessEnv) {
   const text = (input: string) => {
     let clean = input;
 
-    for (const value of values) clean = clean.replaceAll(value, "[REDACTED]");
+    for (const value of values) {
+      clean = clean.replaceAll(value, "[REDACTED]");
+    }
+
     clean = redactCredentials(clean, 64_000);
 
     return prefixes(clean);
@@ -403,12 +418,18 @@ class Actions {
     const day = this.today();
     const state = await readDroidState(directory);
 
-    if (state === null) return "the droid state is unreadable";
+    if (state === null) {
+      return "the droid state is unreadable";
+    }
 
-    if ((state?.recovers[day] ?? 0) >= settings.maxRecoversPerDay)
+    if ((state?.recovers[day] ?? 0) >= settings.maxRecoversPerDay) {
       return `the daily limit of ${settings.maxRecoversPerDay} recover(s) is reached`;
+    }
 
-    if (await this.runActive()) return "a maintenance run is active";
+    if (await this.runActive()) {
+      return "a maintenance run is active";
+    }
+
     const journal = await Journal.read(config);
 
     const gateway = await readUnit(
@@ -420,19 +441,25 @@ class Actions {
       journal.kind === "none" &&
       gateway !== "inactive" &&
       gateway !== "failed"
-    )
+    ) {
       return "there is no leftover journal and the gateway is not stopped";
+    }
 
     return;
   }
 
   public async recover() {
-    if (this.used.has("recover"))
+    if (this.used.has("recover")) {
       return this.refuse("recover", "already requested in this check");
+    }
+
     this.used.add("recover");
     const blocked = await this.recoverBlocked();
 
-    if (blocked) return this.refuse("recover", blocked);
+    if (blocked) {
+      return this.refuse("recover", blocked);
+    }
+
     // Admission: the day is the local date at this moment, checked and
     // Counted in one state update, so a check that started before midnight
     // Charges the day the recover actually runs.
@@ -446,18 +473,23 @@ class Actions {
       (state) => {
         const count = state.recovers[day] ?? 0;
 
-        if (count >= settings.maxRecoversPerDay) return;
+        if (count >= settings.maxRecoversPerDay) {
+          return;
+        }
+
         // Counted before it runs, so a killed or deferred recover still counts.
         state.recovers[day] = count + 1;
         admitted = true;
       },
     );
 
-    if (!admitted)
+    if (!admitted) {
       return this.refuse(
         "recover",
         `the daily limit of ${settings.maxRecoversPerDay} recover(s) is reached`,
       );
+    }
+
     await this.log("recover", "started");
 
     const result: { ok: boolean; message: string; busy?: Reason } =
@@ -486,12 +518,16 @@ class Actions {
   }
 
   public async plan() {
-    if (this.used.has("plan"))
+    if (this.used.has("plan")) {
       return this.refuse("plan", "already requested in this check");
+    }
+
     this.used.add("plan");
 
-    if (await this.runActive())
+    if (await this.runActive()) {
       return this.refuse("plan", "a maintenance run is active");
+    }
+
     await this.log("plan", "started");
 
     try {
@@ -547,11 +583,18 @@ function fallbackBody(trigger: Trigger, facts: DroidFacts, list: Finding[]) {
   const lines: string[] = [];
   const newest = facts.reports[0];
 
-  if (trigger === "after-run" && newest) lines.push(describeReport(newest));
+  if (trigger === "after-run" && newest) {
+    lines.push(describeReport(newest));
+  }
 
-  for (const finding of list) lines.push(`- ${finding.text}`);
+  for (const finding of list) {
+    lines.push(`- ${finding.text}`);
+  }
 
-  if (list.length === 0) lines.push("No problems found.");
+  if (list.length === 0) {
+    lines.push("No problems found.");
+  }
+
   lines.push("(No model summary; this is Stargate's deterministic summary.)");
 
   return lines.join("\n");
@@ -653,20 +696,28 @@ export async function runDroid(
   const { config, configPath, signal } = input;
   const m = config.maintenance;
 
-  if (!m) throw new Error("No maintenance section in configuration.");
+  if (!m) {
+    throw new Error("No maintenance section in configuration.");
+  }
+
   const settings = m.droid;
 
-  if (!settings)
+  if (!settings) {
     throw new Error("No maintenance.droid section in configuration.");
+  }
 
-  if (!input.preview && !settings.enabled)
+  if (!input.preview && !settings.enabled) {
     throw new Error(
       "The maintenance droid is disabled. Set maintenance.droid.enabled to true.",
     );
+  }
+
   const report = m.report;
 
-  if (!report)
+  if (!report) {
     throw new Error("The maintenance droid needs maintenance.report.");
+  }
+
   const directory = droidDirectory(config.dataDirectory);
   const now = deps.clock.now();
   const zone = m.window.timeZone;
@@ -703,7 +754,7 @@ export async function runDroid(
       ? "after-run"
       : "health";
 
-  if (input.preview)
+  if (input.preview) {
     return {
       trigger,
       findings: codes,
@@ -722,11 +773,12 @@ export async function runDroid(
         2800,
       ),
     };
+  }
 
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const held = lockDroid(directory);
 
-  if (!held)
+  if (!held) {
     return {
       trigger,
       findings: codes,
@@ -734,6 +786,7 @@ export async function runDroid(
       model: false,
       skipped: "locked",
     };
+  }
 
   try {
     const checkID = deps.uuid();
@@ -820,7 +873,7 @@ export async function runDroid(
     await actions.settled();
     const model = body.length > 0;
 
-    if (!model)
+    if (!model) {
       await audit(directory, {
         at: at(),
         checkID,
@@ -828,6 +881,7 @@ export async function runDroid(
         kind: "model",
         status: "fallback",
       });
+    }
 
     const text = scrub.fit(
       scrub.text(
@@ -862,7 +916,7 @@ export async function runDroid(
       detail: model ? "model" : "fallback",
     });
 
-    if (trigger === "after-run" && newest)
+    if (trigger === "after-run" && newest) {
       await updateDroidState(
         directory,
         localDay(deps.clock.now(), zone),
@@ -871,6 +925,7 @@ export async function runDroid(
           state.lastReport = newest.name;
         },
       );
+    }
 
     return { trigger, findings: codes, posted: true, text, model };
   } finally {

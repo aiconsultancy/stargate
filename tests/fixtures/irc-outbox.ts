@@ -42,7 +42,10 @@ if (import.meta.main) {
       db.close();
     }
 
-    if (process.argv.includes("--write")) await copyFile(path, outboxFixture);
+    if (process.argv.includes("--write")) {
+      await copyFile(path, outboxFixture);
+    }
+
     const expected = new Database(path, { readonly: true, strict: true });
 
     const saved = new Database(outboxFixture.pathname, {

@@ -76,7 +76,9 @@ export class JournalStore {
       )
       .get(input.member, replayKey);
 
-    if (!entry) throw new Error("Journal append unavailable");
+    if (!entry) {
+      throw new Error("Journal append unavailable");
+    }
 
     return entry;
   }
@@ -109,7 +111,9 @@ export class JournalStore {
 
     const truncated = entries.length > limit;
 
-    if (truncated) entries.pop();
+    if (truncated) {
+      entries.pop();
+    }
 
     return { entries, nextAfter: entries.at(-1)?.id ?? after, truncated };
   }

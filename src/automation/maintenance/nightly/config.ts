@@ -44,7 +44,9 @@ export const timeZoneSchema = Schema.String.check(Schema.isMinCodePoints(1))
     settingsRefine(
       (zone) => {
         // Intl accepts fixed offsets; they are not IANA zones and ignore DST.
-        if (/^[+-]/.test(zone)) return false;
+        if (/^[+-]/.test(zone)) {
+          return false;
+        }
 
         try {
           new Intl.DateTimeFormat("en", { timeZone: zone }).format(0);
@@ -415,42 +417,48 @@ export const maintenanceSchema = settingsStruct({
     const { start, end, jitterMinutes, reserveMinutes } = value.window;
     const length = (minutes(end) - minutes(start) + 1440) % 1440;
 
-    if (length === 0)
+    if (length === 0) {
       context.addIssue({
         code: "custom",
         path: ["window", "end"],
         message: "Window start and end must differ",
       });
-    else if (jitterMinutes + reserveMinutes >= length)
+    } else if (jitterMinutes + reserveMinutes >= length) {
       context.addIssue({
         code: "custom",
         path: ["window", "jitterMinutes"],
         message: "Jitter plus reserve must be shorter than the window",
       });
+    }
 
     const need = (
       component: keyof typeof value.components,
       sections: (keyof typeof value)[],
     ) => {
-      if (!value.components[component]) return;
+      if (!value.components[component]) {
+        return;
+      }
 
-      for (const section of sections)
-        if (value[section] === undefined)
+      for (const section of sections) {
+        if (value[section] === undefined) {
           context.addIssue({
             code: "custom",
             path: [section],
             message: `components.${component} requires the ${section} section`,
           });
+        }
+      }
     };
 
     const droid = value.droid;
 
-    if (droid?.enabled && !value.report)
+    if (droid?.enabled && !value.report) {
       context.addIssue({
         code: "custom",
         path: ["droid", "enabled"],
         message: "droid requires the report section (its Slack destination)",
       });
+    }
 
     // The proxy provider serves only named models (see pi-durable.ts).
     if (
@@ -458,12 +466,14 @@ export const maintenanceSchema = settingsStruct({
       (droid.backend.provider
         ? !piProxyModels.includes(droid.backend.model)
         : droid.backend.model === piProxyModel)
-    )
+    ) {
       context.addIssue({
         code: "custom",
         path: ["droid", "backend"],
         message: `A provider requires model ${piProxyModels.join(" or ")}, and ${piProxyModel} requires a provider`,
       });
+    }
+
     need("stargate", ["stargate"]);
     need("cliproxyapi", ["cliproxyapi", "proxy"]);
     need("agentClis", ["agentClis"]);

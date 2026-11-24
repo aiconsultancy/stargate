@@ -16,11 +16,13 @@ export async function checkIrcCredentials(
 ) {
   const members = [registration, ...registration.crew];
 
-  for (const { passwordEnv } of members)
-    if (passwordEnv && !env[passwordEnv]?.trim())
+  for (const { passwordEnv } of members) {
+    if (passwordEnv && !env[passwordEnv]?.trim()) {
       throw new Error(
         "Missing IRC password environment reference. Set it in the environment or <config>.env; use --schema-only to skip credential checks.",
       );
+    }
+  }
 
   const pemFiles = new Set(
     members.flatMap(({ clientPemFile }) =>
@@ -28,9 +30,13 @@ export async function checkIrcCredentials(
     ),
   );
 
-  for (const path of pemFiles) await clientPem(path);
+  for (const path of pemFiles) {
+    await clientPem(path);
+  }
+
   const ca = registration.server.caFile;
 
-  if (ca && !(await lstat(ca).catch(() => {}))?.isFile())
+  if (ca && !(await lstat(ca).catch(() => {}))?.isFile()) {
     throw new Error("IRC caFile is not a readable file.");
+  }
 }

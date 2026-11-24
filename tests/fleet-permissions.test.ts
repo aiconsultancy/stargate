@@ -97,10 +97,11 @@ test("exact, wildcard and simple prefix rules follow last-match ordering", () =>
 });
 
 test("ask rules cannot be bypassed through direct IPC or a later allow", () => {
-  for (const action of ["*", "fleet_*", "fleet_dispatch", "fleet_status"])
+  for (const action of ["*", "fleet_*", "fleet_dispatch", "fleet_status"]) {
     expect(() => validateFleetPermissions([rule(action, "*", "ask")])).toThrow(
       "does not support ask",
     );
+  }
 
   const rules = [
     rule("*", "*", "deny"),
@@ -122,10 +123,11 @@ test("unsupported potentially matching action/resource patterns fail closed", ()
     "fleet_(dispatch|status)",
     "subspace_*|fleet_dispatch",
     "stargate_foo|fleet_status",
-  ])
+  ]) {
     expect(() => validateFleetPermissions([rule(action, "*")])).toThrow(
       "only exact literals",
     );
+  }
 
   for (const resource of [
     "cap?ain",
@@ -135,10 +137,12 @@ test("unsupported potentially matching action/resource patterns fail closed", ()
     "cap\\*",
     "captain*other",
     "",
-  ])
+  ]) {
     expect(() =>
       validateFleetPermissions([rule("fleet_dispatch", resource)]),
     ).toThrow("only exact literals");
+  }
+
   expect(
     fleetRequestAllowed(
       [rule("*", "*"), rule("fleet_**", "*", "deny")],
@@ -171,8 +175,9 @@ test("the selected fleet profile's root policy works without broadening its allo
 
   expect(() => validateFleetPermissions(rules)).not.toThrow();
 
-  for (const request of [verify, dispatch, status])
+  for (const request of [verify, dispatch, status]) {
     expect(fleetRequestAllowed(rules, request)).toBe(true);
+  }
 
   const restricted = fleetPermissions({
     role: "captain",
@@ -182,7 +187,9 @@ test("the selected fleet profile's root policy works without broadening its allo
     capabilities: ["read_code", "subspace", "implement"],
   });
 
-  for (const request of [verify, status])
+  for (const request of [verify, status]) {
     expect(fleetRequestAllowed(restricted, request)).toBe(true);
+  }
+
   expect(fleetRequestAllowed(restricted, dispatch)).toBe(false);
 });

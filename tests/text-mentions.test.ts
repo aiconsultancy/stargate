@@ -26,7 +26,9 @@ import { identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const names = ["captains", "all captains", "Galactica", "Adama"];
@@ -99,10 +101,11 @@ test("setting: off by default; channel IDs and literal names", () => {
     { channels: ["D123"], names },
     { channels: ["C1"], names: ["capt.*"] },
     { channels: ["C1"], names: [] },
-  ])
+  ]) {
     expect(
       Result.isSuccess(Schema.decodeUnknownResult(mentionRuleSchema)(rule)),
     ).toBe(false);
+  }
 });
 
 test("the longest whole-word name wins, in any letter case", () => {
@@ -113,8 +116,9 @@ test("the longest whole-word name wins, in any letter case", () => {
   expect(findMention(["Galactica's PR merged"], names)).toBe("Galactica");
   expect(findMention(["all\ncaptains"], names)).toBe("all captains");
 
-  for (const text of ["the captain said", "captainship", "galactic", ""])
+  for (const text of ["the captain said", "captainship", "galactic", ""]) {
     expect(findMention([text], names)).toBeUndefined();
+  }
 });
 
 test("only text that Slack shows can name the bot", () => {
@@ -127,10 +131,12 @@ test("only text that Slack shows can name the bot", () => {
     "<#C123|captains> is busy",
     "<!subteam^S1|@captains> fyi",
     "<@UCAPTAINS>",
-  ])
+  ]) {
     expect(routeEvent(message(text), cfg, identity)).not.toHaveProperty(
       "textMention",
     );
+  }
+
   expect(
     routeEvent(
       message("see <https://example.test/x|all captains briefing>"),
@@ -271,8 +277,11 @@ function fixture() {
       let jobs = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20);
       jobs.length;
       jobs = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20)
-    )
-      for (const job of jobs) await gateway.process(job, signal);
+    ) {
+      for (const job of jobs) {
+        await gateway.process(job, signal);
+      }
+    }
   };
 
   return {
@@ -333,7 +342,7 @@ test("a peer captain's call to all captains is admitted and keeps the thread lim
     ),
   ).toBe(true);
 
-  for (let i = 1; i < peerTurnsPerHour; i++)
+  for (let i = 1; i < peerTurnsPerHour; i++) {
     expect(
       await f.gateway.receive(
         message(`more ${i}`, {
@@ -344,6 +353,8 @@ test("a peer captain's call to all captains is admitted and keeps the thread lim
         }),
       ),
     ).toBe(true);
+  }
+
   expect(
     await f.gateway.receive(
       message("again", {

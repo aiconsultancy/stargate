@@ -63,8 +63,9 @@ test("calendar, precision and zone boundaries normalize to UTC milliseconds", ()
     "2024-01-01T00:00:00+01:60",
     "2024-01-01",
     "2024-01-01T00:00:00",
-  ])
+  ]) {
     expect(utcMillis(value)).toBeUndefined();
+  }
 });
 
 test("rejects unknown envelope and nested fields and bounds code points", () => {
@@ -74,8 +75,10 @@ test("rejects unknown envelope and nested fields and bounds code points", () => 
     { signature: "supplied" },
     { source: "other" },
     { destination: "COTHER" },
-  ])
+  ]) {
     expect(Result.isFailure(decode({ ...input, ...extra }))).toBe(true);
+  }
+
   expect(
     Result.isFailure(
       decode({ ...input, payload: { ...input.payload, command: "run" } }),
@@ -86,8 +89,10 @@ test("rejects unknown envelope and nested fields and bounds code points", () => 
     { title: "😀".repeat(201) },
     { title: "ok", body: "😀".repeat(2801) },
     { title: "ok", url: `https://example.org/${"a".repeat(2048)}` },
-  ])
+  ]) {
     expect(Result.isFailure(decode({ ...input, payload }))).toBe(true);
+  }
+
   expect(
     Result.isSuccess(
       decode({
@@ -101,8 +106,10 @@ test("rejects unknown envelope and nested fields and bounds code points", () => 
     Object.fromEntries(Array.from({ length: 17 }, (_, n) => [`k${n}`, "v"])),
     { ["k".repeat(65)]: "v" },
     { key: "v".repeat(257) },
-  ])
+  ]) {
     expect(Result.isFailure(decode({ ...input, tags }))).toBe(true);
+  }
+
   expect(Result.isFailure(decode({ ...input, topic: "a".repeat(201) }))).toBe(
     true,
   );
@@ -118,10 +125,12 @@ test("HTTPS URLs reject userinfo, whitespace and controls without fetching", () 
     "https://example.org/a b",
     "https://example.org/\n",
     "https://example.org/\u0000",
-  ])
+  ]) {
     expect(
       Result.isFailure(decode({ ...input, payload: { title: "ok", url } })),
     ).toBe(true);
+  }
+
   expect(
     Result.isSuccess(
       decode({
@@ -224,8 +233,10 @@ test("matching uses final-star and AND tags, deduplicates physical aliases", () 
 });
 
 test("numeric limits are positive finite and attempts cannot outlive leases", () => {
-  for (const admissionQueue of [0, -1, Infinity, NaN, 1.5])
+  for (const admissionQueue of [0, -1, Infinity, NaN, 1.5]) {
     expect(() => notificationLimits({ admissionQueue })).toThrow();
+  }
+
   expect(() => notificationLimits({ attemptTimeoutMs: 60_000 })).toThrow();
   expect(() => notificationLimits({ concurrency: 5 })).toThrow();
   expect(() => notificationLimits({ sendAttempts: 4 })).toThrow();

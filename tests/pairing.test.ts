@@ -68,7 +68,9 @@ function fixture(deadline?: () => AbortSignal) {
   const opened = () => {
     const view = calls[0]?.view;
 
-    if (!view) throw new Error("Missing confirmation");
+    if (!view) {
+      throw new Error("Missing confirmation");
+    }
 
     return view;
   };
@@ -137,12 +139,13 @@ test("pairing config is off by default; operators are exact and URLs are origins
     { ...config.pairing, operators: ["C123"] },
     { ...config.pairing, urls: [] },
     { ...config.pairing, urls: Array(6).fill("https://example.test") },
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(botSchema)({ ...config, pairing }),
       ),
     ).toBe(false);
+  }
 
   for (const url of [
     "ftp://example.test",
@@ -156,7 +159,7 @@ test("pairing config is off by default; operators are exact and URLs are origins
     "https://@example.test",
     "https://example.test\\evil",
     "//example.test",
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(botSchema)({
@@ -165,6 +168,8 @@ test("pairing config is off by default; operators are exact and URLs are origins
         }),
       ),
     ).toBe(false);
+  }
+
   expect(config.pairing?.urls).toEqual([
     "https://code.example.test",
     "http://host.tail123.ts.net:4096",
@@ -246,17 +251,26 @@ test("invalid, denied, bot, disabled, unsupported commands never mint", async ()
   ]) {
     const f = fixture();
 
-    if (change === "disabled") delete f.config.pairing;
+    if (change === "disabled") {
+      delete f.config.pairing;
+    }
 
-    if (change === "user") f.config.access.deniedUsers = ["U123"];
+    if (change === "user") {
+      f.config.access.deniedUsers = ["U123"];
+    }
 
-    if (change === "channel") f.config.access.deniedChannels = ["C123"];
+    if (change === "channel") {
+      f.config.access.deniedChannels = ["C123"];
+    }
 
-    if (change === "unsupported")
+    if (change === "unsupported") {
       f.config.backend = { type: "module", module: "/x", options: {} };
+    }
 
-    if (change === "no-capability")
+    if (change === "no-capability") {
       delete (f.backend as Pick<AgentBackend, "pair">).pair;
+    }
+
     await f.ui.command(command(), f.ack);
     expect(f.calls).toEqual([]);
     expect(f.order).toEqual(["ack"]);
@@ -284,44 +298,70 @@ test("button reauthorizes operator and normal denies, app, team, human and chann
     await f.ui.command(command(), f.ack);
     const body = action(f.opened());
 
-    if (change === "operator" && f.config.pairing)
+    if (change === "operator" && f.config.pairing) {
       f.config.pairing.operators = ["UOTHER"];
+    }
 
-    if (change === "user") f.config.access.deniedUsers = ["U123"];
+    if (change === "user") {
+      f.config.access.deniedUsers = ["U123"];
+    }
 
-    if (change === "channel") f.config.access.deniedChannels = ["C123"];
+    if (change === "channel") {
+      f.config.access.deniedChannels = ["C123"];
+    }
 
-    if (change === "disabled") delete f.config.pairing;
+    if (change === "disabled") {
+      delete f.config.pairing;
+    }
 
-    if (change === "app") body.api_app_id = "AOTHER";
+    if (change === "app") {
+      body.api_app_id = "AOTHER";
+    }
 
-    if (change === "team") body.team.id = "TOTHER";
+    if (change === "team") {
+      body.team.id = "TOTHER";
+    }
 
-    if (change === "human") Object.assign(body.user, { is_bot: true });
+    if (change === "human") {
+      Object.assign(body.user, { is_bot: true });
+    }
 
-    if (change === "owner") body.user.id = "UOTHER";
+    if (change === "owner") {
+      body.user.id = "UOTHER";
+    }
 
-    if (change === "container") body.container.view_id = "VOTHER";
+    if (change === "container") {
+      body.container.view_id = "VOTHER";
+    }
 
-    if (change === "callback") body.view.callback_id = "cron_list";
+    if (change === "callback") {
+      body.view.callback_id = "cron_list";
+    }
 
-    if (change === "nonce") body.view.private_metadata = "forged";
+    if (change === "nonce") {
+      body.view.private_metadata = "forged";
+    }
 
-    if (change === "action")
+    if (change === "action") {
       body.actions[0] = {
         type: "button",
         action_id: "stargate_pair_other",
         value: "generate",
       };
+    }
 
-    if (change === "multi")
+    if (change === "multi") {
       body.actions.push({
         type: "button",
         action_id: "stargate_pair_generate",
         value: "generate",
       });
+    }
 
-    if (change === "expired") f.advance(300_001);
+    if (change === "expired") {
+      f.advance(300_001);
+    }
+
     await f.ui.interactive(body, f.ack);
     expect(f.order).not.toContain("pair");
     expect(f.order.filter((s) => s === "ack")).toHaveLength(2);
@@ -359,9 +399,14 @@ test("failed mint or modal delivery is sanitized and never retried", async () =>
       throw new Error("fixture-secret https://secret.test");
     };
 
-    if (target === "pair") f.backend.pair = fail;
+    if (target === "pair") {
+      f.backend.pair = fail;
+    }
 
-    if (target === "update") f.api.update = fail;
+    if (target === "update") {
+      f.api.update = fail;
+    }
+
     await f.ui.interactive(body, target === "ack" ? fail : f.ack);
     await f.ui.interactive(body, f.ack);
     expect(f.logs.join(" ")).not.toContain("fixture-secret");
@@ -376,7 +421,10 @@ test("failed mint or modal delivery is sanitized and never retried", async () =>
 test("pending confirmation count is bounded and stale records expire", async () => {
   const f = fixture();
 
-  for (let n = 0; n < 130; n++) await f.ui.command(command(), f.ack);
+  for (let n = 0; n < 130; n++) {
+    await f.ui.command(command(), f.ack);
+  }
+
   expect(f.calls).toHaveLength(128);
   const old = action(f.opened());
   f.advance(300_001);
@@ -457,10 +505,15 @@ test("access changes during ACK or issuance prevent mint or secret delivery", as
     await f.ui.interactive(action(f.opened()), async () => {
       await f.ack();
 
-      if (stage === "ack") f.config.access.deniedChannels = ["C123"];
+      if (stage === "ack") {
+        f.config.access.deniedChannels = ["C123"];
+      }
     });
 
-    if (stage === "ack") expect(f.order).not.toContain("pair");
+    if (stage === "ack") {
+      expect(f.order).not.toContain("pair");
+    }
+
     expect(f.calls).toHaveLength(1);
   }
 });

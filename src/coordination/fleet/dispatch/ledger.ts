@@ -148,14 +148,18 @@ export class DispatchLedger {
   }
 
   public set cursor(value: string | undefined) {
-    if (value !== undefined) this.setMeta("cursor", value);
+    if (value !== undefined) {
+      this.setMeta("cursor", value);
+    }
   }
 
   /** An unfinished assignment listing; an unreadable value starts it again. */
   public get assignmentWalk(): AssignmentWalk | undefined {
     const value = this.meta("assignmentWalk");
 
-    if (value === undefined) return undefined;
+    if (value === undefined) {
+      return undefined;
+    }
 
     const parsed = Schema.decodeUnknownResult(
       Schema.fromJsonString(walkSchema),
@@ -165,15 +169,16 @@ export class DispatchLedger {
   }
 
   public set assignmentWalk(value: AssignmentWalk | undefined) {
-    if (value === undefined)
+    if (value === undefined) {
       this.db
         .query("DELETE FROM dispatch_meta WHERE key=?")
         .run("assignmentWalk");
-    else
+    } else {
       this.setMeta(
         "assignmentWalk",
         JSON.stringify(Schema.encodeUnknownSync(walkSchema)(value)),
       );
+    }
   }
 
   /** One-time log flags, so a restart does not repeat a warning every poll. */
@@ -182,11 +187,13 @@ export class DispatchLedger {
   }
 
   public setFlag(name: string, on: boolean) {
-    if (on) this.setMeta(`flag:${name}`, "1");
-    else
+    if (on) {
+      this.setMeta(`flag:${name}`, "1");
+    } else {
       this.db
         .query("DELETE FROM dispatch_meta WHERE key=?")
         .run(`flag:${name}`);
+    }
   }
 
   /** A strictly increasing counter: who is asked first moves on per issue. */
@@ -232,7 +239,9 @@ export class DispatchLedger {
       Schema.fromJsonString(trackedSchema),
     )(value);
 
-    if (Result.isFailure(parsed)) return;
+    if (Result.isFailure(parsed)) {
+      return;
+    }
 
     return { ...parsed.success, order: [...parsed.success.order] };
   }
@@ -297,10 +306,11 @@ export class DispatchLedger {
       .all()) {
       const value = this.decode(row.value);
 
-      if (!value || value.updatedAt < now - keepMs)
+      if (!value || value.updatedAt < now - keepMs) {
         this.db
           .query("DELETE FROM dispatch_issues WHERE issue=?")
           .run(row.issue);
+      }
     }
   }
 }

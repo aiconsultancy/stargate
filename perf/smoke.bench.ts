@@ -9,8 +9,9 @@ export default bench({
       run: async (ctx) => {
         const { output } = await ctx.exec();
 
-        if (!output.includes("Usage: stargate"))
+        if (!output.includes("Usage: stargate")) {
           throw new Error("Stargate CLI help was not printed");
+        }
       },
     },
   },

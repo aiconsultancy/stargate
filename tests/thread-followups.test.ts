@@ -16,14 +16,18 @@ const stores: Store[] = [];
 afterEach(() => {
   setSystemTime();
 
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 });
 
 function fixture(enabled = true, drain?: DrainControl) {
   const config = bot();
 
-  if (config.backend.type !== "opencode")
+  if (config.backend.type !== "opencode") {
     throw new Error("Expected OpenCode config");
+  }
+
   config.backend.sessionID = "ses_captain";
   config.slack.steerThreadFollowUps = enabled;
   const store = openStore(":memory:");
@@ -48,7 +52,10 @@ function fixture(enabled = true, drain?: DrainControl) {
       );
       duringWrite?.();
 
-      if (!input.allowed()) return { status: "refused" };
+      if (!input.allowed()) {
+        return { status: "refused" };
+      }
+
       writes.push(input.id);
 
       return result;
@@ -84,7 +91,9 @@ function fixture(enabled = true, drain?: DrainControl) {
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
 
-    if (!job) throw new Error("Expected queued request");
+    if (!job) {
+      throw new Error("Expected queued request");
+    }
 
     return job;
   };
@@ -294,8 +303,10 @@ test("failed uncertainty notices cannot bypass native reconciliation backoff or 
   f.gateway.accept(f.follow());
   await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
 
-  for (let i = 0; i < 12; i++)
+  for (let i = 0; i < 12; i++) {
     await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
+  }
+
   expect(reads).toBe(0);
 
   for (let i = 0; i < 12; i++) {
@@ -388,7 +399,10 @@ test("writing receipt recovery reads evidence only, without resubmitting or queu
   f.gateway.accept(f.follow());
   const receipt = f.store.threadFollowUps.followUps(f.gateway.key)[0];
 
-  if (!receipt) throw new Error("Missing receipt");
+  if (!receipt) {
+    throw new Error("Missing receipt");
+  }
+
   expect(f.store.threadFollowUps.claimFollowUp(receipt)).toBe(true);
   let reads = 0;
   f.backend.reconcileSteer = async () => {
@@ -423,7 +437,10 @@ test("accepted-event receipt and deterministic native identity survive SQLite re
     store.enqueue(input);
     const owner = store.ready("bot", Date.now(), 1)[0];
 
-    if (!owner) throw new Error("Missing owner");
+    if (!owner) {
+      throw new Error("Missing owner");
+    }
+
     store.running(owner.id);
     store.saveInput("bot", owner.id, "msg_original");
     const followup = { ...input, eventId: "C123:2.000", text: "Revised scope" };
@@ -432,7 +449,10 @@ test("accepted-event receipt and deterministic native identity survive SQLite re
     );
     const receipt = store.threadFollowUps.followUps("bot")[0];
 
-    if (!receipt) throw new Error("Missing receipt");
+    if (!receipt) {
+      throw new Error("Missing receipt");
+    }
+
     store.threadFollowUps.claimFollowUp(receipt);
     store.close();
     store = openStore(path);

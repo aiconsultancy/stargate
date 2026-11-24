@@ -71,23 +71,28 @@ async function fixture(options: { pinned?: boolean } = {}) {
     async get({ sessionID }) {
       const bound = irc.get(sessionID);
 
-      if (bound)
+      if (bound) {
         return {
           id: sessionID,
           agent: bound.agent,
           location: { directory: bound.directory },
           ...(bound.parentID ? { parentID: bound.parentID } : {}),
         };
+      }
 
-      if (sessionID.startsWith("ses_captain"))
+      if (sessionID.startsWith("ses_captain")) {
         return {
           id: sessionID,
           agent: "captain",
           location: { directory: crewOptions.captainDirectory },
         };
+      }
+
       const peer = engine.state.peerBySession(sessionID);
 
-      if (!peer) throw new Error("not found");
+      if (!peer) {
+        throw new Error("not found");
+      }
 
       return {
         id: sessionID,
@@ -406,7 +411,10 @@ test("crew irc outbox: every stored stargate_dm is listed once, in order; mail i
     const page = f.engine.ircOutbox({ after: 0, limit: 10 });
     const [first, , third] = f.events;
 
-    if (!first || !third) throw new Error("missing receipts");
+    if (!first || !third) {
+      throw new Error("missing receipts");
+    }
+
     expect(page.items).toEqual([
       {
         sequence: 1,
@@ -455,7 +463,9 @@ test("crew irc outbox: bounded by count and age", async () => {
 
     // Saved rows cover setup; remaining writes still exercise count/age pruning.
     db.transaction(() => {
-      for (let n = 1001; n <= 1003; n++) outbox.enqueue(item(n), outboxNow);
+      for (let n = 1001; n <= 1003; n++) {
+        outbox.enqueue(item(n), outboxNow);
+      }
     }).immediate();
     const all = outbox.outbox({ after: 0, limit: 2000 }, outboxNow);
     expect(all.latest).toBe(1003);

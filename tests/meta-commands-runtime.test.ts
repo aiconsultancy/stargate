@@ -24,7 +24,10 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
     const config = bot();
     config.configPanelEnabled = true;
 
-    if (config.backend.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.backend.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     config.backend.directory = dataDirectory;
     config.backend.agent = "captain";
 
@@ -177,7 +180,10 @@ test("runtime binds registration-scoped reads and authenticated panel actions wi
       .flatMap((block) => block.elements ?? [])
       .find((item) => item.text.text === "3s");
 
-    if (!button || !interactions) throw new Error("Panel binding unavailable");
+    if (!button || !interactions) {
+      throw new Error("Panel binding unavailable");
+    }
+
     let acks = 0;
     await interactions.interactive(
       {

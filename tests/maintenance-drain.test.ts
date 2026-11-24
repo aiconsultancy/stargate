@@ -30,8 +30,9 @@ export type DrainCrewParity<
 const cleanup: string[] = [];
 
 afterEach(async () => {
-  for (const path of cleanup.splice(0))
+  for (const path of cleanup.splice(0)) {
     await rm(path, { recursive: true, force: true });
+  }
 });
 
 const directory = async () => {

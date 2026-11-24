@@ -28,34 +28,43 @@ export async function bootstrapRelease(
     const exists = await lstat(join(input.config.root, link)).then(
       () => true,
       (error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return false;
+        if (error.code === "ENOENT") {
+          return false;
+        }
+
         throw error;
       },
     );
 
-    if (exists)
+    if (exists) {
       throw new Error(
         "Bootstrap requires a root without current or previous links.",
       );
+    }
   }
 
-  if (!input.config.requireTreeCheck || !input.config.checkout)
+  if (!input.config.requireTreeCheck || !input.config.checkout) {
     throw new Error("Bootstrap requires a local checkout tree comparison.");
+  }
 
   if (
     (await verifyOrigin(input.config, input.release, input.headers)) !==
     input.commit
-  )
+  ) {
     throw new Error("Bootstrap tag does not match the operator-pinned commit.");
+  }
+
   const staged = await stageRelease(input);
 
   if (
     staged.metadata.commit !== input.commit ||
     staged.metadata.tree !== "equal"
-  )
+  ) {
     throw new Error(
       "Bootstrap staged release does not match the pinned source.",
     );
+  }
+
   await switchCurrent(input.config.root, input.release.version);
 
   return staged;
@@ -65,14 +74,17 @@ if (import.meta.main) {
   try {
     const [configPath, version, commit, extra] = process.argv.slice(2);
 
-    if (!configPath || !version || !commit || extra)
+    if (!configPath || !version || !commit || extra) {
       throw new Error("Expected config path, version and full commit.");
+    }
+
     await loadEnvironment(configPath);
     const config = await loadConfig(configPath);
     const settings = config.maintenance?.stargate;
 
-    if (!settings)
+    if (!settings) {
       throw new Error("Configure maintenance.stargate before bootstrap.");
+    }
 
     const headers = githubHeaders(
       await githubToken(settings.tokenEnv, processRunner),

@@ -24,7 +24,9 @@ function fixture() {
     async captain(caller: CrewCaller) {
       checks.push(caller);
 
-      if (caller.agent !== "captain") throw new CrewError("Captain only.");
+      if (caller.agent !== "captain") {
+        throw new CrewError("Captain only.");
+      }
     },
   };
 
@@ -48,10 +50,12 @@ test("cron requires captain verification even for reads", async () => {
   const f = fixture();
   const cron = new CrewCron(f.authority, f.runner);
 
-  for (const op of ["list", "report"])
+  for (const op of ["list", "report"]) {
     await expect(
       cron.run({ op }, { ...f.caller, agent: "worker" }),
     ).rejects.toThrow("Captain only.");
+  }
+
   expect(f.checks).toHaveLength(2);
   expect(f.calls).toHaveLength(0);
 });
@@ -79,10 +83,12 @@ test("cron uses only configured binding and forwards cancellation signal", async
     { configPath: "/other/stargate.json" },
     { bot: "other" },
     { expectedDirectory: "/other" },
-  ])
+  ]) {
     await expect(
       cron.run({ op: "list", ...injected }, f.caller),
     ).rejects.toThrow("Invalid stargate_cron input");
+  }
+
   expect(f.calls).toHaveLength(1);
 });
 

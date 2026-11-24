@@ -57,11 +57,15 @@ async function getJson(
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 
-  if (!res.ok) throw new Error(`GET ${url} returned HTTP ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`GET ${url} returned HTTP ${res.status}`);
+  }
+
   const body = (await res.json()) as unknown;
 
-  if (body === null || typeof body !== "object")
+  if (body === null || typeof body !== "object") {
     throw new Error(`GET ${url} did not return a JSON object`);
+  }
 
   return body as Record<string, unknown>;
 }
@@ -115,36 +119,47 @@ export class BotFrameworkKeyStore {
     if (
       this.#now() - this.#fetchedAt > KEY_REFRESH_INTERVAL_MS &&
       this.#mayAttempt()
-    )
+    ) {
       refreshed = await this.#refreshKeepingCache();
+    }
+
     const known = this.#keys.get(kid);
 
-    if (known) return known;
+    if (known) {
+      return known;
+    }
+
     const missingSince = this.#missing.get(kid);
 
     if (
       missingSince !== undefined &&
       this.#now() - missingSince < MISSING_KEY_TTL_MS
-    )
+    ) {
       return undefined;
+    }
 
     if (!refreshed) {
-      if (!this.#mayAttempt())
+      if (!this.#mayAttempt()) {
         throw new KeyRefreshDeferredError(
           "the signing keys were fetched moments ago; retry shortly",
         );
+      }
+
       refreshed = await this.#refreshKeepingCache();
 
-      if (!refreshed)
+      if (!refreshed) {
         throw new KeyRefreshDeferredError(
           "the signing keys could not be refreshed; retry shortly",
         );
+      }
     }
 
     // The key set is fresh and still lacks this key ID: the token is not Bot Framework's.
     const key = this.#keys.get(kid);
 
-    if (!key) this.#rememberMissing(kid);
+    if (!key) {
+      this.#rememberMissing(kid);
+    }
 
     return key;
   }
@@ -168,7 +183,10 @@ export class BotFrameworkKeyStore {
     while (this.#missing.size > MISSING_KEY_LIMIT) {
       const oldest = this.#missing.keys().next().value;
 
-      if (oldest === undefined) break;
+      if (oldest === undefined) {
+        break;
+      }
+
       this.#missing.delete(oldest);
     }
   }
@@ -181,7 +199,9 @@ export class BotFrameworkKeyStore {
       return true;
     } catch (err) {
       // Keep serving with the keys already held; fail only when there are none.
-      if (this.#keys.size === 0) throw err;
+      if (this.#keys.size === 0) {
+        throw err;
+      }
 
       return false;
     }
@@ -214,8 +234,9 @@ export class BotFrameworkKeyStore {
 
     const algorithms = offered.filter((alg): alg is "RS256" => alg === "RS256");
 
-    if (algorithms.length === 0)
+    if (algorithms.length === 0) {
       throw new Error("OpenID metadata does not offer RS256 signing");
+    }
 
     const jwks = await getJson(this.#fetch, jwksUri);
     const keys = new Map<string, SigningKey>();
@@ -228,10 +249,13 @@ export class BotFrameworkKeyStore {
         typeof key["kid"] !== "string" ||
         typeof key["n"] !== "string" ||
         typeof key["e"] !== "string"
-      )
+      ) {
         continue;
+      }
 
-      if (key["use"] !== undefined && key["use"] !== "sig") continue;
+      if (key["use"] !== undefined && key["use"] !== "sig") {
+        continue;
+      }
 
       const endorsements = Array.isArray(key["endorsements"])
         ? key["endorsements"].map(String)
@@ -245,15 +269,19 @@ export class BotFrameworkKeyStore {
       });
     }
 
-    if (keys.size === 0)
+    if (keys.size === 0) {
       throw new Error(
         "the Bot Framework key document holds no RSA signing keys",
       );
+    }
+
     this.#keys = keys;
     this.#algorithms = algorithms;
     this.#fetchedAt = this.#now();
 
-    for (const kid of keys.keys()) this.#missing.delete(kid);
+    for (const kid of keys.keys()) {
+      this.#missing.delete(kid);
+    }
   }
 }
 
@@ -277,16 +305,22 @@ export function signingKeyResolver(
   onKey: (key: SigningKey) => void = () => {},
 ) {
   return async (header: JWTHeaderParameters) => {
-    if (header.alg !== "RS256")
+    if (header.alg !== "RS256") {
       throw new AuthError(
         `token algorithm ${String(header.alg)} is not allowed`,
       );
+    }
 
-    if (typeof header.kid !== "string" || !header.kid)
+    if (typeof header.kid !== "string" || !header.kid) {
       throw new AuthError("token has no key ID");
+    }
+
     const key = await keyStore.getKey(header.kid);
 
-    if (!key) throw new AuthError("token is signed with an unknown key");
+    if (!key) {
+      throw new AuthError("token is signed with an unknown key");
+    }
+
     onKey(key);
 
     return importJWK({ kty: "RSA", n: key.n, e: key.e }, "RS256");
@@ -304,7 +338,9 @@ export async function verifyBotFrameworkToken(
 ): Promise<VerifiedToken> {
   const match = BEARER.exec((authorization ?? "").trim());
 
-  if (!match) throw new AuthError("missing or malformed Bearer token");
+  if (!match) {
+    throw new AuthError("missing or malformed Bearer token");
+  }
 
   let signingKey: SigningKey | undefined;
   let claims: JWTPayload;
@@ -327,10 +363,14 @@ export async function verifyBotFrameworkToken(
 
     claims = verified.payload;
   } catch (err) {
-    if (err instanceof AuthError) throw err;
+    if (err instanceof AuthError) {
+      throw err;
+    }
 
-    if (err instanceof joseErrors.JOSEError)
+    if (err instanceof joseErrors.JOSEError) {
       throw new AuthError(`token rejected: ${err.message}`);
+    }
+
     throw err;
   }
 

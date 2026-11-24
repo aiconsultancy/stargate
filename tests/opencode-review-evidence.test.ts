@@ -104,7 +104,7 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
 
       calls.push({ path, method: request.method });
 
-      if (path === `/api/agent/${b.reviewer.agent}`)
+      if (path === `/api/agent/${b.reviewer.agent}`) {
         return Response.json({
           location: { directory: b.reviewer.directory },
           data: {
@@ -120,13 +120,15 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
             },
           },
         });
+      }
 
-      if (path === "/api/session/active")
+      if (path === "/api/session/active") {
         return Response.json({
           data: changes.busy ? { ses_other: { type: "running" } } : {},
         });
+      }
 
-      if (path === "/api/session" && request.method === "GET")
+      if (path === "/api/session" && request.method === "GET") {
         return Response.json({
           data:
             changes.busy || changes.queued
@@ -140,11 +142,13 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
               : [],
           cursor: {},
         });
+      }
 
-      if (path === "/api/session/ses_other/inbox")
+      if (path === "/api/session/ses_other/inbox") {
         return Response.json({
           data: changes.queued ? [{ id: "queued-work" }] : [],
         });
+      }
 
       if (path === "/api/session" && request.method === "POST") {
         const data = Schema.decodeUnknownSync(zodStringRecord(Schema.Unknown))(
@@ -166,7 +170,7 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
         return Response.json({ data: { id: data["id"] } });
       }
 
-      if (path === `/api/session/${b.sessionID}`)
+      if (path === `/api/session/${b.sessionID}`) {
         return Response.json({
           data: {
             id: changes.wrongSession ? "ses_other" : b.sessionID,
@@ -186,6 +190,7 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
             time: { created: 0, updated: 10, idle: 10 },
           },
         });
+      }
 
       if (path === `/api/session/${b.sessionID}/message`) {
         const assistant = {
@@ -359,7 +364,10 @@ function fixture(b: FleetReviewBinding, changes: Changes = {}) {
     sessionID: "ses_peer",
   });
 
-  if (config.type !== "opencode") throw new Error("Wrong fixture backend");
+  if (config.type !== "opencode") {
+    throw new Error("Wrong fixture backend");
+  }
+
   const backend = new OpenCodeBackend(config);
 
   return {
@@ -553,7 +561,7 @@ test("native review preserves all makers and readonly tool checks across instruc
 for (const changes of [
   { instruction: "malformed" as const },
   { instruction: "native" as const, earlierTool: "bash" },
-])
+]) {
   test(`native review rejects unknown steering or unsafe pre-context tool: ${JSON.stringify(changes)}`, async () => {
     const b = binding();
     const f = fixture(b, changes);
@@ -564,8 +572,9 @@ for (const changes of [
       await f.close();
     }
   });
+}
 
-for (const callback of ["owned", "foreign"] as const)
+for (const callback of ["owned", "foreign"] as const) {
   test(`review shell callback keeps unsafe-tool refusal: ${callback}`, async () => {
     const b = binding();
     const f = fixture(b, { shellCallback: callback });
@@ -579,6 +588,7 @@ for (const callback of ["owned", "foreign"] as const)
       await f.close();
     }
   });
+}
 
 test("unowned review shell notice retains the original pending boundary behaviour", async () => {
   const b = binding();

@@ -68,7 +68,10 @@ export class OpenCodeCrewStatus {
       let probe = pending ? this.fleetStatusProbe : undefined;
 
       if (!probe) {
-        if (performance.now() < this.fleetStatusRetryAt) return;
+        if (performance.now() < this.fleetStatusRetryAt) {
+          return;
+        }
+
         probe = this.startFleetStatusProbe(input);
         this.fleetStatusProbe = probe;
       }
@@ -82,13 +85,19 @@ export class OpenCodeCrewStatus {
           () => probe.result,
         ).result;
 
-        if (probe.member === input.member) return result;
+        if (probe.member === input.member) {
+          return result;
+        }
 
         // A different filter needs its own probe once the slot is free.
         // A timed-out RPC can still hold the slot while it drains.
-        if (this.fleetStatusRead.pending === pending) return;
+        if (this.fleetStatusRead.pending === pending) {
+          return;
+        }
       } finally {
-        if (--probe.waiters === 0) probe.controller.abort();
+        if (--probe.waiters === 0) {
+          probe.controller.abort();
+        }
       }
     }
   }
@@ -109,7 +118,10 @@ export class OpenCodeCrewStatus {
       {
         timeout: probeMs,
         onAbandon: () => {
-          if (!failureCounted) this.recordFleetStatusFailure();
+          if (!failureCounted) {
+            this.recordFleetStatusFailure();
+          }
+
           failureCounted = true;
         },
       },
@@ -117,14 +129,19 @@ export class OpenCodeCrewStatus {
 
     const result = probe
       .then((status): FleetCrewStatus | undefined => {
-        if (controller.signal.aborted || failureCounted) return;
+        if (controller.signal.aborted || failureCounted) {
+          return;
+        }
+
         const result = Schema.decodeUnknownSync(fleetCrewStatusSchema)(status);
         this.fleetStatusFailures = 0;
 
         return result;
       })
       .catch((error: unknown): undefined => {
-        if (controller.signal.aborted || failureCounted) return;
+        if (controller.signal.aborted || failureCounted) {
+          return;
+        }
 
         const timedOut =
           error instanceof DOMException && error.name === "TimeoutError";

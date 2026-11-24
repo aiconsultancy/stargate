@@ -97,7 +97,10 @@ Tokens are never accepted as arguments; use environment references.`;
 function windowText(config: Config, configPath: string) {
   const m = config.maintenance;
 
-  if (!m) throw new Error("No maintenance section in configuration.");
+  if (!m) {
+    throw new Error("No maintenance section in configuration.");
+  }
+
   const installID = m.installID ?? defaultInstallID(configPath);
   const jitter = stableJitter(installID, m.window.jitterMinutes);
   const now = Date.now();
@@ -138,8 +141,10 @@ async function installUnits(
   name: string,
   units: { timer: string; service: string },
 ) {
-  if (process.platform !== "linux")
+  if (process.platform !== "linux") {
     throw new Error("User timers require Linux with systemd.");
+  }
+
   const directory = join(homedir(), ".config/systemd/user");
   await mkdir(directory, { recursive: true });
 
@@ -171,10 +176,12 @@ async function installUnits(
     },
   );
 
-  if (reload.code !== 0)
+  if (reload.code !== 0) {
     throw new Error(
       "systemctl --user daemon-reload failed. Check the user session bus.",
     );
+  }
+
   console.log(
     `Installed ${name}.timer and ${name}.service (not enabled).\nReview, then: systemctl --user enable --now ${name}.timer`,
   );
@@ -206,26 +213,30 @@ function validateMaintenanceOptions(
   if (
     (options.now || options.foreground || options.retryFailed) &&
     operation !== "update"
-  )
+  ) {
     throw new Error("--now and --retry-failed apply only to update.");
+  }
 
-  if (operation === "cleanup" && !options.plan)
+  if (operation === "cleanup" && !options.plan) {
     throw new Error(
       "Use maintenance cleanup --plan; cleanup applies only through maintenance run.",
     );
+  }
 
-  if (options.plan && operation !== "cleanup" && operation !== "update")
+  if (options.plan && operation !== "cleanup" && operation !== "update") {
     throw new Error("--plan applies only to cleanup and update.");
+  }
 
   if (
     (options.acceptCurrent !== undefined || options.yes) &&
     (operation !== "recover" ||
       options.afterRun ||
       options.acceptCurrent === undefined)
-  )
+  ) {
     throw new Error(
       "--accept-current ENTRY [--yes] applies only to recover, without --after-run.",
     );
+  }
 }
 
 export async function maintenanceCli(
@@ -249,8 +260,10 @@ export async function maintenanceCli(
   if (operation === "cleanup") {
     const settings = config.maintenance?.cleanup;
 
-    if (!settings)
+    if (!settings) {
       throw new Error("Configure maintenance.cleanup before planning cleanup.");
+    }
+
     const crews = await discoverCrews(config);
 
     const result = await runCleanup({
@@ -270,7 +283,10 @@ export async function maintenanceCli(
   if (operation === "update") {
     const m = config.maintenance;
 
-    if (!m) throw new Error("No maintenance section in configuration.");
+    if (!m) {
+      throw new Error("No maintenance section in configuration.");
+    }
+
     process.umask(0o077);
     const controller = new AbortController();
 
@@ -305,7 +321,10 @@ export async function maintenanceCli(
       );
     } catch (error) {
       // A refusal is an answer, not a crash; its text is fixed and safe.
-      if (!(error instanceof UpdateRefused)) throw error;
+      if (!(error instanceof UpdateRefused)) {
+        throw error;
+      }
+
       console.log(error.message);
 
       return 1;
@@ -346,10 +365,13 @@ export async function maintenanceCli(
   if (operation === "adopt") {
     const root = config.maintenance?.stargate?.root;
 
-    if (!root)
+    if (!root) {
       throw new Error("maintenance.stargate.root is required for adopt.");
+    }
 
-    if (!options.release) throw new Error("--release DIR is required.");
+    if (!options.release) {
+      throw new Error("--release DIR is required.");
+    }
 
     const result = await adoptRelease(
       root,
@@ -389,8 +411,10 @@ export async function maintenanceCli(
     const { m } = windowText(config, options.configPath);
     const droid = m.droid;
 
-    if (!droid)
+    if (!droid) {
       throw new Error("No maintenance.droid section in configuration.");
+    }
+
     const name = timerName(options.name ?? "stargate-maintenance-droid");
 
     const units = buildDroidUnits({
@@ -434,7 +458,10 @@ export async function maintenanceCli(
         ...(options.print && { preview: true }),
       });
 
-      if (result.text) console.log(result.text);
+      if (result.text) {
+        console.log(result.text);
+      }
+
       console.log(
         result.skipped
           ? "Another droid check is running; nothing was done."
@@ -468,8 +495,11 @@ export async function maintenanceCli(
         signal: controller.signal,
       });
 
-      if (options.json) console.log(JSON.stringify(report, null, 2));
-      else console.log(summary(report, reportPath ?? "not written (plan)"));
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log(summary(report, reportPath ?? "not written (plan)"));
+      }
 
       // Non-zero makes the unit visibly failed when an operator must look.
       return report.outcome === "failed" || attention ? 1 : 0;

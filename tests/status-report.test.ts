@@ -30,23 +30,26 @@ test("detailed shared status returns only OpenCode counts and version from read-
       const path = new URL(request.url).pathname;
       calls.push(`${request.method} ${path}`);
 
-      if (path === "/api/info")
+      if (path === "/api/info") {
         return Response.json({
           version: "2.5.1",
           pid: 1,
           urls: [],
           paths: { tmp: "/" },
         });
+      }
 
-      if (path === "/api/session/active")
+      if (path === "/api/session/active") {
         return Response.json({ data: { ses_test: { type: "running" } } });
+      }
 
-      if (path === "/api/form" || path === "/api/permission/request")
+      if (path === "/api/form" || path === "/api/permission/request") {
         return Response.json({
           data: [{ sessionID: "ses_test", prompt: "secret-prompt" }],
         });
+      }
 
-      if (path === "/api/mcp")
+      if (path === "/api/mcp") {
         return Response.json({
           data: [
             { name: "private-server", status: { status: "connected" } },
@@ -56,6 +59,7 @@ test("detailed shared status returns only OpenCode counts and version from read-
             },
           ],
         });
+      }
 
       return new Response("unknown", { status: 404 });
     },
@@ -64,8 +68,10 @@ test("detailed shared status returns only OpenCode counts and version from read-
   try {
     const registration = bot();
 
-    if (registration.backend.type !== "opencode")
+    if (registration.backend.type !== "opencode") {
       throw new Error("Invalid fixture");
+    }
+
     registration.backend = {
       ...registration.backend,
       url: server.url.href,
@@ -103,13 +109,14 @@ test("unreadable OpenCode detail stays unknown without losing observed version",
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
-      if (new URL(request.url).pathname === "/api/info")
+      if (new URL(request.url).pathname === "/api/info") {
         return Response.json({
           version: "2.5.1",
           pid: 1,
           urls: [],
           paths: { tmp: "/" },
         });
+      }
 
       return new Response("secret-upstream", { status: 503 });
     },
@@ -118,8 +125,10 @@ test("unreadable OpenCode detail stays unknown without losing observed version",
   try {
     const registration = bot();
 
-    if (registration.backend.type !== "opencode")
+    if (registration.backend.type !== "opencode") {
       throw new Error("Invalid fixture");
+    }
+
     registration.backend = {
       ...registration.backend,
       url: server.url.href,
@@ -192,13 +201,14 @@ test("read-only report keeps history when metadata succeeds and crew fails", asy
     fetch(req) {
       paths.push(`${req.method} ${new URL(req.url).pathname}`);
 
-      if (new URL(req.url).pathname.endsWith("/info"))
+      if (new URL(req.url).pathname.endsWith("/info")) {
         return Response.json({
           version: "2",
           pid: 1,
           urls: [],
           paths: { tmp: "/" },
         });
+      }
 
       return new Response("secret error", { status: 500 });
     },
@@ -209,8 +219,10 @@ test("read-only report keeps history when metadata succeeds and crew fails", asy
   try {
     const registration = bot();
 
-    if (registration.backend.type !== "opencode")
+    if (registration.backend.type !== "opencode") {
       throw new Error("invalid fixture");
+    }
+
     registration.backend = { ...registration.backend, url: server.url.href };
     const config = join(dir, "config.json");
     const log = join(dir, "log");
@@ -258,8 +270,9 @@ test("status help and argument errors precede configuration reads", async () => 
       ["status", "--bot", "helper", "extra"],
       ["status", "--bot", "helper", "--name", "bad"],
       ["start", "--log", "bad"],
-    ])
+    ]) {
       await expect(runCli(args)).rejects.toThrow();
+    }
   } finally {
     output.mockRestore();
   }
@@ -277,21 +290,23 @@ test("status never requests a location or crew RPC, including if it is evicted",
       const url = new URL(req.url);
       calls.push(`${req.method} ${url.pathname}`);
 
-      if (url.pathname === "/api/info")
+      if (url.pathname === "/api/info") {
         return Response.json({
           version: "2",
           pid: 1,
           urls: [],
           paths: { tmp: "/" },
         });
+      }
 
-      if (url.pathname === "/api/session/ses_fixture")
+      if (url.pathname === "/api/session/ses_fixture") {
         return Response.json({
           data: {
             id: "ses_fixture",
             location: { directory: incompatible ? "/wrong" : "/workspace" },
           },
         });
+      }
 
       if (url.pathname === "/api/debug/location") {
         evicted = true; // A loaded location disappears after the list response.
@@ -299,8 +314,9 @@ test("status never requests a location or crew RPC, including if it is evicted",
         return Response.json([{ directory: "/workspace" }]);
       }
 
-      if (url.pathname === "/api/rpc/stargate.crew.reporting/status")
+      if (url.pathname === "/api/rpc/stargate.crew.reporting/status") {
         return new Response(null, { status: evicted ? 500 : 404 });
+      }
 
       return new Response(null, { status: 404 });
     },
@@ -311,8 +327,10 @@ test("status never requests a location or crew RPC, including if it is evicted",
   try {
     const registration = bot();
 
-    if (registration.backend.type !== "opencode")
+    if (registration.backend.type !== "opencode") {
       throw new Error("invalid fixture");
+    }
+
     registration.backend = {
       ...registration.backend,
       url: server.url.href,

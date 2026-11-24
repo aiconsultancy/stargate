@@ -215,7 +215,10 @@ function safe<T>(
   try {
     return operation();
   } catch (error) {
-    if (error instanceof NotificationStoreError) throw error;
+    if (error instanceof NotificationStoreError) {
+      throw error;
+    }
+
     throw new NotificationStoreError(message);
   }
 }
@@ -229,8 +232,9 @@ function checkRead(registration: string, now: number) {
     !isRegistration(registration) ||
     !Number.isSafeInteger(now) ||
     !Number.isFinite(new Date(now).getTime())
-  )
+  ) {
     invalid();
+  }
 }
 
 function registrationHash(registration: string) {
@@ -238,18 +242,24 @@ function registrationHash(registration: string) {
 }
 
 function readCursor(cursor: string | undefined, registration: string) {
-  if (cursor === undefined) return { channel: "", thread: "" };
+  if (cursor === undefined) {
+    return { channel: "", thread: "" };
+  }
 
   try {
     const bytes = Buffer.from(cursor, "base64url");
 
-    if (bytes.toString("base64url") !== cursor) invalid();
+    if (bytes.toString("base64url") !== cursor) {
+      invalid();
+    }
 
     const parsed = Schema.decodeUnknownSync(cursorSchema)(
       JSON.parse(bytes.toString("utf8")),
     );
 
-    if (parsed.registration !== registrationHash(registration)) invalid();
+    if (parsed.registration !== registrationHash(registration)) {
+      invalid();
+    }
 
     return parsed;
   } catch {
@@ -267,7 +277,9 @@ function settingOf(
   row: SavedSetting | undefined,
   now: number,
 ): NotificationSetting {
-  if (!row) return { state: "absent", mute_until: null };
+  if (!row) {
+    return { state: "absent", mute_until: null };
+  }
 
   return {
     state:
@@ -296,8 +308,10 @@ export class NotificationStore {
         );
 
         try {
-          if (!fstatSync(fd).isFile())
+          if (!fstatSync(fd).isFile()) {
             throw new Error("Notification store path is not a regular file");
+          }
+
           fchmodSync(fd, 0o600);
         } finally {
           closeSync(fd);
@@ -346,8 +360,9 @@ export class NotificationStore {
     return safe(() => {
       checkRead(registration, now);
 
-      if (!isChannel(channel) || (thread !== undefined && !isThread(thread)))
+      if (!isChannel(channel) || (thread !== undefined && !isThread(thread))) {
         invalid();
+      }
 
       // A single SELECT keeps overlapping scopes in the same SQLite snapshot.
       const rows = this.db
@@ -396,7 +411,10 @@ export class NotificationStore {
 
       const parsed = Schema.decodeUnknownResult(notificationInputSchema)(raw);
 
-      if (Result.isFailure(parsed)) invalid();
+      if (Result.isFailure(parsed)) {
+        invalid();
+      }
+
       const input = parsed.success;
 
       if (input.op === "list") {
@@ -421,7 +439,7 @@ export class NotificationStore {
             })
           : null;
 
-      if (input.op === "status" && target)
+      if (input.op === "status" && target) {
         return {
           op: "status",
           target,
@@ -432,9 +450,11 @@ export class NotificationStore {
             readTime(),
           ),
         };
+      }
 
-      if (input.op === "status" || !Schema.is(contextSchema)(context))
+      if (input.op === "status" || !Schema.is(contextSchema)(context)) {
         invalid();
+      }
 
       return this.db
         .transaction(() => {
@@ -462,10 +482,12 @@ export class NotificationStore {
             if (
               existing.input !== canonical ||
               existing.caller !== context.caller
-            )
+            ) {
               throw new NotificationStoreError(
                 "Notification operation identity conflict.",
               );
+            }
+
             receipt = Schema.decodeUnknownSync(receiptSchema)(
               JSON.parse(existing.receipt),
             );
@@ -475,10 +497,12 @@ export class NotificationStore {
               input.op === "mute" &&
               input.mute_until !== undefined &&
               Date.parse(input.mute_until) <= now
-            )
+            ) {
               throw new NotificationStoreError(
                 "Notification mute expiry has elapsed.",
               );
+            }
+
             let changed: boolean;
             let cleared: NotificationCounts | undefined;
 
@@ -491,7 +515,10 @@ export class NotificationStore {
                   )
                   .run(registration).changes > 0;
             } else {
-              if (!target) invalid();
+              if (!target) {
+                invalid();
+              }
+
               const thread = target.scope === "thread" ? target.thread_ts : "";
 
               if (input.op === "unmute") {
@@ -552,8 +579,9 @@ export class NotificationStore {
           }
 
           if (input.op === "clear_all") {
-            if (!receipt.cleared)
+            if (!receipt.cleared) {
               throw new Error("Notification clear receipt has no counts");
+            }
 
             return {
               op: input.op,
@@ -565,7 +593,9 @@ export class NotificationStore {
             };
           }
 
-          if (!target) invalid();
+          if (!target) {
+            invalid();
+          }
 
           return {
             op: input.op,

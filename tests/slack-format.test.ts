@@ -92,11 +92,13 @@ test("mixed content retains lists, quotes, headings, links and inline code", () 
     ).blocks,
   );
 
-  for (const type of ["rich_text_list", "rich_text_quote", "link", "user"])
+  for (const type of ["rich_text_list", "rich_text_quote", "link", "user"]) {
     expect(encoded).toContain(`"type":"${type}"`);
+  }
 
-  for (const style of ["bold", "italic", "code"])
+  for (const style of ["bold", "italic", "code"]) {
     expect(encoded).toContain(`"${style}":true`);
+  }
 });
 
 test("invalid or dangerous link targets remain literal and fallback is escaped", () => {
@@ -167,8 +169,10 @@ test("mixed headings, tables and images degrade to readable content", () => {
     "Ship",
     "Ready",
     "Ship image (https://example.test/ship.png)",
-  ])
+  ]) {
     expect(encoded).toContain(content);
+  }
+
   expect(encoded).not.toContain("| --- |");
   expect(encoded).not.toContain("![");
   expect(encoded).not.toContain("# Heading");
@@ -218,16 +222,21 @@ test("code, escaped and entity controls in image or unsafe-link labels stay lite
     const encoded = JSON.stringify(slackContent(text).blocks);
     expect(encoded).not.toContain('"type":"user"');
 
-    if (text.startsWith("[`")) expect(encoded).toContain('"code":true');
+    if (text.startsWith("[`")) {
+      expect(encoded).toContain('"code":true');
+    }
+
     expect(encoded).not.toContain('"literal":');
   }
 });
 
 test("unclosed inline code fails closed during streaming", () => {
-  for (const text of ["Use `<@U123>", "<@U123>` tail"])
+  for (const text of ["Use `<@U123>", "<@U123>` tail"]) {
     expect(JSON.stringify(slackContent(text).blocks)).not.toContain(
       '"type":"user"',
     );
+  }
+
   const encoded = JSON.stringify(slackContent("Use `<@U123>` <@U9>").blocks);
   expect(encoded).not.toContain('"user_id":"U123"');
   expect(encoded).toContain('"user_id":"U9"');
@@ -262,18 +271,26 @@ test("link URLs and labels both consume the Slack chunk budget", () => {
   expect(parts.length).toBeGreaterThanOrEqual(5);
 
   for (const part of parts) {
-    if (typeof part === "string")
+    if (typeof part === "string") {
       throw new Error("Expected classified content");
+    }
+
     let characters = 0;
 
     const count = (value: unknown) => {
-      if (Array.isArray(value)) for (const child of value) count(child);
-      else if (value && typeof value === "object")
-        for (const [key, child] of Object.entries(value)) {
-          if ((key === "text" || key === "url") && typeof child === "string")
-            characters += Array.from(child).length;
-          else count(child);
+      if (Array.isArray(value)) {
+        for (const child of value) {
+          count(child);
         }
+      } else if (value && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) {
+          if ((key === "text" || key === "url") && typeof child === "string") {
+            characters += Array.from(child).length;
+          } else {
+            count(child);
+          }
+        }
+      }
     };
 
     count(part.content.blocks);
@@ -291,8 +308,10 @@ test("ordinary replies keep main's exact native Markdown payload", () => {
     expect(parts).toHaveLength(1);
     const part = parts[0];
 
-    if (!part || typeof part === "string")
+    if (!part || typeof part === "string") {
       throw new Error("Missing prepared payload");
+    }
+
     expect(part.content).toEqual({
       text: text
         .replaceAll("&", "&amp;")

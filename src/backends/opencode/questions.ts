@@ -49,7 +49,9 @@ export class OpenCodeQuestions {
     formID: string,
     signal: AbortSignal,
   ) {
-    if (this.sessionID !== undefined && sessionID !== this.sessionID) return;
+    if (this.sessionID !== undefined && sessionID !== this.sessionID) {
+      return;
+    }
 
     const form = await this.client.session.form
       .get({ sessionID, formID }, { signal })
@@ -57,8 +59,10 @@ export class OpenCodeQuestions {
         if (
           (isFormNotFoundError(error) && error.id === formID) ||
           (isSessionNotFoundError(error) && error.sessionID === sessionID)
-        )
+        ) {
           return;
+        }
+
         throw error;
       });
 
@@ -67,11 +71,15 @@ export class OpenCodeQuestions {
       form.id !== formID ||
       form.sessionID !== sessionID ||
       form.state.status !== "pending"
-    )
+    ) {
       return;
+    }
+
     const origin = decodeQuestionOrigin(form.metadata);
 
-    if (Option.isNone(origin)) return;
+    if (Option.isNone(origin)) {
+      return;
+    }
 
     const message = await this.client.session.message.get(
       { sessionID, messageID: origin.value.tool.messageID },
@@ -82,8 +90,9 @@ export class OpenCodeQuestions {
       message.id !== origin.value.tool.messageID ||
       message.type !== "assistant" ||
       message.time.completed !== undefined
-    )
+    ) {
       return;
+    }
 
     const tools = message.content.filter(
       (p) => p.type === "tool" && p.id === origin.value.tool.id,
@@ -97,8 +106,9 @@ export class OpenCodeQuestions {
       tool.name !== "question" ||
       tool.state.status !== "running" ||
       tool.time.completed !== undefined
-    )
+    ) {
       return;
+    }
 
     return { form, toolMessageID: message.id, toolCallID: tool.id };
   }
@@ -110,7 +120,10 @@ export class OpenCodeQuestions {
   ): Promise<PendingQuestion | undefined> {
     const running = await this.runningQuestion(sessionID, formID, signal);
 
-    if (!running) return;
+    if (!running) {
+      return;
+    }
+
     const { form, toolMessageID, toolCallID } = running;
 
     const fingerprint = questionFingerprint({
@@ -145,8 +158,9 @@ export class OpenCodeQuestions {
         (await this.client.session.inbox.list({ sessionID }, { signal })).some(
           (v) => v.id === inputID,
         )
-      )
+      ) {
         return;
+      }
     } else {
       inputID = await this.questionInput(sessionID, toolMessageID, signal);
 
@@ -163,14 +177,20 @@ export class OpenCodeQuestions {
         if (this.questionAncestry.size >= 128) {
           const oldest = this.questionAncestry.keys().next().value;
 
-          if (oldest !== undefined) this.questionAncestry.delete(oldest);
+          if (oldest !== undefined) {
+            this.questionAncestry.delete(oldest);
+          }
         }
 
         this.questionAncestry.set(cacheKey, { fingerprint, inputID });
-      } else return;
+      } else {
+        return;
+      }
     }
 
-    if (!inputID) return;
+    if (!inputID) {
+      return;
+    }
 
     const parsed = Schema.decodeUnknownResult(nativeQuestionSchema)({
       id: form.id,
@@ -218,8 +238,10 @@ export class OpenCodeQuestions {
 
       for (const message of page.data) {
         if (!found) {
-          if (message.id === assistant && message.type === "assistant")
+          if (message.id === assistant && message.type === "assistant") {
             found = true;
+          }
+
           continue;
         }
 
@@ -231,18 +253,27 @@ export class OpenCodeQuestions {
           return resolveBoundaryContext(chain);
         }
 
-        if (record.input === undefined) continue;
+        if (record.input === undefined) {
+          continue;
+        }
 
-        if (chain.length === 0 && record.type !== "synthetic")
+        if (chain.length === 0 && record.type !== "synthetic") {
           return record.input;
+        }
+
         chain.push(record);
       }
 
       cursor = page.cursor.next ?? undefined;
 
-      if (!cursor) return resolveBoundaryContext(chain);
+      if (!cursor) {
+        return resolveBoundaryContext(chain);
+      }
 
-      if (seen.has(cursor)) throw new Error("Question history cursor repeated");
+      if (seen.has(cursor)) {
+        throw new Error("Question history cursor repeated");
+      }
+
       seen.add(cursor);
     }
 
@@ -253,24 +284,36 @@ export class OpenCodeQuestions {
     sessionID: string,
     signal: AbortSignal,
   ): Promise<PendingQuestion[]> {
-    if (this.sessionID !== undefined && sessionID !== this.sessionID) return [];
+    if (this.sessionID !== undefined && sessionID !== this.sessionID) {
+      return [];
+    }
 
     const forms = await this.client.session.form
       .list({ sessionID }, { signal })
       .catch((error: unknown) => {
-        if (isSessionNotFoundError(error) && error.sessionID === sessionID)
+        if (isSessionNotFoundError(error) && error.sessionID === sessionID) {
           return [];
+        }
+
         throw error;
       });
 
-    if (forms.length > 16) throw new Error("Too many native forms");
+    if (forms.length > 16) {
+      throw new Error("Too many native forms");
+    }
+
     const questions: PendingQuestion[] = [];
 
     for (const form of forms) {
-      if (form.sessionID !== sessionID) continue;
+      if (form.sessionID !== sessionID) {
+        continue;
+      }
+
       const question = await this.nativeQuestion(sessionID, form.id, signal);
 
-      if (question) questions.push(question);
+      if (question) {
+        questions.push(question);
+      }
     }
 
     return questions;
@@ -281,8 +324,9 @@ export class OpenCodeQuestions {
     formID: string,
     signal: AbortSignal,
   ): Promise<"pending" | "resolved" | "missing-session" | "unknown"> {
-    if (this.sessionID !== undefined && sessionID !== this.sessionID)
+    if (this.sessionID !== undefined && sessionID !== this.sessionID) {
       return "unknown";
+    }
 
     try {
       const form = await this.client.session.form.get(
@@ -290,14 +334,20 @@ export class OpenCodeQuestions {
         { signal },
       );
 
-      if (form.id !== formID || form.sessionID !== sessionID) return "unknown";
+      if (form.id !== formID || form.sessionID !== sessionID) {
+        return "unknown";
+      }
 
       return form.state.status === "pending" ? "pending" : "resolved";
     } catch (error) {
-      if (isFormNotFoundError(error) && error.id === formID) return "resolved";
+      if (isFormNotFoundError(error) && error.id === formID) {
+        return "resolved";
+      }
 
-      if (isSessionNotFoundError(error) && error.sessionID === sessionID)
+      if (isSessionNotFoundError(error) && error.sessionID === sessionID) {
         return "missing-session";
+      }
+
       throw error;
     }
   }
@@ -322,7 +372,9 @@ export class OpenCodeQuestions {
     fingerprint: string,
     signal: AbortSignal,
   ) {
-    if (sessionID !== this.sessionID) return;
+    if (sessionID !== this.sessionID) {
+      return;
+    }
 
     const form = await this.client.session.form.get(
       { sessionID, formID },
@@ -339,11 +391,13 @@ export class OpenCodeQuestions {
         metadata: form.metadata,
         fields: form.fields,
       }) !== fingerprint
-    )
+    ) {
       return;
+    }
 
-    if (form.state.status === "answered" || form.state.status === "cancelled")
+    if (form.state.status === "answered" || form.state.status === "cancelled") {
       return form.state.status;
+    }
 
     return;
   }
@@ -365,15 +419,21 @@ export class OpenCodeQuestions {
       "unsupported" in live ||
       live.inputID !== question.inputID ||
       live.fingerprint !== question.fingerprint
-    )
+    ) {
       throw new Error("Native question is stale or has no owned input");
+    }
+
     const input = { sessionID: question.sessionID, formID: question.id };
 
-    if (allowed && !allowed()) throw new Error("Question route changed");
+    if (allowed && !allowed()) {
+      throw new Error("Question route changed");
+    }
 
-    if (answer === null)
+    if (answer === null) {
       await this.client.session.form.cancel(input, { signal });
-    else await this.client.session.form.reply({ ...input, answer }, { signal });
+    } else {
+      await this.client.session.form.reply({ ...input, answer }, { signal });
+    }
   }
 
   public async questionInputSettled(
@@ -381,25 +441,31 @@ export class OpenCodeQuestions {
     inputID: string,
     signal: AbortSignal,
   ): Promise<boolean> {
-    if (this.sessionID !== undefined && sessionID !== this.sessionID)
+    if (this.sessionID !== undefined && sessionID !== this.sessionID) {
       return false;
+    }
+
     const session = await this.client.session.get({ sessionID }, { signal });
 
     if (
       session.id !== sessionID ||
       session.time.idle === undefined ||
       session.time.idle < (session.time.busy ?? 0)
-    )
+    ) {
       return false;
+    }
 
-    if ((await this.client.session.active({ signal }))[sessionID]) return false;
+    if ((await this.client.session.active({ signal }))[sessionID]) {
+      return false;
+    }
 
     if (
       (await this.client.session.inbox.list({ sessionID }, { signal })).some(
         (v) => v.id === inputID,
       )
-    )
+    ) {
       return false;
+    }
 
     const input = await this.client.session.message.get(
       { sessionID, messageID: inputID },
@@ -423,10 +489,15 @@ export class OpenCodeQuestions {
         Option.isSome(decodeQuestionOrigin(form.metadata)),
     );
 
-    if (candidates.length === 0) return false;
+    if (candidates.length === 0) {
+      return false;
+    }
+
     const active = await this.client.session.active({ signal });
 
-    if (!active[sessionID]) return false;
+    if (!active[sessionID]) {
+      return false;
+    }
 
     for (const form of candidates) {
       signal.throwIfAborted();
@@ -439,7 +510,9 @@ export class OpenCodeQuestions {
 
       signal.throwIfAborted();
 
-      if (running) return true;
+      if (running) {
+        return true;
+      }
     }
 
     return false;

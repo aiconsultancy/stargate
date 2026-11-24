@@ -170,8 +170,10 @@ export function buildQuestionBlocks(
     !Number.isInteger(revision) ||
     revision < 0 ||
     revision > question.fields.length
-  )
+  ) {
     throw new Error("Invalid clarification revision");
+  }
+
   const field = question.fields[revision];
 
   if (!field) {
@@ -218,11 +220,12 @@ export function buildQuestionBlocks(
   const blocks: SlackPanelContent["blocks"] = [];
   const chars = Array.from(description);
 
-  for (let i = 0; i < chars.length; i += 2800)
+  for (let i = 0; i < chars.length; i += 2800) {
     blocks.push({
       type: "section",
       text: plain(chars.slice(i, i + 2800).join("")),
     });
+  }
 
   const elements: Extract<
     SlackPanelContent["blocks"][number],
@@ -230,7 +233,7 @@ export function buildQuestionBlocks(
   >["elements"] = [];
 
   if (field.type === "multiselect" && field.options.length > 0) {
-    for (let start = 0; start < field.options.length; start += 10)
+    for (let start = 0; start < field.options.length; start += 10) {
       blocks.push({
         type: "actions",
         block_id: selectionBlock(token, revision, start / 10),
@@ -247,6 +250,8 @@ export function buildQuestionBlocks(
           },
         ],
       });
+    }
+
     elements.push(button("submit", control, "Submit"));
   } else if (field.type === "string") {
     elements.push(
@@ -260,10 +265,14 @@ export function buildQuestionBlocks(
     );
   }
 
-  if (custom(field)) elements.push(button("custom", control, "Type your own"));
+  if (custom(field)) {
+    elements.push(button("custom", control, "Type your own"));
+  }
 
-  if (field.required === false)
+  if (field.required === false) {
     elements.push(button("skip", control, "Skip optional question"));
+  }
+
   elements.push(button("cancel", control, "Cancel question"));
   blocks.push({
     type: "actions",
@@ -307,11 +316,17 @@ export class SlackQuestionControls {
   private owner(token: string) {
     const bot = this.bot();
 
-    if (!bot) return;
+    if (!bot) {
+      return;
+    }
+
     const key = botKey(bot, this.identity);
     const offer = this.store.questions.questionByToken(key, token);
 
-    if (offer?.state !== "offered" || offer.expires <= Date.now()) return;
+    if (offer?.state !== "offered" || offer.expires <= Date.now()) {
+      return;
+    }
+
     const job = this.store.jobByInput(key, offer.inputID);
 
     if (
@@ -323,8 +338,9 @@ export class SlackQuestionControls {
       job.deferDelivery ||
       !isAllowedUser(bot, job.user) ||
       !isAllowedChannel(bot, job.channel)
-    )
+    ) {
       return;
+    }
 
     return { bot, offer, job };
   }
@@ -333,7 +349,9 @@ export class SlackQuestionControls {
     const owner = this.owner(token);
     const binding = this.store.questions.slackQuestion(token);
 
-    if (!owner || !binding) return;
+    if (!owner || !binding) {
+      return;
+    }
 
     try {
       const question = Schema.decodeUnknownSync(nativeQuestionSchema)(
@@ -348,8 +366,9 @@ export class SlackQuestionControls {
         question.sessionID !== owner.offer.sessionID ||
         question.inputID !== owner.offer.inputID ||
         question.fingerprint !== owner.offer.fingerprint
-      )
+      ) {
         return;
+      }
 
       const progress = questionAnswer(
         { ...question, fields: question.fields.slice(0, binding.revision) },
@@ -387,7 +406,9 @@ export class SlackQuestionControls {
   ) {
     const current = await this.admitted(token, user, channel, thread, open);
 
-    if (!current || !this.slack.update || !open()) return;
+    if (!current || !this.slack.update || !open()) {
+      return;
+    }
 
     const panel = buildQuestionBlocks(
       current.question,
@@ -428,8 +449,9 @@ export class SlackQuestionControls {
         current.binding.revision,
         text,
       )
-    )
+    ) {
       return;
+    }
 
     if (revision === current.question.fields.length) {
       await this.submit(current.job, current.offer.token, text, user);
@@ -466,15 +488,20 @@ export class SlackQuestionControls {
         current.job.channel !== channel ||
         (current.job.replyParent ?? current.job.thread) !== thread ||
         (settings.answer !== "allowed" && current.job.user !== user)
-      )
+      ) {
         return;
+      }
 
       return current;
     };
 
-    if (!matches(await this.settings())) return;
+    if (!matches(await this.settings())) {
+      return;
+    }
 
-    if (!(await this.isHuman(user))) return;
+    if (!(await this.isHuman(user))) {
+      return;
+    }
 
     return matches(await this.settings());
   }
@@ -497,12 +524,16 @@ export class SlackQuestionControls {
       question.fingerprint !== offer.fingerprint ||
       question.sessionID !== offer.sessionID ||
       question.inputID !== offer.inputID
-    )
+    ) {
       throw new Error("Clarification publication refused");
+    }
+
     const trusted = Schema.decodeUnknownSync(nativeQuestionSchema)(question);
 
-    if (trusted.fields.length > 1 && !this.slack.update)
+    if (trusted.fields.length > 1 && !this.slack.update) {
       throw new Error("Clarification updates unavailable");
+    }
+
     const panel = buildQuestionBlocks(trusted, offer.token);
 
     const ts = await this.slack.post(
@@ -514,8 +545,10 @@ export class SlackQuestionControls {
       panel,
     );
 
-    if (typeof ts !== "string" || !/^\d{1,16}\.\d{1,6}$/.test(ts))
+    if (typeof ts !== "string" || !/^\d{1,16}\.\d{1,6}$/.test(ts)) {
       throw new Error("Clarification publication unconfirmed");
+    }
+
     this.store.questions.saveSlackQuestion(offer.token, ts, trusted);
   }
 
@@ -535,11 +568,15 @@ export class SlackQuestionControls {
           Option.isSome(action) && action.value.action_id.startsWith(prefix)
         );
       })
-    )
+    ) {
       return false;
+    }
+
     await ack();
 
-    if (!open()) return true;
+    if (!open()) {
+      return true;
+    }
 
     return this.enqueue(async () => {
       try {
@@ -556,7 +593,10 @@ export class SlackQuestionControls {
     const parsed = decodeAction(raw);
     const bot = this.bot();
 
-    if (Option.isNone(parsed) || !bot) return;
+    if (Option.isNone(parsed) || !bot) {
+      return;
+    }
+
     const body = parsed.value;
     const action = body.actions[0];
 
@@ -567,19 +607,27 @@ export class SlackQuestionControls {
       body.message.user !== this.identity.user ||
       body.container.channel_id !== body.channel.id ||
       body.container.message_ts !== body.message.ts
-    )
+    ) {
       return;
+    }
 
     // Checkbox changes only update Slack state. They never answer the form.
-    if (action.action_id === `${prefix}select`) return;
+    if (action.action_id === `${prefix}select`) {
+      return;
+    }
 
-    if (action.type !== "button") return;
+    if (action.type !== "button") {
+      return;
+    }
 
     const match = /^([a-f0-9]{32})(?::([0-8])(?::([0-9]|1[0-9]))?)?$/.exec(
       action.value ?? "",
     );
 
-    if (!match) return;
+    if (!match) {
+      return;
+    }
+
     const token = match[1] ?? "";
 
     const current = await this.admitted(
@@ -590,13 +638,18 @@ export class SlackQuestionControls {
       open,
     );
 
-    if (!current || current.binding.ts !== body.message.ts) return;
+    if (!current || current.binding.ts !== body.message.ts) {
+      return;
+    }
 
-    if (match[2] === undefined && current.question.fields.length !== 1) return;
+    if (match[2] === undefined && current.question.fields.length !== 1) {
+      return;
+    }
+
     const revision = Number(match[2] ?? "0");
 
     if (revision !== current.binding.revision) {
-      if (revision < current.binding.revision)
+      if (revision < current.binding.revision) {
         await this.repaint(
           token,
           body.user.id,
@@ -604,12 +657,15 @@ export class SlackQuestionControls {
           body.message.thread_ts,
           open,
         );
+      }
 
       return;
     }
 
     if (action.action_id === `${prefix}cancel` && match[3] === undefined) {
-      if (open()) await this.submit(current.job, token, null, body.user.id);
+      if (open()) {
+        await this.submit(current.job, token, null, body.user.id);
+      }
 
       return;
     }
@@ -621,13 +677,14 @@ export class SlackQuestionControls {
         action.action_id === `${prefix}finish` &&
         match[3] === undefined &&
         open()
-      )
+      ) {
         await this.submit(
           current.job,
           token,
           JSON.stringify(current.progress),
           body.user.id,
         );
+      }
 
       return;
     }
@@ -641,10 +698,14 @@ export class SlackQuestionControls {
     ) {
       const option = field.options?.[Number(match[3])];
 
-      if (!option) return;
+      if (!option) {
+        return;
+      }
+
       answer = { [field.key]: option.value };
-    } else if (match[3] !== undefined) return;
-    else if (
+    } else if (match[3] !== undefined) {
+      return;
+    } else if (
       action.action_id === `${prefix}submit` &&
       field.type === "multiselect"
     ) {
@@ -657,7 +718,9 @@ export class SlackQuestionControls {
           ],
         );
 
-        if (Option.isNone(selection)) return;
+        if (Option.isNone(selection)) {
+          return;
+        }
 
         for (const selected of selection.value.selected_options) {
           const index = /^([a-f0-9]{32}):([0-8]):([0-9]|1[0-9])$/.exec(
@@ -674,25 +737,35 @@ export class SlackQuestionControls {
               ? field.options[number]
               : undefined;
 
-          if (!option) return;
+          if (!option) {
+            return;
+          }
+
           values.push(option.value);
         }
       }
 
       answer = { [field.key]: values };
-    } else if (action.action_id === `${prefix}skip` && field.required === false)
+    } else if (
+      action.action_id === `${prefix}skip` &&
+      field.required === false
+    ) {
       answer = {};
-    else if (action.action_id === `${prefix}custom` && custom(field)) {
-      if (open())
+    } else if (action.action_id === `${prefix}custom` && custom(field)) {
+      if (open()) {
         await this.slack.ephemeral?.(
           current.job.channel,
           body.user.id,
           body.message.thread_ts,
           `Reply in this thread: <@${this.identity.user}> answer ${token}${current.question.fields.length > 1 ? `:${revision}` : ""} <your answer>${field.type === "multiselect" ? " (comma-separated choices)" : ""}. Never send credentials.`,
         );
+      }
 
       return;
-    } else return;
+    } else {
+      return;
+    }
+
     questionAnswer(
       { ...current.question, fields: [field] },
       JSON.stringify(answer),
@@ -703,17 +776,24 @@ export class SlackQuestionControls {
   public receive(raw: unknown, open: () => boolean): Promise<boolean> | false {
     const candidate = decodeTextCandidate(raw);
 
-    if (Option.isNone(candidate)) return false;
+    if (Option.isNone(candidate)) {
+      return false;
+    }
 
     const match = new RegExp(
       `^\\s*<@${this.identity.user}>\\s+answer\\s+([a-f0-9]{32})(?::([0-8]))?(?:\\s+([\\s\\S]+))?\\s*$`,
     ).exec(candidate.value.event.text);
 
-    if (!match) return false;
+    if (!match) {
+      return false;
+    }
 
     return this.enqueue(async () => {
       try {
-        if (!(await this.settings()).enabled) return false;
+        if (!(await this.settings()).enabled) {
+          return false;
+        }
+
         await this.handleReply(
           raw,
           match[1] ?? "",
@@ -739,14 +819,18 @@ export class SlackQuestionControls {
     const parsed = decodeReply(raw);
     const bot = this.bot();
 
-    if (Option.isNone(parsed) || !bot || !text || text.length > 4000) return;
+    if (Option.isNone(parsed) || !bot || !text || text.length > 4000) {
+      return;
+    }
+
     const body = parsed.value;
 
     if (
       body.api_app_id !== bot.slack.appId ||
       body.team_id !== this.identity.team
-    )
+    ) {
       return;
+    }
 
     const current = await this.admitted(
       token,
@@ -759,12 +843,14 @@ export class SlackQuestionControls {
     if (
       !current ||
       (revisionText === undefined && current.question.fields.length !== 1)
-    )
+    ) {
       return;
+    }
+
     const revision = Number(revisionText ?? "0");
 
     if (revision !== current.binding.revision) {
-      if (revision < current.binding.revision)
+      if (revision < current.binding.revision) {
         await this.repaint(
           token,
           body.event.user,
@@ -772,13 +858,16 @@ export class SlackQuestionControls {
           body.event.thread_ts,
           open,
         );
+      }
 
       return;
     }
 
     const field = current.field;
 
-    if (!field || !custom(field)) return;
+    if (!field || !custom(field)) {
+      return;
+    }
 
     const answer = {
       [field.key]:

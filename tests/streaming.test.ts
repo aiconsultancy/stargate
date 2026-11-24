@@ -54,7 +54,10 @@ test("text reaches Slack before generation completes, then updates in place", as
     gateway.accept(event());
     const job = store.ready(gateway.key, Date.now(), 1)[0];
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
+
     const work = gateway.process(job, new AbortController().signal);
     await visible.promise;
     expect(writes).toEqual(["Hello"]);
@@ -84,7 +87,10 @@ function liveFixture(delayMs: number | null = 5000) {
   store.enqueue(input);
   const job = store.ready("bot", Date.now(), 1)[0];
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
+
   const writes: string[] = [];
 
   const written = Array.from({ length: 10 }, () =>
@@ -282,7 +288,9 @@ function gatewayFixture() {
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
 
     return job;
   };
@@ -294,7 +302,10 @@ test("final update retries reuse preview and never rerun tools", async () => {
   const f = gatewayFixture();
   const update = f.slack.update;
 
-  if (!update) throw new Error("Missing update");
+  if (!update) {
+    throw new Error("Missing update");
+  }
+
   f.slack.update = async () => {
     throw new Error("Slack unavailable");
   };
@@ -499,7 +510,9 @@ test("silent combines with a reaction and stays silent when the reaction fails",
     f.slack.react = async (_channel, _ts, name) => {
       reactions.push(name);
 
-      if (fails) throw new Error("missing_scope");
+      if (fails) {
+        throw new Error("missing_scope");
+      }
     };
 
     // Text-free steps before the reply leave leading blank lines.
@@ -611,8 +624,9 @@ test("reaction and silent directives are removed before mixed Markdown rendering
       await f.gateway.process(f.next(), new AbortController().signal);
       expect(payloads.join("")).not.toContain("[[stargate:");
 
-      if (silent) expect(payloads).toEqual([]);
-      else {
+      if (silent) {
+        expect(payloads).toEqual([]);
+      } else {
         expect(payloads.length).toBeGreaterThan(0);
         expect(payloads.at(-1)).toContain('"type":"user","user_id":"U123"');
         expect(payloads.at(-1)).toContain('"bold":true');

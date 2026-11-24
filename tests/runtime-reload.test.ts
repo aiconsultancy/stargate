@@ -26,7 +26,9 @@ import { FakeIrcServer, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 type Turn = (id: string, signal: AbortSignal) => Promise<string>;
@@ -91,7 +93,10 @@ async function running(
         const text = String(chunk);
         logs.push(text);
 
-        if (text.includes('"msg":"Stargate ready"')) ready.resolve();
+        if (text.includes('"msg":"Stargate ready"')) {
+          ready.resolve();
+        }
+
         done();
       },
     }),
@@ -145,8 +150,10 @@ async function running(
     async backend(_config, context) {
       const id = context.dataDirectory.split("/").at(-2) ?? "";
 
-      if (id === options.failBackend)
+      if (id === options.failBackend) {
         throw new Error("fixture backend refused");
+      }
+
       built.push(id);
       const crewStatus = options.crewStatus;
 
@@ -196,7 +203,9 @@ async function running(
   const accept = (body: unknown) => {
     const input = intakes.get("helper");
 
-    if (!input) throw new Error("No intake");
+    if (!input) {
+      throw new Error("No intake");
+    }
 
     return input(body);
   };
@@ -692,14 +701,21 @@ test("reload retires every removed Fleet crew read before backend cleanup", asyn
     },
     pinned: ["helper", "fleet-pilot"],
     crewStatus: async (id, reading) => {
-      if (id === "fleet-pilot") retired.resolve(reading);
+      if (id === "fleet-pilot") {
+        retired.resolve(reading);
+      }
 
-      if (id === "fleet") unchanged.resolve(reading);
+      if (id === "fleet") {
+        unchanged.resolve(reading);
+      }
 
       return held.promise;
     },
     closeBackend: async (id) => {
-      if (id !== "fleet-chief") return;
+      if (id !== "fleet-chief") {
+        return;
+      }
+
       closing.resolve();
       await finishClose.promise;
     },

@@ -22,7 +22,9 @@ import { bot, event, identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 function fixture() {
@@ -144,7 +146,9 @@ function fixture() {
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
 
     return job;
   };
@@ -322,7 +326,7 @@ test("mute racing async resume or peer verification is checked again before enqu
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
 
-    if (source === "resume")
+    if (source === "resume") {
       f.slack.threadContext = async () => {
         entered.resolve();
         await release.promise;
@@ -332,13 +336,14 @@ test("mute racing async resume or peer verification is checked again before enqu
           truncated: false,
         };
       };
-    else
+    } else {
       f.peerLookup.run = async () => {
         entered.resolve();
         await release.promise;
 
         return true;
       };
+    }
 
     const admitted = f.gateway.receive(
       source === "resume" ? reply() : peer("ordinary"),
@@ -461,7 +466,9 @@ test("preference faults hold chat without suppressing DM, queued history, output
     undefined,
     undefined,
     (channel, thread) => {
-      if (fault) throw new Error("private failure");
+      if (fault) {
+        throw new Error("private failure");
+      }
 
       return f.preferences.status(f.key, channel, thread, f.now());
     },
@@ -564,7 +571,9 @@ test("a held preference fault backs off chat but permits pinned cron/native jobs
     undefined,
     undefined,
     (channel, thread) => {
-      if (fault) throw new Error("private error");
+      if (fault) {
+        throw new Error("private error");
+      }
 
       return f.preferences.status(f.key, channel, thread, f.now());
     },
@@ -630,7 +639,10 @@ test("released chat holds wait for a bypassed same-thread reply without deadlock
   ).toBe(true);
   const native = f.store.ready(f.gateway.key, 0, 10, true)[0];
 
-  if (!native) throw new Error("Expected native bypass");
+  if (!native) {
+    throw new Error("Expected native bypass");
+  }
+
   expect(native.text).toBe("native");
   f.store.running(native.id);
   expect(f.store.ready(f.gateway.key, 100, 10, true)).toEqual([]);
@@ -680,8 +692,10 @@ test("text mute bypass configuration must be an explicit subset on Slack text ru
   ).toBe(true);
   const changed = bot();
 
-  if (changed.backend.type === "opencode")
+  if (changed.backend.type === "opencode") {
     changed.backend.directory = "/different";
+  }
+
   expect(notificationKey(changed, identity)).toBe(
     notificationKey(config, identity),
   );

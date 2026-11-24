@@ -42,13 +42,21 @@ export type BackendFailureKind = (typeof backendFailureKinds)[number];
 
 /** The category of a provider HTTP status that reports a failure. */
 export function statusKind(status: number): BackendFailureKind {
-  if (status === 429 || status === 402) return "quota";
+  if (status === 429 || status === 402) {
+    return "quota";
+  }
 
-  if (status === 401 || status === 403) return "auth";
+  if (status === 401 || status === 403) {
+    return "auth";
+  }
 
-  if (status === 404) return "model";
+  if (status === 404) {
+    return "model";
+  }
 
-  if (status === 408 || status === 504) return "timeout";
+  if (status === 408 || status === 504) {
+    return "timeout";
+  }
 
   return "provider";
 }
@@ -109,9 +117,13 @@ export function connectionFailure(
     const code = "code" in current ? current.code : undefined;
 
     if (typeof code === "string") {
-      if (unreachedCodes.has(code)) return "unreached";
+      if (unreachedCodes.has(code)) {
+        return "unreached";
+      }
 
-      if (code === "ECONNRESET") return "lost";
+      if (code === "ECONNRESET") {
+        return "lost";
+      }
     }
 
     current = current.cause;
@@ -153,10 +165,15 @@ export function providerFailure(
   | undefined {
   const match = providerPattern.exec(cause);
 
-  if (!match) return undefined;
+  if (!match) {
+    return undefined;
+  }
+
   const kind = backendFailureKinds.find((item) => item === match[1]);
 
-  if (!kind) return undefined;
+  if (!kind) {
+    return undefined;
+  }
 
   return {
     kind,
@@ -208,7 +225,10 @@ function describe(cause: RequestFailure): { title: string; text: string } {
   const parsed = providerFailure(cause);
 
   // A stored cause that is neither fixed nor a valid provider cause.
-  if (!parsed) return failures[cause as FixedFailure] ?? failures.backend;
+  if (!parsed) {
+    return failures[cause as FixedFailure] ?? failures.backend;
+  }
+
   const status = parsed.status ? ` (HTTP ${parsed.status})` : "";
 
   return {

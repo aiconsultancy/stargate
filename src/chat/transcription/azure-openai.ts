@@ -33,7 +33,9 @@ const decodeTranscriptResponse = Schema.decodeUnknownSync(transcriptResponse);
 async function boundedJSON(response: Response): Promise<unknown> {
   const body = await response.arrayBuffer();
 
-  if (body.byteLength > maxResponseBytes) throw new Error("Response too large");
+  if (body.byteLength > maxResponseBytes) {
+    throw new Error("Response too large");
+  }
 
   return JSON.parse(new TextDecoder().decode(body));
 }
@@ -77,8 +79,10 @@ export class AzureOpenAITranscriber implements Transcriber {
   }
 
   private async accessToken(signal: AbortSignal) {
-    if (this.token && this.now() < this.token.refreshAt)
+    if (this.token && this.now() < this.token.refreshAt) {
       return this.token.value;
+    }
+
     this.token = undefined;
 
     const response = await this.request(this.identity, {
@@ -88,13 +92,17 @@ export class AzureOpenAITranscriber implements Transcriber {
     });
 
     try {
-      if (response.status !== 200) throw new Error("Identity token refused");
+      if (response.status !== 200) {
+        throw new Error("Identity token refused");
+      }
+
       const token = decodeTokenResponse(await boundedJSON(response));
       const refreshAt = token.expires_on * 1000 - refreshMarginMs;
 
       // A token inside the margin serves this request and is not kept.
-      if (refreshAt > this.now())
+      if (refreshAt > this.now()) {
         this.token = { value: token.access_token, refreshAt };
+      }
 
       return token.access_token;
     } finally {
@@ -135,15 +143,19 @@ export class AzureOpenAITranscriber implements Transcriber {
         try {
           status = response.status;
 
-          if (status === 200)
+          if (status === 200) {
             return decodeTranscriptResponse(await boundedJSON(response)).text;
+          }
+
           // The rate limit names its own delay; the caller's signal bounds
           // The total wait. Any other refusal is final.
           const after = response.headers.get("retry-after") ?? "";
           const seconds = /^\d{1,3}$/.test(after) ? Number(after) : -1;
 
-          if (status !== 429 || seconds < 0 || seconds > maxRetryAfterSeconds)
+          if (status !== 429 || seconds < 0 || seconds > maxRetryAfterSeconds) {
             throw new Error("Transcription refused");
+          }
+
           retryMs = Math.max(1, seconds) * 1000;
         } finally {
           await response.body?.cancel().catch(() => {});
@@ -153,7 +165,10 @@ export class AzureOpenAITranscriber implements Transcriber {
       }
     } catch {
       // A rejected token is not reused. The request is not repeated here.
-      if (status === 401 || status === 403) this.token = undefined;
+      if (status === 401 || status === 403) {
+        this.token = undefined;
+      }
+
       signal.throwIfAborted();
       throw new Error("Transcription request failed");
     }

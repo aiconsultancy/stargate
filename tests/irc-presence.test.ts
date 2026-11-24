@@ -14,7 +14,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const caps = [
@@ -92,7 +94,10 @@ async function setup(features?: Record<string, boolean>) {
 
   const [captain, chief] = ship.registrations;
 
-  if (!captain || !chief) throw new Error("missing registrations");
+  if (!captain || !chief) {
+    throw new Error("missing registrations");
+  }
+
   const controller = new AbortController();
 
   const worker = new Gateway(

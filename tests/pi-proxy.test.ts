@@ -131,7 +131,7 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
         body: await request.json(),
       });
 
-      if (denied)
+      if (denied) {
         return Response.json(
           {
             error: {
@@ -141,6 +141,7 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
           },
           { status: 401 },
         );
+      }
 
       return completion();
     },
@@ -228,8 +229,12 @@ test("Pi proxy sends chat tools, safe auth and persisted conversation headers", 
     await backend?.close();
     await server.stop(true);
 
-    if (previous === undefined) delete process.env[apiKeyEnv];
-    else process.env[apiKeyEnv] = previous;
+    if (previous === undefined) {
+      delete process.env[apiKeyEnv];
+    } else {
+      process.env[apiKeyEnv] = previous;
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -319,8 +324,12 @@ test("Pi cancellation closes the underlying proxy stream", async () => {
     await backend?.close();
     await server.stop(true);
 
-    if (previous === undefined) delete process.env[apiKeyEnv];
-    else process.env[apiKeyEnv] = previous;
+    if (previous === undefined) {
+      delete process.env[apiKeyEnv];
+    } else {
+      process.env[apiKeyEnv] = previous;
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -366,7 +375,10 @@ for (const cancelQueued of [false, true]) {
       const finish = (index: number, text: string) => {
         const stream = streams[index];
 
-        if (!stream) throw new Error("Fixture provider is not connected");
+        if (!stream) {
+          throw new Error("Fixture provider is not connected");
+        }
+
         stream.enqueue(chunk(text, "stop"));
         stream.enqueue(encoder.encode("data: [DONE]\n\n"));
         stream.close();
@@ -381,7 +393,9 @@ for (const cancelQueued of [false, true]) {
           request.signal.addEventListener(
             "abort",
             () => {
-              if (index === 0) priorCancelled = true;
+              if (index === 0) {
+                priorCancelled = true;
+              }
             },
             { once: true },
           );
@@ -396,7 +410,9 @@ for (const cancelQueued of [false, true]) {
                 (index === 0 ? priorStarted : ownStarted).resolve();
               },
               cancel() {
-                if (index === 0) priorCancelled = true;
+                if (index === 0) {
+                  priorCancelled = true;
+                }
               },
             }),
             { headers: { "content-type": "text/event-stream" } },
@@ -428,7 +444,9 @@ for (const cancelQueued of [false, true]) {
           BACKGROUND_CONTEXT,
         );
 
-        if (!conversation) throw new Error("Fixture conversation is missing");
+        if (!conversation) {
+          throw new Error("Fixture conversation is missing");
+        }
 
         const native = await conversation.submit(
           { type: "input", content: "Prior native request" },
@@ -443,8 +461,9 @@ for (const cancelQueued of [false, true]) {
               if (
                 change.type === "submission" &&
                 change.value.status === "queued"
-              )
+              ) {
                 queued.resolve();
+              }
             }
           },
           end() {},
@@ -458,7 +477,9 @@ for (const cancelQueued of [false, true]) {
           (text) => {
             snapshots.push(text);
 
-            if (text.includes("OWN PARTIAL")) ownPartial.resolve();
+            if (text.includes("OWN PARTIAL")) {
+              ownPartial.resolve();
+            }
           },
         );
         await queued.promise;
@@ -491,8 +512,12 @@ for (const cancelQueued of [false, true]) {
         await backend?.close();
         await server.stop(true);
 
-        if (previous === undefined) delete process.env[apiKeyEnv];
-        else process.env[apiKeyEnv] = previous;
+        if (previous === undefined) {
+          delete process.env[apiKeyEnv];
+        } else {
+          process.env[apiKeyEnv] = previous;
+        }
+
         await rm(directory, { recursive: true, force: true });
       }
     },
@@ -552,7 +577,10 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
           BACKGROUND_CONTEXT,
         );
 
-        if (!conversation) throw new Error("Fixture conversation is missing");
+        if (!conversation) {
+          throw new Error("Fixture conversation is missing");
+        }
+
         let native: Submission | undefined;
 
         if (placement !== "placed") {
@@ -583,7 +611,10 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
                     requestId = draft.requestId;
                     own = await conversation.submit(draft, context);
 
-                    if (aborted) controller.abort();
+                    if (aborted) {
+                      controller.abort();
+                    }
+
                     throw new Error("Admission handle lost after commit");
                   },
                   async commit<T>(
@@ -592,8 +623,9 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
                   ) {
                     queried = true;
 
-                    if (placement === "unreadable")
+                    if (placement === "unreadable") {
                       throw new Error("Lookup unavailable");
+                    }
 
                     return conversation.commit(change, context);
                   },
@@ -616,7 +648,10 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
         expect(attempts).toBe(1);
         expect(queried).toBe(true);
 
-        if (!own) throw new Error("Own input was not admitted");
+        if (!own) {
+          throw new Error("Own input was not admitted");
+        }
+
         const status = await own.status(BACKGROUND_CONTEXT);
         expect(status.requestId).toBe(requestId);
         expect(status.status).toBe(
@@ -640,8 +675,12 @@ for (const placement of ["queued", "placed", "unreadable"] as const) {
         await backend?.close();
         await server.stop(true);
 
-        if (previous === undefined) delete process.env[apiKeyEnv];
-        else process.env[apiKeyEnv] = previous;
+        if (previous === undefined) {
+          delete process.env[apiKeyEnv];
+        } else {
+          process.env[apiKeyEnv] = previous;
+        }
+
         await rm(directory, { recursive: true, force: true });
       }
     });
@@ -672,7 +711,10 @@ for (const report of [false, true]) {
         requests++;
 
         if (requests === 2) {
-          if (!task) throw new Error("Task is missing");
+          if (!task) {
+            throw new Error("Task is missing");
+          }
+
           expect(state.piTaskConversation(task.id)).toBeDefined();
 
           if (report) {
@@ -703,7 +745,9 @@ for (const report of [false, true]) {
         ],
       }).crew[0];
 
-      if (!member) throw new Error("Member is missing");
+      if (!member) {
+        throw new Error("Member is missing");
+      }
 
       const factory: PiWorkerFactory = async (config, context) => {
         opens++;
@@ -719,7 +763,10 @@ for (const report of [false, true]) {
       state.readyPeer(member.id);
       const maintenance = state.piPeer(peer.sessionID)?.conversationID;
 
-      if (!backend || !maintenance) throw new Error("Native worker is missing");
+      if (!backend || !maintenance) {
+        throw new Error("Native worker is missing");
+      }
+
       expect(
         await backend.prompt(
           maintenance,
@@ -743,10 +790,14 @@ for (const report of [false, true]) {
         );
 
         task = state.promote(queued.id, null)?.task;
-      } else
+      } else {
         task = state.reserveTask(peer, "captain", "Maintenance") ?? undefined;
+      }
 
-      if (!task) throw new Error("Task is missing");
+      if (!task) {
+        throw new Error("Task is missing");
+      }
+
       const interrupted = Promise.withResolvers<void>();
       state.complete = () => {
         throw new Error("Crash after native commit, before crew completion");
@@ -764,8 +815,12 @@ for (const report of [false, true]) {
       const bound = state.piTaskConversation(task.id);
       expect(bound).toBeDefined();
 
-      if (report) expect(bound).not.toBe(maintenance);
-      else expect(bound).toBe(maintenance);
+      if (report) {
+        expect(bound).not.toBe(maintenance);
+      } else {
+        expect(bound).toBe(maintenance);
+      }
+
       expect(requests).toBe(2);
       await workers.close();
       expect(
@@ -805,8 +860,12 @@ for (const report of [false, true]) {
       state.close();
       await server.stop(true);
 
-      if (previous === undefined) delete process.env[apiKeyEnv];
-      else process.env[apiKeyEnv] = previous;
+      if (previous === undefined) {
+        delete process.env[apiKeyEnv];
+      } else {
+        process.env[apiKeyEnv] = previous;
+      }
+
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -904,8 +963,10 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
     try {
       const task = await crashed.task(seeded.task, BACKGROUND_CONTEXT);
 
-      if (task?.state.status !== "pending")
+      if (task?.state.status !== "pending") {
         throw new Error("Pending generation is missing");
+      }
+
       expectedTask = {
         ...task,
         state: {
@@ -941,10 +1002,12 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
     const inspection = await openNodeSqliteStorage(path);
 
     try {
-      for (const record of [seeded.placed, seeded.queued, seeded.unanswered])
+      for (const record of [seeded.placed, seeded.queued, seeded.unanswered]) {
         expect(
           await inspection.submission(record.id, BACKGROUND_CONTEXT),
         ).toEqual(record);
+      }
+
       expect(await inspection.task(seeded.task, BACKGROUND_CONTEXT)).toEqual(
         expectedTask,
       );
@@ -952,7 +1015,10 @@ test("Pi receipt inspection leaves placed, queued and unanswered native work unc
       await inspection.close(BACKGROUND_CONTEXT);
     }
   } finally {
-    if (!closed) await harness.close(BACKGROUND_CONTEXT);
+    if (!closed) {
+      await harness.close(BACKGROUND_CONTEXT);
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -1003,9 +1069,13 @@ test("Pi maps the proxy's answer to one shared failure category", async () => {
       calls++;
       const status = answers.shift();
 
-      if (status === undefined) return completion();
+      if (status === undefined) {
+        return completion();
+      }
 
-      if (status === "tool") return toolCall();
+      if (status === "tool") {
+        return toolCall();
+      }
 
       return Response.json(
         {
@@ -1060,8 +1130,10 @@ test("Pi maps the proxy's answer to one shared failure category", async () => {
       // One retried status is enough here; `statusKind` covers the rest.
     ];
 
-    for (const [status, cause] of cases)
+    for (const [status, cause] of cases) {
       expect([status, await failure([status])]).toEqual([status, cause]);
+    }
+
     expect(calls).toBeGreaterThanOrEqual(cases.length);
     // The model called a tool; the proxy refused the next call.
     expect(await failure(["tool", 429])).toBe("provider:quota:429:ran");
@@ -1072,8 +1144,12 @@ test("Pi maps the proxy's answer to one shared failure category", async () => {
     await backend?.close();
     await server.stop(true);
 
-    if (previous === undefined) delete process.env[apiKeyEnv];
-    else process.env[apiKeyEnv] = previous;
+    if (previous === undefined) {
+      delete process.env[apiKeyEnv];
+    } else {
+      process.env[apiKeyEnv] = previous;
+    }
+
     await rm(directory, { recursive: true, force: true });
   }
 }, 120_000);

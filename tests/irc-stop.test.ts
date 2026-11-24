@@ -16,7 +16,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 function config(port: number, extra: Record<string, unknown> = {}) {
@@ -100,7 +102,10 @@ async function setup(extra: Record<string, unknown> = {}, answer = "Done.") {
 
   const [captain] = ship.registrations;
 
-  if (!captain) throw new Error("missing captain");
+  if (!captain) {
+    throw new Error("missing captain");
+  }
+
   const controller = new AbortController();
 
   const gateway = new Gateway(
@@ -149,8 +154,11 @@ function react(
 ) {
   const line = `@${from.account ? `account=${from.account};` : ""}${key}=${emoji};+draft/reply=${msgid} :${from.nick}!u@outside TAGMSG ${target}`;
 
-  for (const client of fake.clients)
-    if (client.registered) client.socket.write(`${line}\r\n`);
+  for (const client of fake.clients) {
+    if (client.registered) {
+      client.socket.write(`${line}\r\n`);
+    }
+  }
 }
 
 test("irc stop: a ✋ reaction on the request cancels the running turn", async () => {
@@ -315,7 +323,9 @@ test("irc stop: a reaction on a bot message stops the turn that message answers"
     "@account=jack;+draft/react=🛑;+draft/reply=bot-1 :jack!u@h TAGMSG #galactica",
   );
 
-  if (!parsed) throw new Error("fixture");
+  if (!parsed) {
+    throw new Error("fixture");
+  }
 
   const stop = routeIrcStop(parsed, {
     config: config(6667),

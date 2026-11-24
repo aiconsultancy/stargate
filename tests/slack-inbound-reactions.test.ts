@@ -42,7 +42,9 @@ const signal = new AbortController().signal;
 const cleanups: (() => void)[] = [];
 
 afterEach(() => {
-  for (const cleanup of cleanups.splice(0).reverse()) cleanup();
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    cleanup();
+  }
 });
 
 function fixture(
@@ -56,11 +58,16 @@ function fixture(
 ) {
   const store = options.store ?? openStore(":memory:");
 
-  if (!options.store) cleanups.push(() => store.close());
+  if (!options.store) {
+    cleanups.push(() => store.close());
+  }
+
   const config = bot();
 
-  if (options.enabled !== undefined)
+  if (options.enabled !== undefined) {
     config.slack.inboundReactions = options.enabled;
+  }
+
   config.slack.steerThreadFollowUps = options.steer ?? false;
   config.slackReadReceipts = true;
   config.waiting.delayMs = null;
@@ -78,7 +85,10 @@ function fixture(
       return "[[stargate:react:thumbsup]]\nAnswer";
     },
     async steer(input) {
-      if (!input.allowed()) return { status: "refused" };
+      if (!input.allowed()) {
+        return { status: "refused" };
+      }
+
       steers.push(input);
 
       return { status: "accepted" };
@@ -115,7 +125,9 @@ function fixture(
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1, true)[0];
 
-    if (!job) throw new Error("Expected a queued request");
+    if (!job) {
+      throw new Error("Expected a queued request");
+    }
 
     return job;
   };
@@ -192,13 +204,15 @@ test("only the specified Slack reaction names can wake a new turn", async () => 
     "eyes",
   ];
 
-  for (const [i, name] of allowed.entries())
+  for (const [i, name] of allowed.entries()) {
     expect(
       await f.gateway.receive(reaction(name, "reaction_added", `Ev${i}`)),
     ).toBe(true);
+  }
 
-  for (const name of ["heart", "thumbsup::skin-tone-2", "check", "EYES"])
+  for (const name of ["heart", "thumbsup::skin-tone-2", "check", "EYES"]) {
     expect(await f.gateway.receive(reaction(name))).toBe(false);
+  }
 });
 
 test("parallel Slack verification preserves arrival order across reaction and text follow-ups", async () => {
@@ -251,7 +265,10 @@ test("parallel Slack verification preserves arrival order across reaction and te
   expect(ack).toHaveBeenCalledTimes(4);
   expect(f.store.queueCounts(f.gateway.key).queued).toBe(3);
 
-  for (let i = 0; i < 3; i++) await f.gateway.process(f.next(), signal);
+  for (let i = 0; i < 3; i++) {
+    await f.gateway.process(f.next(), signal);
+  }
+
   expect(f.prompts.slice(1).map((prompt) => prompt.split("\n").at(-1))).toEqual(
     [
       "Slack reaction :eyes: added.",
@@ -320,8 +337,10 @@ test("flag off and untrusted reaction sources never reach the queue", async () =
       ...valid,
       event: { ...valid.event, item: { ...valid.event.item, ts: "1.000" } },
     },
-  ])
+  ]) {
     expect(await f.gateway.receive(body)).toBe(false);
+  }
+
   f.config.access.users = ["*"];
   f.config.access.channels = ["*"];
   f.config.access.deniedUsers = ["U123"];
@@ -358,7 +377,10 @@ test("legacy preview targets steer only their running captain thread, not the re
   expect(f.steers).toHaveLength(1);
   const steer = f.steers[0];
 
-  if (!steer) throw new Error("Expected steer");
+  if (!steer) {
+    throw new Error("Expected steer");
+  }
+
   expect(steer.inputID).toBe("msg_original");
   expect(sourceLine(steer.context)).toBe(
     "s=slack;c=C123;t=1.000;m=2.000;u=U123;reaction=eyes;action=added",
@@ -416,9 +438,15 @@ test.each([false, true])(
       ).toBe(true);
       const target = f.store.jobByEvent(f.gateway.key, "C123:1.500");
 
-      if (!target) throw new Error("Missing other thread");
+      if (!target) {
+        throw new Error("Missing other thread");
+      }
+
       f.store.savePreview(target.id, 0, "2.000");
-    } else f.store.savePreview(owner.id, 0, "2.000");
+    } else {
+      f.store.savePreview(owner.id, 0, "2.000");
+    }
+
     expect(await f.gateway.receive(reaction())).toBe(true);
     await f.gateway.pollFollowUps(signal);
     expect(f.steers).toEqual([]);
@@ -448,7 +476,10 @@ test("an ordinary steer during a reaction turn retains its own Slack message ide
   await f.gateway.pollFollowUps(signal);
   const steer = f.steers[0];
 
-  if (!steer) throw new Error("Expected steer");
+  if (!steer) {
+    throw new Error("Expected steer");
+  }
+
   expect(sourceLine(steer.context)).toBe(
     "s=slack;c=C123;t=1.000;m=6.000;u=U123",
   );
@@ -481,11 +512,13 @@ test("Slack fallback uses an exact message returned by the API, never claimed it
       const url = new URL(String(input));
       calls.push(url.pathname);
 
-      if (url.pathname === "/api/users.info")
+      if (url.pathname === "/api/users.info") {
         return Response.json({
           ok: true,
           user: { id: "U123", team_id: "T123", is_bot: false, deleted: false },
         });
+      }
+
       expect(url.pathname).toBe("/api/reactions.get");
       const args = new URLSearchParams(String(init?.body));
       expect(args.get("channel")).toBe("C123");

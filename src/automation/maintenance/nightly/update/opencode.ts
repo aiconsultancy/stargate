@@ -79,7 +79,9 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
     Bun.sleep(openCodeCallMs).then(() => {}),
   ]);
 
-  if (!endpoint) throw new StepError("health-failed");
+  if (!endpoint) {
+    throw new StepError("health-failed");
+  }
 
   const client = OpenCode.make({
     baseUrl: endpoint.url,
@@ -150,8 +152,9 @@ export async function connectOpenCode(): Promise<OpenCodeControl> {
             }),
           ]);
 
-          for (const request of [...forms.data, ...permissions.data])
+          for (const request of [...forms.data, ...permissions.data]) {
             waiting.add(request.sessionID);
+          }
         }
 
         return [...waiting];

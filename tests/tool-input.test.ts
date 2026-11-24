@@ -86,7 +86,10 @@ test("native post SDK input keeps defaults, raw text and its input advertisement
 
   expect(invalid).toHaveProperty("issues");
 
-  if (!invalid.issues) throw new Error("Broadcast without thread accepted");
+  if (!invalid.issues) {
+    throw new Error("Broadcast without thread accepted");
+  }
+
   expect(invalid.issues).toContainEqual(
     expect.objectContaining({
       path: ["reply_broadcast"],
@@ -108,10 +111,15 @@ test("post compound constraints retain broadcast diagnostics but structural fail
       errors: "all",
     })(input);
 
-    if (Result.isSuccess(direct)) throw new Error("Invalid post accepted");
+    if (Result.isSuccess(direct)) {
+      throw new Error("Invalid post accepted");
+    }
+
     const sdk = await standard.validate(input);
 
-    if (!sdk.issues) throw new Error("Invalid SDK post accepted");
+    if (!sdk.issues) {
+      throw new Error("Invalid SDK post accepted");
+    }
 
     for (const issues of [
       SchemaIssue.makeFormatterStandardSchemaV1()(direct.failure.issue).issues,
@@ -159,8 +167,10 @@ test("Effect envelope advertises encoded fields and validates without injecting 
   expect(json["type"]).toBe("object");
   expect(json["required"]).toEqual(["op"]);
 
-  for (const key of ["anyOf", "oneOf", "allOf"])
+  for (const key of ["anyOf", "oneOf", "allOf"]) {
     expect(json).not.toHaveProperty(key);
+  }
+
   const decode = Schema.decodeUnknownSync(envelope);
   expect(decode({ op: "read" })).toEqual({ op: "read" });
   const append = { op: "append", text: "  note  ", nested: { value: "ok" } };
@@ -171,10 +181,11 @@ test("Effect envelope advertises encoded fields and validates without injecting 
     { op: "read", extra: true },
     { op: "append", text: "  ", nested: { value: "ok" } },
     { op: "append", text: "note", nested: { value: "ok", extra: true } },
-  ])
+  ]) {
     expect(Result.isFailure(Schema.decodeUnknownResult(envelope)(input))).toBe(
       true,
     );
+  }
 
   const invalid = Schema.decodeUnknownResult(envelope)({
     op: "append",
@@ -182,7 +193,10 @@ test("Effect envelope advertises encoded fields and validates without injecting 
     nested: { value: 1 },
   });
 
-  if (!Result.isFailure(invalid)) throw new Error("Expected nested rejection");
+  if (!Result.isFailure(invalid)) {
+    throw new Error("Expected nested rejection");
+  }
+
   expect(
     SchemaIssue.makeFormatterStandardSchemaV1()(invalid.failure.issue).issues,
   ).toContainEqual(expect.objectContaining({ path: ["nested", "value"] }));
@@ -252,8 +266,10 @@ test("all Stargate union tools advertise an object root with their fields", () =
 
   expect(cron["type"]).toBe("object");
 
-  for (const key of ["oneOf", "anyOf", "allOf"])
+  for (const key of ["oneOf", "anyOf", "allOf"]) {
     expect(cron).not.toHaveProperty(key);
+  }
+
   expect(cron["required"]).toEqual(["op"]);
 });
 
@@ -280,9 +296,9 @@ test("notification and quota tool advertisements keep their frozen bytes", () =>
     ["stargate_quota", quotaToolInput()],
   ] as const;
 
-  for (const [name, tool] of tools)
-    for (const target of ["draft-2020-12", "draft-07"] as const)
-      for (const side of ["input", "output"] as const)
+  for (const [name, tool] of tools) {
+    for (const target of ["draft-2020-12", "draft-07"] as const) {
+      for (const side of ["input", "output"] as const) {
         expect(
           createHash("sha256")
             .update(
@@ -290,6 +306,9 @@ test("notification and quota tool advertisements keep their frozen bytes", () =>
             )
             .digest("hex"),
         ).toBe(frozen[name][target]);
+      }
+    }
+  }
 });
 
 test("notification union keeps explicit scoped requirements and input expiry representation", async () => {
@@ -305,12 +324,16 @@ test("notification union keeps explicit scoped requirements and input expiry rep
       channel: "C123",
       mute_until: "2026-11-18T10:00:00Z",
     },
-  ])
+  ]) {
     expect(await schema.validate(input)).toHaveProperty("issues");
+  }
 
   const missing = await schema.validate({ scope: "channel", channel: "C123" });
 
-  if (!missing.issues) throw new Error("Missing operation accepted");
+  if (!missing.issues) {
+    throw new Error("Missing operation accepted");
+  }
+
   expect(missing.issues).toEqual([{ path: ["op"], message: "Invalid input" }]);
 
   const input = {
@@ -324,7 +347,10 @@ test("notification union keeps explicit scoped requirements and input expiry rep
   // The tool input keeps the raw value; the handler's decode normalizes it.
   const checked = await schema.validate(input);
 
-  if (checked.issues) throw new Error("Valid mute rejected");
+  if (checked.issues) {
+    throw new Error("Valid mute rejected");
+  }
+
   expect(checked.value).toEqual(input);
   expect(
     Schema.decodeUnknownSync(notificationInputSchema)(checked.value),
@@ -368,7 +394,10 @@ test("native mail project envelope retains branch requirements and field paths",
     project: "stargate",
   });
 
-  if (!invalid.issues) throw new Error("Missing mail recipient accepted");
+  if (!invalid.issues) {
+    throw new Error("Missing mail recipient accepted");
+  }
+
   expect(invalid.issues).toContainEqual(
     expect.objectContaining({ path: ["to"] }),
   );
@@ -392,12 +421,16 @@ test("native quota tool input stays strict and validates project keys", async ()
     { project: "constructor" },
     { op: "inbox" },
     Object.create({ inherited: 1 }),
-  ])
+  ]) {
     expect(await schema.validate(raw)).toHaveProperty("issues");
+  }
 
   const unknown = await schema.validate({ a: 1, b: 2 });
 
-  if (!unknown.issues) throw new Error("Unknown keys accepted");
+  if (!unknown.issues) {
+    throw new Error("Unknown keys accepted");
+  }
+
   expect(unknown.issues).toEqual([
     { path: [], message: 'Unrecognized keys: "a", "b"' },
   ]);
@@ -408,7 +441,10 @@ test("optional envelope fields do not inject another operation's defaults", asyn
   const adaptedCron = await cronToolInput()["~standard"].validate(cron);
   expect(adaptedCron).toEqual({ value: cron });
 
-  if (adaptedCron.issues) throw new Error("Cron report rejected");
+  if (adaptedCron.issues) {
+    throw new Error("Cron report rejected");
+  }
+
   expect(
     Schema.decodeUnknownSync(cronOperationSchema)(adaptedCron.value),
   ).toEqual(Schema.decodeUnknownSync(cronOperationSchema)(cron));
@@ -422,7 +458,10 @@ test("optional envelope fields do not inject another operation's defaults", asyn
 
     expect(adapted).toEqual({ value: input });
 
-    if (adapted.issues) throw new Error("Native operation rejected");
+    if (adapted.issues) {
+      throw new Error("Native operation rejected");
+    }
+
     expect(Schema.decodeUnknownSync(original)(adapted.value)).toEqual(
       Schema.decodeUnknownSync(original)(input),
     );
@@ -437,7 +476,10 @@ test("optional envelope fields do not inject another operation's defaults", asyn
   const adapted = await modelToolInputSchema["~standard"].validate(input);
   expect(adapted).toEqual({ value: input });
 
-  if (adapted.issues) throw new Error("Unexpected model validation failure");
+  if (adapted.issues) {
+    throw new Error("Unexpected model validation failure");
+  }
+
   expect(Schema.decodeUnknownSync(modelInputSchema)(adapted.value)).toEqual({
     op: "get",
     target: "self",

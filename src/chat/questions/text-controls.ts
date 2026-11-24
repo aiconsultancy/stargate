@@ -27,13 +27,14 @@ export function questionControl(text: string): QuestionControl | undefined {
       malformed &&
       candidate &&
       /^[a-f0-9]{24,128}[.,:;!?…)]*$/i.test(candidate)
-    )
+    ) {
       return {
         target: (malformed[1] ?? "").replace(/^@/, ""),
         token: "",
         answer: undefined,
         invalid: true,
       };
+    }
 
     return;
   }
@@ -79,10 +80,12 @@ export function questionText(
     `Only the original requester may reply in this thread: ${account}: answer ${token} ${question.fields.length === 1 ? "<choice number or answer>" : '<JSON object, for example {"q0":"choice"}>'}`,
   );
 
-  if (question.fields.some((f) => f.type === "multiselect"))
+  if (question.fields.some((f) => f.type === "multiselect")) {
     lines.push(
       "For multiple choices use comma-separated numbers; a JSON answer uses native option values.",
     );
+  }
+
   lines.push(
     `Or: ${account}: cancel-question ${token}`,
     `After expiry, only you may request a fresh offer here: ${account}: renew-question ${token}`,
@@ -90,8 +93,9 @@ export function questionText(
   );
   const text = lines.join("\n");
 
-  if (Buffer.byteLength(text) > 16_000)
+  if (Buffer.byteLength(text) > 16_000) {
     throw new Error("Question is too large for IRC");
+  }
 
   return text;
 }

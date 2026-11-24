@@ -65,13 +65,16 @@ for (let index = 2; index < process.argv.length; index += 2) {
     !["--root", "--pr-head", "--push-before"].includes(key) ||
     value === undefined ||
     options.has(key)
-  )
+  ) {
     fail("usage", usage);
+  }
+
   options.set(key, value);
 }
 
-if (options.has("--pr-head") && options.has("--push-before"))
+if (options.has("--pr-head") && options.has("--push-before")) {
   fail("usage", usage);
+}
 
 const root = resolve(options.get("--root") ?? ".");
 const fullSha = /^[a-f0-9]{40}$/;
@@ -96,8 +99,9 @@ async function spawnText(args: string[]) {
 async function command(args: string[], allowFailure = false) {
   const { stdout, stderr, exit } = await spawnText(args);
 
-  if (exit !== 0 && !allowFailure)
+  if (exit !== 0 && !allowFailure) {
     fail(`command-failed:${args[0]}`, `${args.join(" ")} (${exit}): ${stderr}`);
+  }
 
   return exit === 0 ? stdout : undefined;
 }
@@ -112,44 +116,52 @@ const revision = async (name: string) =>
 
 const head = await revision("HEAD");
 
-if (!head) fail("event:no-head", "the root is not a Git checkout");
+if (!head) {
+  fail("event:no-head", "the root is not a Git checkout");
+}
 
 const parent = await revision("HEAD^1");
 
-if (!parent)
+if (!parent) {
   fail(
     "event:no-parent",
     `HEAD ${head} has no first parent; fetch history (fetch-depth: 0)`,
   );
+}
 
 const prHead = options.get("--pr-head");
 
 if (prHead !== undefined) {
-  if (!fullSha.test(prHead))
+  if (!fullSha.test(prHead)) {
     fail("event:pr-head-invalid", `expected a full SHA, got "${prHead}"`);
+  }
+
   const second = await revision("HEAD^2");
 
-  if (second !== prHead)
+  if (second !== prHead) {
     fail(
       "event:not-merge-ref",
       `HEAD ${head} is not the merge of PR head ${prHead} into its target; check out refs/pull/N/merge`,
     );
+  }
 }
 
 const before = options.get("--push-before");
 
 if (before !== undefined) {
-  if (!fullSha.test(before) || /^0+$/.test(before))
+  if (!fullSha.test(before) || /^0+$/.test(before)) {
     fail(
       "event:push-before-missing",
       `github.event.before is "${before}"; a new branch or deleted ref has no comparison commit`,
     );
+  }
 
-  if (before !== parent)
+  if (before !== parent) {
     fail(
       "event:push-not-single-commit",
       `before ${before} is not HEAD's first parent ${parent}. Only one commit per push is checked; check each commit of this push against its own parent`,
     );
+  }
 }
 
 /** Rejects a JSON object with a repeated key at any depth. */
@@ -161,12 +173,15 @@ function duplicateKey(text: string): string | undefined {
     const frame = frames.at(-1);
     const [, string, punctuation] = match;
 
-    if (punctuation === "{") frames.push({ keys: new Set(), expectKey: true });
-    else if (punctuation === "[")
+    if (punctuation === "{") {
+      frames.push({ keys: new Set(), expectKey: true });
+    } else if (punctuation === "[") {
       frames.push({ keys: undefined, expectKey: false });
-    else if (punctuation === "}" || punctuation === "]") frames.pop();
-    else if (punctuation === "," && frame?.keys) frame.expectKey = true;
-    else if (string !== undefined && frame?.keys && frame.expectKey) {
+    } else if (punctuation === "}" || punctuation === "]") {
+      frames.pop();
+    } else if (punctuation === "," && frame?.keys) {
+      frame.expectKey = true;
+    } else if (string !== undefined && frame?.keys && frame.expectKey) {
       let key: string;
 
       try {
@@ -176,7 +191,10 @@ function duplicateKey(text: string): string | undefined {
         return undefined;
       }
 
-      if (frame.keys.has(key)) return key;
+      if (frame.keys.has(key)) {
+        return key;
+      }
+
       frame.keys.add(key);
       frame.expectKey = false;
     }
@@ -195,8 +213,9 @@ const atParent = async (path: string) =>
 
 const parentBaseline = await atParent(BASELINE);
 
-if (parentBaseline === undefined)
+if (parentBaseline === undefined) {
   fail("event:parent-without-baseline", `${parent} has no ${BASELINE}`);
+}
 
 const parentBaselineSha256 = sha256(parentBaseline);
 const parentDeclaration = await atParent(DECLARATION);
@@ -209,29 +228,34 @@ const declarationPath = join(root, DECLARATION);
 
 const declarationStatus = await lstat(declarationPath).catch(
   (error: unknown) => {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT")
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return;
+    }
+
     throw error;
   },
 );
 
-if (declarationStatus?.isSymbolicLink())
+if (declarationStatus?.isSymbolicLink()) {
   fail(
     "declaration:symlink",
     `${DECLARATION} is a symbolic link; commit the declaration as a regular file, so the diff shows its allowances`,
   );
+}
 
-if (declarationStatus && !declarationStatus.isFile())
+if (declarationStatus && !declarationStatus.isFile()) {
   fail(
     "declaration:not-regular-file",
     `${DECLARATION} is ${declarationStatus.isDirectory() ? "a directory" : "not a regular file"}`,
   );
+}
 
-if (declarationStatus && declarationStatus.size > DECLARATION_LIMIT)
+if (declarationStatus && declarationStatus.size > DECLARATION_LIMIT) {
   fail(
     "declaration:too-large",
     `${DECLARATION} has ${declarationStatus.size} bytes; the limit is ${DECLARATION_LIMIT}`,
   );
+}
 
 const currentDeclaration = declarationStatus
   ? await readFile(declarationPath, "utf8")
@@ -247,8 +271,9 @@ let parsed: unknown = {};
 if (changed && currentDeclaration?.trim()) {
   const duplicate = duplicateKey(currentDeclaration);
 
-  if (duplicate !== undefined)
+  if (duplicate !== undefined) {
     fail("declaration:duplicate-key", `"${duplicate}" appears twice`);
+  }
 
   try {
     parsed = JSON.parse(currentDeclaration);
@@ -272,11 +297,12 @@ const allowances =
   Boolean(declaration.closureAdditions?.length) ||
   Boolean(declaration.rekeyExceptions?.length);
 
-if (allowances && declaration.baselineSha256 === undefined)
+if (allowances && declaration.baselineSha256 === undefined) {
   fail(
     "declaration:missing-baseline-sha256",
     `add "baselineSha256": "${parentBaselineSha256}" after checking the allowances against current main`,
   );
+}
 
 const stale =
   declaration.baselineSha256 !== undefined &&
@@ -287,11 +313,12 @@ const staleDetail = `declared ${declaration.baselineSha256}, parent ${parent} ha
 // A PR must bind to its current parent.
 // A push cannot undo a merge: main does not require up-to-date branches.
 // So a push re-validates the allowances against the actual parent.
-if (stale && before === undefined)
+if (stale && before === undefined) {
   fail(
     "declaration:stale-baseline",
     `${staleDetail}. Another change rewrote the baseline: regenerate on current main the baseline and the declaration`,
   );
+}
 
 const failStale = (detail: string): never =>
   fail(
@@ -301,13 +328,17 @@ const failStale = (detail: string): never =>
 
 const args: string[] = [];
 
-if (declaration.pruneStale) args.push("--prune-stale");
+if (declaration.pruneStale) {
+  args.push("--prune-stale");
+}
 
-for (const file of declaration.closureAdditions ?? [])
+for (const file of declaration.closureAdditions ?? []) {
   args.push("--allow-closure-addition", file);
+}
 
-for (const { oldKey, newKey } of declaration.rekeyExceptions ?? [])
+for (const { oldKey, newKey } of declaration.rekeyExceptions ?? []) {
   args.push("--rekey-exception", oldKey, newKey);
+}
 
 const baselineBytes = await readFile(join(root, BASELINE), "utf8");
 
@@ -336,8 +367,13 @@ try {
   if (stale) {
     const result = await spawnText(tool);
 
-    if (result.exit !== 0) failStale(result.stderr);
-  } else await command(tool);
+    if (result.exit !== 0) {
+      failStale(result.stderr);
+    }
+  } else {
+    await command(tool);
+  }
+
   receipt = Schema.decodeUnknownSync(receiptSchema)(
     JSON.parse(await readFile(receiptPath, "utf8")),
   );
@@ -356,32 +392,37 @@ const differences = Object.keys(expected).filter(
   (key) => !isDeepStrictEqual(working[key], expected[key]),
 );
 
-if ((await readFile(join(root, BASELINE), "utf8")) !== baselineBytes)
+if ((await readFile(join(root, BASELINE), "utf8")) !== baselineBytes) {
   fail("baseline-changed-during-check");
+}
 
-if (differences.length > 0 && stale)
+if (differences.length > 0 && stale) {
   failStale(differences.map((key) => `baseline-diff:${key}`).join("\n"));
+}
 
-if (differences.length > 0)
+if (differences.length > 0) {
   fail(
     "baseline-diff",
     differences.map((key) => `baseline-diff:${key}`).join("\n"),
   );
+}
 
 // Every allowance is printed in full: the reader must verify each one.
 const notices: [string, string][] = [];
 
-for (const file of declaration.closureAdditions ?? [])
+for (const file of declaration.closureAdditions ?? []) {
   notices.push([
     "closure addition",
     `${file}. Reader: verify that this file holds only code the crew plugin closure already loaded (moved bodies, no new package).`,
   ]);
+}
 
-for (const { oldKey, newKey } of declaration.rekeyExceptions ?? [])
+for (const { oldKey, newKey } of declaration.rekeyExceptions ?? []) {
   notices.push([
     "exception rekey",
     `${oldKey} => ${newKey}. Reader: verify that the importing code moved unchanged into the new file.`,
   ]);
+}
 
 const listed = (value: unknown) =>
   Array.isArray(value)
@@ -404,11 +445,12 @@ const removedLargeFiles = listed(previous["largeFiles"]).filter(
   (file) => !listed(working["largeFiles"]).includes(file),
 );
 
-if (declaration.pruneStale)
+if (declaration.pruneStale) {
   notices.push([
     "prune stale",
     `removed against the parent: exceptions: ${removedExceptions.join(", ") || "none"}; size entries: ${removedLargeFiles.join(", ") || "none"}. Pruning only removes entries.`,
   ]);
+}
 
 // The commit under test supplies its own policy: every edit is a permission.
 const policyStat = (
@@ -459,8 +501,9 @@ for (const [kind, text] of notices) {
   console.log(`Architecture allowance: ${kind}: ${text}`);
 }
 
-if (notices.length > 0 && receipt.closureReviewRequired)
+if (notices.length > 0 && receipt.closureReviewRequired) {
   console.log(`Tool: ${receipt.closureReviewRequired}`);
+}
 
 console.log(
   `Architecture baseline matches preview against parent ${parent} (${state}; ${notices.length} allowances)`,
@@ -468,7 +511,7 @@ console.log(
 
 const summary = process.env["GITHUB_STEP_SUMMARY"];
 
-if (summary)
+if (summary) {
   await appendFile(
     summary,
     [
@@ -486,3 +529,4 @@ if (summary)
       "",
     ].join("\n"),
   );
+}

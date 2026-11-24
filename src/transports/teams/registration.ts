@@ -193,10 +193,12 @@ export class TeamsRegistration {
         .query<{ name: string }, []>("PRAGMA table_info(approvals)")
         .all()
         .some((column) => column.name === "notified")
-    )
+    ) {
       this.db.run(
         "ALTER TABLE approvals ADD COLUMN notified INTEGER NOT NULL DEFAULT 0",
       );
+    }
+
     this.connector =
       connector ??
       new ConnectorClient({
@@ -222,7 +224,9 @@ export class TeamsRegistration {
       source: (job) => {
         const resultSource = fleetResultSource(job);
 
-        if (resultSource) return resultSource;
+        if (resultSource) {
+          return resultSource;
+        }
 
         return {
           transport: "teams",
@@ -252,7 +256,9 @@ export class TeamsRegistration {
         working: async (channel, thread, signal, allowed, mode, read) => {
           const ref = this.reference(channel);
 
-          if (mode !== "notice" || !ref || !allowed) return;
+          if (mode !== "notice" || !ref || !allowed) {
+            return;
+          }
 
           const active = () =>
             allowed() &&
@@ -273,8 +279,9 @@ export class TeamsRegistration {
             active,
             read ?? (() => {}),
             async (activity, signal) => {
-              if (!active())
+              if (!active()) {
                 throw new Error("Teams presence no longer available");
+              }
 
               return this.connector.sendToConversation(
                 ref.service,
@@ -295,8 +302,9 @@ export class TeamsRegistration {
             !reference ||
             !this.allowed(reference.user, channel) ||
             (allowed && !allowed())
-          )
+          ) {
             throw new Error("Teams image delivery access denied");
+          }
 
           return this.connector.sendToConversation(
             reference.service,
@@ -310,7 +318,9 @@ export class TeamsRegistration {
         },
       ),
       post: async (channel, thread, text, _stop, unit) => {
-        if (unit?.allowed && !(await unit.allowed())) return;
+        if (unit?.allowed && !(await unit.allowed())) {
+          return;
+        }
 
         if (
           presence &&
@@ -338,8 +348,9 @@ export class TeamsRegistration {
                   { signal, retryServerErrors: false },
                 ),
             ))
-          )
+          ) {
             return;
+          }
         }
 
         await this.send(channel, text, thread);
@@ -374,8 +385,9 @@ export class TeamsRegistration {
   private async send(conversation: string, text: string, replyToId?: string) {
     const reference = this.reference(conversation);
 
-    if (!reference || !this.allowed(reference.user, conversation))
+    if (!reference || !this.allowed(reference.user, conversation)) {
       throw new Error("Teams conversation is unavailable");
+    }
 
     const response = await this.connector.sendToConversation(
       reference.service,
@@ -392,8 +404,10 @@ export class TeamsRegistration {
     if (
       Result.isFailure(parsed) ||
       !allowedActivity(this.config, parsed.success)
-    )
+    ) {
       return false;
+    }
+
     const activity = parsed.success;
     const user = activity.from.aadObjectId?.toLowerCase() ?? "";
     const conversation = activity.conversation.id;
@@ -408,7 +422,10 @@ export class TeamsRegistration {
       })),
     });
 
-    if (!text) return false;
+    if (!text) {
+      return false;
+    }
+
     this.db
       .query(
         "INSERT INTO conversations VALUES(?,?,?,?,?,?) ON CONFLICT(conversation) DO UPDATE SET service=excluded.service,recipient=excluded.recipient,user=excluded.user,personal=excluded.personal,scope=excluded.scope",
@@ -428,7 +445,7 @@ export class TeamsRegistration {
       return true;
     }
 
-    if (this.sourceRecorder && this.config.fleetPolicy)
+    if (this.sourceRecorder && this.config.fleetPolicy) {
       this.sourceRecorder({
         reference: fleetSourceReference(
           "teams",
@@ -445,6 +462,8 @@ export class TeamsRegistration {
         receivedAt: activity.timestamp ?? new Date().toISOString(),
         origin: { botKey: this.key, eventId: `${conversation}:${activity.id}` },
       });
+    }
+
     this.store.enqueue({
       eventId: `${conversation}:${activity.id}`,
       botKey: this.key,
@@ -470,11 +489,15 @@ export class TeamsRegistration {
       !match ||
       activity.conversation.conversationType !== "personal" ||
       !this.config.approvalUsers.some((id) => id.toLowerCase() === user)
-    )
+    ) {
       return;
+    }
+
     const token = match[2];
 
-    if (!token) return;
+    if (!token) {
+      return;
+    }
 
     const row = this.db
       .query<Approval, [string]>("SELECT * FROM approvals WHERE token=?")
@@ -487,11 +510,13 @@ export class TeamsRegistration {
       row.conversation !== activity.conversation.id ||
       row.expires <= Date.now() ||
       row.session !== this.backend.sessionID
-    )
+    ) {
       return;
+    }
 
-    if (!this.backend.replyPermission || !(await this.currentApproval(row)))
+    if (!this.backend.replyPermission || !(await this.currentApproval(row))) {
       return;
+    }
 
     // Consume before the API call: an uncertain outcome can never replay approval.
     if (
@@ -500,8 +525,10 @@ export class TeamsRegistration {
           "UPDATE approvals SET used=1 WHERE token=? AND used=0 AND expires>?",
         )
         .run(token, Date.now()).changes
-    )
+    ) {
       return;
+    }
+
     await this.backend.replyPermission(
       row.session,
       row.request,
@@ -525,8 +552,9 @@ export class TeamsRegistration {
       reference.user !== row.user ||
       !this.config.approvalUsers.some((id) => id.toLowerCase() === row.user) ||
       !this.allowed(row.user, row.conversation)
-    )
+    ) {
       return;
+    }
 
     const pending = await this.backend.pendingPermissions?.(
       row.session,
@@ -538,7 +566,9 @@ export class TeamsRegistration {
         request.id === row.request && request.sessionID === row.session,
     );
 
-    if (!request || permissionFingerprint(request) !== row.fingerprint) return;
+    if (!request || permissionFingerprint(request) !== row.fingerprint) {
+      return;
+    }
 
     if (
       !(await this.backend.permissionBelongsToInput?.(
@@ -547,8 +577,10 @@ export class TeamsRegistration {
         row.input,
         this.abort.signal,
       ))
-    )
+    ) {
       return;
+    }
+
     this.abort.signal.throwIfAborted();
     const owner = this.store.jobByInput(this.key, row.input);
     const currentReference = this.reference(row.conversation);
@@ -564,8 +596,9 @@ export class TeamsRegistration {
       row.expires <= Date.now() ||
       !this.config.approvalUsers.some((id) => id.toLowerCase() === row.user) ||
       !this.allowed(row.user, row.conversation)
-    )
+    ) {
       return;
+    }
 
     return request;
   }
@@ -576,14 +609,17 @@ export class TeamsRegistration {
       !session ||
       !this.backend.pendingPermissions ||
       !this.backend.permissionBelongsToInput
-    )
+    ) {
       return;
+    }
 
     for (const request of await this.backend.pendingPermissions(
       session,
       this.abort.signal,
     )) {
-      if (request.sessionID !== session) continue;
+      if (request.sessionID !== session) {
+        continue;
+      }
 
       let owner:
         | { user: string; conversation: string; input: string }
@@ -613,7 +649,10 @@ export class TeamsRegistration {
         }
       }
 
-      if (!owner) continue;
+      if (!owner) {
+        continue;
+      }
+
       const offerOwner = owner;
 
       const row = this.db
@@ -636,10 +675,14 @@ export class TeamsRegistration {
               existing.conversation !== offerOwner.conversation ||
               existing.input !== offerOwner.input ||
               existing.fingerprint !== fingerprint
-            )
+            ) {
               return;
+            }
 
-            if (existing.expires > Date.now()) return existing;
+            if (existing.expires > Date.now()) {
+              return existing;
+            }
+
             const token = randomBytes(16).toString("hex");
             const expires = Date.now() + this.config.approvalTTLms;
             this.db
@@ -685,7 +728,10 @@ export class TeamsRegistration {
         })
         .immediate();
 
-      if (!row || row.notified) continue;
+      if (!row || row.notified) {
+        continue;
+      }
+
       const current = await this.currentApproval(row);
 
       const live = this.db
@@ -698,8 +744,10 @@ export class TeamsRegistration {
         live.used ||
         live.notified ||
         live.expires <= Date.now()
-      )
+      ) {
         continue;
+      }
+
       // Tool arguments and provider errors may contain secrets; publish only action.
       await this.send(
         row.conversation,
@@ -725,7 +773,10 @@ export class TeamsRegistration {
         });
       },
       onActivity: async (activity) => {
-        if (!open()) throw new Error("Teams intake stopped");
+        if (!open()) {
+          throw new Error("Teams intake stopped");
+        }
+
         await this.accept(activity);
       },
       log: this.log,
@@ -750,12 +801,14 @@ export class TeamsRegistration {
     this.abort.abort();
     const server = this.server;
 
-    if (server?.listening)
+    if (server?.listening) {
       await new Promise<void>((resolve) => {
         server.close(() => {
           resolve();
         });
       });
+    }
+
     unlinkOwnSocket(this.config.socketPath, this.socketIdentity);
     await this.loop;
     this.db.close();

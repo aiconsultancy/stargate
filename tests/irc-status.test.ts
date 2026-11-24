@@ -30,7 +30,10 @@ async function until(check: () => boolean) {
   const deadline = Date.now() + 1500;
 
   while (!check()) {
-    if (Date.now() >= deadline) throw new Error("status condition timed out");
+    if (Date.now() >= deadline) {
+      throw new Error("status condition timed out");
+    }
+
     await pause(1);
   }
 }
@@ -64,7 +67,9 @@ function setup(
     await until(() => attempts.length >= count);
     const attempt = attempts[count - 1];
 
-    if (!attempt) throw new Error("missing attempt");
+    if (!attempt) {
+      throw new Error("missing attempt");
+    }
 
     return attempt;
   };
@@ -110,7 +115,10 @@ test("irc status: synchronous short turns cancel starts and leave known clear al
   status.connected();
   await ack(1);
 
-  for (let i = 0; i < 100; i++) status.begin()();
+  for (let i = 0; i < 100; i++) {
+    status.begin()();
+  }
+
   await pause(40);
   expect(attempts).toHaveLength(1);
 });
@@ -183,7 +191,10 @@ test("irc status: ten-attempt rolling quota reserves a clear slot across reconne
   const startup = await ack(1);
   const finish = status.begin();
 
-  for (let count = 2; count <= 9; count++) await ack(count);
+  for (let count = 2; count <= 9; count++) {
+    await ack(count);
+  }
+
   await pause(12);
   expect(attempts).toHaveLength(9);
   finish();
@@ -270,7 +281,9 @@ test("irc status: thrown publisher failures retain clear without unhandled rejec
     async (value) => {
       values.push(value);
 
-      if (++calls === 1) throw new Error("synthetic transport failure");
+      if (++calls === 1) {
+        throw new Error("synthetic transport failure");
+      }
 
       return { kind: "ok" };
     },
@@ -443,7 +456,9 @@ test("irc status: hard value cap applies; tiny advertised caps still permit clea
 function parsed(line: string) {
   const message = parseMessage(line);
 
-  if (!message) throw new Error(`unparseable IRC test line: ${line}`);
+  if (!message) {
+    throw new Error(`unparseable IRC test line: ${line}`);
+  }
 
   return message;
 }

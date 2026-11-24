@@ -79,7 +79,9 @@ export class CaptainTranscriptRecords {
         )
         .get(botKey, sessionID);
 
-      if (!row) throw new Error("Captain cursor not found");
+      if (!row) {
+        throw new Error("Captain cursor not found");
+      }
 
       return { cursor: row.cursor ?? undefined, owner: row.owner };
     })();
@@ -121,8 +123,9 @@ export class CaptainTranscriptRecords {
           input.from.cursor ?? null,
           input.from.owner,
         ).changes !== 1
-    )
+    ) {
       throw new TranscriptConflict();
+    }
 
     // Native ownership selects both source and delivery mode. Digest catch-ups
     // Commit as locally delivered rows, never as pending Slack work.
@@ -143,14 +146,18 @@ export class CaptainTranscriptRecords {
             input.botKey,
             reply.job,
           ).changes !== 1
-      )
+      ) {
         throw new TranscriptConflict();
+      }
     }
   }
 
   public appendCaptainTranscript(input: CaptainTranscript): boolean {
     return this.db.transaction(() => {
-      if (this.captainBusy(input.botKey)) return false;
+      if (this.captainBusy(input.botKey)) {
+        return false;
+      }
+
       this.commitCaptain(input);
 
       return true;

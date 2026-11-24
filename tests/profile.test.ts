@@ -128,8 +128,10 @@ test("specialisms retain broad host tools and session history", () => {
       "browser",
       "subagent",
       "stargate_history",
-    ])
+    ]) {
       expect(rules).toContainEqual({ action, resource: "*", effect: "allow" });
+    }
+
     expect(rules).toContainEqual({
       action: "read",
       resource: "*.key",
@@ -317,7 +319,10 @@ test("profile init creates named feature worktrees, preserves source and reuses 
   expect(await initializeProfile(options)).toEqual(result);
   const worker = result.worktrees["mario"];
 
-  if (!worker) throw new Error("Missing worker worktree");
+  if (!worker) {
+    throw new Error("Missing worker worktree");
+  }
+
   execFileSync("git", ["-C", worker, "switch", "-c", "feat/task-in-place"], {
     stdio: "pipe",
   });
@@ -597,7 +602,10 @@ test("Pi crew receives a worktree but no OpenCode agent or session profile", asy
   const created = await initializeProfile({ ...options, team: mixed });
   const worktree = created.worktrees["twiki"];
 
-  if (!worktree) throw new Error("Twiki worktree missing");
+  if (!worktree) {
+    throw new Error("Twiki worktree missing");
+  }
+
   expect(
     await Bun.file(join(worktree, ".opencode", "opencode.json")).exists(),
   ).toBe(false);
@@ -821,10 +829,12 @@ test("custom init creates only configured worktrees, generic prompts, and genera
     "utf8",
   );
 
-  for (const id of ["adama", "starbuck", "gaeta"])
+  for (const id of ["adama", "starbuck", "gaeta"]) {
     expect(excludes).toContain(
       `/.agents/opco/agents/adama-${id === "adama" ? "captain" : "crew"}-${id}.md`,
     );
+  }
+
   expect(await initializeProfile({ ...options, team })).toEqual(result);
 });
 
@@ -1132,8 +1142,10 @@ test("captain, crew and Pi instructions render the configured maintenance window
     ),
   );
 
-  for (const text of [captain, crew, pi])
+  for (const text of [captain, crew, pi]) {
     expect(text.split(paragraph)).toHaveLength(2);
+  }
+
   expect(captain).toEndWith("<!-- STARGATE:END -->\n");
   expect(nightlyInstructions(undefined)).toBe("");
 });

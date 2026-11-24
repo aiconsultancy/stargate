@@ -47,28 +47,36 @@ export class CrewProjects {
   ): Promise<CrewProjects> {
     const parsed = Schema.decodeUnknownResult(crewOptionsSchema)(raw);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError(
         "Invalid crew/project configuration; use exact configured repository keys and worktrees.",
       );
+    }
+
     const { projects, ...base } = parsed.success;
     const configurations = new Map<string, CrewOptions>([["default", base]]);
 
     if (projects && Object.keys(projects).length > 0) {
       const team = base.team ?? defaultTeam;
 
-      if ((Object.keys(projects).length + 1) * team.crew.length > HISTORY_PAGE)
+      if (
+        (Object.keys(projects).length + 1) * team.crew.length >
+        HISTORY_PAGE
+      ) {
         throw new CrewError(
           "Configured project/member contexts exceed the bounded history limit.",
         );
+      }
 
       for (const [key, project] of Object.entries(projects)) {
         const namespace = `${base.namespace}:project:${key}`;
 
-        if (namespace.length > 256)
+        if (namespace.length > 256) {
           throw new CrewError(
             "Project namespace exceeds the configured limit.",
           );
+        }
+
         configurations.set(key, {
           ...base,
           ...project,
@@ -95,10 +103,11 @@ export class CrewProjects {
         if (
           Object.keys(options.worktrees).length !== ids.length ||
           ids.some((id) => !Object.hasOwn(options.worktrees, id))
-        )
+        ) {
           throw new CrewError(
             "Project worktrees must exactly match the configured crew.",
           );
+        }
 
         const project = await projectRepository(
           options.projectDirectory,
@@ -108,10 +117,12 @@ export class CrewProjects {
         if (
           repositories.has(project.common) ||
           projectPaths.some((path) => overlap(path, project.directory))
-        )
+        ) {
           throw new CrewError(
             "Project registry contains a duplicate repository or directory alias.",
           );
+        }
+
         repositories.add(project.common);
         projectPaths.push(project.directory);
 
@@ -126,10 +137,12 @@ export class CrewProjects {
           if (
             worker !== resolve(path) ||
             workerPaths.some((other) => overlap(other, worker))
-          )
+          ) {
             throw new CrewError(
               "Project worktrees contain a duplicate, nested or symbolic-link alias.",
             );
+          }
+
           workerPaths.push(worker);
         }
       }
@@ -138,17 +151,19 @@ export class CrewProjects {
         workerPaths.some((worker) =>
           projectPaths.some((project) => overlap(worker, project)),
         )
-      )
+      ) {
         throw new CrewError(
           "A project checkout overlaps a configured worker worktree.",
         );
+      }
     }
 
     const engines = new Map<string, CrewEngine>();
 
     try {
-      for (const [key, options] of configurations)
+      for (const [key, options] of configurations) {
         engines.set(key, await factory(options));
+      }
 
       return new CrewProjects(engines);
     } catch (error) {
@@ -168,36 +183,44 @@ export class CrewProjects {
   public get(key: string): CrewEngine {
     const engine = this.contexts.get(key);
 
-    if (!engine)
+    if (!engine) {
       throw new CrewError(
         "Unknown crew project; use a configured project key, never a directory.",
       );
+    }
 
     return engine;
   }
 
   public owner(sessionID: string): string | undefined {
     const contexts = [...this.contexts].filter(([, engine]) => {
-      if (engine.state.peerBySession(sessionID) !== null) return true;
+      if (engine.state.peerBySession(sessionID) !== null) {
+        return true;
+      }
+
       const member = engine.ircMember(sessionID);
 
       return member !== undefined && member !== "";
     });
 
-    if (contexts.length > 1)
+    if (contexts.length > 1) {
       throw new CrewError(
         "Native worker identity occurs in multiple project contexts; preserve state and resolve explicitly.",
       );
+    }
 
     return contexts[0]?.[0];
   }
 
   public async select(raw: unknown, caller: CrewCaller, mail = false) {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       throw new CrewError("Invalid project tool input.");
+    }
 
-    if (![Object.prototype, null].includes(Reflect.getPrototypeOf(raw)))
+    if (![Object.prototype, null].includes(Reflect.getPrototypeOf(raw))) {
       throw new CrewError("Project input requires own fields.");
+    }
+
     const record = raw as Record<string, unknown>;
 
     const project = Object.hasOwn(record, "project")
@@ -210,13 +233,17 @@ export class CrewProjects {
     const requested =
       project === undefined ? undefined : decodeProjectKey(project);
 
-    if (requested && Result.isFailure(requested))
+    if (requested && Result.isFailure(requested)) {
       throw new CrewError("Invalid crew project key.");
+    }
+
     const owner = this.owner(caller.sessionID);
     const key = requested?.success ?? owner ?? "default";
 
-    if (owner && key !== owner)
+    if (owner && key !== owner) {
       throw new CrewError("Workers cannot select another project context.");
+    }
+
     const engine = this.get(key);
 
     const checking =
@@ -224,8 +251,11 @@ export class CrewProjects {
         ? { ...caller, signal: AbortSignal.timeout(5000) }
         : caller;
 
-    if (mail) await engine.authorizeMail(checking);
-    else await engine.authorize(checking);
+    if (mail) {
+      await engine.authorizeMail(checking);
+    } else {
+      await engine.authorize(checking);
+    }
 
     return { engine, input, project: key };
   }
@@ -244,8 +274,10 @@ export class CrewProjects {
       if (
         typeof member !== "string" ||
         !Object.hasOwn(selected.engine.options.worktrees, member)
-      )
+      ) {
         throw new CrewError("Unknown configured crew member.");
+      }
+
       input["text"] = [
         `Configured Stargate project: ${selected.project}.`,
         `Use only your permanent worktree: ${JSON.stringify(selected.engine.options.worktrees[member])}.`,
@@ -262,7 +294,9 @@ export class CrewProjects {
   }
 
   public status(input: CrewStatusInput = {}): CrewStatus {
-    if (!this.enabled) return this.default.status(input);
+    if (!this.enabled) {
+      return this.default.status(input);
+    }
 
     const pages = [...this.contexts].map(([project, engine]) => ({
       project,
@@ -289,7 +323,10 @@ export class CrewProjects {
       const member = options.team.crew.find((entry) => entry.id === id);
       const directory = options.worktrees[id];
 
-      if (!member || !directory) return [];
+      if (!member || !directory) {
+        return [];
+      }
+
       const model = member.backend?.model ?? member.model;
 
       return [
@@ -318,7 +355,7 @@ export class CrewProjects {
     for (const [project, engine] of this.contexts) {
       const page = await engine.history.historyRoots(signal);
 
-      for (const session of page.sessions)
+      for (const session of page.sessions) {
         sessions.push(
           project === "default"
             ? session
@@ -331,15 +368,17 @@ export class CrewProjects {
                   ),
               },
         );
+      }
     }
 
     if (
       sessions.length > HISTORY_PAGE ||
       new Set(sessions.map((s) => s.id)).size !== sessions.length
-    )
+    ) {
       throw new CrewError(
         "Project history exceeds its bound or has ambiguous native identities.",
       );
+    }
 
     return { sessions };
   }
@@ -360,8 +399,11 @@ export class CrewProjects {
 
     const sessions = pages.flatMap((page) => page.sessions);
 
-    if (new Set(sessions.map((session) => session.id)).size !== sessions.length)
+    if (
+      new Set(sessions.map((session) => session.id)).size !== sessions.length
+    ) {
       throw new CrewError("Ambiguous project history identity.");
+    }
 
     return { sessions };
   }
@@ -387,6 +429,8 @@ export class CrewProjects {
 
     const failed = results.find((result) => result.status === "rejected");
 
-    if (failed?.status === "rejected") throw failed.reason;
+    if (failed?.status === "rejected") {
+      throw failed.reason;
+    }
   }
 }

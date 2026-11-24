@@ -17,7 +17,10 @@ export function historyVisible(
   peer: Peer | null,
   session: HistorySession,
 ): boolean {
-  if (options.team.historyScope === "server") return true;
+  if (options.team.historyScope === "server") {
+    return true;
+  }
+
   const identity = session.metadata?.["stargateCrew"];
 
   const metadata =
@@ -27,7 +30,10 @@ export function historyVisible(
       ? identity
       : undefined;
 
-  if (metadata && metadata["namespace"] !== options.namespace) return false;
+  if (metadata && metadata["namespace"] !== options.namespace) {
+    return false;
+  }
+
   const directory = resolve(session.location.directory);
 
   if (
@@ -37,8 +43,9 @@ export function historyVisible(
       options.team.captain.id,
     ].includes(session.agent ?? "") &&
     directory === resolve(options.captainDirectory)
-  )
+  ) {
     return true;
+  }
 
   if (peer) {
     const worktree = options.worktrees[peer.crewID];
@@ -84,10 +91,11 @@ export async function connectHistoryAPI(
           ([header, name]) => {
             const value = process.env[name];
 
-            if (!value)
+            if (!value) {
               throw new CrewError(
                 "History API authentication environment is missing in the OpenCode service.",
               );
+            }
 
             return [header, value];
           },
@@ -96,10 +104,12 @@ export async function connectHistoryAPI(
     } else {
       const endpoint = await Service.discover();
 
-      if (!endpoint)
+      if (!endpoint) {
         throw new CrewError(
           "History API unavailable; configure team.historyAPI for this OpenCode server.",
         );
+      }
+
       baseUrl = endpoint.url;
       headers =
         Service.headers({
@@ -123,14 +133,18 @@ export async function connectHistoryAPI(
         resolve(caller.location.directory) ||
       JSON.stringify(observed.metadata?.["stargateCrew"]) !==
         JSON.stringify(caller.metadata?.["stargateCrew"])
-    )
+    ) {
       throw new CrewError(
         "History endpoint must address the same OpenCode server and caller session.",
       );
+    }
 
     return client;
   } catch (error) {
-    if (error instanceof CrewError) throw error;
+    if (error instanceof CrewError) {
+      throw error;
+    }
+
     throw new CrewError(
       "History API connection unconfirmed; check the same OpenCode server and authentication. Raw details withheld.",
     );

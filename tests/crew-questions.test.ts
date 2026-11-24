@@ -15,7 +15,9 @@ import { fixtureRoot } from "./fixture-root";
 const cleanup: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const signal = new AbortController().signal;
@@ -27,12 +29,18 @@ async function fixture() {
   cleanup.push(async () => state.close());
   const member = defaultTeam.crew[0];
 
-  if (!member) throw new Error("Missing worker");
+  if (!member) {
+    throw new Error("Missing worker");
+  }
+
   const peer = state.reservePeer(member.id);
   state.readyPeer(peer.crewID);
   const task = state.reserveTask(peer, "ses_captain");
 
-  if (!task) throw new Error("Missing task");
+  if (!task) {
+    throw new Error("Missing task");
+  }
+
   state.running(task.id);
 
   const question: NativeQuestion = {
@@ -78,8 +86,9 @@ async function fixture() {
       return state;
     },
     async captain(caller: CrewCaller) {
-      if (caller.agent !== defaultTeam.captain.id)
+      if (caller.agent !== defaultTeam.captain.id) {
         throw new CrewError("Captain required");
+      }
     },
     async dm(input: unknown, caller: CrewCaller) {
       notices.push({ input, caller });
@@ -123,7 +132,9 @@ async function fixture() {
           ) {
             replies.push(answer);
 
-            if (failWrite) throw new Error("private details");
+            if (failWrite) {
+              throw new Error("private details");
+            }
           },
         };
       },
@@ -232,12 +243,14 @@ test("worker, other captain and malformed answers cannot consume an offer", asyn
   for (const caller of [
     { ...f.caller, agent: "worker" },
     { ...f.caller, sessionID: "ses_other" },
-  ])
+  ]) {
     await expect(
       f
         .bridge()
         .run({ op: "answer", token: offer?.token, answer: "1" }, caller),
     ).rejects.toThrow();
+  }
+
   await expect(
     f
       .bridge()
@@ -332,7 +345,10 @@ test("restart reconciles a claimed write even when the native form disappeared",
   await f.bridge().poll(signal);
   const offer = f.state().crewQuestionOffers(f.task.id)[0];
 
-  if (!offer) throw new Error("Missing offer");
+  if (!offer) {
+    throw new Error("Missing offer");
+  }
+
   expect(f.state().claimCrewQuestion(offer.token, 1000)).toBe(true);
   f.pending([]);
   await f.reopen();
@@ -385,7 +401,10 @@ test("paired crew enables missing settings, honours explicit off, and waits if u
   expect(f.notices).toHaveLength(1);
   const offer = f.state().crewQuestionOffers(f.task.id)[0];
 
-  if (!offer) throw new Error("Expected paired question offer");
+  if (!offer) {
+    throw new Error("Expected paired question offer");
+  }
+
   const input = { op: "answer", token: offer.token, answer: "1" };
   paired = false;
   await expect(bridge.run(input, f.caller)).rejects.toThrow("disabled");
@@ -430,7 +449,10 @@ test("gateway restart reconciles an uncertain crew answer once and retains its c
   await bridge.poll(signal);
   const offer = f.state().crewQuestionOffers(f.task.id)[0];
 
-  if (!offer) throw new Error("Missing offer");
+  if (!offer) {
+    throw new Error("Missing offer");
+  }
+
   f.failWrite();
   await bridge.run({ op: "answer", token: offer.token, answer: "1" }, f.caller);
   expect(f.state().crewQuestion(offer.token)?.outcome).toBe("uncertain");

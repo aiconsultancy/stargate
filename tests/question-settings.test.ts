@@ -24,8 +24,10 @@ test("question authority rejects symbolic, oversized and non-private files", asy
   try {
     const config = bot();
 
-    if (config.backend.type !== "opencode")
+    if (config.backend.type !== "opencode") {
       throw new Error("Expected OpenCode");
+    }
+
     config.backend.directory = directory;
     config.backend.agent = "captain";
 
@@ -74,8 +76,10 @@ test("question settings are private, atomic, isolated and fail closed", async ()
   try {
     const config = bot();
 
-    if (config.backend.type !== "opencode")
+    if (config.backend.type !== "opencode") {
       throw new Error("Expected OpenCode");
+    }
+
     config.backend.directory = directory;
     config.backend.agent = "captain";
 
@@ -137,8 +141,10 @@ test("the paired default applies only to an absent settings file without creatin
   try {
     const config = bot();
 
-    if (config.backend.type !== "opencode")
+    if (config.backend.type !== "opencode") {
       throw new Error("Expected OpenCode");
+    }
+
     config.backend.directory = directory;
     config.backend.agent = "captain";
     const path = questionSettingsPath(directory, "captain");

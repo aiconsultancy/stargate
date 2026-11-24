@@ -115,8 +115,9 @@ export function feedbackCallIdentity({
 }: FeedbackCall) {
   const identity = [sessionID, messageID, id];
 
-  if (!identity.every((part) => validCallPart(part)))
+  if (!identity.every((part) => validCallPart(part))) {
     throw new CrewError("Feedback requires the full host tool-call identity.");
+  }
 
   return identity;
 }
@@ -186,13 +187,17 @@ export class ReportingStore {
       ["endSeq", "INTEGER"],
       ["summarySeq", "INTEGER NOT NULL DEFAULT 0"],
     ]) {
-      if (!columns.some((column) => column.name === name))
+      if (!columns.some((column) => column.name === name)) {
         db.run(`ALTER TABLE activity_captures ADD COLUMN ${name} ${type}`);
+      }
     }
   }
 
   private prepareFeedback() {
-    if (this.feedbackReady) return;
+    if (this.feedbackReady) {
+      return;
+    }
+
     this.db.run(`CREATE TABLE IF NOT EXISTS feedback_inbox (
       id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER NOT NULL,
       member TEXT NOT NULL, project TEXT NOT NULL, callKey TEXT NOT NULL UNIQUE,
@@ -210,8 +215,10 @@ export class ReportingStore {
     const identity = feedbackCallIdentity(source);
     const parsed = decodeFeedback(raw);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError("Invalid feedback input.");
+    }
+
     const input = parsed.success;
 
     const callKey = createHash("sha256")
@@ -228,16 +235,19 @@ export class ReportingStore {
           )
           .get(callKey);
 
-        if (before) return { status: "stored", id: before.id };
+        if (before) {
+          return { status: "stored", id: before.id };
+        }
 
         const count = this.db
           .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM feedback_inbox")
           .get();
 
-        if (!count || count.n >= feedbackCapacity)
+        if (!count || count.n >= feedbackCapacity) {
           throw new CrewError(
             "This ship's feedback inbox is full. No new report was stored.",
           );
+        }
 
         const row = this.db
           .query<
@@ -269,7 +279,9 @@ export class ReportingStore {
               : safeFeedbackText(input.evidence, feedbackEvidenceLimit),
           );
 
-        if (!row) throw new Error("Feedback insert unavailable");
+        if (!row) {
+          throw new Error("Feedback insert unavailable");
+        }
 
         return { status: "stored", id: row.id };
       })
@@ -279,8 +291,10 @@ export class ReportingStore {
   public reviewFeedback(raw: unknown) {
     const parsed = decodeFeedbackReview(raw);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError("Invalid feedback review input.");
+    }
+
     const { after = 0, limit = 10 } = parsed.success;
 
     if (
@@ -290,8 +304,9 @@ export class ReportingStore {
           "SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='feedback_inbox'",
         )
         .get() === null
-    )
+    ) {
       return { entries: [], nextAfter: after, truncated: false };
+    }
 
     const entries = this.db
       .query<FeedbackEntry, [number, number]>(
@@ -302,7 +317,9 @@ export class ReportingStore {
 
     const truncated = entries.length > limit;
 
-    if (truncated) entries.pop();
+    if (truncated) {
+      entries.pop();
+    }
 
     return { entries, nextAfter: entries.at(-1)?.id ?? after, truncated };
   }
@@ -351,8 +368,9 @@ export class ReportingStore {
           .get(sessionID, requestID);
 
         if (previous) {
-          if (previous.reporterID !== reporterID)
+          if (previous.reporterID !== reporterID) {
             throw new CrewError("Capture reporter cannot change.");
+          }
 
           return previous;
         }
@@ -370,10 +388,12 @@ export class ReportingStore {
               "SELECT COUNT(*) AS count FROM activity_captures",
             )
             .get()?.count ?? 0) >= 1000
-        )
+        ) {
           throw new CrewError(
             "Activity capture capacity reached; retry after retention cleanup.",
           );
+        }
+
         const id = `capture_${randomUUID()}`;
         const expires = Date.now() + captureLease;
         this.db
@@ -405,8 +425,9 @@ export class ReportingStore {
       )
       .get(sessionID, id);
 
-    if (!capture)
+    if (!capture) {
       throw new CrewError("This captain does not own the activity capture.");
+    }
 
     return capture;
   }
@@ -466,7 +487,10 @@ export class ReportingStore {
   public assignment<T extends ReportingTask>(task: T, text: string) {
     this.expire();
 
-    if (this.isReport(task.id)) return;
+    if (this.isReport(task.id)) {
+      return;
+    }
+
     const captainID = this.captainRoute(task.originCaptainID);
     this.journal.append(
       {
@@ -486,7 +510,9 @@ export class ReportingStore {
       .get(captainID);
 
     // The reporter's own maintenance must not create reports of itself.
-    if (!capture || task.crewID === capture.reporterID) return;
+    if (!capture || task.crewID === capture.reporterID) {
+      return;
+    }
 
     const count =
       this.db
@@ -507,8 +533,9 @@ export class ReportingStore {
       !this.db
         .query("INSERT OR IGNORE INTO activity_tasks VALUES (?,?)")
         .run(task.id, capture.id).changes
-    )
+    ) {
       return;
+    }
   }
 
   public record<T extends ReportingTask>(
@@ -526,14 +553,17 @@ export class ReportingStore {
         )
         .get(task.id);
 
-      if (row && kind === "result") this.terminal(row, "complete", text);
+      if (row && kind === "result") {
+        this.terminal(row, "complete", text);
+      }
 
-      if (row && kind === "update" && text === "Outcome uncertain")
+      if (row && kind === "update" && text === "Outcome uncertain") {
         this.terminal(
           row,
           "unavailable",
           "Reporter execution unavailable or unconfirmed; no work was replayed.",
         );
+      }
 
       return;
     }
@@ -564,7 +594,9 @@ export class ReportingStore {
       .query<Capture, [string]>("SELECT * FROM activity_captures WHERE id=?")
       .get(captureID);
 
-    if (!capture) return [];
+    if (!capture) {
+      return [];
+    }
 
     return this.journal
       .window(
@@ -623,7 +655,9 @@ export class CrewReporter {
   ): Promise<ReportCaller> {
     signal.throwIfAborted();
 
-    if (this.closed) throw new CrewError("Activity reporter is closing.");
+    if (this.closed) {
+      throw new CrewError("Activity reporter is closing.");
+    }
 
     const caller = {
       sessionID,
@@ -635,11 +669,16 @@ export class CrewReporter {
       await this.engine.captain(caller);
       signal.throwIfAborted();
 
-      if (this.closed) throw new CrewError("Activity reporter is closing.");
+      if (this.closed) {
+        throw new CrewError("Activity reporter is closing.");
+      }
 
       return caller;
     } catch (error) {
-      if (error instanceof CrewError) throw error;
+      if (error instanceof CrewError) {
+        throw error;
+      }
+
       throw new CrewError(
         "Activity captain verification unavailable; raw details withheld.",
       );
@@ -714,22 +753,27 @@ export class CrewReporter {
     await job?.done;
 
     // Cancellation was accepted before close; do not revisit a drained owner.
-    if (this.closed) return true;
+    if (this.closed) {
+      return true;
+    }
 
-    if (capture.reportTaskID)
+    if (capture.reportTaskID) {
       await this.engine.cancelReport(capture.reportTaskID, caller);
-    else {
+    } else {
       const current = this.store.owned(input.sessionID, input.id);
 
-      if (current.reportTaskID)
+      if (current.reportTaskID) {
         await this.engine.cancelReport(current.reportTaskID, caller);
+      }
     }
 
     return true;
   }
 
   private advance(capture: Capture, caller: ReportCaller) {
-    if (capture.status !== "summarizing" || this.jobs.has(capture.id)) return;
+    if (capture.status !== "summarizing" || this.jobs.has(capture.id)) {
+      return;
+    }
 
     if (Date.now() >= capture.deadline) {
       this.store.terminal(
@@ -755,8 +799,9 @@ export class CrewReporter {
           ),
       ) &&
       Date.now() < capture.deadline
-    )
+    ) {
       return;
+    }
 
     if (
       !capture.reportTaskID &&
@@ -808,7 +853,9 @@ export class CrewReporter {
         let truncated =
           Boolean(capture.truncated) || records.length > recordLimit;
 
-        if (records.length > recordLimit) records.shift();
+        if (records.length > recordLimit) {
+          records.shift();
+        }
 
         const reference = () =>
           JSON.stringify({ records, tasks: taskStatuses, truncated });
@@ -871,7 +918,10 @@ export class CrewReporter {
     this.closed = true;
     const jobs = [...this.jobs.values()];
 
-    for (const job of jobs) job.controller.abort();
+    for (const job of jobs) {
+      job.controller.abort();
+    }
+
     await Promise.all(jobs.map(({ done }) => done));
   }
 }

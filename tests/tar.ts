@@ -44,7 +44,10 @@ function header(
   block.write(magic, 257, "latin1");
   let sum = 0;
 
-  for (const byte of block) sum += byte;
+  for (const byte of block) {
+    sum += byte;
+  }
+
   block.write(`${octal(sum, 6)}\0 `, 148);
 
   return block;
@@ -60,7 +63,9 @@ function paxBody(records: Record<string, string>) {
         const body = ` ${key}=${value}\n`;
         let length = body.length + 1;
 
-        while (`${length}${body}`.length !== length) length++;
+        while (`${length}${body}`.length !== length) {
+          length++;
+        }
 
         return `${length}${body}`;
       })
@@ -99,11 +104,17 @@ export function tarball(entries: TarEntry[], corrupt = false) {
       block.fill(" ", 148, 156);
       let sum = 0;
 
-      for (const byte of block) sum += byte;
+      for (const byte of block) {
+        sum += byte;
+      }
+
       block.write(`${octal(sum, 6)}\0 `, 148);
     }
 
-    if (corrupt) block[0] = (block[0] ?? 0) ^ 1;
+    if (corrupt) {
+      block[0] = (block[0] ?? 0) ^ 1;
+    }
+
     blocks.push(block, pad(data));
   }
 

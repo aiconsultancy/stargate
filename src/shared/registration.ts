@@ -33,7 +33,9 @@ export function backendFingerprint<
   // A pin selects execution identity, not a new Slack/outbox namespace.
   const backend = { ...config.backend };
 
-  if (backend.type === "opencode") delete backend.sessionID;
+  if (backend.type === "opencode") {
+    delete backend.sessionID;
+  }
 
   return createHash("sha256").update(JSON.stringify(backend)).digest("hex");
 }

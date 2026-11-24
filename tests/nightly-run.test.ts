@@ -213,8 +213,9 @@ const api = Bun.serve({
           versions: { "2.2.7": {}, "2.2.9": {} },
         });
       case "/v1/models":
-        if (request.headers.get("authorization") !== "Bearer proxy-key")
+        if (request.headers.get("authorization") !== "Bearer proxy-key") {
           return new Response("no", { status: 401 });
+        }
 
         return fixture.proxyDown(fixture)
           ? new Response("down", { status: 503 })
@@ -459,13 +460,19 @@ const runner: CommandRunner = {
     const text = command.join(" ");
     await fixture.onCommand(text);
 
-    if (fixture.abortWhen(text)) fixture.controller.abort();
+    if (fixture.abortWhen(text)) {
+      fixture.controller.abort();
+    }
+
     const [first, ...rest] = command;
 
-    if (first === "tar" || first === "git")
+    if (first === "tar" || first === "git") {
       return processRunner.run(command, options);
+    }
 
-    if (first === "bun") return ok();
+    if (first === "bun") {
+      return ok();
+    }
 
     if (first === "npm") {
       const prefix = rest[rest.indexOf("--prefix") + 1] ?? "";
@@ -499,15 +506,23 @@ const runner: CommandRunner = {
     if (first === "systemctl") {
       const [, action, unit] = rest;
 
-      if (unit === "opencode2.service" && action === "restart")
+      if (unit === "opencode2.service" && action === "restart") {
         fixture.openCodeRestarts++;
+      }
 
-      if (unit !== "stargate.service") return ok();
+      if (unit !== "stargate.service") {
+        return ok();
+      }
 
-      if (action === "is-active") return ok(`${fixture.gateway}\n`);
+      if (action === "is-active") {
+        return ok(`${fixture.gateway}\n`);
+      }
 
       if (action === "stop") {
-        if (fixture.stopFails) return { code: 1, stdout: "", stderr: "" };
+        if (fixture.stopFails) {
+          return { code: 1, stdout: "", stderr: "" };
+        }
+
         fixture.gateway = "inactive";
       }
 
@@ -521,7 +536,7 @@ const runner: CommandRunner = {
 
         const version = current?.metadata.version ?? null;
 
-        if (fixture.readyVersions.has(version))
+        if (fixture.readyVersions.has(version)) {
           await writeFile(
             join(fixture.dir, "data", "ready.json"),
             JSON.stringify({
@@ -534,6 +549,7 @@ const runner: CommandRunner = {
                 : {}),
             }),
           );
+        }
       }
 
       return ok();
@@ -556,7 +572,9 @@ const opencode: OpenCodeControl = {
   switchModel: async (id, model) => {
     fixture.sessions.set(id, model);
 
-    if (fixture.abortWhen("switchModel")) fixture.controller.abort();
+    if (fixture.abortWhen("switchModel")) {
+      fixture.controller.abort();
+    }
   },
   catalog: async () => [
     { providerID: "openai-proxy", id: "gpt-6.1-sol", variants: ["high"] },
@@ -697,7 +715,10 @@ test("enabled drain proceeds at its deadline and reports the running session", a
 test("cleanup-only maintenance records results without stopping services", async () => {
   const { config, path } = await install();
 
-  if (!config.maintenance) throw new Error("fixture maintenance missing");
+  if (!config.maintenance) {
+    throw new Error("fixture maintenance missing");
+  }
+
   config.maintenance.components = {
     stargate: false,
     cliproxyapi: false,
@@ -730,7 +751,10 @@ test("cleanup-only maintenance records results without stopping services", async
 test("cleanup fails closed when the shared OpenCode server has activity", async () => {
   const { config, path } = await install();
 
-  if (!config.maintenance) throw new Error("fixture maintenance missing");
+  if (!config.maintenance) {
+    throw new Error("fixture maintenance missing");
+  }
+
   config.maintenance.components = {
     stargate: false,
     cliproxyapi: false,
@@ -755,7 +779,10 @@ test("cleanup fails closed when the shared OpenCode server has activity", async 
 test("cleanup checkpoints intent and result privately before one final notice", async () => {
   const { config, path } = await install();
 
-  if (!config.maintenance) throw new Error("fixture maintenance missing");
+  if (!config.maintenance) {
+    throw new Error("fixture maintenance missing");
+  }
+
   config.maintenance.components = {
     stargate: false,
     cliproxyapi: false,
@@ -901,8 +928,10 @@ describe("nightly maintenance run", () => {
         state.enqueue(chief, "ses_e49d787old", `private task text ${i}`),
       );
 
-      for (const row of rows.slice(0, 4))
+      for (const row of rows.slice(0, 4)) {
         state.cancelQueued(row.id, "ses_e49d787old");
+      }
+
       id = rows[4]?.id ?? "";
     } finally {
       state.close();
@@ -984,7 +1013,10 @@ describe("nightly maintenance run", () => {
     const { config, path } = await install();
     const bot = config.bots[0];
 
-    if (!bot) throw new Error("bot");
+    if (!bot) {
+      throw new Error("bot");
+    }
+
     const identity = { team: "T1", user: "U1" };
     const key = botKey(bot, identity);
     const { report, reportPath, attention } = await run(config, path);
@@ -1017,7 +1049,10 @@ describe("nightly maintenance run", () => {
       JSON.parse(await readFile(path, "utf8")),
     ).bots[0];
 
-    if (!after) throw new Error("bot");
+    if (!after) {
+      throw new Error("bot");
+    }
+
     expect(botKey(after, identity)).toBe(key);
     expect(fixture.probes).toEqual([
       "responses:gpt-6.2-sol",
@@ -1298,12 +1333,16 @@ describe("nightly maintenance run", () => {
       '"files"',
       '"clis"',
       '"openCode"',
-    ])
+    ]) {
       expect(journal).toContain(entry);
+    }
+
     // The undo runs with Slack ingress still stopped; the gateway comes last.
     const during: string[] = [];
     fixture.onCommand = async (command) => {
-      if (command.startsWith("npm")) during.push(fixture.gateway);
+      if (command.startsWith("npm")) {
+        during.push(fixture.gateway);
+      }
     };
 
     fixture.commands = [];
@@ -1431,12 +1470,13 @@ describe("nightly maintenance run", () => {
           c.join(" ").includes("opencode2.service"),
         ) &&
         reads === 3
-      )
+      ) {
         return {
           providerID: "openai-proxy",
           id: "gpt-6.1-sol",
           variant: "high",
         };
+      }
 
       return model;
     };
@@ -1506,7 +1546,10 @@ describe("nightly maintenance run", () => {
     expect(await readFile(globalConfigFile, "utf8")).toBe(original);
     expect(fixture.probes).toEqual([]);
 
-    if (!config.maintenance?.models) throw new Error("Missing models");
+    if (!config.maintenance?.models) {
+      throw new Error("Missing models");
+    }
+
     config.maintenance.models.updateGlobalCatalog = false;
     const disabled = await run(config, path, "plan");
     expect(
@@ -1566,14 +1609,18 @@ describe("nightly maintenance run", () => {
       };
 
       fixture.onCommand = async (command) => {
-        if (command.includes("restart opencode2.service"))
+        if (command.includes("restart opencode2.service")) {
           sawAdditionAtRestart ||= (await readFile(target, "utf8")).includes(
             "gpt-6.2-sol",
           );
+        }
       };
 
       opencode.switchModel = async (id, model, signal) => {
-        if (model.id === "gpt-6.2-sol") expect(succeeds).toBe(true);
+        if (model.id === "gpt-6.2-sol") {
+          expect(succeeds).toBe(true);
+        }
+
         await beforeSwitch(id, model, signal);
       };
 
@@ -1634,8 +1681,9 @@ describe("nightly maintenance run", () => {
     );
 
     fixture.onCommand = async (command) => {
-      if (command.includes("stop stargate.service"))
+      if (command.includes("stop stargate.service")) {
         await writeFile(globalConfigFile, edited);
+      }
     };
 
     const { report } = await run(config, path);
@@ -1926,7 +1974,10 @@ describe("nightly maintenance run", () => {
   test("work that starts between the gate and the stop defers and undoes", async () => {
     const { config, path } = await install();
     fixture.onCommand = async (command) => {
-      if (!command.startsWith("npm install")) return;
+      if (!command.startsWith("npm install")) {
+        return;
+      }
+
       const store = openStore(join(config.dataDirectory, "stargate.sqlite"));
       store.enqueue({
         eventId: "E1",
@@ -2148,7 +2199,10 @@ describe("nightly maintenance run", () => {
     const { config } = await install();
     const proxy = config.maintenance?.proxy;
 
-    if (!proxy) throw new Error("proxy");
+    if (!proxy) {
+      throw new Error("proxy");
+    }
+
     const signal = AbortSignal.timeout(5000);
     expect(await probeModel(proxy, "claude-opus-5-6", signal)).toBe(true);
     expect(await probeModel(proxy, "gpt-6.2-sol", signal)).toBe(true);
@@ -2179,7 +2233,10 @@ describe("nightly maintenance run", () => {
       "Outside the maintenance window",
     );
 
-    if (config.maintenance) config.maintenance.enabled = false;
+    if (config.maintenance) {
+      config.maintenance.enabled = false;
+    }
+
     await expect(run(config, path)).rejects.toThrow("disabled");
   });
 });
@@ -2206,7 +2263,10 @@ const teamPath = () => join(fixture.dir, "team.json");
 async function stargateOnly(overrides: Record<string, unknown> = {}) {
   const installed = await install(overrides);
 
-  if (!installed.config.maintenance) throw new Error("no maintenance");
+  if (!installed.config.maintenance) {
+    throw new Error("no maintenance");
+  }
+
   installed.config.maintenance.components = {
     stargate: true,
     cliproxyapi: false,
@@ -2306,7 +2366,10 @@ describe("gateway-only update", () => {
       const { config, path } = await stargateOnly();
 
       // Undefined: the running release has no recorded digest.
-      if (plugin) await runningPlugin(plugin);
+      if (plugin) {
+        await runningPlugin(plugin);
+      }
+
       await updateState(config.dataDirectory, (state) => {
         state.openCodeRelease = "old";
       });
@@ -2424,7 +2487,10 @@ describe("gateway-only update", () => {
       state.openCodeRelease = "loaded";
     });
 
-    if (config.maintenance?.stargate) config.maintenance.stargate.keep = 2;
+    if (config.maintenance?.stargate) {
+      config.maintenance.stargate.keep = 2;
+    }
+
     const { report } = await run(config, path);
     expect(statusOf(report, "stargate")).toBe("updated");
     const left = (await readdir(join(root, "releases"))).sort();
@@ -2468,7 +2534,10 @@ describe("operator update", () => {
     // Every component is configured; tonight's run would update them all.
     const { config, path } = await install();
 
-    if (!config.maintenance?.stargate) throw new Error("no maintenance");
+    if (!config.maintenance?.stargate) {
+      throw new Error("no maintenance");
+    }
+
     config.maintenance.enabled = false;
     config.maintenance.stargate.coolOffHours = 24;
     // Outside the window, with a running captain turn and a queued request.
@@ -2566,7 +2635,10 @@ describe("operator update", () => {
   test("a release that cannot be verified is not installed", async () => {
     const { config, path } = await install();
 
-    if (!config.maintenance?.stargate) throw new Error("no maintenance");
+    if (!config.maintenance?.stargate) {
+      throw new Error("no maintenance");
+    }
+
     // The tree comparison is required but no checkout is configured.
     config.maintenance.stargate.requireTreeCheck = true;
     fixture.time = noon;
@@ -2610,10 +2682,12 @@ describe("operator update", () => {
 
     const before = await readFile(journalPath, "utf8");
 
-    for (const mode of ["plan", "run"] as const)
+    for (const mode of ["plan", "run"] as const) {
       await expect(update(config, path, "0.2.0", { mode })).rejects.toThrow(
         "stargate maintenance recover",
       );
+    }
+
     expect(await readFile(journalPath, "utf8")).toBe(before);
     expect(fixture.commands).toEqual([]);
     expect(await reports(config)).toEqual([]);
@@ -2642,7 +2716,10 @@ describe("operator update", () => {
     for (const operator of [true, false]) {
       const { config, path } = await install();
 
-      if (!config.maintenance) throw new Error("no maintenance");
+      if (!config.maintenance) {
+        throw new Error("no maintenance");
+      }
+
       config.maintenance.components = {
         stargate: true,
         cliproxyapi: false,
@@ -2651,8 +2728,12 @@ describe("operator update", () => {
       };
       fixture.active = [];
 
-      if (operator) await update(config, path, "0.2.0");
-      else await run(config, path);
+      if (operator) {
+        await update(config, path, "0.2.0");
+      } else {
+        await run(config, path);
+      }
+
       // As a kill leaves it right after the gateway started on the new
       // Release: the switch is not committed.
       const runID = crypto.randomUUID();
@@ -2731,7 +2812,10 @@ describe("operator update", () => {
     const installed = async (config: Config, name = "caller") => {
       const root = config.maintenance?.stargate?.root;
 
-      if (!root) throw new Error("no release root");
+      if (!root) {
+        throw new Error("no release root");
+      }
+
       const directory = join(root, "releases", name);
       await mkdir(join(directory, "src"), { recursive: true });
       await writeFile(join(directory, "src", "main.ts"), "");
@@ -2849,7 +2933,10 @@ describe("operator update", () => {
       const { config, path } = await install();
       const root = config.maintenance?.stargate?.root;
 
-      if (!root) throw new Error("no release root");
+      if (!root) {
+        throw new Error("no release root");
+      }
+
       fixture.time = noon;
       await runningPlugin();
       const outside = join(fixture.dir, "checkout", "src", "main.ts");
@@ -2882,7 +2969,7 @@ describe("operator update", () => {
         join(root, "releases", "old", "src", "main.ts"),
         join(root, "releases", "bare", "src", "main.ts"),
         join(root, "releases", "missing", "src", "main.ts"),
-      ])
+      ]) {
         for (const foreground of [false, true]) {
           const attempt = command(
             config,
@@ -2898,6 +2985,7 @@ describe("operator update", () => {
           await expect(attempt).rejects.toThrow(UpdateRefused);
           await expect(attempt).rejects.toThrow("Run the installed stargate");
         }
+      }
 
       // Nothing ran: no unit, no stage, no switch.
       expect(fixture.commands).toEqual([]);
@@ -2981,10 +3069,11 @@ describe("operator update", () => {
         { version: "0.2", now: true },
         { now: true },
         { version: "0.2.0", plan: true, foreground: true },
-      ])
+      ]) {
         await expect(command(config, path, options)).rejects.toThrow(
           UpdateRefused,
         );
+      }
     });
 
     test("--plan says what would happen and which services restart", async () => {
@@ -3007,7 +3096,10 @@ describe("operator update", () => {
       for (const same of [true, false]) {
         const { config, path } = await install();
 
-        if (same) await runningPlugin();
+        if (same) {
+          await runningPlugin();
+        }
+
         fixture.time = noon;
         // Staged and verified, then rolled back: not the current release.
         fixture.readyVersions = new Set(["0.1.0"]);
@@ -3064,7 +3156,10 @@ describe("operator update", () => {
       fixture.time = noon;
       const root = config.maintenance?.stargate?.root;
 
-      if (!root) throw new Error("no release root");
+      if (!root) {
+        throw new Error("no release root");
+      }
+
       const entrypoint = await installed(config, "0.0.1");
 
       for (const version of ["0.0.1", "0.0.2", "0.0.3", "0.0.4"]) {
@@ -3350,8 +3445,9 @@ describe("journal recovery", () => {
     // The first pass restores the file, then dies in the OpenCode restart.
     const dying: CommandRunner = {
       async run(command, options) {
-        if (command.join(" ").includes("opencode2.service"))
+        if (command.join(" ").includes("opencode2.service")) {
           throw new Error("killed");
+        }
 
         return runner.run(command, options);
       },
@@ -3553,8 +3649,9 @@ describe("journal recovery", () => {
     );
     fixture.gateway = "inactive";
     fixture.onCommand = async (command) => {
-      if (command === "systemctl --user start stargate.service")
+      if (command === "systemctl --user start stargate.service") {
         sql(`UPDATE cron_schedules SET nextAt=${now + 86_400_000}`);
+      }
     };
 
     const { report } = await run(config, path);
@@ -3613,7 +3710,10 @@ describe("journal recovery", () => {
         (key === "gateway" || key === "release") &&
         this.get(key) !== undefined
       ) {
-        if (first) throw new Error("killed");
+        if (first) {
+          throw new Error("killed");
+        }
+
         first = key;
       }
 
@@ -3742,8 +3842,11 @@ describe("journal recovery", () => {
 
     const silent: CommandRunner = {
       async run(command, options) {
-        if (command.join(" ") === "systemctl --user is-active stargate.service")
+        if (
+          command.join(" ") === "systemctl --user is-active stargate.service"
+        ) {
           return { code: 1, stdout: "", stderr: "" };
+        }
 
         return runner.run(command, options);
       },

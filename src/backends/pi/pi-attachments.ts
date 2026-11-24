@@ -17,20 +17,27 @@ export function piInputContent(
     throw new AttachmentInputUnavailable("Invalid or oversized Pi attachments");
   }
 
-  if (files.length === 0) return text;
+  if (files.length === 0) {
+    return text;
+  }
+
   const content: Exclude<UserInput, string> = [];
 
-  if (text) content.push({ type: "text", text });
+  if (text) {
+    content.push({ type: "text", text });
+  }
 
   for (const file of files) {
     if (
       ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.mime)
     ) {
       // Pi otherwise replaces unsupported images with a textual placeholder.
-      if (!acceptsImages)
+      if (!acceptsImages) {
         throw new AttachmentInputUnavailable(
           "Pi model does not support images",
         );
+      }
+
       content.push(
         { type: "text", text: `Attachment: ${file.name}` },
         {
@@ -64,10 +71,12 @@ export function piInputContent(
             byte === 127 ||
             (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13),
         )
-      )
+      ) {
         throw new AttachmentInputUnavailable(
           "Pi text attachment contains binary control bytes",
         );
+      }
+
       content.push({
         type: "text",
         text: `Attachment: ${file.name}\n${decoded}`,

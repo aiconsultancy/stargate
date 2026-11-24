@@ -61,10 +61,13 @@ function operate(
 }
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 describe("notificationInputSchema", () => {
@@ -130,12 +133,14 @@ describe("notificationInputSchema", () => {
       { op: "mute", ...channel, caller: "other" },
       { op: "mute", ...channel, configPath: "/secret" },
       { op: "mute", ...channel, sessionID: "other" },
-    ])
+    ]) {
       expect(
         Result.isSuccess(
           Schema.decodeUnknownResult(notificationInputSchema)(input),
         ),
       ).toBe(false);
+    }
+
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(notificationInputSchema)({
@@ -157,7 +162,7 @@ describe("notificationInputSchema", () => {
       "2026-11-17T13:00:00+99:00",
       "Infinity",
       "2026-11-17T13:00Z",
-    ])
+    ]) {
       expect(
         Result.isSuccess(
           Schema.decodeUnknownResult(notificationInputSchema)({
@@ -167,13 +172,14 @@ describe("notificationInputSchema", () => {
           }),
         ),
       ).toBe(false);
+    }
 
     for (const input of [
       { op: "unmute", ...channel },
       { op: "status", ...thread },
       { op: "list" },
       { op: "clear_all" },
-    ])
+    ]) {
       expect(
         Result.isSuccess(
           Schema.decodeUnknownResult(notificationInputSchema)({
@@ -182,6 +188,7 @@ describe("notificationInputSchema", () => {
           }),
         ),
       ).toBe(false);
+    }
   });
 });
 
@@ -212,11 +219,13 @@ describe("NotificationStore", () => {
       ["captain-b", "C123", thread.thread_ts],
       ["captain-a", "G123", thread.thread_ts],
       ["captain-a", "C123", "1794922711.1"],
-    ])
+    ]) {
       expect(
         store.status(registration ?? "", targetChannel ?? "", targetThread, now)
           .mode,
       ).toBe("normal");
+    }
+
     expect(
       operate(store, { op: "list" }, "read", now, "captain-b"),
     ).toMatchObject({
@@ -238,13 +247,15 @@ describe("NotificationStore", () => {
       thread: { state: "active", mute_until: until },
     });
 
-    for (const time of [deadline, deadline + 1])
+    for (const time of [deadline, deadline + 1]) {
       expect(
         store.status("captain-a", "C123", thread.thread_ts, time),
       ).toMatchObject({
         mode: "normal",
         thread: { state: "expired", mute_until: until },
       });
+    }
+
     operate(store, { op: "mute", ...channel }, "channel-mute");
     expect(
       store.status("captain-a", "C123", thread.thread_ts, deadline),
@@ -270,10 +281,12 @@ describe("NotificationStore", () => {
       mute_until: until,
     });
 
-    for (const time of [deadline, deadline + 1])
+    for (const time of [deadline, deadline + 1]) {
       expect(() => operate(store, input, "expired", time)).toThrow(
         "Notification mute expiry has elapsed.",
       );
+    }
+
     expect(store.status("captain-a", "C123", thread.thread_ts, now).mode).toBe(
       "normal",
     );
@@ -470,10 +483,12 @@ describe("NotificationStore", () => {
       { op: "unmute", ...thread },
       { op: "mute", ...channel },
       { op: "mute", ...thread, reason: "secret reason" },
-    ] as const)
+    ] as const) {
       expect(() => operate(store, input)).toThrow(
         "Notification operation identity conflict.",
       );
+    }
+
     expect(() =>
       store.operate(
         "captain-a",
@@ -587,8 +602,10 @@ describe("NotificationStore", () => {
     open(path);
     expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
 
-    for (const file of [path, `${path}-wal`, `${path}-shm`])
+    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
       expect(statSync(file).mode & 0o777).toBe(0o600);
+    }
+
     chmodSync(path, 0o644);
     open(path);
     expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -621,7 +638,7 @@ describe("NotificationStore", () => {
       { now: Number.NaN },
       { now: Infinity },
       { now: 1.5 },
-    ])
+    ]) {
       expect(() =>
         store.operate(
           "captain-a",
@@ -634,11 +651,14 @@ describe("NotificationStore", () => {
           },
         ),
       ).toThrow("Invalid notification request.");
+    }
 
-    for (const registration of ["", " ", "x".repeat(2049)])
+    for (const registration of ["", " ", "x".repeat(2049)]) {
       expect(() => store.status(registration, "C123", undefined, now)).toThrow(
         "Invalid notification request.",
       );
+    }
+
     expect(() => store.status("captain-a", "D123", undefined, now)).toThrow(
       "Invalid notification request.",
     );
@@ -651,7 +671,7 @@ describe("NotificationStore", () => {
   test("lists bounded keyset pages and rejects invalid/cross-registration cursor", () => {
     const store = open();
 
-    for (let index = 0; index < 52; index++)
+    for (let index = 0; index < 52; index++) {
       operate(
         store,
         {
@@ -661,10 +681,14 @@ describe("NotificationStore", () => {
         },
         `mute-${index}`,
       );
+    }
+
     const first = operate(store, { op: "list" });
 
-    if (first.op !== "list" || first.cursor === null)
+    if (first.op !== "list" || first.cursor === null) {
       throw new Error("Missing list cursor");
+    }
+
     expect(first.settings).toHaveLength(50);
     operate(
       store,
@@ -680,10 +704,12 @@ describe("NotificationStore", () => {
       cursor: null,
     });
 
-    for (const cursor of ["invalid", "e30", "a".repeat(1025)])
+    for (const cursor of ["invalid", "e30", "a".repeat(1025)]) {
       expect(() => operate(store, { op: "list", cursor })).toThrow(
         "Invalid notification request.",
       );
+    }
+
     expect(() =>
       operate(
         store,

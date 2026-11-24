@@ -81,8 +81,10 @@ export function settingsAdvertisement(schema: Schema.Constraint) {
         !Predicate.isObject(value) ||
         !Array.isArray(value["enum"]) ||
         value["enum"].length !== 1
-      )
+      ) {
         return value;
+      }
+
       const { enum: values, ...rest } = value;
 
       const first: unknown = values[0];
@@ -91,8 +93,9 @@ export function settingsAdvertisement(schema: Schema.Constraint) {
     }),
   );
 
-  if (!Predicate.isObject(result))
+  if (!Predicate.isObject(result)) {
     throw new Error("Invalid settings advertisement");
+  }
 
   return result;
 }
@@ -111,8 +114,9 @@ export function settingsInputAdvertisement(
       ? check.checks.some(trimsInput)
       : check.annotations?.representation?.id === "effect/schema/isTrimmed";
 
-  if (ast.encoding?.length && ast.checks?.some(trimsInput))
+  if (ast.encoding?.length && ast.checks?.some(trimsInput)) {
     delete json["pattern"];
+  }
 
   if (
     Predicate.isTagged(ast, "Objects") &&
@@ -122,23 +126,32 @@ export function settingsInputAdvertisement(
     const required: string[] = [];
 
     for (const field of ast.propertySignatures) {
-      if (typeof field.name !== "string") continue;
+      if (typeof field.name !== "string") {
+        continue;
+      }
+
       const codec = Schema.make<Schema.Codec<unknown>>(field.type);
       properties[field.name] = settingsInputAdvertisement(codec);
 
-      if (!Schema.toEncoded(codec).ast.context?.isOptional)
+      if (!Schema.toEncoded(codec).ast.context?.isOptional) {
         required.push(field.name);
+      }
     }
 
-    if (required.length > 0) json["required"] = required;
-    else delete json["required"];
+    if (required.length > 0) {
+      json["required"] = required;
+    } else {
+      delete json["required"];
+    }
   } else if (Predicate.isTagged(ast, "Union")) {
     const types = ast.types.filter(
       (member) => !Predicate.isTagged(member, "Undefined"),
     );
 
-    if (types.length === 1 && types[0])
+    if (types.length === 1 && types[0]) {
       return settingsInputAdvertisement(Schema.make(types[0]));
+    }
+
     const key = Array.isArray(json["oneOf"]) ? "oneOf" : "anyOf";
 
     if (Array.isArray(json[key]) && types.length === json[key].length) {
@@ -162,7 +175,9 @@ export function settingsInputAdvertisement(
 
       json[exclusive ? "oneOf" : key] = branches;
 
-      if (exclusive) delete json["anyOf"];
+      if (exclusive) {
+        delete json["anyOf"];
+      }
     }
   }
 

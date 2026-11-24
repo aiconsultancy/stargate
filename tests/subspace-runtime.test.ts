@@ -33,7 +33,10 @@ import {
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
+
   await removeDirectories();
 });
 
@@ -168,7 +171,7 @@ async function officerSocket() {
   return join(await childDirectory(sockets, "captain-a", 0o700), "a.sock");
 }
 
-for (const variant of ["absent", "enabled: false"] as const)
+for (const variant of ["absent", "enabled: false"] as const) {
   test(`runtime: subspaceAgents ${variant} creates, opens, logs and contacts nothing`, async () => {
     const stub = stubApi();
     const socketPath = await officerSocket();
@@ -199,6 +202,7 @@ for (const variant of ["absent", "enabled: false"] as const)
     expect(gateway.backends).toEqual([slackBot(claude).backend]);
     await gateway.stop();
   });
+}
 
 test("runtime: enabled, keys are made, the socket signs, enrolment runs in the background and a Claude officer gets the bridge", async () => {
   const stub = stubApi();

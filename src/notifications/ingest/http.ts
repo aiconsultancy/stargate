@@ -57,17 +57,21 @@ function shuttingDownFailure(_failure: ShuttingDown) {
 }
 
 function publishFailure(failed: PublishError) {
-  if (Predicate.isTagged(failed, "InvalidNotification"))
+  if (Predicate.isTagged(failed, "InvalidNotification")) {
     return failure(400, "invalid_notification");
+  }
 
-  if (Predicate.isTagged(failed, "TopicNotGranted"))
+  if (Predicate.isTagged(failed, "TopicNotGranted")) {
     return failure(403, "topic_not_granted");
+  }
 
-  if (Predicate.isTagged(failed, "QueueFull"))
+  if (Predicate.isTagged(failed, "QueueFull")) {
     return failure(503, "queue_full");
+  }
 
-  if (Predicate.isTagged(failed, "StoreUnavailable"))
+  if (Predicate.isTagged(failed, "StoreUnavailable")) {
     return failure(503, "store_unavailable");
+  }
 
   return shuttingDownFailure(failed);
 }
@@ -85,7 +89,9 @@ export function notificationRoutes(
   const routes: NotificationRoute[] = [];
 
   for (const [name, adapter] of Object.entries(config.adapters)) {
-    if (!adapter.enabled) continue;
+    if (!adapter.enabled) {
+      continue;
+    }
 
     const sources = credentials
       .filter((entry) => entry.adapter === name)
@@ -108,11 +114,13 @@ export function notificationRoutes(
       path: adapter.path,
       limits: { maxBodyBytes: 64 * 1024, timeoutMs: 20_000, maxConcurrent: 4 },
       authorize(headers) {
-        if (!open)
+        if (!open) {
           return { allowed: false, response: failure(503, "shutting_down") };
+        }
 
-        if (headers.has("Origin"))
+        if (headers.has("Origin")) {
           return { allowed: false, response: failure(403, "forbidden") };
+        }
 
         const token = /^Bearer ([A-Za-z0-9_-]{32,256})$/i.exec(
           headers.get("Authorization") ?? "",
@@ -124,18 +132,21 @@ export function notificationRoutes(
 
         const entry = matches.length === 1 ? matches[0] : undefined;
 
-        if (!token || !entry)
+        if (!token || !entry) {
           return { allowed: false, response: failure(401, "unauthorized") };
+        }
 
         if (
           !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(
             headers.get("Content-Type") ?? "",
           )
-        )
+        ) {
           return {
             allowed: false,
             response: failure(415, "unsupported_media_type"),
           };
+        }
+
         const time = now();
 
         if (time >= entry.expires) {
@@ -143,7 +154,7 @@ export function notificationRoutes(
           entry.expires = time + 60_000;
         }
 
-        if (entry.count >= entry.rate)
+        if (entry.count >= entry.rate) {
           return {
             allowed: false,
             response: failure(
@@ -152,15 +163,23 @@ export function notificationRoutes(
               Math.max(1, Math.ceil((entry.expires - time) / 1000)),
             ),
           };
+        }
+
         entry.count++;
 
         return { allowed: true, caller: entry.source };
       },
       async handle(request, caller, signal) {
-        if (!open) return failure(503, "shutting_down");
+        if (!open) {
+          return failure(503, "shutting_down");
+        }
+
         const source = Schema.decodeUnknownResult(Source)(caller);
 
-        if (Result.isFailure(source)) return failure(401, "unauthorized");
+        if (Result.isFailure(source)) {
+          return failure(401, "unauthorized");
+        }
+
         let input: unknown;
 
         try {
@@ -172,8 +191,9 @@ export function notificationRoutes(
         // The core decoder is authoritative and rejects all producer identity claims.
         const decoded = Schema.decodeUnknownResult(NotificationInput)(input);
 
-        if (Result.isFailure(decoded))
+        if (Result.isFailure(decoded)) {
           return failure(400, "invalid_notification");
+        }
 
         try {
           const result = await Effect.runPromise(
@@ -181,7 +201,7 @@ export function notificationRoutes(
             { signal },
           );
 
-          if (Result.isSuccess(result))
+          if (Result.isSuccess(result)) {
             return Response.json(result.success, {
               status: 202,
               headers: {
@@ -189,6 +209,7 @@ export function notificationRoutes(
                 "X-Content-Type-Options": "nosniff",
               },
             });
+          }
 
           return publishFailure(result.failure);
         } catch {

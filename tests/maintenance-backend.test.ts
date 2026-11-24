@@ -37,7 +37,10 @@ test("maintenance RPC pins session, request, notice and captain location", async
       directory: "/captain",
     });
 
-    if (config.type !== "opencode") throw new Error("Wrong fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Wrong fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;
     const watch = await backend.startMaintenance("captain", "turn", signal);

@@ -105,13 +105,16 @@ function contentPolicy(html: string): string {
     })
     .on("script, style", {
       text(text) {
-        if (block) block.body += text.text;
+        if (block) {
+          block.body += text.text;
+        }
       },
     })
     .transform(html);
 
-  if (block)
+  if (block) {
     throw new Error("Dashboard HTML contains an unclosed inline block");
+  }
 
   return [
     "default-src 'none'",
@@ -231,10 +234,13 @@ function createDashboard(options: Options) {
       return error(400, "Invalid request");
     }
 
-    if (options.signal.aborted) return error(503, "Service unavailable");
+    if (options.signal.aborted) {
+      return error(503, "Service unavailable");
+    }
 
-    if (pending.size >= 8)
+    if (pending.size >= 8) {
       return error(503, "Service unavailable", { "Retry-After": "1" });
+    }
 
     const signal = AbortSignal.any([
       options.signal,
@@ -246,7 +252,7 @@ function createDashboard(options: Options) {
         case "fleet":
           return options.source.fleet(signal);
         case "sessions":
-          if (Option.isSome(children))
+          if (Option.isSome(children)) {
             return options.source.children(
               id,
               {
@@ -257,10 +263,14 @@ function createDashboard(options: Options) {
               },
               signal,
             );
+          }
+
           break;
         case "entries":
-          if (Option.isSome(entries))
+          if (Option.isSome(entries)) {
             return options.source.entries(id, entries.value, signal);
+          }
+
           break;
         default:
           return options.source.ship(id, signal);
@@ -284,7 +294,9 @@ function createDashboard(options: Options) {
 
       signal.addEventListener("abort", onAbort, { once: true });
 
-      if (signal.aborted) onAbort();
+      if (signal.aborted) {
+        onAbort();
+      }
     });
 
     try {
@@ -294,9 +306,14 @@ function createDashboard(options: Options) {
         ? error(404, "Not found")
         : respond(200, result);
     } catch {
-      if (options.signal.aborted) return error(503, "Service unavailable");
+      if (options.signal.aborted) {
+        return error(503, "Service unavailable");
+      }
 
-      if (signal.aborted) return error(504, "Gateway timeout");
+      if (signal.aborted) {
+        return error(504, "Gateway timeout");
+      }
+
       options.log.warn({ route: kind }, "Dashboard source failed");
 
       return error(502, "Bad gateway");
@@ -370,8 +387,10 @@ export async function startDashboard(
           response.end(Buffer.from(await result.arrayBuffer()));
         })
         .catch(() => {
-          if (!response.headersSent)
+          if (!response.headersSent) {
             response.writeHead(502, { "Cache-Control": "no-store" });
+          }
+
           response.end();
         });
     });
@@ -411,8 +430,10 @@ export async function startDashboard(
   const old = await socketStat(options.socket);
 
   if (old) {
-    if (!old.isSocket())
+    if (!old.isSocket()) {
       throw new Error("Dashboard socket path is not a socket");
+    }
+
     await unlink(options.socket);
   }
 
@@ -453,8 +474,10 @@ async function socketStat(path: string) {
   try {
     return await lstat(path);
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT")
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return;
+    }
+
     throw error;
   }
 }

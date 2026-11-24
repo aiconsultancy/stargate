@@ -87,20 +87,30 @@ export function parseReactionReply(text: string, complete = true) {
     if (
       !complete &&
       open.some((line) => line.startsWith(current) || current === `${line}\r`)
-    )
+    ) {
       return { text: "", pending: true, reaction, silent };
+    }
+
     const newline = rest.indexOf("\n");
 
     const line =
       newline === -1 ? rest : rest.slice(0, newline).replace(/\r$/, "");
 
-    if (!open.includes(line)) break;
+    if (!open.includes(line)) {
+      break;
+    }
 
-    if (line === silentDirective) silent = true;
-    else reaction = directives.find((item) => item.line === line)?.name;
+    if (line === silentDirective) {
+      silent = true;
+    } else {
+      reaction = directives.find((item) => item.line === line)?.name;
+    }
+
     rest = newline === -1 ? "" : rest.slice(newline + 1);
 
-    if (newline === -1) break;
+    if (newline === -1) {
+      break;
+    }
   }
 
   return { text: silent ? "" : rest, pending: false, reaction, silent };

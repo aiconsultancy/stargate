@@ -34,10 +34,11 @@ test("attachment eval: OpenCode receives image and document bytes through native
         return Response.json({ data: { id: input } });
       }
 
-      if (url.pathname.endsWith("/wait"))
+      if (url.pathname.endsWith("/wait")) {
         return new Response(null, { status: 204 });
+      }
 
-      if (url.pathname.endsWith("/message"))
+      if (url.pathname.endsWith("/message")) {
         return Response.json({
           data: [
             {
@@ -50,6 +51,7 @@ test("attachment eval: OpenCode receives image and document bytes through native
           ],
           cursor: {},
         });
+      }
 
       return new Response(null, { status: 404 });
     },
@@ -62,7 +64,10 @@ test("attachment eval: OpenCode receives image and document bytes through native
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
 
     const files = [

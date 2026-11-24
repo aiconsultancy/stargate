@@ -92,7 +92,9 @@ export class MetaRecords {
       WHERE registration=? AND nonce=? AND ts IS NULL`)
       .run(ts, registration, nonce).changes;
 
-    if (changed !== 1) throw new Error("Config panel binding unavailable");
+    if (changed !== 1) {
+      throw new Error("Config panel binding unavailable");
+    }
   }
 
   public pendingConfigPanel(registration: string, nonce: string): boolean {
@@ -126,7 +128,10 @@ export class MetaRecords {
           panel.revision - 1,
         ).changes;
 
-      if (changed !== 1) throw new Error("Config panel revision changed");
+      if (changed !== 1) {
+        throw new Error("Config panel revision changed");
+      }
+
       this.applyMeta(
         panel.registration,
         message,
@@ -178,7 +183,9 @@ export class MetaRecords {
       reply=?,oldDelayMs=?,newDelayMs=? WHERE registration=? AND message=? AND state='pending'`)
       .run(reply, oldDelayMs, newDelayMs, registration, message).changes;
 
-    if (changed !== 1) throw new Error("Meta command claim unavailable");
+    if (changed !== 1) {
+      throw new Error("Meta command claim unavailable");
+    }
   }
 
   public deliverMeta(registration: string, message: string) {

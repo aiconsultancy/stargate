@@ -95,7 +95,10 @@ async function capabilities(
     failureReporting: unknown("inspect incident evidence"),
   };
 
-  if (bot.backend.type !== "opencode") return checks;
+  if (bot.backend.type !== "opencode") {
+    return checks;
+  }
+
   const config = bot.backend;
   checks.crewReporting = unknown("atomic loaded-only read unavailable");
   const headers: Record<string, string> = {};
@@ -179,11 +182,12 @@ async function capabilities(
       ).length ?? null;
   }
 
-  if (checks.backendRead.state === "available")
+  if (checks.backendRead.state === "available") {
     checks.backendRead.reason =
       "server metadata read succeeded; request execution not tested";
+  }
 
-  if (config.sessionID)
+  if (config.sessionID) {
     checks.pinnedSession = await check(async (signal) => {
       const session = decodeSession(
         await client.session.get(
@@ -200,6 +204,7 @@ async function capabilities(
         (config.agent === undefined || session.agent === config.agent)
       );
     });
+  }
 
   return checks;
 }
@@ -286,12 +291,16 @@ function logRecord(line: string) {
     return;
   }
 
-  if (value === null || typeof value !== "object" || Array.isArray(value))
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return;
+  }
+
   const record = value as Record<string, unknown>;
   const time = logTime(record["time"]);
 
-  if (Number.isFinite(time)) return { record, time };
+  if (Number.isFinite(time)) {
+    return { record, time };
+  }
 
   return;
 }
@@ -308,7 +317,10 @@ export function summarizeLog(
   let ambiguous = false;
 
   for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
+    if (!line.trim()) {
+      continue;
+    }
+
     const decoded = logRecord(line);
 
     if (!decoded) {
@@ -319,7 +331,10 @@ export function summarizeLog(
     const { record, time } = decoded;
     earliest = Math.min(earliest, time);
 
-    if (time < now - windowMs || time > now) continue;
+    if (time < now - windowMs || time > now) {
+      continue;
+    }
+
     const message = record["msg"];
 
     const category =
@@ -327,12 +342,20 @@ export function summarizeLog(
         ? categories[message]
         : undefined;
 
-    if (!category) continue;
+    if (!category) {
+      continue;
+    }
 
-    if (typeof record["bot"] === "string" && record["bot"] !== bot) continue;
+    if (typeof record["bot"] === "string" && record["bot"] !== bot) {
+      continue;
+    }
+
     const scope = record["bot"] === bot ? "selected-bot" : "unattributed";
 
-    if (scope === "unattributed") ambiguous = true;
+    if (scope === "unattributed") {
+      ambiguous = true;
+    }
+
     const failure = record["failure"];
 
     const categoryName =
@@ -347,10 +370,14 @@ export function summarizeLog(
     if (previous) {
       previous.count++;
 
-      if (date < previous.first) previous.first = date;
+      if (date < previous.first) {
+        previous.first = date;
+      }
 
-      if (date > previous.last) previous.last = date;
-    } else
+      if (date > previous.last) {
+        previous.last = date;
+      }
+    } else {
       groups.set(key, {
         ...category,
         category: categoryName,
@@ -362,6 +389,8 @@ export function summarizeLog(
         ticket: null,
         jobs: [],
       });
+    }
+
     const group = groups.get(key);
     const job = record["job"];
 
@@ -372,8 +401,9 @@ export function summarizeLog(
       job > 0 &&
       group.jobs.length < 20 &&
       !group.jobs.includes(job)
-    )
+    ) {
       group.jobs.push(job);
+    }
   }
 
   return {
@@ -393,12 +423,13 @@ export function summarizeLog(
 }
 
 async function incidents(path: string | undefined, bot: string, now: number) {
-  if (!path)
+  if (!path) {
     return {
       state: "unknown" as const,
       reasons: ["log path not supplied"],
       incidents: [],
     };
+  }
 
   try {
     const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
@@ -406,7 +437,10 @@ async function incidents(path: string | undefined, bot: string, now: number) {
     try {
       const stat = await file.stat();
 
-      if (!stat.isFile()) throw new Error("Log path is not a regular file");
+      if (!stat.isFile()) {
+        throw new Error("Log path is not a regular file");
+      }
+
       const start = Math.max(0, stat.size - maxLogBytes);
       const bytes = Buffer.alloc(stat.size - start);
       const { bytesRead } = await file.read(bytes, 0, bytes.length, start);
@@ -439,7 +473,10 @@ export async function statusReport(
   const config = await readConfiguration(configPath);
   const bot = config.bots.find((item) => item.id === botID);
 
-  if (!bot) throw new Error("Bot not found in configuration.");
+  if (!bot) {
+    throw new Error("Bot not found in configuration.");
+  }
+
   let env: NodeJS.ProcessEnv;
 
   try {
@@ -448,7 +485,9 @@ export async function statusReport(
     try {
       companion = parseEnv(await readFile(`${configPath}.env`, "utf8"));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
     }
 
     env = { ...companion, ...process.env };
@@ -483,8 +522,9 @@ export async function botStatusReport(
     incidents(logPath, bot.id, now),
   ]);
 
-  if (history.state !== "unknown")
+  if (history.state !== "unknown") {
     checks.failureReporting = available("log readable; coverage incomplete");
+  }
 
   return {
     generatedAt: new Date(now).toISOString(),

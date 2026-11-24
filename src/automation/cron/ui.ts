@@ -32,11 +32,17 @@ const slackFields = Schema.Unknown.pipe(
     Schema.Unknown,
     SchemaTransformation.transform({
       decode: (input) => {
-        if (!Predicate.isObject(input) || Array.isArray(input)) return input;
+        if (!Predicate.isObject(input) || Array.isArray(input)) {
+          return input;
+        }
+
         const copy: Record<string, unknown> = {};
 
-        for (const key in input)
-          if (key !== "__proto__") copy[key] = input[key];
+        for (const key in input) {
+          if (key !== "__proto__") {
+            copy[key] = input[key];
+          }
+        }
 
         return copy;
       },
@@ -271,7 +277,7 @@ export class CronUI {
   }
 
   private async sync() {
-    if (this.config.cronjobs)
+    if (this.config.cronjobs) {
       await this.bounded(
         new CronjobManager(
           this.config,
@@ -280,6 +286,7 @@ export class CronUI {
           this.resolveModel,
         ).sync(Date.now(), AbortSignal.timeout(1500)),
       );
+    }
   }
   public constructor(
     private config: BotConfig,
@@ -311,15 +318,19 @@ export class CronUI {
         JSON.parse(raw),
       );
 
-      if (Result.isFailure(result)) return;
+      if (Result.isFailure(result)) {
+        return;
+      }
+
       const scope = result.success;
 
       if (
         scope.botKey !== botKey(this.config, this.identity) ||
         scope.user !== user ||
         !this.allowed(user, scope.channel, app, team)
-      )
+      ) {
         return;
+      }
 
       return scope;
     } catch {
@@ -333,7 +344,10 @@ export class CronUI {
     let jobs = this.store.list(owner, page);
 
     // Removing the last row on a page returns to the preceding page.
-    if (jobs.length === 0 && page > 0) jobs = this.store.list(owner, --page);
+    if (jobs.length === 0 && page > 0) {
+      jobs = this.store.list(owner, --page);
+    }
+
     const current = { ...scope, page };
 
     const next =
@@ -394,7 +408,10 @@ export class CronUI {
     let acknowledged = false;
 
     const once: SlackAck = async (payload) => {
-      if (acknowledged) return;
+      if (acknowledged) {
+        return;
+      }
+
       acknowledged = true;
       await ack(payload);
     };
@@ -549,10 +566,12 @@ export class CronUI {
               data.view.state.values[key],
             );
 
-            if (Result.isSuccess(field)) raw[key] = field.success.value.value;
-            else
+            if (Result.isSuccess(field)) {
+              raw[key] = field.success.value.value;
+            } else {
               errors[key] =
                 `Enter ${key === "expression" ? "a five-field cron expression" : `a valid ${key}`} (1–${max} characters).`;
+            }
           }
 
           const report = Schema.decodeUnknownResult(reportSchema)(
@@ -562,8 +581,10 @@ export class CronUI {
           if (
             data.view.state.values["report"] !== undefined &&
             Result.isFailure(report)
-          )
+          ) {
             errors["report"] = "Choose immediate or daily reporting.";
+          }
+
           raw["report"] = Result.isSuccess(report)
             ? (report.success.value.selected_option?.value ?? "immediate")
             : "immediate";
@@ -573,9 +594,10 @@ export class CronUI {
             Result.isFailure(
               Schema.decodeUnknownResult(cronjobNameSchema)(raw["name"]),
             )
-          )
+          ) {
             errors["name"] =
               "Use a lowercase kebab-case name, for example daily-build.";
+          }
 
           if (Object.keys(errors).length > 0) {
             await once({ response_action: "errors", errors });
@@ -614,13 +636,15 @@ export class CronUI {
                 this.resolveModel,
               ).add(decodeScope(scope), validated.input, now, data.view.id),
             );
-          } else
+          } else {
             this.store.add(
               decodeScope(scope),
               validated.input,
               now,
               data.view.id,
             );
+          }
+
           // Clear all views after saving. The next Add gets a fresh view.id,
           // Preserving durable retry deduplication without growing the stack.
           await once({ response_action: "clear" });
@@ -690,8 +714,9 @@ export class CronUI {
             data.api_app_id,
             data.team.id,
           )
-        )
+        ) {
           return;
+        }
 
         if (action.action_id === "cron_add") {
           await this.api.push(data.trigger_id, addView(scope, this.config));

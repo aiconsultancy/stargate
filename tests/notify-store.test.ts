@@ -33,10 +33,13 @@ function fixture(limits: ConstructorParameters<typeof NotifyStore>[1] = {}) {
 }
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 const source: Source = {
@@ -170,7 +173,10 @@ test("pending oldest eviction preserves leased rows and all-leased refuses", () 
   const claim = store.claim(100);
   expect(claim?.attempts).toBe(1);
 
-  if (!claim) throw new Error("expected claim");
+  if (!claim) {
+    throw new Error("expected claim");
+  }
+
   store.admit(source, input("pending-old"), () => [destination], 101);
   store.admit(source, input("pending-new"), () => [destination], 102);
   expect(rows(path).outbox).toHaveLength(2);
@@ -196,7 +202,10 @@ test("pending oldest eviction preserves leased rows and all-leased refuses", () 
   one.store.admit(source, input(), () => [destination], 100);
   const leased = one.store.claim(100);
 
-  if (!leased) throw new Error("expected claim");
+  if (!leased) {
+    throw new Error("expected claim");
+  }
+
   const before = rows(one.path);
   expect(() =>
     one.store.admit(source, input("new"), () => [destination], 101),
@@ -213,7 +222,10 @@ test("dedup retention protects outstanding events and permits bounded late copie
   expect(rows(path).dedup).toHaveLength(1);
   const claim = store.claim(250);
 
-  if (!claim) throw new Error("expected claim");
+  if (!claim) {
+    throw new Error("expected claim");
+  }
+
   store.settle(claim, { state: "sent" }, 251);
   store.claim(252);
   expect(rows(path).dedup).toHaveLength(0);
@@ -235,7 +247,10 @@ test("claims persist attempts, isolate destinations, honor RetryAfter and stop a
   const first = store.claim(100);
   const second = store.claim(100);
 
-  if (!first || !second) throw new Error("two destinations must progress");
+  if (!first || !second) {
+    throw new Error("two destinations must progress");
+  }
+
   expect(first.destination.channel).not.toBe(second.destination.channel);
   store.settle(
     first,
@@ -247,13 +262,19 @@ test("claims persist attempts, isolate destinations, honor RetryAfter and stop a
   const retry = store.claim(10_101);
   expect(retry?.attempts).toBe(2);
 
-  if (!retry) throw new Error("retry due");
+  if (!retry) {
+    throw new Error("retry due");
+  }
+
   store.settle(retry, { state: "unknown" }, 10_102);
   expect(store.claim(12_101)).toBeUndefined();
   const third = store.claim(12_102);
   expect(third?.attempts).toBe(3);
 
-  if (!third) throw new Error("third due");
+  if (!third) {
+    throw new Error("third due");
+  }
+
   store.settle(third, { state: "unknown" }, 12_103);
   expect(rows(path).outbox).toHaveLength(0);
   expect(store.claim(999_999)).toBeUndefined();
@@ -268,7 +289,10 @@ test("fractional RetryAfter rounds up and remains due-safe after reopen", () => 
   store.admit(source, input(), () => [destination], 100);
   const first = store.claim(100);
 
-  if (!first) throw new Error("expected first claim");
+  if (!first) {
+    throw new Error("expected first claim");
+  }
+
   store.settle(
     first,
     { state: "refused", retryable: true, retryAfterMs: 10_000.5 },
@@ -282,7 +306,10 @@ test("fractional RetryAfter rounds up and remains due-safe after reopen", () => 
   expect(reopened.claim(10_101)).toBeUndefined();
   const retry = reopened.claim(10_102);
 
-  if (!retry) throw new Error("expected retry at rounded deadline");
+  if (!retry) {
+    throw new Error("expected retry at rounded deadline");
+  }
+
   expect(retry.attempts).toBe(2);
   reopened.settle(retry, { state: "sent" }, 10_103);
 });
@@ -343,7 +370,10 @@ test("unknown versions and corrupt databases preserve bytes, symlinks refuse", (
         "PRAGMA user_version=99; CREATE TABLE precious(value TEXT); INSERT INTO precious VALUES('keep')",
       );
       db.close();
-    } else writeFileSync(path, "not a SQLite database");
+    } else {
+      writeFileSync(path, "not a SQLite database");
+    }
+
     const before = readFileSync(path);
     expect(() => new NotifyStore(path)).toThrow();
     expect(readFileSync(path)).toEqual(before);

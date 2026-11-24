@@ -146,7 +146,10 @@ test("quota compares the tightest windows without adding account percentages", a
   const b = account("claude", 14, start, 2);
   const weekly = account("claude", 20, start).windows[0];
 
-  if (!weekly) throw new Error("Missing fixture limit");
+  if (!weekly) {
+    throw new Error("Missing fixture limit");
+  }
+
   a.windows.push({ ...weekly, window: "5h" });
   a.windows.push({ ...weekly, scope: "fable", remainingPercent: 0 });
 
@@ -196,7 +199,10 @@ test("quota report config authorises one outbound destination without opening in
 
   const reporter = parsed.bots[0];
 
-  if (!reporter) throw new Error("Missing report bot fixture");
+  if (!reporter) {
+    throw new Error("Missing report bot fixture");
+  }
+
   expect(isAllowedChannel(reporter, quotaWatch.report.channel)).toBe(false);
   expect(
     Result.isSuccess(

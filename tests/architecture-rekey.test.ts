@@ -22,14 +22,17 @@ const newKey = "private:src/feature/composition.ts -> src/other/private.ts";
 const roots: string[] = [];
 
 afterEach(async () => {
-  for (const root of roots.splice(0))
+  for (const root of roots.splice(0)) {
     await rm(root, { recursive: true, force: true });
+  }
 });
 
 function git(root: string, ...args: string[]) {
   const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
 
-  if (result.status !== 0) throw new Error(result.stderr);
+  if (result.status !== 0) {
+    throw new Error(result.stderr);
+  }
 
   return result.stdout.trim();
 }
@@ -103,8 +106,10 @@ async function fixture(
     ...(options.existingDestination
       ? { "src/feature/composition.ts": "export {};\n" }
       : {}),
-  }))
+  })) {
     await put(root, name, text);
+  }
+
   git(root, "init", "-b", "fixture");
   git(root, "add", ".");
   git(
@@ -222,27 +227,33 @@ for (const scenario of [
       );
     }
 
-    if (scenario === "different-kind")
+    if (scenario === "different-kind") {
       next = newKey.replace("private:", "direction:");
+    }
 
-    if (scenario === "old-key-present")
+    if (scenario === "old-key-present") {
       await put(
         root,
         "src/feature/entry.ts",
         'import "./composition"; import "../other/private";\n',
       );
+    }
 
-    if (scenario === "exception-total-increase")
+    if (scenario === "exception-total-increase") {
       await put(
         root,
         "src/feature/unrelated.ts",
         'import "../other/second";\n',
       );
+    }
+
     const before = await readFile(join(root, baselinePath), "utf8");
     const args = ["--write", "--rekey-exception", oldKey, next];
 
-    if (scenario === "duplicate-old")
+    if (scenario === "duplicate-old") {
       args.push("--rekey-exception", oldKey, next);
+    }
+
     const result = run(...args);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`rekey:${scenario}`);

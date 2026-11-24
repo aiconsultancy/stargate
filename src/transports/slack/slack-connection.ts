@@ -46,7 +46,9 @@ const networkCodes = new Set([
 ]);
 
 function retryable(error: unknown, depth = 0): boolean {
-  if (!Predicate.isObject(error) || depth > 5) return false;
+  if (!Predicate.isObject(error) || depth > 5) {
+    return false;
+  }
 
   return (
     (typeof error["code"] === "string" && networkCodes.has(error["code"])) ||
@@ -82,7 +84,9 @@ function bounded<A>(work: Promise<A>, signal: AbortSignal): Promise<A> {
       },
     );
 
-    if (signal.aborted) stop();
+    if (signal.aborted) {
+      stop();
+    }
   });
 }
 
@@ -103,8 +107,10 @@ export async function retrySlack<A>(
     try {
       return await bounded(work(), boundedSignal);
     } catch (error) {
-      if (boundedSignal.aborted || !retryable(error))
+      if (boundedSignal.aborted || !retryable(error)) {
         throw new Error("Slack connection unavailable");
+      }
+
       await delay(retryDelay(attempt++, defaults), undefined, {
         signal: boundedSignal,
       });
@@ -156,10 +162,11 @@ export class SlackSocket {
     const socket = this.socket;
     this.socket = undefined;
 
-    if (socket)
+    if (socket) {
       await bounded(socket.disconnect(), AbortSignal.timeout(5000)).catch(
         () => {},
       );
+    }
   }
   private async run(signal: AbortSignal) {
     let deadline = Date.now() + this.timing.outageMs;
@@ -168,11 +175,13 @@ export class SlackSocket {
 
     try {
       while (!signal.aborted) {
-        if (Date.now() >= deadline)
+        if (Date.now() >= deadline) {
           throw new Error("Slack connection unavailable");
+        }
+
         this.state = everConnected ? "reconnecting" : "connecting";
 
-        if (attempt)
+        if (attempt) {
           await delay(
             Math.min(
               retryDelay(attempt - 1, this.timing),
@@ -181,6 +190,8 @@ export class SlackSocket {
             undefined,
             { signal },
           );
+        }
+
         signal.throwIfAborted();
         const socket = this.create();
         this.socket = socket;
@@ -201,12 +212,13 @@ export class SlackSocket {
             everConnected || connected ? "reconnecting" : "connecting";
           lost.resolve();
 
-          if (!connected)
+          if (!connected) {
             hello.reject(
               Object.assign(new Error("Slack connection unavailable"), {
                 code: "ECONNRESET",
               }),
             );
+          }
         };
 
         void hello.promise.catch(() => {});
@@ -234,10 +246,14 @@ export class SlackSocket {
           await bounded(lost.promise, signal);
           deadline = Date.now() + this.timing.outageMs;
         } catch (error) {
-          if (signal.aborted) break;
+          if (signal.aborted) {
+            break;
+          }
 
-          if (!retryable(error))
+          if (!retryable(error)) {
             throw new Error("Slack connection unavailable");
+          }
+
           this.log.warn(
             "Slack connection unavailable; retrying within outage deadline",
           );
@@ -261,7 +277,9 @@ export class SlackSocket {
 
       this.first.reject(new Error("Slack connection closed"));
     } finally {
-      if (signal.aborted) this.state = "closed";
+      if (signal.aborted) {
+        this.state = "closed";
+      }
     }
   }
 }

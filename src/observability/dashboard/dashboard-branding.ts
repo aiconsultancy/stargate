@@ -22,8 +22,9 @@ const favicons = new Set([
 export function dashboardBranding(htmlInput: string): string {
   let html = htmlInput;
 
-  for (const [token, image] of Object.entries(artwork))
+  for (const [token, image] of Object.entries(artwork)) {
     html = html.replaceAll(token, image);
+  }
 
   return html;
 }

@@ -14,7 +14,9 @@ import { bot, event, identity } from "./fixtures";
 const cleanup: (() => Promise<void> | void)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 test.each([false, true])(
@@ -24,7 +26,10 @@ test.each([false, true])(
     cleanup.push(() => rm(directory, { recursive: true, force: true }));
     const config = bot();
 
-    if (config.backend.type !== "opencode") throw new Error("OpenCode fixture");
+    if (config.backend.type !== "opencode") {
+      throw new Error("OpenCode fixture");
+    }
+
     config.backend.directory = directory;
     config.backend.agent = "adama";
     config.backend.sessionID = "ses_captain";
@@ -55,13 +60,14 @@ test.each([false, true])(
       ],
     };
 
-    if (multiple)
+    if (multiple) {
       form.fields.push({
         key: "q1",
         type: "string",
         title: "Explain why",
         custom: true,
       });
+    }
 
     const backend: AgentBackend = {
       sessionID: "ses_captain",
@@ -129,7 +135,10 @@ test.each([false, true])(
     expect(await gateway.receive(event())).toBe(true);
     const job = store.queuedJob(gateway.key, "C123:1.000");
 
-    if (!job) throw new Error("Missing admitted job");
+    if (!job) {
+      throw new Error("Missing admitted job");
+    }
+
     store.running(job.id);
     store.started(job.id);
     store.captainCursor(gateway.key, "ses_captain");
@@ -148,7 +157,9 @@ test.each([false, true])(
     expect(posts[0]?.content).toBeDefined();
     const offer = store.questions.questionOffers(gateway.key)[0];
 
-    if (!offer) throw new Error("Missing offered question");
+    if (!offer) {
+      throw new Error("Missing offered question");
+    }
 
     const answerEvent = event(
       `<@UBOT> answer ${offer.token}${multiple ? ":0" : ""} go`,
@@ -183,7 +194,10 @@ test.each([false, true])(
       expect(answers).toHaveLength(1);
       expect(store.queuedJob(gateway.key, "C123:5.000")).toBeNull();
       expect(store.queuedJob(gateway.key, "C123:6.000")).toBeNull();
-    } else expect(answers).toEqual([{ q0: "go" }]);
+    } else {
+      expect(answers).toEqual([{ q0: "go" }]);
+    }
+
     expect(prompts).toBe(0);
     expect(store.queuedJob(gateway.key, "C123:4.000")).toBeNull();
   },

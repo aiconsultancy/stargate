@@ -21,13 +21,16 @@ function fixture(failures: number, silent = false) {
         async start() {
           attempts++;
 
-          if (attempts <= failUntil)
+          if (attempts <= failUntil) {
             throw Object.assign(
               new Error("private request must not be logged"),
               { code: "EAI_AGAIN" },
             );
+          }
 
-          if (!silent) events.emit("connected");
+          if (!silent) {
+            events.emit("connected");
+          }
         },
         async disconnect() {
           events.emit("disconnected");
@@ -64,7 +67,10 @@ test("a later disconnect reconnects, and close cancels further attempts", async 
   f.sockets[0]?.emit("disconnected");
   expect(f.socket.state).not.toBe("connected");
 
-  for (let i = 0; i < 100 && f.attempts() < 2; i++) await Bun.sleep(1);
+  for (let i = 0; i < 100 && f.attempts() < 2; i++) {
+    await Bun.sleep(1);
+  }
+
   expect(f.attempts()).toBe(2);
   expect(f.socket.state).toBe("connected");
   await f.socket.close();
@@ -113,8 +119,9 @@ test("auth.test also retries wrapped boot-time DNS failures", async () => {
     fetch: async () => {
       attempts++;
 
-      if (attempts <= 2)
+      if (attempts <= 2) {
         throw Object.assign(new Error("fixture DNS"), { code: "EAI_AGAIN" });
+      }
 
       return Response.json({
         ok: true,

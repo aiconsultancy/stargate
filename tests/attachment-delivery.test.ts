@@ -263,8 +263,12 @@ test("reply files from OpenCode's TMPDIR scratch are published; dot segments bel
     ]);
     expect(uploaded).toEqual(["proof"]);
   } finally {
-    if (previous === undefined) delete process.env["TMPDIR"];
-    else process.env["TMPDIR"] = previous;
+    if (previous === undefined) {
+      delete process.env["TMPDIR"];
+    } else {
+      process.env["TMPDIR"] = previous;
+    }
+
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -291,7 +295,10 @@ test.each(["unchanged", "changed", "symlink", "TMPDIR"])(
       const f = fixture([{ path, caption: "" }], {
         download: async () => [],
         reserveUpload: async () => {
-          if (fail) throw new Error("Retry reservation");
+          if (fail) {
+            throw new Error("Retry reservation");
+          }
+
           calls.push("reserve");
 
           return { fileID: "F1", url: "https://files.example/upload" };
@@ -310,7 +317,9 @@ test.each(["unchanged", "changed", "symlink", "TMPDIR"])(
       expect(f.files[0]?.prepared?.path).toBe(path);
       fail = false;
 
-      if (change === "changed") await writeFile(path, "other");
+      if (change === "changed") {
+        await writeFile(path, "other");
+      }
 
       if (change === "symlink") {
         await rm(path);
@@ -318,7 +327,9 @@ test.each(["unchanged", "changed", "symlink", "TMPDIR"])(
         await symlink(join(scratch, "other.txt"), path);
       }
 
-      if (change === "TMPDIR") process.env["TMPDIR"] = root;
+      if (change === "TMPDIR") {
+        process.env["TMPDIR"] = root;
+      }
 
       if (change === "unchanged") {
         await f.deliver();
@@ -330,8 +341,12 @@ test.each(["unchanged", "changed", "symlink", "TMPDIR"])(
         expect(calls).toEqual([]);
       }
     } finally {
-      if (previous === undefined) delete process.env["TMPDIR"];
-      else process.env["TMPDIR"] = previous;
+      if (previous === undefined) {
+        delete process.env["TMPDIR"];
+      } else {
+        process.env["TMPDIR"] = previous;
+      }
+
       await rm(root, { recursive: true, force: true });
     }
   },

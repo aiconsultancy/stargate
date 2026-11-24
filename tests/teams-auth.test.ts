@@ -345,7 +345,9 @@ describe("Bot Framework OpenID metadata", () => {
     const key = await makeSigningKey("key-1");
 
     const http = mockFetch((url) => {
-      if (url.href === BOT_FRAMEWORK_OPENID_URL) return json(metadata);
+      if (url.href === BOT_FRAMEWORK_OPENID_URL) {
+        return json(metadata);
+      }
 
       return json({ keys: [key.jwk] });
     });

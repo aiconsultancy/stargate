@@ -8,8 +8,9 @@ export function configuredApiToken(
   configPath: string,
   rotate?: boolean,
 ) {
-  if (!config.api)
+  if (!config.api) {
     throw new Error("Enable api in the Stargate configuration first.");
+  }
 
   return apiToken(resolve(dirname(configPath), config.dataDirectory), rotate);
 }

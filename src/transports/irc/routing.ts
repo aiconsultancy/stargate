@@ -64,21 +64,32 @@ export type IrcRouteContext = {
  * from prose is trimmed.
  */
 export function filehostLinks(text: string, filehost: URL | undefined) {
-  if (!filehost) return [];
+  if (!filehost) {
+    return [];
+  }
+
   const links: string[] = [];
 
   for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
     const candidate = match[0].replace(/[)\].,;:!?]+$/, "");
 
-    if (!URL.canParse(candidate)) continue;
+    if (!URL.canParse(candidate)) {
+      continue;
+    }
+
     const url = new URL(candidate);
 
-    if (url.origin !== filehost.origin || url.username || url.password)
+    if (url.origin !== filehost.origin || url.username || url.password) {
       continue;
+    }
 
-    if (!links.includes(url.href)) links.push(url.href);
+    if (!links.includes(url.href)) {
+      links.push(url.href);
+    }
 
-    if (links.length === maxAttachments) break;
+    if (links.length === maxAttachments) {
+      break;
+    }
   }
 
   return links;
@@ -104,7 +115,9 @@ function routeTarget(
 ) {
   const direct = !isIrcChannel(target);
 
-  if (direct && caseFold(target) !== caseFold(nick)) return;
+  if (direct && caseFold(target) !== caseFold(nick)) {
+    return;
+  }
 
   return { direct, channel: caseFold(direct ? account : target) };
 }
@@ -144,19 +157,25 @@ export function ircAllowed(
   if (
     config.fleetPolicy &&
     fleetAuthority(config.fleetPolicy, account) === "context"
-  )
+  ) {
     return false;
+  }
 
-  if (listed(access.deniedAccounts, account, caseFold)) return false;
+  if (listed(access.deniedAccounts, account, caseFold)) {
+    return false;
+  }
 
   if (
     access.allowedAccounts &&
     !listed(access.allowedAccounts, account, caseFold)
-  )
+  ) {
     return false;
+  }
 
-  if (!isIrcChannel(channel))
+  if (!isIrcChannel(channel)) {
     return member.role === "captain" && !access.deniedChannels.includes("*");
+  }
+
   const key = caseFold(channel);
 
   return (
@@ -187,12 +206,15 @@ export function requiresVisitorTag(
     config.access.channelRequests !== "nick-mention" ||
     !config.fleetPolicy ||
     !isIrcChannel(channel)
-  )
+  ) {
     return false;
+  }
+
   const key = caseFold(channel);
 
-  if (config.fleetChannels && key === caseFold(config.fleetChannels.home))
+  if (config.fleetChannels && key === caseFold(config.fleetChannels.home)) {
     return false;
+  }
 
   return (
     !config.access.humanWakeChannels?.some(
@@ -227,8 +249,9 @@ function withoutAddress(
     if (
       caseFold(prefix) === caseFold(nick) &&
       /^[:,]\s*/.test(text.slice(offset + nick.length))
-    )
+    ) {
       return text.slice(offset + nick.length).replace(/^[:,]\s*/, "");
+    }
   }
 
   return text;
@@ -250,7 +273,9 @@ function addressedToFleetPeer(
   text: string,
   caseFold: Fold,
 ) {
-  if (!config.fleetControl?.results) return false;
+  if (!config.fleetControl?.results) {
+    return false;
+  }
 
   const own = new Set(
     [member.account, member.nick, currentNick].map((item) => caseFold(item)),
@@ -275,12 +300,17 @@ function addressedToFleetPeer(
       `^@([${nickCharacters}]+)(?:[:,]?\\s+|[:,]$|$)`,
     ).exec(remainder);
 
-    if (!next?.[1]) break;
+    if (!next?.[1]) {
+      break;
+    }
+
     invited.push(caseFold(next[1]));
     remainder = remainder.slice(next[0].length);
   }
 
-  if (invited.some((name) => own.has(name))) return false;
+  if (invited.some((name) => own.has(name))) {
+    return false;
+  }
 
   return withoutAddress(body, peers, caseFold, true) !== body;
 }
@@ -325,17 +355,25 @@ export function ircResultJobAllowed(
     !(captured ? [captured] : [currentNick, member.nick]).some((nick) =>
       visitorAddressed(job.text ?? "", nick, caseFold),
     )
-  )
+  ) {
     return false;
+  }
 
-  if (!config.fleetControl?.results) return true;
+  if (!config.fleetControl?.results) {
+    return true;
+  }
 
-  if (!config.fleetPolicy) return false;
+  if (!config.fleetPolicy) {
+    return false;
+  }
+
   const authority = fleetAuthority(config.fleetPolicy, account);
 
   if (authority === "agent") {
-    if (job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result")
+    if (job?.fleet?.kind === "assignment" || job?.fleet?.kind === "result") {
       return true;
+    }
+
     // Only a peer's reserved @nick field can act as a persisted recipient.
     const recipient = job?.sender === "captain" ? captured : undefined;
 
@@ -394,22 +432,40 @@ export function routeIrcMessage(
   const { member } = context;
   const caseFold = context.fold;
 
-  if (message.command !== "PRIVMSG") return;
+  if (message.command !== "PRIVMSG") {
+    return;
+  }
+
   const account = message.tags.get("account");
 
-  if (!account || account === "*") return;
+  if (!account || account === "*") {
+    return;
+  }
+
   const user = caseFold(account);
 
-  if (user === caseFold(member.account)) return;
+  if (user === caseFold(member.account)) {
+    return;
+  }
+
   const [target = "", raw = ""] = message.params;
 
-  if (raw.startsWith("\u0001")) return;
+  if (raw.startsWith("\u0001")) {
+    return;
+  }
+
   const routed = routeTarget(target, account, context.currentNick, caseFold);
 
-  if (!routed) return;
+  if (!routed) {
+    return;
+  }
+
   const { direct, channel } = routed;
 
-  if (!ircAllowed(config, member, user, channel, caseFold)) return;
+  if (!ircAllowed(config, member, user, channel, caseFold)) {
+    return;
+  }
+
   const strict = config.access.channelRequests === "nick-mention";
   const tagged = message.tags.get("msgid");
 
@@ -425,7 +481,9 @@ export function routeIrcMessage(
 
   const protectedHuman = !!rule && !!human;
 
-  if (strict && context.replay && !protectedHuman) return;
+  if (strict && context.replay && !protectedHuman) {
+    return;
+  }
 
   const fleetPeer =
     config.fleetPolicy &&
@@ -437,8 +495,9 @@ export function routeIrcMessage(
     ((message.tags.has("bot") && !fleetPeer) ||
       !validMsgid(tagged) ||
       (!direct && !context.joined?.(target)))
-  )
+  ) {
     return;
+  }
 
   // A multiline message keeps its line breaks; each line is cleaned.
   const body = raw
@@ -509,11 +568,14 @@ export function routeIrcMessage(
       !validMsgid(tagged) ||
       !context.joined?.(target) ||
       message.tags.has("bot")
-    )
+    ) {
       return;
+    }
 
     // A malformed tag never becomes an unthreaded request, even when addressed.
-    if (hasReply && !validReply) return;
+    if (hasReply && !validReply) {
+      return;
+    }
 
     const member =
       root !== undefined && !!context.participating?.(channel, root);
@@ -523,7 +585,9 @@ export function routeIrcMessage(
       (validReply &&
         (rule.replies === "all" || (root !== undefined && member)));
 
-    if (hasReply && !humanWake && !currentMention) return;
+    if (hasReply && !humanWake && !currentMention) {
+      return;
+    }
   }
 
   if (
@@ -531,10 +595,14 @@ export function routeIrcMessage(
     !humanWake &&
     !(protectedHuman && currentMention) &&
     addressedToFleetPeer(config, member, context.currentNick, body, caseFold)
-  )
+  ) {
     return;
+  }
 
-  if (strict && !direct && mentioned !== true && !humanWake) return;
+  if (strict && !direct && mentioned !== true && !humanWake) {
+    return;
+  }
+
   const replied = !strict && validMsgid(reply) && context.sent(reply);
 
   // Captain text mentions and all-calls; the matched word becomes the
@@ -560,8 +628,9 @@ export function routeIrcMessage(
     named === undefined &&
     !wake &&
     !humanWake
-  )
+  ) {
     return;
+  }
 
   // An all-call stays an all-call when a mention or a reply also admits it:
   // Its word is recorded, so the turn is staggered and sees the context.
@@ -578,7 +647,9 @@ export function routeIrcMessage(
   const mention = recipient ? `@${recipient}` : (allCall ?? named);
   const content = withoutAddress(body, nicks, caseFold, visitorTag).trim();
 
-  if (!content) return;
+  if (!content) {
+    return;
+  }
 
   // Recovery must see the same recipient as intake, including nested
   // Addresses such as `captain: vance: ...`; historical rows stay intact.
@@ -646,13 +717,21 @@ export function ircDispatchAnswerAllowed(
   const caseFold = context.fold;
   const account = message.tags.get("account");
 
-  if (!account || account === "*") return false;
+  if (!account || account === "*") {
+    return false;
+  }
+
   const user = caseFold(account);
 
-  if (user === caseFold(context.member.account)) return false;
+  if (user === caseFold(context.member.account)) {
+    return false;
+  }
+
   const target = message.params[0] ?? "";
 
-  if (!isIrcChannel(target) || !context.joined?.(target)) return false;
+  if (!isIrcChannel(target) || !context.joined?.(target)) {
+    return false;
+  }
 
   return ircAllowed(context.config, context.member, user, target, caseFold);
 }
@@ -683,31 +762,50 @@ export function routeIrcStop(message: IrcMessage, context: IrcStopContext) {
   const { member } = context;
   const caseFold = context.fold;
 
-  if (message.command !== "TAGMSG") return;
+  if (message.command !== "TAGMSG") {
+    return;
+  }
+
   const react = message.tags.get("+draft/react");
   const reply = message.tags.get("+draft/reply") ?? message.tags.get("+reply");
 
-  if (react === undefined || !validMsgid(reply)) return;
+  if (react === undefined || !validMsgid(reply)) {
+    return;
+  }
+
   const stops = config.stopReactions.map(reactionKey);
 
-  if (!stops.includes(reactionKey(react))) return;
+  if (!stops.includes(reactionKey(react))) {
+    return;
+  }
+
   const account = message.tags.get("account");
 
-  if (!account || account === "*") return;
+  if (!account || account === "*") {
+    return;
+  }
+
   const user = caseFold(account);
 
   if (
     shipAccounts(config, caseFold).has(user) ||
     config.access.peerCaptains.some((peer) => caseFold(peer) === user)
-  )
+  ) {
     return;
+  }
+
   const target = message.params[0] ?? "";
   const routed = routeTarget(target, account, context.currentNick, caseFold);
 
-  if (!routed) return;
+  if (!routed) {
+    return;
+  }
+
   const { channel } = routed;
 
-  if (!ircAllowed(config, member, user, channel, caseFold)) return;
+  if (!ircAllowed(config, member, user, channel, caseFold)) {
+    return;
+  }
 
   return {
     conversation: JSON.stringify([member.key, channel]),
@@ -744,7 +842,9 @@ export function shipAgents(
   const lists = (channels: readonly string[]) =>
     channels.some((name) => caseFold(name) === key);
 
-  if (!lists(config.channels)) return 0;
+  if (!lists(config.channels)) {
+    return 0;
+  }
 
   return 1 + config.crew.filter((member) => lists(member.channels)).length;
 }
@@ -765,7 +865,9 @@ export function agentTurn(
   const lists = (channels: readonly string[]) =>
     channels.some((name) => caseFold(name) === key);
 
-  if (!lists(config.channels)) return;
+  if (!lists(config.channels)) {
+    return;
+  }
 
   const order = [
     config.id,
@@ -794,7 +896,7 @@ export function withinLimits(
 ) {
   const since = admission.received - ircWindowMs;
 
-  if (admission.sender === "captain")
+  if (admission.sender === "captain") {
     return (
       limits.count({
         botKeys: [admission.botKey],
@@ -803,6 +905,7 @@ export function withinLimits(
         scope: { conversation: admission.conversation },
       }) < (config.access.peerTurnsPerHour ?? defaultIrcPeerTurnsPerHour)
     );
+  }
 
   if (admission.sender === "crew") {
     // A channel's cap scales with the ship agents configured in it. A direct

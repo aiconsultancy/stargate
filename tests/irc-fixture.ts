@@ -102,7 +102,9 @@ export class FakeIrcServer {
   }
 
   get port() {
-    if (!this.listener) throw new Error("not started");
+    if (!this.listener) {
+      throw new Error("not started");
+    }
 
     return this.listener.port;
   }
@@ -126,7 +128,10 @@ export class FakeIrcServer {
         data: (socket, data) => {
           const client = this.clients.find((c) => c.socket === socket);
 
-          if (!client) return;
+          if (!client) {
+            return;
+          }
+
           client.buffer += data.toString();
           let index = client.buffer.indexOf("\r\n");
 
@@ -135,15 +140,21 @@ export class FakeIrcServer {
             client.buffer = client.buffer.slice(index + 2);
             client.lines.push(line);
 
-            if (!this.muted.has(client.id)) this.handle(client, line);
+            if (!this.muted.has(client.id)) {
+              this.handle(client, line);
+            }
+
             index = client.buffer.indexOf("\r\n");
           }
         },
         close: (socket) => {
           const client = this.clients.find((c) => c.socket === socket);
 
-          if (client)
-            for (const set of this.members.values()) set.delete(client);
+          if (client) {
+            for (const set of this.members.values()) {
+              set.delete(client);
+            }
+          }
         },
       },
     });
@@ -152,7 +163,10 @@ export class FakeIrcServer {
   }
 
   stop() {
-    for (const client of this.clients) client.socket.end();
+    for (const client of this.clients) {
+      client.socket.end();
+    }
+
     this.listener?.stop(true);
   }
 
@@ -165,20 +179,29 @@ export class FakeIrcServer {
 
   /** Raw line to every connection of `account`. */
   sendTo(account: string, line: string) {
-    for (const client of this.clients)
-      if (client.account === account) client.socket.write(`${line}\r\n`);
+    for (const client of this.clients) {
+      if (client.account === account) {
+        client.socket.write(`${line}\r\n`);
+      }
+    }
   }
 
   /** Stop answering the current connections of `account`. */
   mute(account: string) {
-    for (const client of this.clients)
-      if (client.account === account) this.muted.add(client.id);
+    for (const client of this.clients) {
+      if (client.account === account) {
+        this.muted.add(client.id);
+      }
+    }
   }
 
   /** Drop every connection of `account` without a QUIT. */
   drop(account: string) {
-    for (const client of this.clients)
-      if (client.account === account) client.socket.terminate();
+    for (const client of this.clients) {
+      if (client.account === account) {
+        client.socket.terminate();
+      }
+    }
   }
 
   /** An outside nick now belongs to `account` (null: not logged in). */
@@ -219,14 +242,17 @@ export class FakeIrcServer {
       line: full,
     });
 
-    for (const client of this.recipients(target))
+    for (const client of this.recipients(target)) {
       client.socket.write(`${full}\r\n`);
+    }
 
     return tags["msgid"] ?? `m${this.msgid}`;
   }
 
   private recipients(target: string) {
-    if (target.startsWith("#")) return [...(this.members.get(target) ?? [])];
+    if (target.startsWith("#")) {
+      return [...(this.members.get(target) ?? [])];
+    }
 
     return this.clients.filter((c) => c.nick === target && c.registered);
   }
@@ -238,7 +264,10 @@ export class FakeIrcServer {
   private handle(client: Client, line: string) {
     const message = parseMessage(line);
 
-    if (!message) return;
+    if (!message) {
+      return;
+    }
+
     const label = message.tags.get("label");
 
     const labelled = (text: string) =>
@@ -252,11 +281,19 @@ export class FakeIrcServer {
       case "METADATA": {
         const account = client.account ?? "";
 
-        if (this.onMetadata?.(account, [...message.params])) return;
+        if (this.onMetadata?.(account, [...message.params])) {
+          return;
+        }
+
         const value = message.params[3];
 
-        if (first !== "*" || second !== "SET" || message.params[2] !== "status")
+        if (
+          first !== "*" ||
+          second !== "SET" ||
+          message.params[2] !== "status"
+        ) {
           return;
+        }
 
         if (value !== undefined) {
           this.metadata.set(account, value);
@@ -276,22 +313,30 @@ export class FakeIrcServer {
       }
 
       case "CAP":
-        if (first === "LS")
+        if (first === "LS") {
           this.reply(client, `:fake CAP * LS :${this.caps.join(" ")}`);
-        else if (first === "REQ") {
+        } else if (first === "REQ") {
           const names = second.split(" ");
           const offered = this.caps.map((cap) => cap.split("=")[0]);
 
           if (names.every((name) => offered.includes(name))) {
-            for (const name of names) client.caps.add(name);
+            for (const name of names) {
+              client.caps.add(name);
+            }
+
             this.reply(client, `:fake CAP * ACK :${second}`);
-          } else this.reply(client, `:fake CAP * NAK :${second}`);
-        } else if (first === "END") this.welcome(client);
+          } else {
+            this.reply(client, `:fake CAP * NAK :${second}`);
+          }
+        } else if (first === "END") {
+          this.welcome(client);
+        }
 
         return;
       case "AUTHENTICATE":
-        if (first === "PLAIN") this.reply(client, "AUTHENTICATE +");
-        else {
+        if (first === "PLAIN") {
+          this.reply(client, "AUTHENTICATE +");
+        } else {
           const [, account = "", password] = Buffer.from(first, "base64")
             .toString()
             .split("\0");
@@ -300,7 +345,9 @@ export class FakeIrcServer {
             client.account = account;
             this.reply(client, `:fake 900 * * ${account} :logged in`);
             this.reply(client, ":fake 903 * :SASL successful");
-          } else this.reply(client, ":fake 904 * :SASL failed");
+          } else {
+            this.reply(client, ":fake 904 * :SASL failed");
+          }
         }
 
         return;
@@ -342,13 +389,14 @@ export class FakeIrcServer {
           set.add(client);
           this.members.set(channel, set);
 
-          for (const member of set)
+          for (const member of set) {
             this.reply(
               member,
               member.caps.has("extended-join")
                 ? `:${client.nick}!u@stargate JOIN ${channel} ${client.account ?? "*"} :Stargate`
                 : `:${client.nick}!u@stargate JOIN ${channel}`,
             );
+          }
         }
 
         return;
@@ -392,7 +440,10 @@ export class FakeIrcServer {
 
         const batch = client.open.get(first.slice(1));
 
-        if (!first.startsWith("-") || !batch) return;
+        if (!first.startsWith("-") || !batch) {
+          return;
+        }
+
         client.open.delete(first.slice(1));
 
         return this.multiline(
@@ -448,20 +499,29 @@ export class FakeIrcServer {
             (prefix) => `${prefix}:${client.nick}!u@stargate `,
           );
 
-        for (const other of this.recipients(target))
-          if (other !== client) this.reply(other, out(false));
+        for (const other of this.recipients(target)) {
+          if (other !== client) {
+            this.reply(other, out(false));
+          }
+        }
 
         if (
           message.command !== "PRIVMSG" ||
           !this.holdMessageConfirmation.has(`${client.account} ${target}`)
         ) {
-          if (client.caps.has("echo-message")) this.reply(client, out(true));
-          else if (label !== undefined && client.caps.has("labeled-response"))
+          if (client.caps.has("echo-message")) {
+            this.reply(client, out(true));
+          } else if (
+            label !== undefined &&
+            client.caps.has("labeled-response")
+          ) {
             this.reply(client, `@label=${label} :fake ACK`);
+          }
         }
 
-        if (message.command === "PRIVMSG")
+        if (message.command === "PRIVMSG") {
           this.onMessage?.(client.account, target);
+        }
 
         return;
       }
@@ -483,11 +543,13 @@ export class FakeIrcServer {
         const account = real ? real.account : outside;
         this.reply(client, `:fake 311 ${client.nick} ${first} u h * :someone`);
 
-        if (account)
+        if (account) {
           this.reply(
             client,
             `:fake 330 ${client.nick} ${first} ${account} :is logged in as`,
           );
+        }
+
         this.reply(client, `:fake 318 ${client.nick} ${first} :End of WHOIS`);
 
         return;
@@ -496,7 +558,9 @@ export class FakeIrcServer {
       case "CHATHISTORY": {
         this.historyRequests.push([...message.params]);
 
-        if (this.holdHistory) return;
+        if (this.holdHistory) {
+          return;
+        }
 
         const since = (value: string | undefined) =>
           value?.startsWith("timestamp=") ? value.slice(10) : "";
@@ -507,22 +571,27 @@ export class FakeIrcServer {
           const from = since(second);
           const partners = new Map<string, string>();
 
-          for (const entry of this.history)
+          for (const entry of this.history) {
             if (
               entry.target.toLowerCase() === client.nick?.toLowerCase() &&
               entry.time > from
-            )
+            ) {
               partners.set(entry.from, entry.time);
+            }
+          }
+
           this.reply(
             client,
             `:fake BATCH +${reference} draft/chathistory-targets`,
           );
 
-          for (const [nick, time] of partners)
+          for (const [nick, time] of partners) {
             this.reply(
               client,
               `@batch=${reference} :fake CHATHISTORY TARGETS ${nick} ${time}`,
             );
+          }
+
           this.reply(client, `:fake BATCH -${reference}`);
 
           return;
@@ -544,8 +613,10 @@ export class FakeIrcServer {
 
         this.reply(client, `:fake BATCH +${reference} chathistory ${target}`);
 
-        for (const entry of matches)
+        for (const entry of matches) {
           this.reply(client, entry.line.replace(/^@/, `@batch=${reference};`));
+        }
+
         this.reply(client, `:fake BATCH -${reference}`);
 
         return;
@@ -654,7 +725,7 @@ export class FakeIrcServer {
 
       this.reply(to, open);
 
-      for (const line of lines)
+      for (const line of lines) {
         this.reply(
           to,
           formatMessage("PRIVMSG", [batch.target, line.text], {
@@ -665,15 +736,23 @@ export class FakeIrcServer {
             (prefix) => `${prefix}:${client.nick}!u@stargate `,
           ),
         );
+      }
+
       this.reply(to, `BATCH -${reference}`);
     };
 
-    for (const other of this.recipients(batch.target))
-      if (other !== client) emit(other, false);
+    for (const other of this.recipients(batch.target)) {
+      if (other !== client) {
+        emit(other, false);
+      }
+    }
 
-    if (client.caps.has("echo-message")) emit(client, true);
-    else if (label !== undefined)
+    if (client.caps.has("echo-message")) {
+      emit(client, true);
+    } else if (label !== undefined) {
       this.reply(client, `@label=${label} :fake ACK`);
+    }
+
     this.onMessage?.(client.account, batch.target);
   }
 
@@ -701,7 +780,7 @@ export class FakeIrcServer {
         )}\r\n`,
       );
 
-      for (const line of lines)
+      for (const line of lines) {
         client.socket.write(
           `${prefix(
             formatMessage("PRIVMSG", [target, line.text], {
@@ -710,6 +789,8 @@ export class FakeIrcServer {
             }),
           )}\r\n`,
         );
+      }
+
       client.socket.write(`BATCH -${reference}\r\n`);
     }
 
@@ -762,12 +843,15 @@ export function until(
         !error.message.startsWith(
           "Cannot use onTestFinished() outside of the test runner.",
         )
-      )
+      ) {
         throw error;
+      }
     }
 
     const poll = () => {
-      if (!active) return;
+      if (!active) {
+        return;
+      }
 
       try {
         const ready = check();
@@ -863,7 +947,9 @@ export class FakeFilehost {
   }
 
   get origin() {
-    if (!this.server) throw new Error("not started");
+    if (!this.server) {
+      throw new Error("not started");
+    }
 
     return `http://127.0.0.1:${this.server.port}`;
   }
@@ -894,22 +980,27 @@ export class FakeFilehost {
       disposition: request.headers.get("content-disposition"),
     });
 
-    if (!user || this.accounts[user] !== password)
+    if (!user || this.accounts[user] !== password) {
       return new Response("auth", { status: 401 });
+    }
 
-    if (url.pathname === "/redirect")
+    if (url.pathname === "/redirect") {
       return new Response(null, {
         status: 302,
         headers: { location: "https://elsewhere.example/x" },
       });
+    }
 
     if (url.pathname === "/upload" && request.method === "POST") {
       const failing = this.failUploads > 0;
 
-      if (failing) this.failUploads--;
+      if (failing) {
+        this.failUploads--;
+      }
 
-      if (failing && this.failStatus < 500)
+      if (failing && this.failStatus < 500) {
         return new Response("refused", { status: this.failStatus });
+      }
 
       const name =
         /filename="([^"]+)"/.exec(
@@ -923,7 +1014,10 @@ export class FakeFilehost {
         body: new Uint8Array(await request.arrayBuffer()),
       });
 
-      if (failing) return new Response("failed", { status: this.failStatus });
+      if (failing) {
+        return new Response("failed", { status: this.failStatus });
+      }
+
       await this.onUpload?.();
 
       return new Response(null, {
@@ -934,8 +1028,9 @@ export class FakeFilehost {
 
     const file = this.files.get(url.pathname);
 
-    if (!file || !["GET", "HEAD"].includes(request.method))
+    if (!file || !["GET", "HEAD"].includes(request.method)) {
       return new Response("missing", { status: 404 });
+    }
 
     return new Response(
       request.method === "HEAD" ? null : new Uint8Array(file.body),

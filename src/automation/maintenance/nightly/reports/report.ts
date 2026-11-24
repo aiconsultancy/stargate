@@ -264,17 +264,24 @@ export class ReportRecorder {
   public component(entry: ComponentReport) {
     const index = this.components.findIndex((c) => c.id === entry.id);
 
-    if (index !== -1) this.components[index] = entry;
-    else this.components.push(entry);
+    if (index !== -1) {
+      this.components[index] = entry;
+    } else {
+      this.components.push(entry);
+    }
   }
   public update(id: string, patch: Partial<ComponentReport>) {
     const entry = this.components.find((c) => c.id === id);
 
-    if (!entry) return;
+    if (!entry) {
+      return;
+    }
+
     Object.assign(entry, patch);
 
-    if (patch.status === "updated" || patch.status === "unchanged")
+    if (patch.status === "updated" || patch.status === "unchanged") {
       delete entry.reason;
+    }
   }
   public restart(service: "gateway" | "opencode" | "cliproxyapi", ok: boolean) {
     this.restarts.push({
@@ -290,12 +297,15 @@ export class ReportRecorder {
     ];
   }
   public markModels(status: ModelChange["status"], reason?: Reason) {
-    for (const change of this.models)
+    for (const change of this.models) {
       if (change.status === "planned") {
         change.status = status;
 
-        if (reason) change.reason = reason;
+        if (reason) {
+          change.reason = reason;
+        }
       }
+    }
   }
 
   public outcome(): Report["outcome"] {
@@ -309,13 +319,21 @@ export class ReportRecorder {
     const rolled = statuses.some((s) => s === "rolled-back");
     const pending = statuses.some((s) => s === "deferred");
 
-    if (applied) return bad || pending ? "partial" : "completed";
+    if (applied) {
+      return bad || pending ? "partial" : "completed";
+    }
 
-    if (pending) return "deferred";
+    if (pending) {
+      return "deferred";
+    }
 
-    if (rolled) return "rolled-back";
+    if (rolled) {
+      return "rolled-back";
+    }
 
-    if (bad) return "failed";
+    if (bad) {
+      return "failed";
+    }
 
     return "no-op";
   }
@@ -353,12 +371,19 @@ const rank = (key: string) => {
 };
 
 function zodKeyOrder(value: unknown, names = false): unknown {
-  if (Array.isArray(value)) return value.map((item) => zodKeyOrder(item));
+  if (Array.isArray(value)) {
+    return value.map((item) => zodKeyOrder(item));
+  }
 
-  if (!Predicate.isObject(value)) return value;
+  if (!Predicate.isObject(value)) {
+    return value;
+  }
+
   const entries = Object.entries(value);
 
-  if (!names) entries.sort(([a], [b]) => rank(a) - rank(b));
+  if (!names) {
+    entries.sort(([a], [b]) => rank(a) - rank(b));
+  }
 
   return Object.fromEntries(
     entries.map(([key, item]) => [
@@ -403,8 +428,9 @@ export function boundReport(report: Report): Report {
   const truncated: Record<string, number> = { ...report.truncated };
 
   const take = <T>(key: keyof typeof limits, items: T[]) => {
-    if (items.length > limits[key])
+    if (items.length > limits[key]) {
       truncated[key] = (truncated[key] ?? 0) + items.length - limits[key];
+    }
 
     return items.slice(0, limits[key]);
   };
@@ -435,7 +461,9 @@ export function boundReport(report: Report): Report {
     ...(report.notes && { notes: take("notes", report.notes) }),
   };
 
-  if (Object.keys(truncated).length > 0) bounded.truncated = truncated;
+  if (Object.keys(truncated).length > 0) {
+    bounded.truncated = truncated;
+  }
 
   return bounded;
 }
@@ -451,8 +479,9 @@ export async function writeReport(dataDirectory: string, report: Report) {
   let valid: Report;
   const parsed = decodeReport(boundReport(report));
 
-  if (Result.isSuccess(parsed)) valid = parsed.success;
-  else
+  if (Result.isSuccess(parsed)) {
+    valid = parsed.success;
+  } else {
     valid = decodeReportSync({
       ...withoutNotes(report),
       components: [],
@@ -462,6 +491,8 @@ export async function writeReport(dataDirectory: string, report: Report) {
       restarts: [],
       truncated: { invalid: 1 },
     });
+  }
+
   const directory = join(maintenanceDirectory(dataDirectory), "reports");
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const name = `${valid.startedAt.replace(/[^0-9TZ]/g, "")}-${valid.runID}.json`;
@@ -551,12 +582,13 @@ export function summary(report: Report, reportName: string) {
       `Restart drain: ${drain.state.phase}; ${drain.outcome}; deadline ${new Date(drain.state.deadlineAt).toISOString()}; ${drain.notices.length} notice receipts; ${drain.state.stragglers?.length ?? 0} stragglers.`,
     );
 
-    for (const work of drain.state.stragglers?.slice(0, 8) ?? [])
+    for (const work of drain.state.stragglers?.slice(0, 8) ?? []) {
       parts.push(
         line(
           `- drain straggler: ${work.taskID ?? "no task ID"} ${work.sessionID ?? "no session ID"} (${work.reason})`,
         ),
       );
+    }
   }
 
   if (report.cleanup) {
@@ -566,50 +598,64 @@ export function summary(report: Report, reportName: string) {
     );
   }
 
-  for (const component of changed.slice(0, 12))
+  for (const component of changed.slice(0, 12)) {
     parts.push(
       line(
         `- ${component.id}: ${component.status}${component.before || component.after ? ` ${component.before ?? "?"} → ${component.after ?? component.candidate ?? "?"}` : ""}${component.reason ? ` (${labels[component.reason]})` : ""}`,
       ),
     );
+  }
+
   const unchanged = report.components.length - changed.length;
 
-  if (unchanged) parts.push(`Unchanged: ${unchanged} component(s).`);
+  if (unchanged) {
+    parts.push(`Unchanged: ${unchanged} component(s).`);
+  }
+
   const models = new Map<string, { applied: number; other: number }>();
 
   for (const change of report.models) {
     const key = `${change.from} → ${change.to}`;
     const entry = models.get(key) ?? { applied: 0, other: 0 };
 
-    if (change.status === "applied") entry.applied++;
-    else entry.other++;
+    if (change.status === "applied") {
+      entry.applied++;
+    } else {
+      entry.other++;
+    }
+
     models.set(key, entry);
   }
 
-  for (const [key, entry] of [...models].slice(0, 8))
+  for (const [key, entry] of [...models].slice(0, 8)) {
     parts.push(
       line(
         `- model ${key}: ${entry.applied} applied${entry.other ? `, ${entry.other} not applied` : ""}`,
       ),
     );
+  }
 
   for (const notice of (report.updateNotices ?? [])
     .filter((notice) => notice.status !== "unchanged")
-    .slice(0, 8))
+    .slice(0, 8)) {
     parts.push(line(`- update notice ${notice.sessionID}: ${notice.status}`));
+  }
 
-  for (const note of (report.notes ?? []).slice(0, 5))
+  for (const note of (report.notes ?? []).slice(0, 5)) {
     parts.push(
       line(
         `- crew task ${note.taskID} for ${note.crew} is queued (${note.originIsPin ? "from the pinned captain" : "from an earlier captain session"}): ${note.action.charAt(0).toLowerCase()}${note.action.slice(1)}`,
         300,
       ),
     );
+  }
 
-  if (report.rollbacks.length > 0)
+  if (report.rollbacks.length > 0) {
     parts.push(
       `Rollbacks: ${report.rollbacks.map((r) => `${r.component} ${r.status}`).join(", ")}.`,
     );
+  }
+
   parts.push(`Private report: ${reportName}`);
 
   return Array.from(parts.join("\n")).slice(0, 2800).join("");

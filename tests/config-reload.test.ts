@@ -133,7 +133,9 @@ function logger() {
 }
 
 function expectNoSecrets(text: string) {
-  for (const value of secretValues) expect(text).not.toContain(value);
+  for (const value of secretValues) {
+    expect(text).not.toContain(value);
+  }
 }
 
 function liveChange() {

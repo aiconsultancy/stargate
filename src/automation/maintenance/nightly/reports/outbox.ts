@@ -29,7 +29,10 @@ export class MaintenanceOutbox {
     try {
       const notice = decodeNotice(JSON.parse(await readFile(claimed, "utf8")));
 
-      if (!this.channelAllowed(notice.channel)) return "refused";
+      if (!this.channelAllowed(notice.channel)) {
+        return "refused";
+      }
+
       await this.announce(notice.channel, notice.text, signal);
 
       return "sent";
@@ -55,7 +58,10 @@ export class MaintenanceOutbox {
     let sent = 0;
 
     for (const name of names) {
-      if (signal.aborted) break;
+      if (signal.aborted) {
+        break;
+      }
+
       const path = join(directory, name);
       const claimed = `${path}.claimed`;
 
@@ -67,7 +73,10 @@ export class MaintenanceOutbox {
 
       const status = await this.deliverClaimed(claimed, signal);
 
-      if (status === "sent") sent++;
+      if (status === "sent") {
+        sent++;
+      }
+
       await rename(claimed, `${path}.${status}`).catch(() => {});
     }
 

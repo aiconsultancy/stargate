@@ -46,15 +46,23 @@ export function startAgentDispatch(
 ): AgentDispatchRuntime | undefined {
   const dispatch = host.config;
 
-  if (!dispatch?.enabled) return;
+  if (!dispatch?.enabled) {
+    return;
+  }
+
   const target = agentDispatchTarget(dispatch, host.irc);
 
-  if (typeof target === "string") throw new Error(target);
+  if (typeof target === "string") {
+    throw new Error(target);
+  }
+
   const ship = host.ship(target.registration.id);
   const primary = ship?.registrations[0];
 
-  if (!ship || !primary)
+  if (!ship || !primary) {
     throw new Error("Agent dispatch registration unavailable");
+  }
+
   const client = primary.client;
   const enrolled = target.registration.fleetPolicy?.agentAccounts ?? [];
   const log = host.log.child({ agentDispatch: dispatch.fleet });
@@ -104,10 +112,11 @@ export function startAgentDispatch(
       caseFold,
     );
 
-    if (answer)
+    if (answer) {
       void dispatcher.answer(answer).catch(() => {
         log.warn("Agent dispatch answer failed");
       });
+    }
   };
 
   ship.dispatchListener = listener;
@@ -117,7 +126,10 @@ export function startAgentDispatch(
     log,
     run: (signal) => dispatcher.run(signal),
     close() {
-      if (ship.dispatchListener === listener) ship.dispatchListener = undefined;
+      if (ship.dispatchListener === listener) {
+        ship.dispatchListener = undefined;
+      }
+
       ledger.close();
     },
   };

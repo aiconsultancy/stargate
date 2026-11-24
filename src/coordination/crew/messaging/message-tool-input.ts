@@ -18,13 +18,14 @@ function jsonTarget(
   json: Record<string, unknown>,
   target: StandardJSONSchemaV1.Target,
 ) {
-  if (target === "draft-2020-12")
+  if (target === "draft-2020-12") {
     return structuredClone({
       $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12,
       ...json,
     });
+  }
 
-  if (target === "draft-07")
+  if (target === "draft-07") {
     return structuredClone({
       $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
       ...JsonSchema.toDocumentDraft07({
@@ -33,6 +34,8 @@ function jsonTarget(
         definitions: {},
       }).schema,
     });
+  }
+
   throw new Error(`Unsupported message schema target: ${target}`);
 }
 
@@ -69,7 +72,7 @@ export function messageOpenCodeInput(
   const properties: Record<string, unknown> = {};
   const fields = new Map<string, Schema.Constraint[]>();
 
-  for (const member of members)
+  for (const member of members) {
     for (const [key, field] of Object.entries(member.fields)) {
       const variants = fields.get(key) ?? [];
       variants.push(
@@ -79,6 +82,7 @@ export function messageOpenCodeInput(
       );
       fields.set(key, variants);
     }
+  }
 
   const operation = union
     ? Schema.decodeUnknownResult(
@@ -103,15 +107,22 @@ export function messageOpenCodeInput(
   for (const [key, variants] of fields) {
     const schemas = variants.map((field) => settingsInputAdvertisement(field));
 
-    if (union) for (const field of schemas) delete field["default"];
+    if (union) {
+      for (const field of schemas) {
+        delete field["default"];
+      }
+    }
+
     properties[key] = union ? { anyOf: schemas } : schemas[0];
 
     if (
       union
         ? key === "op"
         : variants[0] && !Schema.toType(variants[0]).ast.context?.isOptional
-    )
+    ) {
       required.push(key);
+    }
+
     decoders.set(
       key,
       variants.map((field) =>
@@ -151,7 +162,7 @@ export function messageOpenCodeInput(
         if (Result.isFailure(result)) {
           const failed = operation?.(raw);
 
-          if (failed && Result.isFailure(failed))
+          if (failed && Result.isFailure(failed)) {
             return {
               issues: [
                 ...settingsIssues(result.failure.issue).issues.filter(
@@ -160,6 +171,7 @@ export function messageOpenCodeInput(
                 ...settingsIssues(failed.failure.issue).issues,
               ],
             };
+          }
 
           return settingsIssues(result.failure.issue);
         }
@@ -169,19 +181,28 @@ export function messageOpenCodeInput(
         for (const key of Object.keys(properties)) {
           const present = Object.hasOwn(result.success, key);
 
-          if (!present && (union || key === "project")) continue;
+          if (!present && (union || key === "project")) {
+            continue;
+          }
+
           const input = result.success[key];
 
-          if (present) value[key] = input;
+          if (present) {
+            value[key] = input;
+          }
 
-          if (union && input === undefined) continue;
+          if (union && input === undefined) {
+            continue;
+          }
 
           for (const decoder of decoders.get(key) ?? []) {
             const decoded = decoder(input);
 
             if (Result.isSuccess(decoded)) {
-              if (present || decoded.success !== undefined)
+              if (present || decoded.success !== undefined) {
                 value[key] = decoded.success;
+              }
+
               break;
             }
           }
@@ -203,7 +224,7 @@ export function messagePiParameters(schema: EffectToolInput) {
     delete json["anyOf"];
   }
 
-  if (Array.isArray(branches))
+  if (Array.isArray(branches)) {
     for (const branch of branches) {
       const properties = Predicate.isObject(branch)
         ? branch["properties"]
@@ -213,8 +234,11 @@ export function messagePiParameters(schema: EffectToolInput) {
         ? properties["text"]
         : undefined;
 
-      if (Predicate.isObject(text)) delete text["pattern"];
+      if (Predicate.isObject(text)) {
+        delete text["pattern"];
+      }
     }
+  }
 
   return { $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12, ...json };
 }

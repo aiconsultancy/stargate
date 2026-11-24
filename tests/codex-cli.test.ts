@@ -43,18 +43,26 @@ const cleanup: (() => Promise<unknown>)[] = [];
 
 afterEach(async () => {
   for (const [name, value] of saved) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
   }
 
   saved.clear();
 
-  for (const step of cleanup.splice(0).reverse()) await step();
+  for (const step of cleanup.splice(0).reverse()) {
+    await step();
+  }
 });
 
 function setEnv(values: Record<string, string>) {
   for (const [name, value] of Object.entries(values)) {
-    if (!saved.has(name)) saved.set(name, process.env[name]);
+    if (!saved.has(name)) {
+      saved.set(name, process.env[name]);
+    }
+
     process.env[name] = value;
   }
 }
@@ -98,7 +106,10 @@ function toolNames(tools: readonly Tool[], prefix = ""): string[] {
   return tools.flatMap((tool) => {
     const name = `${prefix}${tool.name ?? tool.type}`;
 
-    if (tool.tools) return toolNames(tool.tools, `${name}.`);
+    if (tool.tools) {
+      return toolNames(tool.tools, `${name}.`);
+    }
+
     const nested = [...(tool.description ?? "").matchAll(/^### `([^`]+)`/gm)];
 
     return [name, ...nested.map((match) => `${name}/${match[1]}`)];
@@ -171,8 +182,10 @@ function fixture(script: Reply[] = []) {
           : {}),
       });
 
-      if (url.pathname !== "/v1/responses")
+      if (url.pathname !== "/v1/responses") {
         return Response.json({}, { status: 404 });
+      }
+
       const reply = script.shift() ?? { text: "Fixture reply" };
       const id = `resp_${requests.length}`;
 
@@ -285,8 +298,9 @@ async function setup(name: string) {
   const project = join(root, "project");
   const data = join(root, "data");
 
-  for (const directory of [home, project, data])
+  for (const directory of [home, project, data]) {
     await mkdir(directory, { recursive: true });
+  }
 
   return { root, home, project, data };
 }
@@ -331,7 +345,10 @@ const session = (backend: CodexBackend) =>
  * bundled copy, which may not work where the system one does.
  */
 async function sandboxWorks() {
-  if (process.platform !== "linux") return false;
+  if (process.platform !== "linux") {
+    return false;
+  }
+
   const home = await mkdtemp(join(tmpdir(), "stargate-codex-probe-"));
 
   try {
@@ -386,8 +403,9 @@ args = ["${join(root, "mcp")}"]
   );
   await writeFile(join(project, "AGENTS.md"), memory);
 
-  for (const rc of [".zshrc", ".bashrc", ".profile", ".zprofile"])
+  for (const rc of [".zshrc", ".bashrc", ".profile", ".zprofile"]) {
     await writeFile(join(home, rc), `touch ${join(root, "rc")}\n`);
+  }
 
   const before = (await readdir(home)).concat(
     await readdir(join(home, ".codex")),
@@ -425,8 +443,9 @@ args = ["${join(root, "mcp")}"]
 
   expect(turns.length).toBe(3);
 
-  for (const turn of turns.slice(1))
+  for (const turn of turns.slice(1)) {
     expect(turn.body).toContain("STARGATEFIRST");
+  }
 
   for (const turn of turns) {
     expect(turn.model).toBe("gpt-6.1-sol");
@@ -505,8 +524,10 @@ args = ["${join(root, "mcp")}"]
 
   expect(proxy.seen).toEqual([]);
 
-  for (const file of ["notified", "mcp", "rc"])
+  for (const file of ["notified", "mcp", "rc"]) {
     expect(await readdir(root)).not.toContain(file);
+  }
+
   expect(
     (await readdir(home)).concat(await readdir(join(home, ".codex"))),
   ).toEqual(before);
@@ -542,8 +563,9 @@ function commands(
 async function noneLeft(turn: string) {
   const deadline = Date.now() + 3000;
 
-  while ((await processesOf(turn)).length && Date.now() < deadline)
+  while ((await processesOf(turn)).length && Date.now() < deadline) {
     await Bun.sleep(25);
+  }
 
   return processesOf(turn);
 }
@@ -556,8 +578,10 @@ test.skipIf(!sandboxed)(
     const proxy = await recordingProxy();
 
     // Shell start-up files that would run in every tool command.
-    for (const rc of [".zshenv", ".zshrc", ".bashrc", ".profile"])
+    for (const rc of [".zshenv", ".zshrc", ".bashrc", ".profile"]) {
       await writeFile(join(home, rc), "export STARGATE_RC_RAN=1\n");
+    }
+
     setEnv({ [apiKeyEnv]: key, HOME: home });
     // Probe both the account's default shell and Codex's Linux fallback.
     // Network seccomp can make Bash mistake even /dev/null for socket stdin.
@@ -652,8 +676,10 @@ test.skipIf(!sandboxed)(
       (await readdir(root)).filter((f) => f.startsWith("escalated")),
     ).toEqual([]);
 
-    for (const name of ["readonly", "workspace", "network"])
+    for (const name of ["readonly", "workspace", "network"]) {
       expect(await Bun.file(`${shared}-${name}`).exists()).toBe(false);
+    }
+
     expect(proxy.seen).toEqual([]);
   },
   240_000,
@@ -670,12 +696,14 @@ test.skipIf(!sandboxed)(
     // Runs sh, mkfifo, cat and rm.
     const names = ["git", "rg", "sh", "mkfifo", "cat", "rm", "bwrap"];
 
-    for (const name of names)
+    for (const name of names) {
       await writeFile(
         join(bin, name),
         `#!/bin/sh\n: > ${join(root, `ran-${name}`)}\nexit 1\n`,
         { mode: 0o755 },
       );
+    }
+
     // A PATH entry behind a link outside the workspace, retargeted to the
     // Shims between turns, and a directory with a link to the git shim.
     const benign = join(root, "benign");
@@ -713,8 +741,10 @@ test.skipIf(!sandboxed)(
       const output = (requests.at(-1)?.outputs ?? []).join("\n");
       expect(output).toContain("WHICH:");
 
-      for (const path of [bin, linked, links])
+      for (const path of [bin, linked, links]) {
         expect(output).not.toContain(path);
+      }
+
       expect(
         (await readdir(root)).filter((name) => name.startsWith("ran-")),
       ).toEqual([]);
@@ -760,7 +790,9 @@ test.skipIf(process.platform !== "linux")(
     const modes: { extra: Record<string, unknown>; runtime?: CodexRuntime }[] =
       [{ extra: full }, { extra: full, runtime: { executable: deaf } }];
 
-    if (sandboxed) modes.push({ extra: {} });
+    if (sandboxed) {
+      modes.push({ extra: {} });
+    }
 
     for (const [index, { extra, runtime }] of modes.entries()) {
       const dataDirectory = join(data, String(index));
@@ -797,14 +829,18 @@ test.skipIf(process.platform !== "linux")(
           () => "",
         );
 
-        if (!marker) return false;
+        if (!marker) {
+          return false;
+        }
 
         for (const pid of await processesOf(marker)) {
           const argv = await readFile(`/proc/${pid}/cmdline`, "utf8").catch(
             () => "",
           );
 
-          if (argv.split("\0")[0] === "sleep") return true;
+          if (argv.split("\0")[0] === "sleep") {
+            return true;
+          }
         }
 
         return false;
@@ -823,8 +859,9 @@ test.skipIf(process.platform !== "linux")(
       }
 
       cleanup.push(async () => {
-        for (const pid of await processesOf(marker))
+        for (const pid of await processesOf(marker)) {
           process.kill(pid, "SIGKILL");
+        }
       });
       // The CLI, the sandbox helpers and the sleepers all carry the marker.
       expect((await processesOf(marker)).length).toBeGreaterThan(2);

@@ -275,8 +275,9 @@ function parseCli(args: string[]) {
         parsed.positionals[0] === "maintenance" &&
         (parsed.positionals[1] === "cleanup" ||
           parsed.positionals[1] === "update")
-      )
+      ) {
         return parsed;
+      }
     } catch {
       /* Fall through to the fixed, credential-safe error. */
     }
@@ -325,14 +326,17 @@ export async function runCli(args: string[]): Promise<CliResult> {
     ...commandOptions(command, p[1], botOptions),
   ]);
 
-  if (Object.keys(v).some((key) => !allowed.has(key)))
+  if (Object.keys(v).some((key) => !allowed.has(key))) {
     throw new Error(
       "Option is not supported by this command. Use command --help.",
     );
+  }
 
   if (command === "status") {
-    if (p.length !== 1 || !v.bot?.trim())
+    if (p.length !== 1 || !v.bot?.trim()) {
       throw new Error("Use status --help; --bot is required.");
+    }
+
     console.log(
       JSON.stringify(await statusReport(configPath, v.bot, v.log), null, 2),
     );
@@ -340,11 +344,14 @@ export async function runCli(args: string[]): Promise<CliResult> {
     return { command: "exit" };
   }
 
-  if (command === "start" && p.length <= 1)
+  if (command === "start" && p.length <= 1) {
     return { command: "start", configPath };
+  }
 
   if (command === "maintenance") {
-    if (p.length !== 2) throw new Error("Use maintenance --help.");
+    if (p.length !== 2) {
+      throw new Error("Use maintenance --help.");
+    }
 
     const code = await maintenanceCli(p[1], {
       configPath,
@@ -365,7 +372,9 @@ export async function runCli(args: string[]): Promise<CliResult> {
       ...(v["retry-failed"] && { retryFailed: true }),
     });
 
-    if (code !== 0) process.exitCode = code;
+    if (code !== 0) {
+      process.exitCode = code;
+    }
 
     return { command: "exit" };
   }
@@ -373,10 +382,13 @@ export async function runCli(args: string[]): Promise<CliResult> {
   if (command === "cron") {
     const op = p[1];
 
-    if (!op || !["list", "add", "run", "remove", "report"].includes(op))
+    if (!op || !["list", "add", "run", "remove", "report"].includes(op)) {
       throw new Error("Unknown cron operation. Use cron --help.");
+    }
 
-    if (!v.bot?.trim()) throw new Error("--bot is required.");
+    if (!v.bot?.trim()) {
+      throw new Error("--bot is required.");
+    }
 
     const selectors = [v.name, v.id, p[2]].filter(
       (value) => value !== undefined,
@@ -391,12 +403,17 @@ export async function runCli(args: string[]): Promise<CliResult> {
       (op === "run" || op === "remove"
         ? selectors.length !== 1
         : selectors.length > 0)
-    )
+    ) {
       throw new Error("Invalid cron options. Use cron --help.");
+    }
+
     let raw: unknown = { op };
 
     if (op === "add") {
-      if (!v.input) throw new Error("cron add requires --input PATH.");
+      if (!v.input) {
+        throw new Error("cron add requires --input PATH.");
+      }
+
       const input = await readCronFile(resolve(v.input));
 
       if (
@@ -404,16 +421,24 @@ export async function runCli(args: string[]): Promise<CliResult> {
         typeof input !== "object" ||
         Array.isArray(input) ||
         "op" in input
-      )
+      ) {
         throw new Error(
           "Use a cronjob definition JSON object without an op field.",
         );
-      raw = { ...input, op };
-    } else if (op === "run") raw = { op, name: selectors[0] };
-    else if (op === "remove") raw = { op, id: selectors[0] };
+      }
 
-    if (Result.isFailure(Schema.decodeUnknownResult(cronOperationSchema)(raw)))
+      raw = { ...input, op };
+    } else if (op === "run") {
+      raw = { op, name: selectors[0] };
+    } else if (op === "remove") {
+      raw = { op, id: selectors[0] };
+    }
+
+    if (
+      Result.isFailure(Schema.decodeUnknownResult(cronOperationSchema)(raw))
+    ) {
       throw new Error("Invalid cron input. Use cron --help.");
+    }
 
     const result = await runCronOperation(
       raw,
@@ -423,28 +448,33 @@ export async function runCli(args: string[]): Promise<CliResult> {
 
     console.log(JSON.stringify(result, null, 2));
   } else if (command === "crew" && p[1] === "init" && p.length === 2) {
-    if (Boolean(v["cron-config"]) !== Boolean(v["cron-bot"]))
+    if (Boolean(v["cron-config"]) !== Boolean(v["cron-bot"])) {
       throw new Error(
         "--cron-config and --cron-bot must be supplied together.",
       );
+    }
 
-    if (!v.directory || !v.project || !v.worktrees)
+    if (!v.directory || !v.project || !v.worktrees) {
       throw new Error("--directory, --project, and --worktrees are required.");
+    }
 
     // New-ship policy belongs to setup, not the legacy runtime roster schema.
     const team =
       v.team !== undefined ? await readTeamFile(resolve(v.team)) : undefined;
 
-    if (!team?.crew.some((member) => member.backend?.provider))
+    if (!team?.crew.some((member) => member.backend?.provider)) {
       throw new Error(
         "New ships require --team with a Pi helper: set backend.type to pi-durable, backend.model and backend.provider (baseURL and apiKeyEnv). Start with team.example.json; no credentials or model fallback are inferred.",
       );
+    }
+
     const mesijCommand = v["mesij-command"] ?? Bun.which("mesij");
 
-    if (!mesijCommand)
+    if (!mesijCommand) {
       throw new Error(
         "Mesij is unavailable. Run mise install or provide --mesij-command.",
       );
+    }
 
     const maintenanceWindow = v["maintenance-config"]
       ? await readMaintenanceWindow(resolve(v["maintenance-config"]))
@@ -475,8 +505,9 @@ export async function runCli(args: string[]): Promise<CliResult> {
 
     console.log(JSON.stringify(result, null, 2));
   } else if (command === "bot" && p[1] === "provision" && p.length === 2) {
-    if (typeof v.plan !== "string" || !v.plan)
+    if (typeof v.plan !== "string" || !v.plan) {
       throw new Error("--plan PATH is required.");
+    }
 
     const result = await provisionBots({
       planPath: resolve(v.plan),
@@ -486,15 +517,18 @@ export async function runCli(args: string[]): Promise<CliResult> {
       ...(v["record-app"] && { recordApp: v["record-app"] }),
     });
 
-    if (v.json) console.log(JSON.stringify(result, null, 2));
-    else {
+    if (v.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
       console.log(`Workspace ${result.teamId}; journal ${result.journalPath}`);
 
-      for (const bot of result.bots) console.log(JSON.stringify(bot));
+      for (const bot of result.bots) {
+        console.log(JSON.stringify(bot));
+      }
     }
-  } else if (command === "init" && p.length === 1)
+  } else if (command === "init" && p.length === 1) {
     await setupWizard(configPath);
-  else if (command === "config" && p[1] === "check" && p.length === 2) {
+  } else if (command === "config" && p[1] === "check" && p.length === 2) {
     const config = await readConfiguration(configPath);
 
     if (!v["schema-only"]) {
@@ -533,16 +567,19 @@ export async function runCli(args: string[]): Promise<CliResult> {
       rotate: v.rotate,
     });
 
-    if (code !== 0) process.exitCode = code;
+    if (code !== 0) {
+      process.exitCode = code;
+    }
   } else if (command === "manifest" && p.length === 1) {
     // The manifest is command output, not a log line, and has no secrets.
     // One stream keeps the setup guide after the manifest when piped.
     process.stdout.write(`${JSON.stringify(buildManifest(v.name), null, 2)}\n`);
 
-    if (!v.json)
+    if (!v.json) {
       process.stdout.write(
         `\n${manifestUrl(v.name)}\n\n${slackInstructions}\n`,
       );
+    }
   } else if (
     command === "service" &&
     p.length === 2 &&
@@ -550,28 +587,36 @@ export async function runCli(args: string[]): Promise<CliResult> {
   ) {
     await manageService(p[1] ?? "", configPath, v.name);
   } else if (command === "bot" && p[1] === "add" && p.length === 2) {
-    if (!Object.keys(v).some((key) => botOptions.includes(key)))
+    if (!Object.keys(v).some((key) => botOptions.includes(key))) {
       await setupWizard(configPath);
-    else {
-      if (!v.directory) throw new Error("--directory is required.");
+    } else {
+      if (!v.directory) {
+        throw new Error("--directory is required.");
+      }
 
-      if (v.backend === "claude" || v.backend === "codex")
+      if (v.backend === "claude" || v.backend === "codex") {
         throw new Error(
           `Add ${v.backend} backends to the configuration JSON; see docs/${v.backend}.md.`,
         );
+      }
 
-      if (v.backend === "opencode" && Boolean(v.provider) !== Boolean(v.model))
+      if (
+        v.backend === "opencode" &&
+        Boolean(v.provider) !== Boolean(v.model)
+      ) {
         throw new Error(
           "OpenCode --provider and --model must be supplied together.",
         );
+      }
 
       if (
         v.backend === "pi-durable" &&
         (v.provider || v.url || v.agent || v["session-id"])
-      )
+      ) {
         throw new Error(
           "pi-durable does not support --provider, --url, --agent, or --session-id.",
         );
+      }
 
       const backend =
         v.backend === "opencode"
@@ -616,7 +661,9 @@ export async function runCli(args: string[]): Promise<CliResult> {
         "Bot added. Supply tokens through the referenced environment variables.",
       );
     }
-  } else throw new Error("Unknown command or extra arguments. Use --help.");
+  } else {
+    throw new Error("Unknown command or extra arguments. Use --help.");
+  }
 
   return { command: "exit" };
 }
@@ -634,7 +681,10 @@ async function readMaintenanceWindow(path: string) {
 
   const maintenance = config.maintenance;
 
-  if (!maintenance?.enabled) return;
+  if (!maintenance?.enabled) {
+    return;
+  }
+
   const { start, end, timeZone } = maintenance.window;
 
   return { start, end, timeZone };
@@ -657,8 +707,10 @@ async function readCronFile(path: string): Promise<unknown> {
     try {
       const stat = await file.stat();
 
-      if (!stat.isFile() || stat.size > 65_536)
+      if (!stat.isFile() || stat.size > 65_536) {
         throw new Error("Cron input is not a regular file of at most 64 KiB");
+      }
+
       const buffer = Buffer.alloc(65_537);
       let length = 0;
 
@@ -670,11 +722,16 @@ async function readCronFile(path: string): Promise<unknown> {
           null,
         );
 
-        if (!bytesRead) break;
+        if (!bytesRead) {
+          break;
+        }
+
         length += bytesRead;
       }
 
-      if (length > 65_536) throw new Error("Cron input exceeds 64 KiB");
+      if (length > 65_536) {
+        throw new Error("Cron input exceeds 64 KiB");
+      }
 
       return JSON.parse(buffer.subarray(0, length).toString("utf8"));
     } finally {

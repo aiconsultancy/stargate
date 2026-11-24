@@ -14,7 +14,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const password = "s3cret-password-value";
@@ -474,8 +476,10 @@ test("irc client: JOIN lines stay within 512 bytes for many long channels", asyn
     .received("galactica")
     .filter((line) => line.startsWith("JOIN "));
 
-  for (const line of joins)
+  for (const line of joins) {
     expect(utf8Bytes(line) + 2).toBeLessThanOrEqual(512);
+  }
+
   expect(joins.flatMap((line) => line.slice(5).split(",")).sort()).toEqual(
     [...channels].sort(),
   );

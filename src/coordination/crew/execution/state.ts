@@ -291,8 +291,10 @@ export class CrewState {
           .get()?.sql ?? ""
       ).includes("'abandoned'");
 
-      if ((allowCrewExpansion && legacyPeers) || legacyTasks)
+      if ((allowCrewExpansion && legacyPeers) || legacyTasks) {
         db.run("PRAGMA foreign_keys=OFF");
+      }
+
       db.transaction(() => {
         const identity = db
           .query<{ value: string }, []>("SELECT value FROM identity")
@@ -308,10 +310,11 @@ export class CrewState {
           identity.value !== fingerprint &&
           identity.value !== legacyFingerprint &&
           !expansion
-        )
+        ) {
           throw new CrewError(
             "Crew configuration changed. Restore its original identity and directories or use a new namespace; do not delete state.",
           );
+        }
 
         if (expansion && legacyPeers) {
           // Rebuild only the obsolete fixed-roster constraint; child IDs and
@@ -327,10 +330,11 @@ export class CrewState {
             ALTER TABLE peers_expansion RENAME TO peers;
           `);
 
-          if (db.query("PRAGMA foreign_key_check").all().length > 0)
+          if (db.query("PRAGMA foreign_key_check").all().length > 0) {
             throw new CrewError(
               "Crew expansion failed its reference check; original state retained.",
             );
+          }
         }
 
         if (legacyTasks) {
@@ -348,10 +352,11 @@ export class CrewState {
               ON tasks(crewID) WHERE released=0;
           `);
 
-          if (db.query("PRAGMA foreign_key_check").all().length > 0)
+          if (db.query("PRAGMA foreign_key_check").all().length > 0) {
             throw new CrewError(
               "Crew task status upgrade failed its reference check; original state retained.",
             );
+          }
         }
 
         // Add provenance after legacy rebuilds; retained rows stay untagged.
@@ -361,18 +366,21 @@ export class CrewState {
               .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
               .all()
               .some((column) => column.name === "originInputID")
-          )
+          ) {
             db.run(`ALTER TABLE ${table} ADD COLUMN originInputID TEXT`);
+          }
         }
 
-        if (identity && identity.value !== fingerprint)
+        if (identity && identity.value !== fingerprint) {
           db.query("UPDATE identity SET value=? WHERE value=?").run(
             fingerprint,
             identity.value,
           );
+        }
 
-        if (!identity)
+        if (!identity) {
           db.query("INSERT INTO identity VALUES (?)").run(fingerprint);
+        }
       }).immediate();
       db.run("PRAGMA foreign_keys=ON");
 
@@ -380,7 +388,10 @@ export class CrewState {
     } catch (error) {
       db.close();
 
-      if (error instanceof CrewError) throw error;
+      if (error instanceof CrewError) {
+        throw error;
+      }
+
       throw new CrewError(
         "Crew state unavailable. Check private state directory access; do not delete state.",
       );
@@ -407,7 +418,9 @@ export class CrewState {
   public captainLineage(id: string): boolean {
     const pin = this.captainSessionID;
 
-    if (!pin || !id || this.peerBySession(id)) return false;
+    if (!pin || !id || this.peerBySession(id)) {
+      return false;
+    }
 
     return (
       id === pin ||
@@ -434,8 +447,9 @@ export class CrewState {
           .run(crewID, `ses_${randomUUID().replaceAll("-", "")}`);
         const peer = this.peer(crewID);
 
-        if (!peer)
+        if (!peer) {
           throw new CrewError("Crew reservation failed. Inspect crew state.");
+        }
 
         return peer;
       })
@@ -469,10 +483,11 @@ export class CrewState {
           "UPDATE pi_peers SET conversationID=? WHERE sessionID=? AND conversationID IS NULL",
         )
         .run(conversationID, sessionID).changes !== 1
-    )
+    ) {
       throw new CrewError(
         "Pi conversation reservation changed; inspect crew state.",
       );
+    }
   }
 
   /** Persist before native admission. Idempotent for the same conversation;
@@ -487,17 +502,21 @@ export class CrewState {
 
         const saved = this.piTaskConversation(taskID);
 
-        if (saved === conversationID) return;
+        if (saved === conversationID) {
+          return;
+        }
 
         if (
           saved !== undefined ||
           task?.released !== 0 ||
           (task.status !== "dispatching" && task.status !== "running") ||
           this.activeTask(task.crewID)?.id !== task.id
-        )
+        ) {
           throw new CrewError(
             "Pi task conversation binding refused: task is not current or is bound elsewhere.",
           );
+        }
+
         this.db
           .query("INSERT INTO pi_task_conversations VALUES (?,?)")
           .run(taskID, conversationID);
@@ -582,7 +601,10 @@ export class CrewState {
 
   /** Share gateway presence across the daemon's separate plugin locations. */
   public noteCrewQuestionConsumer(at: number) {
-    if (!this.captainSessionID) return;
+    if (!this.captainSessionID) {
+      return;
+    }
+
     this.db
       .query(`INSERT INTO crew_question_consumer VALUES (1,?,?,?)
         ON CONFLICT(slot) DO UPDATE SET captain=excluded.captain,
@@ -692,8 +714,10 @@ export class CrewState {
   ): CrewTask | null {
     return this.db
       .transaction(() => {
-        if (this.activeTask(peer.crewID) || this.controlled(peer.crewID))
+        if (this.activeTask(peer.crewID) || this.controlled(peer.crewID)) {
           return null;
+        }
+
         const id = `task_${randomUUID()}`;
         this.db
           .query(`INSERT INTO tasks
@@ -767,15 +791,17 @@ export class CrewState {
           expected.released !== 0 ||
           expected.notifying !== 0 ||
           !this.unchangedTask(expected)
-        )
+        ) {
           throw new CrewError(
             "Task ownership or state changed; inspect again before reconciliation.",
           );
+        }
 
-        if (this.controlled(expected.crewID))
+        if (this.controlled(expected.crewID)) {
           throw new CrewError(
             "Worker control is reserved; do not steal it. Inspect before retrying.",
           );
+        }
 
         return this.insertControl(expected.crewID);
       })
@@ -822,10 +848,12 @@ export class CrewState {
           )
           .get(task.crewID);
 
-        if (control?.token !== token || !this.unchangedTask(task))
+        if (control?.token !== token || !this.unchangedTask(task)) {
           throw new CrewError(
             "Task ownership changed before resume; inspect again.",
           );
+        }
+
         this.db
           .query(`INSERT OR IGNORE INTO task_resume_attempts
         (taskID,idleAt,requestedBy,requestedAt) VALUES (?,?,?,?)`)
@@ -882,15 +910,17 @@ export class CrewState {
           task.originCaptainID !== expected.originCaptainID ||
           task.inputID !== expected.inputID ||
           this.peer(expected.crewID)?.sessionID !== expected.workerSessionID
-        )
+        ) {
           throw new CrewError(
             "Task ownership or state changed; inspect again. Nothing abandoned.",
           );
+        }
 
-        if (this.resumeBoundaries(task.id, true).length > 0)
+        if (this.resumeBoundaries(task.id, true).length > 0) {
           throw new CrewError(
             "Resume admission is still unconfirmed. Inspect status before releasing the task.",
           );
+        }
 
         const control = this.db
           .query<{ token: string }, [string]>(
@@ -900,22 +930,26 @@ export class CrewState {
 
         const held = control ? controlID(control.token) : null;
 
-        if (held !== expected.controlID)
+        if (held !== expected.controlID) {
           throw new CrewError(
             held
               ? "Worker control is reserved. Pass its inspected controlID only if no Stargate operation can still hold it. Nothing abandoned."
               : "Expected worker control is gone; inspect again. Nothing abandoned.",
           );
+        }
 
-        if (control && liveControls.has(`${this.path}\0${control.token}`))
+        if (control && liveControls.has(`${this.path}\0${control.token}`)) {
           throw new CrewError(
             "Worker control is held by an operation in this process; retry after it ends. Nothing abandoned.",
           );
+        }
 
-        if (control)
+        if (control) {
           this.db
             .query("DELETE FROM worker_controls WHERE crewID=? AND token=?")
             .run(expected.crewID, control.token);
+        }
+
         const token = this.insertControl(expected.crewID);
         this.db
           .query(
@@ -945,8 +979,10 @@ export class CrewState {
         const updated = { ...task, status: "abandoned" as const, released: 1 };
 
         // Report captures end as unavailable; the work's outcome stays unknown.
-        if (this.reporting.isReport(task.id))
+        if (this.reporting.isReport(task.id)) {
           this.reporting.record(updated, "update", "Outcome uncertain");
+        }
+
         this.reporting.record(updated, "update", "Abandoned by captain");
         this.activity.phase(updated, "abandoned");
 
@@ -968,9 +1004,13 @@ export class CrewState {
           )
           .get(taskID);
 
-        if (row?.stop !== "pending") return null;
+        if (row?.stop !== "pending") {
+          return null;
+        }
 
-        if (liveControls.has(`${this.path}\0${row.controlToken}`)) return null;
+        if (liveControls.has(`${this.path}\0${row.controlToken}`)) {
+          return null;
+        }
 
         const control = this.db
           .query<{ token: string }, [string]>(
@@ -1009,7 +1049,10 @@ export class CrewState {
           )
           .get(taskID, token);
 
-        if (!row) throw new CrewError("Abandon audit missing.");
+        if (!row) {
+          throw new CrewError("Abandon audit missing.");
+        }
+
         this.db
           .query(`UPDATE task_abandonments SET stop=?,stopDetail=?,stoppedAt=?
             WHERE taskID=? AND stop='pending'`)
@@ -1028,25 +1071,29 @@ export class CrewState {
   ): string {
     return this.db
       .transaction(() => {
-        if (this.controlled(crewID))
+        if (this.controlled(crewID)) {
           throw new CrewError(
             "Worker control is reserved by another operation; inspect again. No Git change made.",
           );
+        }
+
         const active = this.activeTask(crewID);
 
-        if ((active?.id ?? null) !== expectedTaskID)
+        if ((active?.id ?? null) !== expectedTaskID) {
           throw new CrewError(
             "Worker task slot changed since inspection; inspect again. No Git change made.",
           );
+        }
 
         if (
           active &&
           ((active.status !== "completed" && active.status !== "uncertain") ||
             active.notifying)
-        )
+        ) {
           throw new CrewError(
             "Worker has Stargate-active work; wait, or abandon it before changing the workspace. No Git change made.",
           );
+        }
 
         return this.insertControl(crewID);
       })
@@ -1080,15 +1127,18 @@ export class CrewState {
           expected.notifying !== 0 ||
           control?.token !== token ||
           !this.unchangedTask(expected)
-        )
+        ) {
           throw new CrewError(
             "Task ownership or state changed during verification; inspect again.",
           );
+        }
 
-        if (expected.result !== null && expected.result !== result)
+        if (expected.result !== null && expected.result !== result) {
           throw new CrewError(
             "Retained task result conflicts; no state changed.",
           );
+        }
+
         this.db
           .query(`INSERT INTO task_reconciliations
             (taskID,workerSessionID,originCaptainID,inputID,reconciledBy,
@@ -1114,7 +1164,9 @@ export class CrewState {
         this.reporting.record(expected, "result", result);
         const audit = this.reconciliation(expected.id);
 
-        if (!audit) throw new CrewError("Reconciliation audit missing.");
+        if (!audit) {
+          throw new CrewError("Reconciliation audit missing.");
+        }
 
         return audit;
       })
@@ -1147,10 +1199,12 @@ export class CrewState {
   public reserveStatusRequest(id: string, task: CrewTask, captainID: string) {
     this.db
       .transaction(() => {
-        if (!this.unchangedTask(task))
+        if (!this.unchangedTask(task)) {
           throw new CrewError(
             "Task ownership changed before the status request; inspect again.",
           );
+        }
+
         this.db
           .query(`INSERT OR IGNORE INTO crew_status_requests
             (id,taskID,captainID,workerSessionID) VALUES (?,?,?,?)`)
@@ -1183,8 +1237,9 @@ export class CrewState {
           if (previous) {
             const task = this.task(previous);
 
-            if (!task)
+            if (!task) {
               throw new CrewError("Reporting task reservation missing.");
+            }
 
             return task;
           }
@@ -1192,19 +1247,22 @@ export class CrewState {
           if (
             capture.status !== "summarizing" ||
             capture.reporterID !== peer.crewID
-          )
+          ) {
             throw new CrewError(
               "Reporting capture is not eligible for admission.",
             );
+          }
+
           const active = this.activeTask(peer.crewID);
 
           if (
             this.controlled(peer.crewID) ||
             (active && (active.status !== "completed" || active.notifying))
-          )
+          ) {
             throw new CrewError(
               "Summary skipped: reporter is busy or uncertain.",
             );
+          }
         }
 
         const count =
@@ -1214,10 +1272,12 @@ export class CrewState {
             )
             .get(peer.crewID)?.count ?? 0;
 
-        if (count >= pendingTaskLimit)
+        if (count >= pendingTaskLimit) {
           throw new CrewError(
             `Worker queue full: limit ${pendingTaskLimit} pending tasks per worker.`,
           );
+        }
+
         const id = `task_${randomUUID()}`;
         this.db
           .query(
@@ -1234,12 +1294,20 @@ export class CrewState {
           );
         const task = this.task(id);
 
-        if (!task) throw new CrewError("Queue reservation failed.");
+        if (!task) {
+          throw new CrewError("Queue reservation failed.");
+        }
 
-        if (drainRunID) this.drainRecords.markQueued(id, drainRunID);
+        if (drainRunID) {
+          this.drainRecords.markQueued(id, drainRunID);
+        }
 
-        if (reportCaptureID) this.reporting.markReport(id, reportCaptureID);
-        else this.reporting.assignment(task, text);
+        if (reportCaptureID) {
+          this.reporting.markReport(id, reportCaptureID);
+        } else {
+          this.reporting.assignment(task, text);
+        }
+
         this.activity.assignment(task, text, !!reportCaptureID);
 
         return task;
@@ -1260,13 +1328,20 @@ export class CrewState {
           )
           .get(id);
 
-        if (queued?.status !== "queued" || this.controlled(queued.crewID))
+        if (queued?.status !== "queued" || this.controlled(queued.crewID)) {
           return null;
+        }
+
         const active = this.activeTask(queued.crewID);
 
-        if ((active?.id ?? null) !== previousID) return null;
+        if ((active?.id ?? null) !== previousID) {
+          return null;
+        }
 
-        if (active && !this.release(active.id)) return null;
+        if (active && !this.release(active.id)) {
+          return null;
+        }
+
         this.db
           .query(
             `INSERT INTO tasks (id,crewID,workerSessionID,originCaptainID,originInputID,inputID,status) VALUES (?,?,?,?,?,?,'dispatching')`,
@@ -1282,7 +1357,10 @@ export class CrewState {
         this.db.query("DELETE FROM pending_tasks WHERE id=?").run(id);
         const task = this.task(id);
 
-        if (!task) throw new CrewError("Queue promotion failed.");
+        if (!task) {
+          throw new CrewError("Queue promotion failed.");
+        }
+
         this.activity.phase(task, "dispatching");
 
         return { task, text: queued.text };
@@ -1324,16 +1402,19 @@ export class CrewState {
   public reserveControl(crewID: string): string {
     return this.db
       .transaction(() => {
-        if (this.controlled(crewID))
+        if (this.controlled(crewID)) {
           throw new CrewError(
             "Worker control already reserved; reconcile crash-held controls manually.",
           );
+        }
+
         const active = this.activeTask(crewID);
 
-        if (active && (active.status !== "completed" || active.notifying))
+        if (active && (active.status !== "completed" || active.notifying)) {
           throw new CrewError(
             "Worker has running or uncertain work; control refused.",
           );
+        }
 
         return this.insertControl(crewID);
       })
@@ -1420,8 +1501,10 @@ export class CrewState {
           task.originCaptainID !== captainID ||
           task.inputID !== expected.inputID ||
           this.controlled(expected.crewID)
-        )
+        ) {
           return;
+        }
+
         const now = Date.now();
         this.db
           .query("UPDATE tasks SET status='cancelled',released=1 WHERE id=?")
@@ -1449,8 +1532,10 @@ export class CrewState {
           );
         const updated = { ...task, status: "cancelled" as const, released: 1 };
 
-        if (this.reporting.isReport(task.id))
+        if (this.reporting.isReport(task.id)) {
           this.reporting.record(updated, "update", "Outcome uncertain");
+        }
+
         this.reporting.record(updated, "update", "Cancelled before execution");
         this.activity.phase(updated, "cancelled");
       })
@@ -1475,18 +1560,23 @@ export class CrewState {
   public complete(id: string, workerSessionID: string, resultInput: string) {
     let result = resultInput;
 
-    if (this.reporting.isReport(id)) result = redactCredentials(result, 3000);
+    if (this.reporting.isReport(id)) {
+      result = redactCredentials(result, 3000);
+    }
 
     this.db
       .transaction(() => {
         const task = this.task(id);
 
-        if (!task || task.workerSessionID !== workerSessionID)
+        if (!task || task.workerSessionID !== workerSessionID) {
           throw new CrewError(
             "Only the assigned worker can complete this task.",
           );
+        }
 
-        if (task.status === "completed" && task.result === result) return;
+        if (task.status === "completed" && task.result === result) {
+          return;
+        }
 
         // A failed observation does not void the worker's own answer, but an
         // Abandoned, released or replaced task can never be completed.
@@ -1500,10 +1590,12 @@ export class CrewState {
           (task.status !== "dispatching" &&
             task.status !== "running" &&
             task.status !== "uncertain")
-        )
+        ) {
           throw new CrewError(
             "Task is not current. Inspect its state; do not replay work.",
           );
+        }
+
         this.db
           .query(
             "UPDATE tasks SET status='completed',result=? WHERE id=? AND released=0",
@@ -1518,8 +1610,9 @@ export class CrewState {
   public recoverResult(expected: CrewTask, resultInput: string): CrewTask {
     let result = resultInput;
 
-    if (this.reporting.isReport(expected.id))
+    if (this.reporting.isReport(expected.id)) {
       result = redactCredentials(result, 3000);
+    }
 
     return this.db
       .transaction(() => {
@@ -1569,7 +1662,9 @@ export class CrewState {
 
     const task = this.task(id);
 
-    if (changed && task) this.activity.phase(task, "cancelling");
+    if (changed && task) {
+      this.activity.phase(task, "cancelling");
+    }
 
     return changed;
   }
@@ -1583,7 +1678,9 @@ export class CrewState {
   public noticeOnce(messageID: string, taskID: string, text: string) {
     this.db
       .transaction(() => {
-        if (this.mailRoutes.notice(messageID)) this.notice(taskID, text);
+        if (this.mailRoutes.notice(messageID)) {
+          this.notice(taskID, text);
+        }
       })
       .immediate();
   }
@@ -1620,12 +1717,13 @@ export class CrewState {
   ): number {
     return this.db
       .transaction(() => {
-        if (acknowledged !== undefined)
+        if (acknowledged !== undefined) {
           this.db
             .query(`INSERT INTO mail_cursors VALUES (?,?,?)
           ON CONFLICT(sessionID,taskID) DO UPDATE
           SET sequence=MAX(sequence,excluded.sequence)`)
             .run(sessionID, taskID, acknowledged);
+        }
 
         return (
           this.db

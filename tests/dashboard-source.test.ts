@@ -18,7 +18,9 @@ const signal = new AbortController().signal;
 const closers: (() => void)[] = [];
 
 afterEach(() => {
-  for (const close of closers.splice(0)) close();
+  for (const close of closers.splice(0)) {
+    close();
+  }
 });
 
 const session = (
@@ -55,7 +57,9 @@ function fixture(options: { pinned?: string; crewStatus?: boolean } = {}) {
     async roots() {
       calls.roots++;
 
-      if (crewRoots instanceof Error) throw crewRoots;
+      if (crewRoots instanceof Error) {
+        throw crewRoots;
+      }
 
       return crewRoots;
     },
@@ -209,19 +213,25 @@ describe("dashboard source", () => {
       ships.pop();
       source.retireFleetBackend(alias.backend);
 
-      if (healthy)
+      if (healthy) {
         finish.resolve({
           members: [member("pilot", false)],
           total: 1,
           truncated: false,
         });
-      else finish.reject(new Error("Primary unavailable"));
+      } else {
+        finish.reject(new Error("Primary unavailable"));
+      }
+
       const [result] = (await read).ships;
       expect(reading.aborted).toBe(false);
       expect(aliasStatus).not.toHaveBeenCalled();
 
-      if (healthy) expect(result?.summary.crew?.total).toBe(1);
-      else expect(result?.error).toBe("Crew status unavailable.");
+      if (healthy) {
+        expect(result?.summary.crew?.total).toBe(1);
+      } else {
+        expect(result?.error).toBe("Crew status unavailable.");
+      }
     },
   );
 
@@ -341,8 +351,9 @@ describe("dashboard source", () => {
       "ses_chief",
       "ses_child",
       "ses_grand",
-    ])
+    ]) {
       expect(await read(id)).toEqual({ entries: [] });
+    }
 
     for (const id of [
       "ses_foreign",
@@ -350,8 +361,10 @@ describe("dashboard source", () => {
       "ses_other_bot",
       "ses_other_child",
       "ses_unknown",
-    ])
+    ]) {
       expect(await read(id)).toBeUndefined();
+    }
+
     expect(f.calls.entries).toEqual([
       "ses_captain",
       "ses_mapped",
@@ -486,7 +499,10 @@ describe("dashboard store accessors", () => {
     );
     const [run] = cronStore.claimDue("bot", now + 60_000);
 
-    if (!run) throw new Error("Expected due run");
+    if (!run) {
+      throw new Error("Expected due run");
+    }
+
     cronStore.finish(run.id, "failed", now + 61_000);
     expect(cronStore.recentRuns("bot")).toEqual([
       {

@@ -26,8 +26,9 @@ export class SlackAdmission {
       !input.startsConversation &&
       !input.gate &&
       !this.intake.store.follows(input.conversation)
-    )
+    ) {
       return before;
+    }
 
     return;
   }
@@ -35,17 +36,25 @@ export class SlackAdmission {
   public async receive(body: unknown, open: () => boolean = () => true) {
     const bot = this.intake.bot();
 
-    if (!bot || !open()) return false;
+    if (!bot || !open()) {
+      return false;
+    }
+
     const current = () => open() && this.intake.bot() === bot;
     const reaction = routeReaction(body, bot, this.intake.identity);
 
-    if (reaction)
+    if (reaction) {
       return this.ordered(current, (admit) =>
         this.receiveReaction(reaction, bot, current, admit),
       );
+    }
+
     const question = this.intake.question(body, current);
 
-    if (question !== false && (await question)) return false;
+    if (question !== false && (await question)) {
+      return false;
+    }
+
     const meta = this.intake.meta(body, bot, current);
 
     if (meta !== false) {
@@ -97,14 +106,18 @@ export class SlackAdmission {
         .verify(sender, AbortSignal.timeout(peerLookupMs))
         .catch(() => false);
 
-      if (!open()) return false;
+      if (!open()) {
+        return false;
+      }
 
       return admit(() =>
         this.intake.accept(body, verified ? sender : undefined),
       );
     }
 
-    if (sender) return admit(() => this.intake.accept(body));
+    if (sender) {
+      return admit(() => this.intake.accept(body));
+    }
 
     return this.receiveHumanMessage(body, bot, open, admit);
   }
@@ -120,7 +133,10 @@ export class SlackAdmission {
     if (bot.resumeSlackThreads && slack.threadContext) {
       const input = this.intake.route(body);
 
-      if (!input) return false;
+      if (!input) {
+        return false;
+      }
+
       const before = this.resumeBefore(input);
 
       if (before !== undefined) {
@@ -136,7 +152,9 @@ export class SlackAdmission {
           signal: AbortSignal.timeout(1800),
         });
 
-        if (!open() || this.intake.bot() !== bot) return false;
+        if (!open() || this.intake.bot() !== bot) {
+          return false;
+        }
 
         return admit(() =>
           this.intake.accept(
@@ -166,15 +184,22 @@ export class SlackAdmission {
     const { key, identity, lifetime, slack, store } = this.intake;
     let thread = store.slackReplyThread(key, channel, ts);
 
-    if (!slack.userInfo || (!thread && !slack.reactionThread)) return false;
+    if (!slack.userInfo || (!thread && !slack.reactionThread)) {
+      return false;
+    }
 
     // Both reads share the Socket Mode acknowledgement budget.
     const signal = AbortSignal.any([lifetime, AbortSignal.timeout(2200)]);
 
     try {
-      if (!isSlackHuman(await slack.userInfo(user, signal), user)) return false;
+      if (!isSlackHuman(await slack.userInfo(user, signal), user)) {
+        return false;
+      }
 
-      if (signal.aborted || !open()) return false;
+      if (signal.aborted || !open()) {
+        return false;
+      }
+
       thread ??= await slack.reactionThread?.({
         channel,
         ts,
@@ -186,7 +211,10 @@ export class SlackAdmission {
       return false;
     }
 
-    if (!thread || signal.aborted) return false;
+    if (!thread || signal.aborted) {
+      return false;
+    }
+
     const root = thread;
 
     return admit(() => this.intake.reaction(input, root, bot));

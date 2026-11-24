@@ -100,8 +100,12 @@ describe("routing", () => {
           config.access.channels = ["*"];
         }
 
-        if (dimension === "users") config.access.deniedUsers = ["U123"];
-        else config.access.deniedChannels = ["C123"];
+        if (dimension === "users") {
+          config.access.deniedUsers = ["U123"];
+        } else {
+          config.access.deniedChannels = ["C123"];
+        }
+
         expect(routeEvent(event(), config, identity)).toBeUndefined();
       }
     }
@@ -156,8 +160,10 @@ describe("routing", () => {
     );
     const changed = bot();
 
-    if (changed.backend.type === "opencode")
+    if (changed.backend.type === "opencode") {
       changed.backend.directory = "/different";
+    }
+
     expect(botKey(changed, identity)).not.toBe(botKey(bot(), identity));
   });
 
@@ -185,8 +191,9 @@ describe("routing", () => {
       {},
     ];
 
-    for (const value of cases)
+    for (const value of cases) {
       expect(routeEvent(value, bot(), identity)).toBeUndefined();
+    }
   });
 
   test("thread replies require subscription; mention-only overrides it", () => {

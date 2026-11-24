@@ -21,7 +21,9 @@ import { FakeIrcServer } from "./irc-fixture";
 const cleanup: (() => Promise<unknown> | unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const lock = (path: string) => ({
@@ -104,7 +106,10 @@ async function runtime(transports: "irc" | "teams" | "both") {
     { level: "info" },
     new Writable({
       write(chunk, _encoding, done) {
-        if (String(chunk).includes('"msg":"Stargate ready"')) ready.resolve();
+        if (String(chunk).includes('"msg":"Stargate ready"')) {
+          ready.resolve();
+        }
+
         done();
       },
     }),
@@ -117,7 +122,10 @@ async function runtime(transports: "irc" | "teams" | "both") {
     async backend(config) {
       const id = config.type === "opencode" ? config.sessionID : undefined;
 
-      if (!id) throw new Error("Missing fixture pin");
+      if (!id) {
+        throw new Error("Missing fixture pin");
+      }
+
       built.push(id);
 
       return {
@@ -201,7 +209,7 @@ async function runtime(transports: "irc" | "teams" | "both") {
   return { config, directory, built, closed, turns, registrations, get };
 }
 
-for (const transport of ["irc", "teams", "both"] as const)
+for (const transport of ["irc", "teams", "both"] as const) {
   test(`${transport} runtime dashboard uses real transports without extra backends, sessions or Slack`, async () => {
     const f = await runtime(transport);
 
@@ -255,7 +263,10 @@ for (const transport of ["irc", "teams", "both"] as const)
     if (transport !== "teams") {
       const registration = f.registrations[0];
 
-      if (!registration) throw new Error("Missing real IRC registration");
+      if (!registration) {
+        throw new Error("Missing real IRC registration");
+      }
+
       const store = openStore(join(f.directory, "stargate.sqlite"));
 
       try {
@@ -275,10 +286,16 @@ for (const transport of ["irc", "teams", "both"] as const)
           text: "not shown in summary",
         });
 
-        if (!job) throw new Error("Missing fixture job");
+        if (!job) {
+          throw new Error("Missing fixture job");
+        }
+
         const retained = store.queuedJob(registration.key, "dashboard-fixture");
 
-        if (!retained) throw new Error("Missing retained job");
+        if (!retained) {
+          throw new Error("Missing retained job");
+        }
+
         store.finish(retained.id, "failed");
         store.saveSession(conversation, "ses_mapped_irc");
       } finally {
@@ -299,7 +316,7 @@ for (const transport of ["irc", "teams", "both"] as const)
           .status,
       ).toBe(200);
 
-      if (transport === "both")
+      if (transport === "both") {
         expect(
           (
             await f.get(
@@ -307,10 +324,12 @@ for (const transport of ["irc", "teams", "both"] as const)
             )
           ).status,
         ).toBe(404);
+      }
     }
 
     expect(f.turns).toEqual([]);
   });
+}
 
 test("shared dashboard configuration is explicit, normalised and requires dashboard enablement", () => {
   const base = { bots: [bot()] };
@@ -324,7 +343,7 @@ test("shared dashboard configuration is explicit, normalised and requires dashbo
     { path: "/run/dashboard.sock" },
     { path: "/run/dashboard.sock", groupAccess: false },
     { path: "/run/dashboard.sock", groupAccess: true, mode: 0o666 },
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(configSchema)({
@@ -334,6 +353,8 @@ test("shared dashboard configuration is explicit, normalised and requires dashbo
         }),
       ),
     ).toBe(false);
+  }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(configSchema)({

@@ -138,13 +138,18 @@ test(
       expect(second.reserveTask(peer, "captain")).toBeNull();
       state.releaseControl(peer.crewID, token);
 
-      for (let index = 1; index < pendingTaskLimit; index++)
+      for (let index = 1; index < pendingTaskLimit; index++) {
         state.enqueue(peer, "captain", String(index));
+      }
+
       expect(() => second.enqueue(peer, "captain", "overflow")).toThrow("100");
       const immediate = second.reserveTask(peer, "captain", "Priority read");
       expect(immediate).not.toBeNull();
 
-      if (!immediate) throw new Error("Missing priority task");
+      if (!immediate) {
+        throw new Error("Missing priority task");
+      }
+
       expect(state.task(queued.id)?.status).toBe("queued");
       state.complete(immediate.id, peer.sessionID, "Read complete");
       state.release(immediate.id);

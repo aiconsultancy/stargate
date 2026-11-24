@@ -62,10 +62,12 @@ function currentKey(
     if (now !== cached.stamp) {
       const key = await readOfficerKey(officer, files);
 
-      if (!key)
+      if (!key) {
         throw new SubspaceFileError(
           `${officer.name}'s Subspace bundle is missing`,
         );
+      }
+
       cached = { key, stamp: now };
     }
 
@@ -105,20 +107,27 @@ async function prepare(host: SubspaceAgentsHost, log: Logger) {
   const groups = new Map<number, string>();
 
   for (const officer of section.officers) {
-    if (!officer.socketPath) continue;
+    if (!officer.socketPath) {
+      continue;
+    }
 
     const stats = checkSocketDirectory(
       dirname(officer.socketPath),
       officer.name,
     );
 
-    if ((stats.mode & 0o070) === 0) continue;
+    if ((stats.mode & 0o070) === 0) {
+      continue;
+    }
+
     const other = groups.get(stats.gid);
 
-    if (other !== undefined)
+    if (other !== undefined) {
       throw new SubspaceFileError(
         `The socket directories of ${other} and ${officer.name} share a group; give each officer's engine its own`,
       );
+    }
+
     groups.set(stats.gid, officer.name);
   }
 
@@ -129,7 +138,10 @@ async function prepare(host: SubspaceAgentsHost, log: Logger) {
     for (const officer of section.officers) {
       const key = keys.get(officer.name);
 
-      if (!officer.socketPath || !key) continue;
+      if (!officer.socketPath || !key) {
+        continue;
+      }
+
       proxies.push(
         await OfficerProxy.open({
           officer: officer.name,
@@ -185,25 +197,28 @@ export async function startSubspaceAgents(
     ...(host.fetch && { fetch: host.fetch }),
   }).then(
     (outcomes) => {
-      for (const outcome of outcomes)
-        if (outcome.state === "failed")
+      for (const outcome of outcomes) {
+        if (outcome.state === "failed") {
           log.warn(
             { officer: outcome.name, reason: outcome.error },
             "Subspace enrolment failed; run stargate subspace enrol",
           );
-        else if (outcome.state === "enrolled")
+        } else if (outcome.state === "enrolled") {
           log.info(
             { officer: outcome.name, fingerprint: outcome.fingerprint },
             "Subspace officer enrolled",
           );
+        }
+      }
     },
     (error: unknown) => {
-      if (!stop.signal.aborted)
+      if (!stop.signal.aborted) {
         log.warn(
           error instanceof SubspaceFileError
             ? error.message
             : "Subspace enrolment stopped",
         );
+      }
     },
   );
 
@@ -218,7 +233,9 @@ export async function startSubspaceAgents(
         (entry) => entry.registration === registration,
       );
 
-      if (!officer?.socketPath || backend.type !== "claude") return backend;
+      if (!officer?.socketPath || backend.type !== "claude") {
+        return backend;
+      }
 
       return {
         ...backend,

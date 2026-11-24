@@ -34,10 +34,13 @@ function databasePath() {
 }
 
 afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+  for (const store of stores.splice(0)) {
+    store.close();
+  }
 
-  for (const directory of directories.splice(0))
+  for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 describe("file-backed cron controls", () => {
@@ -132,7 +135,10 @@ describe("file-backed cron controls", () => {
 
     const accepted = store.claimDue(scope.botKey, schedule.nextAt)[0];
 
-    if (!accepted) throw new Error("Expected advanced clock run");
+    if (!accepted) {
+      throw new Error("Expected advanced clock run");
+    }
+
     expect(accepted).toMatchObject(options);
     expect(store.list(scope)[0]).toMatchObject(options);
     expect(store.report(scope.botKey)[0]).toMatchObject(options);
@@ -166,7 +172,10 @@ describe("file-backed cron controls", () => {
 
     const run = store.runNow(scope, schedule.id, now);
 
-    if (!run) throw new Error("Expected once run");
+    if (!run) {
+      throw new Error("Expected once run");
+    }
+
     store.upsertFile(scope, input, source, false, now);
     store.finish(run.id, "done", now + 1);
     const restarted = open(path);
@@ -201,14 +210,20 @@ describe("file-backed cron controls", () => {
 
     const failed = store.runNow(scope, schedule.id, now);
 
-    if (!failed) throw new Error("Expected failed run");
+    if (!failed) {
+      throw new Error("Expected failed run");
+    }
+
     store.finish(failed.id, "failed", now);
     expect(store.enabled(schedule.id)).toBe(true);
     store.finish(failed.id, "done", now + 1);
     expect(store.enabled(schedule.id)).toBe(true);
     const blocked = store.runNow(scope, schedule.id, now + 1);
 
-    if (!blocked) throw new Error("Expected blocked run");
+    if (!blocked) {
+      throw new Error("Expected blocked run");
+    }
+
     store.block(blocked.id);
     expect(store.enabled(schedule.id)).toBe(true);
     const dbPath = databasePath();
@@ -216,7 +231,10 @@ describe("file-backed cron controls", () => {
     const canceled = disk.add(scope, { ...input, once: true }, now);
     const canceledRun = disk.runNow(scope, canceled.id, now);
 
-    if (!canceledRun) throw new Error("Expected cancelable run");
+    if (!canceledRun) {
+      throw new Error("Expected cancelable run");
+    }
+
     const db = new Database(dbPath);
 
     try {
@@ -236,7 +254,10 @@ describe("file-backed cron controls", () => {
     const schedule = store.upsertFile(scope, input, source, false, now);
     const run = store.runNow(scope, schedule.id, now);
 
-    if (!run) throw new Error("Expected ordinary run");
+    if (!run) {
+      throw new Error("Expected ordinary run");
+    }
+
     store.upsertFile(scope, { ...input, once: true }, source, false, now);
     store.finish(run.id, "done", now + 1);
     expect(store.enabled(schedule.id)).toBe(true);
@@ -254,7 +275,10 @@ describe("file-backed cron controls", () => {
 
     const run = store.runNow(scope, schedule.id, now);
 
-    if (!run) throw new Error("Expected evaluation run");
+    if (!run) {
+      throw new Error("Expected evaluation run");
+    }
+
     expect(store.claimEvaluation(run.id)).toBe(true);
     expect(store.claimEvaluation(run.id)).toBe(false);
     expect(store.runNow(scope, schedule.id, now)).toBeUndefined();
@@ -292,7 +316,10 @@ describe("file-backed cron controls", () => {
       const schedule = store.add(owner, { ...input, arbiter: "chief" }, now);
       const run = store.runNow(owner, schedule.id, now);
 
-      if (!run) throw new Error("Expected evaluation run");
+      if (!run) {
+        throw new Error("Expected evaluation run");
+      }
+
       expect(store.claimEvaluation(run.id)).toBe(true);
     }
 
@@ -303,7 +330,10 @@ describe("file-backed cron controls", () => {
     expect(restarted.recentRuns("other")[0]?.status).toBe("evaluating");
     const failed = restarted.recentRuns(scope.botKey)[0];
 
-    if (!failed) throw new Error("Expected failed run");
+    if (!failed) {
+      throw new Error("Expected failed run");
+    }
+
     expect(restarted.claimEvaluation(failed.id)).toBe(false);
     expect(
       restarted.saveEvaluation(failed.id, {
@@ -328,7 +358,10 @@ describe("file-backed cron controls", () => {
 
     const run = store.runNow(scope, schedule.id, now);
 
-    if (!run) throw new Error("Expected paused manual run");
+    if (!run) {
+      throw new Error("Expected paused manual run");
+    }
+
     store.fileAvailability(scope.botKey, []);
     expect(store.claimEvaluation(run.id)).toBe(false);
     store.fileAvailability(scope.botKey, [source]);
@@ -350,7 +383,10 @@ describe("file-backed cron controls", () => {
     const schedule = store.add(scope, input, now);
     const run = store.runNow(scope, schedule.id, now);
 
-    if (!run) throw new Error("Expected run");
+    if (!run) {
+      throw new Error("Expected run");
+    }
+
     const db = new Database(path);
 
     try {
@@ -584,7 +620,10 @@ describe("file-backed cron controls", () => {
     const manual = store.runNow(scope, paused.id, now);
     expect(manual?.manual).toBe(true);
 
-    if (!manual) throw new Error("Expected paused manual run");
+    if (!manual) {
+      throw new Error("Expected paused manual run");
+    }
+
     expect(store.announcing(manual.id)).toBe(true);
     expect(() =>
       store.upsertFile(scope, { ...input, prompt: "" }, source, false, now),
@@ -603,7 +642,10 @@ describe("file-backed cron controls", () => {
     const schedule = store.upsertFile(scope, input, source, false, now);
     const accepted = store.claimDue(scope.botKey, now + 60_000)[0];
 
-    if (!accepted) throw new Error("Expected scheduled run");
+    if (!accepted) {
+      throw new Error("Expected scheduled run");
+    }
+
     store.upsertFile(
       scope,
       { ...input, name: "Changed", prompt: "Changed private prompt." },
@@ -619,7 +661,10 @@ describe("file-backed cron controls", () => {
     store.finish(accepted.id, "done");
     const manual = store.runNow(scope, schedule.id, now);
 
-    if (!manual) throw new Error("Expected manual run");
+    if (!manual) {
+      throw new Error("Expected manual run");
+    }
+
     store.upsertFile(scope, input, source, false, now);
     expect(store.pending(scope.botKey)[0]).toEqual(manual);
     expect(manual.prompt).toBe("Changed private prompt.");
@@ -631,13 +676,19 @@ describe("file-backed cron controls", () => {
     const schedule = store.add(scope, { ...input, report: "daily" }, now);
     const run = store.runNow(scope, schedule.id, now);
 
-    if (!run) throw new Error("Expected manual run");
+    if (!run) {
+      throw new Error("Expected manual run");
+    }
+
     expect(store.prepareDeferred(run.id)).toBe(true);
     const otherScope = { ...scope, botKey: "other" };
     const otherSchedule = store.add(otherScope, input, now);
     const otherRun = store.runNow(otherScope, otherSchedule.id, now);
 
-    if (!otherRun) throw new Error("Expected other bot run");
+    if (!otherRun) {
+      throw new Error("Expected other bot run");
+    }
+
     store.announcing(otherRun.id);
     const restarted = open(path);
     expect(restarted.recoverAnnouncements(scope.botKey)).toBe(0);
@@ -658,7 +709,10 @@ describe("file-backed cron controls", () => {
     const schedule = store.upsertFile(scope, input, source, false, now);
     const run = store.claimDue(scope.botKey, now + 60_000)[0];
 
-    if (!run) throw new Error("Expected scheduled run");
+    if (!run) {
+      throw new Error("Expected scheduled run");
+    }
+
     store.upsertFile(scope, input, source, true, now);
     expect(store.prepareDeferred(run.id)).toBe(false);
     store.upsertFile(scope, input, source, false, now);
@@ -670,12 +724,18 @@ describe("file-backed cron controls", () => {
     store.upsertFile(scope, input, source, true, now);
     const manual = store.runNow(scope, schedule.id, now + 60_002);
 
-    if (!manual) throw new Error("Expected paused manual run");
+    if (!manual) {
+      throw new Error("Expected paused manual run");
+    }
+
     expect(store.prepareDeferred(manual.id)).toBe(true);
     store.finish(manual.id, "done", now + 60_003);
     const removed = store.runNow(scope, schedule.id, now + 60_004);
 
-    if (!removed) throw new Error("Expected removable run");
+    if (!removed) {
+      throw new Error("Expected removable run");
+    }
+
     store.remove(scope, schedule.id);
     expect(store.prepareDeferred(removed.id)).toBe(false);
     expect(store.prepareDeferred(crypto.randomUUID())).toBe(false);
@@ -687,7 +747,10 @@ describe("file-backed cron controls", () => {
     const schedule = store.add(scope, input, now);
     const first = store.runNow(scope, input.name, now, "click-1");
 
-    if (!first) throw new Error("Expected manual run");
+    if (!first) {
+      throw new Error("Expected manual run");
+    }
+
     expect(first).toMatchObject({ ...input, dueAt: now, manual: true });
     expect(store.list(scope)[0]?.nextAt).toBe(schedule.nextAt);
     const second = open(path);
@@ -699,7 +762,10 @@ describe("file-backed cron controls", () => {
     const later = second.runNow(scope, schedule.id, now, "click-2");
     expect(later?.dueAt).toBe(now + 1);
 
-    if (!later) throw new Error("Expected second manual run");
+    if (!later) {
+      throw new Error("Expected second manual run");
+    }
+
     second.finish(later.id, "failed");
     expect(store.runNow(scope, schedule.id, now)?.dueAt).toBe(now + 2);
   });
@@ -734,10 +800,17 @@ describe("file-backed cron controls", () => {
   test("safe boundary validation does not store invalid data", () => {
     const store = open();
 
-    for (const path of ["relative.md", "", "/jobs/\0secret", "a".repeat(5000)])
+    for (const path of [
+      "relative.md",
+      "",
+      "/jobs/\0secret",
+      "a".repeat(5000),
+    ]) {
       expect(() => store.upsertFile(scope, input, path, false, now)).toThrow(
         "Invalid cron file source.",
       );
+    }
+
     expect(() =>
       store.fileAvailability(scope.botKey, Array(101).fill(source)),
     ).toThrow();
@@ -784,19 +857,25 @@ describe("cron metadata reports", () => {
 
       const run = store.runNow(scope, job.id, now + index);
 
-      if (!run) throw new Error("Expected daily run");
+      if (!run) {
+        throw new Error("Expected daily run");
+      }
 
-      if (status === "done" || status === "failed")
+      if (status === "done" || status === "failed") {
         store.finish(run.id, status, now + index);
-      else if (status === "canceled") store.remove(scope, job.id);
-      else if (status !== "pending") {
+      } else if (status === "canceled") {
+        store.remove(scope, job.id);
+      } else if (status !== "pending") {
         store.announcing(run.id);
 
         if (status !== "announcing") {
           store.announced(run.id, "1.000");
 
-          if (status === "queued") store.enqueued(run.id, index);
-          else if (status === "blocked") store.block(run.id);
+          if (status === "queued") {
+            store.enqueued(run.id, index);
+          } else if (status === "blocked") {
+            store.block(run.id);
+          }
         }
       }
 
@@ -855,12 +934,14 @@ describe("cron metadata reports", () => {
   test("daily results include scheduled runs and remain bounded at 100", () => {
     const store = open();
 
-    for (let index = 0; index < 101; index++)
+    for (let index = 0; index < 101; index++) {
       store.add(
         scope,
         { ...input, report: "daily", name: `Daily ${index}` },
         now,
       );
+    }
+
     expect(store.claimDue(scope.botKey, now + 60_000)).toHaveLength(100);
     expect(store.claimDue(scope.botKey, now + 60_000)).toHaveLength(1);
     const results = store.dailyResults(scope.botKey, now, now + 120_000);
@@ -878,7 +959,10 @@ describe("cron metadata reports", () => {
     const schedule = store.add(scope, { ...input, report: "daily" }, now);
     const run = store.runNow(scope, schedule.id, now);
 
-    if (!run) throw new Error("Expected overnight run");
+    if (!run) {
+      throw new Error("Expected overnight run");
+    }
+
     store.prepareDeferred(run.id);
     store.enqueued(run.id, 7);
     expect(
@@ -916,7 +1000,10 @@ describe("cron metadata reports", () => {
     const schedule = store.add(scope, { ...input, report: "daily" }, now);
     const run = store.runNow(scope, schedule.id, now);
 
-    if (!run) throw new Error("Expected daily run");
+    if (!run) {
+      throw new Error("Expected daily run");
+    }
+
     store.finish(run.id, "failed", now + 1000);
     expect(
       store.dailyResults(scope.botKey, now + 1000, now + 2000),
@@ -924,7 +1011,10 @@ describe("cron metadata reports", () => {
     expect(store.dailyResults(scope.botKey, now + 1, now + 1000)).toEqual([]);
     const future = store.runNow(scope, schedule.id, now + 4000);
 
-    if (!future) throw new Error("Expected future run");
+    if (!future) {
+      throw new Error("Expected future run");
+    }
+
     store.finish(future.id, "done", now + 2000);
     expect(store.dailyResults(scope.botKey, now + 2000, now + 3000)).toEqual(
       [],
@@ -936,7 +1026,10 @@ describe("cron metadata reports", () => {
     const first = store.upsertFile(scope, input, source, true, now);
     const run = store.runNow(scope, first.id, now);
 
-    if (!run) throw new Error("Expected manual run");
+    if (!run) {
+      throw new Error("Expected manual run");
+    }
+
     store.finish(run.id, "done");
     store.upsertFile(scope, input, "/jobs/missing.md", false, now + 1);
     store.fileAvailability(scope.botKey, [source]);
@@ -965,8 +1058,10 @@ describe("cron metadata reports", () => {
     expect(JSON.stringify(store.report(scope.botKey))).not.toContain("prompt");
     expect(JSON.stringify(store.report(scope.botKey))).not.toContain(source);
 
-    for (let index = 0; index < 105; index++)
+    for (let index = 0; index < 105; index++) {
       store.add(scope, { ...input, name: `Job ${index}` }, now + index);
+    }
+
     expect(store.report(scope.botKey)).toHaveLength(100);
     expect(store.report("other")).toHaveLength(1);
   });
@@ -988,8 +1083,10 @@ describe("cron metadata reports", () => {
       { botKey: "other" },
       { channel: "C999" },
       { user: "U999" },
-    ])
+    ]) {
       expect(store.claimDailyReport({ ...scope, ...change }, date)).toBe(true);
+    }
+
     store.finishDailyReport(scope, "2026-01-03", "done");
     expect(store.claimDailyReport(scope, "2026-01-03")).toBe(true);
   });
@@ -997,10 +1094,17 @@ describe("cron metadata reports", () => {
   test("daily dates validate calendar days and safe ownership", () => {
     const store = open();
 
-    for (const date of ["2026-1-01", "2026-02-29", "2026-04-31", "2026-01-01x"])
+    for (const date of [
+      "2026-1-01",
+      "2026-02-29",
+      "2026-04-31",
+      "2026-01-01x",
+    ]) {
       expect(() => store.claimDailyReport(scope, date)).toThrow(
         "Invalid cron report date.",
       );
+    }
+
     expect(() => store.finishDailyReport(scope, "", "done")).toThrow();
     expect(() =>
       store.claimDailyReport({ ...scope, user: "" }, "2026-01-01"),

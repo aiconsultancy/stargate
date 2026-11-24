@@ -12,7 +12,9 @@ import { bot, event, identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 function fixture(
@@ -63,7 +65,9 @@ function fixture(
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
 
     return job;
   };
@@ -236,7 +240,10 @@ test("live peer limits enforce caps above the old query bound", () => {
 
   configure(101);
 
-  for (let index = 1; index <= 101; index++) expect(send(index)).toBe(true);
+  for (let index = 1; index <= 101; index++) {
+    expect(send(index)).toBe(true);
+  }
+
   expect(send(102)).toBe(false);
   configure(102);
   expect(send(102)).toBe(true);

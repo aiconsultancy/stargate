@@ -93,10 +93,16 @@ const crewBranchDecoders = new Map<
 // Acknowledgement behind a root error. Delegate to the known branch first.
 export const crewInputSchema = Schema.Unknown.check(
   Schema.makeFilter((raw) => {
-    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string") return;
+    if (!Predicate.isObject(raw) || typeof raw["op"] !== "string") {
+      return;
+    }
+
     const decode = crewBranchDecoders.get(raw["op"]);
 
-    if (!decode) return;
+    if (!decode) {
+      return;
+    }
+
     const result = decode(raw);
 
     return Result.isFailure(result) ? result.failure.issue : undefined;
@@ -121,7 +127,7 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
 
   const fields = new Map<string, Schema.Constraint[]>();
 
-  for (const member of crewInputBranches.members)
+  for (const member of crewInputBranches.members) {
     for (const [key, field] of Object.entries<Schema.Constraint>(
       member.fields,
     )) {
@@ -133,6 +139,7 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
       );
       fields.set(key, variants);
     }
+  }
 
   const properties: Record<string, unknown> = {};
 
@@ -149,7 +156,9 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
     for (const schema of schemas) {
       delete schema["default"];
 
-      if (key === "reason") delete schema["pattern"];
+      if (key === "reason") {
+        delete schema["pattern"];
+      }
     }
 
     const only = schemas[0];
@@ -187,13 +196,14 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
   const order = Object.keys(properties);
 
   const project = (target: StandardJSONSchemaV1.Target) => {
-    if (target === "draft-2020-12")
+    if (target === "draft-2020-12") {
       return structuredClone({
         $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12,
         ...json,
       });
+    }
 
-    if (target === "draft-07")
+    if (target === "draft-07") {
       return structuredClone({
         $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
         ...JsonSchema.toDocumentDraft07({
@@ -202,6 +212,8 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
           definitions: {},
         }).schema,
       });
+    }
+
     throw new Error(`Unsupported crew schema target: ${target}`);
   };
 
@@ -217,7 +229,7 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
             const { project: _project, ...input } = raw;
             const failed = operation(input);
 
-            if (Result.isFailure(failed))
+            if (Result.isFailure(failed)) {
               return {
                 issues: [
                   ...settingsIssues(result.failure.issue).issues.filter(
@@ -226,6 +238,7 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
                   ...settingsIssues(failed.failure.issue).issues,
                 ],
               };
+            }
           }
 
           return settingsIssues(result.failure.issue);
@@ -234,11 +247,16 @@ export function crewOpenCodeInput(): StandardSchemaV1<Record<string, unknown>> &
         const value: Record<string, unknown> = {};
 
         for (const key of order) {
-          if (!Object.hasOwn(result.success, key)) continue;
+          if (!Object.hasOwn(result.success, key)) {
+            continue;
+          }
+
           const rawValue = result.success[key];
           value[key] = rawValue;
 
-          if (rawValue === undefined) continue;
+          if (rawValue === undefined) {
+            continue;
+          }
 
           for (const decode of decoders.get(key) ?? []) {
             const decoded = decode(rawValue);
@@ -274,7 +292,7 @@ export function crewPiParameters() {
     delete json["anyOf"];
   }
 
-  if (Array.isArray(branches))
+  if (Array.isArray(branches)) {
     for (const branch of branches) {
       const properties = Predicate.isObject(branch)
         ? branch["properties"]
@@ -284,8 +302,11 @@ export function crewPiParameters() {
         ? properties["reason"]
         : undefined;
 
-      if (Predicate.isObject(reason)) delete reason["pattern"];
+      if (Predicate.isObject(reason)) {
+        delete reason["pattern"];
+      }
     }
+  }
 
   return { $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12, ...json };
 }
@@ -326,17 +347,20 @@ export function quotaToolInput(): StandardSchemaV1<Record<string, unknown>> &
   };
 
   const project = ({ target }: { target: StandardJSONSchemaV1.Target }) => {
-    if (target === "draft-2020-12")
+    if (target === "draft-2020-12") {
       return structuredClone({
         $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12,
         ...json,
       });
+    }
 
-    if (target === "draft-07")
+    if (target === "draft-07") {
       return structuredClone({
         $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
         ...json,
       });
+    }
+
     throw new Error(`Unsupported quota schema target: ${target}`);
   };
 
@@ -348,8 +372,10 @@ export function quotaToolInput(): StandardSchemaV1<Record<string, unknown>> &
       validate: (raw) => {
         const object = decodeToolObject(raw);
 
-        if (Result.isFailure(object))
+        if (Result.isFailure(object)) {
           return settingsIssues(object.failure.issue);
+        }
+
         const input = object.success;
         const issues: StandardSchemaV1.Issue[] = [];
         const value: Record<string, unknown> = {};
@@ -360,26 +386,36 @@ export function quotaToolInput(): StandardSchemaV1<Record<string, unknown>> &
           if (input["project"] !== undefined) {
             const key = decodeProjectKey(input["project"]);
 
-            if (Result.isFailure(key))
-              for (const issue of settingsIssues(key.failure.issue).issues)
+            if (Result.isFailure(key)) {
+              for (const issue of settingsIssues(key.failure.issue).issues) {
                 issues.push({
                   ...issue,
                   path: ["project", ...(issue.path ?? [])],
                 });
+              }
+            }
           }
         }
 
         const unknown: string[] = [];
 
-        for (const key in input) if (key !== "project") unknown.push(key);
+        for (const key in input) {
+          if (key !== "project") {
+            unknown.push(key);
+          }
+        }
 
-        if (unknown.length > 0)
+        if (unknown.length > 0) {
           issues.push({
             path: [],
             message: `Unrecognized key${unknown.length === 1 ? "" : "s"}: ${unknown.map((key) => JSON.stringify(key)).join(", ")}`,
           });
+        }
 
-        if (issues.length > 0) return { issues };
+        if (issues.length > 0) {
+          return { issues };
+        }
+
         const { project: _project, ...rest } = input;
         const quota = decodeQuotaInput(rest);
 

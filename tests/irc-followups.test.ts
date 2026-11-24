@@ -11,7 +11,9 @@ import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 test("IRC same-root follow-up steers despite its unique msgid; other roots queue and final stays on original root", async () => {
@@ -46,7 +48,10 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
 
   const captain = ship.registrations[0];
 
-  if (!captain) throw new Error("Missing captain");
+  if (!captain) {
+    throw new Error("Missing captain");
+  }
+
   const finish = Promise.withResolvers<string>();
   const prompts: string[] = [];
   let latestAnswer = "";
@@ -65,7 +70,10 @@ test("IRC same-root follow-up steers despite its unique msgid; other roots queue
       return latestAnswer;
     },
     async transcript(_s, after) {
-      if (after === undefined) return { cursor: "", entries: [] };
+      if (after === undefined) {
+        return { cursor: "", entries: [] };
+      }
+
       const input = `msg_input_${prompts.length}`;
 
       return {

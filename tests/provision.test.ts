@@ -161,11 +161,13 @@ test.each([
       environment: {},
     });
 
-    if (enabled)
+    if (enabled) {
       await expect(result).rejects.toThrow(
         "does not match the original plan/config",
       );
-    else expect((await result).bots[0]?.app).toBe("planned");
+    } else {
+      expect((await result).bots[0]?.app).toBe("planned");
+    }
   },
 );
 

@@ -145,7 +145,10 @@ test("append-only identity compares raw member order and shallow record values",
   expect(canExpandCrew(fingerprint, JSON.stringify(next))).toBe(true);
   const first = previous.crew[0];
 
-  if (!first) throw new Error("Missing identity fixture");
+  if (!first) {
+    throw new Error("Missing identity fixture");
+  }
+
   const reordered = Object.fromEntries(Object.entries(first).reverse());
   expect(
     canExpandCrew(
@@ -185,11 +188,13 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
   const decode = (input: unknown) => {
     const result = envelope.validate(input);
 
-    if (result instanceof Promise)
+    if (result instanceof Promise) {
       throw new Error("Expected synchronous native model validation");
+    }
 
-    if (result.issues)
+    if (result.issues) {
       throw new Error(result.issues.map((issue) => issue.message).join("\n"));
+    }
 
     return result.value;
   };
@@ -205,15 +210,18 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
   expect(json["required"]).toEqual(["op"]);
   expect(json["additionalProperties"]).toBe(false);
 
-  for (const keyword of ["anyOf", "oneOf", "allOf"])
+  for (const keyword of ["anyOf", "oneOf", "allOf"]) {
     expect(json).not.toHaveProperty(keyword);
+  }
 
   for (const input of [
     { op: "get" },
     { op: "list" },
     { op: "switch", providerID: "fixture", id: "model" },
-  ])
+  ]) {
     expect(decode(input)).toEqual(input);
+  }
+
   expect(
     JSON.stringify(
       decode({
@@ -247,8 +255,10 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
     { op: "effort", target: "shaw", variant: "" },
     { op: "switch", providerID: "fixture", id: "model", extra: true },
     { op: "get", target: null },
-  ])
+  ]) {
     expect(() => decode(input)).toThrow();
+  }
+
   expect(
     defaults({ op: "effort", target: "shaw", variant: "𐐀".repeat(100) }).op,
   ).toBe("effort");
@@ -263,8 +273,10 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
   ).toBe(true);
   const invalid = envelope.validate({ op: "inspect", project: "../bad" });
 
-  if (invalid instanceof Promise)
+  if (invalid instanceof Promise) {
     throw new Error("Expected synchronous native model validation");
+  }
+
   expect(invalid.issues).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ path: ["project"] }),
@@ -276,8 +288,10 @@ test("model native envelope preserves raw arguments, branch defaults and strictn
     op: "unknown",
   });
 
-  if (Result.isSuccess(unknown))
+  if (Result.isSuccess(unknown)) {
     throw new Error("Unknown model operation accepted");
+  }
+
   expect(unknown.failure.message).toContain('["op"]');
 });
 

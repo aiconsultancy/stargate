@@ -56,8 +56,10 @@ function directiveStrings(source: SourceFile) {
         if (
           !isExpressionStatement(statement) ||
           !isStringLiteral(statement.expression)
-        )
+        ) {
           break;
+        }
+
         found.add(statement.expression);
       }
     }
@@ -82,8 +84,10 @@ function tokens(gap: string) {
   while (scanner.scan() !== SyntaxKind.EndOfFile) {
     const end = scanner.getTokenEnd();
 
-    if (end <= last || end > gap.length)
+    if (end <= last || end > gap.length) {
       throw new Error("Non-progressing TypeScript token scanner");
+    }
+
     last = end;
     found.push(scanner.getTokenText());
   }
@@ -133,17 +137,23 @@ function gaps(node: Node, source: SourceFile, descendants: Node[]) {
     tail[0] === "," &&
     tail[1] === close &&
     tail.length === 2
-  )
+  ) {
     tail.shift();
+  }
+
   uncovered.push(tail);
 
   return JSON.stringify(uncovered);
 }
 
 function inTaggedTemplate(node: Node, child: Node, tagged: boolean) {
-  if (isTaggedTemplateExpression(node)) return child === node.template;
+  if (isTaggedTemplateExpression(node)) {
+    return child === node.template;
+  }
 
-  if (tagged && isTemplateExpression(node)) return true;
+  if (tagged && isTemplateExpression(node)) {
+    return true;
+  }
 
   return tagged && isTemplateSpan(node) && child === node.literal;
 }
@@ -177,29 +187,37 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
     const y = literal(right, b);
 
     if (isRegularExpressionLiteral(a) && isRegularExpressionLiteral(b)) {
-      if (x !== y) difference("regex", x, y);
+      if (x !== y) {
+        difference("regex", x, y);
+      }
 
       return;
     }
 
     if (directivesLeft.has(a) || directivesRight.has(b)) {
-      if (x !== y || directivesLeft.has(a) !== directivesRight.has(b))
+      if (x !== y || directivesLeft.has(a) !== directivesRight.has(b)) {
         difference("directive", x, y);
+      }
 
       return;
     }
 
     if (isNumericLiteral(a) && isNumericLiteral(b)) {
-      if (!Object.is(Number(a.text), Number(b.text)))
+      if (!Object.is(Number(a.text), Number(b.text))) {
         difference("numeric value", x, y);
-      else if (x !== y) reasons.add("numeric form");
+      } else if (x !== y) {
+        reasons.add("numeric form");
+      }
 
       return;
     }
 
     if (isBigIntLiteral(a) && isBigIntLiteral(b)) {
-      if (value(x) !== value(y)) difference("bigint value", x, y);
-      else if (x !== y) reasons.add("numeric form");
+      if (value(x) !== value(y)) {
+        difference("bigint value", x, y);
+      } else if (x !== y) {
+        reasons.add("numeric form");
+      }
 
       return;
     }
@@ -208,9 +226,13 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
       (isStringLiteral(a) && isStringLiteral(b)) ||
       (isTemplateLiteralToken(a) && isTemplateLiteralToken(b))
     ) {
-      if (a.text !== b.text) difference("cooked value", x, y);
-      else if (tagged && x !== y) difference("tagged raw value", x, y);
-      else if (x !== y) reasons.add("escape form");
+      if (a.text !== b.text) {
+        difference("cooked value", x, y);
+      } else if (tagged && x !== y) {
+        difference("tagged raw value", x, y);
+      } else if (x !== y) {
+        reasons.add("escape form");
+      }
 
       return;
     }
@@ -229,7 +251,9 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
     }
 
     if (ac.length === 0) {
-      if (x !== y) difference("token text", x, y);
+      if (x !== y) {
+        difference("token text", x, y);
+      }
 
       return;
     }
@@ -239,13 +263,17 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
     const ag = gaps(a, left, ac);
     const bg = gaps(b, right, bc);
 
-    if (ag !== bg) difference("structural tokens", ag, bg);
+    if (ag !== bg) {
+      difference("structural tokens", ag, bg);
+    }
 
     for (const [index, child] of ac.entries()) {
       const other = bc[index];
 
-      if (!other)
+      if (!other) {
         throw new Error("TypeScript child count changed during comparison");
+      }
+
       stack.push({
         a: child,
         b: other,
@@ -257,10 +285,13 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
   const before = shebang(left.text);
   const after = shebang(right.text);
 
-  if (before !== after) difference("shebang", before, after);
+  if (before !== after) {
+    difference("shebang", before, after);
+  }
 
-  for (let next = stack.pop(); next; next = stack.pop())
+  for (let next = stack.pop(); next; next = stack.pop()) {
     visit(next.a, next.b, next.tagged);
+  }
 
   return {
     equal: differences.length === 0,
@@ -275,8 +306,9 @@ function compareTrees(left: SourceFile, right: SourceFile): Result {
 }
 
 async function comparePair({ path, before, after }: Pair): Promise<Result> {
-  if (before === after)
+  if (before === after) {
     return { equal: true, reasons: ["raw"], differences: [] };
+  }
 
   const suffix = /\.[cm]?jsx?$/.exec(path)?.[0] ?? ".js";
 
@@ -310,12 +342,16 @@ async function comparePair({ path, before, after }: Pair): Promise<Result> {
     try {
       const program = snapshot.getProjects()[0]?.program;
 
-      if (!program) throw new Error("Could not load TypeScript's JS parser");
+      if (!program) {
+        throw new Error("Could not load TypeScript's JS parser");
+      }
+
       const a = await program.getSourceFile(left);
       const b = await program.getSourceFile(right);
 
-      if (!a || !b || a.text !== before || b.text !== after)
+      if (!a || !b || a.text !== before || b.text !== after) {
         throw new Error(`Parser input mismatch: ${path}`);
+      }
 
       if (
         (await program.getSyntacticDiagnostics(left)).length > 0 ||
@@ -352,7 +388,10 @@ async function listDirectory(root: string, dir = ""): Promise<string[]> {
     if (entry.isDirectory()) {
       files.push(...(await listDirectory(root, path)));
     } else if (/\.(?:[cm]?js|jsx)$/.test(path)) {
-      if (!entry.isFile()) throw new Error(`Not a regular JS output: ${path}`);
+      if (!entry.isFile()) {
+        throw new Error(`Not a regular JS output: ${path}`);
+      }
+
       files.push(path);
     }
   }
@@ -408,10 +447,11 @@ async function capture(output: string) {
 async function main() {
   const [, , a, b, ...extra] = process.argv;
 
-  if (!a || !b || extra.length > 0)
+  if (!a || !b || extra.length > 0) {
     throw new Error(
       "Usage: bun scripts/compare-js-emit.ts --capture OUT_DIR | BEFORE_DIR AFTER_DIR",
     );
+  }
 
   if (a === "--capture") {
     await capture(b);
@@ -450,7 +490,11 @@ async function main() {
     JSON.stringify({ counts, files: Object.fromEntries(files) }, null, 2),
   );
 
-  if (counts["fail"]) process.exitCode = 1;
+  if (counts["fail"]) {
+    process.exitCode = 1;
+  }
 }
 
-if (import.meta.main) await main();
+if (import.meta.main) {
+  await main();
+}

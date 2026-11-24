@@ -36,7 +36,9 @@ export function fleetRequest(
                 "Fleet response exceeded its private response limit.",
               ),
             );
-          } else chunks.push(chunk);
+          } else {
+            chunks.push(chunk);
+          }
         });
         response.once("error", () => {
           reject(
@@ -51,14 +53,18 @@ export function fleetRequest(
               Buffer.concat(chunks).toString("utf8"),
             );
 
-            if (typeof value !== "object" || value === null)
+            if (typeof value !== "object" || value === null) {
               throw new Error("Fleet response is not an object");
+            }
 
-            if ("error" in value && typeof value.error === "string")
+            if ("error" in value && typeof value.error === "string") {
               throw new FleetError(value.error);
+            }
 
-            if (response.statusCode !== 200 || !("result" in value))
+            if (response.statusCode !== 200 || !("result" in value)) {
               throw new Error("Fleet response has no result");
+            }
+
             resolve(value.result);
           } catch (error) {
             reject(

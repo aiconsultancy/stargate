@@ -67,7 +67,10 @@ test("a due cron prompt runs through the existing gateway and replies in its sch
     await scheduler.tick(now + 60_000, signal);
     const job = store.ready(gateway.key, now + 60_000, 1)[0];
 
-    if (!job) throw new Error("Scheduled prompt was not queued");
+    if (!job) {
+      throw new Error("Scheduled prompt was not queued");
+    }
+
     expect(job.thread).toBe("20.000");
     await gateway.process(job, signal);
     await scheduler.tick(now + 60_000, signal);

@@ -37,8 +37,9 @@ function git(dir: string, ...args: string[]) {
     encoding: "utf8",
   });
 
-  if (result.status !== 0)
+  if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+  }
 
   return result.stdout.trim();
 }

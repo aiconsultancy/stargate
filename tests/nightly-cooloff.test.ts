@@ -40,7 +40,9 @@ const server = Bun.serve({
   fetch(request) {
     const url = new URL(request.url);
 
-    if (url.pathname === "/@opencode%2Fcli") return Response.json(packument);
+    if (url.pathname === "/@opencode%2Fcli") {
+      return Response.json(packument);
+    }
 
     return new Response("missing", { status: 404 });
   },

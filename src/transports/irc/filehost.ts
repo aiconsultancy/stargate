@@ -21,15 +21,23 @@ import { isLoopbackAddress } from "../../lib/loopback";
  * forbids HTTP under TLS IRC). Never credentials, query or fragment.
  */
 export function filehostURL(value: string, tlsIrc: boolean) {
-  if (!URL.canParse(value)) return;
+  if (!URL.canParse(value)) {
+    return;
+  }
+
   const url = new URL(value);
 
-  if (url.username || url.password || url.search || url.hash) return;
+  if (url.username || url.password || url.search || url.hash) {
+    return;
+  }
 
-  if (url.protocol === "https:") return url;
-
-  if (url.protocol === "http:" && !tlsIrc && isLoopbackAddress(url.hostname))
+  if (url.protocol === "https:") {
     return url;
+  }
+
+  if (url.protocol === "http:" && !tlsIrc && isLoopbackAddress(url.hostname)) {
+    return url;
+  }
 
   return;
 }
@@ -61,8 +69,9 @@ function safeMime(header: string | null, data: Uint8Array) {
     /^\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b|<script\b|<svg\b)/i.test(
       start,
     )
-  )
+  ) {
     return "text/plain";
+  }
 
   return mimePattern.test(declared) ? declared : "application/octet-stream";
 }
@@ -103,7 +112,10 @@ async function readBounded(
 ) {
   const reader = response.body?.getReader();
 
-  if (!reader) throw new Error("FILEHOST response has no body");
+  if (!reader) {
+    throw new Error("FILEHOST response has no body");
+  }
+
   const parts: Uint8Array[] = [];
   let used = 0;
 
@@ -112,10 +124,16 @@ async function readBounded(
       signal.throwIfAborted();
       const chunk = await reader.read();
 
-      if (chunk.done) break;
+      if (chunk.done) {
+        break;
+      }
+
       used += chunk.value.byteLength;
 
-      if (used > limit) throw new Error("FILEHOST file too large");
+      if (used > limit) {
+        throw new Error("FILEHOST file too large");
+      }
+
       parts.push(chunk.value);
     }
   } finally {
@@ -151,21 +169,26 @@ function uploadDisposition(name: string) {
 }
 
 function uploadedLocation(response: Response, target: URL) {
-  if (response.status !== 201)
+  if (response.status !== 201) {
     throw refusedStatuses.has(response.status)
       ? new UploadRefused()
       : new Error("FILEHOST upload unconfirmed");
+  }
+
   const location = response.headers.get("location");
 
-  if (!location) throw new Error("FILEHOST upload unconfirmed");
+  if (!location) {
+    throw new Error("FILEHOST upload unconfirmed");
+  }
 
   // Public links must stay on the FILEHOST origin and omit credentials.
   const url = URL.canParse(location, target)
     ? new URL(location, target)
     : undefined;
 
-  if (!url || !safeFileURL(url, target))
+  if (!url || !safeFileURL(url, target)) {
     throw new Error("FILEHOST returned an unsafe location");
+  }
 
   return url.href;
 }
@@ -194,7 +217,9 @@ export class Filehost {
   private uploadURL(): URL {
     const url = this.url();
 
-    if (!url) throw new UploadRefused();
+    if (!url) {
+      throw new UploadRefused();
+    }
 
     return url;
   }
@@ -222,7 +247,9 @@ export class Filehost {
   public owns(value: string) {
     const host = this.url();
 
-    if (!host || !URL.canParse(value)) return false;
+    if (!host || !URL.canParse(value)) {
+      return false;
+    }
 
     return safeFileURL(new URL(value), host);
   }
@@ -231,12 +258,18 @@ export class Filehost {
     urls: readonly string[],
     signal: AbortSignal,
   ): Promise<Attachment[]> {
-    if (urls.length > maxAttachments) throw new Error("Too many attachments");
+    if (urls.length > maxAttachments) {
+      throw new Error("Too many attachments");
+    }
+
     const files: Attachment[] = [];
     let total = 0;
 
     for (const value of urls) {
-      if (!this.owns(value)) throw new Error("File is not on the FILEHOST");
+      if (!this.owns(value)) {
+        throw new Error("File is not on the FILEHOST");
+      }
+
       const url = new URL(value);
       let response: Response;
 
@@ -248,17 +281,23 @@ export class Filehost {
       }
 
       try {
-        if (response.status !== 200)
+        if (response.status !== 200) {
           throw new Error("FILEHOST download failed");
+        }
+
         const declared = response.headers.get("content-length");
 
-        if (declared !== null && Number(declared) > maxAttachmentBytes)
+        if (declared !== null && Number(declared) > maxAttachmentBytes) {
           throw new Error("FILEHOST file too large");
+        }
+
         const data = await readBounded(response, maxAttachmentBytes, signal);
         total += data.byteLength;
 
-        if (total > maxAttachmentTotalBytes)
+        if (total > maxAttachmentTotalBytes) {
           throw new Error("FILEHOST files too large");
+        }
+
         files.push({
           name: fileName(response.headers.get("content-disposition"), url),
           mime: safeMime(response.headers.get("content-type"), data),

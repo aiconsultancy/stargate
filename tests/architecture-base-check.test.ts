@@ -52,7 +52,9 @@ function git(root: string, ...args: string[]) {
     { cwd: root, encoding: "utf8", timeout: 30_000 },
   );
 
-  if (result.status !== 0) throw new Error(result.stderr);
+  if (result.status !== 0) {
+    throw new Error(result.stderr);
+  }
 
   return result.stdout.trim();
 }
@@ -91,7 +93,9 @@ async function baselineHash(root: string, revision: string) {
     timeout: 30_000,
   });
 
-  if (shown.status !== 0) throw new Error(String(shown.stderr));
+  if (shown.status !== 0) {
+    throw new Error(String(shown.stderr));
+  }
 
   return createHash("sha256").update(shown.stdout).digest("hex");
 }
@@ -165,7 +169,10 @@ async function fixture() {
     { cwd: root, encoding: "utf8", timeout: 30_000 },
   );
 
-  if (format.status !== 0) throw new Error(format.stderr);
+  if (format.status !== 0) {
+    throw new Error(format.stderr);
+  }
+
   git(root, "init", "-q", "-b", "main");
   git(root, "config", "user.name", "Baseline Check Fixture");
   git(root, "config", "user.email", "fixture@example.invalid");
@@ -212,7 +219,9 @@ function refresh(root: string, base: string, args: string[]) {
     { cwd: root, encoding: "utf8", timeout: 60_000 },
   );
 
-  if (result.status !== 0) throw new Error(result.stderr);
+  if (result.status !== 0) {
+    throw new Error(result.stderr);
+  }
 }
 
 /** A reviewed extraction: new leaf joins the closure, declared by name. */
@@ -238,7 +247,9 @@ async function exceptionLowering(root: string) {
   await editJson<Policy>(root, POLICY, (policy) => {
     const slice = policy.slices["b"];
 
-    if (slice) slice.public = ["src/b/private.ts"];
+    if (slice) {
+      slice.public = ["src/b/private.ts"];
+    }
   });
   refresh(root, parent, ["--prune-stale"]);
 }
@@ -525,7 +536,9 @@ describe("architecture baseline check against the first parent", () => {
     await editJson<Policy>(root, POLICY, (policy) => {
       const slice = policy.slices["b"];
 
-      if (slice) slice.public = ["src/b/private.ts"];
+      if (slice) {
+        slice.public = ["src/b/private.ts"];
+      }
     });
     refresh(root, head, ["--prune-stale"]);
     const outside = await mkdtemp(join(tmpdir(), "stargate-summary-"));
@@ -606,7 +619,9 @@ describe("architecture baseline check against the first parent", () => {
         workflow,
       )?.[1];
 
-    if (!block) throw new Error("Missing hosted comparison step");
+    if (!block) {
+      throw new Error("Missing hosted comparison step");
+    }
 
     const shell =
       `mise() { shift 3; "$BUN_EXEC" "$@"; }\n` +
@@ -647,10 +662,12 @@ describe("architecture baseline check against the first parent", () => {
   test("names every unusable event input", async () => {
     const { root, base, head } = await fixture();
 
-    for (const before of ["", "0".repeat(40)])
+    for (const before of ["", "0".repeat(40)]) {
       expect(run(root, ["--push-before", before]).stderr).toContain(
         "event:push-before-missing",
       );
+    }
+
     await files(root, { "README.md": "# Second commit\n" });
     commit(root, "second");
     expect(run(root, ["--push-before", base]).stderr).toContain(

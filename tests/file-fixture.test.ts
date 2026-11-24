@@ -17,8 +17,10 @@ test("hidden release temp keeps ordinary files visible and publisher scratch pri
     expect(dirname(ordinary)).toBe(base);
     expect(dirname(published)).toBe(join(hidden, "opencode"));
 
-    for (const directory of [ordinary, published, dirname(published)])
+    for (const directory of [ordinary, published, dirname(published)]) {
       expect((await stat(directory)).mode & 0o777).toBe(0o700);
+    }
+
     const proof = join(ordinary, "proof.txt");
     await writeFile(proof, "proof");
     expect((await inspectAttachment({ path: proof, caption: "" })).size).toBe(
@@ -30,8 +32,12 @@ test("hidden release temp keeps ordinary files visible and publisher scratch pri
       inspectAttachment({ path: hiddenProof, caption: "" }),
     ).rejects.toMatchObject({ reason: "denied" });
   } finally {
-    if (previous === undefined) delete process.env["TMPDIR"];
-    else process.env["TMPDIR"] = previous;
+    if (previous === undefined) {
+      delete process.env["TMPDIR"];
+    } else {
+      process.env["TMPDIR"] = previous;
+    }
+
     await rm(base, { recursive: true, force: true });
   }
 });
@@ -52,8 +58,12 @@ test("publisher fixtures refuse a nonprivate temp before creating scratch", asyn
       code: "ENOENT",
     });
   } finally {
-    if (previous === undefined) delete process.env["TMPDIR"];
-    else process.env["TMPDIR"] = previous;
+    if (previous === undefined) {
+      delete process.env["TMPDIR"];
+    } else {
+      process.env["TMPDIR"] = previous;
+    }
+
     await rm(base, { recursive: true, force: true });
   }
 });

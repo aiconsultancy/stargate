@@ -104,8 +104,10 @@ export function crewAssignmentText(text: string): string {
     !/^Configured Stargate project: [a-z][a-z0-9_-]*\.\nUse only your permanent worktree: /.test(
       text,
     )
-  )
+  ) {
     return text;
+  }
+
   const start = text.indexOf("\n\n");
 
   return start === -1 ? "Project assignment" : text.slice(start + 2);

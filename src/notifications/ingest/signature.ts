@@ -10,7 +10,9 @@ import {
 export function signature(source: Source, input: NotificationInput): string {
   const occurredAt = utcMillis(input.occurredAt);
 
-  if (!occurredAt) throw new InvalidNotification();
+  if (!occurredAt) {
+    throw new InvalidNotification();
+  }
 
   const tags = Object.entries(input.tags ?? {}).toSorted(([a], [b]) =>
     a < b ? -1 : a > b ? 1 : 0,

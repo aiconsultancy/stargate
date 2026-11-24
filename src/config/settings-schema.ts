@@ -26,10 +26,17 @@ export function settingsStruct<const F extends Schema.Struct.Fields>(
 
   const exact = Schema.makeFilter<unknown>(
     (value) => {
-      if (!Predicate.isObject(value)) return "Expected an object";
+      if (!Predicate.isObject(value)) {
+        return "Expected an object";
+      }
+
       const extra: string[] = [];
 
-      for (const key in value) if (!keys.has(key)) extra.push(key);
+      for (const key in value) {
+        if (!keys.has(key)) {
+          extra.push(key);
+        }
+      }
 
       return extra.length > 0
         ? `Unrecognized key${extra.length === 1 ? "" : "s"}: ${extra.map((key) => JSON.stringify(key)).join(", ")}`
@@ -59,8 +66,10 @@ export function settingsRecord<
             !Predicate.isObject(input) ||
             Array.isArray(input) ||
             !Object.hasOwn(input, "__proto__")
-          )
+          ) {
             return input;
+          }
+
           const copy = { ...input };
           Reflect.deleteProperty(copy, "__proto__");
 
@@ -89,11 +98,16 @@ function plainObject(input: unknown) {
     input === null ||
     Array.isArray(input) ||
     !Predicate.isObject(input)
-  )
+  ) {
     return false;
+  }
+
   const constructor = input.constructor;
 
-  if (typeof constructor !== "function") return true;
+  if (typeof constructor !== "function") {
+    return true;
+  }
+
   const prototype: unknown = constructor.prototype;
 
   return (

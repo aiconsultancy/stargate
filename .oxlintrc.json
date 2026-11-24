@@ -71,7 +71,7 @@
     "eslint/capitalized-comments": "off",
     "eslint/class-methods-use-this": "off",
     "eslint/complexity": "off",
-    "eslint/curly": "off",
+    "eslint/curly": ["error", "all"],
     "eslint/default-case": "off",
     "eslint/default-case-last": "off",
     "eslint/default-param-last": "off",
@@ -740,14 +740,48 @@
         ],
         "eslint/max-lines-per-function": [
           "error",
-          { "max": 250, "skipBlankLines": true, "skipComments": true }
+          {
+            "max": 250,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
         ],
-        "eslint/max-statements": ["error", { "max": 60 }],
-        "eslint/max-params": ["error", { "max": 6 }],
-        "eslint/max-depth": ["error", { "max": 6 }],
-        "eslint/complexity": ["error", { "max": 40 }],
-        "unicorn/max-nested-calls": ["error", { "max": 6 }],
-        "eslint/max-classes-per-file": ["error", { "max": 3 }],
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 60
+          }
+        ],
+        "eslint/max-params": [
+          "error",
+          {
+            "max": 6
+          }
+        ],
+        "eslint/max-depth": [
+          "error",
+          {
+            "max": 6
+          }
+        ],
+        "eslint/complexity": [
+          "error",
+          {
+            "max": 40
+          }
+        ],
+        "unicorn/max-nested-calls": [
+          "error",
+          {
+            "max": 6
+          }
+        ],
+        "eslint/max-classes-per-file": [
+          "error",
+          {
+            "max": 3
+          }
+        ],
         "eslint/no-inner-declarations": "error",
         "anti-slop/no-object-parameters": "error",
         "unicorn/consistent-function-scoping": "error",
@@ -782,7 +816,6 @@
         "typescript/strict-void-return": "error",
         "eslint/arrow-body-style": "off",
         "eslint/class-methods-use-this": "off",
-        "eslint/curly": "off",
         "eslint/default-case": "off",
         "eslint/func-names": "off",
         "eslint/func-style": "off",
@@ -877,7 +910,6 @@
       "files": [
         "scripts/test-compare.ts",
         "src/app/cli.ts",
-        "src/app/runtime.ts",
         "src/automation/maintenance/nightly/cleanup/cleanup.ts",
         "src/automation/maintenance/nightly/journal.ts",
         "src/automation/maintenance/nightly/run.ts",
@@ -894,7 +926,102 @@
       "rules": {
         "eslint/max-lines-per-function": [
           "error",
-          { "max": 1249, "skipBlankLines": true, "skipComments": true }
+          {
+            "max": 1243,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/app/provision.ts"],
+      "rules": {
+        "eslint/max-lines-per-function": [
+          "error",
+          {
+            "max": 259,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/notifications/ingest/notifications.ts"],
+      "rules": {
+        "eslint/max-lines-per-function": [
+          "error",
+          {
+            "max": 264,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/observability/dashboard/api/v1/server.ts"],
+      "rules": {
+        "eslint/max-lines-per-function": [
+          "error",
+          {
+            "max": 273,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/transports/irc/client.ts"],
+      "rules": {
+        "eslint/max-lines-per-function": [
+          "error",
+          {
+            "max": 276,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/chat/activity/activity-delivery.ts"],
+      "rules": {
+        "eslint/max-lines-per-function": [
+          "error",
+          {
+            "max": 279,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["scripts/migrate-stargate-state.ts"],
+      "rules": {
+        "eslint/max-lines-per-function": [
+          "error",
+          {
+            "max": 280,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/app/runtime.ts"],
+      "rules": {
+        "eslint/max-lines-per-function": [
+          "error",
+          {
+            "max": 1296,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
         ]
       }
     },
@@ -902,10 +1029,8 @@
       "files": [
         "scripts/test-compare.ts",
         "src/app/cli.ts",
-        "src/app/runtime.ts",
         "src/automation/maintenance/nightly/cli.ts",
         "src/automation/maintenance/nightly/journal.ts",
-        "src/automation/maintenance/nightly/run.ts",
         "src/backends/claude.ts",
         "src/backends/codex.ts",
         "src/backends/opencode/opencode.ts",
@@ -913,13 +1038,159 @@
         "src/chat/attachments/attachment-delivery.ts",
         "src/coordination/captain/captain-post.ts",
         "src/coordination/crew/messaging/messaging.ts",
-        "src/gateway/gateway.ts",
         "src/ops/agent-profile-switch.ts",
         "src/transports/irc/client.ts",
         "src/transports/irc/routing.ts",
         "src/transports/irc/ship.ts"
       ],
-      "rules": { "eslint/max-statements": ["error", { "max": 177 }] }
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 157
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/automation/cron/ui.ts",
+        "src/chat/attachments/attachments.ts"
+      ],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 61
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "scripts/hooks/affected-tests.ts",
+        "scripts/migrate-stargate-state.ts",
+        "src/app/profile.ts",
+        "src/app/provision.ts",
+        "src/chat/questions/slack-questions.ts"
+      ],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 62
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "scripts/test-compare-report.ts",
+        "src/automation/maintenance/nightly/update/models.ts"
+      ],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 63
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/coordination/fleet/protocol.ts",
+        "src/observability/dashboard/api/v1/server.ts",
+        "src/transports/irc/config.ts"
+      ],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 64
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/backends/pi/pi-durable.ts",
+        "src/coordination/crew/execution/engine.ts"
+      ],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 66
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/coordination/fleet/dispatch/polling.ts"],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 69
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/observability/dashboard/api/server.ts"],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 70
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/chat/meta-commands/meta-commands.ts"],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 80
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/app/runtime.ts"],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 186
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/automation/maintenance/nightly/run.ts"],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 195
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/gateway/gateway.ts"],
+      "rules": {
+        "eslint/max-statements": [
+          "error",
+          {
+            "max": 213
+          }
+        ]
+      }
     },
     {
       "files": [
@@ -941,11 +1212,25 @@
         "src/transports/slack/pairing.ts",
         "src/transports/teams/presence.ts"
       ],
-      "rules": { "eslint/max-params": ["error", { "max": 13 }] }
+      "rules": {
+        "eslint/max-params": [
+          "error",
+          {
+            "max": 13
+          }
+        ]
+      }
     },
     {
       "files": ["src/gateway/gateway.ts"],
-      "rules": { "eslint/max-depth": ["error", { "max": 7 }] }
+      "rules": {
+        "eslint/max-depth": [
+          "error",
+          {
+            "max": 7
+          }
+        ]
+      }
     },
     {
       "files": [
@@ -976,7 +1261,14 @@
         "src/transports/irc/routing.ts",
         "src/transports/irc/ship.ts"
       ],
-      "rules": { "eslint/complexity": ["error", { "max": 169 }] }
+      "rules": {
+        "eslint/complexity": [
+          "error",
+          {
+            "max": 169
+          }
+        ]
+      }
     },
     {
       "files": [
@@ -987,7 +1279,14 @@
         "src/transports/irc/config.ts",
         "src/transports/irc/delivery.ts"
       ],
-      "rules": { "unicorn/max-nested-calls": ["error", { "max": 9 }] }
+      "rules": {
+        "unicorn/max-nested-calls": [
+          "error",
+          {
+            "max": 9
+          }
+        ]
+      }
     },
     {
       "files": [
@@ -996,7 +1295,14 @@
         "src/shared/request-failure.ts",
         "src/transports/irc/client.ts"
       ],
-      "rules": { "eslint/max-classes-per-file": ["error", { "max": 5 }] }
+      "rules": {
+        "eslint/max-classes-per-file": [
+          "error",
+          {
+            "max": 5
+          }
+        ]
+      }
     },
     {
       "files": ["tests/**"],
@@ -1024,7 +1330,6 @@
         "eslint/arrow-body-style": "off",
         "eslint/class-methods-use-this": "off",
         "eslint/complexity": "off",
-        "eslint/curly": "off",
         "eslint/default-case": "off",
         "eslint/eqeqeq": "off",
         "eslint/func-names": "off",
@@ -1227,7 +1532,6 @@
         "eslint/arrow-body-style": "off",
         "eslint/class-methods-use-this": "off",
         "eslint/complexity": "off",
-        "eslint/curly": "off",
         "eslint/default-case": "off",
         "eslint/eqeqeq": "off",
         "eslint/func-names": "off",

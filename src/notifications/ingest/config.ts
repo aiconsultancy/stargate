@@ -97,17 +97,22 @@ export function notifyConfigError(
   const paths = new Set<string>();
 
   for (const adapter of Object.values(notify.adapters)) {
-    if (adapter.enabled && listen !== "unix")
+    if (adapter.enabled && listen !== "unix") {
       return "Notification HTTP requires Unix API mode";
+    }
 
-    if (paths.has(adapter.path)) return "Duplicate notification mount";
+    if (paths.has(adapter.path)) {
+      return "Duplicate notification mount";
+    }
+
     paths.add(adapter.path);
 
     if (
       new Set(adapter.sources.map((source) => source.id)).size !==
       adapter.sources.length
-    )
+    ) {
       return "Duplicate notification source";
+    }
   }
 
   const aliases = new Map<string, string>();
@@ -118,8 +123,9 @@ export function notifyConfigError(
     if (
       !sender ||
       (!live && !isAllowedChannel(sender, destination.slack.channel))
-    )
+    ) {
       return "Notification destination must name an allowed Slack channel and registration";
+    }
 
     if (
       !live &&
@@ -130,36 +136,46 @@ export function notifyConfigError(
           isAllowedChannel(receiver, destination.slack.channel) &&
           !receiver.access.deniedUsers.includes("*"),
       )
-    )
+    ) {
       return "Notification destination may echo into a local receiver";
+    }
 
     const key = JSON.stringify([
       destination.slack.bot,
       destination.slack.channel,
     ]);
 
-    if (aliases.has(key) && aliases.get(key) !== destination.audience)
+    if (aliases.has(key) && aliases.get(key) !== destination.audience) {
       return "Conflicting notification destination aliases";
+    }
+
     aliases.set(key, destination.audience);
   }
 
   for (const subscription of notify.subscriptions) {
     for (const alias of subscription.to) {
-      if (!Object.hasOwn(notify.destinations, alias))
+      if (!Object.hasOwn(notify.destinations, alias)) {
         return "Unknown notification destination alias";
+      }
+
       const destination = notify.destinations[alias];
 
-      if (!destination) return "Unknown notification destination alias";
+      if (!destination) {
+        return "Unknown notification destination alias";
+      }
 
-      for (const adapter of Object.values(notify.adapters))
-        for (const source of adapter.sources)
+      for (const adapter of Object.values(notify.adapters)) {
+        for (const source of adapter.sources) {
           if (
             !audienceAllowed(source.audience, destination.audience) &&
             source.topics.some((grant) =>
               patternsOverlap(grant, subscription.topic),
             )
-          )
+          ) {
             return "Notification audience is not allowed";
+          }
+        }
+      }
     }
   }
 
@@ -193,7 +209,9 @@ export function coreLimits(config: NotifyConfig) {
   ] as const) {
     const value = limits[key];
 
-    if (value !== undefined) result[key] = value;
+    if (value !== undefined) {
+      result[key] = value;
+    }
   }
 
   return result;
@@ -207,18 +225,25 @@ export async function checkProducerCredentials(
 ) {
   producerCredentials(config, environment);
 
-  if (!notifyEnabled(config)) return;
+  if (!notifyEnabled(config)) {
+    return;
+  }
 
   const file = await open(
     join(dataDirectory, "api-token"),
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
   ).catch((error: unknown) => {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT")
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return;
+    }
+
     throw new Error("Cannot check notification credential separation.");
   });
 
-  if (!file) return;
+  if (!file) {
+    return;
+  }
+
   let operatorToken: string;
 
   try {
@@ -230,14 +255,18 @@ export async function checkProducerCredentials(
       (info.mode & 0o7777) !== 0o600 ||
       info.size < 43 ||
       info.size > 44
-    )
+    ) {
       throw new Error("Cannot check notification credential separation.");
+    }
+
     const bytes = Buffer.alloc(45);
     const { bytesRead } = await file.read(bytes);
     const token = bytes.subarray(0, bytesRead).toString("utf8");
 
-    if (!/^[A-Za-z0-9_-]{43}\n?$/.test(token))
+    if (!/^[A-Za-z0-9_-]{43}\n?$/.test(token)) {
       throw new Error("Cannot check notification credential separation.");
+    }
+
     operatorToken = token.trim();
   } catch {
     throw new Error("Cannot check notification credential separation.");
@@ -267,20 +296,25 @@ export function producerCredentials(
   }[] = [];
 
   for (const [name, adapter] of Object.entries(config?.adapters ?? {})) {
-    if (!adapter.enabled) continue;
+    if (!adapter.enabled) {
+      continue;
+    }
 
     for (const source of adapter.sources) {
       const token = env[source.tokenEnv];
 
-      if (!token || !/^[A-Za-z0-9_-]{32,256}$/.test(token))
+      if (!token || !/^[A-Za-z0-9_-]{32,256}$/.test(token)) {
         throw new Error("Missing or invalid notification producer credential.");
+      }
 
       if (
         (operatorToken !== undefined &&
           equalCredential(token, operatorToken)) ||
         resolved.some((entry) => equalCredential(entry.token, token))
-      )
+      ) {
         throw new Error("Ambiguous notification producer credential.");
+      }
+
       resolved.push({ adapter: name, source, token });
     }
   }

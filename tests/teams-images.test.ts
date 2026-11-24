@@ -32,13 +32,15 @@ function png(width = 1, height = 1, padding = 0): Buffer {
     chunk("IHDR", header),
   ];
 
-  if (padding)
+  if (padding) {
     parts.push(
       chunk(
         "tEXt",
         Buffer.concat([Buffer.from("note\0"), Buffer.alloc(padding, 65)]),
       ),
     );
+  }
+
   parts.push(
     chunk(
       "IDAT",
@@ -91,8 +93,10 @@ test("screenshots reject bad signatures, damaged chunks and incomplete framing",
     JPEG.subarray(0, -2),
     Buffer.concat([JPEG, Buffer.from("extra")]),
     Buffer.concat([png(), Buffer.from("extra")]),
-  ])
+  ]) {
     expect(() => inspectScreenshot(bytes)).toThrow();
+  }
+
   const badChunk = png();
   badChunk[12] = (badChunk[12] ?? 0) | 0x80;
   badChunk.writeUInt32BE(crc32(badChunk.subarray(12, 29)), 29);
@@ -132,8 +136,10 @@ test("oversized/zero dimensions and oversized input fail before image decoding",
     [1, 0],
     [1025, 1],
     [1, 1025],
-  ] as const)
+  ] as const) {
     expect(() => inspectScreenshot(png(width, height))).toThrow("dimensions");
+  }
+
   const oversized = Buffer.from(JPEG);
   const frame = oversized.indexOf(Buffer.from([0xff, 0xc0]));
   oversized.writeUInt16BE(1025, frame + 5);
@@ -240,8 +246,10 @@ test("image upload rejects MIME mismatch, unsupported bytes and encoded activity
     file(JPEG, "image/png"),
     file(Buffer.from("<svg></svg>"), "image/svg+xml"),
     file(png(1, 1, 31_000)),
-  ])
+  ]) {
     await expect(adapter.upload(attachment, signal())).rejects.toThrow();
+  }
+
   expect(sends).toBe(0);
   await expect(
     adapter.download(["attachment"], "conversation", signal()),
@@ -265,10 +273,12 @@ test("link accepts only validated canonical local receipts and never fetches a U
     `data:image/png;base64,${png().toString("base64")}\n`,
   ];
 
-  for (const receipt of malformed)
+  for (const receipt of malformed) {
     await expect(
       adapter.link("channel", "thread", receipt, "caption", signal()),
     ).rejects.toThrow();
+  }
+
   expect(sends).toBe(0);
 });
 

@@ -32,7 +32,10 @@ export async function sendFleetAssignment(
   await client.waitReady(10_000, signal);
   const guard = () => !signal.aborted && allowed();
 
-  if (!guard()) throw new Error("Fleet dispatch is no longer allowed");
+  if (!guard()) {
+    throw new Error("Fleet dispatch is no longer allowed");
+  }
+
   const budget = client.budget("PRIVMSG", channel, {});
 
   if (!text.includes("\n") && Buffer.byteLength(text) <= budget) {
@@ -43,10 +46,11 @@ export async function sendFleetAssignment(
 
   const limits = client.multiline;
 
-  if (!limits || Buffer.byteLength(text) > limits.maxBytes)
+  if (!limits || Buffer.byteLength(text) > limits.maxBytes) {
     throw new Error(
       "Fleet assignment needs negotiated atomic IRC multiline within server limits",
     );
+  }
 
   const partBudget = Math.min(
     limits.maxBytes,
@@ -63,7 +67,9 @@ export async function sendFleetAssignment(
     })),
   );
 
-  if (lines.length > limits.maxLines)
+  if (lines.length > limits.maxLines) {
     throw new Error("Fleet assignment exceeds atomic IRC multiline limits");
+  }
+
   await client.sendBatch(channel, lines, {}, guard);
 }

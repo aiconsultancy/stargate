@@ -111,8 +111,9 @@ export class QuestionRecords {
           "SELECT 1 FROM jobs j JOIN irc_question_sources q ON q.botKey=j.botKey AND q.eventId=j.eventId WHERE j.botKey=? AND j.status='running' AND j.cancel_requested=0 AND j.failure IS NOT 'cancelled' AND j.input IS NOT NULL LIMIT 1",
         )
         .get(botKey) !== null
-    )
+    ) {
       sessions.push(pinned);
+    }
 
     return [...new Set(sessions)];
   }
@@ -124,7 +125,9 @@ export class QuestionRecords {
   ): QuestionOffer | undefined {
     const row = this.questionByTokenForRenewal(token);
 
-    if (!row) return;
+    if (!row) {
+      return;
+    }
 
     const changed = this.db
       .query(

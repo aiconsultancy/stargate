@@ -255,7 +255,7 @@ async function fixture() {
     BACKGROUND_CONTEXT,
   );
 
-  for (let i = 0; i < 5; i++)
+  for (let i = 0; i < 5; i++) {
     await conversation.commit(
       (tx) =>
         tx.appendEntry(conversation.id, {
@@ -264,6 +264,7 @@ async function fixture() {
         }),
       BACKGROUND_CONTEXT,
     );
+  }
 
   return {
     directory,
@@ -325,7 +326,10 @@ test("Pi native pagination supports both orders and cursor retains original orde
       signal,
     );
 
-    if (!first.cursor) throw new Error("Missing cursor");
+    if (!first.cursor) {
+      throw new Error("Missing cursor");
+    }
+
     await expect(
       history.entries(
         {
@@ -526,7 +530,9 @@ test("Pi history forwards only canonical numeric IDs and exact JSON cursors", as
     await expect(read(`0${f.id}`)).rejects.toThrow("Pi history unavailable");
     const first = await read(f.id);
 
-    if (!first.cursor) throw new Error("Missing cursor");
+    if (!first.cursor) {
+      throw new Error("Missing cursor");
+    }
 
     const cursor: unknown = JSON.parse(
       Buffer.from(first.cursor, "base64url").toString("utf8"),
@@ -535,8 +541,10 @@ test("Pi history forwards only canonical numeric IDs and exact JSON cursors", as
     if (
       !Predicate.hasProperty(cursor, "page") ||
       !Predicate.isObject(cursor.page)
-    )
+    ) {
       throw new Error("Unexpected cursor");
+    }
+
     const next = await read(f.id, cursor);
     expect(next.entries).toHaveLength(2);
     const nested = { list: [1, null, "x", true, { deep: [] }] };
@@ -553,11 +561,12 @@ test("Pi history forwards only canonical numeric IDs and exact JSON cursors", as
       { ...cursor, page: null },
       { ...cursor, page: "after" },
       [],
-    ])
+    ]) {
       await expect(
         read(f.id, invalid),
         JSON.stringify(invalid),
       ).rejects.toThrow("Pi history unavailable");
+    }
   } finally {
     await f.close();
   }
@@ -587,7 +596,9 @@ test("Pi history cursor JSON __proto__ keys keep the base pagination outcome", a
       signal,
     );
 
-    if (!start.cursor) throw new Error("Missing cursor");
+    if (!start.cursor) {
+      throw new Error("Missing cursor");
+    }
 
     const { page } = JSON.parse(
       Buffer.from(start.cursor, "base64url").toString("utf8"),
@@ -602,18 +613,20 @@ test("Pi history cursor JSON __proto__ keys keep the base pagination outcome", a
       `{${session},"page":{${own},"__proto__":{"after":0,"order":"descending"}}}`,
       `{${session},"page":{${own},"__proto__":1}}`,
       `{${session},"page":{${own},"x":{"__proto__":{"a":1}}}}`,
-    ])
+    ]) {
       expect(await read(cursor), cursor).toEqual(next);
+    }
 
     for (const cursor of [
       `{${session},"page":{"__proto__":{${own}}}}`,
       `{${session},"page":{"__proto__":1}}`,
       `{${session},"page":{${own}},"__proto__":{"x":1}}`,
       `{"page":{${own}},"__proto__":{${session}}}`,
-    ])
+    ]) {
       await expect(read(cursor), cursor).rejects.toThrow(
         "Pi history unavailable",
       );
+    }
   } finally {
     await f.close();
   }

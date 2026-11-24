@@ -45,12 +45,16 @@ export async function prepareIrcRoster(
   for (const next of ships) {
     const binding = bindings.get(next.id);
 
-    if (!binding) throw new ReloadRejected("unavailable");
+    if (!binding) {
+      throw new ReloadRejected("unavailable");
+    }
+
     const plan = await binding.ship.prepareReload(next, environment);
     const staged = new Map<IrcRegistration, IrcRuntimeRegistration>();
 
-    for (const registration of plan.added)
+    for (const registration of plan.added) {
       staged.set(registration, await stage(registration, next));
+    }
 
     plans.push({
       binding,
@@ -82,8 +86,9 @@ export function resolveIrcRosterUpdates(plans: readonly RosterPlan[]) {
       const entry =
         staged.get(registration) ?? binding.entries.get(registration.key);
 
-      if (!entry || entry.gateway.key !== registration.transport.key)
+      if (!entry || entry.gateway.key !== registration.transport.key) {
         throw new ReloadRejected("unavailable");
+      }
 
       return { binding, registration, entry, transcriber, next };
     });

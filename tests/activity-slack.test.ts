@@ -169,10 +169,13 @@ test("activity posts in its thread, edits the same message, and never reposts a 
       const fields = new URLSearchParams(await request.text());
       calls.push({ path, fields });
 
-      if (fields.get("ts") === "missing")
+      if (fields.get("ts") === "missing") {
         return Response.json({ ok: false, error: "message_not_found" });
+      }
 
-      if (fields.get("channel") === "empty") return Response.json({ ok: true });
+      if (fields.get("channel") === "empty") {
+        return Response.json({ ok: true });
+      }
 
       return Response.json({ ok: true, ts: "2.000" });
     },
@@ -251,7 +254,9 @@ test("activity cancellation aborts its request without affecting another request
     {
       slackApiUrl: server.url.href,
       fetch: (url, init) => {
-        if (String(url).endsWith("/chat.postMessage")) return fetch(url, init);
+        if (String(url).endsWith("/chat.postMessage")) {
+          return fetch(url, init);
+        }
 
         return new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener(

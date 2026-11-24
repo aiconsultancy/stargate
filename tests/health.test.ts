@@ -158,7 +158,9 @@ test("every section and summary render bounded safe observed values and explicit
     expect(text).toContain("unknown");
     expect(text).not.toContain(canary);
 
-    if (section) expect(text.toLowerCase()).toContain(section);
+    if (section) {
+      expect(text.toLowerCase()).toContain(section);
+    }
   }
 
   expect(await read("opencode")).toContain("✓ backend read");
@@ -173,8 +175,10 @@ test("every section and summary render bounded safe observed values and explicit
     "proxy",
     "services",
     "starfleet",
-  ])
+  ]) {
     expect(summary).toContain(section);
+  }
+
   expect(await read("host")).toContain("1/2/3");
   expect(await read("host")).toContain("opencode PID 12 CPU 20%");
   expect(await read("host")).toContain("growth root 1MiB over 60s");
@@ -653,8 +657,10 @@ test("unavailable ticket fields stay explicit and ownership duration uses starte
     "last-hour delivery errors unknown",
     "last-hour refused messages unknown",
     "latest release version unknown",
-  ])
+  ]) {
     expect(gateway).toContain(field);
+  }
+
   expect(await read("opencode")).toContain("unit started unknown");
   expect(await read("proxy")).toContain("unit started unknown");
 });
@@ -671,8 +677,10 @@ test("default sources read the host, OpenCode, reports, alert and Starfleet file
     await writeFile(join(dataDirectory, "maintenance", "ALERT.json"), "{}");
     const registration = bot();
 
-    if (registration.backend.type !== "opencode")
+    if (registration.backend.type !== "opencode") {
       throw new Error("Invalid fixture");
+    }
+
     // A closed local port: the read fails at once and stays unknown.
     registration.backend = {
       ...registration.backend,

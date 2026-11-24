@@ -39,8 +39,10 @@ class Wire extends IrcClient {
     text: string,
     tags: Record<string, string> = {},
   ) {
-    if (this.lines.length + this.batches.length >= this.failAfter)
+    if (this.lines.length + this.batches.length >= this.failAfter) {
       throw new Error("refused");
+    }
+
     this.lines.push({ text, tags });
   }
   override async sendBatch(
@@ -48,8 +50,10 @@ class Wire extends IrcClient {
     lines: readonly { text: string; concat: boolean }[],
     tags: Record<string, string> = {},
   ) {
-    if (this.lines.length + this.batches.length >= this.failAfter)
+    if (this.lines.length + this.batches.length >= this.failAfter) {
       throw new Error("refused");
+    }
+
     this.batches.push({
       text: lines.map((line) => line.text).join("\n"),
       tags,
@@ -148,7 +152,10 @@ test("IRC file links use the persisted root, while main-room and capless lines s
 
   const link = delivery.files?.link;
 
-  if (!link) throw new Error("missing link transport");
+  if (!link) {
+    throw new Error("missing link transport");
+  }
+
   await link(
     "#ship",
     "thread",

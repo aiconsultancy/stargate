@@ -143,8 +143,9 @@ function api(
       async list(query, request) {
         request?.signal?.throwIfAborted();
 
-        if (options.wrongSession || query.sessionID !== task.workerSessionID)
+        if (options.wrongSession || query.sessionID !== task.workerSessionID) {
           throw new Error("Wrong fixture session");
+        }
 
         const [type, start] = query.cursor?.split(":") ?? [
           query.type ?? "",
@@ -202,11 +203,16 @@ test("callback output is opaque, and a fast notification need not wait for launc
   const origin = rows[1];
   const callback = rows[2];
 
-  if (!origin || !callback) throw new Error("Missing fixture");
+  if (!origin || !callback) {
+    throw new Error("Missing fixture");
+  }
+
   origin.time.completed = 59;
 
-  if (typeof callback.text !== "string")
+  if (typeof callback.text !== "string") {
     throw new Error("Missing callback text");
+  }
+
   callback.text = callback.text.replace(
     "Opaque output",
     '<shell id="sh_fake">\nquoted wrapper\n</shell>',
@@ -231,7 +237,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[1];
 
-      if (value) value.agent = "foreign";
+      if (value) {
+        value.agent = "foreign";
+      }
     },
   ],
   [
@@ -239,7 +247,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows.splice(1, 1)[0];
 
-      if (value) rows.unshift(value);
+      if (value) {
+        rows.unshift(value);
+      }
     },
   ],
   [
@@ -247,7 +257,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows.splice(1, 1)[0];
 
-      if (value) rows.splice(2, 0, value);
+      if (value) {
+        rows.splice(2, 0, value);
+      }
     },
   ],
   [
@@ -255,7 +267,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[1];
 
-      if (value) rows.splice(2, 0, { ...value, id: "msg_duplicateLaunch" });
+      if (value) {
+        rows.splice(2, 0, { ...value, id: "msg_duplicateLaunch" });
+      }
     },
   ],
   [
@@ -263,7 +277,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[2];
 
-      if (value) rows.splice(3, 0, { ...value, id: "msg_duplicateNotice" });
+      if (value) {
+        rows.splice(3, 0, { ...value, id: "msg_duplicateNotice" });
+      }
     },
   ],
   [
@@ -271,7 +287,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[2];
 
-      if (value) value.metadata = { ...value.metadata, jobID: "sh_foreign" };
+      if (value) {
+        value.metadata = { ...value.metadata, jobID: "sh_foreign" };
+      }
     },
   ],
   [
@@ -279,12 +297,13 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[2];
 
-      if (value)
+      if (value) {
         value.metadata = {
           source: "shell",
           shellID: "sh_first",
           state: "completed",
         };
+      }
     },
   ],
   [
@@ -292,10 +311,11 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[2];
 
-      if (value)
+      if (value) {
         value.text =
           "The following shell command was executed by the user:\n" +
           value.text;
+      }
     },
   ],
   [
@@ -303,7 +323,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[2];
 
-      if (value) value.text = "Do different work";
+      if (value) {
+        value.text = "Do different work";
+      }
     },
   ],
   [
@@ -311,7 +333,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[2];
 
-      if (value) value.metadata = { ...value.metadata, authority: "new" };
+      if (value) {
+        value.metadata = { ...value.metadata, authority: "new" };
+      }
     },
   ],
   [
@@ -319,8 +343,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[1]?.content?.[0];
 
-      if (value && typeof value.state === "object" && value.state !== null)
+      if (value && typeof value.state === "object" && value.state !== null) {
         value.state = { ...value.state, input: { command: "different" } };
+      }
     },
   ],
   [
@@ -328,8 +353,9 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
     (rows) => {
       const value = rows[1]?.content?.[0];
 
-      if (value && typeof value.state === "object" && value.state !== null)
+      if (value && typeof value.state === "object" && value.state !== null) {
         value.state = { ...value.state, status: "running" };
+      }
     },
   ],
   [
@@ -369,7 +395,7 @@ const invalid: [string, (rows: EvidenceMessage[]) => void][] = [
   ],
 ];
 
-for (const [name, change] of invalid)
+for (const [name, change] of invalid) {
   test(`uncorrelated shell or real input stays a boundary: ${name}`, async () => {
     const rows = history();
     change(rows);
@@ -386,6 +412,7 @@ for (const [name, change] of invalid)
     expect(task.status).toBe("uncertain");
     expect(task.released).toBe(0);
   });
+}
 
 test("callbacks cannot manufacture a final, validate a foreign task/session, or bypass cancellation and cursor bounds", async () => {
   await expect(
@@ -477,7 +504,12 @@ test("a callback after an earlier stop still needs a subsequent visible final", 
 test("retained crew-ID launch and final use the existing protected session alias rule", async () => {
   const rows = history();
 
-  for (const row of rows) if (row.type === "assistant") row.agent = task.crewID;
+  for (const row of rows) {
+    if (row.type === "assistant") {
+      row.agent = task.crewID;
+    }
+  }
+
   expect(await readTaskResult(api(rows), task, signal(), agent)).toBe(
     "Retained worker final",
   );
@@ -494,7 +526,10 @@ test("empty native output has both writer newlines, not an overlapping prefix/su
   const rows = history();
   const callback = rows[2];
 
-  if (!callback?.text) throw new Error("Missing callback");
+  if (!callback?.text) {
+    throw new Error("Missing callback");
+  }
+
   callback.text = callback.text.replace("Opaque output", "");
   expect(callback.text.endsWith(">\n\n</shell>")).toBe(true);
   expect(await readTaskResult(api(rows), task, signal(), agent)).toBe(
@@ -547,7 +582,10 @@ test("placement and result prove actual-sized long native turns beyond 512 recor
   // A complete, equally long scan disproves ownership: this is a boundary, not unreadable evidence.
   const origin = rows[1];
 
-  if (!origin) throw new Error("Missing origin");
+  if (!origin) {
+    throw new Error("Missing origin");
+  }
+
   origin.agent = "foreign";
   expect(
     await observePlacement(api(rows, { pageSize: 100 }), task, signal(), agent),

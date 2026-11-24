@@ -30,7 +30,9 @@ const chunk = (
 const binary = process.argv[2];
 const loseBeforeWrite = process.argv.includes("--drop-answer");
 
-if (!binary) throw new Error("Pass the OpenCode 2.2.7 binary path");
+if (!binary) {
+  throw new Error("Pass the OpenCode 2.2.7 binary path");
+}
 
 const home = await mkdtemp(join(tmpdir(), "stargate-question-"));
 let modelCalls = 0;
@@ -47,7 +49,9 @@ const model = Bun.serve({
   async fetch(req) {
     const body: unknown = await req.json();
 
-    if (!isModelRequest(body)) throw new Error("Unexpected model request body");
+    if (!isModelRequest(body)) {
+      throw new Error("Unexpected model request body");
+    }
 
     const answered = body.messages.some(
       (m: { role: string }) => m.role === "tool",
@@ -162,7 +166,10 @@ async function wait<T>(get: () => Promise<T | undefined>, label: string) {
   for (let i = 0; i < 160; i++) {
     const value = await get();
 
-    if (value) return value;
+    if (value) {
+      return value;
+    }
+
     await Bun.sleep(150);
   }
 
@@ -222,18 +229,23 @@ try {
         if (path.endsWith("/prompt")) {
           promptPosts++;
 
-          if (discardPrompt) throw new Error("fixture submission disconnected");
+          if (discardPrompt) {
+            throw new Error("fixture submission disconnected");
+          }
         }
 
         if (path.endsWith("/reply")) {
           answerPosts++;
 
-          if (loseBeforeWrite)
+          if (loseBeforeWrite) {
             throw new Error("Fixture disconnected before native delivery");
+          }
+
           const response = await fetch(url, init);
 
-          if (process.argv.includes("--lose-answer-ack") && response.ok)
+          if (process.argv.includes("--lose-answer-ack") && response.ok) {
             throw new Error("Fixture lost the native answer ACK");
+          }
 
           return response;
         }

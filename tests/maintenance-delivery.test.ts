@@ -84,7 +84,9 @@ test("publication failure, transport failure and cancellation never acknowledge 
 
     const f = fixture({
       async read() {
-        if (failure === "read") throw new Error("Transport failed");
+        if (failure === "read") {
+          throw new Error("Transport failed");
+        }
 
         return notice;
       },
@@ -95,7 +97,10 @@ test("publication failure, transport failure and cancellation never acknowledge 
     });
 
     f.input.publish = async () => {
-      if (failure === "publish") throw new Error("Slack unavailable");
+      if (failure === "publish") {
+        throw new Error("Slack unavailable");
+      }
+
       f.stop.abort();
       cancelled.resolve();
     };

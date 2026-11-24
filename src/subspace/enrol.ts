@@ -35,10 +35,11 @@ async function enrolmentToken(
 ) {
   const source = section.enrolment;
 
-  if (!source)
+  if (!source) {
     throw new SubspaceUpstreamError(
       "No enrolment token is configured (subspaceAgents.enrolment)",
     );
+  }
 
   let raw: string | undefined;
 
@@ -60,12 +61,15 @@ async function enrolmentToken(
 
   const token = raw?.trim();
 
-  if (!token) throw new SubspaceUpstreamError("The enrolment token is not set");
+  if (!token) {
+    throw new SubspaceUpstreamError("The enrolment token is not set");
+  }
 
-  if (!/^senr1\.[\u0021-\u007e]+$/.test(token))
+  if (!/^senr1\.[\u0021-\u007e]+$/.test(token)) {
     throw new SubspaceUpstreamError(
       "The configured enrolment token is not a Subspace enrolment token",
     );
+  }
 
   return token;
 }
@@ -165,27 +169,30 @@ export async function enrolCertificate(options: {
 
   const text = await boundedText(response, 64 * 1024).catch(() => "");
 
-  if (response.status !== 200 && response.status !== 201)
+  if (response.status !== 200 && response.status !== 201) {
     throw new SubspaceUpstreamError(
       refusal(response.status, officer, text, options.token),
       response.status,
     );
+  }
 
   const decoded = Schema.decodeUnknownResult(
     Schema.fromJsonString(enrolledSchema),
   )(text);
 
-  if (Result.isFailure(decoded))
+  if (Result.isFailure(decoded)) {
     throw new SubspaceUpstreamError(
       "The Subspace API's enrolment answer is unreadable",
       response.status,
     );
+  }
 
-  if (decoded.success.fingerprint.toLowerCase() !== key.fingerprint)
+  if (decoded.success.fingerprint.toLowerCase() !== key.fingerprint) {
     throw new SubspaceUpstreamError(
       "The API reported a different certificate fingerprint",
       response.status,
     );
+  }
 
   return {
     agentId: decoded.success.agentId,
@@ -245,10 +252,11 @@ export async function enrolOfficers(
     (name) => !section.officers.some((officer) => officer.name === name),
   );
 
-  if (unknown?.length)
+  if (unknown?.length) {
     throw new SubspaceUpstreamError(
       `No configured officer is named ${unknown.join(", ")}`,
     );
+  }
 
   const officers = section.officers.filter(
     (officer) => !context.names || context.names.includes(officer.name),
@@ -314,8 +322,10 @@ export async function enrolOfficers(
       });
 
       // A rotated key replaces the bundle only once the API holds it.
-      if (context.rotate)
+      if (context.rotate) {
         await writeOfficerKey(officer, files, section.keyAlgorithm, key);
+      }
+
       await writeEnrolmentRecord(files, {
         fingerprint: key.fingerprint,
         agentId: enrolled.agentId,
@@ -334,7 +344,10 @@ export async function enrolOfficers(
     } catch (error) {
       context.signal?.throwIfAborted();
 
-      if (!(error instanceof SubspaceUpstreamError)) throw error;
+      if (!(error instanceof SubspaceUpstreamError)) {
+        throw error;
+      }
+
       // A failed rotation leaves the old bundle, if any, in place.
       const current = context.rotate ? existing : key;
 

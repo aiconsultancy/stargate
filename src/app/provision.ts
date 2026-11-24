@@ -108,12 +108,16 @@ async function optionalFile(path: string, privateFile = false) {
   try {
     const info = await lstat(path);
 
-    if (!info.isFile() || (privateFile && (info.mode & 0o077) !== 0))
+    if (!info.isFile() || (privateFile && (info.mode & 0o077) !== 0)) {
       throw new Error("Not a private regular file");
+    }
 
     return await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+
     throw new Error(
       "Cannot read provisioning file; use a regular private file.",
     );
@@ -139,7 +143,9 @@ async function writeJournal(path: string, journal: Journal) {
 function stateFor(journal: Journal, id: string) {
   const entry = journal.bots.find((bot) => bot.id === id);
 
-  if (!entry) throw new Error("Provision journal does not match the plan.");
+  if (!entry) {
+    throw new Error("Provision journal does not match the plan.");
+  }
 
   return entry;
 }
@@ -163,30 +169,43 @@ async function preflight(plan: Plan, journal: Journal, configPath: string) {
     existing.flatMap((bot) => [bot.slack.appTokenEnv, bot.slack.botTokenEnv]),
   );
 
-  if (names.size !== existing.length * 2 || names.has(plan.configTokenEnv))
+  if (names.size !== existing.length * 2 || names.has(plan.configTokenEnv)) {
     throw new Error("Configuration token-reference conflict.");
+  }
+
   names.add(plan.configTokenEnv);
 
   for (const entry of plan.bots) {
-    if (ids.has(entry.id)) throw new Error("Provisioning bot ID conflict.");
+    if (ids.has(entry.id)) {
+      throw new Error("Provisioning bot ID conflict.");
+    }
+
     ids.add(entry.id);
     const appId = stateFor(journal, entry.id).appId;
     const intended = runtimeBot(entry, appId);
     const previous = existing.find((bot) => bot.id === entry.id);
 
     if (previous) {
-      if (!appId || !isDeepStrictEqual(previous, intended))
+      if (!appId || !isDeepStrictEqual(previous, intended)) {
         throw new Error("Existing registration conflict; nothing overwritten.");
+      }
+
       continue;
     }
 
-    if (appId && apps.has(appId))
+    if (appId && apps.has(appId)) {
       throw new Error("Slack App ID conflict; nothing overwritten.");
+    }
 
-    if (appId) apps.add(appId);
+    if (appId) {
+      apps.add(appId);
+    }
 
     for (const name of [entry.slack.appTokenEnv, entry.slack.botTokenEnv]) {
-      if (names.has(name)) throw new Error("Token-reference conflict.");
+      if (names.has(name)) {
+        throw new Error("Token-reference conflict.");
+      }
+
       names.add(name);
     }
   }
@@ -240,7 +259,9 @@ async function createApp(
       };
     }
 
-    if (response.status >= 500) return { state: "outcome_unknown" };
+    if (response.status >= 500) {
+      return { state: "outcome_unknown" };
+    }
 
     const parsed = Schema.decodeUnknownResult(
       Schema.Struct({
@@ -251,14 +272,16 @@ async function createApp(
     )(await response.json());
 
     if (Result.isSuccess(parsed)) {
-      if (response.ok && parsed.success.ok && parsed.success.app_id)
+      if (response.ok && parsed.success.ok && parsed.success.app_id) {
         return { state: "created", appId: parsed.success.app_id };
+      }
 
       if (
         !parsed.success.ok &&
         rejectedWithoutCreation.has(parsed.success.error ?? "")
-      )
+      ) {
         return { state: "failed" };
+      }
     }
   } catch {
     // A sent request can succeed even when its response is lost. Never replay it.
@@ -286,8 +309,10 @@ export async function provisionBots(
     `${configPath}.lock`,
   ]);
 
-  if (reserved.has(journalPath) || reserved.has(`${journalPath}.lock`))
+  if (reserved.has(journalPath) || reserved.has(`${journalPath}.lock`)) {
     throw new Error("Provision journal must use a separate path.");
+  }
+
   let plan: Plan;
 
   try {
@@ -355,18 +380,22 @@ export async function provisionBots(
       journal.bots.length !== plan.bots.length ||
       new Set(journal.bots.map((entry) => entry.id)).size !==
         journal.bots.length
-    )
+    ) {
       throw new Error(
         "Provision journal does not match the original plan/config.",
       );
+    }
 
     for (const entry of plan.bots) {
       const state = stateFor(journal, entry.id);
 
-      if (entry.app.mode === "reuse" && state.appId !== entry.app.appId)
+      if (entry.app.mode === "reuse" && state.appId !== entry.app.appId) {
         throw new Error("Provision journal reuse identity conflict.");
+      }
 
-      if (state.state === "creating") state.state = "outcome_unknown";
+      if (state.state === "creating") {
+        state.state = "outcome_unknown";
+      }
     }
 
     if (options.recordApp !== undefined) {
@@ -377,14 +406,18 @@ export async function provisionBots(
       const entry = plan.bots.find((bot) => bot.id === match?.[1]);
       const appId = match?.[2];
 
-      if (entry?.app.mode !== "create" || !appId)
+      if (entry?.app.mode !== "create" || !appId) {
         throw new Error(
           "Invalid record-app; use a planned create BOT_ID=APP_ID.",
         );
+      }
+
       const state = stateFor(journal, entry.id);
 
-      if (state.appId && state.appId !== appId)
+      if (state.appId && state.appId !== appId) {
         throw new Error("record-app cannot replace an already known App ID.");
+      }
+
       Object.assign(state, { state: "recorded", appId });
       delete state.retryAt;
     }
@@ -419,23 +452,29 @@ export async function provisionBots(
           "verify_live_reply",
         ];
 
-        if (!state.appId)
+        if (!state.appId) {
           needsHuman.unshift(
             state.state === "outcome_unknown"
               ? "reconcile_app_id_with_record_app"
               : "create_app_or_record_browser_created_app",
           );
+        }
 
-        if (credentials === "missing")
+        if (credentials === "missing") {
           needsHuman.push("store_runtime_tokens_privately");
+        }
 
-        if (state.state === "failed")
+        if (state.state === "failed") {
           needsHuman.push("review_configuration_token_and_manifest");
+        }
 
-        if (state.state === "rate_limited")
+        if (state.state === "rate_limited") {
           needsHuman.push("wait_before_retrying_create");
+        }
 
-        if (state.appId) needsHuman.push("invite_bot_to_allowed_channels");
+        if (state.appId) {
+          needsHuman.push("invite_bot_to_allowed_channels");
+        }
 
         return {
           id: entry.id,
@@ -475,7 +514,10 @@ export async function provisionBots(
 
   const initial = await prepare();
 
-  if (!options.apply && options.recordApp === undefined) return report(initial);
+  if (!options.apply && options.recordApp === undefined) {
+    return report(initial);
+  }
+
   await mkdir(dirname(journalPath), { recursive: true, mode: 0o700 });
   let lock: FileHandle;
 
@@ -495,18 +537,26 @@ export async function provisionBots(
       );
 
       for (const entry of plan.bots) {
-        if (coolingDown) break;
+        if (coolingDown) {
+          break;
+        }
+
         const state = stateFor(journal, entry.id);
 
         if (
           state.appId ||
           state.state === "outcome_unknown" ||
           (state.retryAt !== undefined && state.retryAt > now())
-        )
+        ) {
           continue;
+        }
+
         const token = environment[plan.configTokenEnv];
 
-        if (!token?.trim()) continue;
+        if (!token?.trim()) {
+          continue;
+        }
+
         await preflight(plan, journal, configPath);
         state.state = "creating";
         delete state.retryAt;
@@ -522,7 +572,9 @@ export async function provisionBots(
         Object.assign(state, result);
         await writeJournal(journalPath, journal);
 
-        if (result.state === "rate_limited") break;
+        if (result.state === "rate_limited") {
+          break;
+        }
       }
 
       await preflight(plan, journal, configPath);
@@ -530,7 +582,9 @@ export async function provisionBots(
       for (const entry of plan.bots) {
         const appId = stateFor(journal, entry.id).appId;
 
-        if (!appId) continue;
+        if (!appId) {
+          continue;
+        }
 
         const existing: BotConfig[] = await preflight(
           plan,

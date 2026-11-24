@@ -92,8 +92,10 @@ describe("Teams intake and source ownership", () => {
         activity({ serviceUrl: "https://attacker.example/" }),
       ];
 
-      for (const message of rejected)
+      for (const message of rejected) {
         expect(await f.registration.accept(message)).toBe(false);
+      }
+
       expect(f.store.ready(f.registration.key, Date.now(), 10)).toEqual([]);
       f.config.access.deniedUsers.push(HUMAN);
       expect(allowedActivity(f.config, activity())).toBe(false);
@@ -258,7 +260,10 @@ describe("Opt-in Teams native permission decisions", () => {
       );
       const persisted = approvalRow(f);
 
-      if (!persisted) throw new Error("Missing persisted notification offer");
+      if (!persisted) {
+        throw new Error("Missing persisted notification offer");
+      }
+
       expect(persisted).toMatchObject({ notified: 0, used: 0 });
       notification.mockRestore();
       await f.registration.pollApprovals();
@@ -294,7 +299,10 @@ describe("Opt-in Teams native permission decisions", () => {
       );
       const persisted = approvalRow(f);
 
-      if (!persisted) throw new Error("Missing persisted notification offer");
+      if (!persisted) {
+        throw new Error("Missing persisted notification offer");
+      }
+
       expect(f.sent).toEqual([]);
       notification.mockRestore();
       await f.reopen();
@@ -359,17 +367,26 @@ describe("Opt-in Teams native permission decisions", () => {
         );
         notification.mockRestore();
 
-        if (changed === "input")
+        if (changed === "input") {
           f.backend.bindings.set(request.id, "native-irc-input");
+        }
 
-        if (changed === "session") f.backend.sessionID = "replacement-session";
+        if (changed === "session") {
+          f.backend.sessionID = "replacement-session";
+        }
 
-        if (changed === "arguments")
+        if (changed === "arguments") {
           f.backend.pending = [{ ...request, resources: ["different scope"] }];
+        }
 
-        if (changed === "completed") f.store.respond(job.id, ["completed"]);
+        if (changed === "completed") {
+          f.store.respond(job.id, ["completed"]);
+        }
 
-        if (changed === "access") f.config.access.deniedUsers.push(HUMAN);
+        if (changed === "access") {
+          f.config.access.deniedUsers.push(HUMAN);
+        }
+
         await f.registration.pollApprovals();
         expect(f.sent).toEqual([]);
         expect(f.backend.replies).toEqual([]);
@@ -696,20 +713,28 @@ describe("Opt-in Teams native permission decisions", () => {
         await f.registration.pollApprovals();
         const text = `approve ${f.approvalToken()}`;
 
-        if (changed === "request") f.backend.pending = [];
+        if (changed === "request") {
+          f.backend.pending = [];
+        }
 
-        if (changed === "session") f.backend.sessionID = "replacement-session";
+        if (changed === "session") {
+          f.backend.sessionID = "replacement-session";
+        }
 
-        if (changed === "input")
+        if (changed === "input") {
           f.backend.bindings.set("permission-1", "irc-input");
+        }
 
-        if (changed === "arguments")
+        if (changed === "arguments") {
           f.backend.pending = [
             { ...f.backend.permission(), resources: ["different tool scope"] },
           ];
+        }
 
-        if (changed === "completed")
+        if (changed === "completed") {
           f.store.respond(job.id, ["already completed"]);
+        }
+
         await f.reopen();
         await f.registration.accept(
           activity({ id: `changed-${changed}`, text }),
@@ -738,7 +763,10 @@ describe("Opt-in Teams native permission decisions", () => {
       });
       const irc = f.store.ready("irc-registration", Date.now(), 10)[0];
 
-      if (!irc) throw new Error("Missing IRC fixture");
+      if (!irc) {
+        throw new Error("Missing IRC fixture");
+      }
+
       f.store.running(irc.id);
       f.store.saveInput(
         "irc-registration",
@@ -853,7 +881,9 @@ test("a Teams connector that declines informative updates still gets typing and 
         _channel: string,
         activity: import("../src/transports/teams/connector").OutgoingActivity,
       ) => {
-        if (activity.entities) throw new Error("Informative streams disabled");
+        if (activity.entities) {
+          throw new Error("Informative streams disabled");
+        }
 
         return { id: activity.type };
       },
@@ -974,10 +1004,11 @@ describe("Teams waiting phrases", () => {
       ],
     ];
 
-    for (const [progress, label] of labels)
+    for (const [progress, label] of labels) {
       expect(informative(await run(() => progress, waiting(), 40))).toEqual([
         label,
       ]);
+    }
   });
 
   test("a specific stage pauses the phrase, which resumes afterwards", async () => {
@@ -1062,7 +1093,10 @@ describe("Teams waiting phrases", () => {
     try {
       const backend = f.config.backend;
 
-      if (backend.type !== "opencode") throw new Error("OpenCode fixture");
+      if (backend.type !== "opencode") {
+        throw new Error("OpenCode fixture");
+      }
+
       // The configured 5 second delay would keep "Thinking" for this turn.
       await saveWaitingDelay(
         backend.directory,

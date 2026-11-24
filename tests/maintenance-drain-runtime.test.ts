@@ -19,7 +19,10 @@ import {
 import { bot, identity } from "./fixtures";
 
 async function until(check: () => boolean) {
-  for (let i = 0; i < 200 && !check(); i++) await Bun.sleep(25);
+  for (let i = 0; i < 200 && !check(); i++) {
+    await Bun.sleep(25);
+  }
+
   expect(check()).toBe(true);
 }
 

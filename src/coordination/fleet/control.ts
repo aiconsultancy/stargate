@@ -85,18 +85,23 @@ export class FleetControl {
       !options.sessionID ||
       !options.account ||
       /[\s\p{Cc}]/u.test(options.account)
-    )
+    ) {
       throw new FleetError(
         "Fleet control requires a pinned session and actual account.",
       );
+    }
 
-    if (options.config.reviews && !options.nativeReviews)
+    if (options.config.reviews && !options.nativeReviews) {
       throw new FleetError("Native review backend unavailable");
+    }
+
     this.ledger = new FleetLedger(options.config.statePath);
 
     if (options.config.reviews) {
-      if (!options.nativeReviews)
+      if (!options.nativeReviews) {
         throw new FleetError("Native review backend unavailable");
+      }
+
       this.reviews = new FleetReviews({
         ledger: this.ledger,
         config: options.config.reviews,
@@ -141,10 +146,11 @@ export class FleetControl {
       input.offerID,
     );
 
-    if (!recorded || recorded.received < Date.now() - 24 * 3_600_000)
+    if (!recorded || recorded.received < Date.now() - 24 * 3_600_000) {
       throw new FleetError(
         "No current offer with this ID was addressed to this captain.",
       );
+    }
 
     const result = {
       offerID: input.offerID,
@@ -154,13 +160,17 @@ export class FleetControl {
       humanApproval: false as const,
     };
 
-    if (recorded.answer === input.answer) return { ...result, repeated: true };
+    if (recorded.answer === input.answer) {
+      return { ...result, repeated: true };
+    }
 
-    if (recorded.answer !== null)
+    if (recorded.answer !== null) {
       throw new FleetError("This offer already has a different answer.");
+    }
 
-    if (!this.options.answer)
+    if (!this.options.answer) {
       throw new FleetError("Offer answers are unavailable on this gateway.");
+    }
 
     try {
       await this.options.answer(
@@ -184,7 +194,9 @@ export class FleetControl {
     return this.options.config.results === true;
   }
   public reviewAssignmentPrompt(dispatchID: string): string | undefined {
-    if (!this.reviews) return;
+    if (!this.reviews) {
+      return;
+    }
 
     const assignment = this.ledger.reviewContext(
       this.options.sessionID,
@@ -192,14 +204,17 @@ export class FleetControl {
       dispatchID,
     );
 
-    if (!assignment) return;
+    if (!assignment) {
+      return;
+    }
 
     if (
       !this.options.config.reviews?.repositories.includes(
         assignment.context.repository,
       )
-    )
+    ) {
       throw new FleetError("Review repository is not permitted");
+    }
 
     return reviewContextPrompt(assignment.context, assignment.text);
   }
@@ -244,8 +259,10 @@ export class FleetControl {
     eventId: string,
     completion: FleetCompletion,
   ) {
-    if (!this.resultsEnabled)
+    if (!this.resultsEnabled) {
       throw new FleetError("Fleet results are disabled");
+    }
+
     this.ledger.complete(
       this.options.sessionID,
       this.options.account,
@@ -261,8 +278,10 @@ export class FleetControl {
     dispatchID: string,
     inputID: string,
   ) {
-    if (!this.resultsEnabled)
+    if (!this.resultsEnabled) {
       throw new FleetError("Fleet results are disabled");
+    }
+
     this.ledger.bindInput(
       this.options.sessionID,
       this.options.account,
@@ -283,7 +302,10 @@ export class FleetControl {
   }
 
   private resultOrigin(source: VerifiedSource) {
-    if (!this.resultsEnabled) return;
+    if (!this.resultsEnabled) {
+      return;
+    }
+
     const origin = this.options.origin?.(source);
 
     if (
@@ -291,10 +313,11 @@ export class FleetControl {
       !source.origin ||
       origin.botKey !== source.origin.botKey ||
       origin.eventId !== source.origin.eventId
-    )
+    ) {
       throw new FleetError(
         "Fleet result origin has no retained ingress job/native input",
       );
+    }
 
     return origin;
   }
@@ -304,10 +327,11 @@ export class FleetControl {
     caller: FleetCaller,
     signal: AbortSignal,
   ) {
-    if (!this.options.allowDispatch)
+    if (!this.options.allowDispatch) {
       throw new FleetError(
         "Fleet dispatch is disabled by this gateway's capability policy.",
       );
+    }
 
     if (
       input.review &&
@@ -315,23 +339,27 @@ export class FleetControl {
         !this.options.config.reviews?.repositories.includes(
           input.review.repository,
         ))
-    )
+    ) {
       throw new FleetError(
         "Review evidence is disabled or repository is not permitted",
       );
+    }
 
     const target = this.options.config.targets.find(
       (entry) => entry.id === input.target,
     );
 
-    if (!target)
+    if (!target) {
       throw new FleetError("Fleet dispatch target is not configured.");
+    }
+
     const source = this.ledger.verify(caller.sessionID, input.sourceReference);
 
-    if (source.authority === "context")
+    if (source.authority === "context") {
       throw new FleetError(
         "Context-only messages cannot authorise fleet assignments.",
       );
+    }
 
     const origin = this.resultOrigin(source);
 
@@ -346,7 +374,9 @@ export class FleetControl {
       ...(input.review && { review: input.review }),
     });
 
-    if (!reserved.created) return reserved.result;
+    if (!reserved.created) {
+      return reserved.result;
+    }
 
     // This label reports real transport identity and immutable evidence. Rank,
     // Delegated evidence and a human source never grant human approval authority.
@@ -377,7 +407,9 @@ export class FleetControl {
           disconnected.abort();
         });
         response.once("close", () => {
-          if (!response.writableEnded) disconnected.abort();
+          if (!response.writableEnded) {
+            disconnected.abort();
+          }
         });
 
         const signal = AbortSignal.any([
@@ -411,9 +443,11 @@ export class FleetControl {
                 !this.options.config.reviews?.repositories.includes(
                   proof.repository,
                 )
-              )
+              ) {
                 sendJson(response, 404, { error: "Review proof unavailable" });
-              else sendJson(response, 200, { proof });
+              } else {
+                sendJson(response, 200, { proof });
+              }
 
               return;
             }
@@ -432,8 +466,9 @@ export class FleetControl {
               keys.some(
                 (k) => !["repository", "pullRequest", "headSHA"].includes(k),
               )
-            )
+            ) {
               throw new FleetError("Invalid review proof lookup");
+            }
 
             const target = Schema.decodeUnknownSync(
               settingsStruct({
@@ -476,20 +511,25 @@ export class FleetControl {
             ),
           );
 
-          if (Result.isFailure(parsed))
+          if (Result.isFailure(parsed)) {
             throw new FleetError("Invalid fleet tool request.");
+          }
+
           const value = parsed.success;
 
-          if (value.caller.sessionID !== this.options.sessionID)
+          if (value.caller.sessionID !== this.options.sessionID) {
             throw new FleetError(
               "Fleet tool caller does not match this gateway's native session pin.",
             );
+          }
+
           signal.throwIfAborted();
 
-          if (!fleetRequestAllowed(this.permissions, value))
+          if (!fleetRequestAllowed(this.permissions, value)) {
             throw new FleetError(
               "Trusted gateway policy refuses this fleet operation.",
             );
+          }
 
           const nativeOrigin = await this.options.authorize(
             value.caller,
@@ -570,11 +610,17 @@ export class FleetControl {
   }
 
   public async close() {
-    if (this.closed) return;
+    if (this.closed) {
+      return;
+    }
+
     this.closed = true;
     this.stop.abort();
 
-    if (this.server) await close(this.server);
+    if (this.server) {
+      await close(this.server);
+    }
+
     await Promise.allSettled(this.pending);
     unlinkOwnSocket(
       this.options.config.socketPath,

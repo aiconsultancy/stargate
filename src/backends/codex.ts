@@ -126,8 +126,9 @@ export function codexLauncher(
 ) {
   const tool = (name: keyof typeof utilities) => shellQuote(utilities[name]);
 
-  if (!/^\/[A-Za-z0-9._+/-]+$/.test(utilities.sh))
+  if (!/^\/[A-Za-z0-9._+/-]+$/.test(utilities.sh)) {
     throw new Error("Codex launcher shell path is not usable");
+  }
 
   return [
     `#!${utilities.sh}`,
@@ -165,8 +166,9 @@ export async function verifyLauncher(path: string, expected: string) {
     file.uid !== uid ||
     (file.mode & 0o777) !== 0o700 ||
     (await readFile(path, "utf8")) !== expected
-  )
+  ) {
     throw new CodexTurnError("Codex launcher failed verification");
+  }
 }
 
 /**
@@ -175,8 +177,9 @@ export async function verifyLauncher(path: string, expected: string) {
  * (`O_EXCL | O_NOFOLLOW`).
  */
 export async function writeLauncher(path: string, script: string) {
-  if (!(await linkFree(dirname(path))))
+  if (!(await linkFree(dirname(path)))) {
     throw new CodexTurnError("Codex launcher failed verification");
+  }
 
   const file = await open(
     path,
@@ -319,11 +322,13 @@ export function codexInput(
     if (imageTypes[file.mime]) {
       parts.push(`Attachment: ${file.name} (image ${images.length + 1})`);
       images.push(file);
-    } else if (isTextAttachment(file)) parts.push(textAttachment(file));
-    else
+    } else if (isTextAttachment(file)) {
+      parts.push(textAttachment(file));
+    } else {
       throw new AttachmentInputUnavailable(
         "Codex supports UTF-8 text and PNG/JPEG/GIF/WebP attachments only",
       );
+    }
   }
 
   return { text: parts.join("\n\n"), images };
@@ -379,23 +384,29 @@ export function codexFailureKind(
       message,
     )?.[1];
 
-  if (status)
+  if (status) {
     return { kind: statusKind(Number(status)), status: Number(status) };
+  }
 
-  if (/usage limit|rate limit|quota|too many requests/i.test(message))
+  if (/usage limit|rate limit|quota|too many requests/i.test(message)) {
     return { kind: "quota" };
+  }
 
-  if (/unauthorized|api key|authentication|access token/i.test(message))
+  if (/unauthorized|api key|authentication|access token/i.test(message)) {
     return { kind: "auth" };
+  }
 
-  if (/timed out|timeout/i.test(message)) return { kind: "timeout" };
+  if (/timed out|timeout/i.test(message)) {
+    return { kind: "timeout" };
+  }
 
   if (
     /error sending request|connection (?:refused|reset|closed)|stream disconnected|dns error|network/i.test(
       message,
     )
-  )
+  ) {
     return { kind: "network" };
+  }
 
   return undefined;
 }
@@ -415,7 +426,10 @@ export class CodexTurn {
 
   /** Returns true when the visible text may have changed. */
   public add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
-    if (stage && isTurnStarted(raw)) stage("model");
+    if (stage && isTurnStarted(raw)) {
+      stage("model");
+    }
+
     const started = decodeStartedEvent(raw);
 
     if (Option.isSome(started)) {
@@ -431,16 +445,27 @@ export class CodexTurn {
       const worked = workItems.has(type);
 
       if (item.value.type === "item.started") {
-        if (type === "reasoning") stage?.("reasoning");
-        else if (worked) stage?.("tool");
-        else if (type === "agent_message") stage?.("reply");
+        if (type === "reasoning") {
+          stage?.("reasoning");
+        } else if (worked) {
+          stage?.("tool");
+        } else if (type === "agent_message") {
+          stage?.("reply");
+        }
       }
 
-      if (worked) this.worked = true;
+      if (worked) {
+        this.worked = true;
+      }
 
-      if (type !== "agent_message" || text === undefined) return false;
+      if (type !== "agent_message" || text === undefined) {
+        return false;
+      }
 
-      if (this.messages.get(id) === text) return false;
+      if (this.messages.get(id) === text) {
+        return false;
+      }
+
       this.messages.set(id, text);
 
       return true;
@@ -452,8 +477,9 @@ export class CodexTurn {
       this.result = { ok: end.value.type === "turn.completed" };
       const message = end.value.error?.message ?? end.value.message;
 
-      if (!this.result.ok && message)
+      if (!this.result.ok && message) {
         this.failure = codexFailureKind(message) ?? this.failure;
+      }
     }
 
     return false;
@@ -555,8 +581,10 @@ export class CodexBackend implements AgentBackend {
     for (const path of Object.values(directories)) {
       await mkdir(path, { recursive: true, mode: 0o700 });
 
-      if (!(await linkFree(path)))
+      if (!(await linkFree(path))) {
         throw new Error("Codex data directories must not be symbolic links");
+      }
+
       await chmod(path, 0o700);
     }
 
@@ -590,7 +618,9 @@ export class CodexBackend implements AgentBackend {
   }: Parameters<AgentBackend["createSession"]>[0]) {
     signal.throwIfAborted();
 
-    if (this.closed) throw new Error("Codex backend is closing");
+    if (this.closed) {
+      throw new Error("Codex backend is closing");
+    }
 
     // Codex assigns the thread ID on the first turn; Stargate maps to it.
     return crypto.randomUUID();
@@ -603,7 +633,10 @@ export class CodexBackend implements AgentBackend {
         JSON.parse(await readFile(join(this.threads, `${id}.json`), "utf8")),
       ).thread;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
+
       throw new CodexTurnError("Codex thread mapping is unreadable");
     }
   }
@@ -630,13 +663,19 @@ export class CodexBackend implements AgentBackend {
 
     signal.throwIfAborted();
 
-    if (this.closed) throw new Error("Codex backend is closing");
+    if (this.closed) {
+      throw new Error("Codex backend is closing");
+    }
 
-    if (!isID(sessionId))
+    if (!isID(sessionId)) {
       throw new CodexTurnError("Codex conversation ID is not valid");
+    }
+
     const id = sessionId;
 
-    if (this.runs.has(id)) throw new CodexTurnError("Codex thread is busy");
+    if (this.runs.has(id)) {
+      throw new CodexTurnError("Codex thread is busy");
+    }
 
     const input = codexInput(
       context ? `${sourceLine(context)}\n\n${text}` : text,
@@ -684,9 +723,14 @@ export class CodexBackend implements AgentBackend {
     const abandon = Promise.withResolvers<"abandon">();
 
     const cancel = () => {
-      if (live) sdk.abort();
+      if (live) {
+        sdk.abort();
+      }
 
-      if (!recorded || reaping !== undefined) return;
+      if (!recorded || reaping !== undefined) {
+        return;
+      }
+
       reaping = stopTurnProcesses(
         systemProcesses,
         run.marker,
@@ -715,11 +759,13 @@ export class CodexBackend implements AgentBackend {
         temporary = await trustedPath(temporary, roots);
         await checkCodexPaths(this.config, this.data, temporary);
 
-        for (const path of Object.values(codexDirectories(this.data)))
-          if (!(await linkFree(path)))
+        for (const path of Object.values(codexDirectories(this.data))) {
+          if (!(await linkFree(path))) {
             throw new Error(
               "Codex data directories must not be symbolic links",
             );
+          }
+        }
       } catch (error) {
         throw new CodexTurnError((error as Error).message);
       }
@@ -806,8 +852,10 @@ export class CodexBackend implements AgentBackend {
           const changed = turn.add(event, stage);
 
           if (turn.thread !== undefined && turn.thread !== known) {
-            if (known !== undefined || !isID(turn.thread))
+            if (known !== undefined || !isID(turn.thread)) {
               throw new CodexTurnError("Codex thread identity changed");
+            }
+
             // Synchronous: the mapping exists before the turn continues.
             writeFileSync(
               join(this.threads, `${id}.json`),
@@ -820,41 +868,57 @@ export class CodexBackend implements AgentBackend {
           if (changed && onText) {
             const visible = turn.answer();
 
-            if (visible) onText(visible);
+            if (visible) {
+              onText(visible);
+            }
           }
 
           if (turn.result && !settle)
-            // A CLI that does not exit after its result is stopped.
+          // A CLI that does not exit after its result is stopped.
+          {
             settle = setTimeout(stop, this.grace);
+          }
+
           live = true;
 
-          if (run.controller.signal.aborted) sdk.abort();
+          if (run.controller.signal.aborted) {
+            sdk.abort();
+          }
         }
       } catch (error) {
         // The result completes the turn; a later teardown error does not.
-        if (signal.aborted || error instanceof CodexTurnError) throw error;
+        if (signal.aborted || error instanceof CodexTurnError) {
+          throw error;
+        }
 
         // The CLI ended without a result; SDK errors carry its stderr.
-        if (!turn.result) throw new BackendFailure("crash", crashed);
+        if (!turn.result) {
+          throw new BackendFailure("crash", crashed);
+        }
       } finally {
         live = false;
         clearTimeout(settle);
 
         // Closes the SDK's stream, now or once a pending read settles.
-        if (open) stream.return(undefined).catch(() => {});
+        if (open) {
+          stream.return(undefined).catch(() => {});
+        }
       }
 
       signal.throwIfAborted();
 
-      if (!turn.result) throw new BackendFailure("crash", crashed);
+      if (!turn.result) {
+        throw new BackendFailure("crash", crashed);
+      }
 
-      if (!turn.result.ok)
+      if (!turn.result.ok) {
         throw turn.failure
           ? new BackendFailure(turn.failure.kind, {
               status: turn.failure.status,
               ran: turn.worked,
             })
           : new CodexTurnError("Codex turn failed");
+      }
 
       return turn.answer();
     } catch (error) {
@@ -866,8 +930,10 @@ export class CodexBackend implements AgentBackend {
         error instanceof AttachmentInputUnavailable ||
         error instanceof BackendFailure ||
         error instanceof CodexTurnError
-      )
+      ) {
         throw error;
+      }
+
       // SDK errors carry the CLI's stderr; never forward them.
       throw new CodexTurnError("Codex turn failed");
     } finally {
@@ -876,22 +942,31 @@ export class CodexBackend implements AgentBackend {
       await reaping;
 
       // Stop every verified process of the turn that is still left.
-      if (recorded)
+      if (recorded) {
         await stopTurnProcesses(
           systemProcesses,
           run.marker,
           run.since,
           this.grace,
         );
+      }
 
-      if (temporary)
+      if (temporary) {
         await rm(temporary, { recursive: true, force: true }).catch(() => {});
+      }
 
-      if (launcher) await rm(launcher, { force: true }).catch(() => {});
+      if (launcher) {
+        await rm(launcher, { force: true }).catch(() => {});
+      }
 
-      if (recorded) await rm(run.record, { force: true });
+      if (recorded) {
+        await rm(run.record, { force: true });
+      }
 
-      if (this.runs.get(id) === run) this.runs.delete(id);
+      if (this.runs.get(id) === run) {
+        this.runs.delete(id);
+      }
+
       finished.resolve();
     }
   }
@@ -922,7 +997,10 @@ export class CodexBackend implements AgentBackend {
   }
 
   public async interrupt(sessionId: string, signal: AbortSignal) {
-    if (!isID(sessionId)) return;
+    if (!isID(sessionId)) {
+      return;
+    }
+
     const run = this.runs.get(sessionId);
 
     if (run) {
@@ -939,7 +1017,10 @@ export class CodexBackend implements AgentBackend {
     this.closed = true;
     const runs = [...this.runs.values()];
 
-    for (const run of runs) run.controller.abort();
+    for (const run of runs) {
+      run.controller.abort();
+    }
+
     await Promise.all(runs.map((run) => run.done));
   }
 }

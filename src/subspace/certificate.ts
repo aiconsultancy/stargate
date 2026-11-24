@@ -26,12 +26,15 @@ export type AgentKey = {
 const tag = (type: number, content: Buffer) => {
   const length = content.length;
 
-  if (length < 0x80)
+  if (length < 0x80) {
     return Buffer.concat([Buffer.from([type, length]), content]);
+  }
+
   const bytes: number[] = [];
 
-  for (let rest = length; rest > 0; rest = Math.floor(rest / 0x1_00))
+  for (let rest = length; rest > 0; rest = Math.floor(rest / 0x1_00)) {
     bytes.unshift(rest % 0x1_00);
+  }
 
   return Buffer.concat([
     Buffer.from([type, 0x80 + bytes.length, ...bytes]),
@@ -51,7 +54,10 @@ const bits = (content: Buffer) =>
 function integer(value: Buffer) {
   let start = 0;
 
-  while (start < value.length - 1 && value[start] === 0) start++;
+  while (start < value.length - 1 && value[start] === 0) {
+    start++;
+  }
+
   const trimmed = value.subarray(start);
 
   return tag(
@@ -216,10 +222,11 @@ export function parseBundle(text: string): AgentKey {
   const keys = blocks.filter((block) => block.label.endsWith("PRIVATE KEY"));
   const leaf = blocks.find((block) => block.label === "CERTIFICATE");
 
-  if (keys.length !== 1 || !leaf)
+  if (keys.length !== 1 || !leaf) {
     throw new BundleError(
       "The bundle needs one private key and its certificate",
     );
+  }
 
   let privateKey: KeyObject;
   let certificate: X509Certificate;
@@ -239,10 +246,13 @@ export function parseBundle(text: string): AgentKey {
         ? "ecdsa-p256"
         : undefined;
 
-  if (!algorithm) throw new BundleError("Use an Ed25519 or ECDSA P-256 key");
+  if (!algorithm) {
+    throw new BundleError("Use an Ed25519 or ECDSA P-256 key");
+  }
 
-  if (!certificate.checkPrivateKey(privateKey))
+  if (!certificate.checkPrivateKey(privateKey)) {
     throw new BundleError("The bundle's certificate does not match its key");
+  }
 
   return {
     algorithm,

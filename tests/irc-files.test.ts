@@ -27,7 +27,9 @@ import { FakeFilehost, FakeIrcServer, lineOf, until } from "./irc-fixture";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const accounts = { galactica: "captain-pass", jack: "jack-pass" };
@@ -132,7 +134,9 @@ async function ship(
 
   const [captain] = created.registrations;
 
-  if (!captain) throw new Error("missing captain");
+  if (!captain) {
+    throw new Error("missing captain");
+  }
 
   // One gateway lifetime; `crash` ends it as a process stop would.
   const lifetime = () => {
@@ -257,7 +261,9 @@ test("irc files in: routing keeps only FILEHOST links of an admitted message", (
     "@account=jack;msgid=m1 :jack!u@h PRIVMSG #galactica :galactica: see https://files.fleet.example/f/a.png, https://evil.example/f/b.png and (https://files.fleet.example/f/c.md).",
   );
 
-  if (!message) throw new Error("fixture");
+  if (!message) {
+    throw new Error("fixture");
+  }
 
   const admission = routeIrcMessage(message, {
     config,
@@ -401,8 +407,9 @@ test.skipIf(!openssl)(
     const run = (...args: string[]) => {
       if (
         spawnSync("openssl", args, { cwd: directory, stdio: "ignore" }).status
-      )
+      ) {
         throw new Error("openssl failed");
+      }
     };
 
     run(
@@ -749,12 +756,15 @@ test("irc files out: only proven refusals are UploadRefused", async () => {
     host.failStatus = code;
   };
 
-  for (const code of [400, 401, 403, 413, 415])
+  for (const code of [400, 401, 403, 413, 415]) {
     expect(await outcome(status(code))).toBe("refused");
+  }
 
   // Rate limits, server errors and unexpected answers may follow a store.
-  for (const code of [200, 202, 302, 409, 429, 500, 502, 503, 504])
+  for (const code of [200, 202, 302, 409, 429, 500, 502, 503, 504]) {
     expect(await outcome(status(code))).toBe("uncertain");
+  }
+
   // A 201 without a usable Location is malformed: uncertain too.
   expect(
     await outcome(() => {

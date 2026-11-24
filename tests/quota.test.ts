@@ -73,15 +73,21 @@ test("collector blocks redirects, oversized data, key symlinks and caller cancel
     async fetch(request) {
       requests++;
 
-      if (new URL(request.url).pathname === "/unexpected") followed = true;
+      if (new URL(request.url).pathname === "/unexpected") {
+        followed = true;
+      }
 
-      if (mode === "redirect")
+      if (mode === "redirect") {
         return new Response(null, {
           status: 302,
           headers: { location: "/unexpected" },
         });
+      }
 
-      if (mode === "large") return new Response("x".repeat(1024 * 1024 + 1));
+      if (mode === "large") {
+        return new Response("x".repeat(1024 * 1024 + 1));
+      }
+
       started.resolve();
 
       return release.promise;

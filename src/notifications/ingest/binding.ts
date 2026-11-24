@@ -41,8 +41,9 @@ export function resolveDestinations(
       ({ bot }) => bot.id === configured.slack.bot,
     );
 
-    if (!sender || !isAllowedChannel(sender.bot, configured.slack.channel))
+    if (!sender || !isAllowedChannel(sender.bot, configured.slack.channel)) {
       throw new Error("Unsafe notification destination binding");
+    }
 
     const decoded = Schema.decodeUnknownResult(Destination)({
       transport: "slack",
@@ -54,8 +55,10 @@ export function resolveDestinations(
       audience: configured.audience,
     });
 
-    if (Result.isFailure(decoded) || echo(decoded.success, registrations))
+    if (Result.isFailure(decoded) || echo(decoded.success, registrations)) {
       throw new Error("Unsafe notification destination binding");
+    }
+
     const destination = decoded.success;
     const key = physicalKey(destination);
     const previous = physical.get(key);
@@ -64,8 +67,10 @@ export function resolveDestinations(
       previous &&
       (previous.audience !== destination.audience ||
         previous.registrationId !== destination.registrationId)
-    )
+    ) {
       throw new Error("Conflicting notification destination aliases");
+    }
+
     physical.set(key, destination);
     result[alias] = destination;
   }
@@ -83,8 +88,9 @@ export function bindingAllowed(
   if (
     !notify ||
     !audienceAllowed(destination.sourceAudience, destination.audience)
-  )
+  ) {
     return false;
+  }
 
   try {
     const key = physicalKey(destination);

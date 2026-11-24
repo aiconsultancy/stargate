@@ -21,7 +21,9 @@ import { identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const names = ["Galactica", "Adama", "captain"];
@@ -131,7 +133,7 @@ test("setting: off by default; channels are IDs, names are words", () => {
     { channels: ["C1"], names: ["Gal.*"] },
     { channels: ["C1"], names: ["x".repeat(41)] },
     { channels: ["C1"], names, extra: true },
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(transcriptionSchema)({
@@ -140,6 +142,7 @@ test("setting: off by default; channels are IDs, names are words", () => {
         }),
       ),
     ).toBe(false);
+  }
 });
 
 test("spoken mentions are whole words in any letter case", () => {
@@ -149,16 +152,19 @@ test("spoken mentions are whole words in any letter case", () => {
     "Adama's crew can take it",
     "Hey CAPTAIN — merge it",
     "status for\ngalactica",
-  ])
+  ]) {
     expect(spokenMention([text], names)).toBe(true);
+  }
 
   for (const text of [
     "the galactic fleet",
     "all captains report",
     "Adamant about it",
     "",
-  ])
+  ]) {
     expect(spokenMention([text], names)).toBe(false);
+  }
+
   expect(spokenMention(["admiral   adama here"], ["Admiral Adama"])).toBe(true);
   // A configured variant is literal, not a pattern.
   expect(spokenMention(["Adamah, go"], ["Adamah"])).toBe(true);
@@ -179,8 +185,10 @@ test("routing holds only unmentioned file messages in configured channels", () =
     [message({ channel: "D123" }), held],
     [message({ channel: "C999" }), held],
     [message(), config({ spoken: false })],
-  ] as const)
+  ] as const) {
     expect(routeEvent(body, cfg, identity)).not.toHaveProperty("gate");
+  }
+
   // Deny lists still win; mentionOnly still admits a held voice message.
   expect(routeEvent(message({ user: "U456" }), held, identity)).toBeUndefined();
   expect(
@@ -225,7 +233,9 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
     async transcribe() {
       calls.push("provider");
 
-      if (fail) throw new Error("PRIVATE provider failure");
+      if (fail) {
+        throw new Error("PRIVATE provider failure");
+      }
 
       return heard;
     },
@@ -292,9 +302,13 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
       jobs.length;
       jobs = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 20)
     ) {
-      for (const job of jobs) await gateway.process(job, signal);
+      for (const job of jobs) {
+        await gateway.process(job, signal);
+      }
 
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        return;
+      }
     }
   };
 
@@ -312,11 +326,17 @@ function fixture(options: Parameters<typeof config>[0] = {}) {
     followed: (thread: string) =>
       store.follows(conversationKey(gateway.key, "C123", thread)),
     set(next: { files?: Attachment[]; heard?: string; fail?: boolean }) {
-      if (next.files) files = next.files;
+      if (next.files) {
+        files = next.files;
+      }
 
-      if (next.heard !== undefined) heard = next.heard;
+      if (next.heard !== undefined) {
+        heard = next.heard;
+      }
 
-      if (next.fail !== undefined) fail = next.fail;
+      if (next.fail !== undefined) {
+        fail = next.fail;
+      }
     },
   };
 }
@@ -443,7 +463,10 @@ test("held and ignored messages never become a thread's delivery target", () => 
   );
   const id = store.queuedJob(key, "C123:1.100")?.id;
 
-  if (id === undefined) throw new Error("Missing held job");
+  if (id === undefined) {
+    throw new Error("Missing held job");
+  }
+
   store.discard(id);
   expect(store.transcript.transcriptTarget(key, conversation)?.user).toBe(
     "U123",
@@ -525,7 +548,10 @@ test("an admitted message whose memory copy was lost is transcribed again and ke
   f.gateway.accept(message());
   const job = f.store.ready(f.gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-  if (!job) throw new Error("Missing job");
+  if (!job) {
+    throw new Error("Missing job");
+  }
+
   // As after a restart between the gate and the turn.
   expect(f.store.admitSpoken(job.id)).toBe(true);
   await f.drain();

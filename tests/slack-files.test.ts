@@ -15,7 +15,9 @@ import {
 const cleanup: (() => Promise<unknown>)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -49,18 +51,22 @@ function fixture() {
   info.set("F1", file());
 
   let api = (path: string, params: URLSearchParams): unknown => {
-    if (path === "/api/files.info")
+    if (path === "/api/files.info") {
       return { ok: true, file: info.get(params.get("file") ?? "") };
+    }
 
-    if (path === "/api/files.getUploadURLExternal")
+    if (path === "/api/files.getUploadURLExternal") {
       return {
         ok: true,
         file_id: "F99",
         upload_url: "https://files.slack.com/upload/v1/F99",
       };
+    }
 
-    if (path === "/api/files.completeUploadExternal")
+    if (path === "/api/files.completeUploadExternal") {
       return { ok: true, files: [{ id: "F99" }] };
+    }
+
     throw new Error("Unexpected fixture API path");
   };
 
@@ -104,13 +110,18 @@ function fixture() {
     if (source.origin === "https://files.slack.com") {
       transfers.push({ url: source.href, init });
 
-      if (!source.pathname.startsWith("/upload/"))
+      if (!source.pathname.startsWith("/upload/")) {
         return download(source, init);
+      }
 
-      if (upload) return upload(source, init);
-    } else if (source.origin !== "https://slack.com")
+      if (upload) {
+        return upload(source, init);
+      }
+    } else if (source.origin !== "https://slack.com") {
       throw new Error("Fixture blocked outbound host");
-    else if (apiFetch) return apiFetch(source, init);
+    } else if (apiFetch) {
+      return apiFetch(source, init);
+    }
 
     return fetch(new URL(source.pathname, server.url), init);
   };
@@ -489,11 +500,13 @@ test("Slack file batch applies count and aggregate budgets before allocating mor
   expect(f.records).toEqual([]);
   const size = 9 * 1024 * 1024;
 
-  for (const id of ["F1", "F2", "F3"])
+  for (const id of ["F1", "F2", "F3"]) {
     f.info.set(
       id,
       f.file(id, new Uint8Array(size), "application/zip", "bundle.zip"),
     );
+  }
+
   f.download(
     async () =>
       new Response(new Uint8Array(size), {
@@ -639,7 +652,10 @@ test("Slack metadata and signed-upload operations honour abort through injected 
       new Promise<Response>((_resolve, reject) => {
         const signal = init?.signal;
 
-        if (!signal) throw new Error("Missing request signal");
+        if (!signal) {
+          throw new Error("Missing request signal");
+        }
+
         signal.addEventListener(
           "abort",
           () => {
@@ -651,8 +667,12 @@ test("Slack metadata and signed-upload operations honour abort through injected 
         started.resolve();
       });
 
-    if (operation === "metadata") f.apiFetch(pending);
-    else f.upload(pending);
+    if (operation === "metadata") {
+      f.apiFetch(pending);
+    } else {
+      f.upload(pending);
+    }
+
     const stop = new AbortController();
 
     const work =

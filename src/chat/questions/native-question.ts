@@ -88,11 +88,12 @@ export const nativeQuestionSchema = settingsStruct({
   ),
 }).check(
   settingsCheck((value, context) => {
-    if (new Set(value.fields.map((f) => f.key)).size !== value.fields.length)
+    if (new Set(value.fields.map((f) => f.key)).size !== value.fields.length) {
       context.addIssue({
         code: "custom",
         message: "Duplicate question fields",
       });
+    }
 
     if (
       value.fields.some(
@@ -100,14 +101,16 @@ export const nativeQuestionSchema = settingsStruct({
           f.options &&
           new Set(f.options.map((o) => o.value)).size !== f.options.length,
       )
-    )
+    ) {
       context.addIssue({
         code: "custom",
         message: "Ambiguous question options",
       });
+    }
 
-    if (value.fields.some((f) => f.options?.length === 0 && !f.custom))
+    if (value.fields.some((f) => f.options?.length === 0 && !f.custom)) {
       context.addIssue({ code: "custom", message: "Empty closed question" });
+    }
 
     const text = [
       value.title,
@@ -128,11 +131,12 @@ export const nativeQuestionSchema = settingsStruct({
       /\b(password|passcode|secret|credential|api[ -]?key|access[ -]?token|private[ -]?key|one[ -]?time[ -]?code)\b/i.test(
         text,
       )
-    )
+    ) {
       context.addIssue({
         code: "custom",
         message: "Sensitive or oversized question",
       });
+    }
   }),
 );
 
@@ -156,14 +160,17 @@ export type QuestionAnswer = Record<string, string | string[]>;
 /** Hash the native form, not just the text selected for display. */
 export function questionFingerprint(value: unknown): string {
   const canonical = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map((item) => canonical(item));
+    if (Array.isArray(v)) {
+      return v.map((item) => canonical(item));
+    }
 
-    if (v !== null && typeof v === "object")
+    if (v !== null && typeof v === "object") {
       return Object.fromEntries(
         Object.entries(v)
           .toSorted(([a], [b]) => a.localeCompare(b))
           .map(([k, item]) => [k, canonical(item)]),
       );
+    }
 
     return v;
   };
@@ -177,14 +184,19 @@ export function questionAnswer(
   question: NativeQuestion,
   text: string,
 ): QuestionAnswer {
-  if (text.length > 4000 || containsCredential(text))
+  if (text.length > 4000 || containsCredential(text)) {
     throw new Error("Unsafe question answer");
+  }
+
   let input: unknown;
 
   if (question.fields.length === 1 && !text.trimStart().startsWith("{")) {
     const f = question.fields[0];
 
-    if (!f) throw new Error("Missing question field");
+    if (!f) {
+      throw new Error("Missing question field");
+    }
+
     const choices = text.split(",").map((v) => v.trim());
 
     const selected = choices.map((v) =>
@@ -202,7 +214,9 @@ export function questionAnswer(
         : choices;
 
     input = { [f.key]: value };
-  } else input = JSON.parse(text);
+  } else {
+    input = JSON.parse(text);
+  }
 
   const answerText = Schema.String.check(Schema.isMaxCodePoints(2000));
 
@@ -221,40 +235,52 @@ export function questionAnswer(
     Object.keys(parsed).some(
       (key) => !question.fields.some((f) => f.key === key),
     )
-  )
+  ) {
     throw new Error("Unknown answer field");
+  }
 
   for (const f of question.fields) {
     const value = parsed[f.key];
 
     if (value === undefined) {
-      if (f.required !== false) throw new Error("Missing answer field");
+      if (f.required !== false) {
+        throw new Error("Missing answer field");
+      }
+
       continue;
     }
 
-    if (f.type === "string" ? typeof value !== "string" : !Array.isArray(value))
+    if (
+      f.type === "string" ? typeof value !== "string" : !Array.isArray(value)
+    ) {
       throw new Error("Wrong answer type");
+    }
+
     const values = typeof value === "string" ? [value] : value;
 
     if (
       new Set(values).size !== values.length ||
       values.some((v) => !v.trim() || containsCredential(v))
-    )
+    ) {
       throw new Error("Invalid answer");
+    }
+
     const options = f.options;
 
     if (
       options &&
       !f.custom &&
       values.some((v) => !options.some((o) => o.value === v))
-    )
+    ) {
       throw new Error("Unknown answer choice");
+    }
 
     if (
       f.type === "multiselect" &&
       (values.length < (f.minItems ?? 1) || values.length > (f.maxItems ?? 20))
-    )
+    ) {
       throw new Error("Wrong selection count");
+    }
   }
 
   return parsed;

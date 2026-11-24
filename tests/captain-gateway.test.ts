@@ -33,11 +33,16 @@ import { bot, event, identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 function fixture(store = openStore(":memory:"), ownStore = true) {
-  if (ownStore) cleanup.push(() => store.close());
+  if (ownStore) {
+    cleanup.push(() => store.close());
+  }
+
   const config = bot();
   config.access.channels = ["*"];
 
@@ -87,14 +92,17 @@ function fixture(store = openStore(":memory:"), ownStore = true) {
   const next = () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
 
     return job;
   };
 
   const drain = async () => {
-    while (store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1).length)
+    while (store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1).length) {
       await gateway.process(next(), signal);
+    }
   };
 
   return {
@@ -150,13 +158,16 @@ function productionTranscriptFixture(store?: Store, ownStore = true) {
     fetch(request) {
       const url = new URL(request.url);
 
-      if (url.pathname === "/api/session/original-captain")
+      if (url.pathname === "/api/session/original-captain") {
         return Response.json({
           data: { id: "original-captain", time: { busy: 0, idle: time + 100 } },
         });
+      }
 
-      if (!url.pathname.endsWith("/message"))
+      if (!url.pathname.endsWith("/message")) {
         return new Response(null, { status: 404 });
+      }
+
       const start = Number(url.searchParams.get("cursor") ?? 0);
 
       const end =
@@ -177,7 +188,10 @@ function productionTranscriptFixture(store?: Store, ownStore = true) {
     directory: "/workspace",
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
+
   const native = new OpenCodeBackend(config);
   f.backend.transcript = (session, cursor, signal) =>
     native.transcript(session, cursor, signal);
@@ -220,7 +234,9 @@ function productionTranscriptFixture(store?: Store, ownStore = true) {
       },
     });
 
-    if (text) answer(id, text);
+    if (text) {
+      answer(id, text);
+    }
   };
 
   const answer = (id: string, text: string) =>
@@ -399,21 +415,24 @@ for (const defect of [
   test(`shell origin ${defect} stays native instead of inheriting the latest chat`, async () => {
     const f = productionTranscriptFixture();
     f.beforeAnswer(() => {
-      if (defect === "unknown-input")
+      if (defect === "unknown-input") {
         f.add({
           id: "unmapped_native",
           type: "user",
           text: "s=slack;c=C123;t=1.000",
         });
+      }
 
-      if (defect !== "future-launch")
+      if (defect !== "future-launch") {
         f.add(shellLaunch("launch_a", "sh_fixtureA"));
+      }
     });
     f.gateway.accept(source("D123", "task A", "1.000"));
     await f.drain();
     f.beforeAnswer(() => {
-      if (defect === "ambiguous")
+      if (defect === "ambiguous") {
         f.add(shellLaunch("duplicate", "sh_fixtureA"));
+      }
     });
     f.gateway.accept(source("C456", "<@UBOT> task B", "2.000"));
     await f.drain();
@@ -423,18 +442,18 @@ for (const defect of [
       defect === "foreign" ? "sh_otherSession" : "sh_fixtureA",
     );
 
-    if (defect === "absent-metadata")
+    if (defect === "absent-metadata") {
       f.add({ id: completion.id, type: "synthetic", text: completion.text });
-    else if (defect === "missing")
+    } else if (defect === "missing") {
       f.add({ ...completion, metadata: { source: "shell" } });
-    else if (defect === "mismatched-job")
+    } else if (defect === "mismatched-job") {
       f.add({
         ...completion,
         metadata: { ...completion.metadata, jobID: "sh_otherJob" },
       });
-    else if (defect === "mismatched-command")
+    } else if (defect === "mismatched-command") {
       f.add({ ...completion, description: "another command" });
-    else if (defect === "mixed-metadata")
+    } else if (defect === "mixed-metadata") {
       f.add({
         ...completion,
         metadata: {
@@ -445,10 +464,16 @@ for (const defect of [
           },
         },
       });
-    else f.add(completion);
+    } else {
+      f.add(completion);
+    }
+
     f.answer("done_a", "Private completion");
 
-    if (defect === "future-launch") f.add(shellLaunch("future", "sh_fixtureA"));
+    if (defect === "future-launch") {
+      f.add(shellLaunch("future", "sh_fixtureA"));
+    }
+
     f.gateway.settle("original-captain");
     await f.gateway.catchUp(f.signal);
     await f.drain();
@@ -537,8 +562,13 @@ test("shell cursor reanchors after restart and reconnect; text and files keep or
     gateway.settle("original-captain");
     await gateway.catchUp(f.signal);
 
-    for (const job of reopened.ready(gateway.key, Number.MAX_SAFE_INTEGER, 10))
+    for (const job of reopened.ready(
+      gateway.key,
+      Number.MAX_SAFE_INTEGER,
+      10,
+    )) {
       await gateway.process(job, f.signal);
+    }
   }
 
   expect(f.posts.slice(2)).toEqual([
@@ -553,7 +583,9 @@ for (const boundary of ["bot", "app", "workspace"]) {
     const f = productionTranscriptFixture();
     const config = bot(boundary === "bot" ? "other-bot" : "helper");
 
-    if (boundary === "app") config.slack.appId = "AFOREIGN";
+    if (boundary === "app") {
+      config.slack.appId = "AFOREIGN";
+    }
 
     const foreignIdentity = {
       ...identity,
@@ -568,12 +600,18 @@ for (const boundary of ["bot", "app", "workspace"]) {
 
     const incoming = routeEvent(raw, config, foreignIdentity);
 
-    if (!incoming) throw new Error("Missing foreign fixture input");
+    if (!incoming) {
+      throw new Error("Missing foreign fixture input");
+    }
+
     expect(f.store.enqueue(incoming)).toBe(true);
     const key = botKey(config, foreignIdentity);
     const job = f.store.ready(key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Missing foreign fixture job");
+    if (!job) {
+      throw new Error("Missing foreign fixture job");
+    }
+
     f.store.running(job.id);
     f.store.saveInput(key, job.id, "msg_foreign", "original-captain");
     f.store.respond(job.id, ["foreign answer"]);
@@ -599,12 +637,17 @@ for (const duringTurn of [false, true]) {
     f.gateway.accept(source("D123", "private task A", "1.000"));
     await f.drain();
 
-    if (duringTurn)
+    if (duringTurn) {
       f.beforeReturn(() => f.wake("wake_a", "PRIVATE_A", "msg_input_1"));
+    }
+
     f.gateway.accept(source("C456", "<@UBOT> public question B", "2.000"));
     await f.drain();
 
-    if (!duringTurn) f.wake("wake_a", "PRIVATE_A", "msg_input_1");
+    if (!duringTurn) {
+      f.wake("wake_a", "PRIVATE_A", "msg_input_1");
+    }
+
     f.wake("unknown", "UNROUTED_PRIVATE");
     f.wake("foreign", "FOREIGN_PRIVATE", "msg_input_2", "other-captain");
     f.gateway.settle("original-captain");
@@ -678,8 +721,10 @@ test("conversation eval: crew origin survives restart and ordinary shell complet
   gateway.settle("original-captain");
   await gateway.catchUp(f.signal);
 
-  for (const job of reopened.ready(gateway.key, Number.MAX_SAFE_INTEGER, 10))
+  for (const job of reopened.ready(gateway.key, Number.MAX_SAFE_INTEGER, 10)) {
     await gateway.process(job, f.signal);
+  }
+
   expect(f.posts.at(-1)).toEqual({
     channel: "D123",
     thread: "1.000",
@@ -802,7 +847,10 @@ test("pin leaves the old namespace and per-source follow-up admission intact", a
   const config = bot();
   const before = backendFingerprint(config);
 
-  if (config.backend.type !== "opencode") throw new Error("Expected OpenCode");
+  if (config.backend.type !== "opencode") {
+    throw new Error("Expected OpenCode");
+  }
+
   config.backend.sessionID = "original-captain";
   expect(backendFingerprint(config)).toBe(before);
   expect(botKey(config, identity)).toBe(botKey(bot(), identity));
@@ -838,7 +886,9 @@ test("conversation eval: concurrent sources keep one captain execution slot", as
 
     active--;
 
-    if (text === "second") done.resolve();
+    if (text === "second") {
+      done.resolve();
+    }
 
     return text;
   };
@@ -871,7 +921,9 @@ test("a captain reply that is still being delivered is not started again by the 
   const polled = async (count: number) => {
     const target = polls + count;
 
-    while (polls < target) await delay(10);
+    while (polls < target) {
+      await delay(10);
+    }
   };
 
   let started = 0;
@@ -887,13 +939,19 @@ test("a captain reply that is still being delivered is not started again by the 
   const work = f.gateway.work(stop.signal);
 
   try {
-    while (started === 0) await delay(10);
+    while (started === 0) {
+      await delay(10);
+    }
+
     // The job is `responding` now. Later polls must leave it to its worker.
     await polled(2);
     expect(started).toBe(1);
     release.resolve();
 
-    while (f.store.queueCounts(f.gateway.key).done !== 1) await delay(10);
+    while (f.store.queueCounts(f.gateway.key).done !== 1) {
+      await delay(10);
+    }
+
     await polled(1);
   } finally {
     release.resolve();
@@ -982,8 +1040,10 @@ test("conversation eval: migration resume carries only its own source after anot
   };
 
   f.setTurn(async (text) => {
-    if (text === "Migration initial")
+    if (text === "Migration initial") {
       throw new Error("Synthetic backend failure");
+    }
+
     f.add("assistant", `answer: ${text}`);
 
     return `answer: ${text}`;
@@ -1052,7 +1112,10 @@ test("cold captain sends current source IDs without resending legacy history", a
     fresh.accept(source("C123", "Resume migration", ts, "1.000"));
     const job = f.store.ready(fresh.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Missing fresh job");
+    if (!job) {
+      throw new Error("Missing fresh job");
+    }
+
     await fresh.process(job, f.signal);
   }
 
@@ -1196,25 +1259,36 @@ function nativeFixture(store?: Store, ownStore = true) {
   };
 
   f.backend.transcript = async (_session, cursor) => {
-    if (broken) throw new Error("History unreadable");
+    if (broken) {
+      throw new Error("History unreadable");
+    }
+
     const after = cursor === latestInput ? input : cursor;
 
-    if (cursor === latestInput && after === undefined)
+    if (cursor === latestInput && after === undefined) {
       throw new TranscriptUnavailable("cursor");
+    }
+
     const open = history.findIndex((message) => !message.settled);
     const done = open < 0 ? history : history.slice(0, open);
 
-    if (after === undefined)
+    if (after === undefined) {
       return { cursor: done.at(-1)?.id ?? "", entries: [] };
+    }
 
     const index =
       after === "" ? -1 : done.findIndex((message) => message.id === after);
 
-    if (after !== "" && index < 0) throw new TranscriptUnavailable("cursor");
+    if (after !== "" && index < 0) {
+      throw new TranscriptUnavailable("cursor");
+    }
+
     let boundary: string | undefined;
 
     const entries = done.slice(index + 1).flatMap((message) => {
-      if (message.kind === "input") boundary = message.id;
+      if (message.kind === "input") {
+        boundary = message.id;
+      }
 
       return message.kind === "assistant" && message.text
         ? [
@@ -1394,7 +1468,9 @@ for (const cause of ["transcription", "attachments"] as const) {
       ...f.slack,
       files: {
         async download() {
-          if (cause === "attachments") throw new Error("Slack file refused");
+          if (cause === "attachments") {
+            throw new Error("Slack file refused");
+          }
 
           return [
             { name: "voice.m4a", mime: "audio/mp4", data: new Uint8Array([1]) },
@@ -1462,7 +1538,10 @@ test("legacy mappings never broadcast; matching original cursor retains one owne
     ["C123", "2.000", "other-root"],
     ["C456", "3.000", "other-root-2"],
   ]) {
-    if (!channel || !thread || !session) throw new Error("Missing fixture");
+    if (!channel || !thread || !session) {
+      throw new Error("Missing fixture");
+    }
+
     f.gateway.accept(source(channel, "<@UBOT> old", thread));
     const other = f.next();
     f.store.saveSession(other.conversation, session, "old-cursor");
@@ -1555,7 +1634,10 @@ test("pending completion remains eligible without a new request or watch event",
   await f.drain();
   await f.gateway.catchUp(f.signal); // Still pending; do not lose the retry.
 
-  for (const message of f.history) message.settled = true;
+  for (const message of f.history) {
+    message.settled = true;
+  }
+
   await f.gateway.catchUp(f.signal);
   await f.drain();
   expect(f.posts.filter((post) => post.text === "Still settling")).toHaveLength(
@@ -1611,7 +1693,10 @@ test("restart preserves source jobs, input ownership and the one delivery cursor
   await gateway.catchUp(f.signal);
   const pending = reopened.ready(gateway.key, Date.now(), 10);
 
-  for (const job of pending) await gateway.process(job, f.signal);
+  for (const job of pending) {
+    await gateway.process(job, f.signal);
+  }
+
   gateway.settle();
   await gateway.catchUp(f.signal);
   expect(reopened.ready(gateway.key, Date.now(), 10)).toEqual([]);
@@ -1687,13 +1772,16 @@ test("recovery interrupts only the proven captain owner, never legacy or native 
     // A settled transcript stops here and hides the later raw UI input.
     f.add("assistant", "Unmarked Stargate output", false);
 
-    if (uiOwns) f.add("input", "native UI instruction");
+    if (uiOwns) {
+      f.add("input", "native UI instruction");
+    }
+
     const interrupted: string[] = [];
     f.backend.interrupt = async (session) => {
       throw new Error(`Broad interruption is not ownership proof: ${session}`);
     };
 
-    if (guarded)
+    if (guarded) {
       f.backend.interruptInput = async (session, expected) => {
         expect(session).toBe("original-captain");
         expect(expected).toBe(input);
@@ -1702,8 +1790,11 @@ test("recovery interrupts only the proven captain owner, never legacy or native 
           (message) => message.kind === "input",
         );
 
-        if (latest?.id === expected) interrupted.push(session);
+        if (latest?.id === expected) {
+          interrupted.push(session);
+        }
       };
+    }
 
     const delivered = Promise.withResolvers<void>();
     const post = f.slack.post;
@@ -1737,10 +1828,15 @@ test("an allocated input not readable yet keeps catch-up eligible", async () => 
   f.breakReads(false);
   const transcript = f.backend.transcript;
 
-  if (!transcript) throw new Error("Missing transcript");
+  if (!transcript) {
+    throw new Error("Missing transcript");
+  }
+
   let pending = true;
   f.backend.transcript = async (session, cursor, signal) => {
-    if (pending) throw new TranscriptUnavailable("cursor");
+    if (pending) {
+      throw new TranscriptUnavailable("cursor");
+    }
 
     return transcript(session, cursor, signal);
   };

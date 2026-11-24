@@ -48,32 +48,39 @@ export class CrewUpdateNotices {
   ): Promise<UpdateReceipt[]> {
     const captain = this.options.captainSessionID;
 
-    if (!captain) return [];
+    if (!captain) {
+      return [];
+    }
+
     const receipts: UpdateReceipt[] = [];
 
     for (const member of this.options.team.crew) {
       signal.throwIfAborted();
       const peer = this.state.peer(member.id);
 
-      if (peer?.status !== "ready") continue;
+      if (peer?.status !== "ready") {
+        continue;
+      }
 
       try {
         let effective: unknown;
 
-        if (member.backend)
+        if (member.backend) {
           effective = {
             model: member.backend.model,
             permissions: member.permissionProfile,
             tools: member.backend.tools,
           };
-        else {
+        } else {
           const session = await this.session(peer.sessionID, signal);
 
           if (
             session.agent !== (member.agent ?? member.id) ||
             session.location.directory !== this.options.worktrees[member.id]
-          )
+          ) {
             throw new Error("Wrong crew session");
+          }
+
           effective = {
             model: session.model,
             permissions: session.permissions,
@@ -114,12 +121,13 @@ export class CrewUpdateNotices {
                 Schema.decodeUnknownSync(
                   Schema.Struct({ stored: Schema.Literal(true) }),
                 )(receipt);
-              } else
+              } else {
                 this.state.updateNotices.queueContext(
                   peer.sessionID,
                   id,
                   this.options.namespace,
                 );
+              }
             },
             this.options.namespace,
           ),
@@ -166,8 +174,10 @@ export class CrewUpdateNotices {
       !member ||
       member.backend ||
       agent !== (member.agent ?? member.id)
-    )
+    ) {
       return;
+    }
+
     this.state.updateNotices.consumeContext(
       sessionID,
       this.options.namespace,

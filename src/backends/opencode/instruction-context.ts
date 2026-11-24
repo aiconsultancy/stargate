@@ -29,12 +29,17 @@ function pathFormat(path: string) {
 
       return code < 32 || code === 127;
     })
-  )
+  ) {
     return;
+  }
 
-  if (posix.isAbsolute(path) && posix.normalize(path) === path) return posix;
+  if (posix.isAbsolute(path) && posix.normalize(path) === path) {
+    return posix;
+  }
 
-  if (win32.isAbsolute(path) && win32.normalize(path) === path) return win32;
+  if (win32.isAbsolute(path) && win32.normalize(path) === path) {
+    return win32;
+  }
 
   return;
 }
@@ -42,9 +47,13 @@ function pathFormat(path: string) {
 function describes(path: string, description: string): boolean {
   const format = pathFormat(path);
 
-  if (!format || !description) return false;
+  if (!format || !description) {
+    return false;
+  }
 
-  if (description === path) return true;
+  if (description === path) {
+    return true;
+  }
 
   return (
     !format.isAbsolute(description) &&
@@ -68,21 +77,31 @@ export function isNativeInstructionContext(
     typeof message.description !== "string" ||
     message.description.length > 16_384 ||
     !message.description.startsWith("Loaded ")
-  )
+  ) {
     return false;
+  }
+
   const parsed = Schema.decodeUnknownResult(metadataSchema)(message.metadata);
 
-  if (Result.isFailure(parsed)) return false;
+  if (Result.isFailure(parsed)) {
+    return false;
+  }
+
   const paths = parsed.success.instruction.paths;
 
-  if (new Set(paths).size !== paths.length) return false;
+  if (new Set(paths).size !== paths.length) {
+    return false;
+  }
+
   const descriptions = message.description.slice("Loaded ".length).split(", ");
 
   if (
     descriptions.length !== paths.length ||
     !paths.every((path, index) => describes(path, descriptions[index] ?? ""))
-  )
+  ) {
     return false;
+  }
+
   // File bodies are opaque; a quoted header inside one is ordinary content.
   // Only the metadata-declared block markers must appear in their native order.
   let cursor = 0;
@@ -91,13 +110,19 @@ export function isNativeInstructionContext(
     const header = `Instructions from: ${path}\n`;
 
     if (index === 0) {
-      if (!message.text.startsWith(header)) return false;
+      if (!message.text.startsWith(header)) {
+        return false;
+      }
+
       cursor = header.length;
     } else {
       const marker = `\n\n${header}`;
       const found = message.text.indexOf(marker, cursor);
 
-      if (found === -1) return false;
+      if (found === -1) {
+        return false;
+      }
+
       cursor = found + marker.length;
     }
   }

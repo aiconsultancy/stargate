@@ -25,8 +25,10 @@ export type TurnProgress = {
 };
 
 export function turnProgressText(progress?: TurnProgress) {
-  if (!progress)
+  if (!progress) {
     return "Stargate has no confirmed backend activity for this request.";
+  }
+
   const time = new Date(progress.observedAt).toISOString().slice(11, 16);
 
   return `${progress.disconnected ? "OpenCode event stream disconnected. " : ""}${descriptions[progress.stage].replace("OpenCode", backendName(progress.backend))} Observed at ${time} UTC.`;

@@ -32,8 +32,10 @@ function treeDigest() {
   const digest = createHash("sha256");
 
   for (const path of new Set(files)) {
-    if (!path || !lstatSync(path, { throwIfNoEntry: false })?.isFile())
+    if (!path || !lstatSync(path, { throwIfNoEntry: false })?.isFile()) {
       continue;
+    }
+
     digest
       .update(`${path}\0`)
       .update(createHash("sha256").update(readFileSync(path)).digest());
@@ -89,10 +91,13 @@ function fix(config: string, options: string[]) {
     { stdio: "inherit" },
   );
 
-  if (attempt.error) throw attempt.error;
+  if (attempt.error) {
+    throw attempt.error;
+  }
 
-  if (attempt.status !== 0 && attempt.status !== 1)
+  if (attempt.status !== 0 && attempt.status !== 1) {
     throw new Error(`Oxlint fix failed: ${attempt.status ?? attempt.signal}`);
+  }
 
   return attempt.status === 0;
 }
@@ -116,8 +121,10 @@ try {
     const current = treeDigest();
 
     if (current === previous) {
-      if (!syntaxPassed || !spacingPassed)
+      if (!syntaxPassed || !spacingPassed) {
         throw new Error("Oxlint could not fix every selected finding");
+      }
+
       console.log(
         `Format fixed point: ${round - 1} changed rounds, one unchanged`,
       );
@@ -128,8 +135,9 @@ try {
     previous = current;
   }
 
-  if (!settled)
+  if (!settled) {
     throw new Error("Formatting did not converge within four rounds");
+  }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

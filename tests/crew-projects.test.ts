@@ -68,7 +68,9 @@ async function git(directory: string, ...args: string[]) {
     child.exited,
   ]);
 
-  if (code) throw new Error(`Local Git fixture failed: ${error}`);
+  if (code) {
+    throw new Error(`Local Git fixture failed: ${error}`);
+  }
 
   return text.trim();
 }
@@ -148,7 +150,10 @@ async function fixture(crewCount = 1) {
 
   const extra = locations.get("stargate");
 
-  if (!extra) throw new Error("Missing project fixture");
+  if (!extra) {
+    throw new Error("Missing project fixture");
+  }
+
   const options: CrewOptions = { ...base, projects: { stargate: extra } };
 
   type Native = CrewSession & { model?: unknown; permissions?: unknown };
@@ -170,13 +175,17 @@ async function fixture(crewCount = 1) {
     async get({ sessionID }) {
       const value = native.get(sessionID);
 
-      if (!value) throw { _tag: "Session.NotFoundError" };
+      if (!value) {
+        throw { _tag: "Session.NotFoundError" };
+      }
 
       return value;
     },
     async create(input) {
-      if (!input.id || !input.agent || !input.location || !input.metadata)
+      if (!input.id || !input.agent || !input.location || !input.metadata) {
         throw new Error("Exact native identity required");
+      }
+
       creations.push(structuredClone(input));
 
       const value: Native = {
@@ -381,7 +390,9 @@ test("dispatch selects only protected paths; worker omission binds native contex
 
     const peer = projects.get("stargate").state.peer("worker");
 
-    if (!peer || !result.task) throw new Error("Missing native task");
+    if (!peer || !result.task) {
+      throw new Error("Missing native task");
+    }
 
     const worker = {
       sessionID: peer.sessionID,
@@ -402,10 +413,11 @@ test("dispatch selects only protected paths; worker omission binds native contex
         ?.summary,
     ).toBe("Read the assigned repository");
 
-    for (const mail of [false, true])
+    for (const mail of [false, true]) {
       await expect(
         projects.select({ project: "default" }, worker, mail),
       ).rejects.toThrow("another project");
+    }
 
     const selected = await projects.select(
       { op: "send", to: "captain", text: "Actual worker result" },
@@ -434,7 +446,10 @@ test("dispatch selects only protected paths; worker omission binds native contex
     expect(projects.default.state.task(result.task.id)).toBeNull();
     const original = f.native.get(peer.sessionID);
 
-    if (!original) throw new Error("Missing peer");
+    if (!original) {
+      throw new Error("Missing peer");
+    }
+
     f.native.set(peer.sessionID, {
       ...original,
       location: { directory: f.base.projectDirectory },
@@ -486,7 +501,7 @@ test("project validation rejects path/repository aliases and foreign worktrees b
 
     let opened = 0;
 
-    for (const value of invalid)
+    for (const value of invalid) {
       await expect(
         CrewProjects.open(value, async (options) => {
           opened++;
@@ -494,6 +509,8 @@ test("project validation rejects path/repository aliases and foreign worktrees b
           return f.factory(options);
         }),
       ).rejects.toThrow();
+    }
+
     const link = join(f.root, "aliased-worker");
     await symlink(
       f.options.projects?.["stargate"]?.worktrees["worker"] ?? "",
@@ -550,8 +567,9 @@ test("tool schema accepts keys only and original strict operation constraints re
     { op: "dispatch", crew: "worker", text: "task", directory: "/tmp/other" },
     { op: "dispatch", crew: "worker", text: "task", project: "../other" },
     { op: "dispatch", project: "stargate" },
-  ])
+  ]) {
     expect(await tool.validate(value)).toHaveProperty("issues");
+  }
 
   for (const key of [
     "default",
@@ -559,7 +577,7 @@ test("tool schema accepts keys only and original strict operation constraints re
     "prototype",
     "__proto__",
     "../escape",
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(projectsSchema)(
@@ -574,6 +592,7 @@ test("tool schema accepts keys only and original strict operation constraints re
         ),
       ),
     ).toBe(false);
+  }
 });
 
 test("Effect project envelope separates selection from strict operation decoding", () => {
@@ -594,8 +613,9 @@ test("Effect project envelope separates selection from strict operation decoding
     { op: "read", extra: true },
     { op: "read", project: "../escape" },
     { op: "read", project: null },
-  ])
+  ]) {
     expect(() => decode(input)).toThrow();
+  }
 
   for (const [key, accepted] of [
     ["default", true],
@@ -635,11 +655,13 @@ test("status and history identify all project contexts while legacy output stays
   const projects = await CrewProjects.open(f.options, f.factory);
 
   try {
-    for (const project of ["default", "stargate"])
+    for (const project of ["default", "stargate"]) {
       await projects.run(
         { op: "ensure", crew: "worker", project },
         f.captain(),
       );
+    }
+
     const status = projects.status();
     expect(status.total).toBe(2);
     expect(status.truncated).toBe(false);
@@ -821,7 +843,10 @@ test("changing a registered worktree cannot rebind persisted project workers or 
     projects = undefined;
     const directory = f.options.projects?.["stargate"]?.projectDirectory;
 
-    if (!directory) throw new Error("Missing project");
+    if (!directory) {
+      throw new Error("Missing project");
+    }
+
     const moved = join(f.root, "new-worker-location");
     await git(directory, "worktree", "add", "-b", "task/moved", moved, "main");
     await expect(
@@ -973,7 +998,9 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
   try {
     const tool = tools.get("stargate_crew");
 
-    if (!tool) throw new Error("Missing registered native tool");
+    if (!tool) {
+      throw new Error("Missing registered native tool");
+    }
 
     const context: Tool.Context = {
       sessionID: Session.ID.make("ses_captain"),
@@ -1001,8 +1028,10 @@ test("actual OpenCode V2 plugin routes the configured project and retains native
     });
     const journal = tools.get("stargate_journal");
 
-    if (!journal || !Schema.isSchema(journal.input))
+    if (!journal || !Schema.isSchema(journal.input)) {
       throw new Error("Journal requires a native Effect input codec");
+    }
+
     const parseJournal = Schema.decodeUnknownSync(journal.input);
 
     const note = {
@@ -1073,7 +1102,9 @@ function feedbackTools(host: Awaited<ReturnType<typeof nativeHost>>) {
   const submit = host.tools.get("stargate_feedback");
   const review = host.tools.get("stargate_feedback_review");
 
-  if (!submit || !review) throw new Error("Feedback tools not registered");
+  if (!submit || !review) {
+    throw new Error("Feedback tools not registered");
+  }
 
   return {
     submit: async (input: unknown, context: Tool.Context) =>
@@ -1155,7 +1186,10 @@ test("feedback persists redacted original and binds review to the ship across pr
       await projects.close();
     }
 
-    if (!peer) throw new Error("Missing worker fixture");
+    if (!peer) {
+      throw new Error("Missing worker fixture");
+    }
+
     const worker = feedbackContext(peer.sessionID, "crew-worker");
     const captain = feedbackContext("ses_captain", "build");
     host = await nativeHost(f, options);
@@ -1304,8 +1338,9 @@ test("feedback persists redacted original and binds review to the ship across pr
         "observed-secret",
         "fixture-password",
         "fixture-tail",
-      ])
+      ]) {
         expect(JSON.stringify(row)).not.toContain(secret);
+      }
     } finally {
       db.close();
     }

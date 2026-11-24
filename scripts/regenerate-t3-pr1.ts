@@ -58,8 +58,10 @@ function replace(file: string, from: string, to: string): void {
   const text = readFileSync(file, "utf8");
   const at = text.indexOf(from);
 
-  if (at === -1 || text.includes(from, at + from.length))
+  if (at === -1 || text.includes(from, at + from.length)) {
     throw new Error(`Pattern drift: ${file}`);
+  }
+
   writeFileSync(file, text.slice(0, at) + to + text.slice(at + from.length));
 }
 
@@ -133,8 +135,9 @@ async function regenerate(): Promise<void> {
   const top = git("rev-parse", "--show-prefix").trim();
   const branch = git("branch", "--show-current").trim();
 
-  if (top || !branch || branch === "main" || branch === "master")
+  if (top || !branch || branch === "main" || branch === "master") {
     throw new Error("Use a feature branch from the repository root");
+  }
 
   if (
     extra.length > 0 ||
@@ -162,8 +165,10 @@ async function regenerate(): Promise<void> {
   }
 
   if (patch) {
-    if (git("rev-parse", "HEAD") !== git("rev-parse", "origin/main"))
+    if (git("rev-parse", "HEAD") !== git("rev-parse", "origin/main")) {
       throw new Error("Fetch and branch from current main first");
+    }
+
     git("apply", "--check", "--index", "--", patch);
     git("apply", "--index", "--", patch);
   }
@@ -175,13 +180,15 @@ async function regenerate(): Promise<void> {
     loaded === null ||
     !("hardModeConfig" in loaded) ||
     !callable(loaded.hardModeConfig)
-  )
+  ) {
     throw new Error("scripts/hard-mode-config.ts must export hardModeConfig");
+  }
 
   const config: unknown = await loaded.hardModeConfig();
 
-  if (!isHardModeConfig(config))
+  if (!isHardModeConfig(config)) {
     throw new Error("hardModeConfig returned an unexpected shape");
+  }
 
   const { zod, ignorePatterns } = config;
   const protectedPaths = [...zod, ...fixed];
@@ -221,8 +228,10 @@ async function regenerate(): Promise<void> {
       { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
     );
 
-    if (result.status !== 0 && result.status !== 1)
+    if (result.status !== 0 && result.status !== 1) {
       throw new Error(`Oxlint failed for ${rule}: ${result.stderr}`);
+    }
+
     const data = JSON.parse(result.stdout) as { diagnostics: Finding[] };
 
     if (
@@ -233,15 +242,17 @@ async function regenerate(): Promise<void> {
           protectedPaths.includes(filename) ||
           !/^(src|scripts|perf)\/(?:[\w-]+\/)*[\w.-]+\.ts$/.test(filename),
       )
-    )
+    ) {
       throw new Error(`Unexpected diagnostic scope: ${rule}`);
+    }
 
     return data.diagnostics;
   }
 
   function requireGreen(rule: string): void {
-    if (lint(rule).length > 0)
+    if (lint(rule).length > 0) {
       throw new Error(`Unresolved findings remain: ${rule}`);
+    }
   }
 
   function transform(): void {
@@ -251,7 +262,10 @@ async function regenerate(): Promise<void> {
     ] as const) {
       const findings = lint(rule).length;
 
-      if (findings) lint(rule, mode);
+      if (findings) {
+        lint(rule, mode);
+      }
+
       requireGreen(rule);
       console.log(`${rule}: ${findings} native repairs`);
     }
@@ -260,15 +274,17 @@ async function regenerate(): Promise<void> {
     const repeats = lint(duplicate);
 
     for (const { filename } of repeats) {
-      if (filename === "src/coordination/fleet/control.ts")
+      if (filename === "src/coordination/fleet/control.ts") {
         replace(
           filename,
           "status?(): Promise<unknown> | unknown;",
           "status?(): unknown;",
         );
-      else if (filename === "src/lib/effect.ts")
+      } else if (filename === "src/lib/effect.ts") {
         replace(filename, "=> Promise<unknown> | unknown,", "=> unknown,");
-      else throw new Error(`Unrecognised redundant constituent: ${filename}`);
+      } else {
+        throw new Error(`Unrecognised redundant constituent: ${filename}`);
+      }
     }
 
     requireGreen(duplicate);
@@ -283,10 +299,12 @@ async function regenerate(): Promise<void> {
       if (
         queries.length !== 3 ||
         queries.some(({ filename }) => filename !== file)
-      )
+      ) {
         throw new Error(
           "Type-query group changed; inspect before extending the codemod",
         );
+      }
+
       replace(
         file,
         'import type { JobStatus } from "../../../../gateway/store";',
@@ -297,8 +315,9 @@ async function regenerate(): Promise<void> {
         ["TurnStage", "shared/turn-progress"],
         ["JobStatus", "gateway/store"],
         ["RequestFailure", "shared/request-failure"],
-      ] as const)
+      ] as const) {
         replace(file, `import("../../../../${module}").${name}`, name);
+      }
     }
 
     requireGreen(imports);
@@ -323,16 +342,20 @@ async function regenerate(): Promise<void> {
     if (
       diff !== git("diff", "--binary", "--no-ext-diff") ||
       parentTree !== git("write-tree")
-    )
+    ) {
       throw new Error("Second run changed the sweep or the index");
-
-    for (const [file, hash] of protectedBefore) {
-      if (digest(file) !== hash)
-        throw new Error(`Protected file changed: ${file}`);
     }
 
-    if (git("diff", "--name-only", "--", "tests"))
+    for (const [file, hash] of protectedBefore) {
+      if (digest(file) !== hash) {
+        throw new Error(`Protected file changed: ${file}`);
+      }
+    }
+
+    if (git("diff", "--name-only", "--", "tests")) {
       throw new Error("PR1 must not rewrite test files");
+    }
+
     bun("run", "typecheck");
     bun("run", "lint");
     bun("scripts/compare-js-emit.ts", "--capture", join(scratch, "after"));

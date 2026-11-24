@@ -69,10 +69,14 @@ export class CrewHistoryRPC {
   private root(member: CrewMember): HistorySession | undefined {
     const peer = this.state.peer(member.id);
 
-    if (peer?.status !== "ready") return undefined;
-
-    if (member.backend && !this.state.piPeer(peer.sessionID)?.conversationID)
+    if (peer?.status !== "ready") {
       return undefined;
+    }
+
+    if (member.backend && !this.state.piPeer(peer.sessionID)?.conversationID) {
+      return undefined;
+    }
+
     const model = member.backend?.model ?? member.model;
 
     return {
@@ -87,20 +91,28 @@ export class CrewHistoryRPC {
   }
 
   private authorized(id: string) {
-    if (!id.startsWith(piHistoryPrefix)) return;
+    if (!id.startsWith(piHistoryPrefix)) {
+      return;
+    }
 
     const [sessionID, childID, extra] = id
       .slice(piHistoryPrefix.length)
       .split("~");
 
-    if (!sessionID || extra !== undefined) return;
+    if (!sessionID || extra !== undefined) {
+      return;
+    }
+
     const peer = this.state.peerBySession(sessionID);
 
     const member = this.team.crew.find(
       (member) => member.id === peer?.crewID && member.backend !== undefined,
     );
 
-    if (!peer || !member) return;
+    if (!peer || !member) {
+      return;
+    }
+
     const mainID = this.state.piPeer(sessionID)?.conversationID;
     const conversationID = childID ?? mainID;
 
@@ -108,8 +120,9 @@ export class CrewHistoryRPC {
       !conversationID ||
       !/^(0|[1-9]\d*)$/.test(conversationID) ||
       !this.state.piOwnsConversation(sessionID, conversationID)
-    )
+    ) {
       return;
+    }
 
     return { member, sessionID, conversationID, child: childID !== undefined };
   }
@@ -122,7 +135,9 @@ export class CrewHistoryRPC {
         return root ? [root] : [];
       });
 
-      if (sessions.length > HISTORY_PAGE) throw new CrewError(unavailable);
+      if (sessions.length > HISTORY_PAGE) {
+        throw new CrewError(unavailable);
+      }
 
       return { sessions };
     });
@@ -136,13 +151,17 @@ export class CrewHistoryRPC {
       for (const id of ids) {
         const owned = this.authorized(id);
 
-        if (!owned) continue;
+        if (!owned) {
+          continue;
+        }
 
         if (!owned.child) {
           const root = this.root(owned.member);
 
-          if (root) sessions.push(root);
-        } else
+          if (root) {
+            sessions.push(root);
+          }
+        } else {
           sessions.push(
             childSession(
               id,
@@ -150,6 +169,7 @@ export class CrewHistoryRPC {
               "task conversation",
             ),
           );
+        }
       }
 
       return { sessions };
@@ -161,10 +181,13 @@ export class CrewHistoryRPC {
       const input = decodeChildren(raw);
       const owned = this.authorized(input.parentID);
 
-      if (!owned) throw new CrewError(unavailable);
-
-      if (input.updatedSince !== undefined && input.cursor)
+      if (!owned) {
         throw new CrewError(unavailable);
+      }
+
+      if (input.updatedSince !== undefined && input.cursor) {
+        throw new CrewError(unavailable);
+      }
 
       const cursor = input.cursor
         ? decodeChildrenCursor(
@@ -172,11 +195,14 @@ export class CrewHistoryRPC {
           )
         : undefined;
 
-      if (cursor && cursor.parentID !== input.parentID)
+      if (cursor && cursor.parentID !== input.parentID) {
         throw new CrewError(unavailable);
+      }
 
       if (owned.child) {
-        if (cursor) throw new CrewError(unavailable);
+        if (cursor) {
+          throw new CrewError(unavailable);
+        }
 
         return { sessions: [] };
       }
@@ -218,7 +244,9 @@ export class CrewHistoryRPC {
       const input = decodeEntries(raw);
       const owned = this.authorized(input.sessionID);
 
-      if (!owned) throw new CrewError(unavailable);
+      if (!owned) {
+        throw new CrewError(unavailable);
+      }
 
       return this.pi.readHistory(owned.member, signal, (history, call) =>
         history.entries(

@@ -67,7 +67,10 @@ export async function readState(dataDirectory: string): Promise<State> {
 
   const text = await readOptional(statePath(dataDirectory)).catch(() => null);
 
-  if (!text) return state;
+  if (!text) {
+    return state;
+  }
+
   let raw: unknown;
 
   try {
@@ -76,20 +79,34 @@ export async function readState(dataDirectory: string): Promise<State> {
     return state;
   }
 
-  if (typeof raw !== "object" || raw === null) return state;
+  if (typeof raw !== "object" || raw === null) {
+    return state;
+  }
+
   const record = raw as Record<string, unknown>;
   const npm = decode.npm(record["npm"]);
 
-  if (Option.isSome(npm)) state.npm = npm.value;
+  if (Option.isSome(npm)) {
+    state.npm = npm.value;
+  }
+
   const proxy = decode.cliproxyapi(record["cliproxyapi"]);
 
-  if (Option.isSome(proxy)) state.cliproxyapi = proxy.value;
+  if (Option.isSome(proxy)) {
+    state.cliproxyapi = proxy.value;
+  }
+
   const failed = decode.failedReleases(record["failedReleases"]);
 
-  if (Option.isSome(failed)) state.failedReleases = failed.value;
+  if (Option.isSome(failed)) {
+    state.failedReleases = failed.value;
+  }
+
   const loaded = decode.openCodeRelease(record["openCodeRelease"]);
 
-  if (Option.isSome(loaded)) state.openCodeRelease = loaded.value;
+  if (Option.isSome(loaded)) {
+    state.openCodeRelease = loaded.value;
+  }
 
   return state;
 }

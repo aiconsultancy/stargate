@@ -65,11 +65,17 @@ async function fixture(version: "0.14" | "0.20") {
   );
   const before = bot("pogo"); // A registration ID is not the product name.
 
-  if (before.backend.type !== "opencode") throw new Error("Fixture backend");
+  if (before.backend.type !== "opencode") {
+    throw new Error("Fixture backend");
+  }
+
   before.backend.directory = "/srv/pogo/captain";
   const after = structuredClone(before);
 
-  if (after.backend.type !== "opencode") throw new Error("Fixture backend");
+  if (after.backend.type !== "opencode") {
+    throw new Error("Fixture backend");
+  }
+
   after.backend.directory = "/srv/stargate/captain";
 
   const oldKey = botKey(before, identity),
@@ -364,12 +370,18 @@ describe("one-time Stargate cutover", () => {
   test("key planner requires old normalization and preserves Slack/IRC identities", () => {
     const before = bot();
 
-    if (before.backend.type !== "opencode") throw new Error("Fixture backend");
+    if (before.backend.type !== "opencode") {
+      throw new Error("Fixture backend");
+    }
+
     before.backend.directory = "/srv/pogo/captain";
     before.backend.headersEnv = { authorization: "POGO_RPC" };
     const after = structuredClone(before);
 
-    if (after.backend.type !== "opencode") throw new Error("Fixture backend");
+    if (after.backend.type !== "opencode") {
+      throw new Error("Fixture backend");
+    }
+
     after.backend.directory = "/srv/stargate/captain";
     after.backend.headersEnv = { authorization: "STARGATE_RPC" };
 

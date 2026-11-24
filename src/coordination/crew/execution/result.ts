@@ -72,8 +72,10 @@ function matchesUrgency(message: ResultMessage, task: CrewTask): boolean {
     metadata !== null &&
     typeof metadata === "object" &&
     "resumeIdleAt" in metadata
-  )
+  ) {
     return isTaskResume(message, task);
+  }
+
   const notice = Schema.decodeUnknownResult(urgency)(metadata);
 
   return (
@@ -90,7 +92,9 @@ function matchesUrgency(message: ResultMessage, task: CrewTask): boolean {
 function matchesInput(message: ResultMessage, task: CrewTask): boolean {
   const payload = taskEnvelopePayload(message.text);
 
-  if (payload === undefined) return false;
+  if (payload === undefined) {
+    return false;
+  }
 
   try {
     const value = Schema.decodeUnknownSync(envelope)(JSON.parse(payload));
@@ -142,20 +146,23 @@ export async function readTaskResult(
 
     signal.throwIfAborted();
 
-    if (page.data.length > 100)
+    if (page.data.length > 100) {
       throw new CrewError("Invalid result history page.");
+    }
 
     for (const message of page.data) {
       if (message.id === task.inputID && message.type === "user") {
-        if (!matchesInput(message, task))
+        if (!matchesInput(message, task)) {
           throw new CrewError(
             "Retained input does not match the task envelope. Restore the original input before retrying status.",
           );
+        }
 
-        if (!shellContext.finish(message.time.created))
+        if (!shellContext.finish(message.time.created)) {
           throw new CrewError(
             "A shell callback lacks unique task-owned launch proof; result refused.",
           );
+        }
 
         const result = (final?.content ?? [])
           .filter((part) => part.type === "text")
@@ -171,17 +178,20 @@ export async function readTaskResult(
           final.error !== undefined ||
           final.time.completed === undefined ||
           !result
-        )
+        ) {
           throw new MissingTaskResult(
             "No completed visible worker answer follows this input. Resume the existing task session, then retry status; do not submit the assignment again.",
           );
+        }
 
         return result.slice(0, 64_000);
       }
 
       const shellCandidate = shellContext.track(message);
 
-      if (shellCandidate && !final) unansweredShellCallback = true;
+      if (shellCandidate && !final) {
+        unansweredShellCallback = true;
+      }
 
       if (
         message.type === "user" ||
@@ -190,32 +200,43 @@ export async function readTaskResult(
           !isNativeInstructionContext(message) &&
           !shellCandidate) ||
         message.type === "shell"
-      )
+      ) {
         throw new CrewError(
           "A later input follows this task. Read the original task turn before resuming; a later answer cannot complete it.",
         );
+      }
 
-      if (message.type === "assistant") final ??= message;
+      if (message.type === "assistant") {
+        final ??= message;
+      }
       // Skill, compaction and model records do not start another assignment.
     }
 
     const next = page.cursor.next;
 
-    if (next && cursors.has(next))
+    if (next && cursors.has(next)) {
       throw new CrewError(
         "Result API repeated its cursor. Retry status when history pagination is available.",
       );
+    }
 
-    if (next) cursors.add(next);
+    if (next) {
+      cursors.add(next);
+    }
+
     cursor = next ?? undefined;
 
-    if (!cursor) break;
+    if (!cursor) {
+      break;
+    }
   }
 
-  if (cursor)
+  if (cursor) {
     throw new CrewError(
       "Result history scan bound exceeded (100 pages, up to 10,000 records). The original input is unverified beyond this window; inspect its retained turn without replaying it.",
     );
+  }
+
   throw new CrewError(
     "The admitted input is absent from retained history. Restore this session's history before retrying status; do not replay the assignment.",
   );

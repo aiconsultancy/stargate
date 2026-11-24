@@ -94,13 +94,21 @@ const decodeEvaluation = Schema.decodeUnknownResult(cronEvaluationSchema);
 function advanced(input: CronAdvanced): CronAdvanced {
   const result: CronAdvanced = {};
 
-  if (input.trigger !== undefined) result.trigger = input.trigger;
+  if (input.trigger !== undefined) {
+    result.trigger = input.trigger;
+  }
 
-  if (input.model !== undefined) result.model = input.model;
+  if (input.model !== undefined) {
+    result.model = input.model;
+  }
 
-  if (input.once !== undefined) result.once = input.once;
+  if (input.once !== undefined) {
+    result.once = input.once;
+  }
 
-  if (input.arbiter !== undefined) result.arbiter = input.arbiter;
+  if (input.arbiter !== undefined) {
+    result.arbiter = input.arbiter;
+  }
 
   return result;
 }
@@ -246,27 +254,34 @@ function readRun({ snapshot, manual, evaluation, ...run }: RunRow): CronRun {
 }
 
 function checkScope(scope: CronScope) {
-  if (!validScope(scope)) throw new Error("Invalid cron ownership scope.");
+  if (!validScope(scope)) {
+    throw new Error("Invalid cron ownership scope.");
+  }
 }
 
 function checkBotKey(botKey: string) {
-  if (!validBotKey(botKey)) throw new Error("Invalid cron bot scope.");
+  if (!validBotKey(botKey)) {
+    throw new Error("Invalid cron bot scope.");
+  }
 }
 
 function checkRequestId(requestId: string | undefined) {
-  if (requestId !== undefined && !validRequestId(requestId))
+  if (requestId !== undefined && !validRequestId(requestId)) {
     throw new Error("Invalid cron request identifier.");
+  }
 }
 
 function checkTime(now: number) {
-  if (!Number.isSafeInteger(now) || !Number.isFinite(new Date(now).getTime()))
+  if (!Number.isSafeInteger(now) || !Number.isFinite(new Date(now).getTime())) {
     throw new Error("Invalid cron reference time.");
+  }
 }
 
 function runtimeRegistration(registration: string, signature: string): string {
   try {
-    if (registration.length > 8192 || !validSignature(signature))
+    if (registration.length > 8192 || !validSignature(signature)) {
       throw new Error("Invalid cron runtime registration or signature.");
+    }
 
     return JSON.stringify(
       Schema.decodeUnknownSync(registrationSchema)(JSON.parse(registration)),
@@ -291,7 +306,10 @@ export class CronStore {
       );
 
       try {
-        if (!fstatSync(fd).isFile()) throw new Error("Invalid cron database.");
+        if (!fstatSync(fd).isFile()) {
+          throw new Error("Invalid cron database.");
+        }
+
         fchmodSync(fd, 0o600);
       } finally {
         closeSync(fd);
@@ -330,8 +348,9 @@ export class CronStore {
               .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
               .all()
               .some((column) => column.name === name)
-          )
+          ) {
             this.db.run(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+          }
         };
 
         column("cron_schedules", "source", "TEXT");
@@ -403,7 +422,9 @@ export class CronStore {
             )
             .get(scope.botKey, scope.channel, scope.user, requestId);
 
-          if (existing) return readSchedule(existing);
+          if (existing) {
+            return readSchedule(existing);
+          }
         }
 
         const schedule = {
@@ -475,10 +496,11 @@ export class CronStore {
             json_extract(botKey,'$[2]'),json_extract(botKey,'$[3]')) ELSE NULL END=? LIMIT 1`)
           .get(botKey, key) !== null;
 
-    if (different)
+    if (different) {
       throw new Error(
         "Cron gateway configuration differs; restart the gateway before managing jobs.",
       );
+    }
   }
 
   public upsertFile(
@@ -492,11 +514,14 @@ export class CronStore {
     checkTime(now);
     const parsedSource = Schema.decodeUnknownResult(sourceSchema)(source);
 
-    if (Result.isFailure(parsedSource))
+    if (Result.isFailure(parsedSource)) {
       throw new Error("Invalid cron file source.");
+    }
 
-    if (typeof paused !== "boolean")
+    if (typeof paused !== "boolean") {
       throw new Error("Invalid cron pause state.");
+    }
+
     const { input, nextAt } = validateCronInput(raw, now);
 
     return this.db
@@ -510,8 +535,9 @@ export class CronStore {
         if (
           existing &&
           (existing.channel !== scope.channel || existing.user !== scope.user)
-        )
+        ) {
           throw new Error("Cron file ownership cannot change.");
+        }
 
         const schedule: CronSchedule = {
           ...scope,
@@ -566,7 +592,10 @@ export class CronStore {
     checkBotKey(botKey);
     const parsed = Schema.decodeUnknownResult(sourcesSchema)(sources);
 
-    if (Result.isFailure(parsed)) throw new Error("Invalid cron file sources.");
+    if (Result.isFailure(parsed)) {
+      throw new Error("Invalid cron file sources.");
+    }
+
     this.db
       .transaction(() => {
         this.db
@@ -579,8 +608,9 @@ export class CronStore {
           "UPDATE cron_schedules SET available=1 WHERE botKey=? AND source=?",
         );
 
-        for (const source of new Set(parsed.success))
+        for (const source of new Set(parsed.success)) {
           available.run(botKey, source);
+        }
       })
       .immediate();
   }
@@ -596,8 +626,10 @@ export class CronStore {
     checkTime(now);
     checkRequestId(requestId);
 
-    if (!validNameOrId(nameOrId))
+    if (!validNameOrId(nameOrId)) {
       throw new Error("Invalid cron name or identifier.");
+    }
+
     const field = validUUID(nameOrId) ? "id" : "name";
 
     return this.db
@@ -609,31 +641,39 @@ export class CronStore {
           )
           .all(scope.botKey, scope.channel, scope.user, nameOrId);
 
-        if (matches.length > 1)
+        if (matches.length > 1) {
           throw new Error("Cron name is ambiguous; use its ID.");
+        }
+
         const row = matches[0];
 
-        if (!row) throw new Error("Cron job not found.");
+        if (!row) {
+          throw new Error("Cron job not found.");
+        }
+
         const schedule = readSchedule(row);
 
-        if (schedule.available !== 1)
+        if (schedule.available !== 1) {
           throw new Error("Cron job is unavailable.");
+        }
 
         if (
           requestId !== undefined &&
           this.db
             .query("SELECT 1 FROM cron_runs WHERE scheduleId=? AND requestId=?")
             .get(schedule.id, requestId) !== null
-        )
+        ) {
           return;
+        }
 
         if (
           this.db
             .query(`SELECT 1 FROM cron_runs WHERE scheduleId=?
         AND status IN (${activeRuns})`)
             .get(schedule.id) !== null
-        )
+        ) {
           return;
+        }
 
         // Keep UNIQUE(scheduleId,dueAt), including repeated calls in one millisecond.
         return this.createRun(
@@ -667,7 +707,10 @@ export class CronStore {
       ...(quotaEvent !== undefined && { quotaEvent }),
     });
 
-    if (Result.isFailure(parsed)) throw new Error("Invalid cron run state.");
+    if (Result.isFailure(parsed)) {
+      throw new Error("Invalid cron run state.");
+    }
+
     const snapshot = parsed.success;
     const id = crypto.randomUUID();
 
@@ -704,7 +747,10 @@ export class CronStore {
       "SELECT 1 FROM cron_runs WHERE scheduleId=? AND dueAt=?",
     );
 
-    while (used.get(scheduleId, dueAt) !== null) dueAt++;
+    while (used.get(scheduleId, dueAt) !== null) {
+      dueAt++;
+    }
+
     checkTime(dueAt);
 
     return dueAt;
@@ -723,13 +769,16 @@ export class CronStore {
     if (
       Option.isNone(parsed) ||
       !["ok", "partial"].includes(parsed.value.status)
-    )
+    ) {
       return [];
+    }
 
     const fresh = (observedAt: number) =>
       observedAt <= now && now - observedAt <= 120_000;
 
-    if (!fresh(parsed.value.observedAt)) return [];
+    if (!fresh(parsed.value.observedAt)) {
+      return [];
+    }
 
     return this.db
       .transaction(() => {
@@ -745,8 +794,9 @@ export class CronStore {
             account.status !== "ok" ||
             observedAt === null ||
             !fresh(observedAt)
-          )
+          ) {
             continue;
+          }
 
           for (const window of account.windows) {
             const { resetAt, usedPercent } = window;
@@ -756,8 +806,9 @@ export class CronStore {
               resetAt === null ||
               resetAt <= now ||
               usedPercent === null
-            )
+            ) {
               continue;
+            }
 
             const key = [
               botKey,
@@ -781,7 +832,9 @@ export class CronStore {
               )
               .get(...key);
 
-            if (previous && observedAt <= previous.observedAt) continue;
+            if (previous && observedAt <= previous.observedAt) {
+              continue;
+            }
 
             const reset =
               previous !== null &&
@@ -860,8 +913,9 @@ export class CronStore {
               .map((row) => readSchedule(row));
 
             for (const schedule of schedules) {
-              if (!schedule.trigger)
+              if (!schedule.trigger) {
                 throw new Error("Invalid cron quota trigger state.");
+              }
 
               const run = this.createRun(
                 schedule,
@@ -881,7 +935,9 @@ export class CronStore {
                 },
               );
 
-              if (run) claimed.push(run);
+              if (run) {
+                claimed.push(run);
+              }
             }
 
             // Consume all matches, including paused, unavailable, busy and
@@ -912,8 +968,9 @@ export class CronStore {
   public list(scope: CronScope, page = 0): CronSchedule[] {
     checkScope(scope);
 
-    if (!Number.isSafeInteger(page) || page < 0 || page > 1_000_000)
+    if (!Number.isSafeInteger(page) || page < 0 || page > 1_000_000) {
       throw new Error("Invalid cron page.");
+    }
 
     return this.db
       .query<ScheduleRow, [string, string, string, number]>(
@@ -933,11 +990,14 @@ export class CronStore {
     },
     page = 0,
   ): CronSchedule[] {
-    if (!validDestinationScope(scope))
+    if (!validDestinationScope(scope)) {
       throw new Error("Invalid cron ownership scope.");
+    }
 
-    if (!Number.isSafeInteger(page) || page < 0 || page > 1_000_000)
+    if (!Number.isSafeInteger(page) || page < 0 || page > 1_000_000) {
       throw new Error("Invalid cron page.");
+    }
+
     const channel = scope.channel ?? null;
     const user = scope.user ?? null;
 
@@ -964,7 +1024,9 @@ export class CronStore {
   public findDestination(botKey: string, id: string): CronSchedule | undefined {
     checkBotKey(botKey);
 
-    if (!validUUID(id)) return undefined;
+    if (!validUUID(id)) {
+      return undefined;
+    }
 
     const row = this.db
       .query<ScheduleRow, [string, string]>(
@@ -978,7 +1040,9 @@ export class CronStore {
   public remove(scope: CronScope, id: string): boolean {
     checkScope(scope);
 
-    if (!validUUID(id)) return false;
+    if (!validUUID(id)) {
+      return false;
+    }
 
     return this.db
       .transaction(() => {
@@ -987,11 +1051,12 @@ export class CronStore {
         WHERE id=? AND botKey=? AND channel=? AND user=? AND removedAt IS NULL`)
           .run(Date.now(), id, scope.botKey, scope.channel, scope.user).changes;
 
-        if (removed)
+        if (removed) {
           this.db
             .query(`UPDATE cron_runs SET status='canceled' WHERE scheduleId=?
           AND status IN ('pending','evaluating','announcing','announced','blocked')`)
             .run(id);
+        }
 
         return removed > 0;
       })
@@ -1047,7 +1112,9 @@ export class CronStore {
             false,
           );
 
-          if (run) claimed.push(run);
+          if (run) {
+            claimed.push(run);
+          }
         }
 
         return claimed;
@@ -1093,8 +1160,9 @@ export class CronStore {
   public recentRuns(botKey: string, limit = 20) {
     checkBotKey(botKey);
 
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
       throw new Error("Invalid cron run limit.");
+    }
 
     return this.db
       .query<
@@ -1129,7 +1197,9 @@ export class CronStore {
     checkTime(since);
     checkTime(until);
 
-    if (until <= since) throw new Error("Invalid cron report window.");
+    if (until <= since) {
+      throw new Error("Invalid cron report window.");
+    }
 
     return this.db
       .query<RunRow, [string, number, number, number, number]>(`${runSelect}
@@ -1207,8 +1277,9 @@ export class CronStore {
   public saveEvaluation(id: string, evaluation: CronEvaluation): boolean {
     const parsed = decodeEvaluation(evaluation);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new Error("Invalid cron evaluation state.");
+    }
 
     return (
       this.db
@@ -1270,8 +1341,10 @@ export class CronStore {
   public finish(id: string, status: "done" | "failed", now = Date.now()) {
     checkTime(now);
 
-    if (status !== "done" && status !== "failed")
+    if (status !== "done" && status !== "failed") {
       throw new Error("Invalid cron run status.");
+    }
+
     this.db
       .transaction(() => {
         const changed = this.db
@@ -1284,12 +1357,13 @@ export class CronStore {
             .query<RunRow, [string]>(`${runSelect} WHERE r.id=?`)
             .get(id);
 
-          if (row && readRun(row).once === true)
+          if (row && readRun(row).once === true) {
             this.db
               .query(
                 "UPDATE cron_schedules SET removedAt=? WHERE id=? AND removedAt IS NULL",
               )
               .run(now, row.scheduleId);
+          }
         }
       })
       .immediate();

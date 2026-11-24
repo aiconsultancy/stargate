@@ -16,7 +16,10 @@ import type { V1Host } from "./types";
 export function memAvailableBytes(meminfo: string) {
   const match = /^MemAvailable:[ \t]+(\d+)[ \t]+kB[ \t]*$/m.exec(meminfo);
 
-  if (!match) return;
+  if (!match) {
+    return;
+  }
+
   const bytes = Number(match[1]) * 1024;
 
   return Number.isSafeInteger(bytes) ? bytes : undefined;
@@ -73,7 +76,9 @@ async function availableMemory() {
       () => {},
     );
 
-    if (available !== undefined) return available;
+    if (available !== undefined) {
+      return available;
+    }
   }
 
   return freemem();
@@ -131,10 +136,13 @@ export function startHostMetrics(dataDirectory: string) {
 
     const disks = [];
 
-    if (root) disks.push({ path: "/", ...root.metrics });
+    if (root) {
+      disks.push({ path: "/", ...root.metrics });
+    }
 
-    if (data && data.dev !== root?.dev)
+    if (data && data.dev !== root?.dev) {
       disks.push({ path: "data", ...data.metrics });
+    }
 
     return snapshot(disks, availableBytes);
   }

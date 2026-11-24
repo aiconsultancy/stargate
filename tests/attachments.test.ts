@@ -20,8 +20,9 @@ import { ordinaryFileDirectory } from "./file-fixture";
 const cleanup: string[] = [];
 
 afterEach(async () => {
-  for (const directory of cleanup.splice(0))
+  for (const directory of cleanup.splice(0)) {
     await rm(directory, { recursive: true, force: true });
+  }
 });
 
 async function directory() {
@@ -59,8 +60,10 @@ test("prepared metadata keeps code-point bounds, MIME spelling and strict fields
   const decode = Schema.decodeUnknownResult(preparedAttachmentSchema);
   const parsed = decode(input);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     throw new Error("Valid prepared metadata rejected");
+  }
+
   expect(parsed.success).toEqual(input);
   expect(Object.keys(parsed.success)).toEqual([
     "path",
@@ -78,8 +81,9 @@ test("prepared metadata keeps code-point bounds, MIME spelling and strict fields
     { ...input, size: Infinity },
     { ...input, extra: true },
     Object.assign(Object.create({ extra: true }), input),
-  ])
+  ]) {
     expect(Result.isFailure(decode(invalid))).toBe(true);
+  }
 });
 
 async function rejection(work: Promise<unknown>) {
@@ -198,8 +202,9 @@ test("plain, bare and code local references are hidden but never published", () 
     "bare file:///home/me/a)b/private.txt end",
     "```\n![x](<file:///home/me/with space/private.png>)\n```",
     "`<file:///home/me/open angle/private.png`",
-  ])
+  ]) {
     expect(parseAttachments(sample).text).not.toContain("private");
+  }
 
   // An unclosed fence remains code to the end of the answer.
   const unclosed = parseAttachments(
@@ -279,7 +284,10 @@ test("real PNG and PDF files inspect, then reread with their recorded identity",
   checkPreparedAttachments(prepared);
   const [first, second] = prepared;
 
-  if (!first || !second) throw new Error("Missing prepared fixtures");
+  if (!first || !second) {
+    throw new Error("Missing prepared fixtures");
+  }
+
   expect(
     await readPreparedAttachment(JSON.parse(JSON.stringify(first))),
   ).toEqual({
@@ -361,11 +369,18 @@ test("credential and machine-state paths are denied before any filesystem access
     "/dev/zero",
     "/etc/hostname",
     "/run/user/1000/bus",
-  ])
+  ]) {
     await unavailable(inspectAttachment({ path, caption: "" }), "denied");
+  }
 
-  for (const path of ["relative.png", "/tmp/opencode/../x.png", "/tmp//x.png"])
+  for (const path of [
+    "relative.png",
+    "/tmp/opencode/../x.png",
+    "/tmp//x.png",
+  ]) {
     await unavailable(inspectAttachment({ path, caption: "" }), "invalid");
+  }
+
   // Ordinary operator screenshot locations stay publishable.
   const shot = join(root, "Screenshot 2026-11-09.png");
   await writeFile(shot, png);

@@ -25,15 +25,21 @@ export function assembleMultiline(
 ): IrcMessage | undefined {
   const [first] = parts;
 
-  if (!first) return;
+  if (!first) {
+    return;
+  }
+
   const tags = new Map(open.tags);
 
-  for (const key of ["account", "time"])
+  for (const key of ["account", "time"]) {
     if (!tags.has(key)) {
       const value = first.tags.get(key);
 
-      if (value !== undefined) tags.set(key, value);
+      if (value !== undefined) {
+        tags.set(key, value);
+      }
     }
+  }
 
   tags.delete("batch");
 
@@ -78,7 +84,9 @@ function unescapeTag(value: string) {
 
     const next = value[++i];
 
-    if (next === undefined) break;
+    if (next === undefined) {
+      break;
+    }
 
     switch (next) {
       case ":":
@@ -119,14 +127,22 @@ export function parseMessage(line: string): IrcMessage | undefined {
   if (rest.startsWith("@")) {
     const space = rest.indexOf(" ");
 
-    if (space === -1) return;
+    if (space === -1) {
+      return;
+    }
 
     for (const item of rest.slice(1, space).split(";")) {
-      if (!item) continue;
+      if (!item) {
+        continue;
+      }
+
       const equals = item.indexOf("=");
       const key = equals === -1 ? item : item.slice(0, equals);
 
-      if (!tagKey.test(key)) continue;
+      if (!tagKey.test(key)) {
+        continue;
+      }
+
       tags.set(key, equals === -1 ? "" : unescapeTag(item.slice(equals + 1)));
     }
 
@@ -138,7 +154,10 @@ export function parseMessage(line: string): IrcMessage | undefined {
   if (rest.startsWith(":")) {
     const space = rest.indexOf(" ");
 
-    if (space === -1) return;
+    if (space === -1) {
+      return;
+    }
+
     source = rest.slice(1, space);
     rest = rest.slice(space + 1).replace(/^ +/, "");
   }
@@ -146,7 +165,10 @@ export function parseMessage(line: string): IrcMessage | undefined {
   const space = rest.indexOf(" ");
   const command = (space === -1 ? rest : rest.slice(0, space)).toUpperCase();
 
-  if (!/^(?:[A-Z]+|\d{3})$/.test(command)) return;
+  if (!/^(?:[A-Z]+|\d{3})$/.test(command)) {
+    return;
+  }
+
   rest = space === -1 ? "" : rest.slice(space + 1);
   const params: string[] = [];
 
@@ -163,7 +185,10 @@ export function parseMessage(line: string): IrcMessage | undefined {
       break;
     }
 
-    if (next > 0) params.push(rest.slice(0, next));
+    if (next > 0) {
+      params.push(rest.slice(0, next));
+    }
+
     rest = rest.slice(next + 1);
   }
 
@@ -179,28 +204,39 @@ export function formatMessage(
   params: readonly string[],
   tags: ReadonlyMap<string, string> | Record<string, string> = {},
 ): string {
-  if (!/^(?:[A-Z]+|\d{3})$/.test(command))
+  if (!/^(?:[A-Z]+|\d{3})$/.test(command)) {
     throw new Error("Invalid IRC command");
+  }
+
   const entries = tags instanceof Map ? [...tags] : Object.entries(tags);
 
   const tagText = entries
     .map(([key, value]: readonly [string, string]) => {
-      if (!tagKey.test(key) || value.includes("\0"))
+      if (!tagKey.test(key) || value.includes("\0")) {
         throw new Error("Invalid IRC tag");
+      }
 
       return value === "" ? key : `${key}=${escapeTag(value)}`;
     })
     .join(";");
 
   const parts = params.map((param, index) => {
-    if (unsafe(param)) throw new Error("Invalid IRC parameter");
+    if (unsafe(param)) {
+      throw new Error("Invalid IRC parameter");
+    }
+
     const last = index === params.length - 1;
 
-    if (last && (param === "" || param.includes(" ") || param.startsWith(":")))
+    if (
+      last &&
+      (param === "" || param.includes(" ") || param.startsWith(":"))
+    ) {
       return `:${param}`;
+    }
 
-    if (param === "" || param.includes(" ") || param.startsWith(":"))
+    if (param === "" || param.includes(" ") || param.startsWith(":")) {
       throw new Error("Invalid IRC middle parameter");
+    }
 
     return param;
   });
@@ -217,7 +253,10 @@ export function tagBytes(tags: Record<string, string>) {
 
 /** `nick!user@host` → nick; a server name stays whole. */
 export function sourceNick(source: string | undefined) {
-  if (!source) return "";
+  if (!source) {
+    return "";
+  }
+
   const bang = source.indexOf("!");
 
   return bang === -1 ? source : source.slice(0, bang);
@@ -257,10 +296,15 @@ const rfc1459Pairs: Record<string, string> = {
  * RFC 8265 case folding.
  */
 export function fold(value: string, mapping: Casemapping = "rfc1459") {
-  if (mapping === "unicode") return value.normalize("NFKC").toLowerCase();
+  if (mapping === "unicode") {
+    return value.normalize("NFKC").toLowerCase();
+  }
+
   const lower = value.replace(/[A-Z]/g, (char) => char.toLowerCase());
 
-  if (mapping === "ascii") return lower;
+  if (mapping === "ascii") {
+    return lower;
+  }
 
   return lower.replace(
     mapping === "rfc1459" ? /[[\]\\~]/g : /[[\]\\]/g,
@@ -289,7 +333,10 @@ export function parseCapabilities(text: string) {
   const caps = new Map<string, string>();
 
   for (const item of text.split(" ")) {
-    if (!item) continue;
+    if (!item) {
+      continue;
+    }
+
     const equals = item.indexOf("=");
     caps.set(
       equals === -1 ? item : item.slice(0, equals),
@@ -323,12 +370,18 @@ export function cleanText(text: string) {
       pattern.lastIndex = i + 1;
       const match = pattern.exec(text);
 
-      if (match) i += match[0].length;
+      if (match) {
+        i += match[0].length;
+      }
+
       continue;
     }
 
-    if (code === 9) result += " ";
-    else if (code >= 32 && code !== 127) result += text[i];
+    if (code === 9) {
+      result += " ";
+    } else if (code >= 32 && code !== 127) {
+      result += text[i];
+    }
   }
 
   return result;
@@ -340,7 +393,10 @@ export function cleanText(text: string) {
  * break after a space keeps the space at the end of the earlier part.
  */
 export function ircParts(line: string, budget: number): string[] {
-  if (budget < 16) throw new Error("IRC line budget too small");
+  if (budget < 16) {
+    throw new Error("IRC line budget too small");
+  }
+
   const parts: string[] = [];
   let rest = line;
 
@@ -352,11 +408,16 @@ export function ircParts(line: string, budget: number): string[] {
     for (const char of rest) {
       const size = utf8Bytes(char);
 
-      if (bytes + size > budget) break;
+      if (bytes + size > budget) {
+        break;
+      }
+
       bytes += size;
       end += char.length;
 
-      if (char === " " && bytes > budget / 2) space = end;
+      if (char === " " && bytes > budget / 2) {
+        space = end;
+      }
     }
 
     const cut = space > 0 ? space : end;
@@ -364,7 +425,9 @@ export function ircParts(line: string, budget: number): string[] {
     rest = rest.slice(cut);
   }
 
-  if (rest) parts.push(rest);
+  if (rest) {
+    parts.push(rest);
+  }
 
   return parts;
 }

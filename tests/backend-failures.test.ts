@@ -23,8 +23,9 @@ function openCode(messages: Assistant[]) {
     async fetch(request) {
       const url = new URL(request.url);
 
-      if (url.pathname === "/api/session")
+      if (url.pathname === "/api/session") {
         return Response.json({ data: { id: "session-1" } });
+      }
 
       if (url.pathname.endsWith("/prompt")) {
         prompts++;
@@ -33,10 +34,11 @@ function openCode(messages: Assistant[]) {
         return Response.json({ data: { id: input } });
       }
 
-      if (url.pathname.endsWith("/wait"))
+      if (url.pathname.endsWith("/wait")) {
         return new Response(null, { status: 204 });
+      }
 
-      if (url.pathname.endsWith("/message"))
+      if (url.pathname.endsWith("/message")) {
         return Response.json({
           data: [
             ...messages
@@ -51,6 +53,7 @@ function openCode(messages: Assistant[]) {
           ],
           cursor: {},
         });
+      }
 
       return new Response(null, { status: 404 });
     },
@@ -62,7 +65,9 @@ function openCode(messages: Assistant[]) {
     directory: "/workspace",
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
 
   return {
     server,
@@ -282,8 +287,9 @@ test("a lost history read after the turn ran never says that nothing ran", async
       async fetch(request) {
         const url = new URL(request.url);
 
-        if (url.pathname === "/api/session")
+        if (url.pathname === "/api/session") {
           return Response.json({ data: { id: "session-1" } });
+        }
 
         if (url.pathname.endsWith("/prompt")) {
           input = ((await request.json()) as { id: string }).id;
@@ -291,8 +297,9 @@ test("a lost history read after the turn ran never says that nothing ran", async
           return Response.json({ data: { id: input } });
         }
 
-        if (url.pathname.endsWith("/wait"))
+        if (url.pathname.endsWith("/wait")) {
           return new Response(null, { status: 204 });
+        }
 
         if (url.pathname.endsWith("/message")) {
           if (++reads === failAt) {
@@ -323,7 +330,10 @@ test("a lost history read after the turn ran never says that nothing ran", async
       directory: "/workspace",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
 
     try {

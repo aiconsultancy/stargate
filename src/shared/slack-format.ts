@@ -47,7 +47,9 @@ type Part =
     };
 
 function safeUrl(value: string) {
-  if (/[\s<>|]/.test(value)) return false;
+  if (/[\s<>|]/.test(value)) {
+    return false;
+  }
 
   try {
     const url = new URL(value);
@@ -64,7 +66,10 @@ function safeUrl(value: string) {
 
 function controls(elements: Inline[]): Inline[] {
   const clean = (element: Inline): Inline => {
-    if (element.type !== "text") return element;
+    if (element.type !== "text") {
+      return element;
+    }
+
     const { literal: _literal, ...text } = element;
 
     return text;
@@ -79,13 +84,17 @@ function controls(elements: Inline[]): Inline[] {
         !element.style?.code &&
         element.text.includes("`"),
     )
-  )
+  ) {
     return elements.map((item) => clean(item));
+  }
+
   let inAngle = false;
 
   return elements.flatMap((element): Inline[] => {
-    if (element.type !== "text" || element.style?.code || element.literal)
+    if (element.type !== "text" || element.style?.code || element.literal) {
       return [clean(element)];
+    }
+
     const result: Inline[] = [];
     let start = 0;
 
@@ -133,13 +142,17 @@ function controls(elements: Inline[]): Inline[] {
         }
       }
 
-      if (!replacement) continue;
+      if (!replacement) {
+        continue;
+      }
 
-      if (match.index > start)
+      if (match.index > start) {
         result.push({
           ...element,
           text: element.text.slice(start, match.index),
         });
+      }
+
       result.push({
         ...replacement,
         ...(element.style && { style: element.style }),
@@ -147,8 +160,9 @@ function controls(elements: Inline[]): Inline[] {
       start = match.index + match[0].length;
     }
 
-    if (start < element.text.length)
+    if (start < element.text.length) {
       result.push({ ...element, text: element.text.slice(start) });
+    }
 
     return result;
   });
@@ -174,19 +188,23 @@ function structuredMarkdown(text: string) {
 
   const inline = (nodes: Part[]): Inline[] =>
     nodes.flatMap((node): Inline[] => {
-      if (node.type === "rich_text_list")
+      if (node.type === "rich_text_list") {
         return node.elements.flatMap((section) => [
           ...section.elements,
           { type: "text", text: "\n" },
         ]);
+      }
 
-      if (node.type === "rich_text_preformatted")
+      if (node.type === "rich_text_preformatted") {
         return node.elements.map((element) => ({
           ...element,
           style: { ...element.style, code: true },
         }));
+      }
 
-      if ("elements" in node) return node.elements;
+      if ("elements" in node) {
+        return node.elements;
+      }
 
       return [node];
     });
@@ -259,7 +277,10 @@ function structuredMarkdown(text: string) {
         let result = "";
 
         const flush = () => {
-          if (sections.length === 0) return;
+          if (sections.length === 0) {
+            return;
+          }
+
           result += put({
             type: "rich_text_list",
             style: meta.ordered ? "ordered" : "bullet",
@@ -272,8 +293,9 @@ function structuredMarkdown(text: string) {
         };
 
         for (const node of parts(children)) {
-          if (node.type === "rich_text_section") sections.push(node);
-          else {
+          if (node.type === "rich_text_section") {
+            sections.push(node);
+          } else {
             flush();
             result += put(node);
           }
@@ -367,17 +389,20 @@ function uncertainFences(text: string) {
     const marker = match?.[2];
     const info = match?.[3] ?? "";
 
-    if (!marker) continue;
+    if (!marker) {
+      continue;
+    }
 
-    if (!active && !(marker.startsWith("`") && info.includes("`")))
+    if (!active && !(marker.startsWith("`") && info.includes("`"))) {
       active = { marker, prefix };
-    else if (
+    } else if (
       prefix === active?.prefix &&
       marker[0] === active.marker[0] &&
       marker.length >= active.marker.length &&
       !info.trim()
-    )
+    ) {
       active = undefined;
+    }
   }
 
   return active !== undefined;
@@ -385,7 +410,9 @@ function uncertainFences(text: string) {
 
 function uncertainInline(block: ReturnType<typeof structuredMarkdown>) {
   return block.elements.some((part) => {
-    if (part.type === "rich_text_preformatted") return false;
+    if (part.type === "rich_text_preformatted") {
+      return false;
+    }
 
     const elements =
       part.type === "rich_text_list"
@@ -435,16 +462,22 @@ export function slackContent(
   text: string,
   format: "markdown" | "plain" = "markdown",
 ) {
-  if (format === "plain") return plainContent(text);
+  if (format === "plain") {
+    return plainContent(text);
+  }
 
-  if (!slackControls.test(text))
+  if (!slackControls.test(text)) {
     return {
       text: escaped(text),
       blocks: [{ type: "markdown" as const, text }],
     };
+  }
+
   const block = classifyReply(text);
 
-  if (!block) return plainContent(text);
+  if (!block) {
+    return plainContent(text);
+  }
 
   return { text: escaped(text), blocks: [block] };
 }
@@ -520,7 +553,9 @@ function literalChunks(text: string) {
         .join("")
         .match(/^<[@#][^<>\n]{1,254}>/u)?.[0];
 
-      if (token && opening + Array.from(token).length > end) end = opening;
+      if (token && opening + Array.from(token).length > end) {
+        end = opening;
+      }
     }
 
     chunks.push(points.slice(start, end).join(""));
@@ -543,13 +578,14 @@ export function prepareSlackReply(
   let text = source.trim() ? source : "Agent finished without a text reply.";
   const points = Array.from(text);
 
-  if (!unbounded && points.length > 60_000)
+  if (!unbounded && points.length > 60_000) {
     text =
       points.slice(0, 60_000).join("") + "\n[Response truncated by Stargate.]";
+  }
 
   // Ordinary replies keep main's native Markdown payload exactly. With no
   // Slack controls in the full source, no chunk can notify a mention.
-  if (!slackControls.test(text))
+  if (!slackControls.test(text)) {
     return markdownChunks(Array.from(text.trim())).map((part, index) => ({
       text: part,
       source: index ? "" : text,
@@ -558,6 +594,7 @@ export function prepareSlackReply(
         blocks: [{ type: "markdown" as const, text: part }],
       },
     }));
+  }
 
   const plain = () =>
     literalChunks(text).map((part, index) => ({
@@ -568,12 +605,15 @@ export function prepareSlackReply(
 
   const block = classifyReply(text);
 
-  if (!block) return plain();
+  if (!block) {
+    return plain();
+  }
 
   const units = block.elements.flatMap(
     (part): { part: RichPart; elements: Inline[] }[] => {
-      if (part.type !== "rich_text_list")
+      if (part.type !== "rich_text_list") {
         return [{ part, elements: part.elements }];
+      }
 
       return part.elements.map((item, index) => ({
         part: {
@@ -596,14 +636,20 @@ export function prepareSlackReply(
     ),
   );
 
-  if (tooLongLink) return plain();
+  if (tooLongLink) {
+    return plain();
+  }
+
   const result: ReplyChunk[] = [];
   let current: RichPart[] = [];
   let fallback = "";
   let used = 0;
 
   const flush = () => {
-    if (current.length === 0) return;
+    if (current.length === 0) {
+      return;
+    }
+
     result.push({
       text: fallback,
       content: {
@@ -620,7 +666,9 @@ export function prepareSlackReply(
     let elements: Inline[] = [];
 
     const append = () => {
-      if (elements.length === 0) return;
+      if (elements.length === 0) {
+        return;
+      }
 
       const part: RichPart =
         unit.part.type === "rich_text_list"

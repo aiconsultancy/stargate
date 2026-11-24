@@ -260,13 +260,17 @@ function lock(dataDirectory: string) {
 function sessions(config: Config, crews: readonly Crew[]): Session[] {
   const found = new Map<string, Session["scope"]>();
 
-  for (const sessionID of pinnedSessionIDs(config))
+  for (const sessionID of pinnedSessionIDs(config)) {
     found.set(sessionID, "captain-session");
+  }
 
   for (const crew of crews) {
     const path = crewDatabase(crew);
 
-    if (!existsSync(path)) continue;
+    if (!existsSync(path)) {
+      continue;
+    }
+
     const db = new Database(path, { readonly: true });
 
     try {
@@ -274,8 +278,9 @@ function sessions(config: Config, crews: readonly Crew[]): Session[] {
         .query<{ id: string }, []>(
           "SELECT sessionID AS id FROM peers WHERE sessionID NOT IN (SELECT sessionID FROM pi_peers)",
         )
-        .all())
+        .all()) {
         found.set(row.id, "crew-session");
+      }
     } catch {
       // Unknown crew state is handled by the idle gate (fails closed).
     } finally {
@@ -307,10 +312,11 @@ function windowReport(
 
 function recordUndo(rec: ReportRecorder) {
   return (event: UndoEvent) => {
-    if (event.kind === "restart") rec.restart(event.service, event.ok);
-    else if (event.kind === "deferred")
+    if (event.kind === "restart") {
+      rec.restart(event.service, event.ok);
+    } else if (event.kind === "deferred") {
       rec.step(`recover-before-${event.step}`, "skipped", event.reason);
-    else
+    } else {
       rec.rollbacks.push({
         component: event.component,
         from: event.from,
@@ -318,6 +324,7 @@ function recordUndo(rec: ReportRecorder) {
         status: event.ok ? "ok" : "failed",
         ...(event.reason && { reason: event.reason }),
       });
+    }
   };
 }
 
@@ -374,15 +381,18 @@ async function recoverJournal(
 ): Promise<{ ok: boolean; message: string; busy?: Reason }> {
   const found = await Journal.read(config);
 
-  if (found.kind === "none") return { ok: true, message: nothingToRecover };
+  if (found.kind === "none") {
+    return { ok: true, message: nothingToRecover };
+  }
 
   if (found.kind === "corrupt") {
     const unit = config.maintenance?.services.gateway;
 
-    if (unit)
+    if (unit) {
       await deps.runner.run(["systemctl", "--user", "start", unit], {
         timeoutMs: bounds.start,
       });
+    }
 
     return {
       ok: false,
@@ -399,7 +409,10 @@ async function recoverJournal(
     record: (event) => {
       record?.(event);
 
-      if (event.kind === "deferred") busy = event.reason;
+      if (event.kind === "deferred") {
+        busy = event.reason;
+      }
+
       let line: string;
 
       switch (event.kind) {
@@ -455,20 +468,26 @@ async function recoverAtIdle(
 > {
   const found = await Journal.read(config);
 
-  if (found.kind === "none") return { kind: "none" };
+  if (found.kind === "none") {
+    return { kind: "none" };
+  }
 
   if (found.kind === "ok") {
     const started = await startStoppedGateway(config, deps, found.journal);
 
-    if (started !== undefined) input.onGatewayStart?.(started);
+    if (started !== undefined) {
+      input.onGatewayStart?.(started);
+    }
+
     const idle = await input.idle(journalScope(found.journal));
 
-    if (!idle.idle)
+    if (!idle.idle) {
       return {
         kind: "busy",
         reason: idle.reason,
         message: `The host is busy (${idle.reason}); nothing was undone.`,
       };
+    }
   }
 
   const result = await recoverJournal(config, deps, input.record, input.gate);
@@ -510,10 +529,13 @@ export async function recoverWhenIdle(
       gate: (step) => idleNow(config, deps, signal, undoStepScope(step)),
     });
 
-    if (result.kind === "none") return { ok: true, message: nothingToRecover };
+    if (result.kind === "none") {
+      return { ok: true, message: nothingToRecover };
+    }
 
-    if (result.kind === "busy")
+    if (result.kind === "busy") {
       return { ok: false, busy: result.reason, message: result.message };
+    }
 
     return { ok: result.ok, message: result.message };
   } finally {
@@ -534,9 +556,14 @@ async function startStoppedGateway(
 ) {
   const unit = config.maintenance?.services.gateway;
 
-  if (!unit || !journal.get("gateway")) return;
+  if (!unit || !journal.get("gateway")) {
+    return;
+  }
 
-  if (await unitRunning(deps.runner, unit)) return;
+  if (await unitRunning(deps.runner, unit)) {
+    return;
+  }
+
   const since = deps.clock.now();
 
   const result = await deps.runner.run(["systemctl", "--user", "start", unit], {
@@ -569,7 +596,9 @@ async function gatewayServing(config: Config, runner: CommandRunner) {
   const unit = config.maintenance?.services.gateway;
   const ready = await readReady(config.dataDirectory);
 
-  if (!unit || !ready || !readyProcessAlive(ready)) return false;
+  if (!unit || !ready || !readyProcessAlive(ready)) {
+    return false;
+  }
 
   const state = (
     await runner.run(["systemctl", "--user", "is-active", unit], {
@@ -639,7 +668,10 @@ async function afterRun(
   deps: Dependencies,
   found: Awaited<ReturnType<typeof Journal.read>>,
 ): Promise<{ ok: boolean; message: string }> {
-  if (found.kind !== "ok") return recoverJournal(config, deps);
+  if (found.kind !== "ok") {
+    return recoverJournal(config, deps);
+  }
+
   const invocation = deps.env["INVOCATION_ID"];
 
   const last = await readOptional(lastRunPath(config.dataDirectory))
@@ -715,7 +747,10 @@ export async function recoverInterruptedRun(
   try {
     const found = await Journal.read(config);
 
-    if (!options.afterRun) return await recoverJournal(config, deps);
+    if (!options.afterRun) {
+      return await recoverJournal(config, deps);
+    }
+
     const result = await afterRun(config, deps, found);
     // A run that was killed wrote no alert. Never leave a journal silently.
     const left = await Journal.read(config);
@@ -729,7 +764,7 @@ export async function recoverInterruptedRun(
         .then((text) => decodeAlertRun(JSON.parse(text ?? "")))
         .catch(() => {});
 
-      if (known?.runID !== runID)
+      if (known?.runID !== runID) {
         await writeAlert(config.dataDirectory, {
           runID,
           at: new Date(deps.clock.now()).toISOString(),
@@ -738,6 +773,7 @@ export async function recoverInterruptedRun(
           report: null,
           journal: true,
         }).catch(() => {});
+      }
     }
 
     return result;
@@ -753,22 +789,28 @@ export async function runMaintenance(
   const { config, mode, signal } = input;
   const m = config.maintenance;
 
-  if (!m) throw new Error("No maintenance section in configuration.");
+  if (!m) {
+    throw new Error("No maintenance section in configuration.");
+  }
+
   const update = input.update;
 
-  if (mode === "run" && !m.enabled && !update)
+  if (mode === "run" && !m.enabled && !update) {
     throw new Error(
       "Maintenance is disabled. Set maintenance.enabled to true.",
     );
+  }
 
   if (update) {
-    if (!m.stargate)
+    if (!m.stargate) {
       throw new UpdateRefused(
         "maintenance.stargate is required for an update.",
       );
+    }
 
-    if (normalizeVersion(update.version) !== update.version)
+    if (normalizeVersion(update.version) !== update.version) {
       throw new UpdateRefused("Use a MAJOR.MINOR.PATCH version.");
+    }
   }
 
   const { clock } = deps;
@@ -777,7 +819,7 @@ export async function runMaintenance(
   const startedAt = clock.now();
   let current = currentWindow(startedAt, m.window, jitter);
 
-  if (update)
+  if (update) {
     current = {
       date: new Date(startedAt).toISOString().slice(0, 10),
       opens: startedAt,
@@ -785,10 +827,13 @@ export async function runMaintenance(
       deadline: startedAt + updateWindowMs - updateReserveMs,
       closes: startedAt + updateWindowMs,
     };
+  }
 
   if (!current && mode === "run") {
-    if (!input.outsideWindow)
+    if (!input.outsideWindow) {
       throw new Error("Outside the maintenance window. Nothing was changed.");
+    }
+
     const length = windowMinutes(m.window) * 60_000;
     current = {
       date: new Date(startedAt).toISOString().slice(0, 10),
@@ -835,7 +880,10 @@ export async function runMaintenance(
         phase: completed ? "completed" : "aborted",
       };
 
-      if (!completed && drain.outcome !== "deadline") drain.outcome = "aborted";
+      if (!completed && drain.outcome !== "deadline") {
+        drain.outcome = "aborted";
+      }
+
       await writeMaintenanceDrain(drain.state, drainDirectory).catch(() => {
         attention = true;
       });
@@ -879,7 +927,10 @@ export async function runMaintenance(
       ...(rec.notes.length > 0 && { notes: rec.notes }),
     };
 
-    if (mode === "plan") return { report, attention: false };
+    if (mode === "plan") {
+      return { report, attention: false };
+    }
+
     // Writing the report must never hide the outcome.
     let written: Awaited<ReturnType<typeof writeReport>> | undefined;
 
@@ -889,14 +940,15 @@ export async function runMaintenance(
       attention = true;
     }
 
-    if (checkpoint)
+    if (checkpoint) {
       return {
         report: written?.report ?? report,
         ...(written && { reportPath: written.path }),
         attention,
       };
+    }
 
-    if (attention || result === "failed")
+    if (attention || result === "failed") {
       await writeAlert(config.dataDirectory, {
         runID,
         at: new Date(clock.now()).toISOString(),
@@ -905,6 +957,8 @@ export async function runMaintenance(
         report: written?.name ?? null,
         journal: (await Journal.read(config)).kind !== "none",
       }).catch(() => {});
+    }
+
     const notify = m.report;
 
     const needsLook =
@@ -914,13 +968,14 @@ export async function runMaintenance(
     if (written && notify && (result !== "no-op" || needsLook)) {
       const bot = config.bots.find((b) => b.id === notify.bot);
 
-      if (bot && isAllowedChannel(bot, notify.channel))
+      if (bot && isAllowedChannel(bot, notify.channel)) {
         await queueNotice(config.dataDirectory, {
           schema: noticeSchemaID,
           channel: notify.channel,
           text: summary(written.report, written.name),
           report: written.name,
         }).catch(() => {});
+      }
     }
 
     return {
@@ -932,23 +987,32 @@ export async function runMaintenance(
 
   try {
     const componentsOf = function (entry: JournalEntry): string[] {
-      if (entry === "clis")
+      if (entry === "clis") {
         return (journal.get("clis")?.packages ?? agentUpdates).map(
           (p) => `npm:${p.name}`,
         );
+      }
 
-      if (entry === "release") return ["stargate"];
+      if (entry === "release") {
+        return ["stargate"];
+      }
 
-      if (entry === "cliproxyapi") return ["cliproxyapi"];
+      if (entry === "cliproxyapi") {
+        return ["cliproxyapi"];
+      }
 
       return ["models"];
     };
 
     const gate = async function (name: string) {
       // The operator accepted the interruption.
-      if (update || drain) return;
+      if (update || drain) {
+        return;
+      }
 
-      if (crewsUnknown) throw new Defer("idle-unknown");
+      if (crewsUnknown) {
+        throw new Defer("idle-unknown");
+      }
 
       const result = await checkIdle({
         ...idleInput(gateScope),
@@ -961,7 +1025,9 @@ export async function runMaintenance(
         result.idle ? undefined : result.reason,
       );
 
-      if (!result.idle) throw new Defer(result.reason);
+      if (!result.idle) {
+        throw new Defer(result.reason);
+      }
     };
 
     const idleInput = function (scope: IdleScope = "stargate") {
@@ -981,10 +1047,14 @@ export async function runMaintenance(
     };
 
     const apply = async function () {
-      if (m === undefined) return;
+      if (m === undefined) {
+        return;
+      }
 
       // Crew profiles that cannot be read: the plugin check cannot run.
-      if (crewsUnknown) throw new Defer("idle-unknown");
+      if (crewsUnknown) {
+        throw new Defer("idle-unknown");
+      }
 
       if (m.drain.enabled) {
         const startedAt = clock.now();
@@ -1123,10 +1193,14 @@ export async function runMaintenance(
           idle.idle ? undefined : idle.reason,
         );
 
-        if (!idle.idle) throw new Defer(idle.reason);
+        if (!idle.idle) {
+          throw new Defer(idle.reason);
+        }
       }
 
-      if (remaining() <= 0) throw new Defer("deadline");
+      if (remaining() <= 0) {
+        throw new Defer("deadline");
+      }
 
       // Agent CLIs: the long install happens before the final gates.
       let cliChanged = false;
@@ -1166,8 +1240,10 @@ export async function runMaintenance(
         if (ok) {
           cliChanged = true;
 
-          for (const plan of agentUpdates)
+          for (const plan of agentUpdates) {
             rec.update(`npm:${plan.name}`, { after: plan.candidate, cutoff });
+          }
+
           rec.step("agent-clis", "ok");
         } else {
           rec.step("agent-clis", "failed", "health-failed");
@@ -1181,23 +1257,28 @@ export async function runMaintenance(
             });
           }
 
-          if (!restored) throw new StepError("install-failed");
+          if (!restored) {
+            throw new StepError("install-failed");
+          }
         }
 
         // Committed after OpenCode restarts with the new binaries.
         if (ok) {
           const committed = async () => {
             await updateState(config.dataDirectory, (s) => {
-              for (const plan of agentUpdates)
-                if (plan.candidate)
+              for (const plan of agentUpdates) {
+                if (plan.candidate) {
                   s.npm[plan.name] = {
                     version: plan.candidate,
                     before: cutoff,
                   };
+                }
+              }
             });
 
-            for (const plan of agentUpdates)
+            for (const plan of agentUpdates) {
               rec.update(`npm:${plan.name}`, { status: "updated" });
+            }
           };
 
           commitClis = committed;
@@ -1224,7 +1305,9 @@ export async function runMaintenance(
         ),
       });
 
-      if (toClose() < needed) throw new Defer("deadline");
+      if (toClose() < needed) {
+        throw new Defer("deadline");
+      }
 
       // Gate 2 right before the stop; gate 3 after it (work cannot arrive).
       await gate("idle-before-stop");
@@ -1299,8 +1382,9 @@ export async function runMaintenance(
             const kept = new Map<string, string>();
 
             for (const [from, to] of work.upgrades) {
-              if (await probeModel(m.proxy, to, signal)) kept.set(from, to);
-              else
+              if (await probeModel(m.proxy, to, signal)) {
+                kept.set(from, to);
+              } else {
                 rec.models.push({
                   scope: "catalog",
                   target: "proxy-probe-after-update",
@@ -1309,17 +1393,19 @@ export async function runMaintenance(
                   status: "skipped",
                   reason: "probe-failed",
                 });
+              }
             }
 
             if (kept.size !== work.upgrades.size) {
               work = buildModelWork(inputs, kept);
               rec.replanModels(work.changes);
 
-              if (kept.size === 0)
+              if (kept.size === 0) {
                 rec.update("models", {
                   status: "skipped",
                   reason: "probe-failed",
                 });
+              }
             }
           }
         } else {
@@ -1331,7 +1417,9 @@ export async function runMaintenance(
           });
 
           // Unknown proxy state: no release or model change tonight.
-          if (!restored) throw new StepError("health-failed");
+          if (!restored) {
+            throw new StepError("health-failed");
+          }
         }
       }
 
@@ -1356,11 +1444,14 @@ export async function runMaintenance(
           try {
             const changes = new FileChanges(backup);
 
-            for (const file of files.files)
+            for (const file of files.files) {
               await changes.write(file.path, file.text, file.expected);
+            }
 
-            for (const link of files.profileLinks)
+            for (const link of files.profileLinks) {
               await changes.link(link.path, link.target);
+            }
+
             rec.step("model-configs", "ok");
           } catch (error) {
             signal.throwIfAborted();
@@ -1389,11 +1480,16 @@ export async function runMaintenance(
             (item) => journal.get(item) !== undefined,
           );
 
-          if (!entry) throw new StepError("plugins-failed");
+          if (!entry) {
+            throw new StepError("plugins-failed");
+          }
+
           suspects.splice(suspects.indexOf(entry), 1);
 
-          if (entry === "release" && staged)
+          if (entry === "release" && staged) {
             await markFailedRelease(staged, "plugins-failed");
+          }
+
           const restored = await undoJournal(journal, ctx, [entry]);
 
           for (const id of componentsOf(entry)) {
@@ -1411,9 +1507,14 @@ export async function runMaintenance(
             work = undefined;
           }
 
-          if (entry === "clis") commitClis = undefined;
+          if (entry === "clis") {
+            commitClis = undefined;
+          }
 
-          if (!restored) throw new StepError("plugins-failed");
+          if (!restored) {
+            throw new StepError("plugins-failed");
+          }
+
           control = await restartOpenCode(m, crews, run, deps, rec, signal);
         }
 
@@ -1424,10 +1525,12 @@ export async function runMaintenance(
         });
 
         // OpenCode now runs the plugin of `current` again.
-        if (state.openCodeRelease !== null)
+        if (state.openCodeRelease !== null) {
           await updateState(config.dataDirectory, (s) => {
             s.openCodeRelease = null;
           });
+        }
+
         signal.throwIfAborted();
 
         if (journal.get("clis")) {
@@ -1458,8 +1561,9 @@ export async function runMaintenance(
             (item) => item.target === session.id && item.status === "planned",
           );
 
-          if (change)
+          if (change) {
             Object.assign(change, { status: "skipped", reason: "deadline" });
+          }
         }
 
         if (live.ok) {
@@ -1490,7 +1594,9 @@ export async function runMaintenance(
             reason: "session-switch-failed",
           });
 
-          if (!restored) throw new StepError("session-switch-failed");
+          if (!restored) {
+            throw new StepError("session-switch-failed");
+          }
         }
       }
 
@@ -1531,9 +1637,9 @@ export async function runMaintenance(
             ? await afterReturn.gate?.("gateway")
             : undefined;
 
-          if (idle && !idle.idle)
+          if (idle && !idle.idle) {
             rec.step("recover-before-gateway", "skipped", idle.reason);
-          else if (restored)
+          } else if (restored) {
             ready = await startGateway(
               config,
               gatewayUnit,
@@ -1542,10 +1648,13 @@ export async function runMaintenance(
               rec,
               signal,
             );
+          }
         }
 
         // Kept in the journal: recover keeps trying and the run fails loudly.
-        if (!ready) throw new StepError("readiness-failed");
+        if (!ready) {
+          throw new StepError("readiness-failed");
+        }
       }
 
       // The release is committed before the gateway entry goes: a kill in
@@ -1560,14 +1669,16 @@ export async function runMaintenance(
           ? (state.openCodeRelease ?? switchedFrom ?? null)
           : null;
 
-        if (gatewayOnly && loaded !== state.openCodeRelease)
+        if (gatewayOnly && loaded !== state.openCodeRelease) {
           await updateState(config.dataDirectory, (s) => {
             s.openCodeRelease = loaded;
           });
+        }
+
         await journal.clear("release");
 
         // A retried release that is ready is no longer known-bad.
-        if (update?.retryFailed && state.failedReleases[staged])
+        if (update?.retryFailed && state.failedReleases[staged]) {
           await updateState(config.dataDirectory, (s) => {
             s.failedReleases = Object.fromEntries(
               Object.entries(s.failedReleases).filter(
@@ -1575,6 +1686,8 @@ export async function runMaintenance(
               ),
             );
           });
+        }
+
         rec.update("stargate", { status: "updated", after: staged });
         await pruneReleases(m.stargate.root, m.stargate.keep, [
           ...(loaded ? [loaded] : []),
@@ -1588,10 +1701,16 @@ export async function runMaintenance(
     };
 
     const switchRelease = async function () {
-      if (!staged || !m?.stargate) return;
+      if (!staged || !m?.stargate) {
+        return;
+      }
+
       const before = await linkedRelease(m.stargate.root, "current");
 
-      if (!before) throw new StepError("switch-failed");
+      if (!before) {
+        throw new StepError("switch-failed");
+      }
+
       await journal.set("release", { previous: before.name, version: staged });
       await switchCurrent(m.stargate.root, staged);
       switchedFrom = before.name;
@@ -1602,7 +1721,9 @@ export async function runMaintenance(
       plans: AgentPlan[],
       version: (plan: AgentPlan) => string | null,
     ) {
-      if (!m?.agentClis) return false;
+      if (!m?.agentClis) {
+        return false;
+      }
 
       for (const plan of plans) {
         const expected = version(plan);
@@ -1610,8 +1731,9 @@ export async function runMaintenance(
         if (
           !expected ||
           !(await agentCliVerify(m.agentClis, plan, expected, run))
-        )
+        ) {
           return false;
+        }
       }
 
       return true;
@@ -1627,17 +1749,20 @@ export async function runMaintenance(
     };
 
     // An update never undoes an earlier run: the operator runs recover.
-    if (update && (await Journal.read(config)).kind !== "none")
+    if (update && (await Journal.read(config)).kind !== "none") {
       throw new UpdateRefused(
         "A maintenance journal is left over. Run `stargate maintenance recover` first. Nothing was changed.",
       );
+    }
 
     // Names the kind of run in the report and its summary.
-    if (update) rec.step("operator-update", "ok");
+    if (update) {
+      rec.step("operator-update", "ok");
+    }
 
     // First, before anything can fail: `recover --after-run` finishes only
     // The journal of the run that this systemd invocation started.
-    if (mode === "run")
+    if (mode === "run") {
       await atomicWrite(
         lastRunPath(config.dataDirectory),
         `${JSON.stringify({
@@ -1647,6 +1772,7 @@ export async function runMaintenance(
         })}\n`,
         0o600,
       );
+    }
 
     // ---- Discovery: read-only ------------------------------------------
     let crews: Crew[] = [];
@@ -1761,17 +1887,23 @@ export async function runMaintenance(
             ...(mode === "run" && { deadline: window.deadline }),
             protectedPaths: cleanupProtection(config, input.configPath, crews),
             beforeItem: async () => {
-              if (remaining() <= 0) throw new Defer("deadline");
+              if (remaining() <= 0) {
+                throw new Defer("deadline");
+              }
 
               const idle = await checkIdle({
                 ...idleInput(),
                 now: clock.now(),
               });
 
-              if (!idle.idle) throw new Defer(idle.reason);
+              if (!idle.idle) {
+                throw new Defer(idle.reason);
+              }
             },
             record: async (item) => {
-              if (mode === "plan" || !cleanup) return;
+              if (mode === "plan" || !cleanup) {
+                return;
+              }
 
               const index = cleanup.items.findIndex(
                 (entry) =>
@@ -1780,15 +1912,20 @@ export async function runMaintenance(
                   entry.branch === item.branch,
               );
 
-              if (index === -1) cleanup.items.push(item);
-              else cleanup.items[index] = item;
+              if (index === -1) {
+                cleanup.items.push(item);
+              } else {
+                cleanup.items[index] = item;
+              }
+
               cleanup.freedBytes = cleanup.items
                 .filter((entry) => entry.status === "removed")
                 .reduce((sum, entry) => sum + entry.size, 0);
               const checkpoint = await finish("partial", undefined, true);
 
-              if (!checkpoint.reportPath || checkpoint.attention)
+              if (!checkpoint.reportPath || checkpoint.attention) {
                 throw new Error("Cleanup audit unavailable");
+              }
             },
           });
           const failed = cleanup.items.some((item) => item.status === "failed");
@@ -1830,7 +1967,7 @@ export async function runMaintenance(
         ? await agentCliPlan(m.agentClis, startedAt)
         : [];
 
-    for (const plan of agentPlans)
+    for (const plan of agentPlans) {
       rec.component({
         id: `npm:${plan.name}`,
         before: plan.before,
@@ -1845,12 +1982,17 @@ export async function runMaintenance(
           reason: "not-found" as const,
         }),
       });
+    }
+
     let inputs: ModelInputs | undefined;
     let work: ModelWork | undefined;
 
     if (!update && m.components.models && m.models && m.proxy) {
       try {
-        if (crewsUnknown) throw new StepError("idle-unknown");
+        if (crewsUnknown) {
+          throw new StepError("idle-unknown");
+        }
+
         inputs = await readModelInputs({
           settings: m.models,
           crews,
@@ -1894,10 +2036,13 @@ export async function runMaintenance(
       }
     }
 
-    if (mode === "plan") return await finish("planned", undefined);
+    if (mode === "plan") {
+      return await finish("planned", undefined);
+    }
 
-    if (!rec.components.some((c) => c.status === "planned"))
+    if (!rec.components.some((c) => c.status === "planned")) {
       return await finish(rec.outcome(), undefined);
+    }
 
     // Forward path: abort-aware. Undo always uses the plain runner.
     const run: CommandRunner = {
@@ -1958,7 +2103,9 @@ export async function runMaintenance(
     // A package whose previous dependency set cannot be pinned for a
     // Rollback (no recorded cutoff, no publication time) is not updated.
     const agentUpdates = agentPlans.filter((plan) => {
-      if (!needsUpdate(plan)) return false;
+      if (!needsUpdate(plan)) {
+        return false;
+      }
 
       try {
         restoreCutoff(plan, state.npm[plan.name]);
@@ -1977,8 +2124,9 @@ export async function runMaintenance(
     const modelWork = () =>
       (work?.files.length ?? 0) > 0 || (work?.sessions.length ?? 0) > 0;
 
-    if (!staged && !proxyDigest && agentUpdates.length === 0 && !modelWork())
+    if (!staged && !proxyDigest && agentUpdates.length === 0 && !modelWork()) {
       return await finish(rec.outcome(), undefined);
+    }
 
     // A release with the crew plugin that OpenCode already runs changes the
     // Gateway only: OpenCode is not restarted and crew work can continue.
@@ -1991,7 +2139,10 @@ export async function runMaintenance(
       !modelWork() &&
       (await samePlugin(m.stargate.root, staged));
 
-    if (gatewayOnly) rec.step("crew-plugin-unchanged", "ok");
+    if (gatewayOnly) {
+      rec.step("crew-plugin-unchanged", "ok");
+    }
+
     const gateScope: IdleScope = gatewayOnly ? "gateway" : "stargate";
     /** `current` before this run switched it. */
     let switchedFrom: string | undefined;
@@ -2011,12 +2162,17 @@ export async function runMaintenance(
     const afterIngress: UndoContext = {
       ...ctx,
       gate: async (step) => {
-        if (drain) return { idle: true };
-
-        if (!(await ingressMayBeOpen(config, deps.runner)))
+        if (drain) {
           return { idle: true };
+        }
 
-        if (crewsUnknown) return { idle: false, reason: "idle-unknown" };
+        if (!(await ingressMayBeOpen(config, deps.runner))) {
+          return { idle: true };
+        }
+
+        if (crewsUnknown) {
+          return { idle: false, reason: "idle-unknown" };
+        }
 
         return checkIdle({
           ...idleInput(undoStepScope(step)),
@@ -2056,16 +2212,17 @@ export async function runMaintenance(
         .map((entry) => ({ entry, ids: componentsOf(entry) }))
         .toArray();
 
-      if (!journal.empty && deps.undoOnExit !== false)
+      if (!journal.empty && deps.undoOnExit !== false) {
         await undoJournal(
           journal,
           gatewayReturned && !update ? afterIngress : ctx,
         );
+      }
 
       for (const { entry, ids } of entries) {
         const restored = journal.get(entry) === undefined;
 
-        for (const id of ids)
+        for (const id of ids) {
           rec.update(id, {
             status: !restored
               ? "failed"
@@ -2074,27 +2231,35 @@ export async function runMaintenance(
                 : "rolled-back",
             ...(endReason && { reason: endReason }),
           });
+        }
 
-        if (entry === "files" || entry === "sessions")
+        if (entry === "files" || entry === "sessions") {
           rec.markModels(
             restored ? (deferred ? "skipped" : "rolled-back") : "failed",
             endReason,
           );
+        }
       }
 
-      for (const c of rec.components)
-        if (c.status === "planned")
+      for (const c of rec.components) {
+        if (c.status === "planned") {
           Object.assign(c, {
             status: "deferred",
             ...(endReason && { reason: endReason }),
           });
+        }
+      }
+
       rec.markModels("skipped", endReason);
 
-      if (!journal.empty) attention = true;
+      if (!journal.empty) {
+        attention = true;
+      }
     }
 
-    if (endReason === "readiness-failed" || endReason === "aborted")
+    if (endReason === "readiness-failed" || endReason === "aborted") {
       attention = true;
+    }
 
     return await finish(
       deferred && !rec.components.some((c) => c.status === "updated")
@@ -2103,17 +2268,22 @@ export async function runMaintenance(
       endReason,
     );
   } catch (error) {
-    if (error instanceof UpdateRefused) throw error;
+    if (error instanceof UpdateRefused) {
+      throw error;
+    }
+
     rec.step("run", "failed", signal.aborted ? "aborted" : reasonOf(error));
     attention = true;
 
     return await finish("failed", signal.aborted ? "aborted" : reasonOf(error));
   } finally {
-    if (drain && ["draining", "restarting"].includes(drain.state.phase))
+    if (drain && ["draining", "restarting"].includes(drain.state.phase)) {
       await writeMaintenanceDrain(
         { ...drain.state, phase: "aborted" },
         drainDirectory,
       ).catch(() => {});
+    }
+
     held?.close();
   }
 }
@@ -2127,9 +2297,14 @@ export function restoreCutoff(
   plan: Pick<AgentPlan, "before" | "beforePublished">,
   recorded: { version: string; before: string } | undefined,
 ) {
-  if (recorded && recorded.version === plan.before) return recorded.before;
+  if (recorded && recorded.version === plan.before) {
+    return recorded.before;
+  }
 
-  if (plan.beforePublished) return new Date(plan.beforePublished).toISOString();
+  if (plan.beforePublished) {
+    return new Date(plan.beforePublished).toISOString();
+  }
+
   throw new StepError("install-failed");
 }
 
@@ -2141,7 +2316,10 @@ async function discoverStargate(
   state: Awaited<ReturnType<typeof readState>>,
   update?: RunInput["update"],
 ) {
-  if ((!m.components.stargate && !update) || !m.stargate) return;
+  if ((!m.components.stargate && !update) || !m.stargate) {
+    return;
+  }
+
   const current = await linkedRelease(m.stargate.root, "current");
   const before = current?.metadata.version ?? null;
   const base = { id: "stargate", before, after: before };
@@ -2235,7 +2413,10 @@ async function discoverProxy(
   rec: ReportRecorder,
   now: number,
 ): Promise<{ candidate: ProxyCandidate; before: string } | undefined> {
-  if (!m.components.cliproxyapi || !m.cliproxyapi) return undefined;
+  if (!m.components.cliproxyapi || !m.cliproxyapi) {
+    return undefined;
+  }
+
   const before = await cliProxyCurrent(m.cliproxyapi);
 
   if (!before) {
@@ -2291,7 +2472,9 @@ async function switchProxy(
   const cpa = m.cliproxyapi;
   const proxy = m.proxy;
 
-  if (!cpa || !proxy || !existsSync(binaryPath(cpa, version))) return false;
+  if (!cpa || !proxy || !existsSync(binaryPath(cpa, version))) {
+    return false;
+  }
 
   try {
     await cliProxySwitch(cpa, version);
@@ -2315,7 +2498,10 @@ async function switchProxy(
       () => false,
     );
 
-    if (healthy || deps.clock.now() >= until) break;
+    if (healthy || deps.clock.now() >= until) {
+      break;
+    }
+
     await deps.clock.sleep(3000, signal);
   }
 
@@ -2338,13 +2524,15 @@ async function pluginLoaded(
 ) {
   const expected = new Set([resolve(configured), await real(configured)]);
 
-  for (const plugin of plugins)
+  for (const plugin of plugins) {
     if (
       plugin.active &&
       (expected.has(resolve(plugin.path)) ||
         expected.has(await real(plugin.path)))
-    )
+    ) {
       return true;
+    }
+  }
 
   return false;
 }
@@ -2356,7 +2544,9 @@ async function pluginLoaded(
 export async function samePlugin(root: string, staged: string) {
   const current = await linkedRelease(root, "current");
 
-  if (!current) return false;
+  if (!current) {
+    return false;
+  }
 
   const [running, next] = await Promise.all([
     readPluginDigest(current.directory),
@@ -2387,20 +2577,27 @@ async function restartOpenCode(
       const candidate = await deps.connect();
       let loaded = true;
 
-      for (const crew of crews)
+      for (const crew of crews) {
         for (const root of crew.roots) {
           const plugins = await candidate.plugins(root.directory, signal);
 
-          if (!(await pluginLoaded(plugins, root.pluginPackage)))
+          if (!(await pluginLoaded(plugins, root.pluginPackage))) {
             loaded = false;
+          }
         }
+      }
 
-      if (loaded) control = candidate;
+      if (loaded) {
+        control = candidate;
+      }
     } catch {
       signal.throwIfAborted();
     }
 
-    if (control || deps.clock.now() >= until) break;
+    if (control || deps.clock.now() >= until) {
+      break;
+    }
+
     await deps.clock.sleep(3000, signal);
   }
 
@@ -2467,11 +2664,13 @@ export async function acceptCurrent(
 ): Promise<{ ok: boolean; message: string }> {
   const parsed = decodeAcceptable(entry);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     return {
       ok: false,
       message: `Unknown entry. Use one of: ${acceptable.literals.join(", ")}.`,
     };
+  }
+
   const name = parsed.success;
   await mkdir(maintenanceDirectory(config.dataDirectory), {
     recursive: true,
@@ -2491,22 +2690,27 @@ export async function acceptCurrent(
   try {
     const found = await Journal.read(config);
 
-    if (found.kind === "none") return { ok: true, message: nothingToRecover };
+    if (found.kind === "none") {
+      return { ok: true, message: nothingToRecover };
+    }
+
     const confirmHint = `Nothing changed. Add --yes to keep the current state and drop ${name === "journal" ? "the whole journal" : `the ${name} entry`}.`;
 
     if (name === "journal") {
       const files = [];
 
-      for (const path of journalFiles(config.dataDirectory))
+      for (const path of journalFiles(config.dataDirectory)) {
         if (
           await access(path).then(
             () => true,
             () => false,
           )
-        )
+        ) {
           files.push(path);
+        }
+      }
 
-      if (!confirm)
+      if (!confirm) {
         return {
           ok: true,
           message: [
@@ -2514,6 +2718,8 @@ export async function acceptCurrent(
             confirmHint,
           ].join("\n"),
         };
+      }
+
       const stamp = new Date().toISOString().replaceAll(":", "");
       const moved = [];
 
@@ -2533,20 +2739,26 @@ export async function acceptCurrent(
       };
     }
 
-    if (found.kind === "corrupt")
+    if (found.kind === "corrupt") {
       return {
         ok: false,
         message:
           "The journal is corrupt; only --accept-current journal applies.",
       };
+    }
+
     const journal = found.journal;
 
-    if (journal.get(name) === undefined)
+    if (journal.get(name) === undefined) {
       return { ok: false, message: `The journal has no ${name} entry.` };
+    }
+
     const lines = await describeEntry(config, journal, name);
 
-    if (!confirm)
+    if (!confirm) {
       return { ok: true, message: [...lines, confirmHint].join("\n") };
+    }
+
     await journal.clear(name);
 
     return {

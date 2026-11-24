@@ -36,7 +36,9 @@ function customIssues(
 
   const check = (filter: SchemaAST.Check<unknown>): void => {
     if (Predicate.isTagged(filter, "FilterGroup")) {
-      for (const child of filter.checks) check(child);
+      for (const child of filter.checks) {
+        check(child);
+      }
     } else if (
       filter.annotations?.["settingsRawDiagnostic"] === true ||
       (filter.annotations?.["settingsDiagnostic"] === true &&
@@ -53,24 +55,29 @@ function customIssues(
 
         const issue = filter.run(value, ast, { errors: "all" });
 
-        if (issue)
+        if (issue) {
           for (const item of settingsIssues(
             new SchemaIssue.Filter(filter, issue),
-          ).issues)
+          ).issues) {
             issues.push({
               path: [...path, ...pathOf(item)],
               message: item.message,
             });
+          }
+        }
       } catch {
         // Never replace an authoritative rejection with a formatter failure.
       }
     }
   };
 
-  for (const filter of ast.checks ?? []) check(filter);
+  for (const filter of ast.checks ?? []) {
+    check(filter);
+  }
 
-  for (const link of ast.encoding ?? [])
+  for (const link of ast.encoding ?? []) {
     customIssues(link.to, input, path, issues);
+  }
 
   if (Predicate.isTagged(ast, "Objects")) {
     if (Predicate.isObject(input)) {
@@ -78,26 +85,33 @@ function customIssues(
         ast.propertySignatures.map((property) => property.name),
       );
 
-      for (const property of ast.propertySignatures)
+      for (const property of ast.propertySignatures) {
         customIssues(
           property.type,
           input[property.name],
           [...path, property.name],
           issues,
         );
+      }
 
-      for (const key of Object.keys(input))
-        if (!fields.has(key))
-          for (const index of ast.indexSignatures)
+      for (const key of Object.keys(input)) {
+        if (!fields.has(key)) {
+          for (const index of ast.indexSignatures) {
             customIssues(index.type, input[key], [...path, key], issues);
+          }
+        }
+      }
     }
   } else if (Predicate.isTagged(ast, "Arrays")) {
-    if (Array.isArray(input))
+    if (Array.isArray(input)) {
       for (const [index, value] of input.entries()) {
         const item = ast.elements[index] ?? ast.rest[0];
 
-        if (item) customIssues(item, value, [...path, index], issues);
+        if (item) {
+          customIssues(item, value, [...path, index], issues);
+        }
       }
+    }
   } else if (Predicate.isTagged(ast, "Union")) {
     for (const member of ast.types) {
       try {
@@ -119,7 +133,10 @@ export function decodeSettings<S extends Schema.Codec<unknown, unknown>>(
 ): S["Type"] {
   const result = Schema.decodeUnknownResult(schema, { errors: "all" })(input);
 
-  if (Result.isSuccess(result)) return result.success;
+  if (Result.isSuccess(result)) {
+    return result.success;
+  }
+
   const issues = [...settingsIssues(result.failure.issue).issues];
   customIssues(schema.ast, input, [], issues);
 

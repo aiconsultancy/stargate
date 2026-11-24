@@ -207,7 +207,7 @@ const invalid: [string, Partial<EvidenceMessage>][] = [
   ["wrong shell type", { type: "shell" }],
 ];
 
-for (const [name, changes] of invalid)
+for (const [name, changes] of invalid) {
   test(`unknown or forged instruction shape remains a boundary: ${name}`, async () => {
     const record = { ...context, ...changes };
     expect(isNativeInstructionContext(record)).toBe(false);
@@ -220,6 +220,7 @@ for (const [name, changes] of invalid)
     ).rejects.toThrow("Another input");
     expect(await observePlacement(reader, task, signal())).toBe("superseded");
   });
+}
 
 test("ordered native multi-file and Windows paths match, ambiguous formats fail closed", () => {
   const second = "/fixture/worker/project/other/AGENTS.md";

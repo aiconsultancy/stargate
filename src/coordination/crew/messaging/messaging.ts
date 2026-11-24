@@ -210,10 +210,12 @@ export class MailRoutes {
             intent.sourceTaskID !== route.sourceTaskID ||
             intent.targetTaskID !== route.targetTaskID ||
             (intent.receiptID !== null && intent.receiptID !== route.id)
-          )
+          ) {
             throw new CrewError(
               "Mail receipt does not match its authorized intent.",
             );
+          }
+
           this.db
             .query(
               "UPDATE mail_intents SET receiptID=? WHERE key=? AND receiptID IS NULL",
@@ -266,10 +268,11 @@ export class MailRoutes {
           saved.captainID !== intent.captainID ||
           saved.sourceTaskID !== intent.sourceTaskID ||
           saved.targetTaskID !== intent.targetTaskID
-        )
+        ) {
           throw new CrewError(
             "Mail retry key belongs to a different message or context.",
           );
+        }
       })
       .immediate();
   }
@@ -285,7 +288,10 @@ export class MailRoutes {
           )
           .get(mailFingerprint(event), event.id);
 
-        if (!intent) return { route: null };
+        if (!intent) {
+          return { route: null };
+        }
+
         const { key, ...context } = intent;
         const route = { id: event.id, ...context };
         // Selection and binding share this transaction: an old bound intent
@@ -306,7 +312,9 @@ export class MailRoutes {
       })
       .immediate();
 
-    if ("error" in repaired) throw repaired.error;
+    if ("error" in repaired) {
+      throw repaired.error;
+    }
 
     return repaired.route;
   }
@@ -332,11 +340,12 @@ export class MailRoutes {
     const ceiling =
       hole === null || hole === undefined ? Number.MAX_SAFE_INTEGER : hole - 1;
 
-    if (after !== undefined)
+    if (after !== undefined) {
       this.db
         .query(`INSERT INTO mailbox_cursors VALUES (?,?,?)
       ON CONFLICT(sessionID,captainID) DO UPDATE SET sequence=MAX(sequence,excluded.sequence)`)
         .run(sessionID, captainID, Math.min(after, ceiling));
+    }
 
     return Math.min(
       ceiling,
@@ -363,7 +372,10 @@ export class CrewMessaging {
       ? Schema.decodeUnknownResult(dmInputSchema)(raw)
       : Schema.decodeUnknownResult(mailInputSchema)(raw);
 
-    if (Result.isFailure(parsed)) throw new CrewError("Invalid mail/DM input.");
+    if (Result.isFailure(parsed)) {
+      throw new CrewError("Invalid mail/DM input.");
+    }
+
     const input = parsed.success;
     caller = await this.engine.authorizeMail(caller);
     // A bound IRC session: member identity from the binding, no task, and
@@ -386,10 +398,11 @@ export class CrewMessaging {
       input.op === "send" &&
       input.replyTo &&
       (!reply || reply.recipient !== caller.sessionID)
-    )
+    ) {
       throw new CrewError(
         "Reply reference must name a validated message addressed to this caller.",
       );
+    }
 
     const statusReply =
       input.op === "send" && input.replyTo
@@ -402,8 +415,9 @@ export class CrewMessaging {
       (statusReply.receiptID !== input.replyTo ||
         statusReply.workerSessionID !== caller.sessionID ||
         (input.taskID && statusReply.taskID !== input.taskID))
-    )
+    ) {
       throw new CrewError("Status reply does not belong to this worker/task.");
+    }
 
     const contextTask = this.engine.mailTask(
       caller,
@@ -419,10 +433,11 @@ export class CrewMessaging {
           (ircMember ? this.engine.options.captainSessionID : undefined) ??
           (input.op === "inbox" ? "" : undefined));
 
-    if (captainID === undefined)
+    if (captainID === undefined) {
       throw new CrewError(
         "Mail requires an originating captain context or a validated reply.",
       );
+    }
 
     const source = statusReply
       ? this.engine.state.task(statusReply.taskID)
@@ -450,7 +465,9 @@ export class CrewMessaging {
       );
 
       const messages = events.flatMap((event) => {
-        if (event.to !== caller.sessionID) return [];
+        if (event.to !== caller.sessionID) {
+          return [];
+        }
 
         const route =
           routes.get(event.id) ??
@@ -468,8 +485,9 @@ export class CrewMessaging {
           event.sessionID !== route.sender ||
           event.actor !== this.engine.mailActor(route.sender) ||
           (input.taskID && route.targetTaskID !== input.taskID)
-        )
+        ) {
           return [];
+        }
 
         const envelope = Schema.decodeUnknownResult(inboxText)(
           parseJSON(event.text),
@@ -505,10 +523,11 @@ export class CrewMessaging {
         memberOf(reply.sender) ??
         (reply.sender === reply.captainID ? captain : undefined);
 
-      if (to !== sender)
+      if (to !== sender) {
         throw new CrewError(
           "A reply must target the validated message sender; use a separate send for broadcasts.",
         );
+      }
     }
 
     const recipients =
@@ -521,10 +540,11 @@ export class CrewMessaging {
 
     const key = input.key ?? caller.id;
 
-    if (!key)
+    if (!key) {
       throw new CrewError(
         "Mail requires a host tool-call identity or legacy key.",
       );
+    }
 
     const receipts: {
       to: string;
@@ -538,17 +558,19 @@ export class CrewMessaging {
     let registered = false;
 
     for (const member of recipients) {
-      if (member === caller.agent)
+      if (member === caller.agent) {
         throw new CrewError("Direct self-send is refused.");
+      }
 
       const definition = this.engine.options.team.crew.find(
         ({ id }) => id === member,
       );
 
-      if (member !== captain && !definition)
+      if (member !== captain && !definition) {
         throw new CrewError(
           "Unknown configured mail recipient. Mail addresses this captain and configured crew only; use fleet_status and fleet_dispatch for a configured fleet peer.",
         );
+      }
 
       if (definition?.backend?.tools === "none") {
         receipts.push({
@@ -674,7 +696,7 @@ export class CrewMessaging {
         routes.save(storedRoute, message.key);
 
         // A stored stargate_dm (never plain mail) can be copied to IRC by Stargate.
-        if (direct)
+        if (direct) {
           this.engine.state.ircSessions.enqueue({
             id: receipt.id,
             from: {
@@ -684,8 +706,9 @@ export class CrewMessaging {
             to: { role: member === captain ? "captain" : "crew", id: member },
             text: input.text,
           });
+        }
 
-        if (!source || !this.engine.state.reporting.isReport(source.id))
+        if (!source || !this.engine.state.reporting.isReport(source.id)) {
           this.engine.state.reporting.journal.append(
             {
               member: caller.agent,
@@ -696,13 +719,15 @@ export class CrewMessaging {
             },
             `mail:${receipt.id}`,
           );
+        }
+
         let notification = "not_requested";
 
         if (
           direct &&
           "delivery" in input &&
           (input.delivery === "steer" || input.delivery === "queue")
-        )
+        ) {
           try {
             notification = await this.engine.notifyMail(
               storedRoute,
@@ -713,6 +738,7 @@ export class CrewMessaging {
           } catch {
             notification = "uncertain";
           }
+        }
 
         receipts.push({ ...receipt, to: member, stored: true, notification });
       } catch {

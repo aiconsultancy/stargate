@@ -19,8 +19,9 @@ export function quote(value: string, command = false) {
       (character) =>
         character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
     )
-  )
+  ) {
     throw new Error("Service paths cannot contain control characters.");
+  }
 
   return `"${value
     .replaceAll("\\", "\\\\")
@@ -30,8 +31,9 @@ export function quote(value: string, command = false) {
 }
 
 export function timerName(name = "stargate-maintenance") {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name))
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name)) {
     throw new Error("Invalid timer name.");
+  }
 
   return name;
 }
@@ -66,8 +68,12 @@ export function buildMaintenanceUnits(input: {
   /** Journal undo worst case: derived from the configured packages (N7). */
   recoveryMinutes: number;
 }) {
-  for (const path of [input.configPath, input.executable, input.entrypoint])
-    if (!isAbsolute(path)) throw new Error("Unit paths must be absolute.");
+  for (const path of [input.configPath, input.executable, input.entrypoint]) {
+    if (!isAbsolute(path)) {
+      throw new Error("Unit paths must be absolute.");
+    }
+  }
+
   const name = timerName(input.name);
   const window = `${input.spec.start}–${input.spec.end} ${input.spec.timeZone}`;
 
@@ -129,8 +135,12 @@ export function buildDroidUnits(input: {
   /** Model answer, plan and a full journal undo, with margin. */
   timeoutMinutes: number;
 }) {
-  for (const path of [input.configPath, input.executable, input.entrypoint])
-    if (!isAbsolute(path)) throw new Error("Unit paths must be absolute.");
+  for (const path of [input.configPath, input.executable, input.entrypoint]) {
+    if (!isAbsolute(path)) {
+      throw new Error("Unit paths must be absolute.");
+    }
+  }
+
   const name = timerName(input.name);
 
   const times = [
@@ -191,14 +201,20 @@ export function buildUpdateCommand(input: {
   recoveryMinutes: number;
 }) {
   for (const path of [input.configPath, input.executable, input.entrypoint]) {
-    if (!isAbsolute(path)) throw new Error("Unit paths must be absolute.");
+    if (!isAbsolute(path)) {
+      throw new Error("Unit paths must be absolute.");
+    }
 
     // The service manager expands these in a transient unit's command.
-    if (/[%$]/.test(path)) throw new Error("Unit paths cannot contain % or $.");
+    if (/[%$]/.test(path)) {
+      throw new Error("Unit paths cannot contain % or $.");
+    }
   }
 
-  if (!/^\d+\.\d+\.\d+$/.test(input.version))
+  if (!/^\d+\.\d+\.\d+$/.test(input.version)) {
     throw new Error("Use a MAJOR.MINOR.PATCH version.");
+  }
+
   const unit = timerName(input.unit);
   const main = [quote(input.executable, true), quote(input.entrypoint, true)];
 

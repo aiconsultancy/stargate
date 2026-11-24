@@ -15,7 +15,10 @@ export function eligible(
   now: number,
   hours: number,
 ) {
-  if (!published) return false;
+  if (!published) {
+    return false;
+  }
+
   const at = Date.parse(published);
 
   return Number.isFinite(at) && at <= now - hours * 3_600_000;
@@ -39,11 +42,16 @@ const decodePackument = Schema.decodeUnknownResult(packument);
 export function selectNpmVersion(raw: unknown, now: number, hours: number) {
   const parsed = decodePackument(raw);
 
-  if (Result.isFailure(parsed)) throw new StepError("network");
+  if (Result.isFailure(parsed)) {
+    throw new StepError("network");
+  }
+
   const data = parsed.success;
   const latest = data["dist-tags"]["latest"];
 
-  if (!latest || !parseVersion(latest)) return null;
+  if (!latest || !parseVersion(latest)) {
+    return null;
+  }
 
   const candidates = Object.entries(data.versions)
     .filter(
@@ -135,7 +143,9 @@ export function selectGitHubRelease(
 ): (GitHubRelease & { version: string }) | null {
   const parsed = decodeReleases(raw);
 
-  if (Result.isFailure(parsed)) throw new StepError("network");
+  if (Result.isFailure(parsed)) {
+    throw new StepError("network");
+  }
 
   return (
     parsed.success

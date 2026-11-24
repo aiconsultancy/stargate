@@ -154,9 +154,12 @@ export function initializeStoreSchema(db: Database) {
       "INTEGER NOT NULL DEFAULT 0",
     )
   )
-    // Existing offers may have been seen despite a lost ACK. Preserve their
-    // Original expiry rather than restarting their window on this migration.
+  // Existing offers may have been seen despite a lost ACK. Preserve their
+  // Original expiry rather than restarting their window on this migration.
+  {
     db.run("UPDATE native_questions SET publicationStarted=1");
+  }
+
   column("irc_thread_messages", "request", "TEXT");
 
   for (const table of [
@@ -165,8 +168,10 @@ export function initializeStoreSchema(db: Database) {
     "irc_thread_messages",
     "irc_thread_memberships",
   ]) {
-    if (column(table, "recorded", "INTEGER NOT NULL DEFAULT 0"))
+    if (column(table, "recorded", "INTEGER NOT NULL DEFAULT 0")) {
       db.query(`UPDATE ${table} SET recorded=?`).run(Date.now());
+    }
+
     db.run(
       `CREATE INDEX IF NOT EXISTS ${table}_retention ON ${table}(botKey,recorded)`,
     );
@@ -188,10 +193,12 @@ export function initializeStoreSchema(db: Database) {
     ON jobs(botKey,channel,json_extract(activity,'$.ts')) WHERE activity IS NOT NULL`);
 
   // Preserve source-first context and legacy ownership; keep statuses intact.
-  if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0"))
+  if (column("jobs", "started", "INTEGER NOT NULL DEFAULT 0")) {
     db.run(`UPDATE jobs SET started=1 WHERE started=0
     AND status!='queued' AND failure IS NOT 'context'
     AND failure IS NOT 'cancelled' AND text!='';`);
+  }
+
   db.run("CREATE INDEX IF NOT EXISTS jobs_input ON jobs(botKey,input)");
   // Newest native message accounted for in Slack; NULL needs a baseline.
   column("sessions", "cursor", "TEXT");

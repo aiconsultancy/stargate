@@ -27,7 +27,9 @@ async function checkoutTagVersion(directory: string): Promise<string | null> {
 
     clearTimeout(timer);
 
-    if (code !== 0) return null;
+    if (code !== 0) {
+      return null;
+    }
 
     const versions = output
       .split("\n")
@@ -70,7 +72,9 @@ export function cacheOpenCodeVersion(
   let expiresAt = 0;
 
   return () => {
-    if (shutdown.aborted) return Promise.resolve(null);
+    if (shutdown.aborted) {
+      return Promise.resolve(null);
+    }
 
     if (!cached || performance.now() >= expiresAt) {
       expiresAt = Infinity;

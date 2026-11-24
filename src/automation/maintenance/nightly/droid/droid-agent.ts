@@ -137,12 +137,15 @@ export async function openPiDroid(
         const bound = active;
 
         // Leftover runs of an earlier check or day can never act.
-        if (!bound || String(api.conversationId) !== bound.conversation)
+        if (!bound || String(api.conversationId) !== bound.conversation) {
           return fail("No maintenance check is in progress; nothing was done.");
+        }
+
         const decoded = Schema.decodeUnknownResult(input.schema)(raw);
 
-        if (Result.isFailure(decoded))
+        if (Result.isFailure(decoded)) {
           return fail("Invalid arguments; nothing was done.");
+        }
 
         try {
           const result = await run(decoded.success, bound.tools);
@@ -236,7 +239,9 @@ export async function openPiDroid(
         context,
       );
 
-      if (existing) return existing;
+      if (existing) {
+        return existing;
+      }
     }
 
     const created = await harness.createConversation(
@@ -270,11 +275,14 @@ export async function openPiDroid(
       // Before anything can be scheduled again.
       const inspection = await harness.inspect(context);
 
-      for (const submission of inspection.submissions)
+      for (const submission of inspection.submissions) {
         await harness.abortSubmission(submission.id, context);
+      }
 
-      for (const task of inspection.tasks)
+      for (const task of inspection.tasks) {
         await harness.abortTask(task.record.id, context);
+      }
+
       const conversation = await conversationFor(day, context);
       active = { conversation: String(conversation.id), tools: bound };
 
@@ -291,8 +299,9 @@ export async function openPiDroid(
 
         const completed = await submission.wait(context);
 
-        if (completed.status !== "done" || completed.type !== "input")
+        if (completed.status !== "done" || completed.type !== "input") {
           throw new Error("The droid's model gave no answer.");
+        }
 
         const entry = await conversation.commit(
           (tx) => tx.entry(AssistantEntry, completed.answer),

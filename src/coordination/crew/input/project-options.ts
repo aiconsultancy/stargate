@@ -42,18 +42,25 @@ const projectRecordSchema = settingsRecord(
   ),
 ).check(
   settingsCheck((projects, context) => {
-    if (Object.keys(projects).length > 8 || Object.hasOwn(projects, "default"))
+    if (
+      Object.keys(projects).length > 8 ||
+      Object.hasOwn(projects, "default")
+    ) {
       context.addIssue({
         code: "custom",
         message:
           "Configure at most eight additional projects; default is the existing context.",
       });
+    }
   }),
 );
 
 export const projectsSchema = Schema.Unknown.check(
   Schema.makeFilter((value) => {
-    if (!Predicate.isObject(value)) return;
+    if (!Predicate.isObject(value)) {
+      return;
+    }
+
     const prototype: unknown = Object.getPrototypeOf(value);
 
     return (prototype !== Object.prototype && prototype !== null) ||
@@ -92,7 +99,10 @@ export function effectProjectToolInput(schema: EffectToolInput) {
     Schema.makeFilter((raw) => {
       const project = selection(raw);
 
-      if (Result.isFailure(project)) return project.failure.issue;
+      if (Result.isFailure(project)) {
+        return project.failure.issue;
+      }
+
       const { project: _project, ...input } = raw;
       const result = decode(input);
 

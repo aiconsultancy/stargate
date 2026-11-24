@@ -33,9 +33,13 @@ function untilAborted<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
 ): Promise<T> {
-  if (!signal) return promise;
+  if (!signal) {
+    return promise;
+  }
 
-  if (signal.aborted) return Promise.reject(signal.reason);
+  if (signal.aborted) {
+    return Promise.reject(signal.reason);
+  }
 
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => {
@@ -175,8 +179,10 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
   public async getToken(): Promise<string> {
     const cached = this.#cached;
 
-    if (cached && cached.expiresAt - TOKEN_REFRESH_MARGIN_MS > this.#now())
+    if (cached && cached.expiresAt - TOKEN_REFRESH_MARGIN_MS > this.#now()) {
       return cached.token;
+    }
+
     this.#inflight ??= this.#request().finally(() => {
       this.#inflight = undefined;
     });
@@ -196,7 +202,10 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
     let lastError = new Error("IMDS token request was not attempted");
 
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await this.#sleep(500 * 2 ** attempt);
+      if (attempt > 0) {
+        await this.#sleep(500 * 2 ** attempt);
+      }
+
       let res: Response;
 
       try {
@@ -216,8 +225,10 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
         const body = (await res.json()) as Record<string, unknown>;
         const token = body["access_token"];
 
-        if (typeof token !== "string" || !token)
+        if (typeof token !== "string" || !token) {
           throw new Error("IMDS returned no access token");
+        }
+
         const expiresOn = Number(body["expires_on"]) * 1000;
         const expiresIn = Number(body["expires_in"]) * 1000;
 
@@ -236,8 +247,9 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
       );
 
       // IMDS asks callers to retry throttling, server errors and identity propagation (404).
-      if (!(res.status === 404 || res.status === 429 || res.status >= 500))
+      if (!(res.status === 404 || res.status === 429 || res.status >= 500)) {
         break;
+      }
     }
 
     throw lastError;

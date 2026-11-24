@@ -26,8 +26,10 @@ if (mise) {
     locator.exited,
   ]);
 
-  if (locatorExit !== 0)
+  if (locatorExit !== 0) {
     throw new Error("Install the pinned Mesij tool with mise.");
+  }
+
   command = locatedCommand.trim();
 }
 
@@ -47,7 +49,10 @@ async function fixture() {
     stderr: "ignore",
   });
 
-  if ((await init.exited) !== 0) throw new Error("Temporary Git init failed.");
+  if ((await init.exited) !== 0) {
+    throw new Error("Temporary Git init failed.");
+  }
+
   const options = { command, projectDirectory, dataDirectory };
 
   return {
@@ -255,10 +260,11 @@ process.stdout.write(JSON.stringify({
       { actor: "a\nb" },
       { sessionID: "a\0b" },
       { to: "a\u007fb" },
-    ])
+    ]) {
       await expect(
         client.send({ ...message, ...change }, signal),
       ).rejects.toThrow("Invalid Mesij input.");
+    }
   } finally {
     await setup.close();
   }
@@ -439,8 +445,10 @@ setInterval(() => {}, 10000);
     expect(pid).toBeGreaterThan(0);
     const exitedPID = pid;
 
-    if (exitedPID !== undefined)
+    if (exitedPID !== undefined) {
       expect(() => process.kill(exitedPID, 0)).toThrow();
+    }
+
     await expect(client.send(message, controller.signal)).rejects.toThrow(
       "Mesij operation cancelled.",
     );

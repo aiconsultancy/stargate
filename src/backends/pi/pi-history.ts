@@ -117,20 +117,22 @@ export function mapPiHistory(
     entry.role = piRole(record.kind);
 
     for (const message of record.model ?? []) {
-      if (Number.isSafeInteger(message.timestamp) && message.timestamp >= 0)
+      if (Number.isSafeInteger(message.timestamp) && message.timestamp >= 0) {
         entry.createdAt ??= message.timestamp;
+      }
 
       if (message.role === "assistant") {
         entry.model ??= `${message.provider}/${message.model}`.slice(0, 200);
 
         for (const block of message.content) {
-          if (block.type === "text") parts.push(textPart(block.text));
-          else if (block.type === "thinking")
+          if (block.type === "text") {
+            parts.push(textPart(block.text));
+          } else if (block.type === "thinking") {
             parts.push({
               type: "reasoning",
               ...(detail === "full" && clipBody(block.thinking)),
             });
-          else {
+          } else {
             const input =
               detail === "full"
                 ? clipBody(JSON.stringify(block.arguments))
@@ -185,12 +187,13 @@ export function mapPiHistory(
       } else if (typeof message.content === "string") {
         parts.push(textPart(message.content));
       } else {
-        for (const block of message.content)
+        for (const block of message.content) {
           parts.push(
             block.type === "text"
               ? textPart(block.text)
               : { type: "notice", label: "Image" },
           );
+        }
       }
     }
 
@@ -212,8 +215,10 @@ export function mapPiHistory(
       !call.visible ||
       call.entryID >= result.entryID ||
       call.part.name !== result.part.name
-    )
+    ) {
       continue;
+    }
+
     Object.assign(call.part, result.part);
     paired.add(result.part);
   }
@@ -221,7 +226,9 @@ export function mapPiHistory(
   return entries.flatMap((entry) => {
     const parts = entry.parts.filter((part) => !paired.has(part));
 
-    if (entry.role === "tool" && parts.length === 0) return [];
+    if (entry.role === "tool" && parts.length === 0) {
+      return [];
+    }
 
     return [
       {
@@ -256,15 +263,18 @@ export function piSessionHistory(
         const sessions: HistorySession[] = [];
 
         for (const id of ids) {
-          if (Result.isFailure(checkNumericID(id))) continue;
+          if (Result.isFailure(checkNumericID(id))) {
+            continue;
+          }
 
           try {
-            if (await conversation(id, signal))
+            if (await conversation(id, signal)) {
               sessions.push({
                 id,
                 harness: "pi-durable",
                 kind: "conversation",
               });
+            }
           } catch {
             signal.throwIfAborted();
             // Unreadable IDs are omitted; never expose native storage failures.
@@ -277,8 +287,9 @@ export function piSessionHistory(
       safe(signal, async () => {
         decodeChildren(input);
 
-        if (!(await conversation(input.parentID, signal)) || input.cursor)
+        if (!(await conversation(input.parentID, signal)) || input.cursor) {
           throw new Error(unavailable);
+        }
 
         // Greybeard: no fork scan on this surface; crew owns recorded children.
         return { sessions: [] };
@@ -288,7 +299,9 @@ export function piSessionHistory(
         const input = decodeEntries(raw);
         const native = await conversation(input.sessionID, signal);
 
-        if (!native) throw new Error(unavailable);
+        if (!native) {
+          throw new Error(unavailable);
+        }
 
         const cursor = input.cursor
           ? decodeCursor(
@@ -298,8 +311,9 @@ export function piSessionHistory(
             )
           : undefined;
 
-        if (cursor && cursor.sessionID !== input.sessionID)
+        if (cursor && cursor.sessionID !== input.sessionID) {
           throw new Error(unavailable);
+        }
 
         // Native cursors retain order; do not override it on continuation.
         const page = await native.entries(
@@ -357,8 +371,9 @@ export async function readPiHistory<T>(
           )
           .get();
 
-        if (schema?.version !== CURRENT_SQLITE_SCHEMA_VERSION)
+        if (schema?.version !== CURRENT_SQLITE_SCHEMA_VERSION) {
           throw new Error(unavailable);
+        }
       } finally {
         probe.close();
       }
@@ -379,8 +394,11 @@ export async function readPiHistory<T>(
 
       return result;
     } finally {
-      if (harness) await harness.close(BACKGROUND_CONTEXT);
-      else await storage?.close(BACKGROUND_CONTEXT);
+      if (harness) {
+        await harness.close(BACKGROUND_CONTEXT);
+      } else {
+        await storage?.close(BACKGROUND_CONTEXT);
+      }
     }
   } catch {
     throw new Error(unavailable);

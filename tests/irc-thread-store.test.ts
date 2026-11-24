@@ -68,7 +68,10 @@ test("IRC reply parent follows both transcript outbox paths and Stop keeps the r
     });
     const request = store.ready("bot", Date.now(), 1)[0];
 
-    if (!request) throw new Error("missing request");
+    if (!request) {
+      throw new Error("missing request");
+    }
+
     expect(store.cancelTurn("bot", "channel", "root")).toBeUndefined();
     expect(store.cancelTurn("bot", "channel", "request")).toBe(request.id);
     store.finish(request.id);
@@ -85,7 +88,10 @@ test("IRC reply parent follows both transcript outbox paths and Stop keeps the r
     const ordinary = store.ready("bot", Date.now(), 1)[0];
     expect(ordinary).toMatchObject({ thread: "request", replyParent: "root" });
 
-    if (!ordinary) throw new Error("missing continuation");
+    if (!ordinary) {
+      throw new Error("missing continuation");
+    }
+
     store.finish(ordinary.id);
     const from = store.captainCursor("bot", "captain");
     expect(

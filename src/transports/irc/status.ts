@@ -16,7 +16,10 @@ export function parseStatusMetadataLimit(offered: string | undefined): number {
   let limit = statusMetadataMaxValueBytes;
 
   for (const token of offered?.split(",") ?? []) {
-    if (!token.startsWith("max-value-bytes=")) continue;
+    if (!token.startsWith("max-value-bytes=")) {
+      continue;
+    }
+
     const advertised = Number(token.slice("max-value-bytes=".length));
     limit =
       Number.isSafeInteger(advertised) && advertised > 0
@@ -49,7 +52,10 @@ export function classifyStatusMetadataReply(
   currentNick: string,
   fold: (value: string) => string,
 ): StatusResult | undefined {
-  if (message.source?.includes("!")) return undefined;
+  if (message.source?.includes("!")) {
+    return undefined;
+  }
+
   const { command, params } = message;
   const own = fold(params[1] ?? "") === fold(currentNick);
 
@@ -58,24 +64,27 @@ export function classifyStatusMetadataReply(
     own &&
     params[2] === statusMetadataKey &&
     params[4] === pendingValue
-  )
+  ) {
     return { kind: "ok" };
+  }
 
   if (
     command === "766" &&
     own &&
     params[2] === statusMetadataKey &&
     pendingValue === undefined
-  )
+  ) {
     return { kind: "ok" };
+  }
 
   if (command === "FAIL" && params[0] === "METADATA") {
     if (
       params[1] === "KEY_NOT_SET" &&
       params[3] === statusMetadataKey &&
       pendingValue === undefined
-    )
+    ) {
       return { kind: "ok" };
+    }
 
     if (params[1] === "RATE_LIMITED" && params[3] === statusMetadataKey) {
       const seconds = /^\d+$/.test(params[4] ?? "") ? Number(params[4]) : 120;
@@ -89,7 +98,9 @@ export function classifyStatusMetadataReply(
       };
     }
 
-    if (params.includes(statusMetadataKey)) return { kind: "rejected" };
+    if (params.includes(statusMetadataKey)) {
+      return { kind: "rejected" };
+    }
   }
 
   return undefined;
@@ -165,7 +176,10 @@ export class IrcStatus {
 
   /** Call only after registration on a connection supporting status metadata. */
   public connected(maxValueBytes?: number): void {
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
+
     this.generation++;
     this.revision++;
     this.online = true;
@@ -197,21 +211,28 @@ export class IrcStatus {
   }
 
   public begin(): () => void {
-    if (this.closing || this.stopped) return () => {};
+    if (this.closing || this.stopped) {
+      return () => {};
+    }
 
     this.active++;
     this.wake();
     let finished = false;
 
     return () => {
-      if (finished) return;
+      if (finished) {
+        return;
+      }
+
       finished = true;
       this.active--;
 
       if (this.active === 0) {
         this.revision++;
 
-        if (this.dirty) this.clearPending = true;
+        if (this.dirty) {
+          this.clearPending = true;
+        }
       }
 
       this.wake();
@@ -220,11 +241,17 @@ export class IrcStatus {
 
   /** Best-effort acknowledged clear before QUIT, with a bounded deadline. */
   public shutdown(): Promise<void> {
-    if (this.shutdownPromise !== undefined) return this.shutdownPromise;
+    if (this.shutdownPromise !== undefined) {
+      return this.shutdownPromise;
+    }
+
     this.closing = true;
     this.revision++;
 
-    if (this.dirty) this.clearPending = true;
+    if (this.dirty) {
+      this.clearPending = true;
+    }
+
     this.shutdownPromise = new Promise<void>((resolve) => {
       this.finishShutdown = resolve;
     });
@@ -237,14 +264,19 @@ export class IrcStatus {
   }
 
   private cancelWake(): void {
-    if (this.timer !== undefined) clearTimeout(this.timer);
+    if (this.timer !== undefined) {
+      clearTimeout(this.timer);
+    }
+
     this.timer = undefined;
   }
 
   private wake(delay = 0): void {
     this.cancelWake();
 
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
 
     if (this.closing && !this.clearPending && !this.inFlight) {
       this.stop();
@@ -252,7 +284,10 @@ export class IrcStatus {
       return;
     }
 
-    if (!this.online || this.inFlight) return;
+    if (!this.online || this.inFlight) {
+      return;
+    }
+
     this.timer = setTimeout(
       () => {
         this.timer = undefined;
@@ -273,7 +308,9 @@ export class IrcStatus {
     // Reserve the last SET attempt for clearing, including missing-key deletes.
     const capacity = this.timing.limit - (clear ? 0 : 1);
 
-    if (capacity === 0) return;
+    if (capacity === 0) {
+      return;
+    }
 
     let due = Math.max(
       this.backoffUntil,
@@ -292,17 +329,28 @@ export class IrcStatus {
   }
 
   private pump(): void {
-    if (this.stopped || !this.online || this.inFlight) return;
+    if (this.stopped || !this.online || this.inFlight) {
+      return;
+    }
+
     const clear = this.clearPending;
 
-    if (!clear && (this.closing || this.active === 0)) return;
+    if (!clear && (this.closing || this.active === 0)) {
+      return;
+    }
+
     const value = clear ? undefined : this.busyValue();
 
-    if (!clear && value === undefined) return;
+    if (!clear && value === undefined) {
+      return;
+    }
+
     const now = Date.now();
     const due = this.sendDue(clear, now);
 
-    if (due === undefined) return;
+    if (due === undefined) {
+      return;
+    }
 
     if (due > now) {
       this.wake(due - now);
@@ -355,13 +403,18 @@ export class IrcStatus {
 
     this.inFlight = undefined;
 
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
+
     // The transport may queue a write. Charging through its reply is conservative
     // For both the rolling quota and spacing between actual nonclear writes.
     const settledAt = Date.now();
     this.attempts[this.attempts.length - 1] = settledAt;
 
-    if (attempt.value !== undefined) this.lastNonclearAt = settledAt;
+    if (attempt.value !== undefined) {
+      this.lastNonclearAt = settledAt;
+    }
 
     if (result.kind === "rate-limited") {
       const retry = Number.isFinite(result.retryAfterMs)
@@ -401,7 +454,10 @@ export class IrcStatus {
     for (const character of this.name) {
       bytes += Buffer.byteLength(character);
 
-      if (bytes > budget) break;
+      if (bytes > budget) {
+        break;
+      }
+
       name += character;
     }
 
@@ -414,7 +470,10 @@ export class IrcStatus {
     this.generation++;
     this.cancelWake();
 
-    if (this.shutdownTimer !== undefined) clearTimeout(this.shutdownTimer);
+    if (this.shutdownTimer !== undefined) {
+      clearTimeout(this.shutdownTimer);
+    }
+
     this.shutdownTimer = undefined;
     this.finishShutdown?.();
     this.finishShutdown = undefined;

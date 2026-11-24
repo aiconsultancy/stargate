@@ -41,8 +41,9 @@ export class FleetReviews {
     callerAgent: string,
     signal: AbortSignal,
   ) {
-    if (!origin)
+    if (!origin) {
       throw new FleetError("Review caller has no exact native ingress binding");
+    }
 
     const reviewer = this.options.config.reviewers.find(
       (r) => r.agent === input.reviewerAgent,
@@ -51,10 +52,11 @@ export class FleetReviews {
     if (
       !reviewer ||
       (reviewer.kind === "captain" && reviewer.agent !== callerAgent)
-    )
+    ) {
       throw new FleetError(
         "Native review agent is not configured for this caller",
       );
+    }
 
     const reserved = this.options.ledger.reserveReview({
       ownerSessionID: this.options.sessionID,
@@ -70,8 +72,9 @@ export class FleetReviews {
       !this.options.config.repositories.includes(
         reserved.record.binding.context.repository,
       )
-    )
+    ) {
       throw new FleetError("Review repository is not permitted");
+    }
 
     if (reserved.created) {
       if (reviewer.kind === "crew") {
@@ -91,8 +94,9 @@ export class FleetReviews {
           );
           signal.throwIfAborted();
         }
-      } else
+      } else {
         this.options.ledger.reviewState(reserved.record.binding.id, "admitted");
+      }
     }
 
     const current = this.options.ledger.reviewRecord(
@@ -112,13 +116,16 @@ export class FleetReviews {
 
       if (
         !this.options.config.repositories.includes(binding.context.repository)
-      )
+      ) {
         continue;
+      }
 
       try {
         const evidence = await this.options.native.readReview(binding, signal);
 
-        if (!evidence) continue;
+        if (!evidence) {
+          continue;
+        }
 
         const result = Schema.decodeUnknownSync(reviewVerdictSchema)(
           JSON.parse(evidence.resultText),
@@ -133,10 +140,11 @@ export class FleetReviews {
           result.baseSHA !== target.baseSHA ||
           result.mergeBaseSHA !== target.mergeBaseSHA ||
           result.contextDigest !== target.contextDigest
-        )
+        ) {
           throw new FleetError(
             "Native reviewer returned a different PR context",
           );
+        }
 
         const makers = evidence.makers.map((m) =>
           Schema.decodeUnknownSync(nativeMakerSchema)(m),
@@ -155,10 +163,11 @@ export class FleetReviews {
                   (s.variant === undefined || s.variant === m.variant),
               ),
           )
-        )
+        ) {
           throw new FleetError(
             "Native reviewer family or agent does not match approved selectors",
           );
+        }
 
         const proof: FleetReviewProof = Schema.decodeUnknownSync(
           reviewProofSchema,

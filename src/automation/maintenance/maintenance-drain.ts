@@ -150,7 +150,9 @@ function processStart(pid: number) {
     const ticks = Number(fields[19]);
     const boot = /^btime (\d+)$/m.exec(readFileSync("/proc/stat", "utf8"));
 
-    if (!Number.isFinite(ticks) || !boot?.[1]) return null;
+    if (!Number.isFinite(ticks) || !boot?.[1]) {
+      return null;
+    }
 
     return Number(boot[1]) * 1000 + (ticks / 100) * 1000;
   } catch {
@@ -163,7 +165,9 @@ function alive(pid: number, since?: number) {
   try {
     process.kill(pid, 0);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EPERM") return false;
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") {
+      return false;
+    }
   }
 
   const started = since === undefined ? null : processStart(pid);
@@ -201,7 +205,10 @@ export function drainState(
 
   const parsed = decodeDrain(value);
 
-  if (Result.isFailure(parsed)) return { state: "unknown" };
+  if (Result.isFailure(parsed)) {
+    return { state: "unknown" };
+  }
+
   const record = parsed.success;
 
   return drainActivePhase(record.phase) && alive(record.pid, record.startedAt)
@@ -264,8 +271,9 @@ async function locked<T>(directory: string, work: () => Promise<T>) {
 function validated(record: MaintenanceDrain) {
   const parsed = decodeDrain(record);
 
-  if (Result.isFailure(parsed))
+  if (Result.isFailure(parsed)) {
     throw new Error("Invalid maintenance drain record");
+  }
 
   return parsed.success;
 }
@@ -284,11 +292,15 @@ export async function claimMaintenanceDrain(
 ): Promise<void> {
   const next = validated(record);
 
-  if (!drainActivePhase(next.phase))
+  if (!drainActivePhase(next.phase)) {
     throw new Error("A maintenance drain claim needs an active phase");
+  }
+
   await locked(directory, async () => {
-    if (conflicts(drainState(directory), next))
+    if (conflicts(drainState(directory), next)) {
       throw new Error("Another maintenance run owns the drain");
+    }
+
     await atomic(join(directory, markerName), next);
   });
 }
@@ -302,16 +314,19 @@ export async function writeMaintenanceDrain(
   await locked(directory, async () => {
     const state = drainState(directory);
 
-    if (conflicts(state, next))
+    if (conflicts(state, next)) {
       throw new Error("Another maintenance run owns the drain");
+    }
 
     if (
       state.state === "inactive" &&
       state.record.runID === next.runID &&
       !drainActivePhase(state.record.phase) &&
       drainActivePhase(next.phase)
-    )
+    ) {
       throw new Error("A finished maintenance run cannot be resumed");
+    }
+
     await atomic(join(directory, markerName), next);
   });
 }
@@ -386,8 +401,9 @@ export async function registerDrainParticipant(
         if (
           Result.isSuccess(file) &&
           file.success.participant.pid === process.pid
-        )
+        ) {
           await unlink(path);
+        }
       } catch {
         // Already gone or replaced by a restart; nothing of ours remains.
       }
@@ -411,13 +427,19 @@ export function readDrainParticipants(
   const newest = new Map<string, { at: number; value: DrainParticipant }>();
 
   for (const name of names) {
-    if (!name.endsWith(".json")) continue;
+    if (!name.endsWith(".json")) {
+      continue;
+    }
+
     const path = join(folder, name);
 
     try {
       const parsed = decodeParticipant(JSON.parse(readFileSync(path, "utf8")));
 
-      if (Result.isFailure(parsed)) continue;
+      if (Result.isFailure(parsed)) {
+        continue;
+      }
+
       const { registeredAt, participant } = parsed.success;
 
       if (!alive(participant.pid, registeredAt)) {
@@ -432,11 +454,12 @@ export function readDrainParticipants(
 
       const seen = newest.get(participant.dataDirectory);
 
-      if (!seen || seen.at < registeredAt)
+      if (!seen || seen.at < registeredAt) {
         newest.set(participant.dataDirectory, {
           at: registeredAt,
           value: participant as unknown as DrainParticipant,
         });
+      }
     } catch {
       // Unreadable metadata is not a participant; it carries no secret to report.
     }
@@ -467,8 +490,9 @@ export function drainNoticeText(record: MaintenanceDrain) {
   const phase = drainNoticePhase(record);
   const head = `Stargate maintenance notice (run ${record.runID}, ${record.job}; ${record.services.join(", ") || "no services"}).`;
 
-  if (phase === "draining")
+  if (phase === "draining") {
     return `${head} Maintenance is draining. Restart is planned by ${new Date(record.deadlineAt).toISOString()}, or sooner when all sessions are idle. New Stargate turns and crew dispatches are held: accepted messages stay queued and crew assignments queue durably. Running work finishes normally until that deadline. Held crew assignments resume automatically under their original captain after maintenance completes. This is information only: it asks for no acknowledgement and grants no permission.`;
+  }
 
   return `${head} ${phase === "completed" ? "Restart complete" : "Restart ended without completing"}. New turns and crew dispatches are released, and held crew assignments resume automatically under their original captain. This replaces any earlier maintenance notice for this run. It is information only and asks for no acknowledgement.`;
 }
@@ -576,7 +600,10 @@ export class DrainRuntime implements DrainControl {
   }
 
   public tick() {
-    if (this.closed || this.running || this.now() < this.nextAt) return;
+    if (this.closed || this.running || this.now() < this.nextAt) {
+      return;
+    }
+
     this.nextAt = this.now() + 1000;
     this.running = this.step()
       .catch(() => {
@@ -626,10 +653,11 @@ export class DrainRuntime implements DrainControl {
         recorded?.runID === this.armed.runID && terminal(recorded.phase)
           ? recorded
           : { ...this.armed, phase: "aborted" };
-    } else if (recorded && this.endDue(recorded))
+    } else if (recorded && this.endDue(recorded)) {
       end = terminal(recorded.phase)
         ? recorded
         : { ...recorded, phase: "aborted" };
+    }
 
     if (end) {
       if (await this.notify(end)) {
@@ -640,7 +668,9 @@ export class DrainRuntime implements DrainControl {
       return;
     }
 
-    if (this.resumeDue) await this.pump();
+    if (this.resumeDue) {
+      await this.pump();
+    }
   }
 
   /** True once the phase's notice is queued, or its attempts are exhausted. */
@@ -648,7 +678,10 @@ export class DrainRuntime implements DrainControl {
     const phase = drainNoticePhase(record);
     const key = `${record.runID}:${phase}`;
 
-    if (this.done.has(key)) return true;
+    if (this.done.has(key)) {
+      return true;
+    }
+
     const attempt = (this.attempts.get(key) ?? 0) + 1;
     this.attempts.set(key, attempt);
     let ok = true;
@@ -660,8 +693,9 @@ export class DrainRuntime implements DrainControl {
           AbortSignal.timeout(noticeMs),
         );
 
-        if (receipts.some((receipt) => receipt.status === "uncertain"))
+        if (receipts.some((receipt) => receipt.status === "uncertain")) {
           ok = false;
+        }
       } catch {
         ok = false;
       }
@@ -693,7 +727,9 @@ export class DrainRuntime implements DrainControl {
     let failed = false;
 
     for (const handler of this.handlers) {
-      if (!handler.resume) continue;
+      if (!handler.resume) {
+        continue;
+      }
 
       try {
         remaining += (await handler.resume(AbortSignal.timeout(noticeMs)))
@@ -703,7 +739,10 @@ export class DrainRuntime implements DrainControl {
       }
     }
 
-    if (!failed && remaining === 0) this.resumeDue = false;
-    else this.nextAt = this.now() + 5000;
+    if (!failed && remaining === 0) {
+      this.resumeDue = false;
+    } else {
+      this.nextAt = this.now() + 5000;
+    }
   }
 }

@@ -55,7 +55,10 @@ export class CrewDrainRecords {
             )
             .run(sessionID, id).changes === 1;
 
-        if (!first) return "unchanged" as const;
+        if (!first) {
+          return "unchanged" as const;
+        }
+
         this.db
           .query(
             "DELETE FROM update_notice_context WHERE scope=? AND sessionID=? AND id LIKE 'drain\\_%' ESCAPE '\\'",

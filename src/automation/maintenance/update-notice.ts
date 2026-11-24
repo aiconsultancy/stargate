@@ -24,8 +24,9 @@ const flagPaths = [
 const readPath = (value: unknown, path: string): unknown => {
   let node = value;
 
-  for (const key of path.split("."))
+  for (const key of path.split(".")) {
     node = Predicate.isObject(node) ? node[key] : undefined;
+  }
 
   return node;
 };
@@ -81,10 +82,13 @@ export function buildUpdateSnapshot(
   for (const line of redactCredentials(changelog, 12_000).split("\n")) {
     const heading = /^## (?:v)?(\d+\.\d+\.\d+)/.exec(line);
 
-    if (heading?.[1]) section = heading[1];
-    else if (line === "## Unreleased") section = version;
-    else if (line.startsWith("- ") && changes.length < 40)
+    if (heading?.[1]) {
+      section = heading[1];
+    } else if (line === "## Unreleased") {
+      section = version;
+    } else if (line.startsWith("- ") && changes.length < 40) {
       changes.push({ version: section, text: line.slice(2, 302) });
+    }
   }
 
   const registrations = ["bots", "irc", "teams"]
@@ -176,31 +180,41 @@ function noticeText(
     "Context only. Do not interrupt, repeat or resume assigned work, change settings, or send an acknowledgement.",
   ];
 
-  if (added.length > 0) lines.push(`New tools: ${added.join(", ")}`);
+  if (added.length > 0) {
+    lines.push(`New tools: ${added.join(", ")}`);
+  }
 
-  if (changed.length > 0) lines.push(`Changed tools: ${changed.join(", ")}`);
+  if (changed.length > 0) {
+    lines.push(`Changed tools: ${changed.join(", ")}`);
+  }
 
-  if (removed.length > 0) lines.push(`Removed tools: ${removed.join(", ")}`);
+  if (removed.length > 0) {
+    lines.push(`Removed tools: ${removed.join(", ")}`);
+  }
+
   lines.push(
     "Use the host's registered tool listing for current names and schemas; permissions remain authoritative.",
   );
 
-  if (commands.length > 0)
+  if (commands.length > 0) {
     lines.push(
       `Meta commands (captain-addressed Slack): ${commands.join(", ")}`,
     );
+  }
+
   lines.push(
     ...Object.entries(next.flags).map(
       ([name, on]) => `${name}: ${on ? "on" : "off"}`,
     ),
   );
 
-  if (previous && previous.configDigest !== next.configDigest)
+  if (previous && previous.configDigest !== next.configDigest) {
     lines.push(
       "Effective tools, permissions, flags or models changed. Re-read their current settings; no new authority is granted.",
     );
+  }
 
-  if (!previous || previous.version !== next.version)
+  if (!previous || previous.version !== next.version) {
     lines.push(
       ...next.changes
         .filter(
@@ -215,11 +229,13 @@ function noticeText(
         .slice(0, 10)
         .map((change) => `Change: ${change.text}`),
     );
+  }
 
-  if (next.version && /^\d+\.\d+\.\d+$/.test(next.version))
+  if (next.version && /^\d+\.\d+\.\d+$/.test(next.version)) {
     lines.push(
       `Release notes: https://github.com/aiconsultancy/stargate/releases/tag/v${next.version}`,
     );
+  }
 
   return redactCredentials(lines.join("\n"), 6000);
 }
@@ -267,8 +283,10 @@ export class UpdateNotices {
           )
           .run(scope, sessionID, id);
 
-        if (written.changes !== 1)
+        if (written.changes !== 1) {
           throw new Error("Update context intent missing");
+        }
+
         this.db
           .query(
             "UPDATE update_notice_state SET status='queued',acknowledged=snapshot WHERE scope=? AND sessionID=? AND id=?",
@@ -339,13 +357,15 @@ export class UpdateNotices {
           commands: next.commands,
         });
 
-        if (old?.token === token)
+        if (old?.token === token) {
           return {
             id: old.id,
             status: old.status,
             text: old.text,
             send: false,
           };
+        }
+
         const text = noticeText(previous, next);
         const id = `msg_${digest([scope, sessionID, old?.id ?? "", token])}`;
         this.db
@@ -367,11 +387,12 @@ export class UpdateNotices {
       })
       .immediate();
 
-    if (!intent.send)
+    if (!intent.send) {
       return {
         sessionID,
         status: intent.status === "uncertain" ? "uncertain" : "unchanged",
       };
+    }
 
     try {
       await queue(intent.id, intent.text);

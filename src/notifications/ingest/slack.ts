@@ -24,7 +24,9 @@ export function notificationContent(payload: DisplayPayload) {
       part += point;
     }
 
-    if (part) parts.push(part);
+    if (part) {
+      parts.push(part);
+    }
 
     return parts.map((text) => ({
       type: "section" as const,
@@ -56,19 +58,23 @@ const permanent = new Set([
 ]);
 
 export function notificationOutcome(error: unknown): SinkOutcome {
-  if (!Predicate.isObject(error)) return { state: "unknown" };
+  if (!Predicate.isObject(error)) {
+    return { state: "unknown" };
+  }
 
   if (
     error["code"] === "slack_webapi_rate_limited_error" &&
     typeof error["retryAfter"] === "number" &&
     Number.isFinite(error["retryAfter"]) &&
     error["retryAfter"] >= 0
-  )
+  ) {
     return {
       state: "refused",
       retryable: true,
       retryAfterMs: error["retryAfter"] * 1000,
     };
+  }
+
   const data = error["data"];
 
   if (
@@ -76,8 +82,9 @@ export function notificationOutcome(error: unknown): SinkOutcome {
     Predicate.isObject(data) &&
     typeof data["error"] === "string" &&
     permanent.has(data["error"])
-  )
+  ) {
     return { state: "refused", retryable: false };
+  }
 
   return { state: "unknown" };
 }
@@ -113,10 +120,15 @@ export function slackNotificationSink(options: {
     allowed,
     async send(destination, payload, signal) {
       // No await between the CURRENT policy snapshot and the physical dispatch.
-      if (!allowed(destination)) return { state: "refused", retryable: false };
+      if (!allowed(destination)) {
+        return { state: "refused", retryable: false };
+      }
+
       const connection = options.connections.get(destination.registrationId);
 
-      if (!connection) return { state: "refused", retryable: false };
+      if (!connection) {
+        return { state: "refused", retryable: false };
+      }
 
       return connection.notification(destination.channel, payload, signal);
     },

@@ -225,8 +225,9 @@ describe("systemd units", () => {
       { version: "0.2.0; reboot" },
       { version: "v0.2.0" },
       { unit: "bad unit" },
-    ])
+    ]) {
       expect(() => buildUpdateCommand({ ...input, ...bad })).toThrow();
+    }
   });
 
   test("timer starts at the jittered local time; service is a bounded oneshot", () => {

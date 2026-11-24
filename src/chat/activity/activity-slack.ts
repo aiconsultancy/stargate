@@ -10,7 +10,9 @@ const statuses = {
 } satisfies Record<ActivityView["status"], string>;
 
 function bounded(text: string, max: number) {
-  if (text.length <= max) return text;
+  if (text.length <= max) {
+    return text;
+  }
 
   return `${text.slice(0, max - 2).replace(/[\uD800-\uDBFF]$/, "")}…`;
 }

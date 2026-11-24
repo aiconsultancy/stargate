@@ -39,7 +39,9 @@ test("startup constructs the configured transcription provider", () => {
 });
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 const audio = new TextEncoder().encode("fixture m4a bytes, not real audio");
@@ -93,10 +95,11 @@ function provider() {
         if (
           state.tokenStatus !== 200 ||
           request.headers.get("Metadata") !== "true"
-        )
+        ) {
           return new Response("identity PRIVATE_IDENTITY_ERROR", {
             status: state.tokenStatus === 200 ? 400 : state.tokenStatus,
           });
+        }
 
         return Response.json({
           access_token: `${secretToken}-${tokens.length}`,
@@ -110,7 +113,10 @@ function provider() {
       const form = await request.formData();
       const file = form.get("file");
 
-      if (!(file instanceof File)) return new Response(null, { status: 400 });
+      if (!(file instanceof File)) {
+        return new Response(null, { status: 400 });
+      }
+
       requests.push({
         path: url.pathname,
         version: url.searchParams.get("api-version"),
@@ -122,11 +128,13 @@ function provider() {
       });
       const limit = state.limited.shift();
 
-      if (limit)
+      if (limit) {
         return new Response("provider PRIVATE_PROVIDER_ERROR", {
           status: limit[0],
           headers: limit[1] === undefined ? {} : { "retry-after": limit[1] },
         });
+      }
+
       state.peak = Math.max(state.peak, ++state.active);
 
       try {
@@ -200,7 +208,7 @@ test("transcription is off by default and accepts only the keyless Azure shape",
     { auth: "apiKey" },
     { apiKey: "not-accepted" },
     { type: "openai" },
-  ])
+  ]) {
     expect(
       Result.isSuccess(
         Schema.decodeUnknownResult(transcriptionSchema)({
@@ -208,6 +216,8 @@ test("transcription is off by default and accepts only the keyless Azure shape",
         }),
       ),
     ).toBe(false);
+  }
+
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(transcriptionSchema)({
@@ -308,12 +318,13 @@ test("Azure token expiry uses Number coercion and positive safe integers", async
     });
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      if (accepted)
+      if (accepted) {
         expect(await transcriber.transcribe(file, signal())).toBe("answer");
-      else
+      } else {
         await expect(transcriber.transcribe(file, signal())).rejects.toThrow(
           /^Transcription request failed$/,
         );
+      }
     }
 
     expect(identities).toBe(cached ? 1 : 2);
@@ -340,7 +351,9 @@ test("provider failures are one fixed error, drop a refused token and honour can
   ] as const) {
     f.state.status = status;
 
-    if (body !== undefined) f.state.body = body;
+    if (body !== undefined) {
+      f.state.body = body;
+    }
 
     const error = await f.transcriber
       .transcribe(file, signal())
@@ -643,7 +656,10 @@ function gatewayFixture(
   const run = async () => {
     const job = store.ready(gateway.key, Number.MAX_SAFE_INTEGER, 1)[0];
 
-    if (!job) throw new Error("Missing job");
+    if (!job) {
+      throw new Error("Missing job");
+    }
+
     await gateway.process(job, signal());
 
     return job;
@@ -776,8 +792,10 @@ test("logs never contain speech, tokens, file names or provider errors", async (
     "PRIVATE_IDENTITY_ERROR",
     "Audio clip",
     "Voice message transcript",
-  ])
+  ]) {
     expect(logged).not.toContain(secret);
+  }
+
   // The request row keeps the typed text only; the transcript is not stored.
   expect(
     JSON.stringify(good.store.recentJobs(good.gateway.key, 5)),

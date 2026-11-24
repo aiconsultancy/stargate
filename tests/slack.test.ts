@@ -153,8 +153,9 @@ test("crew UI consumes trigger for loading modal and updates that private view w
     expect(calls[0]?.fields.get("trigger_id")).toBe("fixture-trigger");
     expect(calls[1]?.fields.get("view_id")).toBe("V_CREW");
 
-    for (const call of calls)
+    for (const call of calls) {
       expect(JSON.parse(call.fields.get("view") ?? "null")).toEqual(view);
+    }
   } finally {
     await server.stop(true);
   }
@@ -173,14 +174,17 @@ test("Slack posts and edits preserve mixed Markdown with safe fallback; reaction
       if (
         path === "/chat.update" &&
         calls.at(-1)?.fields.get("ts") === "missing"
-      )
+      ) {
         return Response.json({ ok: false, error: "message_not_found" });
+      }
 
-      if (path === "/reactions.add")
+      if (path === "/reactions.add") {
         return Response.json({ ok: false, error: "already_reacted" });
+      }
 
-      if (path === "/chat.delete")
+      if (path === "/chat.delete") {
         return Response.json({ ok: false, error: "message_not_found" });
+      }
 
       return Response.json({ ok: true, ts: "2.000" });
     },
@@ -197,8 +201,10 @@ test("Slack posts and edits preserve mixed Markdown with safe fallback; reaction
     const text = "<@UOTHER> **bold** & <https://example.test|Docs> <!here>";
     const prepared = slack.prepareReply(text)[0];
 
-    if (!prepared || typeof prepared === "string")
+    if (!prepared || typeof prepared === "string") {
       throw new Error("Expected classified content");
+    }
+
     expect(
       await slack.post(
         "C123",
@@ -233,8 +239,10 @@ test("Slack posts and edits preserve mixed Markdown with safe fallback; reaction
         '"type":"user","user_id":"UOTHER"',
       );
 
-      if (call.path === "/chat.postMessage")
+      if (call.path === "/chat.postMessage") {
         expect(call.fields.get("mrkdwn")).toBe("false");
+      }
+
       expect(call.fields.get("text")).toBe(prepared.content.text);
       expect(call.fields.get("parse")).toBe("none");
     }
@@ -320,8 +328,10 @@ test("Slack posts and streamed edits preserve classified Markdown", async () => 
   try {
     const prepared = slack.prepareReply(text)[0];
 
-    if (!prepared || typeof prepared === "string")
+    if (!prepared || typeof prepared === "string") {
       throw new Error("Expected classified content");
+    }
+
     await slack.post(
       "C123",
       "1.000",
@@ -514,19 +524,27 @@ test("long mixed replies retain bounded element text and at most two outgoing bl
       const blocks: unknown = JSON.parse(payload.get("blocks") ?? "null");
       expect(Array.isArray(blocks)).toBe(true);
 
-      if (!Array.isArray(blocks)) throw new Error("Missing blocks");
+      if (!Array.isArray(blocks)) {
+        throw new Error("Missing blocks");
+      }
+
       expect(blocks.length).toBe(2); // One content block + Stop, below Slack's 50.
       const lengths: number[] = [];
 
       const inspect = (value: unknown) => {
         if (Array.isArray(value)) {
-          for (const child of value) inspect(child);
-        } else if (value && typeof value === "object")
-          for (const [key, child] of Object.entries(value)) {
-            if (key === "text" && typeof child === "string")
-              lengths.push(Array.from(child).length);
-            else inspect(child);
+          for (const child of value) {
+            inspect(child);
           }
+        } else if (value && typeof value === "object") {
+          for (const [key, child] of Object.entries(value)) {
+            if (key === "text" && typeof child === "string") {
+              lengths.push(Array.from(child).length);
+            } else {
+              inspect(child);
+            }
+          }
+        }
       };
 
       inspect(blocks[0]);
@@ -573,8 +591,10 @@ test("prepared quoted-code chunks reach Slack without reclassification", async (
     expect(parts.length).toBeGreaterThan(1);
 
     for (const part of parts) {
-      if (typeof part === "string")
+      if (typeof part === "string") {
         throw new Error("Expected classified chunk");
+      }
+
       await slack.post(
         "C123",
         "1.000",

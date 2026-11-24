@@ -57,8 +57,9 @@ export function canExpandCrew(previous: string, next: string): boolean {
       before.projectDirectory !== after.projectDirectory ||
       JSON.stringify(before.captain) !== JSON.stringify(after.captain) ||
       before.crew.length >= after.crew.length
-    )
+    ) {
       return false;
+    }
 
     if (
       !before.crew.every((old) =>
@@ -66,8 +67,9 @@ export function canExpandCrew(previous: string, next: string): boolean {
           (member) => JSON.stringify(old) === JSON.stringify(member),
         ),
       )
-    )
+    ) {
       return false;
+    }
 
     const added = after.crew.filter(
       (member) => !before.crew.some((old) => old["id"] === member["id"]),
@@ -78,7 +80,9 @@ export function canExpandCrew(previous: string, next: string): boolean {
       added.every((member) => {
         const backend = member["backend"];
 
-        if (backend === undefined) return true;
+        if (backend === undefined) {
+          return true;
+        }
 
         return (
           typeof backend === "object" &&

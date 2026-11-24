@@ -30,7 +30,10 @@ export function utcMillis(value: string): string | undefined {
       value,
     );
 
-  if (!match) return undefined;
+  if (!match) {
+    return undefined;
+  }
+
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
@@ -49,11 +52,16 @@ export function utcMillis(value: string): string | undefined {
     !zone ||
     (zone.length > 1 &&
       (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4)) > 59))
-  )
+  ) {
     return undefined;
+  }
+
   const time = Date.parse(value);
 
-  if (!Number.isFinite(time)) return undefined;
+  if (!Number.isFinite(time)) {
+    return undefined;
+  }
+
   const canonical = new Date(time).toISOString();
 
   return canonical.length === 24 ? canonical : undefined;
@@ -72,7 +80,9 @@ const Tags = Schema.Record(Schema.String, bounded(256)).check(
 
 const HttpsUrl = bounded(2048).check(
   Schema.makeFilter((value) => {
-    if (/[\s\p{Cc}]/u.test(value) || !/^https:\/\//i.test(value)) return false;
+    if (/[\s\p{Cc}]/u.test(value) || !/^https:\/\//i.test(value)) {
+      return false;
+    }
 
     try {
       const url = new URL(value);
@@ -230,8 +240,9 @@ export function notificationLimits(overrides: Partial<Limits> = {}): Limits {
     limits.attemptTimeoutMs >= limits.leaseMs ||
     limits.concurrency > 4 ||
     limits.sendAttempts > 3
-  )
+  ) {
     throw new StoreUnavailable();
+  }
 
   return limits;
 }

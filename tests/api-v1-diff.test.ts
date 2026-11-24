@@ -138,7 +138,10 @@ test("initial snapshot emits nothing and volatile sampling timestamps are ignore
   after.fleet.host.uptimeSec++;
   const git = after.ships.ship.crewMembers[0]?.contexts[0]?.git;
 
-  if (!git) throw new Error("Missing Git fixture");
+  if (!git) {
+    throw new Error("Missing Git fixture");
+  }
+
   git.checkedAt++;
   expect(diffEvents(undefined, before, at)).toEqual([]);
   expect(diffEvents(before, after, at)).toEqual([]);
@@ -299,7 +302,9 @@ test("reports tasks completed between polls without replaying recent outcomes", 
 test("PR discovery after startup or a Git timeout does not emit activity", () => {
   const before = context();
 
-  if (!before.git) throw new Error("Missing Git fixture");
+  if (!before.git) {
+    throw new Error("Missing Git fixture");
+  }
 
   const after = context({
     pullRequest: {
@@ -341,7 +346,10 @@ test("queue increases produce one bounded sentence with the added task when visi
 test("git emits when branch changes, HEAD detaches or a PR appears", () => {
   const old = context();
 
-  if (!old.git) throw new Error("Missing Git fixture");
+  if (!old.git) {
+    throw new Error("Missing Git fixture");
+  }
+
   const changed = context({ git: { ...old.git, branch: "feature/layout" } });
   expect(activity(old, changed)).toMatchObject([
     {
@@ -394,7 +402,10 @@ test("availability flips emit an event without a member", () => {
   after.ships.ship.available = false;
   const summary = after.fleet.ships[0];
 
-  if (!summary) throw new Error("Missing summary");
+  if (!summary) {
+    throw new Error("Missing summary");
+  }
+
   summary.available = false;
   const overview = (sample: V1EventSnapshot) => ({ ...sample, ships: {} });
   const events = diffEvents(overview(before), overview(after), at);

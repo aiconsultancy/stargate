@@ -105,8 +105,9 @@ const server = Bun.serve({
       if (
         proxy.down ||
         request.headers.get("authorization") !== `Bearer ${secrets.clientKey}`
-      )
+      ) {
         return new Response("down", { status: 503 });
+      }
 
       return Response.json({ data: [{ id: "gpt-6.1-sol" }] });
     }
@@ -115,11 +116,12 @@ const server = Bun.serve({
     proxy.chats.push({ headers: request.headers, body });
     const next = proxy.script.shift() ?? { text: "Nothing to add." };
 
-    if (next === "fail")
+    if (next === "fail") {
       return Response.json(
         { error: { message: "denied", type: "authentication_error" } },
         { status: 401 },
       );
+    }
 
     const stream =
       "tools" in next
@@ -178,27 +180,33 @@ const runner: CommandRunner = {
     host.commands.push(text);
     const [tool, scope, action, unit = ""] = command;
 
-    if (tool !== "systemctl" || scope !== "--user")
+    if (tool !== "systemctl" || scope !== "--user") {
       return { code: 127, stdout: "", stderr: "" };
+    }
 
     const values = host.units[unit] ?? {
       LoadState: "not-found",
       ActiveState: "inactive",
     };
 
-    if (action === "show")
+    if (action === "show") {
       return ok(
         Object.entries(values)
           .map(([key, value]) => `${key}=${value}`)
           .join("\n"),
       );
+    }
 
-    if (action === "is-active") return ok(`${values["ActiveState"]}\n`);
+    if (action === "is-active") {
+      return ok(`${values["ActiveState"]}\n`);
+    }
 
     if (action === "restart" || action === "start") {
       host.units[unit] = { ...values, ActiveState: "active" };
 
-      if (unit === "stargate.service") await ready();
+      if (unit === "stargate.service") {
+        await ready();
+      }
 
       return ok();
     }
@@ -370,10 +378,16 @@ async function install(
   // One Stargate-owned OpenCode session: the gateway's mapping of a thread.
   const storePath = join(config.dataDirectory, "stargate.sqlite");
 
-  if (seededStore) await copyFile(nightlyStoreFixture, storePath);
+  if (seededStore) {
+    await copyFile(nightlyStoreFixture, storePath);
+  }
+
   const store = openStore(storePath);
 
-  if (!seededStore) store.saveSession('["k","C123","1.0"]', "ses_captain");
+  if (!seededStore) {
+    store.saveSession('["k","C123","1.0"]', "ses_captain");
+  }
+
   store.close();
 
   return { config, path: join(dir, "stargate.json") };
@@ -597,13 +611,15 @@ describe("maintenance droid", () => {
       [
         "runs-failing",
         async (config) => {
-          for (const day of ["10", "11"])
+          for (const day of ["10", "11"]) {
             await writeReport(
               config.dataDirectory,
               report("deferred", `2026-11-${day}T00:05:00.000Z`, {
                 reason: "busy-opencode",
               }),
             );
+          }
+
           // Already explained: this is the health check, not a post-run one.
           await mkdir(droidDirectory(config.dataDirectory), {
             recursive: true,
@@ -751,13 +767,16 @@ describe("maintenance droid", () => {
       );
       let held: Database | undefined;
 
-      if (block === "busy") host.busy = ["ses_captain"];
+      if (block === "busy") {
+        host.busy = ["ses_captain"];
+      }
 
-      if (block === "run")
+      if (block === "run") {
         host.units["stargate-maintenance.service"] = {
           LoadState: "loaded",
           ActiveState: "active",
         };
+      }
 
       if (block === "lock") {
         held = new Database(
@@ -877,8 +896,10 @@ describe("maintenance droid", () => {
     const [post] = await posts(config);
     const everything = [...agentPrompts, ...seen, post?.text ?? ""].join("\n");
 
-    for (const value of Object.values(secrets))
+    for (const value of Object.values(secrets)) {
       expect(everything).not.toContain(value);
+    }
+
     expect(seen[0]).toContain('"entries":["gateway"]');
   });
 });
@@ -921,8 +942,9 @@ describe("maintenance droid previews and timeouts", () => {
 
     const slow: CommandRunner = {
       async run(command, options) {
-        if (command.join(" ") === "systemctl --user restart stargate.service")
+        if (command.join(" ") === "systemctl --user restart stargate.service") {
           await gate;
+        }
 
         return runner.run(command, options);
       },
@@ -1020,8 +1042,9 @@ describe("maintenance droid on Pi Durable", () => {
         `Bearer ${secrets.providerKey}`,
       );
 
-      for (const value of Object.values(secrets))
+      for (const value of Object.values(secrets)) {
         expect(chat.body).not.toContain(value);
+      }
     }
 
     // The status tool result reached the model.
@@ -1094,10 +1117,12 @@ describe("droid configuration and units", () => {
           provider: { baseURL: "http://127.0.0.1:8317/v1", apiKey: "raw" },
         },
       },
-    ])
+    ]) {
       expect(() =>
         Schema.decodeUnknownSync(maintenanceSchema)({ ...base, droid }),
       ).toThrow();
+    }
+
     expect(
       Schema.decodeUnknownSync(maintenanceSchema)({
         ...base,
@@ -1361,8 +1386,9 @@ describe("droid recover safety", () => {
     expect(seen[1]).toContain("[REDACTED");
     const everything = [...agentPrompts, ...seen, post?.text ?? ""].join("\n");
 
-    for (const value of Object.values(secrets))
+    for (const value of Object.values(secrets)) {
       expect(everything).not.toContain(value);
+    }
   });
 });
 
@@ -1571,8 +1597,14 @@ describe("droid post length after redaction", () => {
   test("a reply that ends with Bearer before the tail is still posted within 2,800 code points", async () => {
     const { config, path } = await install();
 
-    for (const unit of ["stargate.service", "opencode2.service", "cpa.service"])
+    for (const unit of [
+      "stargate.service",
+      "opencode2.service",
+      "cpa.service",
+    ]) {
       host.units[unit] = { LoadState: "loaded", ActiveState: "failed" };
+    }
+
     const captain = join(host.dir, "captain");
     const stateDirectory = join(captain, ".local", "stargate-crew");
     await mkdir(join(captain, ".opencode"), { recursive: true });
@@ -1596,8 +1628,9 @@ describe("droid post length after redaction", () => {
     const state = await CrewState.open(stateDirectory, "ship", "fingerprint");
 
     try {
-      for (const crew of ["chief", "bosun", "cook", "pilot", "medic"])
+      for (const crew of ["chief", "bosun", "cook", "pilot", "medic"]) {
         state.enqueue(state.reservePeer(crew), "ses_e49d787old", "task text");
+      }
     } finally {
       state.close();
     }
@@ -1644,7 +1677,7 @@ describe("droid post length after redaction", () => {
     const directory = await mkdtemp(join(base, "notice-"));
 
     // Redaction matches at the join, around the limit, in UTF-16 and astral text.
-    for (let length = 2770; length <= 2830; length++)
+    for (let length = 2770; length <= 2830; length++) {
       for (const unit of ["a", "😀"]) {
         const body = `${unit.repeat(length - 7)} Bearer`;
         const redacted = Array.from(scrub.text(`${body}${tail}`));
@@ -1669,6 +1702,7 @@ describe("droid post length after redaction", () => {
           report: `droid-${length}-${unit === "a" ? "a" : "e"}.json`,
         });
       }
+    }
 
     // A post within the limit is returned as it is.
     const within = `${"😀".repeat(2799)}!`;

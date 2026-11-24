@@ -43,7 +43,10 @@ test("activity RPC pins the captain, capture and configured OpenCode location", 
       directory: "/captain",
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid backend fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid backend fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;
 
@@ -73,10 +76,12 @@ test("activity RPC pins the captain, capture and configured OpenCode location", 
       },
     });
 
-    for (const request of requests.slice(1))
+    for (const request of requests.slice(1)) {
       expect(request.body).toEqual({
         input: { sessionID: "ses_captain", id: "capture-one" },
       });
+    }
+
     wrongCapture = true;
     await expect(watch.read(signal)).rejects.toThrow("capture changed");
   } finally {
@@ -124,7 +129,10 @@ test("crew status uses authenticated location RPC only, with no captain session 
       headersEnv: { authorization: "STARGATE_CREW_TEST_AUTH" },
     });
 
-    if (config.type !== "opencode") throw new Error("Invalid fixture");
+    if (config.type !== "opencode") {
+      throw new Error("Invalid fixture");
+    }
+
     const backend = new OpenCodeBackend(config);
     const signal = new AbortController().signal;
     expect(await backend.crewStatus({}, signal)).toEqual({

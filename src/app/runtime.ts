@@ -216,7 +216,9 @@ async function openCodeVersion(
   for (const ship of ships) {
     const version = openCodeServerVersion(ship.backend, signal);
 
-    if (version) return version;
+    if (version) {
+      return version;
+    }
   }
 
   return null;
@@ -267,10 +269,11 @@ function subspaceAgents(
 ) {
   const section = config.subspaceAgents;
 
-  if (!section?.enabled)
+  if (!section?.enabled) {
     return Effect.succeed(
       (registration: { backend: BackendConfig }) => registration.backend,
     );
+  }
 
   return Effect.acquireRelease(
     Effect.promise(async () =>
@@ -324,10 +327,11 @@ export function serve(
           if (
             path === "" ||
             (!isAbsolute(path) && path !== ".." && !path.startsWith("../"))
-          )
+          ) {
             throw new Error(
               "Shared dashboard socket must be outside the private data directory",
             );
+          }
         }
 
         await mkdir(config.dataDirectory, { recursive: true, mode: 0o700 });
@@ -479,8 +483,10 @@ export function serve(
             !updateSnapshot ||
             !backend.queueUpdateNotice ||
             !backend.updateNoticeContext
-          )
+          ) {
             return;
+          }
+
           const bounded = AbortSignal.any([signal, AbortSignal.timeout(2000)]);
 
           const selected = await backend.updateNoticeContext(
@@ -594,19 +600,23 @@ export function serve(
         ]);
         const key = JSON.stringify([identity.team, identity.user]);
 
-        if (identities.has(key))
+        if (identities.has(key)) {
           return yield* Effect.die(
             new Error("Two registrations use the same Slack bot"),
           );
+        }
+
         identities.add(key);
         const notificationRegistration = { bot, identity };
         notificationRegistrations.push(notificationRegistration);
 
         if (notify) {
-          if (!slack.notification)
+          if (!slack.notification) {
             return yield* Effect.die(
               new Error("Slack notification delivery is unavailable"),
             );
+          }
+
           notificationConnections.set(bot.id, {
             notification: slack.notification.bind(slack),
           });
@@ -701,20 +711,23 @@ export function serve(
 
         const cronServices: CronServices = {
           quota: (signal) => {
-            if (!backend.cronQuota)
+            if (!backend.cronQuota) {
               throw new Error("Cron quota reader unavailable.");
+            }
 
             return backend.cronQuota(signal);
           },
           model: (input, signal) => {
-            if (!backend.cronModel)
+            if (!backend.cronModel) {
               throw new Error("Cron model validation unavailable.");
+            }
 
             return backend.cronModel(input, signal);
           },
           evaluate: (input, signal) => {
-            if (!backend.cronEvaluate)
+            if (!backend.cronEvaluate) {
               throw new Error("Cron evaluation unavailable.");
+            }
 
             return backend.cronEvaluate(input, signal);
           },
@@ -779,8 +792,9 @@ export function serve(
                 !currentBot.access.deniedChannels.some(
                   (rule) => rule === "*" || rule === quota.report.channel,
                 )
-              )
+              ) {
                 await slack.announce(quota.report.channel, text, signal);
+              }
             },
             botLog,
           );
@@ -849,7 +863,7 @@ export function serve(
         );
         slackStarted = true;
 
-        if (slack.watch)
+        if (slack.watch) {
           workers.push({
             key: `transport:${bot.id}`,
             work: supervise(
@@ -858,6 +872,8 @@ export function serve(
               () => slack.watch?.() ?? Promise.resolve(),
             ),
           });
+        }
+
         botLog.info("Bot connected");
 
         const dashboardShip = {
@@ -983,8 +999,9 @@ export function serve(
           const primary = ship.registrations[0];
           const entry = primary ? entries.get(primary.key) : undefined;
 
-          if (!entry || !primary)
+          if (!entry || !primary) {
             throw new Error("Fleet primary registration unavailable");
+          }
 
           const relatedTeams = teamsRegistrations.filter(
             (team) =>
@@ -1043,13 +1060,14 @@ export function serve(
                             input: request.input,
                           },
                         ))
-                      )
+                      ) {
                         return {
                           botKey: job.botKey,
                           eventId: job.eventId,
                           sessionID: pin,
                           inputID: job.input,
                         };
+                      }
                     }
                   }
 
@@ -1095,10 +1113,11 @@ export function serve(
             control.recordOffer(offer);
           };
 
-          for (const team of relatedTeams)
+          for (const team of relatedTeams) {
             team.sourceRecorder = (source) => {
               control.recordSource(source);
             };
+          }
 
           if (control.resultsEnabled) {
             ship.assignmentRecorder = (input, fold) =>
@@ -1136,7 +1155,9 @@ export function serve(
           ship.registrations.map((registration) => {
             const id = `${irc.id}:${registration.id}`;
 
-            if (registration.client.registered) seen.add(id);
+            if (registration.client.registered) {
+              seen.add(id);
+            }
 
             return {
               kind: "irc",
@@ -1201,7 +1222,9 @@ export function serve(
           config.api?.listen,
         );
 
-        if (error) return yield* Effect.die(new Error(error));
+        if (error) {
+          return yield* Effect.die(new Error(error));
+        }
       }
 
       if (config.dashboard) {
@@ -1253,7 +1276,10 @@ export function serve(
               dataDirectory: config.dataDirectory,
               projection: {
                 requests: (registration, at) => {
-                  if (registration.kind !== "irc") return [];
+                  if (registration.kind !== "irc") {
+                    return [];
+                  }
+
                   const cfg = registration.config;
 
                   return store.requestProgress(
@@ -1319,7 +1345,7 @@ export function serve(
       // Registered after backends: shutdown interrupts every worker first.
       const fibers = yield* FiberMap.make<string, void>();
 
-      if (config.notifications?.updateNotice)
+      if (config.notifications?.updateNotice) {
         updateSnapshot = yield* Effect.promise(async () =>
           buildUpdateSnapshot(
             await runningVersion(),
@@ -1330,9 +1356,11 @@ export function serve(
             ).catch(() => ""),
           ),
         );
+      }
 
-      for (const worker of workers)
+      for (const worker of workers) {
         yield* FiberMap.run(fibers, worker.key, worker.work);
+      }
 
       if (reload) {
         const apply = async (candidate: ReloadCandidate) => {
@@ -1348,7 +1376,9 @@ export function serve(
             const bots = candidate.config.bots.map((next) => {
               const publish = botBindings.get(next.id);
 
-              if (!publish) throw new ReloadRejected("unavailable");
+              if (!publish) {
+                throw new ReloadRejected("unavailable");
+              }
 
               return {
                 publish,
@@ -1390,31 +1420,40 @@ export function serve(
                     },
                   );
 
-            if (!open || requests.signal.aborted)
+            if (!open || requests.signal.aborted) {
               throw new ReloadRejected("unavailable");
+            }
 
-            for (const { binding, plan } of plans)
+            for (const { binding, plan } of plans) {
               for (const registration of plan.removed) {
                 const entry = binding.entries.get(registration.key);
 
-                if (!entry) throw new ReloadRejected("unavailable");
+                if (!entry) {
+                  throw new ReloadRejected("unavailable");
+                }
+
                 entry.gateway.pause();
                 paused.push(entry.gateway);
               }
+            }
 
-            if (paused.some((gateway) => !gateway.isIdle()))
+            if (paused.some((gateway) => !gateway.isIdle())) {
               throw new ReloadRejected("busy");
+            }
 
             const updates = resolveIrcRosterUpdates(plans);
 
             // No awaits: publish all access/settings and roster references in
             // One JS turn. Admission cannot observe a half-applied candidate.
-            for (const { binding, plan } of plans)
+            for (const { binding, plan } of plans) {
               plan.commit(
                 (key) => binding.entries.get(key)?.gateway.isIdle() ?? false,
               );
+            }
 
-            for (const bot of bots) bot.publish(bot.next, bot.transcriber);
+            for (const bot of bots) {
+              bot.publish(bot.next, bot.transcriber);
+            }
 
             for (const {
               binding,
@@ -1433,7 +1472,10 @@ export function serve(
                 ircDashboardShip(registration, next, entry.resource.backend),
               );
 
-              if (!ships.includes(entry.dashboard)) ships.push(entry.dashboard);
+              if (!ships.includes(entry.dashboard)) {
+                ships.push(entry.dashboard);
+              }
+
               binding.entries.set(registration.key, entry);
             }
 
@@ -1458,7 +1500,10 @@ export function serve(
                 if (entry) {
                   const index = ships.indexOf(entry.dashboard);
 
-                  if (index !== -1) ships.splice(index, 1);
+                  if (index !== -1) {
+                    ships.splice(index, 1);
+                  }
+
                   fleetDashboard?.retireFleetBackend(entry.resource.backend);
                 }
               }
@@ -1494,7 +1539,9 @@ export function serve(
             }
           } finally {
             if (!committed) {
-              for (const gateway of paused) gateway.pause(false);
+              for (const gateway of paused) {
+                gateway.pause(false);
+              }
 
               for (const { entry } of staged) {
                 await Effect.runPromise(
@@ -1528,8 +1575,10 @@ export function serve(
             (transport) => transport.state === "connected",
           )
         ) {
-          if (Date.now() >= deadline)
+          if (Date.now() >= deadline) {
             throw new Error("No transport connected before readiness deadline");
+          }
+
           await delay(connectionTiming.pollMs, undefined, { signal: shutdown });
         }
       });
@@ -1571,7 +1620,7 @@ export function serve(
       log.info("Stargate ready");
       const updateReceipts: UpdateReceipt[] = [];
 
-      if (updateSnapshot)
+      if (updateSnapshot) {
         yield* Effect.promise(async () => {
           await Promise.all(
             [...updateTargets].map(async ([backend, scope]) => {
@@ -1615,16 +1664,19 @@ export function serve(
                   backend.sessionID &&
                   backend.crewUpdateNotice &&
                   updateSnapshot !== undefined
-                )
+                ) {
                   updateReceipts.push(
                     ...(await backend.crewUpdateNotice(updateSnapshot, signal)),
                   );
+                }
               } catch {
                 log.warn("Update notice unavailable");
               }
             }),
           );
         });
+      }
+
       // Readiness record for maintenance health checks; never fatal.
       const readyAt = Date.now();
       let readinessWrite = Promise.resolve();
@@ -1640,10 +1692,11 @@ export function serve(
           ).then(
             (version) => {
               // Only matters where maintenance manages Stargate releases.
-              if (version === null && config.maintenance?.stargate)
+              if (version === null && config.maintenance?.stargate) {
                 log.warn(
                   "This Stargate directory has no valid .stargate-release.json; the readiness record has no version and maintenance cannot verify an update. Install releases with stargate maintenance update or adopt.",
                 );
+              }
             },
             () => {
               log.warn("Readiness record not written");
@@ -1678,7 +1731,10 @@ export function serve(
               () => {},
             );
 
-            if (signal.aborted) break;
+            if (signal.aborted) {
+              break;
+            }
+
             const transports = transportSnapshot();
             const next = JSON.stringify(transports);
 
@@ -1693,11 +1749,14 @@ export function serve(
             ) {
               lostSince ??= Date.now();
 
-              if (Date.now() - lostSince >= connectionTiming.outageMs)
+              if (Date.now() - lostSince >= connectionTiming.outageMs) {
                 throw new Error(
                   "No transport connected before outage deadline",
                 );
-            } else lostSince = undefined;
+              }
+            } else {
+              lostSince = undefined;
+            }
           }
         }),
       );
@@ -1728,7 +1787,10 @@ export function serve(
   // Stop, not a startup failure. The raw cause is never exposed.
   return program.pipe(
     Effect.catchCause((cause) => {
-      if (shutdown.aborted && !started) return Effect.void;
+      if (shutdown.aborted && !started) {
+        return Effect.void;
+      }
+
       const error = Cause.squash(cause);
 
       return started &&
@@ -1771,11 +1833,17 @@ export async function start(configPath: string) {
       ),
     ),
     ...registrations.flatMap(({ backend }) => {
-      if (backend.type === "opencode") return Object.values(backend.headersEnv);
+      if (backend.type === "opencode") {
+        return Object.values(backend.headersEnv);
+      }
 
-      if (backend.type === "module") return [];
+      if (backend.type === "module") {
+        return [];
+      }
 
-      if (backend.provider) return [backend.provider.apiKeyEnv];
+      if (backend.provider) {
+        return [backend.provider.apiKeyEnv];
+      }
 
       return [
         backend.model.startsWith("anthropic/")
@@ -1785,13 +1853,16 @@ export async function start(configPath: string) {
     }),
   ]);
 
-  for (const [key, value] of Object.entries(initial.environment))
+  for (const [key, value] of Object.entries(initial.environment)) {
     if (
       (!producerReferences.has(key) || existingReferences.has(key)) &&
       process.env[key] === undefined &&
       value !== undefined
-    )
+    ) {
       process.env[key] = value;
+    }
+  }
+
   const log = pino({ level: "info" });
 
   const reload = new ConfigReload(

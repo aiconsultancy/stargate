@@ -25,12 +25,17 @@ export interface CommandRunner {
 const limit = 1024 * 1024;
 
 async function capped(stream: ReadableStream<Uint8Array> | null) {
-  if (!stream) return "";
+  if (!stream) {
+    return "";
+  }
+
   const decoder = new TextDecoder();
   let text = "";
 
   for await (const chunk of stream) {
-    if (text.length < limit) text += decoder.decode(chunk, { stream: true });
+    if (text.length < limit) {
+      text += decoder.decode(chunk, { stream: true });
+    }
   }
 
   return text.slice(0, limit);
@@ -133,7 +138,9 @@ export async function must(
 ) {
   const result = await runner.run(command, options);
 
-  if (result.code !== 0) throw new StepError(reason);
+  if (result.code !== 0) {
+    throw new StepError(reason);
+  }
 
   return result;
 }
@@ -180,15 +187,21 @@ export async function request(url: string, options: RequestOptions = {}) {
       throw new StepError("network");
     }
 
-    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      return response;
+    }
+
     const location = response.headers.get("location");
 
-    if ((options.method ?? "GET") !== "GET" || !location)
+    if ((options.method ?? "GET") !== "GET" || !location) {
       throw new StepError("network");
+    }
+
     const next = new URL(location, target);
 
-    if (next.protocol !== "https:" && !loopback(next))
+    if (next.protocol !== "https:" && !loopback(next)) {
       throw new StepError("network");
+    }
 
     if (next.origin !== target.origin) {
       const { authorization: _a, "x-api-key": _k, ...rest } = headers;
@@ -218,9 +231,13 @@ export async function fetchJSON(
 export async function fetchOK(url: string, init: RequestOptions = {}) {
   const response = await request(url, init);
 
-  if (response.status === 404) throw new StepError("not-found");
+  if (response.status === 404) {
+    throw new StepError("not-found");
+  }
 
-  if (!response.ok) throw new StepError("network");
+  if (!response.ok) {
+    throw new StepError("network");
+  }
 
   return response;
 }

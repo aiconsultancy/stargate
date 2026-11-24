@@ -126,7 +126,9 @@ export function packBatches(
     lines.push(line);
   }
 
-  if (lines.length > 0) units.push({ lines });
+  if (lines.length > 0) {
+    units.push({ lines });
+  }
 
   return units;
 }
@@ -161,9 +163,10 @@ export class IrcDelivery implements TransportDelivery {
     private readonly replyParent?: (request: string) => string | undefined,
   ) {
     // Without reactions the gateway never asks for one.
-    if (presence.reactions !== false)
+    if (presence.reactions !== false) {
       this.react = (channel, ts, name, allowed) =>
         this.reaction(channel, ts, name, allowed);
+    }
   }
 
   /**
@@ -258,10 +261,16 @@ export class IrcDelivery implements TransportDelivery {
               () => {},
             );
 
-            if (signal.aborted || (allowed && !allowed())) break;
+            if (signal.aborted || (allowed && !allowed())) {
+              break;
+            }
+
             const progress = readProgress?.();
 
-            if (!first && reported === progress) continue;
+            if (!first && reported === progress) {
+              continue;
+            }
+
             first = false;
             reported = progress;
             void this.turnNotice(
@@ -274,7 +283,9 @@ export class IrcDelivery implements TransportDelivery {
               progress ? observedProgress(request, progress) : undefined,
             ).catch(() => {});
 
-            if (!readProgress) break;
+            if (!readProgress) {
+              break;
+            }
           }
         }
 
@@ -285,7 +296,9 @@ export class IrcDelivery implements TransportDelivery {
     } finally {
       await fleetTyping;
 
-      if (signal.aborted) finish();
+      if (signal.aborted) {
+        finish();
+      }
     }
   }
 
@@ -296,7 +309,9 @@ export class IrcDelivery implements TransportDelivery {
     signal: AbortSignal,
     allowed: () => boolean,
   ) {
-    if (signal.aborted) return;
+    if (signal.aborted) {
+      return;
+    }
 
     if (!this.client.registered) {
       try {
@@ -323,7 +338,7 @@ export class IrcDelivery implements TransportDelivery {
     allowed?: () => boolean,
   ) {
     if (!this.presence.typing || !this.client.hasCap("message-tags")) {
-      if (!signal.aborted)
+      if (!signal.aborted) {
         await new Promise<void>((resolve) => {
           signal.addEventListener(
             "abort",
@@ -333,6 +348,7 @@ export class IrcDelivery implements TransportDelivery {
             { once: true },
           );
         });
+      }
 
       return;
     }
@@ -342,7 +358,10 @@ export class IrcDelivery implements TransportDelivery {
     const timer = this.client.typingMs;
 
     while (!signal.aborted) {
-      if (guard && !guard()) return;
+      if (guard && !guard()) {
+        return;
+      }
+
       this.client.notify(target, { "+typing": "active" }, guard);
       await delay(timer, undefined, { signal }).catch(() => {});
     }
@@ -358,15 +377,23 @@ export class IrcDelivery implements TransportDelivery {
     active: () => boolean,
     progress?: NoticeProgress,
   ) {
-    if (!active() || !this.client.registered) return;
+    if (!active() || !this.client.registered) {
+      return;
+    }
 
     const terminal =
       progress?.stage === "completed" || progress?.stage === "failed";
 
-    if (terminal && !this.client.hasCap("message-tags")) return;
+    if (terminal && !this.client.hasCap("message-tags")) {
+      return;
+    }
+
     const target = await this.target(channel).catch(() => {});
 
-    if (!target || !active()) return;
+    if (!target || !active()) {
+      return;
+    }
+
     const parent = progress?.request ?? this.replyParent?.(thread) ?? thread;
 
     const tags: Record<string, string> =
@@ -376,11 +403,15 @@ export class IrcDelivery implements TransportDelivery {
         ? { "+draft/reply": parent }
         : {};
 
-    if (progress && tags["+draft/reply"])
+    if (progress && tags["+draft/reply"]) {
       tags["+stargate/progress"] =
         progress.stage + (progress.disconnected ? ",disconnected" : "");
+    }
 
-    if (terminal && !tags["+stargate/progress"]) return;
+    if (terminal && !tags["+stargate/progress"]) {
+      return;
+    }
+
     // A missing acknowledgement or IRC confirmation must not hold up a reply.
     void this.client
       .send(
@@ -444,12 +475,15 @@ export class IrcDelivery implements TransportDelivery {
   public get files(): AttachmentTransport | undefined {
     const hosted = this.hosted;
 
-    if (!hosted?.filehost()) return undefined;
+    if (!hosted?.filehost()) {
+      return undefined;
+    }
 
     return {
       download: (urls, _channel, signal) => {
-        if (!hosted.download)
+        if (!hosted.download) {
           return Promise.reject(new Error("IRC file input is off"));
+        }
 
         return hosted.files.download(urls, signal);
       },
@@ -472,19 +506,24 @@ export class IrcDelivery implements TransportDelivery {
     await this.client.waitReady(this.readyMs);
     const host = this.hosted?.filehost();
 
-    if (!host || !URL.canParse(url) || !safeFileURL(new URL(url), host))
+    if (!host || !URL.canParse(url) || !safeFileURL(new URL(url), host)) {
       throw new Error("IRC file link is not a plain FILEHOST URL");
+    }
+
     const target = await this.target(channel);
     const reply = this.reply(thread, channel);
     const budget = this.client.budget("PRIVMSG", target, reply);
     const room = budget - utf8Bytes(`: ${url}`);
     let name = cleanText(title).trim() || "File";
 
-    while (name && utf8Bytes(name) > room)
+    while (name && utf8Bytes(name) > room) {
       name = Array.from(name).slice(0, -1).join("");
+    }
 
-    if (!name || utf8Bytes(url) > budget)
+    if (!name || utf8Bytes(url) > budget) {
       throw new Error("IRC file link does not fit one line");
+    }
+
     await this.client.privmsg(
       target,
       `${name}: ${url}`,
@@ -512,7 +551,9 @@ export class IrcDelivery implements TransportDelivery {
    * stored reply stays for the gateway's retry.
    */
   private guard(channel: string, target: string, allowed?: () => boolean) {
-    if (isIrcChannel(channel)) return allowed;
+    if (isIrcChannel(channel)) {
+      return allowed;
+    }
 
     return () => this.client.holds(channel, target) && (allowed?.() ?? true);
   }
@@ -544,8 +585,10 @@ export class IrcDelivery implements TransportDelivery {
   ) {
     await this.client.waitReady(this.readyMs);
 
-    if (unit?.allowed && !unit.allowed())
+    if (unit?.allowed && !unit.allowed()) {
       throw new Error("IRC delivery access denied");
+    }
+
     const target = await this.target(channel);
     const reply = this.reply(thread, channel);
     const tracked = unit && "job" in unit ? unit : undefined;
@@ -576,8 +619,9 @@ export class IrcDelivery implements TransportDelivery {
       // Survives a retry.
       plan = this.unbatch(plan, done, planTarget(channel), reply);
 
-      if (tracked && this.progress)
+      if (tracked && this.progress) {
         this.progress.replan(tracked, JSON.stringify(plan));
+      }
     }
 
     // Greybeard: a nick that changes hands without a QUIT/NICK/ACCOUNT we
@@ -589,7 +633,7 @@ export class IrcDelivery implements TransportDelivery {
     for (let index = done; index < plan.units.length; index++) {
       const lines = plan.units[index]?.lines ?? [];
 
-      if (plan.batched)
+      if (plan.batched) {
         await this.client.sendBatch(
           target,
           lines,
@@ -598,8 +642,8 @@ export class IrcDelivery implements TransportDelivery {
           "normal",
           thread,
         );
-      else
-        for (const line of lines)
+      } else {
+        for (const line of lines) {
           await this.client.privmsg(
             target,
             line.text,
@@ -608,8 +652,12 @@ export class IrcDelivery implements TransportDelivery {
             "normal",
             thread,
           );
+        }
+      }
 
-      if (tracked && this.progress) this.progress.done(tracked, index + 1);
+      if (tracked && this.progress) {
+        this.progress.done(tracked, index + 1);
+      }
     }
   }
 
@@ -658,8 +706,10 @@ export class IrcDelivery implements TransportDelivery {
     await this.client.waitReady(this.readyMs);
     const reply = this.reply(ts);
 
-    if (!("+draft/reply" in reply))
+    if (!("+draft/reply" in reply)) {
       throw new Error("IRC reactions need message tags");
+    }
+
     const target = await this.target(channel);
     await this.client.tagmsg(
       target,
@@ -682,7 +732,9 @@ function observedProgress(
   request: string | undefined,
   progress?: TurnProgress,
 ): NoticeProgress | undefined {
-  if (!request || progress?.stage === "completed") return;
+  if (!request || progress?.stage === "completed") {
+    return;
+  }
 
   return {
     request,

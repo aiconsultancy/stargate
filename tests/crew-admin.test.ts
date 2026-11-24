@@ -49,8 +49,9 @@ function git(directory: string, ...args: string[]) {
     { env: { PATH: process.env["PATH"] ?? "", HOME: directory } },
   );
 
-  if (run.exitCode !== 0)
+  if (run.exitCode !== 0) {
     throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`);
+  }
 
   return run.stdout.toString().trim();
 }
@@ -108,12 +109,14 @@ async function fixture(
   await mkdir(config.captainDirectory, { recursive: true });
   const sessions = new Map<string, CrewSession>();
 
-  for (const id of ["ses_captain_a", "ses_captain_b"])
+  for (const id of ["ses_captain_a", "ses_captain_b"]) {
     sessions.set(id, {
       id,
       agent: "captain",
       location: { directory: config.captainDirectory },
     });
+  }
+
   const calls: string[] = [];
   const busy = new Set<string>();
   const inbox = new Map<string, string[]>();
@@ -136,16 +139,22 @@ async function fixture(
 
   const native: CrewSessions = {
     async get({ sessionID }) {
-      if (state.nativeDown) throw new Error("PRIVATE native outage");
+      if (state.nativeDown) {
+        throw new Error("PRIVATE native outage");
+      }
+
       const session = sessions.get(sessionID);
 
-      if (!session) throw { _tag: "Session.NotFoundError" };
+      if (!session) {
+        throw { _tag: "Session.NotFoundError" };
+      }
 
       return session;
     },
     async create(input) {
-      if (!input.id || !input.agent || !input.location)
+      if (!input.id || !input.agent || !input.location) {
         throw new Error("Invalid fixture create");
+      }
 
       const session = {
         id: input.id,
@@ -164,9 +173,9 @@ async function fixture(
       calls.push(`prompt:${input.sessionID}`);
       const id = input.id ?? "missing";
 
-      if (state.placement === "queued")
+      if (state.placement === "queued") {
         inbox.set(input.sessionID, [...(inbox.get(input.sessionID) ?? []), id]);
-      else
+      } else {
         history.set(input.sessionID, [
           ...(history.get(input.sessionID) ?? []),
           {
@@ -177,19 +186,31 @@ async function fixture(
             time: { created: 10 },
           },
         ]);
+      }
+
       busy.add(input.sessionID);
 
-      if (state.loseReceipt) throw new Error("PRIVATE lost receipt");
+      if (state.loseReceipt) {
+        throw new Error("PRIVATE lost receipt");
+      }
 
       return { id, sessionID: input.sessionID };
     },
     async wait({ sessionID }, request) {
-      if (state.nativeDown) throw new Error("PRIVATE native outage");
+      if (state.nativeDown) {
+        throw new Error("PRIVATE native outage");
+      }
 
-      if (!busy.has(sessionID)) return;
+      if (!busy.has(sessionID)) {
+        return;
+      }
+
       const signal = request?.signal;
       await new Promise<void>((_, reject) => {
-        if (signal?.aborted) return reject(signal.reason);
+        if (signal?.aborted) {
+          return reject(signal.reason);
+        }
+
         signal?.addEventListener("abort", () => reject(signal.reason), {
           once: true,
         });
@@ -198,7 +219,10 @@ async function fixture(
     async interrupt({ sessionID }) {
       calls.push(`interrupt:${sessionID}`);
 
-      if (state.nativeDown) throw new Error("PRIVATE native outage");
+      if (state.nativeDown) {
+        throw new Error("PRIVATE native outage");
+      }
+
       busy.delete(sessionID);
 
       return { interrupted: true };
@@ -206,14 +230,17 @@ async function fixture(
     async synthetic(input) {
       calls.push("synthetic");
 
-      if (state.loseResumeReceipt)
+      if (state.loseResumeReceipt) {
         throw new Error("PRIVATE resume receipt lost");
+      }
 
       if (
         input.resume &&
         input.description === "Captain resume of retained crew task"
       ) {
-        if (!input.id) throw new Error("Resume requires a native message ID");
+        if (!input.id) {
+          throw new Error("Resume requires a native message ID");
+        }
 
         if (state.queueResume) {
           inbox.set(input.sessionID, [
@@ -245,7 +272,9 @@ async function fixture(
     session: {
       get: (input, request) => native.get(input, request),
       async active() {
-        if (state.inspectionDown) throw new Error("PRIVATE inspection outage");
+        if (state.inspectionDown) {
+          throw new Error("PRIVATE inspection outage");
+        }
 
         return Object.fromEntries(
           [...busy].map((id) => [id, { type: "busy" }]),
@@ -253,8 +282,9 @@ async function fixture(
       },
       inbox: {
         async list({ sessionID }) {
-          if (state.inspectionDown)
+          if (state.inspectionDown) {
             throw new Error("PRIVATE inspection outage");
+          }
 
           return (inbox.get(sessionID) ?? []).map((id) => ({ id }));
         },
@@ -272,15 +302,21 @@ async function fixture(
     message: {
       // Native-like pages: newest first, optional type filter kept by cursor.
       async list(input) {
-        if (state.inspectionDown) throw new Error("PRIVATE inspection outage");
+        if (state.inspectionDown) {
+          throw new Error("PRIVATE inspection outage");
+        }
 
-        if (!input.type && input.limit === 100) state.beforeResumeAdmission();
+        if (!input.type && input.limit === 100) {
+          state.beforeResumeAdmission();
+        }
 
         const query = input.cursor
           ? pages.get(input.cursor)
           : { offset: 0, type: input.type };
 
-        if (!query) throw new Error("Unknown cursor");
+        if (!query) {
+          throw new Error("Unknown cursor");
+        }
 
         const all = (history.get(input.sessionID) ?? [])
           .toReversed()
@@ -315,7 +351,9 @@ async function fixture(
     undefined,
     undefined,
     async () => {
-      if (state.inspectionDown) throw new Error("PRIVATE inspection outage");
+      if (state.inspectionDown) {
+        throw new Error("PRIVATE inspection outage");
+      }
 
       return api;
     },
@@ -347,8 +385,9 @@ async function fixture(
       captain(),
     );
 
-    if (!result.task)
+    if (!result.task) {
       throw new Error(`Missing task: ${JSON.stringify(result)}`);
+    }
 
     return result;
   };
@@ -357,7 +396,10 @@ async function fixture(
   const interrupted = (task: CrewTask) => {
     const session = sessions.get(task.workerSessionID);
 
-    if (session) session.outcome = "interrupted";
+    if (session) {
+      session.outcome = "interrupted";
+    }
+
     busy.delete(task.workerSessionID);
   };
 
@@ -429,7 +471,10 @@ function resumeInput(task: CrewTask) {
 async function stuckTask(f: Fixture) {
   const { task } = await f.dispatch("bosun", "Original assignment");
 
-  if (!task) throw new Error("No fixture task");
+  if (!task) {
+    throw new Error("No fixture task");
+  }
+
   f.interrupted(task);
   expect(
     (await f.engine.run({ op: "status", taskID: task.id }, f.captain())).status,
@@ -441,7 +486,10 @@ async function stuckTask(f: Fixture) {
 function finalAnswer(f: Fixture, task: CrewTask) {
   const session = f.sessions.get(task.workerSessionID);
 
-  if (!session) throw new Error("No fixture session");
+  if (!session) {
+    throw new Error("No fixture session");
+  }
+
   f.busy.delete(task.workerSessionID);
   session.outcome = "succeeded";
   f.history.get(task.workerSessionID)?.push({
@@ -461,7 +509,10 @@ test("captain resumes the original worker, and the final answer completes that t
     const task = await stuckTask(f);
     const queued = (await f.dispatch("bosun", "Next assignment", true)).task;
 
-    if (!queued) throw new Error("No queued fixture task");
+    if (!queued) {
+      throw new Error("No queued fixture task");
+    }
+
     expect(await f.engine.run(resumeInput(task), f.captain())).toMatchObject({
       status: "resume-admitted",
       task: {
@@ -514,7 +565,10 @@ test("a lost resume receipt consumes only the inspected idle boundary", async ()
     );
     const session = f.sessions.get(task.workerSessionID);
 
-    if (!session) throw new Error("No fixture session");
+    if (!session) {
+      throw new Error("No fixture session");
+    }
+
     session.time = { updated: 2, idle: 2, busy: 2 };
     expect((await f.engine.run(input, f.captain())).status).toBe(
       "resume-already-admitted",
@@ -543,10 +597,16 @@ test("abandon withdraws only this task's queued continuation", async () => {
     f.state.queueResume = true;
     const result = await f.engine.run(resumeInput(task), f.captain());
 
-    if (!result.task) throw new Error("Missing admitted task");
+    if (!result.task) {
+      throw new Error("Missing admitted task");
+    }
+
     const [continuation] = f.inbox.get(task.workerSessionID) ?? [];
 
-    if (!continuation) throw new Error("Missing queued continuation");
+    if (!continuation) {
+      throw new Error("Missing queued continuation");
+    }
+
     f.inbox.set(task.workerSessionID, [continuation, "unrelated-input"]);
     const outcome = await f.engine.run(abandon(f, result.task), f.captain());
     expect(outcome.status).toBe("abandoned");
@@ -565,7 +625,10 @@ test("an unconfirmed resume holds its slot until a late native admission is foun
     const task = await stuckTask(f);
     const uncertain = f.engine.state.task(task.id);
 
-    if (!uncertain) throw new Error("Missing uncertain task");
+    if (!uncertain) {
+      throw new Error("Missing uncertain task");
+    }
+
     f.state.loseResumeReceipt = true;
     expect((await f.engine.run(resumeInput(task), f.captain())).status).toBe(
       "resume-uncertain",
@@ -1558,13 +1621,18 @@ test("Pi status adopts only the bound committed answer after restart; abandoned 
     const peer = (await engine.run({ op: "ensure", crew: "twiki" }, captain))
       .peers?.[0];
 
-    if (!peer) throw new Error("Missing Pi peer");
+    if (!peer) {
+      throw new Error("Missing Pi peer");
+    }
 
     // Crash after native admission: bound conversation, no live execution.
     const admit = (text: string) => {
       const task = engine.state.reserveTask(peer, captain.sessionID, text);
 
-      if (!task) throw new Error("Missing Pi task");
+      if (!task) {
+        throw new Error("Missing Pi task");
+      }
+
       engine.state.running(task.id);
       engine.state.savePiTaskConversation(task.id, "17");
 
@@ -1659,7 +1727,9 @@ test("legacy task status CHECK upgrades in place and keeps uncertain rows", asyn
       get: async ({ sessionID }) => {
         const session = f.sessions.get(sessionID);
 
-        if (!session) throw { _tag: "Session.NotFoundError" };
+        if (!session) {
+          throw { _tag: "Session.NotFoundError" };
+        }
 
         return session;
       },
@@ -1710,7 +1780,7 @@ test("legacy task status CHECK upgrades in place and keeps uncertain rows", asyn
   }
 });
 
-for (const shape of ["directory-for-file", "file-for-directory"] as const)
+for (const shape of ["directory-for-file", "file-for-directory"] as const) {
   test(`reset and stash refuse untracked or ignored obstructions of HEAD paths: ${shape}`, async () => {
     const f = await fixture({ repository: true });
 
@@ -1782,6 +1852,7 @@ for (const shape of ["directory-for-file", "file-for-directory"] as const)
       await f.close();
     }
   });
+}
 
 for (const later of [
   "none",
@@ -1789,7 +1860,7 @@ for (const later of [
   "user",
   "shell",
   "synthetic",
-] as const)
+] as const) {
   test(`placement past a long tool-heavy turn interrupts only own latest input: ${later}`, async () => {
     const f = await fixture();
 
@@ -1798,13 +1869,14 @@ for (const later of [
       const history = f.history.get(task.workerSessionID) ?? [];
 
       const tools = (from: number, count: number) => {
-        for (let index = 0; index < count; index++)
+        for (let index = 0; index < count; index++) {
           history.push({
             id: `msg_tool_${from + index}`,
             type: "assistant",
             agent: "bosun",
             time: { created: 20 + from + index },
           });
+        }
       };
 
       tools(0, 600); // Beyond the 8x64 unfiltered window.
@@ -1813,36 +1885,41 @@ for (const later of [
         pogoCrew: { taskID, originCaptainID, messageID: "e".repeat(32) },
       });
 
-      if (later === "user")
+      if (later === "user") {
         history.push({
           id: "msg_foreign",
           type: "user",
           text: "Foreign",
           time: { created: 700 },
         });
+      }
 
-      if (later === "shell")
+      if (later === "shell") {
         history.push({
           id: "msg_shell",
           type: "shell",
           time: { created: 700 },
         });
+      }
 
-      if (later === "synthetic")
+      if (later === "synthetic") {
         history.push({
           id: "msg_foreign_dm",
           type: "synthetic",
           metadata: metadata("task_other", "ses_captain_b"),
           time: { created: 700 },
         });
+      }
 
-      if (later === "own-steer")
+      if (later === "own-steer") {
         history.push({
           id: "msg_own_dm",
           type: "synthetic",
           metadata: metadata(task.id, task.originCaptainID),
           time: { created: 700 },
         });
+      }
+
       tools(600, 100);
       const result = await f.engine.run(abandon(f, task), f.captain());
       const own = later === "none" || later === "own-steer";
@@ -1858,6 +1935,7 @@ for (const later of [
       await f.close();
     }
   });
+}
 
 test("Git writes run without a timer; reads stay bounded", () => {
   const signal = new AbortController().signal;

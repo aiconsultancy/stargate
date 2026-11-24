@@ -238,8 +238,10 @@ test("ladder: rounds wait 1, 3, 6 and 12 hours from the end of the previous roun
     const before = f.chat.offers().length;
     await f.dispatcher.tick(signal);
 
-    if (f.chat.offers().length > before)
+    if (f.chat.offers().length > before) {
       rounds.push((f.clock.now() - start) / MINUTE);
+    }
+
     f.clock.advance(MINUTE);
   }
 
@@ -257,7 +259,10 @@ test("fixture evidence: nobody takes it, a shortened ladder ends in a comment an
     f.clock.advance(MINUTE);
     const offer = f.chat.offers().at(-1);
 
-    if (offer && f.dispatcher && step % 7 === 0) await answer(f, "decline");
+    if (offer && f.dispatcher && step % 7 === 0) {
+      await answer(f, "decline");
+    }
+
     await f.dispatcher.tick(signal);
   }
 
@@ -413,7 +418,9 @@ test("run: polls once per interval, keeps going after a failed poll and never ho
       waits.push(ms);
       advance(ms);
 
-      if (waits.length === 5) controller.abort();
+      if (waits.length === 5) {
+        controller.abort();
+      }
     },
   });
 
@@ -422,7 +429,9 @@ test("run: polls once per interval, keeps going after a failed poll and never ho
   f.api.beforeFleet = async () => {
     polls.push(f.clock.now());
 
-    if (polls.length === 2) throw new Error("Subspace API unreachable");
+    if (polls.length === 2) {
+      throw new Error("Subspace API unreachable");
+    }
   };
 
   await f.dispatcher.run(controller.signal);
@@ -471,7 +480,10 @@ test("run: a pending answer wakes the pause so the next step is not late", async
       new Promise<void>((resolve) => {
         pauses++;
 
-        if (pauseSignal.aborted) return resolve();
+        if (pauseSignal.aborted) {
+          return resolve();
+        }
+
         pauseSignal.addEventListener(
           "abort",
           () => {
@@ -486,7 +498,10 @@ test("run: a pending answer wakes the pause so the next step is not late", async
   f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
   const running = f.dispatcher.run(controller.signal);
 
-  while (f.chat.offers().length === 0) await Bun.sleep(1);
+  while (f.chat.offers().length === 0) {
+    await Bun.sleep(1);
+  }
+
   await answer(f, "decline");
   await woken.promise;
   expect(f.chat.transcript()).toEqual([
@@ -785,7 +800,7 @@ for (const [variant, change, reason] of [
     },
     "its captain agent no longer maps to that chat account",
   ],
-] as const)
+] as const) {
   test(`a captain ${variant} between acceptance and a retried write is not assigned; the round continues`, async () => {
     const f = await fixture();
     f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
@@ -841,6 +856,7 @@ for (const [variant, change, reason] of [
     expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_B);
     expect(f.chat.statuses()).toEqual(["retrying", "withdrawn", "accepted"]);
   });
+}
 
 test("a roster older than one poll interval is read again before the acceptance write", async () => {
   const f = await fixture();
@@ -869,8 +885,10 @@ test("a first start too long for one poll records existing assignments over seve
   const f = await fixture();
   f.api.listingLimit = 2;
 
-  for (let n = 1; n <= 5; n++)
+  for (let n = 1; n <= 5; n++) {
     f.api.add({ id: `i${n}`, identifier: `PRJ-${n}`, assigneeId: CAPTAIN_A });
+  }
+
   f.api.add({ id: "r1", identifier: "PRJ-R", readyForAgents: true });
   await f.dispatcher.step(signal);
   expect(f.ledger.initialised).toBe(false);
@@ -895,8 +913,10 @@ test("a first start too long for one poll records existing assignments over seve
     "assigned since=- from=4",
   ]);
 
-  for (let n = 1; n <= 5; n++)
+  for (let n = 1; n <= 5; n++) {
     expect(ledger.notified(`i${n}`, CAPTAIN_A)).toBe(true);
+  }
+
   expect(f.chat.transcript()).toEqual(["offer PRJ-R -> example-captain-a"]);
   // A later listing longer than one poll still reaches a new assignment.
   f.clock.advance(2 * MINUTE);

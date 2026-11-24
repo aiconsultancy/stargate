@@ -65,7 +65,10 @@ export async function linkedRelease(
     const target = await readlink(paths[which]);
     const directory = resolve(root, target);
 
-    if (dirname(directory) !== paths.releases) return null;
+    if (dirname(directory) !== paths.releases) {
+      return null;
+    }
+
     const metadata = await readMetadata(directory);
 
     return metadata ? { name: basename(directory), directory, metadata } : null;
@@ -81,15 +84,18 @@ export async function linkedRelease(
 export async function switchCurrent(root: string, name: string) {
   const paths = layout(root);
 
-  if (!(await readMetadata(join(paths.releases, name))))
+  if (!(await readMetadata(join(paths.releases, name)))) {
     throw new StepError("switch-failed");
+  }
+
   const old = await linkedRelease(root, "current");
 
   try {
     await replaceLink(paths.current, `releases/${name}`);
 
-    if (old && old.name !== name)
+    if (old && old.name !== name) {
       await replaceLink(paths.previous, `releases/${old.name}`);
+    }
   } catch {
     throw new StepError("switch-failed");
   }
@@ -118,13 +124,15 @@ export async function adoptRelease(
   const paths = layout(root);
   const resolved = resolve(directory);
 
-  if (dirname(resolved) !== paths.releases)
+  if (dirname(resolved) !== paths.releases) {
     throw new Error(
       `Release must be a directory directly under ${paths.releases}.`,
     );
+  }
 
-  if (!parseVersion(version))
+  if (!parseVersion(version)) {
     throw new Error("Use a MAJOR.MINOR.PATCH version.");
+  }
 
   const manifest: unknown = await Bun.file(join(resolved, "package.json"))
     .json()
@@ -136,11 +144,13 @@ export async function adoptRelease(
     !("name" in manifest) ||
     manifest.name !== "stargate" ||
     !(await Bun.file(join(resolved, "src", "main.ts")).exists())
-  )
+  ) {
     throw new Error("Directory is not an unpacked Stargate release.");
+  }
 
-  if (await readMetadata(resolved))
+  if (await readMetadata(resolved)) {
     throw new Error("Release is already managed.");
+  }
 
   const metadata: ReleaseMetadata = {
     schema: "stargate.release.v1",
@@ -163,7 +173,9 @@ export async function adoptRelease(
   );
   const exists = await lstat(paths.current).catch(() => null);
 
-  if (!exists) await symlink(`releases/${basename(resolved)}`, paths.current);
+  if (!exists) {
+    await symlink(`releases/${basename(resolved)}`, paths.current);
+  }
 
   return { current: exists ? "unchanged" : `releases/${basename(resolved)}` };
 }
@@ -176,7 +188,9 @@ export async function githubToken(
   if (tokenEnv) {
     const value = env[tokenEnv]?.trim();
 
-    if (!value) throw new StepError("credentials-unavailable");
+    if (!value) {
+      throw new StepError("credentials-unavailable");
+    }
 
     return value;
   }
@@ -230,7 +244,9 @@ export async function newerRelease(
     config.coolOffHours,
   );
 
-  if (!release) return null;
+  if (!release) {
+    return null;
+  }
 
   return current && compareVersions(release.version, current) <= 0
     ? null
@@ -247,7 +263,9 @@ export async function namedRelease(
   headers: Record<string, string>,
   version: string,
 ): Promise<ReleaseCandidate> {
-  if (normalizeVersion(version) !== version) throw new StepError("not-found");
+  if (normalizeVersion(version) !== version) {
+    throw new StepError("not-found");
+  }
 
   const parsed = decodeRelease(
     await fetchJSON(
@@ -262,15 +280,19 @@ export async function namedRelease(
     ),
   );
 
-  if (Result.isFailure(parsed)) throw new StepError("network");
+  if (Result.isFailure(parsed)) {
+    throw new StepError("network");
+  }
+
   const found = parsed.success;
 
   if (
     found.draft ||
     found.prerelease ||
     normalizeVersion(found.tag_name) !== version
-  )
+  ) {
     throw new StepError("not-found");
+  }
 
   return { ...found, version };
 }
@@ -311,8 +333,10 @@ export async function verifyOrigin(
     assets.length !== 2 ||
     // A missing uploader is not evidence of the CI author: fail closed.
     assets.some((asset) => asset.uploader?.login !== config.author)
-  )
+  ) {
     throw new StepError("author-mismatch");
+  }
+
   const api = `${config.apiURL.replace(/\/+$/, "")}/repos/${config.repository}`;
 
   const ref = decodeRef(
@@ -324,7 +348,10 @@ export async function verifyOrigin(
     ),
   );
 
-  if (Result.isFailure(ref)) throw new StepError("tag-not-on-branch");
+  if (Result.isFailure(ref)) {
+    throw new StepError("tag-not-on-branch");
+  }
+
   let commit = ref.success.object;
 
   if (commit.type === "tag") {
@@ -332,11 +359,16 @@ export async function verifyOrigin(
       await fetchJSON(`${api}/git/tags/${commit.sha}`, { headers }),
     );
 
-    if (Result.isFailure(tag)) throw new StepError("tag-not-on-branch");
+    if (Result.isFailure(tag)) {
+      throw new StepError("tag-not-on-branch");
+    }
+
     commit = tag.success.object;
   }
 
-  if (commit.type !== "commit") throw new StepError("tag-not-on-branch");
+  if (commit.type !== "commit") {
+    throw new StepError("tag-not-on-branch");
+  }
 
   const comparison = decodeComparison(
     await fetchJSON(
@@ -349,8 +381,9 @@ export async function verifyOrigin(
   if (
     Result.isFailure(comparison) ||
     !["ahead", "identical"].includes(comparison.success.status)
-  )
+  ) {
     throw new StepError("tag-not-on-branch");
+  }
 
   return commit.sha;
 }
@@ -378,8 +411,9 @@ export async function downloadAsset(
   path: string,
   signal: AbortSignal,
 ) {
-  if (new URL(url).origin !== new URL(apiURL).origin)
+  if (new URL(url).origin !== new URL(apiURL).origin) {
     throw new StepError("network");
+  }
 
   const response = await request(url, {
     headers: {
@@ -392,14 +426,19 @@ export async function downloadAsset(
     timeoutMs: 300_000,
   });
 
-  if (!response.ok || !response.body) throw new StepError("network");
+  if (!response.ok || !response.body) {
+    throw new StepError("network");
+  }
 
   return writeBody(response, path);
 }
 
 /** Stream a response body to a new file in a fresh staging directory. */
 export async function writeBody(response: Response, path: string) {
-  if (!response.body) throw new StepError("network");
+  if (!response.body) {
+    throw new StepError("network");
+  }
+
   const out = Bun.file(path).writer();
   let size = 0;
 
@@ -407,7 +446,10 @@ export async function writeBody(response: Response, path: string) {
     for await (const chunk of response.body) {
       size += chunk.byteLength;
 
-      if (size > maxArchiveBytes) throw new StepError("archive-invalid");
+      if (size > maxArchiveBytes) {
+        throw new StepError("archive-invalid");
+      }
+
       void out.write(chunk);
       await out.flush();
     }
@@ -423,7 +465,9 @@ export async function writeBody(response: Response, path: string) {
 export async function sha256File(path: string) {
   const hash = createHash("sha256");
 
-  for await (const chunk of Bun.file(path).stream()) hash.update(chunk);
+  for await (const chunk of Bun.file(path).stream()) {
+    hash.update(chunk);
+  }
 
   return hash.digest("hex");
 }
@@ -449,16 +493,19 @@ async function tree(directory: string) {
       const key = relative(directory, full).split(sep).join("/");
       const info = await lstat(full);
 
-      if (info.isSymbolicLink()) entries.set(key, `l:${await readlink(full)}`);
-      else if (info.isDirectory()) {
+      if (info.isSymbolicLink()) {
+        entries.set(key, `l:${await readlink(full)}`);
+      } else if (info.isDirectory()) {
         entries.set(key, "d");
         await walk(full);
-      } else if (info.isFile())
+      } else if (info.isFile()) {
         entries.set(
           key,
           `f:${info.mode & 0o100 ? "x" : "-"}:${await sha256File(full)}`,
         );
-      else entries.set(key, "other");
+      } else {
+        entries.set(key, "other");
+      }
     }
   };
 
@@ -492,7 +539,9 @@ const minutes = (n: number) => n * 60_000;
 function budget(input: StageInput, cap: number) {
   const left = input.remaining();
 
-  if (left < 30_000) throw new StepError("deadline");
+  if (left < 30_000) {
+    throw new StepError("deadline");
+  }
 
   return Math.min(cap, left);
 }
@@ -536,12 +585,15 @@ export async function stageRelease(input: StageInput) {
   if (
     existing?.version === release.version &&
     existing.verification === "verified"
-  )
+  ) {
     return { directory: target, metadata: existing, reused: true };
+  }
 
   // Attestations are unavailable: without the tree comparison, fail closed.
-  if (config.requireTreeCheck && !config.checkout)
+  if (config.requireTreeCheck && !config.checkout) {
     throw new StepError("not-configured");
+  }
+
   const commit = await verifyOrigin(config, release, input.headers);
   await mkdir(paths.releases, { recursive: true, mode: 0o700 });
   const staging = join(paths.releases, `.staging-${input.runID}`);
@@ -552,7 +604,9 @@ export async function stageRelease(input: StageInput) {
     const asset = (name: string) => {
       const found = release.assets.find((item) => item.name === name);
 
-      if (!found) throw new StepError("not-found");
+      if (!found) {
+        throw new StepError("not-found");
+      }
 
       return found;
     };
@@ -581,8 +635,10 @@ export async function stageRelease(input: StageInput) {
 
     const actual = await sha256File(archive);
 
-    if (!expected || expected !== actual)
+    if (!expected || expected !== actual) {
       throw new StepError("checksum-mismatch");
+    }
+
     // Validate every header before tar runs: one real root directory, no
     // Escaping paths or links, no hard links or devices.
     const entries = await inspectArchive(archive, names.prefix);
@@ -596,8 +652,10 @@ export async function stageRelease(input: StageInput) {
     );
     const root = await lstat(join(unpacked, names.prefix)).catch(() => null);
 
-    if (!root?.isDirectory() || root.isSymbolicLink())
+    if (!root?.isDirectory() || root.isSymbolicLink()) {
       throw new StepError("archive-invalid");
+    }
+
     // What tar actually wrote must be exactly what was validated.
     await verifyExtracted(unpacked, entries, names.prefix);
     const source = join(unpacked, names.prefix);
@@ -614,11 +672,13 @@ export async function stageRelease(input: StageInput) {
       treeResult = "equal";
     }
 
-    if (await lstat(target).catch(() => null))
+    if (await lstat(target).catch(() => null)) {
       await rename(
         target,
         join(paths.releases, `.failed-${release.version}-${input.runID}-old`),
       );
+    }
+
     await rename(source, target);
     placed = true;
     // Release code runs with a minimal environment: no inherited tokens,
@@ -672,11 +732,13 @@ export async function stageRelease(input: StageInput) {
 
     return { directory: target, metadata, reused: false };
   } catch (error) {
-    if (placed)
+    if (placed) {
       await rename(
         target,
         join(paths.releases, `.failed-${release.version}-${input.runID}`),
       ).catch(() => {});
+    }
+
     throw error instanceof StepError ? error : new StepError("unknown");
   } finally {
     await rm(staging, { recursive: true, force: true }).catch(() => {});
@@ -696,7 +758,9 @@ async function compareWithCheckout(
 ) {
   const checkout = input.config.checkout;
 
-  if (!checkout) return;
+  if (!checkout) {
+    return;
+  }
 
   const git = (
     args: string[],
@@ -744,7 +808,10 @@ async function compareWithCheckout(
     local = await tagged();
   }
 
-  if (local !== commit) throw new StepError("tree-mismatch");
+  if (local !== commit) {
+    throw new StepError("tree-mismatch");
+  }
+
   const expectedTar = join(staging, "expected.tar");
   const prefix = basename(unpacked);
   await git([
@@ -764,8 +831,9 @@ async function compareWithCheckout(
     "tree-mismatch",
   );
 
-  if (!(await sameTree(unpacked, join(expected, prefix))))
+  if (!(await sameTree(unpacked, join(expected, prefix)))) {
     throw new StepError("tree-mismatch");
+  }
 }
 
 /**
@@ -785,7 +853,9 @@ export async function pruneReleases(
   const removed: string[] = [];
 
   for (const entry of await readdir(paths.releases, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
 
     if (/^\.(staging|failed)-/.test(entry.name)) {
       await rm(join(paths.releases, entry.name), {
@@ -798,7 +868,9 @@ export async function pruneReleases(
 
     const metadata = await readMetadata(join(paths.releases, entry.name));
 
-    if (metadata) managed.push({ name: entry.name, version: metadata.version });
+    if (metadata) {
+      managed.push({ name: entry.name, version: metadata.version });
+    }
   }
 
   const protectedNames = new Set(
@@ -812,7 +884,9 @@ export async function pruneReleases(
   let kept = protectedNames.size;
 
   for (const release of ordered) {
-    if (protectedNames.has(release.name)) continue;
+    if (protectedNames.has(release.name)) {
+      continue;
+    }
 
     if (kept < keep) {
       kept++;

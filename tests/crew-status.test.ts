@@ -76,8 +76,9 @@ async function fixture(history = false) {
     compact: forbidden,
   };
 
-  if (history)
+  if (history) {
     await copyCrewDatabase(directory, options.namespace, statusHistoryFixture);
+  }
 
   const engine = await CrewEngine.open(
     options,
@@ -122,12 +123,17 @@ test("read-only roster shows Pi/OpenCode/unprovisioned, stale running and bounde
       "Twiki cleanup token=topsecret",
     );
 
-    if (!native || !maintenance) throw new Error("Missing task");
+    if (!native || !maintenance) {
+      throw new Error("Missing task");
+    }
+
     f.engine.state.running(native.id);
     f.engine.state.running(maintenance.id);
 
-    for (let i = 0; i < 7; i++)
+    for (let i = 0; i < 7; i++) {
       f.engine.state.enqueue(twiki, "captain", `Queued cleanup ${i}`);
+    }
+
     const db = new Database(f.engine.state.path, { readonly: true });
 
     try {
@@ -286,7 +292,9 @@ test("durable status bounds recent metadata, retains outcomes and never returns 
     const tasks = Array.from({ length: 24 }, (_, i) => {
       const task = f.engine.state.task(historyTaskID(i));
 
-      if (!task) throw new Error("Missing saved task");
+      if (!task) {
+        throw new Error("Missing saved task");
+      }
 
       return task;
     });
@@ -307,7 +315,10 @@ test("durable status bounds recent metadata, retains outcomes and never returns 
           for (let i = 0; i < 24; i++) {
             const task = tasks[i];
 
-            if (!task) throw new Error("Missing saved task");
+            if (!task) {
+              throw new Error("Missing saved task");
+            }
+
             phase.run("dispatching", 0, task.id);
             activity.assignment(
               { ...task, status: "dispatching", released: 0 },
@@ -347,8 +358,10 @@ test("durable status bounds recent metadata, retains outcomes and never returns 
       "RAW PRIVATE",
       "private reasoning",
       peer.sessionID,
-    ])
+    ]) {
       expect(serialized).not.toContain(secret);
+    }
+
     expect(serialized).toContain("Visible check 23");
     const db = new Database(f.engine.state.path, { readonly: true });
     expect(
@@ -399,7 +412,10 @@ test("crew modal ACKs and opens before slow reads, shows literal progress, needs
       "Review <@UOTHER> & <!channel>",
     );
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     f.engine.state.running(task.id);
     f.engine.state.activity.progress(
       task.id,
@@ -456,11 +472,12 @@ test("crew modal ACKs and opens before slow reads, shows literal progress, needs
     expect(text).toContain("Visible <https://example.test|link>");
     expect(text).not.toContain("xoxb-secret-token");
 
-    for (const block of view?.blocks ?? [])
+    for (const block of view?.blocks ?? []) {
       expect(block).toMatchObject({
         type: "section",
         text: { type: "plain_text", emoji: false },
       });
+    }
   } finally {
     await f.close();
   }
@@ -522,14 +539,18 @@ test("crew status fails closed across app/workspace/user/channel/bots and unsupp
       { user_id: "C123" },
       { text: "crew twiki extra" },
       { text: "pair" },
-    ])
+    ]) {
       await ui.command({ ...command(), ...changes }, ack);
+    }
+
     expect(opens).toBe(0);
     expect(reads).toBe(0);
     expect(acks).toHaveLength(11);
 
-    for (const payload of acks)
+    for (const payload of acks) {
       expect(payload).toMatchObject({ response_type: "ephemeral" });
+    }
+
     config.access.users = ["U123"];
     config.access.channels = ["C123"];
     await ui.command({ ...command(), user_id: "UOTHER" }, ack);

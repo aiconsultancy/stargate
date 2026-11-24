@@ -30,11 +30,13 @@ test("update notice admission queues local context via RPC, never native input",
 
       requests.push({ path, body });
 
-      if (path.endsWith("/queueUpdateNotice"))
+      if (path.endsWith("/queueUpdateNotice")) {
         return Response.json({ output: { id: "msg_update", sessionID } });
+      }
 
-      if (path === `/api/session/${sessionID}`)
+      if (path === `/api/session/${sessionID}`) {
         return Response.json({ data: session });
+      }
 
       return new Response("Tool RPC unavailable", { status: 404 });
     },
@@ -90,7 +92,9 @@ function backend(url: string, options: Record<string, unknown> = {}) {
     ...options,
   });
 
-  if (config.type !== "opencode") throw new Error("Invalid fixture");
+  if (config.type !== "opencode") {
+    throw new Error("Invalid fixture");
+  }
 
   return new OpenCodeBackend(config);
 }
@@ -259,12 +263,13 @@ test("OpenCode boundary corpus: pinned response strips keys and checks optional 
       const path = new URL(request.url).pathname;
       paths.push(path);
 
-      if (path.startsWith("/api/agent/"))
+      if (path.startsWith("/api/agent/")) {
         return Response.json({
           location: { directory: "/captain", ignored: true },
           data: { id: "captain", ignored: true },
           ignored: true,
         });
+      }
 
       return Response.json({ data: response });
     },
@@ -307,11 +312,13 @@ test("OpenCode boundary corpus: pinned response strips keys and checks optional 
         signal: AbortSignal.timeout(3000),
       });
 
-      if (accepted) expect(await run).toBe(sessionID);
-      else
+      if (accepted) {
+        expect(await run).toBe(sessionID);
+      } else {
         await expect(run).rejects.toThrow(
           "Pinned OpenCode session unavailable or incompatible",
         );
+      }
     }
 
     expect(
@@ -334,8 +341,10 @@ test("OpenCode boundary corpus: ready response rejects missing or mistyped field
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
-      if (new URL(request.url).pathname.startsWith("/api/agent/"))
+      if (new URL(request.url).pathname.startsWith("/api/agent/")) {
         return Response.json(response);
+      }
+
       creates++;
 
       return Response.json({ data: { id: "ses_created" } });
@@ -373,11 +382,14 @@ test("OpenCode boundary corpus: ready response rejects missing or mistyped field
         signal: AbortSignal.timeout(3000),
       });
 
-      if (accepted) expect(await run).toBe("ses_created");
-      else
+      if (accepted) {
+        expect(await run).toBe("ses_created");
+      } else {
         await expect(run).rejects.toThrow(
           "Configured OpenCode agent unavailable or incompatible; no session was created or reused",
         );
+      }
+
       expect(creates - before).toBe(accepted ? 1 : 0);
     }
   } finally {
@@ -526,7 +538,7 @@ test.each(["owned", "user", "shell"])(
         const path = new URL(request.url).pathname;
         paths.push(path);
 
-        if (path.endsWith("/message"))
+        if (path.endsWith("/message")) {
           return Response.json({
             data: [
               ...(latest === "owned"
@@ -540,8 +552,11 @@ test.each(["owned", "user", "shell"])(
             ],
             cursor: {},
           });
+        }
 
-        if (path.endsWith("/interrupt")) return Response.json({});
+        if (path.endsWith("/interrupt")) {
+          return Response.json({});
+        }
 
         return new Response(null, { status: 204 });
       },
@@ -570,8 +585,9 @@ test("transcript attributes settled text to only preceding window inputs", async
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
-      if (new URL(request.url).pathname.endsWith("/message"))
+      if (new URL(request.url).pathname.endsWith("/message")) {
         return Response.json({ data: messages.toReversed(), cursor: {} });
+      }
 
       return Response.json({ data: { time: { busy: 100, idle: 0 } } });
     },
@@ -669,11 +685,12 @@ test.each(["user", "shell"])(
           return Response.json({ data: { id: input } });
         }
 
-        if (url.pathname.endsWith("/wait"))
+        if (url.pathname.endsWith("/wait")) {
           return new Response(null, { status: 204 });
+        }
 
         if (url.pathname.endsWith("/message")) {
-          if (url.searchParams.has("cursor"))
+          if (url.searchParams.has("cursor")) {
             return Response.json({
               data: [
                 assistant("own-two", "Own second"),
@@ -692,6 +709,7 @@ test.each(["user", "shell"])(
               ],
               cursor: {},
             });
+          }
 
           return Response.json({
             data: [
@@ -754,7 +772,7 @@ test.each(["user", "shell"])(
           return Response.json({ message: "Lost receipt" }, { status: 503 });
         }
 
-        if (path.endsWith("/message"))
+        if (path.endsWith("/message")) {
           return Response.json({
             data: [
               assistant("foreign-answer", "PRIVATE"),
@@ -764,9 +782,11 @@ test.each(["user", "shell"])(
             ],
             cursor: {},
           });
+        }
 
-        if (request.method === "DELETE")
+        if (request.method === "DELETE") {
           return new Response(null, { status: 204 });
+        }
 
         return new Response(null, { status: 404 });
       },
@@ -836,7 +856,10 @@ test.each(["user", "shell"])(
     let sequence = 0;
 
     const emit = (event: string, data: Record<string, unknown>) => {
-      if (!stream) throw new Error("Fixture SSE connection is not open");
+      if (!stream) {
+        throw new Error("Fixture SSE connection is not open");
+      }
+
       stream.enqueue(
         encoder.encode(
           `data: ${JSON.stringify({
@@ -856,7 +879,7 @@ test.each(["user", "shell"])(
       async fetch(request) {
         const path = new URL(request.url).pathname;
 
-        if (path === "/api/event")
+        if (path === "/api/event") {
           return new Response(
             new ReadableStream<Uint8Array>({
               start(controller) {
@@ -869,6 +892,7 @@ test.each(["user", "shell"])(
             }),
             { headers: { "content-type": "text/event-stream" } },
           );
+        }
 
         if (path.endsWith("/prompt")) {
           const body: { id: string } = await request.json();
@@ -895,9 +919,11 @@ test.each(["user", "shell"])(
           return new Response(null, { status: 204 });
         }
 
-        if (path.endsWith("/inbox")) return Response.json({ data: [] });
+        if (path.endsWith("/inbox")) {
+          return Response.json({ data: [] });
+        }
 
-        if (path.endsWith("/message"))
+        if (path.endsWith("/message")) {
           return Response.json({
             data: [
               assistant("foreign-answer", "PRIVATE native reply"),
@@ -907,6 +933,7 @@ test.each(["user", "shell"])(
             ],
             cursor: {},
           });
+        }
 
         return new Response(null, { status: 404 });
       },
@@ -921,7 +948,9 @@ test.each(["user", "shell"])(
       (text) => {
         snapshots.push(text);
 
-        if (text.includes("Own preview")) finish.resolve();
+        if (text.includes("Own preview")) {
+          finish.resolve();
+        }
       },
     );
 

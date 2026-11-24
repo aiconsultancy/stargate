@@ -43,10 +43,11 @@ function fleetToolInput<S extends Schema.Codec<unknown, unknown>>(
   const project = ({ target }: { target: StandardJSONSchemaV1.Target }) => {
     const json = settingsInputAdvertisement(presentation);
 
-    if (target === "draft-2020-12")
+    if (target === "draft-2020-12") {
       return { $schema: JsonSchema.META_SCHEMA_URI_DRAFT_2020_12, ...json };
+    }
 
-    if (target === "draft-07")
+    if (target === "draft-07") {
       return {
         $schema: JsonSchema.META_SCHEMA_URI_DRAFT_07,
         ...JsonSchema.toDocumentDraft07({
@@ -55,6 +56,8 @@ function fleetToolInput<S extends Schema.Codec<unknown, unknown>>(
           definitions: {},
         }).schema,
       };
+    }
+
     throw new Error(`Unsupported fleet schema target: ${target}`);
   };
 
@@ -120,7 +123,7 @@ export async function installFleetTools(ctx: ToolHost) {
   };
 
   const registration = await ctx.tool.transform((editor) => {
-    if (options.reviews)
+    if (options.reviews) {
       editor.add({
         name: "fleet_review",
         description:
@@ -138,6 +141,8 @@ export async function installFleetTools(ctx: ToolHost) {
             { operation: "review", input, caller: caller(context) },
           ),
       });
+    }
+
     editor.add({
       name: "fleet_verify_instruction",
       description:

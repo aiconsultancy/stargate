@@ -16,14 +16,21 @@ test("host snapshots expose safe process leaders and growth only after a baselin
     memory: () => 16_000,
     uptime: () => 50,
     files: async (path) => {
-      if (path === "/proc/meminfo")
+      if (path === "/proc/meminfo") {
         return "MemAvailable: 8 kB\nSwapTotal: 2 kB\nSwapFree: 1 kB\n";
+      }
 
-      if (path === "/proc/stat") return `cpu ${tick ? 200 : 100} 0 0 0 0 0 0 0`;
+      if (path === "/proc/stat") {
+        return `cpu ${tick ? 200 : 100} 0 0 0 0 0 0 0`;
+      }
 
-      if (path.endsWith("/comm")) return "opencode\n";
+      if (path.endsWith("/comm")) {
+        return "opencode\n";
+      }
 
-      if (path.endsWith("/status")) return "VmRSS: 4 kB\nSecret: private-token";
+      if (path.endsWith("/status")) {
+        return "VmRSS: 4 kB\nSecret: private-token";
+      }
 
       if (path.endsWith("/stat")) {
         const fields = Array(22).fill("0");

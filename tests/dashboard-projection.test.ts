@@ -20,7 +20,9 @@ import { bot } from "./fixtures";
 const cleanup: { close(): unknown }[] = [];
 
 afterEach(() => {
-  for (const store of cleanup.splice(0)) store.close();
+  for (const store of cleanup.splice(0)) {
+    store.close();
+  }
 });
 
 const signal = new AbortController().signal;
@@ -270,12 +272,14 @@ test("different tenants, endpoints or unpinned backends never acquire a display 
       registration("team-a", "teams", "tenant-a"),
       registration("team-b", "teams", "tenant-b"),
     ],
-  ])
+  ]) {
     expect(
       (await dashboardSource(ships, store, cron).fleet(signal)).ships.every(
         (ship) => !ship.captain,
       ),
     ).toBe(true);
+  }
+
   const original = registration("teams", "teams");
 
   const unpinned = {
@@ -303,7 +307,9 @@ test("a fleet request reads shared captain crew once and retries only a failed e
   irc.backend.crewStatus = async () => {
     primaryCalls++;
 
-    if (fail) throw new Error("Fixture unavailable");
+    if (fail) {
+      throw new Error("Fixture unavailable");
+    }
 
     return roster();
   };
@@ -402,7 +408,9 @@ async function page() {
 
   const script = /<script>([\s\S]*?)<\/script>/i.exec(html)?.[1];
 
-  if (!script) throw new Error("Missing dashboard script");
+  if (!script) {
+    throw new Error("Missing dashboard script");
+  }
 
   class Element {
     children: Element[] = [];
@@ -556,7 +564,9 @@ test("project labels never infer a crew checkout from the captain directory; pol
   const status = roster();
   const context = status.members[0];
 
-  if (!context) throw new Error("Missing fixture context");
+  if (!context) {
+    throw new Error("Missing fixture context");
+  }
 
   // A legacy gateway response without crewMembers still preserves all contexts.
   const data = {
@@ -571,7 +581,9 @@ test("project labels never infer a crew checkout from the captain directory; pol
       .all()
       .find((node) => node.dataset.context === "project-7-default-stamets");
 
-    if (!details) throw new Error("Missing context");
+    if (!details) {
+      throw new Error("Missing context");
+    }
 
     return details;
   };

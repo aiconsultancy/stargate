@@ -42,15 +42,20 @@ test("version changes queue once per session; an unchanged restart sends nothing
       sent.push(`${id}:${text}`);
     };
 
-    for (const session of ["ses_captain", "ses_crew"])
+    for (const session of ["ses_captain", "ses_crew"]) {
       await state.deliver(session, snapshot("0.36.0"), "queued", queue);
+    }
+
     state = new UpdateNotices(db);
 
-    for (const session of ["ses_captain", "ses_crew"])
+    for (const session of ["ses_captain", "ses_crew"]) {
       await state.deliver(session, snapshot("0.37.0"), "queued", queue);
+    }
 
-    for (const session of ["ses_captain", "ses_crew"])
+    for (const session of ["ses_captain", "ses_crew"]) {
       await state.deliver(session, snapshot("0.37.0"), "queued", queue);
+    }
+
     expect(sent).toHaveLength(4);
     expect(sent.at(-1)).toContain("0.36.0 → 0.37.0");
   } finally {
@@ -84,8 +89,9 @@ test("configuration changes alone queue one notice, containing no secrets or pri
       "https://github.com/aiconsultancy/stargate/releases/tag/v0.37.0",
     );
 
-    for (const secret of ["private-user", "SECRET_ENV", "super-secret"])
+    for (const secret of ["private-user", "SECRET_ENV", "super-secret"]) {
       expect(texts.join("\n")).not.toContain(secret);
+    }
   } finally {
     db.close();
   }

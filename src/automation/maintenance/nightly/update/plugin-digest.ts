@@ -94,8 +94,10 @@ class Unknown extends Error {}
 async function regularFile(root: string, path: string) {
   const inside = relative(root, path);
 
-  if (!inside || inside.startsWith("..") || inside.startsWith(sep))
+  if (!inside || inside.startsWith("..") || inside.startsWith(sep)) {
     return false;
+  }
+
   const stat = await lstat(path).catch(() => null);
 
   return stat?.isFile() === true;
@@ -116,16 +118,22 @@ async function resolveImport(root: string, from: string, specifier: string) {
     throw new Unknown();
   }
 
-  if (/^(?:node|bun):/.test(resolved)) return;
+  if (/^(?:node|bun):/.test(resolved)) {
+    return;
+  }
+
   const inside = relative(root, resolved);
 
-  if (!inside || inside.startsWith("..") || isAbsolute(inside))
+  if (!inside || inside.startsWith("..") || isAbsolute(inside)) {
     throw new Unknown();
+  }
 
   const relativeImport =
     specifier.startsWith("./") || specifier.startsWith("../");
 
-  if (!relativeImport && inside.split(sep).includes("node_modules")) return;
+  if (!relativeImport && inside.split(sep).includes("node_modules")) {
+    return;
+  }
 
   // Bun answers with the real path. A relative import must name its file
   // Itself (with or without the extension, or its directory): a symbolic
@@ -138,11 +146,14 @@ async function resolveImport(root: string, from: string, specifier: string) {
       resolved !== named &&
       plain(resolved) !== plain(named) &&
       !(dirname(resolved) === named && basename(resolved).startsWith("index."))
-    )
+    ) {
       throw new Unknown();
+    }
   }
 
-  if (!(await regularFile(root, resolved))) throw new Unknown();
+  if (!(await regularFile(root, resolved))) {
+    throw new Unknown();
+  }
 
   return resolved;
 }
@@ -157,7 +168,10 @@ const count = (text: string, pattern: RegExp) =>
  * module that its source does not name.
  */
 function importsOf(source: string, loader: "ts" | "tsx" | "js" | "jsx") {
-  if (source.includes("import.meta")) throw new Unknown();
+  if (source.includes("import.meta")) {
+    throw new Unknown();
+  }
+
   const found = new Bun.Transpiler({ loader }).scanImports(source);
 
   // Comments are gone here, and every use of `require` as an identifier is
@@ -181,8 +195,9 @@ function importsOf(source: string, loader: "ts" | "tsx" | "js" | "jsx") {
     // `module.require(...)` is rewritten to a plain `require(...)`.
     /\brequire\s*\(/.test(code) ||
     /\bcreateRequire\b/.test(code)
-  )
+  ) {
     throw new Unknown();
+  }
 
   return found.map((item) => item.path);
 }
@@ -194,9 +209,13 @@ async function filesBelow(directory: string): Promise<string[]> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
 
-    if (entry.isDirectory()) found.push(...(await filesBelow(path)));
-    else if (entry.isFile()) found.push(path);
-    else throw new Unknown();
+    if (entry.isDirectory()) {
+      found.push(...(await filesBelow(path)));
+    } else if (entry.isFile()) {
+      found.push(path);
+    } else {
+      throw new Unknown();
+    }
   }
 
   return found;
@@ -214,14 +233,22 @@ export async function pluginDigest(
       JSON.parse(await readFile(join(root, "package.json"), "utf8")),
     );
 
-    if (Result.isFailure(parsed)) return undefined;
+    if (Result.isFailure(parsed)) {
+      return undefined;
+    }
+
     const exported = parsed.success.exports;
     const entry = typeof exported === "string" ? exported : exported["."];
 
-    if (!entry.startsWith("./")) return undefined;
+    if (!entry.startsWith("./")) {
+      return undefined;
+    }
+
     const start = resolve(root, entry);
 
-    if (!(await regularFile(root, start))) return undefined;
+    if (!(await regularFile(root, start))) {
+      return undefined;
+    }
 
     const covered = new Map<string, string>();
 
@@ -239,44 +266,64 @@ export async function pluginDigest(
     const seen = new Set<string>();
 
     for (let path = queue.pop(); path; path = queue.pop()) {
-      if (seen.has(path)) continue;
+      if (seen.has(path)) {
+        continue;
+      }
+
       seen.add(path);
 
-      if (seen.size > maxFiles) return undefined;
+      if (seen.size > maxFiles) {
+        return undefined;
+      }
+
       const source = (await cover(path)).toString("utf8");
       const extension = extname(path);
 
-      if (data.has(extension)) continue;
+      if (data.has(extension)) {
+        continue;
+      }
+
       const loader = loaders[extension];
 
       // A format that Bun can run and this module cannot scan.
-      if (!loader) return undefined;
+      if (!loader) {
+        return undefined;
+      }
 
       for (const specifier of importsOf(source, loader)) {
         const file = await resolveImport(root, path, specifier);
 
-        if (file) queue.push(file);
+        if (file) {
+          queue.push(file);
+        }
       }
     }
 
-    for (const name of settings)
-      if (await regularFile(root, join(root, name)))
+    for (const name of settings) {
+      if (await regularFile(root, join(root, name))) {
         await cover(join(root, name));
-      else if (await lstat(join(root, name)).catch(() => null))
+      } else if (await lstat(join(root, name)).catch(() => null)) {
         return undefined;
+      }
+    }
+
     const templates = await lstat(join(root, "templates")).catch(() => null);
 
-    if (templates?.isDirectory())
-      for (const path of await filesBelow(join(root, "templates")))
+    if (templates?.isDirectory()) {
+      for (const path of await filesBelow(join(root, "templates"))) {
         await cover(path);
-    else if (templates) return undefined;
+      }
+    } else if (templates) {
+      return undefined;
+    }
 
     const digest = createHash("sha256");
 
     for (const [path, hash] of [...covered].toSorted(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0,
-    ))
+    )) {
       digest.update(`${path}\0${hash}\n`);
+    }
 
     return `v1:${digest.digest("hex")}`;
   } catch {
@@ -294,7 +341,9 @@ export async function writePluginDigest(directory: string) {
   await rm(path, { recursive: true, force: true });
   const digest = await pluginDigest(directory);
 
-  if (digest) await writeFile(path, `${digest}\n`, { flag: "wx", mode: 0o600 });
+  if (digest) {
+    await writeFile(path, `${digest}\n`, { flag: "wx", mode: 0o600 });
+  }
 
   return digest;
 }
@@ -303,7 +352,10 @@ export async function writePluginDigest(directory: string) {
 export async function readPluginDigest(directory: string) {
   const path = join(directory, pluginDigestFile);
 
-  if (!(await regularFile(resolve(directory), resolve(path)))) return;
+  if (!(await regularFile(resolve(directory), resolve(path)))) {
+    return;
+  }
+
   const text = (await readFile(path, "utf8").catch(() => "")).trim();
 
   return format.test(text) ? text : undefined;

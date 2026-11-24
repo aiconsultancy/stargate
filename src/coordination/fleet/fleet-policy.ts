@@ -38,17 +38,19 @@ export const fleetPolicySchema = settingsStruct({
       policy.humanAccounts.map((name) => name.toLowerCase()),
     );
 
-    if (policy.agentAccounts.some((name) => humans.has(name.toLowerCase())))
+    if (policy.agentAccounts.some((name) => humans.has(name.toLowerCase()))) {
       context.addIssue({
         code: "custom",
         message: "Human and agent identities must not overlap",
       });
+    }
 
-    if (new Set(policy.capabilities).size !== policy.capabilities.length)
+    if (new Set(policy.capabilities).size !== policy.capabilities.length) {
       context.addIssue({
         code: "custom",
         message: "Duplicate fleet capability",
       });
+    }
   }),
 );
 
@@ -62,11 +64,13 @@ export function fleetAuthority(
 ): Authority {
   const identity = account.toLowerCase();
 
-  if (policy.humanAccounts.some((name) => name.toLowerCase() === identity))
+  if (policy.humanAccounts.some((name) => name.toLowerCase() === identity)) {
     return "human";
+  }
 
-  if (policy.agentAccounts.some((name) => name.toLowerCase() === identity))
+  if (policy.agentAccounts.some((name) => name.toLowerCase() === identity)) {
     return "agent";
+  }
 
   return "context";
 }
@@ -137,27 +141,36 @@ export function fleetPermissions(
     "fleet_status",
   ]);
 
-  if (policy.capabilities.includes("read_code"))
-    for (const action of ["read", "glob", "grep", "external_directory"])
+  if (policy.capabilities.includes("read_code")) {
+    for (const action of ["read", "glob", "grep", "external_directory"]) {
       actions.add(action);
+    }
+  }
 
-  if (policy.capabilities.includes("subspace")) actions.add("subspace_*");
+  if (policy.capabilities.includes("subspace")) {
+    actions.add("subspace_*");
+  }
 
   // Agent dispatch offers are addressed to captains, who answer them.
-  if (policy.role === "captain") actions.add("fleet_answer_offer");
+  if (policy.role === "captain") {
+    actions.add("fleet_answer_offer");
+  }
 
-  if (policy.capabilities.includes("dispatch"))
-    for (const action of ["fleet_dispatch", "stargate_mail", "stargate_dm"])
+  if (policy.capabilities.includes("dispatch")) {
+    for (const action of ["fleet_dispatch", "stargate_mail", "stargate_dm"]) {
       actions.add(action);
+    }
+  }
 
   if (
     options.reviews === true &&
     policy.role === "captain" &&
     policy.capabilities.includes("dispatch")
-  )
+  ) {
     actions.add("fleet_review");
+  }
 
-  if (policy.capabilities.includes("implement"))
+  if (policy.capabilities.includes("implement")) {
     for (const action of [
       "shell",
       "edit",
@@ -167,8 +180,10 @@ export function fleetPermissions(
       "webfetch",
       "websearch",
       "stargate_crew",
-    ])
+    ]) {
       actions.add(action);
+    }
+  }
 
   return [
     { action: "*", resource: "*", effect: "deny" },

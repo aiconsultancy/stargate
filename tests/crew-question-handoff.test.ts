@@ -67,7 +67,10 @@ test("a gateway write has one delivery and one final ownership check on the capt
   expect(box.take("ses_other").work).toBeNull();
   const work = box.take(task.originCaptainID).work;
 
-  if (!work) throw new Error("Expected claimed command");
+  if (!work) {
+    throw new Error("Expected claimed command");
+  }
+
   expect(work.owner.task).toBe(task.id);
   expect(box.take(task.originCaptainID).work).toBeNull();
   expect(box.confirm("ses_other", work.id).approved).toBe(false);
@@ -82,7 +85,10 @@ test("a gateway write has one delivery and one final ownership check on the capt
   const retry = backend.replyQuestion(q, { q0: "blue" }, stop.signal);
   const other = box.take(task.originCaptainID).work;
 
-  if (!other) throw new Error("Expected second fixture command");
+  if (!other) {
+    throw new Error("Expected second fixture command");
+  }
+
   expect(box.confirm(task.originCaptainID, other.id).approved).toBe(true);
   expect(box.confirm(task.originCaptainID, other.id).approved).toBe(false);
   stop.abort();

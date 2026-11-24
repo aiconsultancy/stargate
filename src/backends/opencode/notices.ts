@@ -28,8 +28,9 @@ export class OpenCodeNotices {
       session.id !== sessionID ||
       session.location.directory !== this.config.directory ||
       (this.config.agent && session.agent !== this.config.agent)
-    )
+    ) {
       throw new Error("Update notice session does not belong to this backend");
+    }
 
     const tools = await this.client
       .rpc(CrewReporting)
@@ -58,8 +59,9 @@ export class OpenCodeNotices {
         { location: { directory: this.config.directory }, signal },
       );
 
-    if (receipt.id !== id || receipt.sessionID !== sessionID)
+    if (receipt.id !== id || receipt.sessionID !== sessionID) {
       throw new Error("Update notice identity changed");
+    }
   }
 
   public async crewUpdateNotice(snapshot: UpdateSnapshot, signal: AbortSignal) {

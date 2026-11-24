@@ -54,7 +54,7 @@ async function fixture() {
     async get({ sessionID }) {
       const peer = engine?.state.peerBySession(sessionID);
 
-      if (peer)
+      if (peer) {
         return {
           id: sessionID,
           agent: peer.crewID,
@@ -63,9 +63,12 @@ async function fixture() {
             stargateCrew: { namespace: options.namespace, crewID: peer.crewID },
           },
         };
+      }
 
       // Every ses_root* session is a real native captain root.
-      if (!sessionID.startsWith("ses_root")) throw new Error("Unknown session");
+      if (!sessionID.startsWith("ses_root")) {
+        throw new Error("Unknown session");
+      }
 
       return {
         id: sessionID,
@@ -157,7 +160,9 @@ async function fixture() {
 
   return {
     get engine() {
-      if (!engine) throw new Error("Engine closed");
+      if (!engine) {
+        throw new Error("Engine closed");
+      }
 
       return engine;
     },
@@ -188,7 +193,10 @@ test("a pinned team keeps one captain: earlier roots are history, not authority 
     );
     const task = f.engine.state.reserveTask(f.peer, legacy, "Legacy work");
 
-    if (!task) throw new Error("Missing legacy task");
+    if (!task) {
+      throw new Error("Missing legacy task");
+    }
+
     f.engine.state.running(task.id);
 
     await f.open(canonical);
@@ -205,8 +213,10 @@ test("a pinned team keeps one captain: earlier roots are history, not authority 
           { sessionID: legacy, request: { op: "inspect", crew: "worker" } },
           AbortSignal.timeout(5000),
         ),
-    ])
+    ]) {
       await expect(attempt()).rejects.toThrow("earlier captain sessions");
+    }
+
     await expect(
       f.engine.authorize(f.captain(canonical)),
     ).resolves.toBeUndefined();
@@ -215,7 +225,10 @@ test("a pinned team keeps one captain: earlier roots are history, not authority 
     const question = (await f.engine.mail({ op: "inbox" }, f.worker()))
       .messages?.[0];
 
-    if (!question) throw new Error("Missing legacy question");
+    if (!question) {
+      throw new Error("Missing legacy question");
+    }
+
     expect(
       await f.engine.dm(
         {
@@ -276,7 +289,10 @@ test("quota tool authorizes captain/assigned worker, accepts no controls and sta
     await f.open(canonical);
     const task = f.engine.state.reserveTask(f.peer, canonical, "Existing work");
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     f.engine.state.running(task.id);
     expect(await f.engine.quota({}, f.captain(canonical))).toMatchObject({
       status: "not-configured",
@@ -349,7 +365,10 @@ test("reconciliation and abandonment keep the raw stored captain identity", asyn
   try {
     const task = f.engine.state.reserveTask(f.peer, legacy, "Legacy work");
 
-    if (!task) throw new Error("Missing legacy task");
+    if (!task) {
+      throw new Error("Missing legacy task");
+    }
+
     f.engine.state.uncertain(task.id);
     await f.open(canonical);
 
@@ -415,7 +434,10 @@ test("lineage needs stored captain evidence; workers and unknown sessions are ne
       "Worker-origin row",
     );
 
-    if (!forged) throw new Error("Missing forged task");
+    if (!forged) {
+      throw new Error("Missing forged task");
+    }
+
     await f.open(canonical);
     const { state } = f.engine;
     expect(state.captainLineage(canonical)).toBe(true);
@@ -437,7 +459,10 @@ test("pinned journals write new lineage facts under the pin and read earlier roo
   try {
     const task = f.engine.state.reserveTask(f.peer, legacy, "Legacy work");
 
-    if (!task) throw new Error("Missing legacy task");
+    if (!task) {
+      throw new Error("Missing legacy task");
+    }
+
     await f.open(canonical);
     f.engine.state.running(task.id);
     const page = await f.engine.journal({ op: "read" }, f.captain(canonical));
@@ -458,7 +483,10 @@ test("unpinned teams keep per-root ownership and wake the originating root", asy
   try {
     const task = f.engine.state.reserveTask(f.peer, legacy, "Root work");
 
-    if (!task) throw new Error("Missing task");
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
     f.engine.state.running(task.id);
     expect(f.engine.state.captainLineage(legacy)).toBe(false);
     await expect(

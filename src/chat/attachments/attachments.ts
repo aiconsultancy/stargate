@@ -40,15 +40,19 @@ function unsafeName(name: string) {
   for (let index = 0; index < name.length; index++) {
     const code = name.charCodeAt(index);
 
-    if (code < 0x20 || code === 0x7f || code === 0x2f || code === 0x5c)
+    if (code < 0x20 || code === 0x7f || code === 0x2f || code === 0x5c) {
       return true;
+    }
   }
 
   return false;
 }
 
 export function checkAttachments(files: readonly Attachment[]) {
-  if (files.length > maxAttachments) throw new Error("Too many attachments");
+  if (files.length > maxAttachments) {
+    throw new Error("Too many attachments");
+  }
+
   let total = 0;
 
   for (const file of files) {
@@ -59,12 +63,15 @@ export function checkAttachments(files: readonly Attachment[]) {
       !mimePattern.test(file.mime) ||
       file.data.byteLength === 0 ||
       file.data.byteLength > maxAttachmentBytes
-    )
+    ) {
       throw new Error("Invalid or oversized attachment");
+    }
+
     total += file.data.byteLength;
 
-    if (total > maxAttachmentTotalBytes)
+    if (total > maxAttachmentTotalBytes) {
       throw new Error("Attachments exceed total size limit");
+    }
   }
 }
 
@@ -144,7 +151,10 @@ function fileLike(destination: string) {
 
 /** Strict absolute file URL: no authority, query, fragment or dot segments. */
 function filePath(destination: string, angle: boolean): string | undefined {
-  if (!/^file:\/\/\//i.test(destination)) return;
+  if (!/^file:\/\/\//i.test(destination)) {
+    return;
+  }
+
   const raw = destination.slice("file://".length);
 
   for (const character of raw) {
@@ -157,8 +167,9 @@ function filePath(destination: string, angle: boolean): string | undefined {
       character === "#" ||
       character === "\\" ||
       (character === " " ? !angle : /\s/.test(character))
-    )
+    ) {
       return;
+    }
   }
 
   const segments: string[] = [];
@@ -172,7 +183,10 @@ function filePath(destination: string, angle: boolean): string | undefined {
       return;
     }
 
-    if (!value || value === "." || value === ".." || unsafeName(value)) return;
+    if (!value || value === "." || value === ".." || unsafeName(value)) {
+      return;
+    }
+
     segments.push(value);
   }
 
@@ -199,9 +213,14 @@ function construct(text: string, bracket: number): Construct {
   let index = bracket + 1;
 
   for (;;) {
-    if (index >= text.length) return { kind: "incomplete", fileLike: true };
+    if (index >= text.length) {
+      return { kind: "incomplete", fileLike: true };
+    }
 
-    if (index - bracket > maxCaption) return { kind: "none" };
+    if (index - bracket > maxCaption) {
+      return { kind: "none" };
+    }
+
     const character = text[index];
 
     if (character === "\\") {
@@ -209,41 +228,62 @@ function construct(text: string, bracket: number): Construct {
       continue;
     }
 
-    if (character === "]") break;
+    if (character === "]") {
+      break;
+    }
 
-    if (character === "[" || character === "\n") return { kind: "none" };
+    if (character === "[" || character === "\n") {
+      return { kind: "none" };
+    }
+
     index++;
   }
 
   const label = text.slice(bracket + 1, index);
   const open = index + 1;
 
-  if (open >= text.length) return { kind: "incomplete", fileLike: true };
+  if (open >= text.length) {
+    return { kind: "incomplete", fileLike: true };
+  }
 
-  if (text[open] !== "(") return { kind: "none" };
+  if (text[open] !== "(") {
+    return { kind: "none" };
+  }
+
   const angle = text[open + 1] === "<";
   const start = open + (angle ? 2 : 1);
   let end = start;
 
   for (;;) {
-    if (end >= text.length)
+    if (end >= text.length) {
       return {
         kind: "incomplete",
         fileLike: fileLike(text.slice(start, end)),
       };
+    }
 
-    if (end - start > maxDestination) return { kind: "none" };
+    if (end - start > maxDestination) {
+      return { kind: "none" };
+    }
+
     const character = text[end] ?? "";
 
     if (angle) {
-      if (character === ">") break;
+      if (character === ">") {
+        break;
+      }
 
-      if (character === "<" || character === "\n") return { kind: "none" };
-    } else {
-      if (character === ")") break;
-
-      if (character === "(" || character === "<" || /\s/.test(character))
+      if (character === "<" || character === "\n") {
         return { kind: "none" };
+      }
+    } else {
+      if (character === ")") {
+        break;
+      }
+
+      if (character === "(" || character === "<" || /\s/.test(character)) {
+        return { kind: "none" };
+      }
     }
 
     end++;
@@ -251,13 +291,19 @@ function construct(text: string, bracket: number): Construct {
 
   const destination = text.slice(start, end);
 
-  if (!destination) return { kind: "none" };
+  if (!destination) {
+    return { kind: "none" };
+  }
 
   if (angle) {
-    if (end + 1 >= text.length)
+    if (end + 1 >= text.length) {
       return { kind: "incomplete", fileLike: fileLike(destination) };
+    }
 
-    if (text[end + 1] !== ")") return { kind: "none" };
+    if (text[end + 1] !== ")") {
+      return { kind: "none" };
+    }
+
     end++;
   }
 
@@ -280,15 +326,24 @@ function fencedSegments(text: string): Segment[] {
         match?.[1]?.[0] === fence.marker &&
         match[1].length >= fence.length &&
         !match[2]?.trim()
-      )
+      ) {
         fence = undefined;
-    } else if (match?.[1] && !(match[1][0] === "`" && match[2]?.includes("`")))
+      }
+    } else if (
+      match?.[1] &&
+      !(match[1][0] === "`" && match[2]?.includes("`"))
+    ) {
       fence = { marker: match[1][0] ?? "`", length: match[1].length };
+    }
+
     const isCode = code || fence !== undefined;
     const last = segments.at(-1);
 
-    if (last?.code === isCode) last.text += line;
-    else segments.push({ code: isCode, text: line });
+    if (last?.code === isCode) {
+      last.text += line;
+    } else {
+      segments.push({ code: isCode, text: line });
+    }
   }
 
   return segments;
@@ -333,12 +388,16 @@ export function parseAttachments(
       if (character === "`") {
         let run = index;
 
-        while (prose[run] === "`") run++;
+        while (prose[run] === "`") {
+          run++;
+        }
+
         const ticks = prose.slice(index, run);
         let close = prose.indexOf(ticks, run);
 
-        while (close >= 0 && prose[close + ticks.length] === "`")
+        while (close >= 0 && prose[close + ticks.length] === "`") {
           close = prose.indexOf(ticks, close + ticks.length + 1);
+        }
 
         if (close >= 0) {
           piece += prose.slice(index, close + ticks.length);
@@ -358,8 +417,12 @@ export function parseAttachments(
         const found = construct(prose, bracket);
 
         if (found.kind === "incomplete" && !complete) {
-          if (found.fileLike) withheld = true;
-          else piece += prose.slice(index);
+          if (found.fileLike) {
+            withheld = true;
+          } else {
+            piece += prose.slice(index);
+          }
+
           break;
         }
 
@@ -377,7 +440,10 @@ export function parseAttachments(
             }
 
             piece += caption;
-          } else piece += prose.slice(index, found.end);
+          } else {
+            piece += prose.slice(index, found.end);
+          }
+
           index = found.end;
           continue;
         }
@@ -393,7 +459,9 @@ export function parseAttachments(
 
     output += redact(piece);
 
-    if (withheld) break;
+    if (withheld) {
+      break;
+    }
   }
 
   return { text: output, files };
@@ -441,20 +509,26 @@ const deniedNames = [
 function deniedPath(path: string, root?: string) {
   const segments = path.split("/").slice(1);
 
-  if (deniedRoots.has(segments[0] ?? "")) return true;
+  if (deniedRoots.has(segments[0] ?? "")) {
+    return true;
+  }
+
   const base = root?.replace(/\/+$/, "").split("/").slice(1).filter(Boolean);
 
   if (
     base &&
     (base.length >= segments.length ||
       base.some((segment, index) => segments[index] !== segment))
-  )
+  ) {
     return true;
+  }
 
   if (
     segments.slice(base?.length ?? 0).some((segment) => segment.startsWith("."))
-  )
+  ) {
     return true;
+  }
+
   const name = segments.at(-1) ?? "";
 
   return deniedNames.some((pattern) => pattern.test(name));
@@ -475,10 +549,13 @@ function checkedPath(path: string, root?: string) {
 
       return code < 0x20 || code === 0x7f || character === "\\";
     })
-  )
+  ) {
     throw new AttachmentUnavailable("invalid");
+  }
 
-  if (deniedPath(path, root)) throw new AttachmentUnavailable("denied");
+  if (deniedPath(path, root)) {
+    throw new AttachmentUnavailable("denied");
+  }
 
   return path;
 }
@@ -510,9 +587,13 @@ function attachmentMime(path: string) {
 }
 
 function unavailable(error: unknown, signal?: AbortSignal): never {
-  if (signal?.aborted) throw signal.reason;
+  if (signal?.aborted) {
+    throw signal.reason;
+  }
 
-  if (error instanceof AttachmentUnavailable) throw error;
+  if (error instanceof AttachmentUnavailable) {
+    throw error;
+  }
 
   const code =
     typeof error === "object" && error !== null && "code" in error
@@ -534,8 +615,9 @@ function unavailable(error: unknown, signal?: AbortSignal): never {
 async function openRegular(path: string, signal?: AbortSignal) {
   signal?.throwIfAborted();
 
-  if ((await realpath(path)) !== path)
+  if ((await realpath(path)) !== path) {
     throw new AttachmentUnavailable("denied");
+  }
 
   const handle = await open(
     path,
@@ -548,21 +630,27 @@ async function openRegular(path: string, signal?: AbortSignal) {
   try {
     const info = await handle.stat();
 
-    if (!info.isFile()) throw new AttachmentUnavailable("type");
+    if (!info.isFile()) {
+      throw new AttachmentUnavailable("type");
+    }
 
-    if (info.size <= 0 || info.size > maxAttachmentBytes)
+    if (info.size <= 0 || info.size > maxAttachmentBytes) {
       throw new AttachmentUnavailable("size");
+    }
 
     // A parent directory can be swapped after realpath; bind the descriptor.
     const linked = await readlink(`/proc/self/fd/${handle.fd}`).catch(() => {});
 
     if (linked !== undefined) {
-      if (linked !== path) throw new AttachmentUnavailable("denied");
+      if (linked !== path) {
+        throw new AttachmentUnavailable("denied");
+      }
     } else {
       const current = await stat(path);
 
-      if (current.dev !== info.dev || current.ino !== info.ino)
+      if (current.dev !== info.dev || current.ino !== info.ino) {
         throw new AttachmentUnavailable("denied");
+      }
     }
 
     return { handle, size: info.size };
@@ -588,16 +676,23 @@ async function readExact(
     signal?.throwIfAborted();
     const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
 
-    if (bytesRead === 0) break;
+    if (bytesRead === 0) {
+      break;
+    }
 
-    if (total + bytesRead > size) throw new AttachmentUnavailable("changed");
+    if (total + bytesRead > size) {
+      throw new AttachmentUnavailable("changed");
+    }
+
     const bytes = chunk.subarray(0, bytesRead);
     hash.update(bytes);
     data?.set(bytes, total);
     total += bytesRead;
   }
 
-  if (total !== size) throw new AttachmentUnavailable("changed");
+  if (total !== size) {
+    throw new AttachmentUnavailable("changed");
+  }
 
   return { sha256: hash.digest("hex"), data };
 }
@@ -615,8 +710,9 @@ export async function inspectAttachment(
 ): Promise<PreparedAttachment> {
   const path = checkedPath(file.path, root);
 
-  if (file.caption.length > maxCaption)
+  if (file.caption.length > maxCaption) {
     throw new AttachmentUnavailable("invalid");
+  }
 
   try {
     const { handle, size } = await openRegular(path, signal);
@@ -648,7 +744,10 @@ export async function readPreparedAttachment(
 ): Promise<Attachment> {
   const parsed = Schema.decodeUnknownResult(preparedAttachmentSchema)(input);
 
-  if (Result.isFailure(parsed)) throw new AttachmentUnavailable("invalid");
+  if (Result.isFailure(parsed)) {
+    throw new AttachmentUnavailable("invalid");
+  }
+
   const prepared = parsed.success;
   const path = checkedPath(prepared.path, root);
 
@@ -656,11 +755,16 @@ export async function readPreparedAttachment(
     const { handle, size } = await openRegular(path, signal);
 
     try {
-      if (size !== prepared.size) throw new AttachmentUnavailable("changed");
+      if (size !== prepared.size) {
+        throw new AttachmentUnavailable("changed");
+      }
+
       const { sha256, data } = await readExact(handle, size, true, signal);
 
-      if (sha256 !== prepared.sha256 || !data)
+      if (sha256 !== prepared.sha256 || !data) {
         throw new AttachmentUnavailable("changed");
+      }
+
       const attachment = { name: prepared.name, mime: prepared.mime, data };
       checkAttachments([attachment]);
 
@@ -675,13 +779,17 @@ export async function readPreparedAttachment(
 
 /** Batch limits from durable metadata, before any upload read. */
 export function checkPreparedAttachments(files: readonly PreparedAttachment[]) {
-  if (files.length > maxAttachments) throw new Error("Too many attachments");
+  if (files.length > maxAttachments) {
+    throw new Error("Too many attachments");
+  }
+
   let total = 0;
 
   for (const file of files) {
     total += file.size;
 
-    if (total > maxAttachmentTotalBytes)
+    if (total > maxAttachmentTotalBytes) {
       throw new Error("Attachments exceed total size limit");
+    }
   }
 }

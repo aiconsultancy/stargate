@@ -73,7 +73,10 @@ function notice(text: string, title = "Crew activity"): CrewView {
 }
 
 function age(time: number | null, now: number) {
-  if (time === null) return "unknown";
+  if (time === null) {
+    return "unknown";
+  }
+
   const seconds = Math.max(0, Math.floor((now - time) / 1000));
 
   return seconds < 60
@@ -125,48 +128,58 @@ export function crewStatusView(
       ),
     );
 
-    if (!detail) continue;
+    if (!detail) {
+      continue;
+    }
 
-    if (member.current?.progress)
+    if (member.current?.progress) {
       blocks.push(
         section(
           `Latest visible progress (bounded snapshot)\n${member.current.progress}`,
         ),
       );
+    }
+
     blocks.push(
       section(
         `Queued tasks: showing ${member.queued.length} of ${member.queuedCount}${member.queuedCount > member.queued.length ? " (truncated)" : ""}.`,
       ),
     );
 
-    for (const task of member.queued) blocks.push(section(taskLine(task)));
+    for (const task of member.queued) {
+      blocks.push(section(taskLine(task)));
+    }
+
     blocks.push(
       section(
         `Recent outcomes: showing ${member.recent.length} of ${member.recentCount}${member.recentCount > member.recent.length ? " (truncated; only recent status details retained)" : ""}.`,
       ),
     );
 
-    for (const task of member.recent)
+    for (const task of member.recent) {
       blocks.push(
         section(
           `${taskLine(task)}\n${timing(task, now)}${task.progress ? `\nLatest visible progress: ${task.progress}` : ""}`,
         ),
       );
+    }
   }
 
-  if (status.members.length === 0)
+  if (status.members.length === 0) {
     blocks.push(
       section(
         "No configured crew member found. Use /stargate crew for the roster.",
       ),
     );
+  }
 
-  if (status.truncated)
+  if (status.truncated) {
     blocks.push(
       section(
         `Roster truncated: showing ${status.members.length} of ${status.total}. Query a member directly with /stargate crew <member-id>.`,
       ),
     );
+  }
 
   return { ...notice("Crew activity"), blocks };
 }
@@ -189,7 +202,10 @@ export function quotaStatusView(
     text += `${text ? "\n" : ""}${line}`;
   }
 
-  if (text) blocks.push(section(text));
+  if (text) {
+    blocks.push(section(text));
+  }
+
   blocks.push(
     section(
       "Close and run /stargate usage again to refresh. No model is called; no account data is posted to the channel.",
@@ -261,7 +277,10 @@ export class CrewUI {
         ),
       );
 
-      if (!this.allowed(data)) return;
+      if (!this.allowed(data)) {
+        return;
+      }
+
       const member = data.text.split(/\s+/)[1];
       const signal = AbortSignal.any([this.signal, this.deadline()]);
       signal.throwIfAborted();
@@ -273,13 +292,16 @@ export class CrewUI {
 
         signal.throwIfAborted();
 
-        if (this.allowed(data))
+        if (this.allowed(data)) {
           await this.api.update(viewID, quotaStatusView(snapshot));
+        }
 
         return;
       }
 
-      if (!this.backend.crewStatus) return;
+      if (!this.backend.crewStatus) {
+        return;
+      }
 
       const status = Schema.decodeUnknownSync(crewStatusSchema)(
         await this.backend.crewStatus(member ? { member } : {}, signal),
@@ -287,7 +309,9 @@ export class CrewUI {
 
       signal.throwIfAborted();
 
-      if (!this.allowed(data)) return;
+      if (!this.allowed(data)) {
+        return;
+      }
 
       // Defense at adapter boundary: module backends get the same redaction and
       // Literal rendering. Schema bounds rows and forbids native session fields.
@@ -304,7 +328,9 @@ export class CrewUI {
     } catch {
       this.log.error("Could not read or display Stargate status");
 
-      if (!viewID || !this.allowed(data)) return;
+      if (!viewID || !this.allowed(data)) {
+        return;
+      }
 
       try {
         await this.api.update(

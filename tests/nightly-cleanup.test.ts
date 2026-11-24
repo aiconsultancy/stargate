@@ -51,11 +51,15 @@ async function fixture() {
 async function age(path: string, days = 10) {
   const info = await lstat(path);
 
-  if (info.isDirectory())
-    for (const name of await readdir(path)) await age(join(path, name), days);
+  if (info.isDirectory()) {
+    for (const name of await readdir(path)) {
+      await age(join(path, name), days);
+    }
+  }
 
-  if (!info.isSymbolicLink())
+  if (!info.isSymbolicLink()) {
     await utimes(path, (now - days * day) / 1000, (now - days * day) / 1000);
+  }
 }
 
 async function exists(path: string) {
@@ -96,7 +100,9 @@ async function git(path: string, ...args: string[]) {
     },
   });
 
-  if (result.code) throw new Error(`fixture git ${args[0]} failed`);
+  if (result.code) {
+    throw new Error(`fixture git ${args[0]} failed`);
+  }
 
   return result.stdout.trim();
 }
@@ -130,10 +136,11 @@ test("strict schema is disabled by default and rejects relative paths and unknow
     { repositories: ["/a\nsecret"] },
     { olderThanDays: 0 },
     { surprise: true },
-  ])
+  ]) {
     expect(
       Result.isSuccess(Schema.decodeUnknownResult(cleanupSchema)(value)),
     ).toBe(false);
+  }
 });
 
 test("disabled does not inspect or run commands; plan never deletes or writes", async () => {
@@ -258,8 +265,9 @@ test("recent, special, protected, active and symlink directories stay", async ()
     const scratch = await fixture();
     const candidate = join(scratch, name);
 
-    if (name === "symlink") await symlink(await fixture(), candidate);
-    else {
+    if (name === "symlink") {
+      await symlink(await fixture(), candidate);
+    } else {
       await mkdir(candidate);
       await writeFile(join(candidate, "data"), "x");
       await age(
@@ -299,12 +307,18 @@ test("nested retention exceptions, credential names, symlinks and hard links fai
     const candidate = join(scratch, "stale");
     await mkdir(candidate);
 
-    if (name === "link") await symlink(await fixture(), join(candidate, name));
-    else await writeFile(join(candidate, name), "not read");
+    if (name === "link") {
+      await symlink(await fixture(), join(candidate, name));
+    } else {
+      await writeFile(join(candidate, name), "not read");
+    }
+
     await age(candidate);
 
-    if (name.includes("inspect") || name.endsWith("relay.json"))
+    if (name.includes("inspect") || name.endsWith("relay.json")) {
       await utimes(join(candidate, name), now / 1000, now / 1000);
+    }
+
     const result = await cleanup(input([scratch]));
     expect(result.items[0]?.status).toBe("skipped");
     expect(await exists(candidate)).toBe(true);
@@ -324,7 +338,9 @@ test("abort, deadline, changed identity, changed content and failed intent preve
         signal: controller.signal,
         ...(mode === "deadline" ? { deadline: Date.now() - 1 } : {}),
         beforeItem: async () => {
-          if (mode === "abort") controller.abort();
+          if (mode === "abort") {
+            controller.abort();
+          }
 
           if (mode === "identity") {
             await rm(candidate, { recursive: true });
@@ -332,10 +348,13 @@ test("abort, deadline, changed identity, changed content and failed intent preve
             await age(candidate);
           }
 
-          if (mode === "content")
+          if (mode === "content") {
             await writeFile(join(candidate, "new"), "new");
+          }
 
-          if (mode === "intent") throw new Error("private error");
+          if (mode === "intent") {
+            throw new Error("private error");
+          }
         },
       }),
     );
@@ -357,19 +376,30 @@ test("scratch repositories require clean trees and every branch and detached HEA
   ]) {
     const { directory, repo } = await repository();
 
-    if (mode === "dirty") await writeFile(join(repo, "untracked"), "new");
-
-    if (["unpushed", "detached", "hidden-branch"].includes(mode)) {
-      if (mode === "hidden-branch") await git(repo, "checkout", "-b", "hidden");
-
-      if (mode === "detached") await git(repo, "checkout", "--detach");
-      await git(repo, "commit", "--allow-empty", "-m", "local");
-
-      if (mode === "hidden-branch") await git(repo, "checkout", "main");
+    if (mode === "dirty") {
+      await writeFile(join(repo, "untracked"), "new");
     }
 
-    if (mode === "missing-remote")
+    if (["unpushed", "detached", "hidden-branch"].includes(mode)) {
+      if (mode === "hidden-branch") {
+        await git(repo, "checkout", "-b", "hidden");
+      }
+
+      if (mode === "detached") {
+        await git(repo, "checkout", "--detach");
+      }
+
+      await git(repo, "commit", "--allow-empty", "-m", "local");
+
+      if (mode === "hidden-branch") {
+        await git(repo, "checkout", "main");
+      }
+    }
+
+    if (mode === "missing-remote") {
       await git(repo, "remote", "remove", "origin");
+    }
+
     await age(repo);
 
     const result = await cleanup(
@@ -443,16 +473,25 @@ test("worktrees preserve primary, locked, dirty, unpushed, active and permanent 
     await git(repo, "worktree", "add", "-b", "leaked", worktree);
 
     if (["pushed", "unpushed", "detached-unpushed"].includes(mode)) {
-      if (mode === "detached-unpushed")
+      if (mode === "detached-unpushed") {
         await git(worktree, "checkout", "--detach");
+      }
+
       await git(worktree, "commit", "--allow-empty", "-m", "local");
 
-      if (mode === "pushed") await git(worktree, "push", "origin", "leaked");
+      if (mode === "pushed") {
+        await git(worktree, "push", "origin", "leaked");
+      }
     }
 
-    if (mode === "dirty") await writeFile(join(worktree, "new"), "new");
+    if (mode === "dirty") {
+      await writeFile(join(worktree, "new"), "new");
+    }
 
-    if (mode === "locked") await git(repo, "worktree", "lock", worktree);
+    if (mode === "locked") {
+      await git(repo, "worktree", "lock", worktree);
+    }
+
     await age(worktree, mode === "recent" ? 1 : 10);
 
     const result = await cleanup(
@@ -604,7 +643,10 @@ test("every child of an oversized scratch root gets its turn, also when all of t
   await Promise.all(names.map((name) => mkdir(join(wide, name))));
 
   // The same age for all: the order is by name.
-  for (const name of names) await age(join(wide, name), 30);
+  for (const name of names) {
+    await age(join(wide, name), 30);
+  }
+
   const seen = new Set<string>();
   const counts: number[] = [];
 
@@ -624,7 +666,9 @@ test("every child of an oversized scratch root gets its turn, also when all of t
     expect(children.every((item) => item.reason === "in-use")).toBe(true);
     counts.push(children.length);
 
-    for (const item of children) seen.add(item.path);
+    for (const item of children) {
+      seen.add(item.path);
+    }
   }
 
   // Two windows: 499 children, then the other two. None is left out.
@@ -648,7 +692,10 @@ test("an earlier scratch root's report items reduce the batch of the next root, 
 
   await Promise.all(names.map((name) => mkdir(join(wide, name))));
 
-  for (const name of names) await age(join(wide, name), 30);
+  for (const name of names) {
+    await age(join(wide, name), 30);
+  }
+
   const seen = new Set<string>();
 
   for (const run of [0, 1]) {
@@ -662,8 +709,11 @@ test("an earlier scratch root's report items reduce the batch of the next root, 
 
     expect(result.items.length).toBeLessThanOrEqual(500);
 
-    for (const item of result.items)
-      if (item.path.startsWith(`${wide}/`)) seen.add(item.path);
+    for (const item of result.items) {
+      if (item.path.startsWith(`${wide}/`)) {
+        seen.add(item.path);
+      }
+    }
   }
 
   // 495 children fit in a run by themselves; behind ten other items they
@@ -694,7 +744,10 @@ test("batches of an oversized scratch root rotate, oldest first, so every child 
   expect(windows[0]).toEqual(children.slice(0, 10).map((child) => child.name));
   expect(windows.map((window) => window.length)).toEqual([10, 10, 5]);
 
-  for (const name of windows.flat()) seen.add(name);
+  for (const name of windows.flat()) {
+    seen.add(name);
+  }
+
   expect(seen.size).toBe(25);
   expect(names(3).names).toEqual(windows[0] ?? []);
   expect(names(0).partial).toBe(true);
@@ -744,8 +797,9 @@ test.skipIf(process.getuid?.() === 0)(
       const fd = join(thread, "fd");
       await mkdir(fd, { recursive: true });
 
-      for (const [name, target] of Object.entries(links))
+      for (const [name, target] of Object.entries(links)) {
         await symlink(target, join(thread, name));
+      }
 
       // As for another user's process: its open files cannot be listed.
       if (!readable) {
@@ -766,11 +820,12 @@ test.skipIf(process.getuid?.() === 0)(
       root: proc,
       uid: me,
       stat: async (path: string) => {
-        if (path.startsWith(`${proc}/`))
+        if (path.startsWith(`${proc}/`)) {
           return {
             uid: owners[path.slice(proc.length + 1)] ?? me,
             mode: 0o555,
           };
+        }
 
         return {
           uid: me,
@@ -787,8 +842,10 @@ test.skipIf(process.getuid?.() === 0)(
       expect(await use(0o700)).toBe("unused");
 
       // Not private: an unreadable process of another user can be using it.
-      for (const mode of [0o750, 0o755, 0o701])
+      for (const mode of [0o750, 0o755, 0o701]) {
         expect(await use(mode)).toBe("unknown");
+      }
+
       // A private directory of another user does not count.
       expect(
         await cleanupPathUse(candidate, undefined, undefined, {
@@ -816,7 +873,9 @@ test.skipIf(process.getuid?.() === 0)(
         }),
       ).toBe("unknown");
     } finally {
-      for (const path of locked) await chmod(path, 0o700).catch(() => {});
+      for (const path of locked) {
+        await chmod(path, 0o700).catch(() => {});
+      }
     }
   },
 );
@@ -970,7 +1029,10 @@ async function only(pid: number) {
 test("a real process that runs a binary inside the path, or has mapped a file of it, is a use", async () => {
   const tool = Bun.which("sleep");
 
-  if (!tool) throw new Error("sleep is required");
+  if (!tool) {
+    throw new Error("sleep is required");
+  }
+
   const elsewhere = await fixture();
   // The executable is in the path; the working directory is not.
   const binary = await fixture();
@@ -1053,7 +1115,7 @@ test("real mapped paths preserve literal escapes and ambiguous newlines", async 
         await cleanupPathUse(candidate, undefined, undefined, view),
       ]).toEqual([name, "in-use"]);
 
-      if (name.includes("\\040"))
+      if (name.includes("\\040")) {
         expect(
           await cleanupPathUse(
             candidate.replaceAll("\\040", " "),
@@ -1062,6 +1124,7 @@ test("real mapped paths preserve literal escapes and ambiguous newlines", async 
             view,
           ),
         ).toBe("unused");
+      }
 
       // Both spellings must be protected: maps cannot distinguish them.
       if (name.includes("\\012") || name.includes("\n")) {
@@ -1121,12 +1184,13 @@ test("fetch errors and malformed worktree metadata fail closed without exposing 
           (failure === "metadata" &&
             command.includes("--porcelain") &&
             command.includes("list"))
-        )
+        ) {
           return {
             code: failure === "fetch" ? 1 : 0,
             stdout: "private malformed output",
             stderr: "private secret",
           };
+        }
 
         return processRunner.run(command, options);
       },
@@ -1158,7 +1222,9 @@ test("abort during completed Git deletion still records removed outcome", async 
     run: async (command, options) => {
       const result = await processRunner.run(command, options);
 
-      if (command.includes("-d")) controller.abort();
+      if (command.includes("-d")) {
+        controller.abort();
+      }
 
       return result;
     },
@@ -1173,7 +1239,9 @@ test("abort during completed Git deletion still records removed outcome", async 
       runner,
       signal: controller.signal,
       record: async (item) => {
-        if (item.branch === "merged") statuses.push(item.status);
+        if (item.branch === "merged") {
+          statuses.push(item.status);
+        }
       },
     }),
   );
@@ -1213,7 +1281,10 @@ test("scratch evidence stays offline, including nested repositories", async () =
     const nested = join(candidate, "nested");
     await git(candidate, "clone", "--no-hardlinks", "--", repo, nested);
 
-    if (dirty) await writeFile(join(nested, "new"), "preserve");
+    if (dirty) {
+      await writeFile(join(nested, "new"), "preserve");
+    }
+
     await age(candidate);
     const commands: string[][] = [];
 
@@ -1253,10 +1324,15 @@ test("Git state and process use are checked again after the durable intent", asy
         inUse: async () =>
           recorded && mode === "in-use" ? "in-use" : "unused",
         record: async (item) => {
-          if (item.branch !== "merged" || item.status !== "planned") return;
+          if (item.branch !== "merged" || item.status !== "planned") {
+            return;
+          }
+
           recorded = true;
 
-          if (mode === "dirty") await writeFile(join(repo, "new"), "preserve");
+          if (mode === "dirty") {
+            await writeFile(join(repo, "new"), "preserve");
+          }
 
           if (mode === "tip") {
             await git(repo, "commit", "--allow-empty", "-m", "new");

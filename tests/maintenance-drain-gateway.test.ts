@@ -17,11 +17,16 @@ import { bot, identity } from "./fixtures";
 const cleanup: (() => unknown)[] = [];
 
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  for (const close of cleanup.splice(0).reverse()) {
+    await close();
+  }
 });
 
 async function until(check: () => boolean) {
-  for (let i = 0; i < 60 && !check(); i++) await delay(50);
+  for (let i = 0; i < 60 && !check(); i++) {
+    await delay(50);
+  }
+
   expect(check()).toBe(true);
 }
 
@@ -86,7 +91,9 @@ function fixture(path: string, held: { value: boolean }) {
       deferDelivery: true,
     });
 
-    if (id === undefined) throw new Error("Scheduled job rejected");
+    if (id === undefined) {
+      throw new Error("Scheduled job rejected");
+    }
 
     return id;
   };
@@ -110,7 +117,10 @@ test("a drain holds new turns but keeps accepting jobs; they run FIFO after rele
   // A turn the poll listed before the drain began still refuses at the last check.
   const ready = first.store.ready(first.gateway.key, Date.now(), 1)[0];
 
-  if (!ready) throw new Error("Expected a queued job");
+  if (!ready) {
+    throw new Error("Expected a queued job");
+  }
+
   await first.gateway.process(ready, new AbortController().signal);
   expect(first.prompts).toEqual([]);
   // Messages accepted during the drain persist behind the older ones.
@@ -171,7 +181,10 @@ test("held queued jobs cannot hide a responding delivery in the bounded ready qu
   });
   const responding = f.store.queuedJob(f.gateway.key, "late")?.id;
 
-  if (responding === undefined) throw new Error("Missing job");
+  if (responding === undefined) {
+    throw new Error("Missing job");
+  }
+
   f.store.running(responding);
   f.store.respond(responding, ["done"]);
   const jobs = f.store.ready(f.gateway.key, Date.now(), 1, false, true);
@@ -203,7 +216,10 @@ test("the gateway broadcast queues each mapped unpinned session once with a dete
 
   const handler = f.handlers[0];
 
-  if (!handler) throw new Error("Gateway did not attach");
+  if (!handler) {
+    throw new Error("Gateway did not attach");
+  }
+
   const signal = new AbortController().signal;
   await handler.broadcast(record, signal);
   await handler.broadcast({ ...record, phase: "restarting" }, signal);

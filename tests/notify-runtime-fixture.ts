@@ -109,8 +109,10 @@ export async function until(check: () => boolean | Promise<boolean>) {
   const deadline = performance.now() + 5000;
 
   while (!(await check())) {
-    if (performance.now() >= deadline)
+    if (performance.now() >= deadline) {
       throw new Error("Notification fixture deadline");
+    }
+
     await delay(5);
   }
 }
@@ -136,7 +138,9 @@ export function runtimeDependencies(
           user: `U${bot.id.toUpperCase()}`,
         }),
         start: async () => {
-          if (options.fail) throw new Error("Fixture connection failed");
+          if (options.fail) {
+            throw new Error("Fixture connection failed");
+          }
         },
         close: async () => {},
         post: async () => {
@@ -193,7 +197,10 @@ if (
 ) {
   const directory = process.argv[2];
 
-  if (!directory) throw new Error("Missing fixture directory");
+  if (!directory) {
+    throw new Error("Missing fixture directory");
+  }
+
   const originalFetch = globalThis.fetch;
   let authCalls = 0;
   let correctAuthorization = false;
@@ -229,7 +236,9 @@ if (
         correctAuthorization =
           new Headers(init?.headers).get("Authorization") ===
           `Bearer ${expectedBot}`;
-      } else unexpectedRequest = true;
+      } else {
+        unexpectedRequest = true;
+      }
 
       return Response.json({ ok: false, error: "invalid_auth" });
     },
@@ -267,7 +276,10 @@ if (
 } else if (import.meta.main) {
   const directory = process.argv[2];
 
-  if (!directory) throw new Error("Missing fixture directory");
+  if (!directory) {
+    throw new Error("Missing fixture directory");
+  }
+
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const config = runtimeConfig(directory);
   const controller = new AbortController();

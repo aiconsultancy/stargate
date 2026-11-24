@@ -22,15 +22,20 @@ const native = {
 const saved = new Map<string, string | undefined>();
 
 beforeEach(() => {
-  for (const name of [apiKeyEnv, ...Object.keys(native)])
+  for (const name of [apiKeyEnv, ...Object.keys(native)]) {
     saved.set(name, process.env[name]);
+  }
+
   Object.assign(process.env, native, { [apiKeyEnv]: "local-proxy-test-only" });
 });
 
 afterEach(() => {
   for (const [name, value] of saved) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
   }
 });
 
@@ -93,7 +98,10 @@ test("Pi Claude proxy registers only the pinned catalog model at the proxy", () 
 
   const routed = models.getModel("anthropic", "claude-haiku-5-5");
 
-  if (!source) throw new Error("Pinned catalog lacks Claude Haiku 5.5");
+  if (!source) {
+    throw new Error("Pinned catalog lacks Claude Haiku 5.5");
+  }
+
   expect(routed).toEqual({ ...source, baseUrl: "http://127.0.0.1:8317" });
   expect(models.getModel("anthropic", "claude-opus-5-5")).toBeUndefined();
   expect(models.getModel("openai", "opencode-go/deepseek-v4.1-flash")).toBe(
@@ -125,8 +133,9 @@ test("Pi thinking level accepts only SDK levels the model supports", () => {
     { thinkingLevel: "low" },
   );
 
-  for (const thinkingLevel of ["#low", "LOW", "lowest", "", 1, null])
+  for (const thinkingLevel of ["#low", "LOW", "lowest", "", 1, null]) {
     expect(() => config(baseURL, "/workspace", { thinkingLevel })).toThrow();
+  }
 
   const { directory: _, ...worker } = config(baseURL, "/workspace", {
     thinkingLevel: "low",
@@ -156,7 +165,7 @@ test("Pi thinking level accepts only SDK levels the model supports", () => {
   ).not.toThrow();
 });
 
-for (const thinkingLevel of [undefined, "low"] as const)
+for (const thinkingLevel of [undefined, "low"] as const) {
   test(`Pi Claude proxy sends thinking ${thinkingLevel ?? "default off"} to bot and report conversations`, async () => {
     const directory = await mkdtemp(
       join(tmpdir(), "stargate-pi-claude-level-"),
@@ -214,6 +223,7 @@ for (const thinkingLevel of [undefined, "low"] as const)
       await rm(directory, { recursive: true, force: true });
     }
   });
+}
 
 test("Pi Claude proxy sends Anthropic messages with only the proxy key", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-pi-claude-"));
@@ -258,7 +268,10 @@ test("Pi Claude proxy sends Anthropic messages with only the proxy key", async (
     expect(requests).toHaveLength(1);
     const [request] = requests;
 
-    if (!request) throw new Error("Proxy request is missing");
+    if (!request) {
+      throw new Error("Proxy request is missing");
+    }
+
     expect(request.path).toBe("/v1/messages");
     expect(request.headers.get("x-api-key")).toBe("local-proxy-test-only");
     expect(request.headers.get("authorization")).toBeNull();
@@ -310,7 +323,9 @@ test("Pi Claude proxy refuses redirects to another host", async () => {
     const models = piModels(config(new URL("/v1", server.url).href));
     const routed = models.getModel("anthropic", "claude-haiku-5-5");
 
-    if (!routed) throw new Error("Claude proxy model is missing");
+    if (!routed) {
+      throw new Error("Claude proxy model is missing");
+    }
 
     const reply = await models.completeSimple(routed, {
       messages: [{ role: "user", content: "hello", timestamp: 0 }],

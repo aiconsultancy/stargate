@@ -66,7 +66,9 @@ function continues(issue: SchemaIssue.Issue): boolean {
 
 /** The pattern sources of a string field, in check order. */
 function patterns(ast: SchemaAST.AST): string[] {
-  if (Predicate.isTagged(ast, "Union")) return ast.types.flatMap(patterns);
+  if (Predicate.isTagged(ast, "Union")) {
+    return ast.types.flatMap(patterns);
+  }
 
   return (ast.checks ?? []).flatMap((check) => {
     const representation = check.annotations?.representation;
@@ -91,7 +93,9 @@ function advertised(
   const encoded = Schema.toEncoded(field);
   const sources = patterns(encoded.ast);
 
-  if (sources.length < 2) return settingsInputAdvertisement(field);
+  if (sources.length < 2) {
+    return settingsInputAdvertisement(field);
+  }
 
   return {
     type: "string",
@@ -102,10 +106,14 @@ function advertised(
 }
 
 function schemaURI(target: StandardJSONSchemaV1.Target) {
-  if (target === "draft-2020-12")
+  if (target === "draft-2020-12") {
     return JsonSchema.META_SCHEMA_URI_DRAFT_2020_12;
+  }
 
-  if (target === "draft-07") return JsonSchema.META_SCHEMA_URI_DRAFT_07;
+  if (target === "draft-07") {
+    return JsonSchema.META_SCHEMA_URI_DRAFT_07;
+  }
+
   throw new Error(`Unsupported notification schema target: ${target}`);
 }
 
@@ -120,7 +128,7 @@ export function notificationToolInput(): StandardSchemaV1<
   StandardJSONSchemaV1<Record<string, unknown>> {
   const fields = new Map<string, Schema.Constraint[]>();
 
-  for (const branch of notificationInputSchema.members)
+  for (const branch of notificationInputSchema.members) {
     for (const [key, field] of Object.entries<Schema.Constraint>(
       branch.fields,
     )) {
@@ -128,24 +136,27 @@ export function notificationToolInput(): StandardSchemaV1<
       variants.push(field);
       fields.set(key, variants);
     }
+  }
 
   const decoders = new Map<string, FieldDecoder[]>();
 
-  for (const [key, variants] of fields)
+  for (const [key, variants] of fields) {
     decoders.set(
       key,
       variants.map((field) =>
         Schema.decodeUnknownResult(Schema.toEncoded(field), { errors: "all" }),
       ),
     );
+  }
 
   const project = ({ target }: { target: StandardJSONSchemaV1.Target }) => {
     const properties: Record<string, unknown> = {};
 
-    for (const [key, variants] of fields)
+    for (const [key, variants] of fields) {
       properties[key] = {
         anyOf: variants.map((field) => advertised(field, target)),
       };
+    }
 
     return structuredClone({
       $schema: schemaURI(target),
@@ -164,8 +175,10 @@ export function notificationToolInput(): StandardSchemaV1<
       validate: (raw) => {
         const object = decodeObject(raw);
 
-        if (Result.isFailure(object))
+        if (Result.isFailure(object)) {
           return settingsIssues(object.failure.issue);
+        }
+
         const input = object.success;
         const issues: StandardSchemaV1.Issue[] = [];
         const value: Record<string, unknown> = {};
@@ -184,10 +197,16 @@ export function notificationToolInput(): StandardSchemaV1<
           const field = input[key];
           value[key] = field;
 
-          if (field === undefined && key !== "op") continue;
+          if (field === undefined && key !== "op") {
+            continue;
+          }
+
           const results = variants.map((decode) => decode(field));
 
-          if (results.some((result) => Result.isSuccess(result))) continue;
+          if (results.some((result) => Result.isSuccess(result))) {
+            continue;
+          }
+
           const [only] = results;
 
           if (results.length !== 1 || !only || Result.isSuccess(only)) {
@@ -196,27 +215,39 @@ export function notificationToolInput(): StandardSchemaV1<
             continue;
           }
 
-          for (const issue of settingsIssues(only.failure.issue).issues)
+          for (const issue of settingsIssues(only.failure.issue).issues) {
             issues.push({ ...issue, path: [key, ...(issue.path ?? [])] });
+          }
 
-          if (!continues(only.failure.issue)) stop = true;
+          if (!continues(only.failure.issue)) {
+            stop = true;
+          }
         }
 
         const unknown: string[] = [];
 
-        for (const key in input) if (!decoders.has(key)) unknown.push(key);
+        for (const key in input) {
+          if (!decoders.has(key)) {
+            unknown.push(key);
+          }
+        }
 
-        if (unknown.length > 0)
+        if (unknown.length > 0) {
           issues.push({
             path: [],
             message: `Unrecognized key${unknown.length === 1 ? "" : "s"}: ${unknown.map((key) => JSON.stringify(key)).join(", ")}`,
           });
+        }
 
-        if (stop) return { issues };
+        if (stop) {
+          return { issues };
+        }
+
         const operation = decodeOperation(value);
 
-        if (Result.isFailure(operation))
+        if (Result.isFailure(operation)) {
           issues.push(...settingsIssues(operation.failure.issue).issues);
+        }
 
         return issues.length > 0 ? { issues } : { value };
       },
@@ -241,19 +272,22 @@ export class CrewNotifications {
   public async run(raw: unknown, caller: CrewCaller): Promise<unknown> {
     const parsed = Schema.decodeUnknownResult(notificationInputSchema)(raw);
 
-    if (Result.isFailure(parsed))
+    if (Result.isFailure(parsed)) {
       throw new CrewError(
         "Invalid notification operation; targets must be explicit.",
       );
+    }
+
     caller.signal.throwIfAborted();
     await this.authority.captain(caller);
     caller.signal.throwIfAborted();
     const binding = this.authority.options.cron;
 
-    if (!binding)
+    if (!binding) {
       throw new CrewError(
         "stargate_notifications unavailable: bind the captain's cron configPath and bot first.",
       );
+    }
 
     try {
       return await this.runner(

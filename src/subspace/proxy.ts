@@ -59,19 +59,26 @@ const warningIntervalMs = 60_000;
  * query passes as sent.
  */
 export function apiPath(target: string | undefined) {
-  if (!target?.startsWith("/") || target.startsWith("//")) return;
+  if (!target?.startsWith("/") || target.startsWith("//")) {
+    return;
+  }
+
   const query = target.indexOf("?");
   const path = query === -1 ? target : target.slice(0, query);
 
-  if (/[\\#]|%(?:2f|5c|2e|00)/i.test(path)) return;
+  if (/[\\#]|%(?:2f|5c|2e|00)/i.test(path)) {
+    return;
+  }
+
   const url = new URL(target, "http://officer.invalid");
 
   if (
     url.origin !== "http://officer.invalid" ||
     url.pathname !== path ||
     (url.pathname !== "/mcp" && !url.pathname.startsWith("/api/v1/"))
-  )
+  ) {
     return;
+  }
 
   return `${url.pathname}${url.search}`;
 }
@@ -103,7 +110,10 @@ async function requestBody(request: IncomingMessage) {
     const buffer = chunk as Buffer;
     size += buffer.length;
 
-    if (size > maxRequestBytes) throw new TooLarge();
+    if (size > maxRequestBytes) {
+      throw new TooLarge();
+    }
+
     chunks.push(buffer);
   }
 
@@ -130,10 +140,11 @@ export type OfficerProxyOptions = {
 export function checkSocketDirectory(directory: string, officer: string) {
   const stats = lstatSync(directory);
 
-  if ((stats.mode & 0o007) !== 0)
+  if ((stats.mode & 0o007) !== 0) {
     throw new SubspaceFileError(
       `${officer}'s Subspace socket directory must give others no access (for example mode 2750)`,
     );
+  }
 
   return stats;
 }
@@ -170,7 +181,10 @@ export class OfficerProxy {
   private warn(kind: string, message: string, status?: number) {
     const now = Date.now();
 
-    if (now - (this.warned.get(kind) ?? 0) < warningIntervalMs) return;
+    if (now - (this.warned.get(kind) ?? 0) < warningIntervalMs) {
+      return;
+    }
+
     this.warned.set(kind, now);
     this.options.log.warn(status === undefined ? {} : { status }, message);
   }
@@ -203,7 +217,9 @@ export class OfficerProxy {
 
     const disconnected = new AbortController();
     response.once("close", () => {
-      if (!response.writableFinished) disconnected.abort();
+      if (!response.writableFinished) {
+        disconnected.abort();
+      }
     });
 
     const signal = AbortSignal.any([
@@ -236,14 +252,17 @@ export class OfficerProxy {
     for (const name of forwardedRequestHeaders) {
       const value = request.headers[name];
 
-      if (typeof value === "string") headers.set(name, value);
+      if (typeof value === "string") {
+        headers.set(name, value);
+      }
     }
 
     let upstream: Response;
 
     try {
-      for (const [name, value] of this.options.upstream.accessHeaders())
+      for (const [name, value] of this.options.upstream.accessHeaders()) {
         headers.set(name, value);
+      }
 
       const key = await this.options.key();
 
@@ -304,12 +323,13 @@ export class OfficerProxy {
       return;
     }
 
-    if (upstream.status === 401 || upstream.status === 403)
+    if (upstream.status === 401 || upstream.status === 403) {
       this.warn(
         "refused",
         "The Subspace API refused this officer's agent token; check its enrolment",
         upstream.status,
       );
+    }
 
     await this.relay(upstream, response, signal);
   }
@@ -325,7 +345,9 @@ export class OfficerProxy {
     for (const name of returnedResponseHeaders) {
       const value = upstream.headers.get(name);
 
-      if (value !== null) headers[name] = value;
+      if (value !== null) {
+        headers[name] = value;
+      }
     }
 
     response.writeHead(upstream.status, headers);
@@ -334,15 +356,25 @@ export class OfficerProxy {
 
     try {
       for (;;) {
-        if (!reader) break;
+        if (!reader) {
+          break;
+        }
+
         const { done, value } = await reader.read();
 
-        if (done) break;
+        if (done) {
+          break;
+        }
+
         size += value.byteLength;
 
-        if (size > maxResponseBytes) throw new TooLarge();
+        if (size > maxResponseBytes) {
+          throw new TooLarge();
+        }
 
-        if (!response.write(value)) await once(response, "drain", { signal });
+        if (!response.write(value)) {
+          await once(response, "drain", { signal });
+        }
       }
 
       response.end();
@@ -380,18 +412,25 @@ export class OfficerProxy {
     if (
       (before.mode & 0o070) !== 0 &&
       lstatSync(this.options.socketPath).gid !== before.gid
-    )
+    ) {
       throw new SubspaceFileError(
         `${this.options.officer}'s Subspace socket did not get its directory's group; set the directory's setgid bit (mode 2750)`,
       );
+    }
   }
 
   public async close() {
-    if (this.closed) return;
+    if (this.closed) {
+      return;
+    }
+
     this.closed = true;
     this.stop.abort();
 
-    if (this.server) await close(this.server);
+    if (this.server) {
+      await close(this.server);
+    }
+
     await Promise.allSettled(this.pending);
     unlinkOwnSocket(
       this.options.socketPath,

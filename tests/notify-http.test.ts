@@ -76,7 +76,10 @@ test("Unix HTTP acknowledges committed SQLite; response loss and restart keep du
       const body = JSON.parse(response.body);
       expect(body.duplicate).toBe(n === 1);
 
-      if (accepted) expect(body.signature).toBe(accepted.signature);
+      if (accepted) {
+        expect(body.signature).toBe(accepted.signature);
+      }
+
       accepted = body;
       const disk = new Database(path, { readonly: true });
       expect(
@@ -141,7 +144,9 @@ test("lost original HTTP response replays as duplicate after restart without ano
           await new Promise<void>((resolve) => {
             signal.addEventListener("abort", () => resolve(), { once: true });
 
-            if (signal.aborted) resolve();
+            if (signal.aborted) {
+              resolve();
+            }
           });
         }
 
@@ -231,7 +236,9 @@ test("full real outbox maps to 503 without partial admission; duplicate still su
           await new Promise<void>((resolve) => {
             signal.addEventListener("abort", () => resolve(), { once: true });
 
-            if (signal.aborted) resolve();
+            if (signal.aborted) {
+              resolve();
+            }
           });
 
           return { state: "unknown" };
@@ -411,8 +418,10 @@ test("real host rejects credentials, Origin, media, identity claims and topic; s
     let response = await unixRequest(join(directory, "api.sock"));
     expect(response.status).toBe(202);
 
-    for (let n = 0; n < 60; n++)
+    for (let n = 0; n < 60; n++) {
       response = await unixRequest(join(directory, "api.sock"));
+    }
+
     expect(response.status).toBe(429);
     expect(response.headers["retry-after"]).toBe("60");
     producer.closeAdmission();

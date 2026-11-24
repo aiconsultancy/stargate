@@ -89,7 +89,9 @@ test("review: configuration records preserve legacy shallow key handling", () =>
   for (const [input, expected] of settingsRecordCases) {
     const options: unknown = JSON.parse(input);
 
-    if (!Predicate.isObject(options)) throw new Error("Invalid record fixture");
+    if (!Predicate.isObject(options)) {
+      throw new Error("Invalid record fixture");
+    }
 
     const result = Schema.decodeUnknownSync(configSchema)({
       bots: [
@@ -109,7 +111,10 @@ test("review: configuration records preserve legacy shallow key handling", () =>
     );
     const backend = result.bots[0]?.backend;
 
-    if (backend?.type !== "module") throw new Error("Unexpected backend");
+    if (backend?.type !== "module") {
+      throw new Error("Unexpected backend");
+    }
+
     expect(backend.options["nested"]).toBe(options["nested"]);
     expect(Object.hasOwn(options as object, "__proto__")).toBe(true);
   }
@@ -220,8 +225,9 @@ test("review: raw unknown keys survive structural child failures safely", () => 
 });
 
 function withoutInboundReactions(value: unknown): unknown {
-  if (!Predicate.isObject(value) || !Predicate.isObject(value["slack"]))
+  if (!Predicate.isObject(value) || !Predicate.isObject(value["slack"])) {
     return value;
+  }
 
   const { inboundReactions: _inboundReactions, ...slack } = value[
     "slack"
@@ -232,14 +238,18 @@ function withoutInboundReactions(value: unknown): unknown {
 
 // Captured from Zod 4.6.7 at base4ff23cb, before replacing production schemas.
 // Include raw wire order: provisioning hashes JSON.stringify(decoded plan).
-for (const [name, codec] of Object.entries(codecs))
+for (const [name, codec] of Object.entries(codecs)) {
   test(`settings legacy acceptance, values and wire order: ${name}`, () => {
     // Keep the legacy oracle independent. New flags are covered separately
     // By their configuration and behaviour tests.
     const legacy = (value: unknown): unknown => {
-      if (!Predicate.isObject(value) || Array.isArray(value)) return value;
+      if (!Predicate.isObject(value) || Array.isArray(value)) {
+        return value;
+      }
 
-      if (name === "botSchema") return withoutInboundReactions(value);
+      if (name === "botSchema") {
+        return withoutInboundReactions(value);
+      }
 
       if (name === "maintenanceSchema") {
         const { drain: _drain, ...rest } = value as Record<string, unknown>;
@@ -252,7 +262,9 @@ for (const [name, codec] of Object.entries(codecs))
           ? { ...value, bots: value["bots"].map(withoutInboundReactions) }
           : value;
 
-        if (!Predicate.isObject(config["maintenance"])) return config;
+        if (!Predicate.isObject(config["maintenance"])) {
+          return config;
+        }
 
         const { drain: _drain, ...maintenance } = config[
           "maintenance"
@@ -266,13 +278,18 @@ for (const [name, codec] of Object.entries(codecs))
 
     const seeds = settingsSeeds[name];
 
-    if (!seeds) throw new Error(`Missing seeds: ${name}`);
+    if (!seeds) {
+      throw new Error(`Missing seeds: ${name}`);
+    }
+
     const decode = Schema.decodeUnknownResult(codec, { errors: "all" });
 
     const decoded = seeds.map((input) => {
       const result = decode(input);
 
-      if (Result.isFailure(result)) throw new Error(`Invalid seed for ${name}`);
+      if (Result.isFailure(result)) {
+        throw new Error(`Invalid seed for ${name}`);
+      }
 
       return legacy(result.success);
     });
@@ -301,6 +318,7 @@ for (const [name, codec] of Object.entries(codecs))
     // The legacy oracle sweep is CPU-bound and can exceed the default 5s
     // Under a full-suite load; it is a deliberate golden comparison.
   }, 60_000);
+}
 
 test("settings preserve Unicode bounds, URL cleanup and explicit undefined keys", () => {
   const name = "𐐀".repeat(40);
@@ -372,11 +390,12 @@ test("otherwise-valid configuration failures retain actionable paths and safe me
     const result = Schema.decodeUnknownResult(codec, { errors: "all" })(input);
     expect(Result.isFailure(result)).toBe(true);
 
-    if (Result.isFailure(result))
+    if (Result.isFailure(result)) {
       expect(settingsIssues(result.failure.issue).issues).toContainEqual({
         path,
         message,
       });
+    }
   }
 });
 
@@ -577,13 +596,19 @@ test("public config errors retain dependent custom diagnostics and independent f
       const error = await loadConfig(file).catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(Error);
 
-      if (!(error instanceof Error))
+      if (!(error instanceof Error)) {
         throw new Error("Invalid config was accepted");
+      }
+
       expect(error.message).not.toContain("SENSITIVE_CONFIG_VALUE");
 
-      for (const message of messages) expect(error.message).toContain(message);
+      for (const message of messages) {
+        expect(error.message).toContain(message);
+      }
 
-      for (const path of paths) expect(error.message).toContain(path);
+      for (const path of paths) {
+        expect(error.message).toContain(path);
+      }
     }
   } finally {
     await rm(directory, { recursive: true, force: true });

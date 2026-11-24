@@ -55,7 +55,9 @@ let deaf = false;
 
 // Decided before any input: the CLI's own SIGTERM handling.
 process.on("SIGTERM", () => {
-  if (!deaf) process.exit(143);
+  if (!deaf) {
+    process.exit(143);
+  }
 });
 
 process.stdin.setEncoding("utf8");
@@ -85,8 +87,9 @@ process.stdin.on("end", () => {
     write({ type: "thread.started", thread_id: thread });
     write({ type: "turn.started" });
 
-    if (prompt.includes("stubborn"))
+    if (prompt.includes("stubborn")) {
       await stubborn(prompt.includes("detached"));
+    }
 
     if (prompt.includes("swap")) {
       const link = process.env["STARGATE_TEST_LINK"] ?? "";
@@ -133,7 +136,7 @@ process.stdin.on("end", () => {
       const message =
         /fail=([^;]*);/.exec(prompt)?.[1] ?? "raw upstream detail";
 
-      if (prompt.includes("tool"))
+      if (prompt.includes("tool")) {
         write({
           type: "item.completed",
           item: {
@@ -143,6 +146,8 @@ process.stdin.on("end", () => {
             aggregated_output: "",
           },
         });
+      }
+
       write({
         type: "item.completed",
         item: { id: "item_e", type: "error", message },
@@ -190,6 +195,8 @@ process.stdin.on("end", () => {
       },
     });
 
-    if (prompt.includes("linger")) setInterval(() => {}, 1000);
+    if (prompt.includes("linger")) {
+      setInterval(() => {}, 1000);
+    }
   })();
 });

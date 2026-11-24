@@ -108,10 +108,17 @@ export function createEventStreams(
   }
 
   function expireOverview() {
-    if (!cachedOverview || cachedOverview.expiresAt > performance.now()) return;
+    if (!cachedOverview || cachedOverview.expiresAt > performance.now()) {
+      return;
+    }
+
     cachedOverview = undefined;
 
-    if (active) for (const client of active.clients) client.close();
+    if (active) {
+      for (const client of active.clients) {
+        client.close();
+      }
+    }
   }
 
   function startPolling() {
@@ -127,10 +134,15 @@ export function createEventStreams(
     let readingHost = false;
 
     function broadcast(events: V1Event[]) {
-      if (events.length === 0) return;
+      if (events.length === 0) {
+        return;
+      }
+
       const bytes = encodeEvents(events);
 
-      for (const client of clients) client.send(bytes);
+      for (const client of clients) {
+        client.send(bytes);
+      }
     }
 
     function newestHost(host: V1Host) {
@@ -151,26 +163,37 @@ export function createEventStreams(
           ? next >= kept
           : host.sampledAt >= latestHost.sampledAt;
 
-      if (newer) latestHost = host;
+      if (newer) {
+        latestHost = host;
+      }
 
       return latestHost;
     }
 
     function publishHostSample(host: V1Host) {
-      if (newestHost(host) !== host) return;
+      if (newestHost(host) !== host) {
+        return;
+      }
 
-      if (fleet) fleet = { ...fleet, host };
+      if (fleet) {
+        fleet = { ...fleet, host };
+      }
+
       broadcast([{ type: "host", data: host }]);
     }
 
     function syncIdentities() {
       const current = options.shipIdentities?.();
 
-      if (!current || isDeepStrictEqual(current, identities))
+      if (!current || isDeepStrictEqual(current, identities)) {
         return rosterGeneration;
+      }
 
       for (const [id, identity] of identities ?? []) {
-        if (current.get(id) === identity) continue;
+        if (current.get(id) === identity) {
+          continue;
+        }
+
         shipReads.get(shipKey(id, identity))?.attempt?.controller.abort();
         cachedShips.delete(id);
       }
@@ -180,7 +203,12 @@ export function createEventStreams(
       rosterRead = new AbortController();
       cachedOverview = undefined;
 
-      if (fleet) for (const client of clients) client.close();
+      if (fleet) {
+        for (const client of clients) {
+          client.close();
+        }
+      }
+
       fleet = undefined;
       ships.clear();
       identities = current;
@@ -197,14 +225,24 @@ export function createEventStreams(
       const prior = summaries;
       summaries = new Map(next.ships.map((ship) => [ship.id, ship]));
 
-      for (const [id, previous] of prior)
-        if (summaries.get(id)?.available !== previous.available)
+      for (const [id, previous] of prior) {
+        if (summaries.get(id)?.available !== previous.available) {
           shipReads.get(shipKey(id))?.attempt?.controller.abort();
+        }
+      }
 
-      for (const id of ships.keys()) if (!summaries.has(id)) ships.delete(id);
+      for (const id of ships.keys()) {
+        if (!summaries.has(id)) {
+          ships.delete(id);
+        }
+      }
 
-      for (const id of cachedShips.keys())
-        if (!summaries.has(id)) cachedShips.delete(id);
+      for (const id of cachedShips.keys()) {
+        if (!summaries.has(id)) {
+          cachedShips.delete(id);
+        }
+      }
+
       broadcast(
         previous
           ? options.diff(
@@ -215,19 +253,23 @@ export function createEventStreams(
           : [{ type: "fleet", data: next }],
       );
 
-      for (const { id, available } of next.ships)
+      for (const { id, available } of next.ships) {
         if (
           !available &&
           prior.get(id)?.available !== false &&
           cachedShips.has(id)
-        )
+        ) {
           publishShip(id, Date.now());
+        }
+      }
     }
 
     function publishShip(id: string, readAt: number, result?: V1ShipDetail) {
       const summary = summaries.get(id);
 
-      if (!fleet || !summary) return;
+      if (!fleet || !summary) {
+        return;
+      }
 
       const detail =
         !summary.available && result?.available ? undefined : result;
@@ -264,12 +306,18 @@ export function createEventStreams(
 
       ships.set(id, next);
 
-      if (next.available && !next.detailStale) cachedShips.set(id, next);
+      if (next.available && !next.detailStale) {
+        cachedShips.set(id, next);
+      }
+
       broadcast(changes);
     }
 
     async function refreshShip({ id, available }: V1Ship, read: V1ShipRead) {
-      if (shutdown.signal.aborted || pending.has(id)) return;
+      if (shutdown.signal.aborted || pending.has(id)) {
+        return;
+      }
+
       const readAt = Date.now();
       const key = shipKey(id);
 
@@ -281,11 +329,14 @@ export function createEventStreams(
 
       let attempt = shared.slot.pending ? shared.attempt : undefined;
 
-      if (attempt && attempt.available !== available)
+      if (attempt && attempt.available !== available) {
         attempt.controller.abort();
+      }
 
       if (attempt && (attempt.failed || attempt.controller.signal.aborted)) {
-        if (!available || cachedShips.has(id)) publishShip(id, readAt);
+        if (!available || cachedShips.has(id)) {
+          publishShip(id, readAt);
+        }
 
         return;
       }
@@ -319,34 +370,52 @@ export function createEventStreams(
       try {
         const detail = await attempt.result.catch((): undefined => {});
 
-        if (cancelled()) return;
+        if (cancelled()) {
+          return;
+        }
+
         syncIdentities();
 
-        if (!cancelled()) publishShip(id, attempt.readAt, detail);
+        if (!cancelled()) {
+          publishShip(id, attempt.readAt, detail);
+        }
       } finally {
         pending.delete(id);
       }
     }
 
     function refreshMetrics(overview: V1Snapshot["fleet"], generation: number) {
-      if (enriching) return;
+      if (enriching) {
+        return;
+      }
+
       enriching = true;
       void enrich(lifetime.signal, (signal) =>
         options.completeFleet(overview, signal),
       )
         .then(({ host, gateway }) => {
-          if (shutdown.signal.aborted || syncIdentities() !== generation)
+          if (shutdown.signal.aborted || syncIdentities() !== generation) {
             return;
+          }
+
           expireOverview();
 
-          if (!cachedOverview || !fleet) return;
+          if (!cachedOverview || !fleet) {
+            return;
+          }
+
           const next = { ...fleet, host: newestHost(host), gateway };
           const hostChanged = !isDeepStrictEqual(fleet.host, next.host);
 
-          if (isDeepStrictEqual(fleet.gateway, gateway)) fleet = next;
-          else publishFleet(next);
+          if (isDeepStrictEqual(fleet.gateway, gateway)) {
+            fleet = next;
+          } else {
+            publishFleet(next);
+          }
 
-          if (hostChanged) publishHostSample(next.host);
+          if (hostChanged) {
+            publishHostSample(next.host);
+          }
         })
         .catch(() => {
           // Keep the cached metrics and retry on a later poll.
@@ -359,13 +428,16 @@ export function createEventStreams(
     async function poll() {
       expireOverview();
 
-      if (shutdown.signal.aborted) return;
+      if (shutdown.signal.aborted) {
+        return;
+      }
 
       try {
         const generation = syncIdentities();
 
-        if (publishing !== generation && !shutdown.signal.aborted)
+        if (publishing !== generation && !shutdown.signal.aborted) {
           await refreshOverview(generation);
+        }
       } catch {
         // Keep the last overview and retry while clients are present.
       }
@@ -396,17 +468,22 @@ export function createEventStreams(
           shutdown.signal.aborted ||
           syncIdentities() !== generation ||
           (sample && sample.generation !== generation)
-        )
+        ) {
           return;
+        }
 
-        if (sample)
+        if (sample) {
           cachedOverview = {
             overview: sample.overview,
             expiresAt: performance.now() + 3 * overviewReadMs,
           };
+        }
+
         expireOverview();
 
-        if (!cachedOverview) return;
+        if (!cachedOverview) {
+          return;
+        }
 
         const overview = sample
           ? sample.overview
@@ -432,12 +509,16 @@ export function createEventStreams(
 
         refreshMetrics(overview, generation);
       } finally {
-        if (publishing === generation) publishing = undefined;
+        if (publishing === generation) {
+          publishing = undefined;
+        }
       }
     }
 
     async function publishHost() {
-      if (shutdown.signal.aborted) return;
+      if (shutdown.signal.aborted) {
+        return;
+      }
 
       if (readingHost) {
         publishHostSample(options.snapshotHost());
@@ -456,7 +537,9 @@ export function createEventStreams(
       });
       const data = await result.catch(() => options.snapshotHost());
 
-      if (!shutdown.signal.aborted) publishHostSample(data);
+      if (!shutdown.signal.aborted) {
+        publishHostSample(data);
+      }
     }
 
     const pollTimer = setInterval(() => void poll(), timing.pollMs);
@@ -482,7 +565,9 @@ export function createEventStreams(
               })),
             ]),
           );
-        } else void poll();
+        } else {
+          void poll();
+        }
       },
       stop() {
         shutdown.abort();
@@ -502,8 +587,10 @@ export function createEventStreams(
         lifetime.signal.aborted ||
         signal.aborted ||
         (active?.clients.size ?? 0) >= maxClients
-      )
+      ) {
         return;
+      }
+
       active ??= startPolling();
       const session = active;
       let cleanup = noop;
@@ -516,7 +603,10 @@ export function createEventStreams(
             };
 
             cleanup = () => {
-              if (!session.clients.delete(client)) return;
+              if (!session.clients.delete(client)) {
+                return;
+              }
+
               signal.removeEventListener("abort", aborted);
 
               if (session.clients.size === 0) {
@@ -533,17 +623,24 @@ export function createEventStreams(
                 if (
                   available !== null &&
                   (available === bufferBytes || bytes.length <= available)
-                )
+                ) {
                   controller.enqueue(bytes);
-                else
+                } else {
                   client.close(new Error("Fleet API event stream backed up"));
+                }
               },
               close(error) {
-                if (!session.clients.has(client)) return;
+                if (!session.clients.has(client)) {
+                  return;
+                }
+
                 cleanup();
 
-                if (error) controller.error(error);
-                else controller.close();
+                if (error) {
+                  controller.error(error);
+                } else {
+                  controller.close();
+                }
               },
             };
 
@@ -560,7 +657,11 @@ export function createEventStreams(
     stop() {
       lifetime.abort();
 
-      if (active) for (const client of active.clients) client.close();
+      if (active) {
+        for (const client of active.clients) {
+          client.close();
+        }
+      }
     },
   };
 }
