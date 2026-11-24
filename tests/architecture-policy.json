@@ -2,7 +2,6 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "braceMigrationFileLimits": {
-    "src/automation/maintenance/nightly/journal.ts": 1049,
     "src/backends/claude.ts": 1013,
     "src/chat/questions/questions.ts": 1031
   },
@@ -1506,6 +1505,7 @@
         "src/maintenance-drain.ts",
         "src/maintenance.ts",
         "src/maintenance/nightly/journal-records.ts",
+        "src/automation/maintenance/nightly/journal-backup.ts",
         "src/nightly/archive.ts",
         "src/nightly/catalog.ts",
         "src/nightly/cleanup-config.ts",
