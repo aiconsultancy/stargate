@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { readInputOrigin } from "../src/coordination/crew/execution/origin";
+import { readInputOrigin } from "../src/backends/opencode/native-input-origin";
 import type {
   ResultAPI,
   ResultMessage,
