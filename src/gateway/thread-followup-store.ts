@@ -58,6 +58,15 @@ export interface FollowUpJobOperations {
   jobByInput(botKey: string, input: string): Job | null;
 }
 
+function threadRoot(
+  message: Pick<Incoming, "thread" | "replyParent">,
+  transport: ThreadFollowUp["transport"],
+) {
+  return transport === "irc"
+    ? (message.replyParent ?? message.thread)
+    : message.thread;
+}
+
 export class ThreadFollowUpRecords {
   public constructor(
     private readonly db: Database,
@@ -92,15 +101,12 @@ export class ThreadFollowUpRecords {
 
       if (!owner) return;
 
-      const root = (message: Pick<Incoming, "thread" | "replyParent">) =>
-        transport === "irc"
-          ? (message.replyParent ?? message.thread)
-          : message.thread;
+      const root = threadRoot(input, transport);
 
       const eligible =
         owner.conversation === input.conversation &&
         owner.channel === input.channel &&
-        root(owner) === root(input) &&
+        threadRoot(owner, transport) === root &&
         !!owner.input &&
         !input.sender &&
         !input.fleet &&
@@ -115,7 +121,7 @@ export class ThreadFollowUpRecords {
           input.botKey,
           input.channel,
           input.thread,
-          root(input),
+          root,
         );
 
         if (eligible)
@@ -127,13 +133,9 @@ export class ThreadFollowUpRecords {
 
         if (
           invited ||
-          this.irc.ircThreadParticipating(
-            input.botKey,
-            input.channel,
-            root(input),
-          )
+          this.irc.ircThreadParticipating(input.botKey, input.channel, root)
         )
-          this.irc.joinIrcThread(input.botKey, input.channel, root(input));
+          this.irc.joinIrcThread(input.botKey, input.channel, root);
       }
 
       this.db
@@ -186,17 +188,13 @@ export class ThreadFollowUpRecords {
     const input = this.followUpInput(receipt);
     const owner = this.jobs.jobByInput(receipt.botKey, receipt.inputID);
 
-    const root = (message: Incoming) =>
-      receipt.transport === "irc"
-        ? (message.replyParent ?? message.thread)
-        : message.thread;
-
     return (
       owner?.id === receipt.owner &&
       owner.status === "running" &&
       owner.conversation === input.conversation &&
       owner.channel === input.channel &&
-      root(owner) === root(input) &&
+      threadRoot(owner, receipt.transport) ===
+        threadRoot(input, receipt.transport) &&
       this.db
         .query("SELECT 1 FROM jobs WHERE id=? AND cancel_requested=0")
         .get(owner.id) !== null
