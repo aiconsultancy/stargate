@@ -14,7 +14,10 @@ import {
   Scope,
 } from "effect";
 import pino, { type Logger } from "pino";
-import { startRuntimeApi } from "../observability/dashboard/api/v1/runtime-api";
+import {
+  createActivityHub,
+  startRuntimeApi,
+} from "../observability/dashboard/api/v1/runtime-api";
 import type { AgentBackend, BackendContext } from "../backends/backend";
 import { createBackend, openCodeServerVersion } from "../backends/factory";
 import {
@@ -253,6 +256,30 @@ export function listenForReload(
   };
 }
 
+/** Each registration's backend, with its Fleet API turn activity recorder. */
+function registrationBackends(
+  config: ServeConfig,
+  log: Logger,
+  dependencies: RuntimeDependencies,
+) {
+  // Officer turn activity is collected only for the Fleet API to serve.
+  const activity = config.api ? createActivityHub() : undefined;
+
+  return subspaceAgents(config, log, dependencies).pipe(
+    Effect.map((bridged) => ({
+      activity,
+      create: (
+        registration: { id: string; backend: BackendConfig },
+        dataDirectory: string,
+      ) =>
+        dependencies.backend(bridged(registration), {
+          dataDirectory,
+          ...(activity && { activity: activity.recorder(registration.id) }),
+        }),
+    })),
+  );
+}
+
 /** Outage and observation timings outside tests. */
 const defaultConnectionTiming = { outageMs: 600_000, pollMs: 250 } as const;
 
@@ -364,7 +391,7 @@ export function serve(
       );
 
       // Unchanged backend configuration unless Subspace agents are enabled.
-      const bridged = yield* subspaceAgents(config, log, dependencies);
+      const backends = yield* registrationBackends(config, log, dependencies);
 
       // Registered before any worker starts; a failure never stops the gateway.
       const drain = dependencies.drain
@@ -535,9 +562,7 @@ export function serve(
 
         const resource = yield* Effect.acquireRelease(
           Effect.promise(async () =>
-            ownedBackend(
-              await dependencies.backend(bridged(teams), { dataDirectory }),
-            ),
+            ownedBackend(await backends.create(teams, dataDirectory)),
           ),
           (resource) => release(teamLog, "Teams backend", resource.close),
         );
@@ -638,9 +663,7 @@ export function serve(
 
         const resource = yield* Effect.acquireRelease(
           Effect.promise(async () =>
-            ownedBackend(
-              await dependencies.backend(bridged(bot), { dataDirectory }),
-            ),
+            ownedBackend(await backends.create(bot, dataDirectory)),
           ),
           (resource) => release(botLog, "Resource", resource.close),
         );
@@ -889,7 +912,7 @@ export function serve(
         await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
 
         const resource = ownedBackend(
-          await dependencies.backend(bridged(registration), { dataDirectory }),
+          await backends.create(registration, dataDirectory),
         );
 
         try {
@@ -1277,6 +1300,7 @@ export function serve(
                 dataDirectory: config.dataDirectory,
               },
               opencodeVersion: (signal) => openCodeVersion(ships, signal),
+              activity: backends.activity,
               signal: viewers.signal,
               ...(notify && {
                 composeRoutes: (token: string) => {

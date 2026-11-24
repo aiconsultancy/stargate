@@ -2,15 +2,19 @@
  * Fleet API v1: the read-only contract the Subspace Fleet Bridge web Space
  * reads. Additive changes only; never remove or retype a field.
  *
- * Times are epoch milliseconds. Byte counts are integers. Text that came from
- * crew or model output is bounded and redacted exactly as the dashboard's
- * crew status already is; prompt and reply text never appear.
+ * Times are epoch milliseconds. Byte counts are integers. In the fleet, ship
+ * and crew routes, text that came from crew or model output is bounded and
+ * redacted exactly as the dashboard's crew status already is. The agent
+ * activity route is the exception by the owner's rule: it serves tool input
+ * and output, errors, reply and reasoning text complete and unredacted, and
+ * pages large items instead of cutting them.
  *
  * Routes (all GET, bearer token, private networks only, `Cache-Control:
  * no-store`):
  *   /api/v1/fleet                       -> V1Fleet
  *   /api/v1/ships/{id}                  -> V1ShipDetail
  *   /api/v1/ships/{id}/crew/{member}    -> V1CrewDetail
+ *   /api/v1/agents/{id}/activity        -> V1AgentActivity or V1ActivityItemPage
  *   /api/v1/events                      -> text/event-stream of V1Event
  */
 import type { JobStatus } from "../../../../gateway/job-status";
@@ -297,6 +301,160 @@ export type V1ActivityEvent = {
   branch?: string;
   /** Final status for `outcome`. */
   status?: V1TaskStatus;
+};
+
+/** A provider failure as the agent saw it. */
+export type V1ActivityError = {
+  type: string;
+  message: string;
+  /** HTTP status, when the provider gave one. */
+  status: number | null;
+  /** The provider's response body, when it gave one. */
+  responseBody: string | null;
+  retryAfterMs: number | null;
+};
+
+export type V1ActivityContent =
+  | { type: "text"; text: string }
+  /** `uri` is often a `data:` URI holding the whole file. */
+  | { type: "file"; uri: string; mime: string; name: string | null };
+
+export type V1ActivityTokens = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+/**
+ * Item IDs are stable within their turn. `seq` is the agent change sequence
+ * of the item's latest change; a client keeps the item with the higher seq.
+ */
+type V1ActivityItemBase = {
+  id: string;
+  seq: number;
+  startedAt: number;
+  updatedAt: number;
+};
+
+/** One model request and response. */
+export type V1ActivityStep = V1ActivityItemBase & {
+  kind: "step";
+  status: "running" | "completed" | "failed";
+  model: { provider: string; id: string; variant: string | null } | null;
+  firstTokenAt: number | null;
+  streamedAt: number | null;
+  endedAt: number | null;
+  finish: string | null;
+  /** Settled token use; null while running. */
+  tokens: V1ActivityTokens | null;
+  /** Settled cost in USD; null while running or when unpriced. */
+  cost: number | null;
+  error: V1ActivityError | null;
+};
+
+/** Reply text (`text`) or the model's reasoning text (`reasoning`). */
+export type V1ActivityText = V1ActivityItemBase & {
+  kind: "text" | "reasoning";
+  status: "streaming" | "completed";
+  text: string;
+};
+
+export type V1ActivityToolCall = V1ActivityItemBase & {
+  kind: "tool";
+  /** The provider's tool call ID. */
+  callId: string;
+  /** Null until the call's name is observed. */
+  name: string | null;
+  /** `input` while the model streams the arguments. */
+  status: "input" | "running" | "completed" | "failed";
+  /** The arguments as the model streamed them. */
+  rawInput: string;
+  /** The parsed arguments once the call was made. */
+  input: Record<string, unknown> | null;
+  /** Whether the tool ran; null until known. */
+  executed: boolean | null;
+  /** The tool's latest progress or result metadata, such as live output. */
+  metadata: Record<string, unknown> | null;
+  /** The result, or a failed call's partial output. */
+  content: V1ActivityContent[] | null;
+  error: V1ActivityError | null;
+};
+
+export type V1ActivityItem =
+  | V1ActivityStep
+  | V1ActivityText
+  | V1ActivityToolCall;
+
+/**
+ * An item whose JSON exceeds 64 KiB. Fetch its pages with
+ * `?turn=&item=&page=` and join their `data` to read the complete item JSON.
+ */
+export type V1ActivityPagedItem = V1ActivityItemBase & {
+  kind: V1ActivityItem["kind"];
+  status: V1ActivityItem["status"];
+  /** Tool calls only. */
+  callId?: string;
+  /** Tool calls only. */
+  name?: string | null;
+  paged: { pages: number; bytes: number };
+};
+
+/** Settled use summed over the turn's steps. */
+export type V1ActivityUsage = {
+  steps: number;
+  tokens: V1ActivityTokens;
+  /** USD. */
+  cost: number;
+};
+
+export type V1ActivityTurn = {
+  /** Stable and unique across gateway restarts. */
+  id: string;
+  /** The agent change sequence of the turn's latest change. */
+  seq: number;
+  status: "running" | "completed" | "failed" | "cancelled";
+  startedAt: number;
+  updatedAt: number;
+  endedAt: number | null;
+  /** Times the live provider stream reattached; changes can be missing. */
+  reconnects: number;
+  /** Null until a step settles. */
+  usage: V1ActivityUsage | null;
+  /** In first-observed order. */
+  items: (V1ActivityItem | V1ActivityPagedItem)[];
+};
+
+/** Changes up to `seq` are included. `generation` changes on restart. */
+export type V1ActivityCursor = { generation: string; seq: number };
+
+export type V1AgentActivity = {
+  agent: {
+    /** Registration ID. */
+    id: string;
+    role: "captain" | "rear_admiral";
+    backend: V1Backend;
+    /** False when this gateway does not collect turns for the backend. */
+    collected: boolean;
+  };
+  /** Oldest first; at most 16 recent turns. */
+  turns: V1ActivityTurn[];
+  cursor: V1ActivityCursor;
+};
+
+/** One page of one item's complete JSON, at most 64 KiB of UTF-8. */
+export type V1ActivityItemPage = {
+  agent: string;
+  turn: string;
+  item: string;
+  /** Pages of different `seq` values do not join; refetch from page 0. */
+  seq: number;
+  page: number;
+  pages: number;
+  /** UTF-8 length of the whole item JSON. */
+  bytes: number;
+  data: string;
 };
 
 /**

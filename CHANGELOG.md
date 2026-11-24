@@ -15,6 +15,12 @@
   defaults. Officer sockets require `subspaceAgents`, which remains off by
   default.
 
+- No new flag: the Fleet API route `/api/v1/agents/{id}/activity` is on
+  whenever `api` is configured, by the owner's decision. It serves OpenCode
+  officers' recent turns, including tool input and output, errors, reply and
+  reasoning text, unredacted and untruncated. The gateway feature
+  `api.agentActivity` reports it.
+
 ### Changes
 
 - Add the usage guard for rear admiral quota notices in each ship channel

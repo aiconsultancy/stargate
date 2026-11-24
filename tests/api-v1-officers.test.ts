@@ -133,12 +133,17 @@ async function officerDirectories(modes: Record<string, number>) {
   return sockets;
 }
 
-async function start(officers: readonly OfficerSocket[], listen?: string) {
+async function start(
+  officers: readonly OfficerSocket[],
+  listen?: string,
+  activity?: Parameters<typeof startApiV1Server>[0]["activity"],
+) {
   const dataDirectory = await privateDirectory();
   const shutdown = new AbortController();
 
   const server = await startApiV1Server({
     ...(listen && { config: { listen, fleetName: "Example fleet" } }),
+    ...(activity && { activity }),
     officers,
     dataDirectory,
     source,
@@ -607,3 +612,54 @@ test("command: stargate fleet request runs as a child process, with --socket or 
   expect(write.code).toBe(1);
   expect(write.stderr).toContain("Option is not supported by this command");
 }, 30_000);
+
+test("officers: turn activity is served to the operator's token only, never on an officer's socket", async () => {
+  const officers = await officerDirectories({ "captain-a": 0o700 });
+
+  const reservation = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response(null),
+  });
+
+  const listen = `127.0.0.1:${reservation.port}`;
+  await reservation.stop(true);
+
+  const reads: string[] = [];
+
+  const { server, dataDirectory } = await start(officers, listen, (agent) => {
+    reads.push(agent);
+
+    return {
+      status: 200,
+      body: {
+        agent: {
+          id: agent,
+          role: "captain",
+          backend: "opencode",
+          collected: true,
+        },
+        turns: [],
+        cursor: { generation: "g", seq: 0 },
+      },
+    };
+  });
+
+  const path = "/api/v1/agents/captain-a/activity";
+  const token = await apiToken(dataDirectory);
+
+  const operator = await fetch(new URL(path, server.url), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  expect(operator.status).toBe(200);
+  expect(reads).toEqual(["captain-a"]);
+
+  for (const method of ["GET", "HEAD"]) {
+    expect(
+      (await overSocket(officers[0]?.socketPath ?? "", method, path)).status,
+    ).toBe(404);
+  }
+
+  expect(reads).toEqual(["captain-a"]);
+});

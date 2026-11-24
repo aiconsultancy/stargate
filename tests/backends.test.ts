@@ -12,7 +12,9 @@ import type {
 } from "@earendil-works/pi-durable";
 import { Schema } from "effect";
 import { latestInput } from "../src/backends/backend";
+import { openCodeTurnObserver } from "../src/backends/opencode/activity";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
+import { createActivityHub } from "../src/observability/dashboard/api/v1/activity";
 import { PiDurableBackend, piPartialText } from "../src/backends/pi/pi-durable";
 import { backendSchema } from "../src/config";
 import {
@@ -792,6 +794,7 @@ function openCodeStreamFixture(
   }
 
   return {
+    config,
     backend: new OpenCodeBackend(config),
     waiting: waiting.promise,
     disconnected: disconnected.promise,
@@ -1060,6 +1063,78 @@ test("OpenCode streams only current-session visible text before canonical histor
     expect(await result).toBe("Canonical final answer.");
     expect(fixture.historyReads()).toBe(2);
     await fixture.disconnected;
+  } finally {
+    controller.abort();
+    await result.catch(() => {});
+    await fixture.close();
+  }
+});
+
+test("OpenCode records the prompt's own turn activity without changing the reply", async () => {
+  const fixture = openCodeStreamFixture();
+  const hub = createActivityHub();
+  const controller = new AbortController();
+
+  const backend = new OpenCodeBackend(
+    fixture.config,
+    undefined,
+    openCodeTurnObserver(hub.recorder("captain")),
+  );
+
+  const result = backend.prompt(
+    "session-current",
+    "Review this PR",
+    controller.signal,
+    () => {},
+  );
+
+  const items = () => hub.turns("captain")?.turns[0]?.items ?? [];
+
+  try {
+    await fixture.waiting;
+
+    const current = {
+      sessionID: "session-current",
+      assistantMessageID: "answer-current",
+    };
+
+    fixture.emit("session.text.delta", {
+      ...current,
+      sessionID: "session-other",
+      ordinal: 0,
+      delta: "OTHER SESSION",
+    });
+    fixture.emit("session.reasoning.delta", {
+      ...current,
+      ordinal: 0,
+      delta: "Thinking it over.",
+    });
+    fixture.emit("session.tool.input.delta", {
+      ...current,
+      id: "call-1",
+      delta: '{"path":',
+    });
+    fixture.emit("session.text.delta", {
+      ...current,
+      ordinal: 1,
+      delta: "Reply text.",
+    });
+
+    for (let attempt = 0; items().length < 3 && attempt < 500; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    fixture.finish();
+    expect(await result).toBe("Canonical final answer.");
+
+    const turn = hub.turns("captain")?.turns[0];
+    expect(turn?.status).toBe("completed");
+    expect(turn?.items).toMatchObject([
+      { id: "i1", kind: "reasoning", text: "Thinking it over." },
+      { id: "i2", kind: "tool", callId: "call-1", rawInput: '{"path":' },
+      { id: "i3", kind: "text", text: "Reply text." },
+    ]);
+    expect(JSON.stringify(turn)).not.toContain("OTHER SESSION");
   } finally {
     controller.abort();
     await result.catch(() => {});

@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import type { AgentBackend, BackendContext } from "./backend";
 import type { BackendConfig } from "./config";
+import { openCodeTurnObserver } from "./opencode/activity";
 import { OpenCodeBackend } from "./opencode/opencode";
 import { PiDurableBackend } from "./pi/pi-durable";
 
@@ -24,7 +25,11 @@ export async function createBackend(
 ): Promise<AgentBackend> {
   switch (config.type) {
     case "opencode":
-      return new OpenCodeBackend(config);
+      return new OpenCodeBackend(
+        config,
+        undefined,
+        context.activity && openCodeTurnObserver(context.activity),
+      );
     case "pi-durable":
       return PiDurableBackend.open(config, context);
     case "claude": {
