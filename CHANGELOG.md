@@ -5,8 +5,8 @@
 ### Feature flags
 
 - New flag: OpenCode `stargate.crew` plugin option `feedbackEnabled` defaults
-  off. It enables the private ship feedback inbox for pinned teams. Submit
-  and captain review require separate native permissions.
+  on for pinned teams. Set it to `false` to disable the private ship feedback
+  inbox tools. Submit and captain review require separate native permissions.
 
 - New flag: `subspaceAgents.enabled`; the whole `subspaceAgents` section is
   absent by default, and absent or off loads nothing, creates no file or

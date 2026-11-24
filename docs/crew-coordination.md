@@ -157,14 +157,14 @@ only by that member. They do not enter a previous captain's activity box.
 
 ### Stargate product feedback
 
-OpenCode only; disabled by default. To enable it for a ship, set
-`feedbackEnabled: true` in that ship's existing `stargate.crew` plugin options
-at each trusted location that needs the tool. The ship must have a pinned
-`captainSessionID`. Keep the existing namespace, state directory and pin.
+OpenCode only; enabled by default at trusted `stargate.crew` plugin locations
+with a pinned `captainSessionID`. To disable the tools at a location, set
+`feedbackEnabled: false` in its plugin options. Keep the existing namespace,
+state directory and pin.
 
 Grant only the exact native permissions needed, in the approved profiles or
 session grants. Generated profiles do not allow either action by default,
-including newly generated direct profiles. Before enabling on an existing
+including newly generated direct profiles. Before upgrading an existing
 installation, review any wildcard grants so they do not implicitly allow the
 new actions. As with other protected tools, use a deny-by-default configuration
 and place explicit allows after matching denies:

@@ -677,7 +677,7 @@ const plugin = Plugin.define({
             ),
         });
 
-        if (engine.options.feedbackEnabled && captainSessionID) {
+        if (engine.options.feedbackEnabled !== false && captainSessionID) {
           editor.add({
             name: "stargate_feedback",
             description:
