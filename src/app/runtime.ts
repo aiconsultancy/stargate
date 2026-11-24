@@ -77,8 +77,8 @@ import {
   runningVersion,
   writeReady,
 } from "../automation/maintenance/nightly/update/ready";
-import { NotificationStore } from "../notifications/preferences/notification-store";
 import { notificationKey } from "../notifications/preferences/notifications";
+import { notificationQueries } from "../notifications/preferences/queries";
 import {
   type SlackRegistration,
   resolveDestinations,
@@ -632,6 +632,10 @@ export function serve(
 
         const backend = resource.backend;
 
+        const preferences = notificationQueries(config.dataDirectory, () =>
+          notificationKey(currentBot, identity),
+        );
+
         const gateway = new Gateway(
           bot,
           identity,
@@ -649,21 +653,7 @@ export function serve(
             : undefined,
           undefined,
           bot.backend.type === "opencode" && bot.backend.sessionID
-            ? (channel, thread) => {
-                const preferences = new NotificationStore(
-                  join(config.dataDirectory, "notifications.sqlite"),
-                );
-
-                try {
-                  return preferences.status(
-                    notificationKey(currentBot, identity),
-                    channel,
-                    thread,
-                  );
-                } finally {
-                  preferences.close();
-                }
-              }
+            ? preferences.status
             : undefined,
           {
             health: createHealthReader({
@@ -700,25 +690,7 @@ export function serve(
                 return false;
               }
             },
-            listMutes: () => {
-              const preferences = new NotificationStore(
-                join(config.dataDirectory, "notifications.sqlite"),
-              );
-
-              try {
-                const result = preferences.operate(
-                  notificationKey(currentBot, identity),
-                  { op: "list" },
-                  { id: "meta-list", caller: "gateway", now: Date.now },
-                );
-
-                if (result.op !== "list") throw new Error("Expected mute list");
-
-                return result;
-              } finally {
-                preferences.close();
-              }
-            },
+            listMutes: preferences.listMutes,
           },
           noticeFor(
             backend,
