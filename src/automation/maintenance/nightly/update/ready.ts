@@ -111,6 +111,19 @@ export function readyProcessAlive(record: Ready) {
   }
 }
 
+function readyForRun(
+  record: Ready,
+  since: number,
+  version: string | undefined,
+) {
+  return (
+    record.readyAt >= since &&
+    (!record.transports ||
+      record.transports.some((transport) => transport.state === "connected")) &&
+    (version === undefined || record.version === version)
+  );
+}
+
 /**
  * Wait until the gateway writes a readiness record at or after `since`
  * (and, when given, for the expected release version).
@@ -128,16 +141,7 @@ export async function waitReady(
   for (;;) {
     const record = await readReady(dataDirectory);
 
-    if (
-      record !== null &&
-      record.readyAt >= since &&
-      (!record.transports ||
-        record.transports.some(
-          (transport) => transport.state === "connected",
-        )) &&
-      (version === undefined || record.version === version)
-    )
-      return true;
+    if (record !== null && readyForRun(record, since, version)) return true;
 
     if (now() >= until) return false;
     await sleep(2000);
