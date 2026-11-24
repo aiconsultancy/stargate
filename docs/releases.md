@@ -144,8 +144,8 @@ versions, compare the unpacked files against the tree from the tag.
 
 Dependabot checks Bun packages and GitHub Actions daily and waits one day
 after a version is published before proposing it. Bun applies the same rule
-locally: `bunfig.toml` sets `minimumReleaseAge` to one day. Dependabot
-updates merge automatically after Quality checks pass. `effect` is excluded:
-it stays pinned to the OpenCode SDK's version.
+locally: `bunfig.toml` sets `minimumReleaseAge` to one day. Dependabot PRs
+must follow the same [merge policy](#merge-policy) as other PRs. `effect`
+stays pinned to the OpenCode SDK's version.
 
 [releases]: https://github.com/aiconsultancy/stargate/releases

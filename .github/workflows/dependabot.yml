@@ -1,7 +1,7 @@
 name: Dependabot automation
 
 on:
-  # Auto-merge needs writes. Only verified same-repo bot metadata runs below.
+  # Review requests need writes. Only verified same-repo bot metadata runs below.
   # No PR checkout or code execution is permitted in this workflow.
   # jactionlint ignore=dangerous-triggers
   pull_request_target:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   updates:
-    name: Review and queue dependency updates
+    name: Request advisory review for dependency updates
     if: >-
       github.repository == 'aiconsultancy/stargate' &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
@@ -25,14 +25,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      PR_URL: ${{ github.event.pull_request.html_url }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       # Never check out or execute PR code in this privileged workflow.
       # Full, head-scoped provenance is part of the required Quality checks job.
@@ -47,8 +45,3 @@ jobs:
           gh api --method POST
           "repos/$GH_REPO/pulls/$PR_NUMBER/requested_reviewers"
           -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
-      - name: Enable auto-merge after required checks pass
-        if: >-
-          steps.metadata.outputs.package-ecosystem == 'bun' ||
-          steps.metadata.outputs.package-ecosystem == 'github-actions'
-        run: gh pr merge --auto --squash --match-head-commit "$HEAD_SHA" "$PR_URL"

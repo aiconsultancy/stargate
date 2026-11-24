@@ -163,7 +163,8 @@ unrelated Promise code or upgrade Effect as part of a schema change.
 Use trunk-based development. Never commit directly to `main`. Branch from the
 latest `main` and keep branches short-lived. Keep each PR to one small change.
 Run the [thermo-nuclear code quality review](.agents/skills/thermo-nuclear-code-quality-review/SKILL.md)
-on each PR's final diff. The author may run it, but a different reviewer must
+on each PR's final diff and record the findings in the PR discussion.
+The author may run it, but a different reviewer must
 confirm the result in an approving GitHub review on the latest push. Enable
 `gh pr merge --auto --squash` only after that confirmation. Required **Quality
 checks** and the [release gate](docs/releases.md) still apply.
