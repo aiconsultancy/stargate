@@ -38,9 +38,38 @@ export class FleetResults {
     },
   ) {}
 
+  private async recoverMakers(job: Job, signal: AbortSignal) {
+    const { backend, sessionID, store } = this.options;
+
+    let makers: NonNullable<Job["makers"]> = [];
+
+    if (job.input && backend.executionMakers) {
+      try {
+        const value = await backend.executionMakers(
+          sessionID,
+          job.input,
+          signal,
+        );
+
+        const parsed = Schema.decodeUnknownResult(
+          Schema.mutable(Schema.Array(nativeMakerSchema)).check(
+            Schema.isMaxLength(100),
+          ),
+        )(value);
+
+        makers = Result.isSuccess(parsed) ? parsed.success : [];
+      } catch {
+        signal.throwIfAborted();
+      }
+    }
+
+    store.fleet.saveMakers(job.id, makers);
+
+    return makers;
+  }
+
   public async poll(signal: AbortSignal) {
-    const { control, store, botKey, sessionID, account, backend } =
-      this.options;
+    const { control, store, botKey, sessionID, account } = this.options;
 
     if (!control.resultsEnabled) return;
 
@@ -62,33 +91,8 @@ export class FleetResults {
 
       if (!delegation)
         throw new Error("Fleet completion delegation unavailable");
-      let makers = job.makers;
 
-      if (makers === undefined) {
-        makers = [];
-
-        if (job.input && backend.executionMakers) {
-          try {
-            const value = await backend.executionMakers(
-              sessionID,
-              job.input,
-              signal,
-            );
-
-            const parsed = Schema.decodeUnknownResult(
-              Schema.mutable(Schema.Array(nativeMakerSchema)).check(
-                Schema.isMaxLength(100),
-              ),
-            )(value);
-
-            makers = Result.isSuccess(parsed) ? parsed.success : [];
-          } catch {
-            signal.throwIfAborted();
-          }
-        }
-
-        store.fleet.saveMakers(job.id, makers);
-      }
+      const makers = job.makers ?? (await this.recoverMakers(job, signal));
 
       const output = JSON.parse(job.response ?? "[]") as ReplyChunk[];
 
