@@ -76,7 +76,7 @@ import {
   type QuestionAnswer,
   nativeQuestionSchema,
   questionFingerprint,
-} from "../../questions/questions";
+} from "../../questions/native-question";
 import { quotaObservationSchema, quotaSnapshotSchema } from "../quota/quota";
 import { createReadSlot, readWithDeadline } from "../../lib/read-deadline";
 import {

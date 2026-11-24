@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import type { NativeQuestion, QuestionOffer } from "../src/questions/questions";
+import type { QuestionOffer } from "../src/questions/questions";
+import type { NativeQuestion } from "../src/questions/native-question";
 import { botKey, conversationKey } from "../src/gateway/routing";
 import type { SlackPanelContent } from "../src/shared/slack-format";
 import {

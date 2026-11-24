@@ -1216,16 +1216,21 @@
         "src/background-questions.ts",
         "src/question-settings.ts",
         "src/questions.ts",
+        "src/questions/native-question.ts",
         "src/questions/store.ts",
         "src/slack-questions.ts"
       ],
       "public": [
         "src/question-settings.ts",
         "src/questions.ts",
+        "src/questions/native-question.ts",
         "src/questions/store.ts",
         "src/slack-questions.ts"
       ],
-      "contracts": ["src/question-settings.ts"],
+      "contracts": [
+        "src/question-settings.ts",
+        "src/questions/native-question.ts"
+      ],
       "neighbours": ["backends", "config", "gateway", "lib", "shared", "slack"],
       "retained": {
         "src/background-questions.ts": "service"
