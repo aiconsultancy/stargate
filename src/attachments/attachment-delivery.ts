@@ -161,6 +161,23 @@ export async function deliverAttachments(
     context.store.saveAttachments(job.id, files);
   };
 
+  const readForUpload = async (
+    file: (typeof files)[number],
+    prepared: NonNullable<(typeof files)[number]["prepared"]>,
+  ) => {
+    try {
+      return await readPreparedAttachment(
+        prepared,
+        undefined,
+        scratchRoot(prepared.path),
+      );
+    } catch {
+      file.phase = "unavailable";
+      save();
+      throw new Error("Published attachment changed or became unavailable");
+    }
+  };
+
   const linked = links(context.transport);
   const transport = linked ? undefined : uploads(context.transport);
 
@@ -275,20 +292,7 @@ export async function deliverAttachments(
     if (linked) {
       // Record the hosted URL first: a retry posts it, never re-uploads.
       if (!file.fileID) {
-        let content: Attachment;
-
-        try {
-          content = await readPreparedAttachment(
-            file.prepared,
-            undefined,
-            scratchRoot(file.prepared.path),
-          );
-        } catch {
-          file.phase = "unavailable";
-          save();
-          throw new Error("Published attachment changed or became unavailable");
-        }
-
+        const content = await readForUpload(file, file.prepared);
         file.phase = "uploading";
         save();
 
@@ -331,19 +335,7 @@ export async function deliverAttachments(
     if (!transport) continue;
 
     if (file.phase !== "uploaded") {
-      let content: Attachment;
-
-      try {
-        content = await readPreparedAttachment(
-          file.prepared,
-          undefined,
-          scratchRoot(file.prepared.path),
-        );
-      } catch {
-        file.phase = "unavailable";
-        save();
-        throw new Error("Published attachment changed or became unavailable");
-      }
+      const content = await readForUpload(file, file.prepared);
 
       // A retry may abandon an unshared reservation, never complete both IDs.
       const reserved = await transport.reserveUpload(
