@@ -1,3 +1,28 @@
+export type CrewID = string;
+
+/** The task row shared by the pending and admitted queues. */
+export type CrewTask = {
+  id: string;
+  crewID: CrewID;
+  workerSessionID: string;
+  originCaptainID: string;
+  originInputID: string | null;
+  inputID: string;
+  status:
+    | "queued"
+    | "cancelled"
+    | "dispatching"
+    | "running"
+    | "completed"
+    | "cancelling"
+    | "uncertain"
+    /** Captain released it without a result; external stop is in the audit. */
+    | "abandoned";
+  result: string | null;
+  released: number;
+  notifying: number;
+};
+
 /**
  * The `pending_tasks` rows that can still start. The engine lists, counts
  * and promotes only queued rows; a promoted row moves to `tasks`, and a

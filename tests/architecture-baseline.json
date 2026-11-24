@@ -13,8 +13,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 293,
-  "sourceEdges": 1225,
+  "sourceFiles": 294,
+  "sourceEdges": 1228,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -45,6 +45,7 @@
       "src/config.ts",
       "src/config/composition.ts",
       "src/config/waiting.ts",
+      "src/coordination/crew/execution/drain-records.ts",
       "src/credentials.ts",
       "src/crew-status.ts",
       "src/crew/api.ts",

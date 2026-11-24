@@ -1,4 +1,4 @@
 {
-  "baselineSha256": "e3ac3812b786c8a7ec1c5b4f758c7a2a40a8c674aa1138066fe559a37ec73ae7",
-  "pruneStale": true
+  "baselineSha256": "4949a0406aa8b37dd068ea2f0de52689b12505b4cbb461da17378ca2cc54202a",
+  "closureAdditions": ["src/coordination/crew/execution/drain-records.ts"]
 }
