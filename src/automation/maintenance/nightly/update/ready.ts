@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { Option, Schema } from "effect";
 import { settingsStruct } from "../../../../config/settings-schema";
 import { installationDirectory } from "../../../../lib/installation-paths";
-import { readMetadata } from "./release";
+import { readMetadata } from "./release-record";
 
 // Zod counted code points for string bounds; keep that unit.
 const id = Schema.String.check(

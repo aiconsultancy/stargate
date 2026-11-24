@@ -42,12 +42,12 @@ import {
   namedRelease,
   newerRelease,
   pruneReleases,
-  readMetadata,
   restoreCurrent,
   type StargateReleaseConfig,
   stageRelease,
   switchCurrent,
 } from "../src/automation/maintenance/nightly/update/release";
+import { readMetadata } from "../src/automation/maintenance/nightly/update/release-record";
 import { tarball } from "./tar";
 
 let directory: string;

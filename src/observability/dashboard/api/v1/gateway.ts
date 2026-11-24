@@ -1,8 +1,8 @@
-import { packageManifest } from "../../../../lib/installation-paths";
 import {
-  packageDirectory,
-  runningVersion,
-} from "../../../../automation/maintenance/nightly/update/ready";
+  installationDirectory,
+  packageManifest,
+} from "../../../../lib/installation-paths";
+import { readMetadata } from "../../../../automation/maintenance/nightly/update/release-record";
 
 const noop = () => {};
 
@@ -46,10 +46,10 @@ async function checkoutTagVersion(directory: string): Promise<string | null> {
  * single `vX.Y.Z` tag at HEAD; else the package version.
  */
 export async function gatewayVersion(
-  directory: string = packageDirectory,
+  directory: string = installationDirectory,
 ): Promise<string> {
   return (
-    (await runningVersion(directory)) ??
+    (await readMetadata(directory))?.version ??
     (await checkoutTagVersion(directory)) ??
     packageManifest.version
   );

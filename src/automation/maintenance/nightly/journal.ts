@@ -38,7 +38,8 @@ import {
   v1,
 } from "./journal-records";
 import { readReady, readyProcessAlive, waitReady } from "./update/ready";
-import { linkedRelease, readMetadata, restoreCurrent } from "./update/release";
+import { linkedRelease, restoreCurrent } from "./update/release";
+import { readMetadata } from "./update/release-record";
 import { type ModelRef, formatRef } from "./update/versions";
 
 /**

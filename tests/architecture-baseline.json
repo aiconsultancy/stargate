@@ -13,8 +13,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 300,
-  "sourceEdges": 1249,
+  "sourceFiles": 301,
+  "sourceEdges": 1254,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -198,7 +198,6 @@
     "direction:src/slack-format.ts -> src/markdown-chunks.ts",
     "direction:src/slack-questions.ts -> src/store.ts",
     "direction:src/store.ts -> src/irc/burst.ts",
-    "private:src/api/v1/gateway.ts -> src/nightly/ready.ts",
     "private:src/backends/pi-durable.ts -> src/crew/instructions.ts",
     "private:src/backends/pi-durable.ts -> src/crew/pi-extension.ts",
     "private:src/captain-post.ts -> src/slack-files.ts",

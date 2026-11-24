@@ -1419,6 +1419,7 @@
         "src/nightly/paths.ts",
         "src/nightly/plugin-digest.ts",
         "src/nightly/ready.ts",
+        "src/automation/maintenance/nightly/update/release-record.ts",
         "src/nightly/release.ts",
         "src/nightly/report.ts",
         "src/nightly/run.ts",
@@ -1434,6 +1435,7 @@
         "src/maintenance-drain.ts",
         "src/maintenance.ts",
         "src/nightly/files.ts",
+        "src/automation/maintenance/nightly/update/release-record.ts",
         "src/nightly/update.ts",
         "src/nightly/versions.ts",
         "src/update-notice.ts"
