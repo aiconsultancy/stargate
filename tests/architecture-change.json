@@ -1,4 +1,4 @@
 {
-  "baselineSha256": "63b35d34f936f1cc451b457ebedb725fde0ba0737a29f2e19586a7f9ef99f5fd",
-  "closureAdditions": ["src/backends/opencode/notices.ts"]
+  "baselineSha256": "b5c88bd24528ad309655e4a56a331e65696ee241b4932239481a709053411747",
+  "closureAdditions": ["src/coordination/crew/execution/update-notices.ts"]
 }
