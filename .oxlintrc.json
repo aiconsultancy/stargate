@@ -894,7 +894,7 @@
       "rules": {
         "eslint/max-lines-per-function": [
           "error",
-          { "max": 1274, "skipBlankLines": true, "skipComments": true }
+          { "max": 1249, "skipBlankLines": true, "skipComments": true }
         ]
       }
     },

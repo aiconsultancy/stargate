@@ -1351,9 +1351,14 @@
       "files": [
         "src/notification-control.ts",
         "src/notification-store.ts",
+        "src/notifications/preferences/queries.ts",
         "src/notifications.ts"
       ],
-      "public": ["src/notification-control.ts", "src/notifications.ts"],
+      "public": [
+        "src/notification-control.ts",
+        "src/notifications/preferences/queries.ts",
+        "src/notifications.ts"
+      ],
       "contracts": ["src/notifications.ts"],
       "retained": {
         "src/notification-store.ts": "store"

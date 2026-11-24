@@ -13,8 +13,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 307,
-  "sourceEdges": 1262,
+  "sourceFiles": 308,
+  "sourceEdges": 1263,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -233,7 +233,6 @@
     "private:src/runtime.ts -> src/nightly/crews.ts",
     "private:src/runtime.ts -> src/nightly/outbox.ts",
     "private:src/runtime.ts -> src/nightly/ready.ts",
-    "private:src/runtime.ts -> src/notification-store.ts",
     "private:src/runtime.ts -> src/notify/binding.ts",
     "private:src/runtime.ts -> src/notify/slack.ts",
     "private:src/runtime.ts -> src/pairing.ts",
