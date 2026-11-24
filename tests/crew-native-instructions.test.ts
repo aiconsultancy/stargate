@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { isNativeInstructionContext } from "../src/coordination/crew/instruction-context";
+import { isNativeInstructionContext } from "../src/backends/opencode/instruction-context";
 import {
   type CrewInspectionAPI,
   type EvidenceMessage,

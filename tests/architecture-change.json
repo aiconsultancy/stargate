@@ -1,5 +1,4 @@
 {
-  "baselineSha256": "25390abec1468aefdfb81a733c06c07711718d6faad109d734b3657e3008e674",
-  "pruneStale": true,
-  "closureAdditions": ["src/coordination/fleet/review-prompts.ts"]
+  "baselineSha256": "5701408c5a701c6d488b5b8fac001ae3b6a3cfb3f91b77ceafb5eb48d5b16435",
+  "pruneStale": true
 }

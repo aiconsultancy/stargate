@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect";
-import { isNativeInstructionContext } from "../../coordination/crew/instruction-context";
+import { isNativeInstructionContext } from "./instruction-context";
 import { crewMessageMetadataKey } from "../../coordination/crew/message-protocol";
 
 const decodeCrewOrigin = Schema.decodeUnknownOption(

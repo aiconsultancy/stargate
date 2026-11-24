@@ -961,7 +961,7 @@
     ],
     "src/crew/instruction-context.ts": [
       "src/crew/instruction-context.ts",
-      "src/coordination/crew/instruction-context.ts"
+      "src/backends/opencode/instruction-context.ts"
     ],
     "src/crew/instructions.ts": [
       "src/crew/instructions.ts",
@@ -1626,6 +1626,7 @@
         "src/backends/config.ts",
         "src/backends/opencode/config.ts",
         "src/backends/opencode/crew-status.ts",
+        "src/crew/instruction-context.ts",
         "src/backends/opencode/notices.ts",
         "src/backends/opencode/questions.ts",
         "src/backends/claude/config.ts",
@@ -1636,6 +1637,7 @@
         "src/backends/factory.ts",
         "src/backends/config.ts",
         "src/backends/opencode/config.ts",
+        "src/crew/instruction-context.ts",
         "src/backends/opencode/questions.ts",
         "src/pi-model.ts",
         "src/backends/claude/config.ts",
@@ -1683,7 +1685,6 @@
         "src/crew/history-rpc.ts",
         "src/crew/history.ts",
         "src/crew/identity.ts",
-        "src/crew/instruction-context.ts",
         "src/crew/instructions.ts",
         "src/crew/irc-rpc.ts",
         "src/crew/irc.ts",
