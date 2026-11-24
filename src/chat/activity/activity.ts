@@ -3,7 +3,7 @@ import {
   settingsDefault,
   settingsPattern,
   settingsStruct,
-} from "../config/settings-schema";
+} from "../../config/settings-schema";
 
 export const crewActivitySchema = settingsStruct({
   detail: Schema.Literals(["off", "summary", "detailed"]).pipe(

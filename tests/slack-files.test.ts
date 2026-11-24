@@ -4,7 +4,7 @@ import {
   type Attachment,
   maxAttachmentBytes,
   maxAttachmentTotalBytes,
-} from "../src/attachments/attachments";
+} from "../src/chat/attachments/attachments";
 import { claudeInputContent } from "../src/backends/claude";
 import { codexInput } from "../src/backends/codex";
 import {

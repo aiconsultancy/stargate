@@ -44,7 +44,7 @@ import {
   settingsStruct,
   settingsURL,
 } from "../config/settings-schema";
-import { voiceInstructions } from "../transcription/transcription";
+import { voiceInstructions } from "../chat/transcription/transcription";
 
 const absolute = Schema.String.check(
   settingsRefine(isAbsolute, { message: "Invalid input" }),

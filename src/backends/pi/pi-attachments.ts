@@ -2,7 +2,7 @@ import type { UserInput } from "@earendil-works/pi-durable";
 import {
   type Attachment,
   checkAttachments,
-} from "../../attachments/attachments";
+} from "../../chat/attachments/attachments";
 import { AttachmentInputUnavailable } from "../../shared/request-failure";
 
 /** Pi 1.5 has text/image user blocks, not PDF/document input blocks. */

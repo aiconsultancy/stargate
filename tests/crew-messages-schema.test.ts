@@ -5,7 +5,7 @@ import { Result, Schema } from "effect";
 import {
   type ActivitySnapshot,
   activitySnapshotSchema,
-} from "../src/activity/activity";
+} from "../src/chat/activity/activity";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
 import {

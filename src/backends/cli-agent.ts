@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { Attachment } from "../attachments/attachments";
+import type { Attachment } from "../chat/attachments/attachments";
 import { AttachmentInputUnavailable } from "../shared/request-failure";
 
 /**

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { Attachment } from "../../../attachments/attachments";
+import type { Attachment } from "../../../chat/attachments/attachments";
 import type {
   AgentBackend,
   BackendContext,

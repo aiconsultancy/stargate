@@ -1,5 +1,5 @@
 import type { Attachment } from "../attachments/attachments";
-import { findMention } from "../shared/mentions";
+import { findMention } from "../../shared/mentions";
 
 /** One transcript block in a prompt; longer speech is cut and marked. */
 export const maxTranscriptCharacters = 20_000;

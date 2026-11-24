@@ -14,10 +14,10 @@ import {
   type AttachmentTransport,
   agentFilesLocal,
   deliverAttachments,
-} from "../src/attachments/attachment-delivery";
-import { opencodeScratchDirectory } from "../src/attachments/attachments";
+} from "../src/chat/attachments/attachment-delivery";
+import { opencodeScratchDirectory } from "../src/chat/attachments/attachments";
 import { backendSchema } from "../src/config";
-import type { AttachmentDelivery } from "../src/attachments/store";
+import type { AttachmentDelivery } from "../src/chat/attachments/store";
 import type { Job } from "../src/gateway/store";
 
 const job = { id: 1, channel: "C1", thread: "1.0" } as Job;

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { Result, Schema } from "effect";
-import type { BotConfig } from "../config";
+import type { BotConfig } from "../../config";
 import {
   type QuestionSettings,
   decodeQuestionSettings,
@@ -13,12 +13,12 @@ import {
   settingsPattern,
   settingsStartsWith,
   settingsStruct,
-} from "../config/settings-schema";
-import type { SlackPanelContent } from "../shared/slack-format";
+} from "../../config/settings-schema";
+import type { SlackPanelContent } from "../../shared/slack-format";
 import {
   resolveWaiting,
   waitingSettingsPath,
-} from "../config/waiting-overrides";
+} from "../../config/waiting-overrides";
 
 export type MutePage = {
   settings: {

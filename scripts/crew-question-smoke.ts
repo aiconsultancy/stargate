@@ -12,7 +12,7 @@ import { CrewQuestionGateway } from "../src/transports/irc/crew-question-gateway
 import {
   questionSettingsPath,
   saveQuestionSettings,
-} from "../src/questions/question-settings";
+} from "../src/chat/questions/question-settings";
 
 const chunk = (
   value: Readonly<Record<string, unknown>>,

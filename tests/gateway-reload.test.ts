@@ -6,7 +6,7 @@ import { botSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";
 import { openStore } from "../src/app/open-store";
-import type { Transcriber } from "../src/transcription/transcription";
+import type { Transcriber } from "../src/chat/transcription/transcription";
 import { bot, event, identity } from "./fixtures";
 
 const cleanup: (() => unknown)[] = [];

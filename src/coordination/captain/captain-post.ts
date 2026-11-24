@@ -29,7 +29,7 @@ import {
   maxAttachments,
   preparedAttachmentSchema,
   readPreparedAttachment,
-} from "../../attachments/attachments";
+} from "../../chat/attachments/attachments";
 import { botToken, botWebClient } from "../../transports/slack/bot-web";
 import { type BotConfig, loadConfig } from "../../config";
 import { isAllowedChannel } from "../../shared/registration";

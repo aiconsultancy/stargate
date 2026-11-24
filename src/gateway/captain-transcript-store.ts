@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { PublishedFile } from "../attachments/attachments";
+import type { PublishedFile } from "../chat/attachments/attachments";
 import type { ReplyChunk } from "../shared/slack-format";
 
 const pendingCaptainJobs = "'queued','running'";

@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentBackend } from "../src/backends/backend";
-import { Questions } from "../src/questions/questions";
-import { type NativeQuestion } from "../src/questions/native-question";
+import { Questions } from "../src/chat/questions/questions";
+import { type NativeQuestion } from "../src/chat/questions/native-question";
 import { openStore } from "../src/app/open-store";
 
 const q: NativeQuestion = {

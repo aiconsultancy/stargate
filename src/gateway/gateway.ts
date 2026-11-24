@@ -4,17 +4,17 @@ import type { Logger } from "pino";
 import {
   ActivityDelivery,
   type ActivityHandle,
-} from "../activity/activity-delivery";
+} from "../chat/activity/activity-delivery";
 import {
   agentFilesLocal,
   deliverAttachments,
-} from "../attachments/attachment-delivery";
+} from "../chat/attachments/attachment-delivery";
 import {
   type Attachment,
   type PublishedFile,
   checkAttachments,
   parseAttachments,
-} from "../attachments/attachments";
+} from "../chat/attachments/attachments";
 import {
   type AgentBackend,
   type PromptSourceContext,
@@ -53,7 +53,7 @@ import {
   MetaCommands,
   type MetaOptions,
   metaCandidate,
-} from "../meta-commands/meta-commands";
+} from "../chat/meta-commands/meta-commands";
 import {
   type NotificationReader,
   notificationNote,
@@ -65,9 +65,9 @@ import {
   peerTurnsPerHour,
   peerWindowMs,
 } from "./peers";
-import { resolveQuestionSettings } from "../questions/question-settings";
-import { type QuestionPort, Questions } from "../questions/questions";
-import type { QuestionControl } from "../questions/text-controls";
+import { resolveQuestionSettings } from "../chat/questions/question-settings";
+import { type QuestionPort, Questions } from "../chat/questions/questions";
+import type { QuestionControl } from "../chat/questions/text-controls";
 import { parseReactionReply } from "../shared/reactions";
 import {
   AttachmentInputUnavailable,
@@ -90,7 +90,7 @@ import {
   transcriptChunks,
 } from "./routing";
 import { type ReplyChunk, replyText } from "../shared/slack-format";
-import { SlackQuestionControls } from "../questions/slack-questions";
+import { SlackQuestionControls } from "../chat/questions/slack-questions";
 import {
   type CaptainCursor,
   type CaptainTranscript,
@@ -109,7 +109,7 @@ import {
   spokenMention,
   spokenMentionNote,
   transcribeMedia,
-} from "../transcription/transcription";
+} from "../chat/transcription/transcription";
 import { type TurnProgress, turnProgressText } from "../shared/turn-progress";
 import type { UpdateReceipt } from "../automation/maintenance/update-notice";
 import { resolveWaiting } from "../config/waiting-overrides";

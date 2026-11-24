@@ -7,7 +7,7 @@ import {
   maxAttachmentBytes,
   maxAttachmentTotalBytes,
   maxAttachments,
-} from "../../attachments/attachments";
+} from "../../chat/attachments/attachments";
 import {
   settingsPattern,
   settingsRecord,

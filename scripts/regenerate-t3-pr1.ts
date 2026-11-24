@@ -77,7 +77,7 @@ function moveInlineComments(findings: Finding[]): void {
     let text = readFileSync(file, "utf8");
     const bytes = Buffer.from(text);
 
-    if (file === "src/attachments/store.ts") {
+    if (file === "src/chat/attachments/store.ts") {
       replace(
         file,
         "    return row?.input_files\n      ? // Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.",

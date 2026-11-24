@@ -4,8 +4,8 @@
 import type {
   AttachmentTransport,
   LinkTransport,
-} from "../../attachments/attachment-delivery";
-import type { Attachment } from "../../attachments/attachments";
+} from "../../chat/attachments/attachment-delivery";
+import type { Attachment } from "../../chat/attachments/attachments";
 import type { OutgoingActivity } from "./connector";
 import { TEAMS_SAFE_MESSAGE_BYTES } from "./teams";
 

@@ -1,5 +1,5 @@
-import type { ActivityWatch } from "../activity/activity";
-import type { Attachment } from "../attachments/attachments";
+import type { ActivityWatch } from "../chat/activity/activity";
+import type { Attachment } from "../chat/attachments/attachments";
 import type { FleetCrewStatus } from "../coordination/crew/reporting/fleet-status";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
 import type { CronAdvanced, CronEvaluation } from "../automation/cron/advanced";
@@ -15,7 +15,7 @@ import type {
   NativeQuestion,
   PendingQuestion,
   QuestionAnswer,
-} from "../questions/native-question";
+} from "../chat/questions/native-question";
 import type { QuotaObservation, QuotaSnapshot } from "./quota/quota";
 import type { InboundReaction } from "../shared/reactions";
 import type { SessionHistory } from "../shared/session-history";

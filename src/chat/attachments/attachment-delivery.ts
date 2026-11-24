@@ -7,8 +7,8 @@ import {
   opencodeScratchDirectory,
   readPreparedAttachment,
 } from "./attachments";
-import type { BackendConfig } from "../config";
-import { isLocalhost } from "../lib/loopback";
+import type { BackendConfig } from "../../config";
+import { isLocalhost } from "../../lib/loopback";
 import type { AttachmentRecords } from "./store";
 
 /** Slack-style three-step upload: reserve, put, then complete in a thread. */

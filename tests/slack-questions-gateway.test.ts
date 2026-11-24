@@ -6,8 +6,8 @@ import pino from "pino";
 import type { AgentBackend } from "../src/backends/backend";
 import { SlackGateway as Gateway } from "./slack-gateway-fixture";
 import type { TransportDelivery } from "../src/gateway/ports";
-import { saveQuestionSettings } from "../src/questions/question-settings";
-import type { NativeQuestion } from "../src/questions/native-question";
+import { saveQuestionSettings } from "../src/chat/questions/question-settings";
+import type { NativeQuestion } from "../src/chat/questions/native-question";
 import { openStore } from "../src/app/open-store";
 import { bot, event, identity } from "./fixtures";
 

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { CrewQuestionHandoff } from "../src/coordination/crew/questions/question-handoff";
 import type { CrewTask } from "../src/coordination/crew/execution/state";
-import type { NativeQuestion } from "../src/questions/native-question";
+import type { NativeQuestion } from "../src/chat/questions/native-question";
 
 test("an unspecified route follows a current poll from the owning pinned captain", () => {
   let now = 0;

@@ -7,7 +7,7 @@ import {
   ircFeatureDefaults,
   ircFeedbackDefaults,
 } from "../../../../config";
-import { resolveQuestionSettings } from "../../../../questions/question-settings";
+import { resolveQuestionSettings } from "../../../../chat/questions/question-settings";
 import type { V1Feature } from "./types";
 
 /**

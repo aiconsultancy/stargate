@@ -5,7 +5,7 @@ import {
   maxAttachmentBytes,
   maxAttachmentTotalBytes,
   maxAttachments,
-} from "../../attachments/attachments";
+} from "../../chat/attachments/attachments";
 import { isLoopbackAddress } from "../../lib/loopback";
 
 /**

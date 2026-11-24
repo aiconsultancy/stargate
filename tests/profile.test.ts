@@ -27,7 +27,7 @@ import { nightlyInstructions } from "../src/automation/maintenance/nightly/instr
 import { peerInstructions } from "../src/gateway/peers";
 import { initializeProfile, renderProfile } from "../src/app/profile";
 import { reactionInstructions } from "../src/shared/reactions";
-import { voiceInstructions } from "../src/transcription/transcription";
+import { voiceInstructions } from "../src/chat/transcription/transcription";
 
 const directories: string[] = [];
 

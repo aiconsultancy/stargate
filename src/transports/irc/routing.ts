@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { maxAttachments } from "../../attachments/attachments";
+import { maxAttachments } from "../../chat/attachments/attachments";
 import {
   type IrcConfig,
   defaultAllCallWords,

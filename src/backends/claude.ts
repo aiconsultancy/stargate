@@ -28,7 +28,10 @@ import {
   query,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Option, Schema } from "effect";
-import { type Attachment, checkAttachments } from "../attachments/attachments";
+import {
+  type Attachment,
+  checkAttachments,
+} from "../chat/attachments/attachments";
 import {
   type AgentBackend,
   type BackendContext,

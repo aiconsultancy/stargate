@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { type PromptSourceContext, sourceLine } from "../../backends/backend";
-import { operatorControl } from "../../questions/question-settings";
+import { operatorControl } from "../../chat/questions/question-settings";
 import {
   type BackendConfig,
   type IrcConfig,
@@ -33,8 +33,8 @@ import type { GatewayTransport } from "../../gateway/ports";
 import {
   type QuestionControl,
   questionControl,
-} from "../../questions/text-controls";
-import { questionFingerprint } from "../../questions/native-question";
+} from "../../chat/questions/text-controls";
+import { questionFingerprint } from "../../chat/questions/native-question";
 import { type Identity, backendFingerprint } from "../../gateway/routing";
 import type { Incoming, Store } from "../../gateway/store";
 import { turnProgressText } from "../../shared/turn-progress";

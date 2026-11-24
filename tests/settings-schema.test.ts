@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Predicate, Result, Schema } from "effect";
-import { crewActivitySchema } from "../src/activity/activity";
+import { crewActivitySchema } from "../src/chat/activity/activity";
 import { captainPostSchema } from "../src/coordination/captain/config";
 import {
   backendSchema,
@@ -41,7 +41,7 @@ import {
   settingsIssues,
   settingsStruct,
 } from "../src/config/settings-schema";
-import { transcriptionSchema } from "../src/transcription/config";
+import { transcriptionSchema } from "../src/chat/transcription/config";
 import { waitingSchema } from "../src/config/waiting";
 import {
   settingsCanonical,

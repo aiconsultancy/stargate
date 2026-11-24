@@ -5,8 +5,8 @@ import type {
   ActivityView,
   ActivityWatch,
   CrewActivitySettings,
-} from "../src/activity/activity";
-import { ActivityDelivery } from "../src/activity/activity-delivery";
+} from "../src/chat/activity/activity";
+import { ActivityDelivery } from "../src/chat/activity/activity-delivery";
 import type { AgentBackend } from "../src/backends/backend";
 import { Gateway } from "../src/gateway/gateway";
 import type { TransportDelivery } from "../src/gateway/ports";

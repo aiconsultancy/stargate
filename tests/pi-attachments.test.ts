@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { SubmissionDraft } from "@earendil-works/pi-durable";
-import type { Attachment } from "../src/attachments/attachments";
+import type { Attachment } from "../src/chat/attachments/attachments";
 import { piInputContent } from "../src/backends/pi/pi-attachments";
 import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 
