@@ -575,18 +575,17 @@ function starfleetSection(
   return { rows, summary };
 }
 
+const aggregate = (rows: string[]) =>
+  rows.some((row) => row.startsWith("✗"))
+    ? "✗"
+    : rows.some((row) => row.startsWith("⚠"))
+      ? "⚠"
+      : "✓";
+
 function renderHealth(
   requested: string | undefined,
-  rows: Record<Section, string[]>,
-  summaries: Partial<Record<Section, string>>,
+  sections: Partial<Record<Section, SectionText>>,
 ): string {
-  const aggregate = (section: Section) =>
-    rows[section].some((row) => row.startsWith("✗"))
-      ? "✗"
-      : rows[section].some((row) => row.startsWith("⚠"))
-        ? "⚠"
-        : "✓";
-
   const header = "Health · read-only\n";
 
   if (requested === undefined)
@@ -594,7 +593,8 @@ function renderHealth(
       header +
       healthSections
         .map((section) => {
-          const line = `${aggregate(section)} ${section}: ${summaries[section] ?? "unknown"}`;
+          const text = sections[section];
+          const line = `${aggregate(text?.rows ?? [])} ${section}: ${text?.summary ?? "unknown"}`;
 
           return line.length <= 400
             ? line
@@ -603,7 +603,8 @@ function renderHealth(
         .join("\n")
     );
   const section = requested as Section;
-  const detail = `${aggregate(section)} ${section}\n${rows[section].join("\n")}`;
+  const rows = sections[section]?.rows ?? [];
+  const detail = `${aggregate(rows)} ${section}\n${rows.join("\n")}`;
   const suffix = "\n⚠ truncated; omitted states unknown";
 
   return (
@@ -665,40 +666,19 @@ export function createHealthReader(
       readHost,
     });
 
-    const rows: Record<Section, string[]> = {
-      host: [],
-      agents: [],
-      stargate: [],
-      opencode: [],
-      proxy: [],
-      services: [],
-      starfleet: [],
-    };
+    const sections: Partial<Record<Section, SectionText>> = {};
 
-    const summaries: Partial<Record<Section, string>> = {};
-
-    if (want("host")) {
-      const text = hostSection(host);
-      rows.host.push(...text.rows);
-      summaries.host = text.summary;
-    }
+    if (want("host")) sections.host = hostSection(host);
 
     const s = parsed(statusSchema, status);
 
-    if (want("agents")) {
-      const text = agentsSection(s, crew, config.stalledAfterSeconds, now);
-      rows.agents.push(...text.rows);
-      summaries.agents = text.summary;
-    }
+    if (want("agents"))
+      sections.agents = agentsSection(s, crew, config.stalledAfterSeconds, now);
 
-    if (want("opencode")) {
-      const text = opencodeSection(s, opencodeState);
-      rows.opencode.push(...text.rows);
-      summaries.opencode = text.summary;
-    }
+    if (want("opencode")) sections.opencode = opencodeSection(s, opencodeState);
 
-    if (want("stargate")) {
-      const text = stargateSection({
+    if (want("stargate"))
+      sections.stargate = stargateSection({
         drainState,
         ready,
         reports,
@@ -709,37 +689,26 @@ export function createHealthReader(
         schedules: input.schedules,
       });
 
-      rows.stargate.push(...text.rows);
-      summaries.stargate = text.summary;
-    }
+    if (want("proxy")) sections.proxy = proxySection(quota, proxyState, now);
 
-    if (want("proxy")) {
-      const text = proxySection(quota, proxyState, now);
-      rows.proxy.push(...text.rows);
-      summaries.proxy = text.summary;
-    }
+    if (want("services"))
+      sections.services = {
+        rows: [
+          "⚠ Sourcebot health/mirror refresh/index age unknown",
+          "⚠ Caddy routes unknown; Tailscale state/peers unknown",
+          "⚠ failed units/timers unknown",
+        ],
+        summary:
+          "Sourcebot health/mirror/index age unknown; Caddy routes unknown; Tailscale state/peers unknown; failed units/timers unknown",
+      };
 
-    if (want("services")) {
-      rows.services.push(
-        "⚠ Sourcebot health/mirror refresh/index age unknown",
-        "⚠ Caddy routes unknown; Tailscale state/peers unknown",
-        "⚠ failed units/timers unknown",
-      );
-      summaries.services =
-        "Sourcebot health/mirror/index age unknown; Caddy routes unknown; Tailscale state/peers unknown; failed units/timers unknown";
-    }
-
-    if (want("starfleet")) {
-      const text = starfleetSection(
+    if (want("starfleet"))
+      sections.starfleet = starfleetSection(
         snapshot,
         now,
         config.snapshotMaxAgeSeconds,
       );
 
-      rows.starfleet.push(...text.rows);
-      summaries.starfleet = text.summary;
-    }
-
-    return renderHealth(requested, rows, summaries);
+    return renderHealth(requested, sections);
   };
 }
