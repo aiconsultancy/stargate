@@ -20,7 +20,10 @@ import {
   saveQuestionSettings,
 } from "../src/questions/question-settings";
 import { openStore } from "../src/app/open-store";
-import { resolveWaiting, waitingSettingsPath } from "../src/gateway/waiting";
+import {
+  resolveWaiting,
+  waitingSettingsPath,
+} from "../src/config/waiting-overrides";
 import { bot, event, identity } from "./fixtures";
 
 const cleanups: (() => Promise<void>)[] = [];

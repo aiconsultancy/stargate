@@ -8,7 +8,7 @@ import {
   type StatusResult,
 } from "../src/transports/irc/status";
 import { fold, parseMessage } from "../src/transports/irc/protocol";
-import { waitingPhrase } from "../src/gateway/waiting";
+import { waitingPhrase } from "../src/shared/waiting";
 
 type Attempt = {
   value: string | undefined;

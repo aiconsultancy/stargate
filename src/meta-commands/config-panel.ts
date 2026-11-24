@@ -15,7 +15,10 @@ import {
   settingsStruct,
 } from "../config/settings-schema";
 import type { SlackPanelContent } from "../shared/slack-format";
-import { resolveWaiting, waitingSettingsPath } from "../gateway/waiting";
+import {
+  resolveWaiting,
+  waitingSettingsPath,
+} from "../config/waiting-overrides";
 
 export type MutePage = {
   settings: {

@@ -58,7 +58,7 @@ import {
   buildUpdateSnapshot,
   noticeTools,
 } from "../src/automation/maintenance/update-notice";
-import { waitingSettingsPath } from "../src/gateway/waiting";
+import { waitingSettingsPath } from "../src/config/waiting-overrides";
 import { bot, event, identity } from "./fixtures";
 import { copyCrewDatabase } from "./fixtures/database-reuse";
 

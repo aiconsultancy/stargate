@@ -16,7 +16,10 @@ import { notificationKey } from "../src/notifications/preferences/notifications"
 import { PeerDirectory } from "../src/gateway/peers";
 import { handleSlackRequest } from "../src/transports/slack/slack";
 import { openStore } from "../src/app/open-store";
-import { resolveWaiting, waitingSettingsPath } from "../src/gateway/waiting";
+import {
+  resolveWaiting,
+  waitingSettingsPath,
+} from "../src/config/waiting-overrides";
 import { bot, event, identity } from "./fixtures";
 
 const cleanups: (() => Promise<void>)[] = [];

@@ -29,7 +29,7 @@ import {
 } from "../shared/registration";
 import { settingsPattern, settingsRecord } from "../config/settings-schema";
 import type { ConfigPanelRecord, MetaRecords } from "./store";
-import { resolveWaiting, saveWaitingDelay } from "../gateway/waiting";
+import { resolveWaiting, saveWaitingDelay } from "../config/waiting-overrides";
 import type { SlackContent } from "../shared/slack-format";
 
 type MetaDelivery = {

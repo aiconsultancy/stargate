@@ -906,7 +906,7 @@
       "src/maintenance/update-notice.ts",
       "src/automation/maintenance/update-notice.ts"
     ],
-    "src/waiting.ts": ["src/waiting.ts", "src/gateway/waiting.ts"],
+    "src/waiting.ts": ["src/waiting.ts", "src/config/waiting-overrides.ts"],
     "src/transcribers/azure-openai.ts": [
       "src/transcribers/azure-openai.ts",
       "src/transcription/azure-openai.ts"
@@ -1062,7 +1062,8 @@
         "src/settings-errors.ts",
         "src/settings-legacy.ts",
         "src/settings-schema.ts",
-        "src/config/waiting.ts"
+        "src/config/waiting.ts",
+        "src/waiting.ts"
       ],
       "public": [
         "src/config.ts",
@@ -1070,7 +1071,8 @@
         "src/settings-errors.ts",
         "src/settings-legacy.ts",
         "src/settings-schema.ts",
-        "src/config/waiting.ts"
+        "src/config/waiting.ts",
+        "src/waiting.ts"
       ],
       "neighbours": [
         "activity",
@@ -1153,8 +1155,7 @@
         "src/routing.ts",
         "src/store.ts",
         "src/streaming.ts",
-        "src/thread-context.ts",
-        "src/waiting.ts"
+        "src/thread-context.ts"
       ],
       "public": [
         "src/gateway.ts",
@@ -1162,8 +1163,7 @@
         "src/gateway/store-types.ts",
         "src/peers.ts",
         "src/routing.ts",
-        "src/store.ts",
-        "src/waiting.ts"
+        "src/store.ts"
       ],
       "retained": {
         "src/store.ts": "store",

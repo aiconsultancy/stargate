@@ -12,7 +12,7 @@ import {
   serve,
 } from "../src/app/runtime";
 import type { SlackInteractions } from "../src/transports/slack/slack";
-import { resolveWaiting } from "../src/gateway/waiting";
+import { resolveWaiting } from "../src/config/waiting-overrides";
 import { bot, event, identity } from "./fixtures";
 
 test("runtime binds registration-scoped reads and authenticated panel actions without captain work", async () => {
