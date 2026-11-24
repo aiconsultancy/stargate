@@ -1510,8 +1510,13 @@ export class IrcShip {
           : undefined) ?? client.anchor(msgid),
       threadRoot: (channel, msgid) =>
         this.store.irc.ircThreadRoot(member.key, channel, msgid),
-      participating: (channel, root) =>
-        this.store.irc.ircThreadParticipating(member.key, channel, root),
+      participating: (channel, root, requester) =>
+        this.store.irc.ircThreadParticipating(
+          member.key,
+          channel,
+          root,
+          requester,
+        ),
       replay,
       now: Date.now,
       fold: client.fold,

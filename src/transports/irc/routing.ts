@@ -49,7 +49,7 @@ export type IrcRouteContext = {
   anchor?(msgid: string): string | undefined;
   /** Durable ancestry and membership, scoped to this registration and channel. */
   threadRoot?(channel: string, msgid: string): string | undefined;
-  participating?(channel: string, root: string): boolean;
+  participating?(channel: string, root: string, requester?: string): boolean;
   replay?: boolean;
   now(): number;
   /** Case folding under the server's CASEMAPPING. */
@@ -278,11 +278,9 @@ function addressesAnotherOfficer(
     ...(config.access.peerCaptains ?? []),
   ];
 
-  return names.some(
-    (nick) =>
-      withoutAddress(text, [nick], caseFold, true) !== text ||
-      mentions(caseFold(text), caseFold(`@${nick}`)),
-  );
+  const body = caseFold(text);
+
+  return names.some((nick) => mentions(body, caseFold(nick)));
 }
 
 /** In results mode, a leading fleet address selects one recipient. */
@@ -640,13 +638,13 @@ export function routeIrcMessage(
   const participatingReply =
     standardCaptainReply &&
     root !== undefined &&
-    context.participating?.(channel, root) === true;
+    context.participating?.(channel, root, user) === true;
 
   const replied =
     !strict &&
     validReply &&
     !(
-      participatingReply &&
+      standardCaptainReply &&
       mentioned !== true &&
       addressesAnotherOfficer(config, body, caseFold)
     ) &&

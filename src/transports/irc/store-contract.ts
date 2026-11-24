@@ -47,6 +47,7 @@ export interface IrcOperations {
     botKey: string,
     channel: string,
     root: string,
+    requester?: string,
   ): boolean;
   ircRequestAnchor(
     botKey: string,

@@ -321,7 +321,7 @@ test("only a top-level human channel request starts a new captain thread", () =>
   ).toBeUndefined();
 });
 
-test("only people can reach a participating captain without a reply to its own message", () => {
+test("only the requester can reach a participating captain via the thread root", () => {
   const context = {
     config,
     member: captain,
@@ -329,8 +329,10 @@ test("only people can reach a participating captain without a reply to its own m
     sent: () => false,
     threadRoot: (channel: string, msgid: string) =>
       channel === "#galactica" && msgid === "answer" ? "request" : undefined,
-    participating: (channel: string, root: string) =>
-      channel === "#galactica" && root === "request",
+    participating: (channel: string, root: string, requester?: string) =>
+      channel === "#galactica" &&
+      root === "request" &&
+      (requester === undefined || requester === "jack"),
     now: () => 0,
     fold,
   };
@@ -352,6 +354,13 @@ test("only people can reach a participating captain without a reply to its own m
     ),
   ).toBeUndefined();
 
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", { ...reply, account: "unknown-bot" }),
+      context,
+    ),
+  ).toBeUndefined();
+
   const answer = { ...reply, "+draft/reply": "answer" };
   const sent = { ...context, sent: () => true };
 
@@ -363,7 +372,7 @@ test("only people can reach a participating captain without a reply to its own m
   ).toBeUndefined();
   expect(
     routeIrcMessage(
-      message("#galactica", "Could @galactica-chief continue?", answer),
+      message("#galactica", "Could galactica-chief continue?", answer),
       sent,
     ),
   ).toBeUndefined();

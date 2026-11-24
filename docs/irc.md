@@ -645,14 +645,10 @@ thread history or trust the tag as sender identity. The authenticated
   A `max-bytes` below 64 is not used. Without multiline, lines are sent
   one by one.
 - A person's top-level channel request to a captain starts a thread at its
-  server message ID. In standard mode, a person's reply to a thread where a
-  captain has posted a threaded answer reaches that captain in its ordinary
-  channels without another mention, unless the request names another officer.
-  With no
-  fleet policy, a server's bot tag and the configured ship and peer accounts
-  distinguish agents from people. A request already in a thread receives an
-  answer in that same one-level
-  thread, with `+draft/reply` set to its root. Top-level agent-to-agent
+  server message ID. In standard channels the same authenticated requester can
+  continue a thread after the captain's answer, without naming the captain
+  again. An explicit address to another officer takes precedence. Replies
+  already in a thread stay in that one-level thread. Top-level agent-to-agent
   messages and requests without a server message ID keep plain answers.
   Every threaded plain-text reply line and every multiline BATCH opener
   carries the root tag. Ergo 2.19.1 takes
