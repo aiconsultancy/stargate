@@ -12,11 +12,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Result, Schema } from "effect";
-import {
-  settingsOffsetDatetime,
-  settingsPattern,
-  settingsStruct,
-} from "../../../../config/settings-schema";
+import { settingsPattern } from "../../../../config/settings-schema";
 import { inspectArchive, verifyExtracted } from "./archive";
 import {
   type GitHubRelease,
@@ -33,6 +29,11 @@ import {
 } from "../exec";
 import { replaceLink } from "../files";
 import { writePluginDigest } from "./plugin-digest";
+import {
+  type ReleaseMetadata,
+  metadataFile,
+  readMetadata,
+} from "./release-record";
 import { compareVersions, normalizeVersion, parseVersion } from "./versions";
 
 /**
@@ -44,26 +45,6 @@ import { compareVersions, normalizeVersion, parseVersion } from "./versions";
  *
  * Only directories with `.stargate-release.json` are managed releases.
  */
-export const metadataFile = ".stargate-release.json";
-
-export const releaseMetadataSchema = settingsStruct({
-  schema: Schema.Literal("stargate.release.v1"),
-  version: Schema.String.check(
-    Schema.makeFilter((value) => parseVersion(value) !== null),
-  ),
-  tag: Schema.NullOr(Schema.String.check(Schema.isMaxCodePoints(100))),
-  commit: Schema.NullOr(Schema.String.check(settingsPattern(/^[a-f0-9]{40}$/))),
-  sha256: Schema.NullOr(Schema.String.check(settingsPattern(/^[a-f0-9]{64}$/))),
-  installedAt: settingsOffsetDatetime,
-  /** `verified`: downloaded and checked by maintenance. `adopted`: migrated. */
-  verification: Schema.Literals(["verified", "adopted"]),
-  tree: Schema.Literals(["equal", "not-configured", "adopted"]),
-});
-
-export type ReleaseMetadata = typeof releaseMetadataSchema.Type;
-
-const decodeMetadata = Schema.decodeUnknownSync(releaseMetadataSchema);
-
 export function layout(root: string) {
   return {
     root,
@@ -71,16 +52,6 @@ export function layout(root: string) {
     current: join(root, "current"),
     previous: join(root, "previous"),
   };
-}
-
-export async function readMetadata(directory: string) {
-  try {
-    return decodeMetadata(
-      JSON.parse(await readFile(join(directory, metadataFile), "utf8")),
-    );
-  } catch {
-    return null;
-  }
 }
 
 /** Resolve a managed link (`current` or `previous`) to its release. */

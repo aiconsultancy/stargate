@@ -5,7 +5,8 @@ import type { CommandRunner } from "../exec";
 import { recoveryBudgetMs } from "../journal";
 import { maintenanceDirectory } from "../paths";
 import { packageDirectory } from "./ready";
-import { layout, readMetadata } from "./release";
+import { layout } from "./release";
+import { readMetadata } from "./release-record";
 import { type Report, summary } from "../reports/report";
 import {
   type Dependencies,
