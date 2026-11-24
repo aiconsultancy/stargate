@@ -17,6 +17,18 @@ export type AttachmentDelivery = PublishedFile & {
   noticeSent?: boolean;
 };
 
+// Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
+const decodeInputFiles = Schema.decodeUnknownSync(
+  Schema.mutable(
+    Schema.Array(
+      Schema.String.check(
+        Schema.isMaxCodePoints(2048),
+        settingsPattern(/^(?:F[A-Z0-9]+|https?:\/\/\S+)$/),
+      ),
+    ),
+  ).check(Schema.isMaxLength(10)),
+);
+
 export class AttachmentRecords {
   public constructor(private readonly db: Database) {}
 
@@ -27,18 +39,8 @@ export class AttachmentRecords {
       )
       .get(id);
 
-    // Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
     return row?.input_files
-      ? Schema.decodeUnknownSync(
-          Schema.mutable(
-            Schema.Array(
-              Schema.String.check(
-                Schema.isMaxCodePoints(2048),
-                settingsPattern(/^(?:F[A-Z0-9]+|https?:\/\/\S+)$/),
-              ),
-            ),
-          ).check(Schema.isMaxLength(10)),
-        )(JSON.parse(row.input_files))
+      ? decodeInputFiles(JSON.parse(row.input_files))
       : [];
   }
 
