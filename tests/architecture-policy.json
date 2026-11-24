@@ -1147,6 +1147,7 @@
         "src/gateway.ts",
         "src/gateway/captain-transcript-store.ts",
         "src/gateway/fleet-job-store.ts",
+        "src/gateway/job-status.ts",
         "src/gateway/ports.ts",
         "src/gateway/store-types.ts",
         "src/gateway/row-codec.ts",
@@ -1161,12 +1162,14 @@
       ],
       "public": [
         "src/gateway.ts",
+        "src/gateway/job-status.ts",
         "src/gateway/ports.ts",
         "src/gateway/store-types.ts",
         "src/peers.ts",
         "src/routing.ts",
         "src/store.ts"
       ],
+      "contracts": ["src/gateway/job-status.ts"],
       "retained": {
         "src/store.ts": "store",
         "src/gateway.ts": "service"

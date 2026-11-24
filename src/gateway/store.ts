@@ -34,13 +34,14 @@ import type { QuestionOffer } from "../questions/questions";
 import { QuestionRecords } from "../questions/store";
 import { type RequestFailure, failureText } from "../shared/request-failure";
 import type { ReplyChunk } from "../shared/slack-format";
-import { type Incoming, type Job, type JobStatus } from "./store-types";
+import type { Incoming, Job } from "./store-types";
+import type { JobStatus } from "./job-status";
 import type { TurnProgress } from "../shared/turn-progress";
 import { UpdateNotices } from "../automation/maintenance/update-notice";
 
 export { TranscriptConflict } from "./captain-transcript-store";
 
-export { jobStatuses } from "./store-types";
+export { jobStatuses } from "./job-status";
 
 export type {
   CaptainCursor,

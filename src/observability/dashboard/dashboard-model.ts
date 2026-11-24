@@ -6,7 +6,7 @@ import type {
   HistorySession,
   HistorySessionPage,
 } from "../../shared/session-history";
-import type { JobStatus } from "../../gateway/store";
+import type { JobStatus } from "../../gateway/job-status";
 
 /** JSON shapes served by the fleet dashboard. Additive changes only. */
 export type QueueCounts = Record<JobStatus, number>;

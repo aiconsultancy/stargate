@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { ReplyChunk } from "../shared/slack-format";
-import type { JobStatus } from "./store-types";
+import type { JobStatus } from "./job-status";
 
 export class TranscriptRecords {
   public constructor(private readonly db: Database) {}

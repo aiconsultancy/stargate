@@ -13,7 +13,7 @@
  *   /api/v1/ships/{id}/crew/{member}    -> V1CrewDetail
  *   /api/v1/events                      -> text/event-stream of V1Event
  */
-import type { JobStatus } from "../../../../gateway/store";
+import type { JobStatus } from "../../../../gateway/job-status";
 import type { TurnStage } from "../../../../shared/turn-progress";
 import type { RequestFailure } from "../../../../shared/request-failure";
 
