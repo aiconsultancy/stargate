@@ -16,6 +16,11 @@ export const TopicPattern = bounded(200).check(
   Schema.isPattern(/^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*(?:\.\*)?$/),
 );
 
+export const topicMatches = (pattern: string, topic: string) =>
+  pattern.endsWith(".*")
+    ? topic.startsWith(pattern.slice(0, -1))
+    : pattern === topic;
+
 export const Audience = Schema.Literals(["internal", "public"]);
 
 /** RFC 3339 without leap seconds or precision that cannot survive milliseconds. */

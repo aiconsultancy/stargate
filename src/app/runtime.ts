@@ -82,10 +82,13 @@ import { NotificationStore } from "../notifications/preferences/notification-sto
 import { notificationKey } from "../notifications/preferences/notifications";
 import {
   type SlackRegistration,
-  notifyConfigError,
   resolveDestinations,
 } from "../notifications/ingest/binding";
-import { coreLimits, notifyEnabled } from "../notifications/ingest/config";
+import {
+  coreLimits,
+  notifyConfigError,
+  notifyEnabled,
+} from "../notifications/ingest/config";
 import { notificationRoutes } from "../notifications/ingest/http";
 import { ShuttingDown } from "../notifications/ingest/model";
 import { makeNotifications } from "../notifications/ingest/notifications";

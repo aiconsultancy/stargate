@@ -21,8 +21,10 @@ import {
 import { fold, widestFold } from "../transports/irc/protocol";
 import { textMentionRuleSchema } from "../shared/mentions";
 import { maintenanceSchema } from "../automation/maintenance/nightly/config";
-import { notifyConfigError } from "../notifications/ingest/binding";
-import { notifySchema } from "../notifications/ingest/config";
+import {
+  notifyConfigError,
+  notifySchema,
+} from "../notifications/ingest/config";
 import {
   piCrewBackendSchema,
   piDurableBackendSchema,
