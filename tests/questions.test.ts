@@ -12,13 +12,15 @@ import { parseMessage } from "../src/transports/irc/protocol";
 import { routeIrcMessage } from "../src/transports/irc/routing";
 import { IrcShip } from "../src/transports/irc/ship";
 import {
-  type NativeQuestion,
-  nativeQuestionSchema,
   Questions,
   questionAnswer,
   questionControl,
   questionText,
 } from "../src/questions/questions";
+import {
+  type NativeQuestion,
+  nativeQuestionSchema,
+} from "../src/questions/native-question";
 import { openStore } from "../src/app/open-store";
 import { type Incoming } from "../src/gateway/store";
 import { bot, identity } from "./fixtures";

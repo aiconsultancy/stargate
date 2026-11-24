@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import type { NativeQuestion, QuestionOffer } from "./questions";
+import type { QuestionOffer } from "./questions";
+import type { NativeQuestion } from "./native-question";
 
 export class QuestionRecords {
   public constructor(private readonly db: Database) {}

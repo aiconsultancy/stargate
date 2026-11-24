@@ -9,7 +9,7 @@ import { saveQuestionSettings } from "../src/questions/question-settings";
 import type {
   NativeQuestion,
   QuestionAnswer,
-} from "../src/questions/questions";
+} from "../src/questions/native-question";
 import { fixtureRoot } from "./fixture-root";
 
 const cleanup: (() => Promise<void>)[] = [];

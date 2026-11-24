@@ -7,7 +7,7 @@ import {
   CrewQuestionRpc,
   type CrewQuestionWork,
 } from "../../coordination/crew/questions/question-handoff";
-import { questionFingerprint } from "../../questions/questions";
+import { questionFingerprint } from "../../questions/native-question";
 
 type Config = Extract<BackendConfig, { type: "opencode" }>;
 

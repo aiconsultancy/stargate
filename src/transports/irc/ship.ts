@@ -30,10 +30,8 @@ import {
 import { fleetSourceReference } from "../../coordination/fleet/fleet-source";
 import type { GatewayConfig } from "../../gateway/gateway";
 import type { GatewayTransport } from "../../gateway/ports";
-import {
-  questionControl,
-  questionFingerprint,
-} from "../../questions/questions";
+import { questionControl } from "../../questions/questions";
+import { questionFingerprint } from "../../questions/native-question";
 import { type Identity, backendFingerprint } from "../../gateway/routing";
 import type { Incoming, Store } from "../../gateway/store";
 import { turnProgressText } from "../../shared/turn-progress";

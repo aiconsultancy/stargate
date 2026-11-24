@@ -5,7 +5,7 @@ import {
   type NativeQuestion,
   type QuestionAnswer,
   nativeQuestionSchema,
-} from "../../../questions/questions";
+} from "../../../questions/native-question";
 import { settingsStruct } from "../../../config/settings-schema";
 import { messagePortableSchema as portable } from "../messaging/message-tool-input";
 import type { CrewTask } from "../execution/state";

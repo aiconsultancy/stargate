@@ -12,7 +12,7 @@ import { IrcShip } from "../src/transports/irc/ship";
 import {
   nativeQuestionSchema,
   type QuestionAnswer,
-} from "../src/questions/questions";
+} from "../src/questions/native-question";
 import { settingsIssues } from "../src/config/settings-schema";
 import { openStore } from "../src/app/open-store";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";

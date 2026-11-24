@@ -15,7 +15,7 @@ import type {
   NativeQuestion,
   PendingQuestion,
   QuestionAnswer,
-} from "../questions/questions";
+} from "../questions/native-question";
 import type { QuotaObservation, QuotaSnapshot } from "./quota/quota";
 import type { InboundReaction } from "../shared/reactions";
 import type { SessionHistory } from "../shared/session-history";
