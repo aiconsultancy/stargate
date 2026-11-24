@@ -43,7 +43,9 @@ function fixture(enabled = true, drain?: DrainControl) {
       return "Done";
     },
     async steer(input) {
-      expect(store.followUps(gateway.key)[0]?.state).toBe("writing");
+      expect(store.threadFollowUps.followUps(gateway.key)[0]?.state).toBe(
+        "writing",
+      );
       duringWrite?.();
 
       if (!input.allowed()) return { status: "refused" };
@@ -137,7 +139,9 @@ test("same-thread busy follow-up persists before native write, steers once and l
   await f.gateway.pollFollowUps(AbortSignal.timeout(1000));
   expect(f.writes).toHaveLength(1);
   expect(f.reactions).toEqual(["2.000"]);
-  expect(f.store.followUpLinks(owner.id)).toContain("/archives/C123/p2000");
+  expect(f.store.threadFollowUps.followUpLinks(owner.id)).toContain(
+    "/archives/C123/p2000",
+  );
 });
 
 test("flag defaults off and idle intake remains an ordinary request", () => {
@@ -382,10 +386,10 @@ test("writing receipt recovery reads evidence only, without resubmitting or queu
   const f = fixture();
   f.start();
   f.gateway.accept(f.follow());
-  const receipt = f.store.followUps(f.gateway.key)[0];
+  const receipt = f.store.threadFollowUps.followUps(f.gateway.key)[0];
 
   if (!receipt) throw new Error("Missing receipt");
-  expect(f.store.claimFollowUp(receipt)).toBe(true);
+  expect(f.store.threadFollowUps.claimFollowUp(receipt)).toBe(true);
   let reads = 0;
   f.backend.reconcileSteer = async () => {
     reads++;
@@ -423,15 +427,19 @@ test("accepted-event receipt and deterministic native identity survive SQLite re
     store.running(owner.id);
     store.saveInput("bot", owner.id, "msg_original");
     const followup = { ...input, eventId: "C123:2.000", text: "Revised scope" };
-    expect(store.admitFollowUp(followup, "ses_captain")).toBe(true);
-    const receipt = store.followUps("bot")[0];
+    expect(store.threadFollowUps.admitFollowUp(followup, "ses_captain")).toBe(
+      true,
+    );
+    const receipt = store.threadFollowUps.followUps("bot")[0];
 
     if (!receipt) throw new Error("Missing receipt");
-    store.claimFollowUp(receipt);
+    store.threadFollowUps.claimFollowUp(receipt);
     store.close();
     store = openStore(path);
-    expect(store.admitFollowUp(followup, "ses_captain")).toBe(false);
-    expect(store.followUps("bot")[0]).toMatchObject({
+    expect(store.threadFollowUps.admitFollowUp(followup, "ses_captain")).toBe(
+      false,
+    );
+    expect(store.threadFollowUps.followUps("bot")[0]).toMatchObject({
       nativeID: receipt.nativeID,
       inputID: "msg_original",
       state: "writing",

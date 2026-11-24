@@ -363,7 +363,9 @@ test("legacy preview targets steer only their running captain thread, not the re
   expect(sourceLine(steer.context)).toBe(
     "s=slack;c=C123;t=1.000;m=2.000;u=U123;reaction=eyes;action=added",
   );
-  expect(f.store.followUpLinks(owner.id)).toContain("/archives/C123/p2000");
+  expect(f.store.threadFollowUps.followUpLinks(owner.id)).toContain(
+    "/archives/C123/p2000",
+  );
   expect(f.slack.react).not.toHaveBeenCalled();
 });
 
