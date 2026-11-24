@@ -441,6 +441,20 @@ export function dashboardSource(
     return false;
   }
 
+  async function scopedHistory(
+    id: string,
+    sessionID: string,
+    signal: AbortSignal,
+  ): Promise<SessionHistory | undefined> {
+    const ship = find(id);
+    const history = ship?.backend.history;
+
+    if (ship && history && (await allowed(ship, history, sessionID, signal)))
+      return history;
+
+    return;
+  }
+
   async function roots(
     ship: DashboardShip,
     signal: AbortSignal,
@@ -769,12 +783,9 @@ export function dashboardSource(
     ) => readShip(id, signal, input),
 
     async children(id, input, signal) {
-      const ship = find(id);
-      const history = ship?.backend.history;
+      const history = await scopedHistory(id, input.parentID, signal);
 
-      if (!ship || !history) return;
-
-      if (!(await allowed(ship, history, input.parentID, signal))) return;
+      if (!history) return;
 
       const page = await history.children(
         {
@@ -796,14 +807,9 @@ export function dashboardSource(
     },
 
     async entries(id, input, signal) {
-      const ship = find(id);
-      const history = ship?.backend.history;
+      const history = await scopedHistory(id, input.sessionID, signal);
 
-      if (!ship || !history) return;
-
-      if (!(await allowed(ship, history, input.sessionID, signal))) return;
-
-      return history.entries(input, signal);
+      return history?.entries(input, signal);
     },
   } satisfies DashboardSource & {
     fleetBackend: (id: string) => AgentBackend | undefined;
