@@ -14,7 +14,7 @@
     "src/store.ts"
   ],
   "sourceFiles": 300,
-  "sourceEdges": 1250,
+  "sourceEdges": 1249,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -227,7 +227,6 @@
     "private:src/health.ts -> src/nightly/ready.ts",
     "private:src/health.ts -> src/nightly/report.ts",
     "private:src/health.ts -> src/status-report.ts",
-    "private:src/input-origin.ts -> src/crew/result.ts",
     "private:src/irc/crew-link.ts -> src/crew/irc-rpc.ts",
     "private:src/irc/crew-question-gateway.ts -> src/crew/question-handoff.ts",
     "private:src/irc/ship.ts -> src/crew/irc-rpc.ts",
