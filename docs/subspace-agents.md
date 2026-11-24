@@ -207,6 +207,12 @@ The socket sits in a directory per officer:
 A directory with mode `0700` admits only the gateway user, which is what a
 gateway-launched (Claude) officer needs.
 
+A missing socket directory stops start-up by design. The examples use
+`/run/stargate/subspace/…`, and `/run` is emptied at boot, so recreate each
+directory at boot, before the gateway starts. For example, a tmpfiles.d entry
+`d /run/stargate/subspace/example-captain 2750 stargate example-captain-engine -`
+makes it with the right owner, group and mode.
+
 This guarantees that a process can obtain a request signed as an officer only
 if it runs as the gateway user, as root, or with that officer's engine group.
 Keep each officer's engine user out of every other officer's group and out of
