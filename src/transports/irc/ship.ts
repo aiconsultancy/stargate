@@ -1229,7 +1229,9 @@ export class IrcShip {
           if (
             detached() ||
             (identity.role !== "captain" && !this.config.features.questions) ||
-            (!client.isChannel(target) && !this.config.features.questions) ||
+            (!this.config.access.humanWakeChannels?.length &&
+              !this.config.features.questions &&
+              (!client.isChannel(target) || !root)) ||
             this.isAuditChannel(client, target)
           ) {
             return;

@@ -327,6 +327,8 @@ test("only people can reach a participating captain without a reply to its own m
     member: captain,
     currentNick: captain.nick,
     sent: () => false,
+    threadRoot: (channel: string, msgid: string) =>
+      channel === "#galactica" && msgid === "answer" ? "request" : undefined,
     participating: (channel: string, root: string) =>
       channel === "#galactica" && root === "request",
     now: () => 0,
@@ -337,6 +339,18 @@ test("only people can reach a participating captain without a reply to its own m
   const followUp = message("#galactica", "continue", reply);
 
   expect(routeIrcMessage(followUp, context)?.replyParent).toBe("request");
+  expect(
+    routeIrcMessage(
+      message("#galactica", "continue", { ...reply, "+draft/reply": "answer" }),
+      context,
+    )?.replyParent,
+  ).toBe("request");
+  expect(
+    routeIrcMessage(
+      message("#galactica", "galactica-chief: continue", reply),
+      context,
+    ),
+  ).toBeUndefined();
   expect(
     routeIrcMessage(followUp, { ...context, member: chief }),
   ).toBeUndefined();

@@ -545,8 +545,22 @@ export function routeIrcMessage(
       !message.tags.has("+reply") ||
       message.tags.get("+draft/reply") === message.tags.get("+reply"));
 
+  const ship = shipAccounts(config, caseFold);
+
+  const sender = ship.has(user)
+    ? ("crew" as const)
+    : config.access.peerCaptains.some((peer) => caseFold(peer) === user)
+      ? ("captain" as const)
+      : undefined;
+
+  const person =
+    !sender && (!config.fleetPolicy || human) && !message.tags.has("bot");
+
+  const standardCaptainReply =
+    !strict && !direct && !visitorTag && member.role === "captain" && person;
+
   const knownRoot =
-    protectedHuman && validReply
+    (protectedHuman || standardCaptainReply) && validReply
       ? context.threadRoot?.(channel, reply)
       : undefined;
 
@@ -603,22 +617,19 @@ export function routeIrcMessage(
     return;
   }
 
-  const ship = shipAccounts(config, caseFold);
-
-  const sender = ship.has(user)
-    ? ("crew" as const)
-    : config.access.peerCaptains.some((peer) => caseFold(peer) === user)
-      ? ("captain" as const)
-      : undefined;
-
-  const person =
-    !sender && (!config.fleetPolicy || human) && !message.tags.has("bot");
-
   const replied =
     !strict &&
     validReply &&
     (context.sent(reply) ||
-      (!direct && member.role === "captain" && person && root !== undefined));
+      (standardCaptainReply &&
+        root !== undefined &&
+        context.participating?.(channel, root) === true &&
+        withoutAddress(
+          body,
+          [...ship, ...config.access.peerCaptains],
+          caseFold,
+          true,
+        ) === body));
 
   // Captain text mentions and all-calls; the matched word becomes the
   // Turn's text mention, so the session sees why it was admitted.
@@ -689,7 +700,7 @@ export function routeIrcMessage(
   const parent = validMsgid(reply)
     ? protectedHuman
       ? (root ?? reply)
-      : (context.anchor?.(reply) ?? reply)
+      : (root ?? context.anchor?.(reply) ?? reply)
     : member.role === "captain" &&
         !hasReply &&
         !direct &&

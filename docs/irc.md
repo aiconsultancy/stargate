@@ -646,7 +646,9 @@ thread history or trust the tag as sender identity. The authenticated
   one by one.
 - A person's top-level channel request to a captain starts a thread at its
   server message ID. In standard mode, a person's reply to a thread where a
-  captain has answered reaches that captain without another mention. With no
+  captain has posted a threaded answer reaches that captain in its ordinary
+  channels without another mention, unless the request names another officer.
+  With no
   fleet policy, a server's bot tag and the configured ship and peer accounts
   distinguish agents from people. A request already in a thread receives an
   answer in that same one-level
