@@ -20,7 +20,7 @@ import {
   isAllowedChannel,
   isAllowedUser,
 } from "../../shared/registration";
-import type { JobStatus } from "../../gateway/store";
+import type { JobStatus } from "../../gateway/job-status";
 
 const line = (text: string, max: number) =>
   Array.from(text.replace(/[\r\n\t]+/g, " "))

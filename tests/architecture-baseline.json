@@ -13,8 +13,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 306,
-  "sourceEdges": 1260,
+  "sourceFiles": 307,
+  "sourceEdges": 1262,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -155,7 +155,6 @@
   "exceptions": [
     "direction:src/activity-delivery.ts -> src/gateway/ports.ts",
     "direction:src/activity-delivery.ts -> src/store.ts",
-    "direction:src/api/v1/types.ts -> src/store.ts",
     "direction:src/backend.ts -> src/maintenance-drain.ts",
     "direction:src/backend.ts -> src/maintenance.ts",
     "direction:src/backend.ts -> src/quota.ts",
@@ -173,9 +172,7 @@
     "direction:src/crew/report-rpc.ts -> src/update-notice.ts",
     "direction:src/crew/team.ts -> src/settings-errors.ts",
     "direction:src/cron-control.ts -> src/bot-web.ts",
-    "direction:src/cron.ts -> src/store.ts",
     "direction:src/dashboard-model.ts -> src/cron-store.ts",
-    "direction:src/dashboard-model.ts -> src/store.ts",
     "direction:src/dashboard-source.ts -> src/irc/ship.ts",
     "direction:src/dispatch/irc.ts -> src/irc/client.ts",
     "direction:src/dispatch/start.ts -> src/irc/ship.ts",
