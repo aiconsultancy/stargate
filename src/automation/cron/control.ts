@@ -128,6 +128,33 @@ const defaults: Dependencies = {
   },
 };
 
+function modelValidator(
+  bot: BotConfig,
+  dataDirectory: string,
+  dependencies: Pick<Dependencies, "model">,
+) {
+  return async (
+    input: Pick<CronAdvanced, "model" | "arbiter">,
+    signal: AbortSignal,
+  ) => {
+    if (dependencies.model)
+      return dependencies.model(bot, dataDirectory, input, signal);
+
+    if (bot.backend.type !== "opencode")
+      throw new CronControlError("This backend cannot validate cron models.");
+    const backend = new OpenCodeBackend(bot.backend);
+
+    try {
+      if (typeof backend.cronModel !== "function")
+        throw new CronControlError("This backend cannot validate cron models.");
+
+      return await backend.cronModel(input, signal);
+    } finally {
+      await backend.close();
+    }
+  };
+}
+
 /** Supported local operator interface; agents never access runtime SQL directly. */
 export async function runCronOperation(
   raw: unknown,
@@ -195,32 +222,13 @@ export async function runCronOperation(
         );
       }
 
-      const model = async (
-        input: Pick<CronAdvanced, "model" | "arbiter">,
-        current: AbortSignal,
-      ) => {
-        if (dependencies.model)
-          return dependencies.model(bot, config.dataDirectory, input, current);
+      const manager = new CronjobManager(
+        bot,
+        identity,
+        store,
+        modelValidator(bot, config.dataDirectory, dependencies),
+      );
 
-        if (bot.backend.type !== "opencode")
-          throw new CronControlError(
-            "This backend cannot validate cron models.",
-          );
-        const backend = new OpenCodeBackend(bot.backend);
-
-        try {
-          if (typeof backend.cronModel !== "function")
-            throw new CronControlError(
-              "This backend cannot validate cron models.",
-            );
-
-          return await backend.cronModel(input, current);
-        } finally {
-          await backend.close();
-        }
-      };
-
-      const manager = new CronjobManager(bot, identity, store, model);
       const now = dependencies.now();
       const errors = await manager.sync(now, signal);
       signal.throwIfAborted();
