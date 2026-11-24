@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { Result, Schema } from "effect";
+import { Schema } from "effect";
 import { ActivityRecords } from "../activity/store";
 import type { PublishedFile } from "../attachments/attachments";
 import { AttachmentRecords } from "../attachments/store";
@@ -8,16 +8,13 @@ import { BackgroundCases } from "../questions/background-questions";
 import { cancellationNotice } from "./cancellation";
 import { fleetJobSchema } from "../coordination/fleet/protocol";
 import {
+  combineIrcBurstMessages,
   ircBurstEligible,
   ircBurstLimits,
-  ircBurstMessageSchema,
-  ircBurstText,
+  prepareIrcBurstMessage,
 } from "../transports/irc/burst";
 import { validMsgid } from "../transports/irc/protocol";
-import type {
-  IrcBurstMessage,
-  IrcOperations,
-} from "../transports/irc/store-contract";
+import type { IrcOperations } from "../transports/irc/store-contract";
 import { FleetJobRecords } from "./fleet-job-store";
 import { type StoredJob, decodeJob, decodeStoredJob } from "./row-codec";
 import { TranscriptRecords } from "./transcript-store";
@@ -1167,29 +1164,14 @@ export class Store {
       return ordinary(input);
     const now = options.now ?? Date.now();
 
-    const message: IrcBurstMessage = {
-      eventId: input.eventId,
-      thread: input.thread,
-      source: options.source,
-      text: input.text,
-      originalText: options.originalText,
-      received: input.received ?? now,
-      files: [...(input.files ?? [])],
-    };
+    const message = prepareIrcBurstMessage(
+      input,
+      options.source,
+      options.originalText,
+      now,
+    );
 
-    // An individually large message still follows ordinary admission intact.
-    if (
-      message.files.length > ircBurstLimits.files ||
-      Buffer.byteLength(JSON.stringify(message)) > ircBurstLimits.bytes
-    )
-      return ordinary(input);
-
-    if (
-      Result.isFailure(
-        Schema.decodeUnknownResult(ircBurstMessageSchema)(message),
-      )
-    )
-      return ordinary(input);
+    if (!message) return ordinary(input);
 
     return this.db.transaction(() => {
       if (
@@ -1210,14 +1192,7 @@ export class Store {
         )
         .get(input.botKey);
 
-      const burst = latest
-        ? this.db
-            .query<
-              { policy: string; deadline: number; maximum: number },
-              [number]
-            >("SELECT policy,deadline,maximum FROM irc_bursts WHERE job=?")
-            .get(latest.id)
-        : null;
+      const burst = latest ? this.irc.ircBurst(latest.id) : null;
 
       if (
         latest &&
@@ -1234,16 +1209,10 @@ export class Store {
         now < burst.maximum
       ) {
         const messages = this.irc.ircBurstMessages(latest.id);
-        const combined = [...messages, message];
-        const files = [...new Set(combined.flatMap((item) => item.files))];
-        const text = ircBurstText(combined);
+        const combined = combineIrcBurstMessages(messages, message);
 
-        if (
-          combined.length <= ircBurstLimits.messages &&
-          files.length <= ircBurstLimits.files &&
-          Buffer.byteLength(JSON.stringify(combined)) <= ircBurstLimits.bytes &&
-          Buffer.byteLength(text) <= ircBurstLimits.bytes
-        ) {
+        if (combined) {
+          const { files, text } = combined;
           const deadline = Math.min(now + options.quietMs, burst.maximum);
 
           const changed = this.db
@@ -1259,12 +1228,10 @@ export class Store {
             ).changes;
 
           if (changed) {
-            this.db
-              .query("UPDATE irc_bursts SET deadline=? WHERE job=?")
-              .run(deadline, latest.id);
+            this.irc.extendIrcBurst(latest.id, deadline);
             this.irc.saveIrcBurstMessage(
               latest.id,
-              combined.length - 1,
+              messages.length,
               input.botKey,
               message,
             );
@@ -1300,11 +1267,12 @@ export class Store {
       const job = this.jobByEvent(input.botKey, input.eventId);
 
       if (!job) throw new Error("IRC burst job was not persisted");
-      this.db
-        .query(
-          "INSERT INTO irc_bursts(job,policy,deadline,maximum) VALUES(?,?,?,?)",
-        )
-        .run(job.id, options.policy, deadline, now + ircBurstLimits.waitMs);
+      this.irc.startIrcBurst(
+        job.id,
+        options.policy,
+        deadline,
+        now + ircBurstLimits.waitMs,
+      );
       this.irc.saveIrcBurstMessage(job.id, 0, input.botKey, message);
 
       return true;

@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Result, Schema } from "effect";
 import {
   settingsStartsWith,
   settingsStruct,
@@ -56,8 +56,54 @@ export function ircBurstEligible(input: Incoming): boolean {
   );
 }
 
+/** An individually large or invalid message must use ordinary admission. */
+export function prepareIrcBurstMessage(
+  input: Incoming,
+  source: string,
+  originalText: string,
+  now: number,
+) {
+  const message: IrcBurstMessage = {
+    eventId: input.eventId,
+    thread: input.thread,
+    source,
+    text: input.text,
+    originalText,
+    received: input.received ?? now,
+    files: [...(input.files ?? [])],
+  };
+
+  if (
+    message.files.length > ircBurstLimits.files ||
+    Buffer.byteLength(JSON.stringify(message)) > ircBurstLimits.bytes ||
+    Result.isFailure(Schema.decodeUnknownResult(ircBurstMessageSchema)(message))
+  )
+    return;
+
+  return message;
+}
+
+export function combineIrcBurstMessages(
+  previous: readonly IrcBurstMessage[],
+  message: IrcBurstMessage,
+) {
+  const combined = [...previous, message];
+  const files = [...new Set(combined.flatMap((item) => item.files))];
+  const text = ircBurstText(combined);
+
+  if (
+    combined.length > ircBurstLimits.messages ||
+    files.length > ircBurstLimits.files ||
+    Buffer.byteLength(JSON.stringify(combined)) > ircBurstLimits.bytes ||
+    Buffer.byteLength(text) > ircBurstLimits.bytes
+  )
+    return;
+
+  return { files, text };
+}
+
 /** JSON quotes user text; user-written delimiters cannot create another source. */
-export function ircBurstText(messages: readonly IrcBurstMessage[]) {
+function ircBurstText(messages: readonly IrcBurstMessage[]) {
   if (messages.length === 1) return messages[0]?.text ?? "";
 
   return [
