@@ -1,4 +1,4 @@
 {
-  "baselineSha256": "29d1531518daf17dc605df4a1de4de1f33124ddc17ba1630b2f2d62e69f9f4ea",
-  "pruneStale": true
+  "baselineSha256": "bf20958fabc41bc3ec755739db23c99d22dbcaff5bcad8cf2bc31f194cdf83a1",
+  "closureAdditions": ["src/backends/opencode/crew-status.ts"]
 }
