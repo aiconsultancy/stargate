@@ -92,15 +92,17 @@ function outcomes({ recent, lastOutcome }: V1CrewContext) {
   return tasks;
 }
 
+type EmitContextEvent = (
+  kind: V1ActivityEvent["kind"],
+  text: string,
+  extra?: Pick<V1ActivityEvent, "status" | "branch">,
+) => void;
+
 function contextEvents(
   previous: V1CrewContext,
   next: V1CrewContext,
   name: string,
-  emit: (
-    kind: V1ActivityEvent["kind"],
-    text: string,
-    extra?: Pick<V1ActivityEvent, "status" | "branch">,
-  ) => void,
+  emit: EmitContextEvent,
 ) {
   const { current } = next;
   const old = previous.current;
@@ -148,6 +150,15 @@ function contextEvents(
     );
   }
 
+  gitActivity(previous, next, name, emit);
+}
+
+function gitActivity(
+  previous: V1CrewContext,
+  next: V1CrewContext,
+  name: string,
+  emit: EmitContextEvent,
+) {
   const branch = next.git?.branch ?? null;
   const priorGit = previous.git;
 
