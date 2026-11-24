@@ -93,19 +93,25 @@ export async function handleSlackRequest(
   try {
     if (request.type === "slash_commands" && interactions) {
       await interactions.command(request.body, request.ack);
-    } else if (request.type === "interactive" && interactions) {
-      await interactions.interactive(request.body, request.ack);
-    } else {
-      if (request.type === "events_api") {
-        await accept(request.body);
 
-        // Intake closed during an async check: Slack redelivers to the next
-        // Connection; a stored copy is deduplicated by its event ID.
-        if (!open()) return;
-      }
-
-      await request.ack();
+      return;
     }
+
+    if (request.type === "interactive" && interactions) {
+      await interactions.interactive(request.body, request.ack);
+
+      return;
+    }
+
+    if (request.type === "events_api") {
+      await accept(request.body);
+
+      // Slack redelivers if intake closed while it waited.
+      // The event ID deduplicates any stored copy.
+      if (!open()) return;
+    }
+
+    await request.ack();
   } catch {
     log.error("Could not handle or acknowledge Slack request");
   }
