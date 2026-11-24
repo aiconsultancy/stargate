@@ -1,8 +1,11 @@
+export { type BackendConfig, backendSchema } from "./backends/config";
+
+export { secret } from "./lib/credentials";
+
 export {
   agentDispatchDefaults,
   agentDispatchSchema,
   agentDispatchTarget,
-  backendSchema,
   botSchema,
   claudeBackendSchema,
   claudeToolNames,
@@ -19,13 +22,11 @@ export {
   pinnedSessionIDs,
   registrationIds,
   reloadConfigSchema,
-  secret,
   teamsSchema,
 } from "./config/composition";
 
 export type {
   AgentDispatchConfig,
-  BackendConfig,
   BotConfig,
   Config,
   EffectiveIrcConfig,

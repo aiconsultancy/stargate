@@ -1,6 +1,7 @@
 import { OpenCode } from "@opencode/client";
 import { Schema } from "effect";
-import { type BackendConfig, secret } from "../../config";
+import type { BackendConfig } from "../../backends/config";
+import { secret } from "../../lib/credentials";
 import {
   CrewIrc,
   type OutboxPage,

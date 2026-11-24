@@ -36,8 +36,8 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Option, Schema, SchemaTransformation } from "effect";
 import type { Attachment } from "../../attachments/attachments";
 import type { AgentBackend, BackendContext, TextSink } from "../backend";
-import { type BackendConfig, secret } from "../../config";
-import { redactCredentials } from "../../lib/credentials";
+import type { piDurableBackendSchema } from "./config";
+import { redactCredentials, secret } from "../../lib/credentials";
 import { workingAgreementNotice } from "../../coordination/crew/instructions";
 import { piCrewExtension } from "../../coordination/crew/pi/pi-extension";
 import {
@@ -55,7 +55,7 @@ import type { SessionHistory } from "../../shared/session-history";
 import { piInputContent } from "./pi-attachments";
 import { piSessionHistory } from "./pi-history";
 
-type Config = Extract<BackendConfig, { type: "pi-durable" }>;
+type Config = typeof piDurableBackendSchema.Type;
 
 // Leading zeros are accepted; the decoded safe integer is the native ID.
 const conversationId = Schema.decodeUnknownSync(

@@ -27,7 +27,8 @@ import {
   type TextSink,
   sourceLine,
 } from "./backend";
-import { type BackendConfig, secret } from "../config";
+import type { codexBackendSchema } from "./codex/config";
+import { secret } from "../lib/credentials";
 import {
   AttachmentInputUnavailable,
   BackendFailure,
@@ -56,7 +57,7 @@ import {
 
 export { nativeCodex } from "./codex-paths";
 
-type Config = Extract<BackendConfig, { type: "codex" }>;
+type Config = typeof codexBackendSchema.Type;
 
 type CodexConfig = NonNullable<CodexOptions["config"]>;
 
