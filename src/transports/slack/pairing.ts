@@ -138,6 +138,25 @@ export class PairingUI {
     );
   }
 
+  private reserveConfirmation(user: string, channel: string) {
+    const now = this.monotonicNow();
+
+    for (const [nonce, entry] of this.pending) {
+      if (entry.expires <= now) this.pending.delete(nonce);
+    }
+
+    if (this.pending.size >= 128) return;
+    const nonce = randomUUID();
+    this.pending.set(nonce, {
+      user,
+      channel,
+      expires: now + 300_000,
+      used: false,
+    });
+
+    return nonce;
+  }
+
   public async command(body: unknown, ack: SlackAck) {
     let acknowledged = false;
 
@@ -167,13 +186,10 @@ export class PairingUI {
         return;
       }
 
-      const now = this.monotonicNow();
+      const data = parsed.success;
+      const nonce = this.reserveConfirmation(data.user_id, data.channel_id);
 
-      for (const [nonce, entry] of this.pending) {
-        if (entry.expires <= now) this.pending.delete(nonce);
-      }
-
-      if (this.pending.size >= 128) {
+      if (nonce === undefined) {
         await once({
           response_type: "ephemeral",
           text: "Too many pairing confirmations. Wait five minutes and try again.",
@@ -182,14 +198,6 @@ export class PairingUI {
         return;
       }
 
-      const data = parsed.success;
-      const nonce = randomUUID();
-      this.pending.set(nonce, {
-        user: data.user_id,
-        channel: data.channel_id,
-        expires: now + 300_000,
-        used: false,
-      });
       await once();
       await this.api.open(data.trigger_id, {
         ...notice(warning),
