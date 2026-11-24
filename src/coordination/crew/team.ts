@@ -103,15 +103,18 @@ export const teamSchema = settingsStruct({
   ).check(Schema.isMinLength(1)),
 }).check(
   settingsCheck((team, context) => {
-    for (const [index, agent] of [team.captain, ...team.crew].entries()) {
-      if (agent.name && agent.id !== agentIDForName(agent.name)) {
-        context.addIssue({
-          code: "custom",
-          path: index === 0 ? ["captain", "id"] : ["crew", index - 1, "id"],
-          message:
-            "Agent IDs must match assigned names; hidden legacy aliases are not allowed.",
-        });
-      }
+    // A captain is an officer, whose name is its ID.
+    // A crew name is only what people see; the ID keys all crew state.
+    if (
+      team.captain.name &&
+      team.captain.id !== agentIDForName(team.captain.name)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["captain", "id"],
+        message:
+          "The captain's ID must match its name; only crew names may differ from their IDs.",
+      });
     }
 
     if (team.captain.id === "all") {
@@ -156,6 +159,37 @@ export const teamSchema = settingsStruct({
 
       ids.add(member.id);
     }
+
+    // Ignoring case, a name is no other member's name or ID or a reserved alias.
+    const members = [team.captain, ...team.crew];
+
+    const owners = new Map([
+      ["captain", -1],
+      ["all", -1],
+    ]);
+
+    for (const [index, member] of members.entries()) {
+      owners.set(member.id, index);
+    }
+
+    for (const [index, member] of members.entries()) {
+      const name = member.name?.toLowerCase();
+
+      if (name === undefined) {
+        continue;
+      }
+
+      if ((owners.get(name) ?? index) === index) {
+        owners.set(name, index);
+      } else {
+        context.addIssue({
+          code: "custom",
+          path: index === 0 ? ["captain", "name"] : ["crew", index - 1, "name"],
+          message:
+            "Crew names must be unique, ignoring case, and differ from the captain's name, every other member's ID, captain and all.",
+        });
+      }
+    }
   }),
 );
 
@@ -165,7 +199,7 @@ export type CrewMember = Team["crew"][number];
 
 export type PermissionProfile = "captain" | CrewMember["permissionProfile"];
 
-/** Definition IDs and filenames are ship-role-name; no runtime alias registry. */
+/** Definition IDs and filenames are ship-role-ID; no runtime alias registry. */
 export function profileTeam(team: Team, ship: string): Team {
   const qualify = <T extends Team["captain"]>(
     agent: T,

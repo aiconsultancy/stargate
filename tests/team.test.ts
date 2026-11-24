@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { Result, Schema } from "effect";
+import { decodeSettings } from "../src/config/settings-errors";
 import { crewPermissions } from "../src/coordination/crew/execution/policy";
 import {
   defaultTeam,
@@ -52,6 +53,49 @@ test("team configuration rejects ambiguous identities and implicit tool access",
   expect(
     Result.isSuccess(
       Schema.decodeUnknownResult(teamSchema)({ ...team, unknown: true }),
+    ),
+  ).toBe(false);
+});
+
+test("crew names may differ from IDs but stay unique, ignoring case", () => {
+  const named =
+    (...names: (string | undefined)[]) =>
+    () =>
+      decodeSettings(teamSchema, {
+        ...team,
+        crew: team.crew.map((member, index) => ({
+          ...member,
+          ...(names[index] !== undefined && { name: names[index] }),
+        })),
+      });
+
+  for (const names of [
+    ["Kestrel"],
+    ["Kestrel", "Osprey"],
+    ["STARBUCK", "Roslin"],
+    [undefined, "Kestrel"],
+  ]) {
+    expect(named(...names)).not.toThrow();
+  }
+
+  for (const names of [
+    ["Kestrel", "kestrel"],
+    ["Roslin"],
+    [undefined, "starbuck"],
+    ["Galactica Captain"],
+    ["galactica-captain"],
+    ["Captain"],
+    ["ALL"],
+  ]) {
+    expect(named(...names)).toThrow("Crew names must be unique");
+  }
+
+  expect(
+    Result.isSuccess(
+      Schema.decodeUnknownResult(teamSchema)({
+        ...team,
+        captain: { id: "galactica-captain", name: "Kestrel" },
+      }),
     ),
   ).toBe(false);
 });

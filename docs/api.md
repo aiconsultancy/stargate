@@ -183,6 +183,10 @@ and `Last-Event-ID` without a token.
 | `/api/v1/ships/{id}/crew/{member}` | One member's detail                                                                   |
 | `/api/v1/events`                   | Server-sent events                                                                    |
 
+`{member}` is a crew member's configured ID. Each of a ship's `crewMembers`
+has that `id`, its configured `name` (which may differ from the ID; the ID
+when no name is set), `role` and `model`.
+
 `HEAD` returns headers without a body. Unknown ships, members, and routes
 return 404. Missing or invalid tokens receive 401 (officers' sockets need
 none). Repeated authentication

@@ -141,14 +141,26 @@ digits, `_` and `-`, at most 64 characters. IDs must be unique and distinct
 from the captain. `captain` and `all` are reserved crew-message aliases.
 Stargate IDs remain short addresses such as `adama` and `apollo`. Optional `agent`
 maps an address to its native OpenCode definition. Generated profiles set native
-IDs and filenames to `<namespace>-captain-<name>.md` or
-`<namespace>-crew-<name>.md`, for example `galactica-crew-apollo.md` and
+IDs and filenames to `<namespace>-captain-<ID>.md` or
+`<namespace>-crew-<ID>.md`, for example `galactica-crew-apollo.md` and
 `pegasus-crew-apollo.md`. Communications do not need these full native IDs.
 Names/instructions are non-secret text, not credentials. Unknown fields fail.
-Agent IDs must match their assigned names, normalized to lowercase with word
-separators as hyphens. Hidden legacy aliases are rejected: Chief is `chief`,
-not `mario`; Adama is `adama`, not `bowser`. Existing mismatched installations
-need an explicit backed-up identity migration; never delete session history.
+
+A captain's ID must match its name, normalized to lowercase with word
+separators as hyphens: Adama is `adama`. A crew member's `name` is what people
+see and may differ from its ID, so a fleet can name `claude-1` Kestrel. The ID
+stays the key for everything the crew plugin keeps: the state fingerprint,
+tasks, sessions, worktree paths, branches and native definition IDs. Renaming
+a member therefore keeps its state; changing its ID does not and needs an
+explicit backed-up identity migration (never delete session history). Compared
+without case, a crew name must be unique in the team and differ from the
+captain's name, every other member's ID, `captain` and `all`. Without a name, a
+member is shown by its ID, as before. The name is shown in the Fleet API's
+`crewMembers` (beside `id` and `model`), crew activity, the `stargate_crew`
+roster and the captain's roster (both beside the ID), and the member's own
+prompt (with its ID). Crew tools, mail and the journal still take the ID.
+Stargate sees one team at a time, so keeping names unique across a fleet's
+ships is the installer's job.
 Optional `historyScope` is `team` (default), `project`, or `server`. Captain and
 crew use `stargate_history` to search OpenCode history through the API. Server scope
 includes all sessions on that OpenCode server, including other namespaces.

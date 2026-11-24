@@ -677,7 +677,7 @@ const team: Team = {
   ],
 };
 
-test("agent IDs must match assigned names without legacy aliases", () => {
+test("captain IDs match their names; crew names may differ from their IDs", () => {
   expect(Result.isSuccess(Schema.decodeUnknownResult(teamSchema)(team))).toBe(
     true,
   );
@@ -695,7 +695,7 @@ test("agent IDs must match assigned names without legacy aliases", () => {
           crew: [{ id, name, role: "Worker", permissionProfile: "coding" }],
         }),
       ),
-    ).toBe(false);
+    ).toBe(true);
   }
 
   expect(
@@ -836,6 +836,61 @@ test("custom init creates only configured worktrees, generic prompts, and genera
   }
 
   expect(await initializeProfile({ ...options, team })).toEqual(result);
+});
+
+test("a crew name apart from its ID keeps the ID's worktree, branch and definition", async () => {
+  const {
+    options: { namespace: _, ...options },
+  } = await fixture();
+
+  const named: Team = {
+    ...team,
+    crew: team.crew.map((member) =>
+      member.id === "starbuck" ? { ...member, name: "Kestrel" } : member,
+    ),
+  };
+
+  const result = await initializeProfile({ ...options, team: named });
+
+  expect(result.worktrees).toEqual({
+    starbuck: join(options.worktreeDirectory, "starbuck"),
+    gaeta: join(options.worktreeDirectory, "gaeta"),
+  });
+  expect(
+    execFileSync(
+      "git",
+      [
+        "-C",
+        join(options.worktreeDirectory, "starbuck"),
+        "branch",
+        "--show-current",
+      ],
+      { encoding: "utf8" },
+    ).trim(),
+  ).toBe("crew/adama-starbuck");
+  expect(
+    (await renderProfile({ ...options, team: named }, "starbuck"))
+      .default_agent,
+  ).toBe("adama-crew-starbuck");
+
+  const worker = await readFile(
+    join(
+      options.worktreeDirectory,
+      "starbuck",
+      ".opencode",
+      "agents",
+      "adama-crew-starbuck.md",
+    ),
+    "utf8",
+  );
+
+  expect(worker).toContain("You are Kestrel (agent ID: starbuck)");
+  expect(
+    await readFile(
+      join(options.directory, ".opencode", "agents", "adama-captain-adama.md"),
+      "utf8",
+    ),
+  ).toContain("- starbuck (Kestrel): Implementation");
 });
 
 test("independent team namespaces and captains share a source without sharing directories", async () => {

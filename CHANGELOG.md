@@ -8,6 +8,9 @@
   on for pinned teams. Set it to `false` to disable the private ship feedback
   inbox tools. Submit and captain review require separate native permissions.
 
+- Crew names that differ from their IDs: none. No flag is added and no
+  default changes; a team without such names behaves as before.
+
 - New flag: `subspaceAgents.enabled`; the whole `subspaceAgents` section is
   absent by default, and absent or off loads nothing, creates no file or
   socket and makes no request. When on, the gateway holds one key and
@@ -63,6 +66,13 @@
 - Move OpenCode plugin implementations under `plugins/opencode/`. Crew still
   loads from the repository root. Fleet configurations can keep using
   `src/fleet/` temporarily; new installs use `plugins/opencode/fleet/`.
+
+- Let a crew member's `name` differ from its ID in the crew plugin's team
+  ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`
+  Kestrel. The ID still keys the member's state, tasks, sessions, worktree and
+  branch, so renaming keeps them. Crew names must be unique in the team,
+  ignoring case, and differ from the captain's name, other members' IDs,
+  `captain` and `all`. A captain's name must still match its ID.
 
 - Add optional Subspace API agent identity
   ([docs](docs/subspace-agents.md)). `stargate subspace enrol` gives each

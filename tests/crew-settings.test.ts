@@ -347,15 +347,15 @@ test("profile rendering matches the captured default and direct-access JSON", as
 test("team diagnostics retain dependent custom paths and profile errors stay safe", async () => {
   const invalid = {
     ...rawTeam,
-    crew: [
-      { id: "shaw", name: "Other", role: "", permissionProfile: "coding" },
-    ],
+    crew: [{ id: "shaw", name: "Cain", role: "", permissionProfile: "coding" }],
   };
 
   expect(() => decodeSettings(teamSchema, invalid)).toThrow(
-    "Agent IDs must match assigned names",
+    "Crew names must be unique",
   );
-  expect(() => decodeSettings(teamSchema, invalid)).toThrow('["crew",0,"id"]');
+  expect(() => decodeSettings(teamSchema, invalid)).toThrow(
+    '["crew",0,"name"]',
+  );
   expect(() =>
     profileTeam(Schema.decodeUnknownSync(teamSchema)(rawTeam), "x".repeat(64)),
   ).toThrow();
