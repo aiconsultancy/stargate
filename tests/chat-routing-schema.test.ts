@@ -6,10 +6,8 @@ import {
 } from "../src/meta-commands/config-panel";
 import { ircBurstMessageSchema } from "../src/transports/irc/burst";
 import type { QuestionSettings } from "../src/questions/question-settings";
-import {
-  nativeQuestionSchema,
-  questionAnswer,
-} from "../src/questions/questions";
+import { questionAnswer } from "../src/questions/questions";
+import { nativeQuestionSchema } from "../src/questions/native-question";
 import { envelopeSchema } from "../src/gateway/routing";
 import { activitySchema } from "../src/transports/teams/registration";
 import { activity } from "./teams-support";
