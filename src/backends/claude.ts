@@ -395,50 +395,8 @@ export class ClaudeTurn {
 
     const frame = decodeStreamFrame(raw);
 
-    if (Option.isSome(frame)) {
-      const event = decodeStreamEvent(frame.value.event);
-
-      if (Option.isNone(event)) return false;
-
-      if (event.value.type === "message_start") {
-        stage?.("model");
-        this.streaming = event.value.message.id;
-        this.seen(this.streaming);
-
-        if (!this.streamed.has(this.streaming))
-          this.streamed.set(this.streaming, new Map());
-
-        return false;
-      }
-
-      const blocks = this.streaming && this.streamed.get(this.streaming);
-
-      if (blocks === undefined || blocks === "") return false;
-
-      if (event.value.type === "content_block_start") {
-        const kind = event.value.content_block.type;
-
-        if (kind === "thinking" || kind === "redacted_thinking")
-          stage?.("reasoning");
-
-        if (kind === "tool_use" || kind === "server_tool_use") stage?.("tool");
-
-        if (kind !== "text") return false;
-        stage?.("reply");
-        blocks.set(event.value.index, event.value.content_block.text ?? "");
-
-        return true;
-      }
-
-      if (event.value.delta.type !== "text_delta" || !event.value.delta.text)
-        return false;
-      blocks.set(
-        event.value.index,
-        (blocks.get(event.value.index) ?? "") + event.value.delta.text,
-      );
-
-      return true;
-    }
+    if (Option.isSome(frame))
+      return this.addStreamEvent(frame.value.event, stage);
 
     const assistant = decodeAssistantFrame(raw);
 
@@ -486,6 +444,51 @@ export class ClaudeTurn {
     }
 
     return false;
+  }
+
+  private addStreamEvent(raw: unknown, stage?: (stage: TurnStage) => void) {
+    const event = decodeStreamEvent(raw);
+
+    if (Option.isNone(event)) return false;
+
+    if (event.value.type === "message_start") {
+      stage?.("model");
+      this.streaming = event.value.message.id;
+      this.seen(this.streaming);
+
+      if (!this.streamed.has(this.streaming))
+        this.streamed.set(this.streaming, new Map());
+
+      return false;
+    }
+
+    const blocks = this.streaming && this.streamed.get(this.streaming);
+
+    if (blocks === undefined || blocks === "") return false;
+
+    if (event.value.type === "content_block_start") {
+      const kind = event.value.content_block.type;
+
+      if (kind === "thinking" || kind === "redacted_thinking")
+        stage?.("reasoning");
+
+      if (kind === "tool_use" || kind === "server_tool_use") stage?.("tool");
+
+      if (kind !== "text") return false;
+      stage?.("reply");
+      blocks.set(event.value.index, event.value.content_block.text ?? "");
+
+      return true;
+    }
+
+    if (event.value.delta.type !== "text_delta" || !event.value.delta.text)
+      return false;
+    blocks.set(
+      event.value.index,
+      (blocks.get(event.value.index) ?? "") + event.value.delta.text,
+    );
+
+    return true;
   }
 
   private seen(id: string) {
