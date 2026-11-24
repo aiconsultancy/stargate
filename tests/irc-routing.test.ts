@@ -351,6 +351,22 @@ test("only people can reach a participating captain without a reply to its own m
       context,
     ),
   ).toBeUndefined();
+
+  const answer = { ...reply, "+draft/reply": "answer" };
+  const sent = { ...context, sent: () => true };
+
+  expect(
+    routeIrcMessage(
+      message("#galactica", "galactica-chief: continue", answer),
+      sent,
+    ),
+  ).toBeUndefined();
+  expect(
+    routeIrcMessage(
+      message("#galactica", "Could @galactica-chief continue?", answer),
+      sent,
+    ),
+  ).toBeUndefined();
   expect(
     routeIrcMessage(followUp, { ...context, member: chief }),
   ).toBeUndefined();

@@ -265,6 +265,26 @@ function visitorAddressed(text: string, nick: string, caseFold: Fold) {
   );
 }
 
+/** An explicit address in a threaded follow-up wins over participation. */
+function addressesAnotherOfficer(
+  config: IrcConfig,
+  text: string,
+  caseFold: Fold,
+) {
+  const names = [
+    ...config.crew.flatMap(({ account, nick }) =>
+      nick ? [account, nick] : [account],
+    ),
+    ...(config.access.peerCaptains ?? []),
+  ];
+
+  return names.some(
+    (nick) =>
+      withoutAddress(text, [nick], caseFold, true) !== text ||
+      mentions(caseFold(text), caseFold(`@${nick}`)),
+  );
+}
+
 /** In results mode, a leading fleet address selects one recipient. */
 function addressedToFleetPeer(
   config: IrcConfig,
@@ -560,7 +580,7 @@ export function routeIrcMessage(
     !strict && !direct && !visitorTag && member.role === "captain" && person;
 
   const knownRoot =
-    (protectedHuman || standardCaptainReply) && validReply
+    !direct && member.role === "captain" && validReply
       ? context.threadRoot?.(channel, reply)
       : undefined;
 
@@ -617,19 +637,20 @@ export function routeIrcMessage(
     return;
   }
 
+  const participatingReply =
+    standardCaptainReply &&
+    root !== undefined &&
+    context.participating?.(channel, root) === true;
+
   const replied =
     !strict &&
     validReply &&
-    (context.sent(reply) ||
-      (standardCaptainReply &&
-        root !== undefined &&
-        context.participating?.(channel, root) === true &&
-        withoutAddress(
-          body,
-          [...ship, ...config.access.peerCaptains],
-          caseFold,
-          true,
-        ) === body));
+    !(
+      participatingReply &&
+      mentioned !== true &&
+      addressesAnotherOfficer(config, body, caseFold)
+    ) &&
+    (context.sent(reply) || participatingReply);
 
   // Captain text mentions and all-calls; the matched word becomes the
   // Turn's text mention, so the session sees why it was admitted.
