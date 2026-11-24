@@ -7,12 +7,14 @@ import { Result, Schema } from "effect";
 import type { AgentBackend, PendingPermission } from "../../backends/backend";
 import type { TeamsConfig } from "../../config";
 import type { FleetSource } from "../../coordination/fleet/protocol";
-import { fleetResultSource } from "../../coordination/fleet/results";
 import {
   fleetAuthority,
   fleetInstructions,
 } from "../../coordination/fleet/fleet-policy";
-import { fleetSourceReference } from "../../coordination/fleet/fleet-source";
+import {
+  fleetResultSource,
+  fleetSourceReference,
+} from "../../coordination/fleet/fleet-source";
 import type { GatewayTransport, TransportDelivery } from "../../gateway/ports";
 import { backendFingerprint } from "../../gateway/routing";
 import {
