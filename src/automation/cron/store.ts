@@ -13,6 +13,8 @@ import {
   type CronAdvanced,
   type CronEvaluation,
   type CronQuotaEvent,
+  type CronReportRow,
+  type CronRunStatus,
   cronAdvancedOptions,
   cronAdvancedSchema,
   cronEvaluationSchema,
@@ -30,7 +32,7 @@ import {
   settingsUUID,
 } from "../../config/settings-schema";
 
-export type { CronEvaluation } from "./advanced";
+export type { CronEvaluation, CronReportRow } from "./advanced";
 
 export type CronScope = { botKey: string; channel: string; user: string };
 
@@ -57,33 +59,8 @@ export type CronRun = CronInput &
     evaluation?: CronEvaluation;
     quotaEvent?: CronQuotaEvent | undefined;
     report: "immediate" | "daily";
-    status:
-      | "pending"
-      | "evaluating"
-      | "announcing"
-      | "announced"
-      | "queued"
-      | "blocked"
-      | "done"
-      | "failed"
-      | "canceled";
+    status: CronRunStatus;
   };
-
-export type CronReportRow = Pick<
-  CronSchedule,
-  | "id"
-  | "name"
-  | "channel"
-  | "user"
-  | "paused"
-  | "available"
-  | "nextAt"
-  | "report"
-  | "trigger"
-  | "model"
-  | "once"
-  | "arbiter"
-> & { lastRunAt: number | null; lastStatus: CronRun["status"] | null };
 
 export type CronDailyResult = Pick<
   CronRun,

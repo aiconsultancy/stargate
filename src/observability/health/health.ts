@@ -3,7 +3,7 @@ import { Option, Schema } from "effect";
 import type { AgentBackend } from "../../backends/backend";
 import type { BotConfig, Config } from "../../config";
 import { crewStatusSchema } from "../../shared/crew-status";
-import type { CronReportRow } from "../../automation/cron/store";
+import type { CronReportRow } from "../../automation/cron/advanced";
 import { type HealthConfig, healthConfigSchema } from "./config";
 import {
   createHostHealthReader,

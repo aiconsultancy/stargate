@@ -1,5 +1,8 @@
 import type { CrewStatus } from "../../shared/crew-status";
-import type { CronReportRow, CronRun } from "../../automation/cron/store";
+import type {
+  CronReportRow,
+  CronRunStatus,
+} from "../../automation/cron/advanced";
 import type {
   HistoryEntriesInput,
   HistoryEntryPage,
@@ -90,7 +93,7 @@ export type JobView = {
 export type CronRunView = {
   id: string;
   name: string;
-  status: CronRun["status"];
+  status: CronRunStatus;
   dueAt: number;
   finishedAt: number | null;
   manual: boolean;

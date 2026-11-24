@@ -90,6 +90,34 @@ export const cronAdvancedSchema = settingsStruct(cronAdvancedOptions);
 
 export type CronAdvanced = typeof cronAdvancedSchema.Type;
 
+export type CronRunStatus =
+  | "pending"
+  | "evaluating"
+  | "announcing"
+  | "announced"
+  | "queued"
+  | "blocked"
+  | "done"
+  | "failed"
+  | "canceled";
+
+/** Operator-visible schedule metadata, without the prompt or storage fields. */
+export type CronReportRow = Pick<
+  CronAdvanced,
+  "trigger" | "model" | "once" | "arbiter"
+> & {
+  id: string;
+  name: string;
+  channel: string;
+  user: string;
+  paused: number;
+  available: number;
+  nextAt: number;
+  report: "immediate" | "daily";
+  lastRunAt: number | null;
+  lastStatus: CronRunStatus | null;
+};
+
 export const cronEvaluationSchema = settingsStruct({
   text: Schema.String.check(Schema.isMaxLength(12_000)),
   model: cronModelSchema,
