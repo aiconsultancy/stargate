@@ -13,8 +13,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 297,
-  "sourceEdges": 1239,
+  "sourceFiles": 298,
+  "sourceEdges": 1244,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -36,6 +36,7 @@
       "src/backends/opencode.ts",
       "src/backends/opencode/config.ts",
       "src/backends/opencode/crew-status.ts",
+      "src/backends/opencode/notices.ts",
       "src/backends/opencode/questions.ts",
       "src/backends/pi-attachments.ts",
       "src/backends/pi-durable.ts",
