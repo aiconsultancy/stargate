@@ -1,4 +1,5 @@
 import { Option, Schema } from "effect";
+import { truncateCodePoints } from "../../../../lib/code-points";
 import { readCommand } from "./command";
 import type { V1PullRequest } from "./types";
 
@@ -93,7 +94,7 @@ export function mapPullRequest(
     return {
       number: pr.number,
       url: url.href,
-      title: Array.from(pr.title).slice(0, 180).join(""),
+      title: truncateCodePoints(pr.title, 180),
       state: pullState(pr.state, pr.isDraft),
       checks: result,
     };

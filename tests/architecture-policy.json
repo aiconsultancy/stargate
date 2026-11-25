@@ -539,6 +539,7 @@
       "src/coordination/captain/captain-post.ts"
     ],
     "src/cli.ts": ["src/cli.ts", "src/app/cli.ts"],
+    "src/lib/code-points.ts": ["src/lib/code-points.ts"],
     "src/config-panel.ts": [
       "src/config-panel.ts",
       "src/meta-commands/config-panel.ts",
@@ -1105,6 +1106,7 @@
     "lib": {
       "layer": "lib",
       "files": [
+        "src/lib/code-points.ts",
         "src/credentials.ts",
         "src/effect.ts",
         "src/lib/installation-paths.ts",
@@ -1114,6 +1116,7 @@
         "src/teams/unix-socket.ts"
       ],
       "public": [
+        "src/lib/code-points.ts",
         "src/credentials.ts",
         "src/effect.ts",
         "src/lib/installation-paths.ts",

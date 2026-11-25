@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { truncateCodePoints } from "../../../../lib/code-points";
 import { redactCredentials } from "../../../../lib/credentials";
 import type {
   V1ActivityEvent,
@@ -60,7 +61,7 @@ const clean = (text: string, limit: number) =>
 
 // Task text and branch names come from crew output, shown as written.
 const crewText = (text: string, limit: number) =>
-  Array.from(text).slice(0, limit).join("").replace(/\s+/g, " ").trim();
+  truncateCodePoints(text, limit).replace(/\s+/g, " ").trim();
 
 const sentence = (text: string) => `${text.slice(0, 199)}.`;
 

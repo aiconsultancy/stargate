@@ -2,6 +2,7 @@ import { hostname } from "node:os";
 import { Semaphore } from "effect";
 import type { AgentBackend } from "../../../../backends/backend";
 import { ircFeedbackDefaults } from "../../../../config";
+import { truncateCodePoints } from "../../../../lib/code-points";
 import { redactCredentials } from "../../../../lib/credentials";
 import type {
   CrewGit,
@@ -239,14 +240,16 @@ function checkoutText(metadata?: Metadata) {
     ),
   ].toSorted((a, b) => b.length - a.length);
 
-  return (text: string, limit: number) => {
-    let value = text;
+  return {
+    configured(this: void, text: string, limit: number) {
+      let value = text;
 
-    for (const path of spellings) {
-      value = value.replaceAll(path, "[checkout]");
-    }
+      for (const path of spellings) {
+        value = value.replaceAll(path, "[checkout]");
+      }
 
-    return redactCredentials(value, limit);
+      return redactCredentials(value, limit);
+    },
   };
 }
 
@@ -254,9 +257,6 @@ type CrewText = ReturnType<typeof checkoutText>;
 
 /** Crew output is shown as written; only its length may be bounded. */
 type TaskText = (text: string, limit: number) => string;
-
-const boundedText: TaskText = (text, limit) =>
-  Array.from(text).slice(0, limit).join("");
 
 const fullText: TaskText = (text) => text;
 
@@ -382,24 +382,24 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   const backendIdentities = new WeakMap<AgentBackend, number>();
   let nextBackendIdentity = 0;
 
-  /** Undefined when the captain's crew plugin cannot answer. */
+  /** Null after an attempt that did not get a captain report. */
   async function captainGit(
     registration: Registration,
     input: CrewGitInput,
     signal: AbortSignal,
-  ): Promise<CrewGit | undefined> {
+  ): Promise<CrewGit | null> {
     const backend = dashboard.fleetBackend(registration.config.id);
 
     if (!backend?.crewGit) {
-      return;
+      return null;
     }
 
     try {
-      return await backend.crewGit(input, signal);
+      return (await backend.crewGit(input, signal)) ?? null;
     } catch {
       signal.throwIfAborted();
 
-      return;
+      return null;
     }
   }
 
@@ -407,11 +407,13 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   async function projectGit(
     registration: Registration,
     directory: string | undefined,
-    reported: CrewGit | undefined,
+    reported: CrewGit | null | undefined,
     signal: AbortSignal,
   ) {
     const report =
-      reported ?? (await captainGit(registration, { crew: false }, signal));
+      reported === undefined
+        ? await captainGit(registration, { crew: false }, signal)
+        : reported;
 
     return report
       ? reportedGit(report.project.git, report.project.directory)
@@ -428,7 +430,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     metadata: Metadata | undefined,
     only: string | undefined,
     signal: AbortSignal,
-  ): Promise<{ read: CheckoutGit; reported?: CrewGit }> {
+  ): Promise<{ read: CheckoutGit; reported: CrewGit | null }> {
     const reported = await captainGit(
       registration,
       only ? { member: only } : {},
@@ -459,6 +461,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     const local = localCheckout(registration);
 
     return {
+      reported,
       read: async (member, { project, provisioned }) => {
         const path =
           local && provisioned === "ready"
@@ -507,7 +510,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     ship: string,
     person: DashboardCrewMember,
     at: number,
-    text: CrewText,
+    { configured: configuredText }: CrewText,
     taskText: TaskText,
     metadata?: Metadata,
     sessions?: HistorySession[],
@@ -542,9 +545,9 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     return [
       {
         id: person.id,
-        name: text(person.name, 100),
-        role: configured?.role ? text(configured.role, 1000) : null,
-        model: configuredModel ? text(configuredModel, 200) : null,
+        name: configuredText(person.name, 100),
+        role: configured?.role ? configuredText(configured.role, 1000) : null,
+        model: configuredModel ? configuredText(configuredModel, 200) : null,
         backend: first.backend,
         activity,
         since: timeState(
@@ -569,7 +572,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     signal: AbortSignal,
     error?: string,
     metadata?: Metadata,
-    reported?: CrewGit,
+    reported?: CrewGit | null,
   ): Promise<V1Ship> {
     const backend = registration.config.backend;
 
@@ -668,7 +671,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       .slice(0, subagentLimit)
       .map((child) => ({
         id: child.id,
-        title: boundedText(child.title ?? "Subagent", 180),
+        title: truncateCodePoints(child.title ?? "Subagent", 180),
         updatedAt: child.updatedAt ?? null,
       }));
   }
@@ -715,7 +718,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         person,
         at,
         text,
-        only ? fullText : boundedText,
+        only ? fullText : truncateCodePoints,
         metadata,
         view.sessions,
       ),
@@ -895,7 +898,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
             person,
             fleet.generatedAt,
             text,
-            boundedText,
+            truncateCodePoints,
             metadata,
           ),
         );

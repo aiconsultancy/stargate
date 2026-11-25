@@ -226,8 +226,10 @@ and each configured crew worktree, as the Linux user that owns them, and
 reports it over its internal `crewGit` RPC. The gateway can run as a user
 that cannot read the captain's home, so it uses that report whenever the
 captain answers. A captain whose plugin is older than this method is asked
-again after a minute; until then, and when the RPC fails or takes more than
-six seconds, the gateway reads the checkout itself as described below. The
+again after a minute. Each ship detail read makes one captain Git request for
+both the project and crew checkouts. If that request fails or reaches its
+six-second timeout, the gateway reads the checkouts itself without asking the
+captain again. A fleet summary requests only the project checkout. The
 plugin uses the crew workspace tool's Git helper, without the gateway's index
 snapshot: repository hooks, fsmonitor and optional locks are off. It caches
 each checkout's result for 15 seconds, with a five-second read limit.
