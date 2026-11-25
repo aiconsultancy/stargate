@@ -185,9 +185,10 @@ should own the file and post the notices.
 ```
 
 Choose a channel the reporting bot can post to and the affected captains
-watch. When the fleet usage guard is also enabled, Slack reports the
-observed balance and refers captains to the guard for crew availability. This grants outbound delivery to that channel without permitting
+watch. This grants outbound delivery to that channel without permitting
 incoming conversations there. Explicit channel denies still apply.
+When the fleet usage guard is also enabled, Slack reports the observed
+balance and refers captains to the guard for crew availability.
 The example account selector is optional. With dedicated
 captain and crew logins, list the crew login emails for each applicable
 provider so reserved balances cannot clear a crew pause. Those selectors

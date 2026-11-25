@@ -1924,23 +1924,13 @@ export class CrewEngine {
       member.backend?.model ??
       (model ? `${model.providerID}/${model.id}` : member.model);
 
-    let provider: string | undefined;
-
     try {
-      provider = await crewUsageBlock(path, selected);
+      return await crewUsageBlock(path, selected);
     } catch {
       throw new CrewError(
         "Usage guard policy is unreadable. Ask the operator to check the gateway state file.",
       );
     }
-
-    if (provider && !selected) {
-      throw new CrewError(
-        "Usage guard cannot identify this worker's model while a cutoff is active. Set its model before resuming.",
-      );
-    }
-
-    return provider;
   }
 
   public async checkWorkerQuota(crewID: string, model?: CrewSession["model"]) {
@@ -2073,7 +2063,7 @@ export class CrewEngine {
     const token = this.state.reserveControl(crewID);
 
     try {
-      if (options.requireReady) {
+      if (options.requireReady || this.options.usageGuardFile) {
         const ready = this.state.peer(crewID);
 
         if (ready?.status !== "ready") {

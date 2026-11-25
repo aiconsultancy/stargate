@@ -17,6 +17,7 @@ import {
   type IrcClient,
   IrcRecipientChanged,
   IrcSendExpired,
+  IrcUnavailable,
 } from "../transports/irc/client";
 
 export function startUsageGuard(options: {
@@ -134,6 +135,7 @@ export function startUsageGuard(options: {
           );
         } catch (error) {
           if (
+            (error instanceof IrcUnavailable && error.notSent) ||
             error instanceof IrcRecipientChanged ||
             error instanceof IrcSendExpired
           ) {

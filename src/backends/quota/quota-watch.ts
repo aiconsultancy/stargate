@@ -476,7 +476,7 @@ export class QuotaWatch {
 
       if (this.observationsOnly && reading.status === "ok") {
         notices.push(
-          `${name} quota reading: ${reading.value.remainingPercent}% remaining. Follow the usage guard for crew availability.`,
+          `${name} quota reading: ${Number(reading.value.remainingPercent.toFixed(2))}% remaining. Follow the usage guard for crew availability.`,
         );
       } else {
         notices.push(

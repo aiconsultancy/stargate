@@ -1,5 +1,5 @@
-import { chmod, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { chmod, mkdir, stat } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { atomicWrite } from "../../automation/maintenance/nightly/files";
@@ -81,14 +81,20 @@ export class UsageGuard {
         );
 
         if (previous) {
-          after[provider] = previous;
+          after[provider] = {
+            ...previous,
+            modelPrefixes: settings.modelPrefixes,
+          };
         }
 
         continue;
       }
 
       if (previous && reading.value.observedAt < previous.observedAt) {
-        after[provider] = previous;
+        after[provider] = {
+          ...previous,
+          modelPrefixes: settings.modelPrefixes,
+        };
         this.warn(
           provider,
           "Usage guard received an older quota reading; retaining last verified policy",
@@ -141,20 +147,43 @@ export class UsageGuard {
     }
 
     signal.throwIfAborted();
-    const directory = dirname(this.config.stateFile);
+    const directory = resolve(dirname(this.config.stateFile));
     const created = await mkdir(directory, { recursive: true, mode: 0o755 });
 
-    if (created === directory) {
-      await chmod(directory, 0o755);
-    } else if (created) {
-      this.log.warn(
-        "Usage guard created missing parent directories; ensure crew engines can traverse the state path",
+    if (created) {
+      for (let path = directory; ; path = dirname(path)) {
+        await chmod(path, 0o755);
+
+        if (path === created) {
+          break;
+        }
+      }
+    } else if (!((await stat(directory)).mode & 0o001)) {
+      this.warn(
+        "permissions",
+        "Usage guard state directory must be traversable by crew engine users",
+        { directory },
       );
     }
 
+    const mode = (
+      await stat(this.config.stateFile).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") {
+            throw error;
+          }
+
+          return;
+        },
+      )
+    )?.mode;
+
     // Publish all cutoffs before touching IRC. Simultaneous crossings cannot
     // Wait on an offline captain before taking effect.
-    if (JSON.stringify(before) !== JSON.stringify(after)) {
+    if (
+      JSON.stringify(before) !== JSON.stringify(after) ||
+      (mode !== undefined && (mode & 0o777) !== 0o644)
+    ) {
       await this.save(after);
     }
 

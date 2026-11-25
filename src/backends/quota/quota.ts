@@ -557,7 +557,6 @@ export async function readPluginQuota(
         }),
       );
     } catch {
-      signal.throwIfAborted();
       accounts.push(account);
     }
   }
