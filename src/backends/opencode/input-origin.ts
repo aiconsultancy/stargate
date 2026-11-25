@@ -53,7 +53,7 @@ type OriginMessage = Parameters<typeof boundaryRecord>[0] & {
   content?: readonly unknown[];
 };
 
-type OriginHistory = {
+export type OriginHistory = {
   message: {
     list(
       input: MessageListInput,

@@ -2,8 +2,7 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "braceMigrationFileLimits": {
-    "src/backends/claude.ts": 1013,
-    "src/chat/questions/questions.ts": 1031
+    "src/backends/claude.ts": 1013
   },
   "aliases": {
     "src/crew/plugin.ts": [
@@ -78,7 +77,8 @@
     "src/crew/origin.ts": [
       "src/crew/origin.ts",
       "src/crew/execution/origin.ts",
-      "src/coordination/crew/execution/origin.ts"
+      "src/coordination/crew/execution/origin.ts",
+      "src/backends/opencode/native-input-origin.ts"
     ],
     "src/crew/native-wait.ts": [
       "src/crew/native-wait.ts",
@@ -1765,6 +1765,7 @@
         "src/backends/opencode/crew-status.ts",
         "src/crew/instruction-context.ts",
         "src/backends/opencode/activity.ts",
+        "src/crew/origin.ts",
         "src/backends/opencode/notices.ts",
         "src/backends/opencode/questions.ts",
         "src/backends/opencode/reviews.ts",
@@ -1778,6 +1779,7 @@
         "src/backends/config.ts",
         "src/backends/opencode/config.ts",
         "src/crew/instruction-context.ts",
+        "src/crew/origin.ts",
         "src/backends/opencode/questions.ts",
         "src/pi-model.ts",
         "src/backends/claude/config.ts",
@@ -1840,7 +1842,6 @@
         "src/crew/models.ts",
         "src/crew/native-wait.ts",
         "src/crew/notifications.ts",
-        "src/crew/origin.ts",
         "src/crew/pending.ts",
         "src/crew/pi-extension.ts",
         "src/crew/pi-worker.ts",
@@ -1914,6 +1915,7 @@
         "src/irc/burst.ts",
         "src/irc/client-pem.ts",
         "src/irc/client.ts",
+        "src/transports/irc/client-capabilities.ts",
         "src/transports/irc/credential-preflight.ts",
         "src/irc/crew-link.ts",
         "src/irc/crew-question-gateway.ts",
