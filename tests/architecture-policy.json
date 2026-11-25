@@ -2,7 +2,6 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "braceMigrationFileLimits": {
-    "src/automation/maintenance/nightly/cleanup/cleanup.ts": 1154,
     "src/automation/maintenance/nightly/journal.ts": 1049,
     "src/backends/claude.ts": 1013,
     "src/chat/questions/questions.ts": 1031
@@ -1505,6 +1504,8 @@
         "src/nightly/cleanup-config.ts",
         "src/nightly/cleanup-protection.ts",
         "src/nightly/cleanup.ts",
+        "src/automation/maintenance/nightly/cleanup/cleanup-path-use.ts",
+        "src/automation/maintenance/nightly/cleanup/cleanup-scan.ts",
         "src/nightly/cli.ts",
         "src/nightly/config.ts",
         "src/nightly/cooloff.ts",
