@@ -354,7 +354,7 @@ async function fixture(report = false) {
     settled: settled.promise,
     progress: () => state.activity.task(state.task(task.id) ?? task).progress,
     rawProgress: () =>
-      state.activity.task(state.task(task.id) ?? task, true).progress,
+      state.activity.task(state.task(task.id) ?? task, "full").progress,
     async close() {
       await workers.close();
       state.close();

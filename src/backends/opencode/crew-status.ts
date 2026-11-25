@@ -43,7 +43,7 @@ export class OpenCodeCrewStatus {
   );
   private fleetStatusProbe?: {
     member: CrewStatusInput["member"];
-    fullTaskText: boolean;
+    taskText: FleetCrewStatusInput["taskText"];
     result: Promise<FleetCrewStatus | undefined>;
     controller: AbortController;
     waiters: number;
@@ -51,7 +51,7 @@ export class OpenCodeCrewStatus {
 
   private crewGitRetryAt = 0;
   private checkoutDiffRetryAt = 0;
-  private fullTaskTextRetryAt = 0;
+  private taskTextRetryAt = 0;
 
   public constructor(
     private readonly client: OpenCodeClient,
@@ -156,7 +156,7 @@ export class OpenCodeCrewStatus {
   }
 
   /**
-   * `fullTaskText` asks for raw task text. A plugin older than the field
+   * `taskText` asks for unredacted task text. A plugin older than the field
    * answers with ordinary, redacted status instead, which callers must accept.
    */
   public async fleetCrewStatus(
@@ -188,7 +188,7 @@ export class OpenCodeCrewStatus {
 
         if (
           probe.member === input.member &&
-          probe.fullTaskText === (input.fullTaskText === true)
+          probe.taskText === input.taskText
         ) {
           return result;
         }
@@ -214,7 +214,7 @@ export class OpenCodeCrewStatus {
     const options = { location: { directory: this.directory() }, signal };
     const ordinary = input.member === undefined ? {} : { member: input.member };
 
-    if (!input.fullTaskText || performance.now() < this.fullTaskTextRetryAt) {
+    if (!input.taskText || performance.now() < this.taskTextRetryAt) {
       return rpc.fleetStatus(ordinary, options);
     }
 
@@ -225,9 +225,9 @@ export class OpenCodeCrewStatus {
         throw error;
       }
 
-      // An older plugin rejects the field: ask again without it.
-      // Full text is not asked for again until an upgrade may have happened.
-      this.fullTaskTextRetryAt = performance.now() + 60_000;
+      // An older plugin rejects the field: ask again without it. Neither
+      // Mode is asked for again until an upgrade may have happened.
+      this.taskTextRetryAt = performance.now() + 60_000;
 
       return rpc.fleetStatus(ordinary, options);
     }
@@ -293,7 +293,7 @@ export class OpenCodeCrewStatus {
 
     return {
       member: input.member,
-      fullTaskText: input.fullTaskText === true,
+      taskText: input.taskText,
       result,
       controller,
       waiters: 0,

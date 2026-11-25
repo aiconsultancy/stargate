@@ -1,7 +1,11 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Predicate, Result, Schema } from "effect";
-import type { CrewStatus, CrewStatusInput } from "../../../shared/crew-status";
+import type {
+  CrewStatus,
+  CrewStatusInput,
+  CrewTaskTextMode,
+} from "../../../shared/crew-status";
 import {
   HISTORY_PAGE,
   type HistoryChildrenInput,
@@ -318,15 +322,18 @@ export class CrewProjects {
     return this.enabled ? { ...result, project: selected.project } : result;
   }
 
-  /** `fullText` returns raw task text, only for the Fleet API's crew detail. */
-  public status(input: CrewStatusInput = {}, fullText = false): CrewStatus {
+  /** Only the Fleet API asks for a `taskText` mode other than `ordinary`. */
+  public status(
+    input: CrewStatusInput = {},
+    taskText: CrewTaskTextMode = "ordinary",
+  ): CrewStatus {
     if (!this.enabled) {
-      return this.default.status(input, { fullText });
+      return this.default.status(input, { taskText });
     }
 
     const pages = [...this.contexts].map(([project, engine]) => ({
       project,
-      status: engine.status(input, { aggregate: true, fullText }),
+      status: engine.status(input, { aggregate: true, taskText }),
     }));
 
     const members = pages.flatMap(({ project, status }) =>
@@ -342,8 +349,8 @@ export class CrewProjects {
   }
 
   public fleetStatus(input: FleetCrewStatusInput): FleetCrewStatus {
-    const { fullTaskText, ...filter } = input;
-    const status = this.status(filter, fullTaskText === true);
+    const { taskText, ...filter } = input;
+    const status = this.status(filter, taskText ?? "ordinary");
 
     const contexts = status.members.flatMap(({ id, project }) => {
       const { options } = this.get(project ?? "default");
@@ -372,9 +379,9 @@ export class CrewProjects {
       contexts,
     };
 
-    return fullTaskText
-      ? { status, metadata, taskText: "full" }
-      : { status, metadata };
+    // The answer names the mode, so a caller can tell an older plugin's
+    // Ordinary answer apart.
+    return taskText ? { status, metadata, taskText } : { status, metadata };
   }
 
   /** Peer sessions and recent task inputs, to attribute crew turns. */

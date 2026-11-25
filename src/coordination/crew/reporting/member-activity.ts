@@ -10,6 +10,7 @@ import {
 } from "./fleet-status";
 import {
   type CrewStatusTask,
+  type CrewTaskTextMode,
   crewAssignmentText,
   crewTaskTextLimits,
 } from "../../../shared/crew-status";
@@ -19,11 +20,30 @@ type Activity = Omit<CrewStatusTask, "id" | "status">;
 /** The dispatch text limit, in code points. Stored task text is raw. */
 export const activityTextLimit = 64_000;
 
+/**
+ * The first `limit` code points. Only twice that many UTF-16 units are
+ * scanned, and the cut never splits a surrogate pair.
+ */
+function head(text: string, limit: number) {
+  return text.length <= limit
+    ? text
+    : Array.from(text.slice(0, 2 * limit))
+        .slice(0, limit)
+        .join("");
+}
+
+/** The last `limit` code points, scanning at most twice that many units. */
+function tail(text: string, limit: number) {
+  return text.length <= limit
+    ? text
+    : Array.from(text.slice(-2 * limit))
+        .slice(-limit)
+        .join("");
+}
+
 /** `text` cut to the stored task text limit. */
 export function activityText(text: string) {
-  return text.length <= activityTextLimit
-    ? text
-    : Array.from(text).slice(0, activityTextLimit).join("");
+  return head(text, activityTextLimit);
 }
 
 /**
@@ -40,6 +60,25 @@ function maskedActivity(activity: Activity): Activity {
     ),
   };
 }
+
+/**
+ * The ordinary bounds and ends (the summary's start, the progress tail)
+ * without redaction or control stripping.
+ */
+function unredactedActivity(activity: Activity): Activity {
+  return {
+    ...activity,
+    summary: head(activity.summary, crewTaskTextLimits.summary),
+    phase: head(activity.phase, crewTaskTextLimits.phase),
+    progress: tail(activity.progress, crewTaskTextLimits.progress),
+  };
+}
+
+const shown = {
+  ordinary: maskedActivity,
+  unredacted: unredactedActivity,
+  full: (activity: Activity) => activity,
+} satisfies Record<CrewTaskTextMode, (activity: Activity) => Activity>;
 
 type ActivityTask = {
   id: string;
@@ -132,10 +171,10 @@ export class MemberActivityStore {
       .run(raw, Date.now(), taskID, raw);
   }
 
-  /** Redacted and bounded task text unless `fullText` asks for it raw. */
+  /** Task text as `mode` shows it; ordinary status redacts and bounds it. */
   public task(
     task: Pick<ActivityTask, "id" | "status">,
-    fullText = false,
+    mode: CrewTaskTextMode = "ordinary",
   ): CrewStatusTask {
     const stored = this.db
       .query<Activity, [string]>(`SELECT kind,summary,phase,
@@ -143,7 +182,7 @@ export class MemberActivityStore {
       FROM member_activity WHERE taskID=?`)
       .get(task.id);
 
-    const activity = stored && (fullText ? stored : maskedActivity(stored));
+    const activity = stored && shown[mode](stored);
 
     // Known local decision; the external native stop is reported separately.
     const stop =
@@ -180,7 +219,7 @@ export class MemberActivityStore {
     };
   }
 
-  public read(crewID: string, fullText = false) {
+  public read(crewID: string, mode: CrewTaskTextMode = "ordinary") {
     const queued = this.db
       .query<Pick<ActivityTask, "id" | "status">, [string]>(
         `SELECT id,status FROM pending_tasks WHERE crewID=? AND status='queued'
@@ -207,7 +246,7 @@ export class MemberActivityStore {
         `SELECT id,status FROM (${terminal}) ORDER BY time DESC,sequence DESC LIMIT 8`,
       )
       .all(crewID, crewID)
-      .map((task) => this.task(task, fullText));
+      .map((task) => this.task(task, mode));
 
     const recentCount =
       this.db
@@ -217,7 +256,7 @@ export class MemberActivityStore {
         .get(crewID, crewID)?.count ?? 0;
 
     return {
-      queued: queued.map((task) => this.task(task, fullText)),
+      queued: queued.map((task) => this.task(task, mode)),
       queuedCount,
       lastOutcome: recent[0] ?? null,
       recent,

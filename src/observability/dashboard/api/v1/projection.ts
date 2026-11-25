@@ -876,10 +876,13 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       const config = deps.config();
       const configured = registrations(config);
 
+      // The sample also feeds each ship's `ship` event: unredacted task
+      // Text within the ordinary limits.
       const fleet = await dashboard.fleetWithCrew(
         signal,
         new Set(configured.keys()),
         crewDeadline,
+        { taskText: "unredacted" },
       );
 
       signal.throwIfAborted();
@@ -978,7 +981,8 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
 
       return shipDetail(
         registration,
-        await dashboard.shipWithCrew(id, signal),
+        // Unredacted task text within the ordinary limits.
+        await dashboard.shipWithCrew(id, signal, { taskText: "unredacted" }),
         signal,
       );
     },
@@ -995,11 +999,11 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
 
       const result = await detail(
         registration,
-        // Only this route asks for raw task text.
+        // Only this route asks for full task text.
         // An older crew plugin answers redacted; the route shows that as is.
         await dashboard.shipWithCrew(ship, signal, {
           member,
-          fullTaskText: true,
+          taskText: "full",
         }),
         signal,
         member,

@@ -24,7 +24,11 @@ import type {
   SessionSyntheticInput,
 } from "@opencode/client";
 import { Predicate, Result, Schema } from "effect";
-import type { CrewStatus, CrewStatusInput } from "../../../shared/crew-status";
+import type {
+  CrewStatus,
+  CrewStatusInput,
+  CrewTaskTextMode,
+} from "../../../shared/crew-status";
 import {
   type MaintenanceDrain,
   drainNoticeID,
@@ -513,18 +517,18 @@ export class CrewEngine {
    */
   public status(
     input: CrewStatusInput,
-    options: { aggregate: true; fullText?: boolean },
+    options: { aggregate: true; taskText?: CrewTaskTextMode },
   ): CrewStatus & { busy: number };
   public status(
     input?: CrewStatusInput,
-    options?: { fullText?: boolean },
+    options?: { taskText?: CrewTaskTextMode },
   ): CrewStatus;
-  /** `fullText` returns raw task text, outside the ordinary status limits. */
+  /** `taskText` other than `ordinary` returns task text unredacted. */
   public status(
     input: CrewStatusInput = {},
-    options?: { aggregate?: true; fullText?: boolean },
+    options?: { aggregate?: true; taskText?: CrewTaskTextMode },
   ): CrewStatus {
-    const fullText = options?.fullText ?? false;
+    const taskText = options?.taskText ?? "ordinary";
 
     const members = this.options.team.crew.filter(
       ({ id }) => !input.member || input.member === id,
@@ -550,8 +554,8 @@ export class CrewEngine {
           backend: member.backend ? "pi-durable" : "opencode",
           provisioned: peer?.status ?? "unprovisioned",
           observed: !!current && !!member.backend && this.pi.observed(current),
-          current: current ? this.state.activity.task(current, fullText) : null,
-          ...this.state.activity.read(member.id, fullText),
+          current: current ? this.state.activity.task(current, taskText) : null,
+          ...this.state.activity.read(member.id, taskText),
         };
       }),
       total: members.length,

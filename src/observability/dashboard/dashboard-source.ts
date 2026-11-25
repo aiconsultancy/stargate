@@ -581,6 +581,7 @@ export function dashboardSource(
     signal: AbortSignal,
     selected?: ReadonlySet<string>,
     crewDeadline?: AbortSignal,
+    crewInput: FleetCrewStatusInput = {},
   ) {
     const groups = captains();
 
@@ -618,7 +619,11 @@ export function dashboardSource(
             ? await readWithDeadline(retired, undefined, (active) => {
                 reading.throwIfAborted();
 
-                return crew(member, AbortSignal.any([reading, active]), {});
+                return crew(
+                  member,
+                  AbortSignal.any([reading, active]),
+                  crewInput,
+                );
               }).result.catch((error: unknown) => {
                 reading.throwIfAborted();
 
@@ -847,7 +852,8 @@ export function dashboardSource(
       signal: AbortSignal,
       selected: ReadonlySet<string>,
       crewDeadline?: AbortSignal,
-    ) => readFleet(signal, selected, crewDeadline),
+      crewInput?: FleetCrewStatusInput,
+    ) => readFleet(signal, selected, crewDeadline, crewInput),
     shipWithCrew: (
       id: string,
       signal: AbortSignal,
@@ -890,10 +896,12 @@ export function dashboardSource(
     fleetBackend: (id: string) => AgentBackend | undefined;
     invalidateFleetCrew: () => void;
     retireFleetBackend: (backend: AgentBackend) => void;
+    /** `crewInput` names the Fleet API's task text mode; omitted is ordinary. */
     fleetWithCrew: (
       signal: AbortSignal,
       selected: ReadonlySet<string>,
       crewDeadline?: AbortSignal,
+      crewInput?: FleetCrewStatusInput,
     ) => ReturnType<typeof readFleet>;
     shipWithCrew: (
       id: string,

@@ -103,6 +103,12 @@ export function crewStatusSchemaWith(limits: CrewTaskTextLimits) {
   return { task, status };
 }
 
+/**
+ * How crew status shows task text. `ordinary` redacts and bounds it,
+ * `unredacted` only bounds it, and `full` returns it as stored.
+ */
+export type CrewTaskTextMode = "ordinary" | "unredacted" | "full";
+
 /** The limits every ordinary crew status reader shows. */
 export const crewTaskTextLimits: CrewTaskTextLimits = {
   summary: 180,

@@ -169,7 +169,7 @@ function fixture(
     children: [] as string[],
     git: [] as string[],
     diffs: [] as { ship: string; member: string }[],
-    fullTaskText: [] as boolean[],
+    taskText: [] as string[],
   };
 
   const roots = [
@@ -253,7 +253,7 @@ function fixture(
               input: FleetCrewStatusInput,
               signal: AbortSignal,
             ) {
-              calls.fullTaskText.push(input.fullTaskText === true);
+              calls.taskText.push(input.taskText ?? "ordinary");
               crewSignals.set(id, signal);
               const scoped = await status(id, input);
 
@@ -1154,18 +1154,20 @@ describe("Fleet API projection", () => {
     }
   });
 
-  test("full task text: a plugin that rejects the field is asked again without it, then not for a minute", async () => {
-    const asked: boolean[] = [];
+  test("task text modes: a plugin that rejects the field is asked again without it, then not for a minute", async () => {
+    const asked: string[] = [];
     let old = false;
 
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       async fetch(request) {
-        const full = (await request.text()).includes("fullTaskText");
-        asked.push(full);
+        const mode =
+          /"taskText":"(\w+)"/.exec(await request.text())?.[1] ?? "ordinary";
 
-        if (old && full) {
+        asked.push(mode);
+
+        if (old && mode !== "ordinary") {
           return Response.json(
             {
               _tag: "RpcError",
@@ -1180,7 +1182,7 @@ describe("Fleet API projection", () => {
           output: {
             status: { members: [], total: 0, truncated: false },
             metadata: { projectDirectory: "/fixture", contexts: [] },
-            ...(full && { taskText: "full" }),
+            ...(mode !== "ordinary" && { taskText: mode }),
           },
         });
       },
@@ -1198,23 +1200,29 @@ describe("Fleet API projection", () => {
       }
 
       const backend = new OpenCodeBackend(config);
-      const input = { member: "pilot", fullTaskText: true } as const;
+      const full = { member: "pilot", taskText: "full" } as const;
+      const unredacted = { taskText: "unredacted" } as const;
 
       try {
-        expect(await backend.fleetCrewStatus(input, signal)).toMatchObject({
+        expect(await backend.fleetCrewStatus(full, signal)).toMatchObject({
           taskText: "full",
         });
         expect(
           await backend.fleetCrewStatus({ member: "pilot" }, signal),
         ).not.toHaveProperty("taskText");
-        expect(asked).toEqual([true, false]);
+        expect(await backend.fleetCrewStatus(unredacted, signal)).toMatchObject(
+          { taskText: "unredacted" },
+        );
+        expect(asked).toEqual(["full", "ordinary", "unredacted"]);
 
         old = true;
-        const masked = await backend.fleetCrewStatus(input, signal);
+        const masked = await backend.fleetCrewStatus(unredacted, signal);
         expect(masked).toMatchObject({ metadata: { contexts: [] } });
         expect(masked).not.toHaveProperty("taskText");
-        await backend.fleetCrewStatus(input, signal);
-        expect(asked).toEqual([true, false, true, false, false]);
+        expect(await backend.fleetCrewStatus(full, signal)).not.toHaveProperty(
+          "taskText",
+        );
+        expect(asked.slice(3)).toEqual(["unredacted", "ordinary", "ordinary"]);
       } finally {
         await backend.close();
       }
@@ -1600,10 +1608,10 @@ describe("Fleet API projection", () => {
       progress: text,
     });
     // Crew detail alone asks the plugin for full task text.
-    expect(f.calls.fullTaskText).toEqual([true]);
+    expect(f.calls.taskText).toEqual(["full"]);
 
     const ship = await f.source.ship("captain", signal);
-    expect(f.calls.fullTaskText).toEqual([true, false]);
+    expect(f.calls.taskText).toEqual(["full", "unredacted"]);
     const current = ship?.crewMembers[0]?.contexts[0]?.current;
     expect(current).toMatchObject({
       summary: bounded(180),
@@ -1614,6 +1622,10 @@ describe("Fleet API projection", () => {
       "Bearer fixture-value token=fixture-value",
     );
     expect(current?.phase).toContain(`${privateProject}-pilot-default`);
+
+    // The fleet sample, which also feeds each ship's event, asks unredacted.
+    await f.source.fleet(signal);
+    expect(f.calls.taskText.slice(2)).toEqual(["unredacted"]);
   });
 
   test("crew diffs go to a captain's backend, never a rear admiral's", async () => {

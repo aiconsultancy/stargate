@@ -27,6 +27,7 @@ import {
   fleetCrewFullStatusSchema,
   fleetCrewStatusInputSchema,
   fleetCrewStatusSchema,
+  fleetCrewUnredactedStatusSchema,
   settledTasksPerMember,
 } from "../src/coordination/crew/reporting/fleet-status";
 import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
@@ -45,8 +46,11 @@ import {
 import { effectProjectKeySchema } from "../src/coordination/crew/protocol/project-key";
 import { CrewProjects } from "../src/coordination/crew/workspace/projects";
 import { teamSchema } from "../src/coordination/crew/team";
-import { crewStatusSchema } from "../src/shared/crew-status";
+import { type CrewStatus, crewStatusSchema } from "../src/shared/crew-status";
 import { MAX_CREW_CONTEXTS } from "../src/shared/session-history";
+import { redactCredentials } from "../src/lib/credentials";
+import { dashboardCrewMembers } from "../src/observability/dashboard/dashboard-projection";
+import { crewStatusView } from "../src/transports/slack/crew-ui";
 import { CronStore } from "../src/automation/cron/store";
 import { dashboardSource } from "../src/observability/dashboard/dashboard-source";
 import { openStore } from "../src/app/open-store";
@@ -707,10 +711,13 @@ test("status and history identify all project contexts while legacy output stays
     });
     expect(JSON.stringify(status)).not.toContain(f.base.projectDirectory);
 
-    // Fleet status gives one member's raw task text only when asked.
+    // Fleet status shows task text in three modes. ESC, BEL, a C1 control
+    // (CSI) and RIGHT-TO-LEFT OVERRIDE ride along with credential-shaped text.
+    const controls = "\u001b[31m \u0007 \u009b2J \u202e";
     const engine = projects.get("stargate");
     const peer = engine.state.peer("worker");
-    const text = `Fix token=fixture-value ${"x".repeat(300)}`;
+    const text = `Fix token=fixture-value ${controls} ${"é".repeat(300)} end`;
+    const progress = `start ${"p".repeat(500)} Bearer fixture-value ${controls} tail`;
     const task = peer && engine.state.reserveTask(peer, "captain", text);
 
     if (!task) {
@@ -718,34 +725,79 @@ test("status and history identify all project contexts while legacy output stays
     }
 
     engine.state.running(task.id);
-    engine.state.activity.progress(task.id, `Bearer fixture-value done`);
+    engine.state.activity.progress(task.id, progress);
 
+    // JSON escapes C0 controls; C1 controls stay raw.
+    const controlChars = /\\u00(?:07|1b)|\u009b/;
+
+    const current = (answer: { status: CrewStatus }) =>
+      answer.status.members.find((m) => m.current)?.current;
+
+    // Ordinary: redacted, controls stripped, 180/80/400, as before.
     const ordinary = Schema.decodeUnknownSync(fleetCrewStatusSchema)(
       projects.fleetStatus({ member: "worker" }),
     );
 
-    const masked = ordinary.status.members.find((m) => m.current)?.current;
-    expect(masked?.summary).toBe(
-      `Fix token=[REDACTED] ${"x".repeat(180 - 21)}`,
-    );
+    expect(current(ordinary)).toMatchObject({
+      summary: redactCredentials(text, 180),
+      progress: redactCredentials(progress, 64_000).slice(-400),
+    });
     expect(JSON.stringify(ordinary)).not.toContain("fixture-value");
+    expect(JSON.stringify(ordinary)).not.toMatch(controlChars);
     expect(ordinary).not.toHaveProperty("taskText");
 
+    // Unredacted: raw within 180/80/400; progress keeps its tail.
+    for (const input of [
+      { taskText: "unredacted" },
+      { member: "worker", taskText: "unredacted" },
+    ] as const) {
+      const unredacted = Schema.decodeUnknownSync(
+        fleetCrewUnredactedStatusSchema,
+      )(projects.fleetStatus(input));
+
+      expect(unredacted.taskText).toBe("unredacted");
+      expect(unredacted.metadata).toEqual(ordinary.metadata);
+      expect(current(unredacted)).toMatchObject({
+        summary: Array.from(text).slice(0, 180).join(""),
+        progress: Array.from(progress).slice(-400).join(""),
+      });
+      expect(current(unredacted)?.summary).toContain(
+        `token=fixture-value ${controls}`,
+      );
+      expect(current(unredacted)?.progress).toEndWith(
+        `Bearer fixture-value ${controls} tail`,
+      );
+    }
+
+    // Full: raw up to 64,000 code points, for one member.
     const full = Schema.decodeUnknownSync(fleetCrewFullStatusSchema)(
-      projects.fleetStatus({ member: "worker", fullTaskText: true }),
+      projects.fleetStatus({ member: "worker", taskText: "full" }),
     );
 
     expect(full.taskText).toBe("full");
     expect(full.metadata).toEqual(ordinary.metadata);
-    expect(full.status.members.find((m) => m.current)?.current).toMatchObject({
-      summary: text,
-      progress: "Bearer fixture-value done",
-    });
+    expect(JSON.stringify(full)).toMatch(controlChars);
+    expect(current(full)).toMatchObject({ summary: text, progress });
+
+    // The operator dashboard and Slack read ordinary status, unchanged.
+    const shown = projects.status({ member: "worker" });
+    expect(current({ status: shown })).toEqual(current(ordinary));
+
+    for (const view of [
+      dashboardCrewMembers(shown),
+      crewStatusView(shown, true),
+    ]) {
+      expect(JSON.stringify(view)).not.toContain("fixture-value");
+      expect(JSON.stringify(view)).not.toMatch(controlChars);
+    }
 
     // Full text names one member, and old callers' input stays valid.
     const input = Schema.decodeUnknownSync(fleetCrewStatusInputSchema);
-    expect(() => input({ fullTaskText: true })).toThrow();
-    expect(() => input({ member: "worker", fullTaskText: false })).toThrow();
+    expect(() => input({ taskText: "full" })).toThrow();
+    expect(() => input({ member: "worker", taskText: "ordinary" })).toThrow();
+    expect(input({ taskText: "unredacted" })).toEqual({
+      taskText: "unredacted",
+    });
     expect(input({ member: "worker" })).toEqual({ member: "worker" });
 
     const roots = await projects.historyRoots(new AbortController().signal);

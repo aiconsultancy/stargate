@@ -294,7 +294,7 @@ export interface AgentBackend {
   crewStatus?(input: CrewStatusInput, signal: AbortSignal): Promise<CrewStatus>;
   /**
    * Private fleet metadata from the same location-scoped crew status read.
-   * `fullTaskText` asks for raw task text; older plugins answer redacted.
+   * `taskText` asks for unredacted task text; older plugins answer redacted.
    */
   fleetCrewStatus?(
     input: FleetCrewStatusInput,

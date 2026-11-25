@@ -146,17 +146,20 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   at that path. Fleet Control's `fleet.sock` may share the directory.
 - Fleet API v1 reports crew task text and Git branch and base names as the
   crew wrote them, without credential redaction or `[checkout]` path
-  replacement. Ship detail and the `ship` event keep the 180/80/400 character
-  limits; the crew member route adds no limit. Subagent titles and pull
-  request titles are also shown as written, cut to 180 characters.
+  replacement. Ship detail and the `ship` event show task text unredacted
+  within the 180/80/400 character limits; the crew member route adds no limit.
+  Subagent titles and pull request titles are also shown as written, cut to
+  180 characters.
 - The crew plugin stores crew task text raw, up to 64,000 characters, and
   redacts and bounds it on read, so the Slack crew command, health, the
-  operator dashboard and the crew status tool show exactly what they did.
-  The fleet status RPC takes `fullTaskText: true` for one member and then
-  returns that text unredacted; only the Fleet API's crew member route asks
-  for it. An older plugin answers redacted, and the gateway falls back.
-  Fleet API text fields keep control and bidirectional formatting
-  characters; clients that print them must escape them.
+  operator dashboard and the crew status tool show exactly what they did. The
+  fleet status RPC takes `taskText: "unredacted"` (raw within 180/80/400, any
+  member filter) or `taskText: "full"` (raw up to 64,000, one member) and
+  echoes the mode in its answer. The Fleet API asks for `unredacted` for ship
+  detail and events and `full` for the crew member route; nothing else asks.
+  An older plugin answers redacted, and the gateway falls back. Fleet API text
+  fields keep control and bidirectional formatting characters; clients that
+  print them must escape them.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`

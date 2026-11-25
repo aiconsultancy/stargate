@@ -14,6 +14,10 @@ import { MemberActivityStore } from "../src/coordination/crew/reporting/member-a
 import { teamSchema } from "../src/coordination/crew/team";
 import { redactCredentials } from "../src/lib/credentials";
 import {
+  activityText,
+  activityTextLimit,
+} from "../src/coordination/crew/reporting/member-activity";
+import {
   dashboardCrewMembers,
   dashboardCrewSummary,
 } from "../src/observability/dashboard/dashboard-projection";
@@ -245,7 +249,7 @@ test("crew status readers show raw stored task text exactly as before: redacted 
     );
 
     // Only an explicit full-text read sees the stored text.
-    const full = f.engine.status({ member: "twiki" }, { fullText: true });
+    const full = f.engine.status({ member: "twiki" }, { taskText: "full" });
     expect(full.members[0]?.current).toMatchObject({
       summary: assignment,
       progress,
@@ -257,12 +261,55 @@ test("crew status readers show raw stored task text exactly as before: redacted 
     const controls = "Run \u001b[2J \u0007 \u009b1m \u202edone";
     f.engine.state.activity.progress(task.id, controls);
     expect(
-      f.engine.status({ member: "twiki" }, { fullText: true }).members[0]
+      f.engine.status({ member: "twiki" }, { taskText: "full" }).members[0]
         ?.current?.progress,
     ).toBe(controls);
     expect(
       f.engine.status({ member: "twiki" }).members[0]?.current?.progress,
     ).toBe(redactCredentials(controls, 64_000).slice(-400));
+  } finally {
+    await f.close();
+  }
+});
+
+test("stored task text is cut at 64,000 code points without splitting a surrogate pair", async () => {
+  const f = await fixture();
+
+  try {
+    expect(activityText("short")).toBe("short");
+
+    // One unit, then pairs: the cut lands mid-pair in UTF-16 units.
+    const astral = `x${"😀".repeat(70_000)}`;
+    const cut = activityText(astral);
+    expect(Array.from(cut)).toHaveLength(activityTextLimit);
+    expect(cut).toBe(`x${"😀".repeat(activityTextLimit - 1)}`);
+    expect(cut.isWellFormed()).toBe(true);
+
+    // Only the head is scanned, however long the input is.
+    expect(activityText("a".repeat(10_000_000))).toBe(
+      "a".repeat(activityTextLimit),
+    );
+
+    const twiki = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const task = f.engine.state.reserveTask(twiki, "captain", astral);
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+    f.engine.state.activity.progress(task.id, `${astral}y`);
+
+    const read = (taskText: "unredacted" | "full") =>
+      f.engine.status({ member: "twiki" }, { taskText }).members[0]?.current;
+
+    expect(read("full")).toMatchObject({ summary: cut, progress: cut });
+    // Unredacted keeps the summary's start and the progress tail, whole pairs.
+    expect(read("unredacted")).toMatchObject({
+      summary: `x${"😀".repeat(179)}`,
+      progress: "😀".repeat(400),
+    });
   } finally {
     await f.close();
   }
