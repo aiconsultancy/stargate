@@ -3,11 +3,15 @@ import { Plugin } from "@opencode/plugin";
 import { fromPromise } from "@opencode/plugin/promise/adapter";
 import type { Context } from "@opencode/plugin/promise/plugin";
 import {
+  type Info,
   type ToolContext,
   Error as ToolError,
 } from "@opencode/plugin/promise/tool";
-import { JsonSchema, Schema } from "effect";
-import type { StandardJSONSchemaV1 } from "effect/StandardSchema";
+import { JsonSchema, Result, Schema } from "effect";
+import type {
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
+} from "effect/StandardSchema";
 import { settingsInputAdvertisement } from "../../../src/config/settings-legacy";
 import {
   settingsDefault,
@@ -18,6 +22,8 @@ import {
   callerSchema,
   dispatchInputSchema,
   FleetError,
+  peerDestinationSchema,
+  peerMessageInputSchema,
   type FleetRequest,
   offerAnswerInputSchema,
   reviewInputBranches,
@@ -31,6 +37,7 @@ const optionsSchema = settingsStruct({
     Schema.makeFilter((path) => isAbsolute(path) && resolve(path) === path),
   ),
   reviews: Schema.Boolean.pipe(settingsDefault(false)),
+  peerMessages: Schema.Boolean.pipe(settingsDefault(false)),
 });
 
 /** Keep native validation and the original object/union tool presentations. */
@@ -67,6 +74,65 @@ function fleetToolInput<S extends Schema.Codec<unknown, unknown>>(
       jsonSchema: { input: project, output: project },
     },
   });
+}
+
+const peerInputError =
+  "Use op=send, a configured to, via=ship or via=command and 1–1,800 characters of single-line text without @ or control characters. Only steer delivery is supported.";
+
+function isPeerInput(input: unknown): boolean {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    "via" in input &&
+    input.via !== undefined
+  );
+}
+
+function peerDmInput(input: Info["input"]) {
+  const standard = "~standard" in input ? input["~standard"] : undefined;
+  if (
+    typeof standard !== "object" ||
+    standard === null ||
+    !("jsonSchema" in standard)
+  ) {
+    throw new ToolError({
+      message: "The local DM tool has an unsupported input schema.",
+    });
+  }
+
+  const local = standard as StandardSchemaV1.Props & StandardJSONSchemaV1.Props;
+  const validatePeer = Schema.decodeUnknownResult(peerMessageInputSchema, {
+    onExcessProperty: "error",
+  });
+  const project = (options: { target: StandardJSONSchemaV1.Target }) => {
+    const json = local.jsonSchema.input(options);
+
+    return {
+      ...json,
+      properties: {
+        ...(json["properties"] as Record<string, unknown>),
+        via: settingsInputAdvertisement(peerDestinationSchema),
+      },
+    };
+  };
+
+  return {
+    "~standard": {
+      ...local,
+      jsonSchema: { input: project, output: project },
+      validate(raw: unknown) {
+        if (!isPeerInput(raw)) {
+          return local.validate(raw);
+        }
+
+        const result = validatePeer(raw);
+
+        return Result.isSuccess(result)
+          ? { value: result.success }
+          : { issues: [{ message: peerInputError }] };
+      },
+    },
+  };
 }
 
 type ToolHost = {
@@ -123,6 +189,43 @@ export async function installFleetTools(ctx: ToolHost) {
   };
 
   const registration = await ctx.tool.transform((editor) => {
+    if (options.peerMessages) {
+      const dm = editor.list().find((tool) => tool.name === "stargate_dm");
+
+      if (dm) {
+        editor.update(dm.id, (tool) => {
+          const sendLocal = tool.execute;
+          tool.input = peerDmInput(tool.input);
+          tool.description +=
+            ' For a configured cross-ship captain, use their target ID as to and via="ship" or via="command". Send 1–1,800 characters on one line without @ or control characters. The gateway adds the recipient tag.';
+          tool.execute = async (input, context) => {
+            if (!isPeerInput(input)) {
+              return sendLocal(input, context);
+            }
+
+            const peer = Schema.decodeUnknownResult(peerMessageInputSchema)(
+              input,
+              {
+                onExcessProperty: "error",
+              },
+            );
+
+            if (Result.isFailure(peer)) {
+              throw new ToolError({
+                message: peerInputError,
+              });
+            }
+
+            return guard(context, "stargate_mail", "send", {
+              operation: "peer-message",
+              input: peer.success,
+              caller: caller(context),
+            });
+          };
+        });
+      }
+    }
+
     if (options.reviews) {
       editor.add({
         name: "fleet_review",

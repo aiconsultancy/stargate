@@ -27,6 +27,7 @@ import {
   type FleetSource,
   type FleetTarget,
   type OfferAnswerInput,
+  type PeerMessageInput,
   type VerifiedSource,
   fleetAssignmentText,
   fleetControlSchema,
@@ -59,6 +60,11 @@ export type FleetControlOptions = {
     reason: string | undefined,
     signal: AbortSignal,
   ): Promise<void>;
+  peerMessage?(
+    target: FleetTarget,
+    input: PeerMessageInput,
+    signal: AbortSignal,
+  ): Promise<string>;
   status?(): unknown;
   /** Resolve the immutable authenticated ingress job and native input locally. */
   origin?(source: VerifiedSource): FleetOrigin | undefined;
@@ -538,6 +544,40 @@ export class FleetControl {
           );
 
           signal.throwIfAborted();
+
+          if (value.operation === "peer-message") {
+            const target = this.options.config.targets.find(
+              (entry) =>
+                entry.id === value.input.to && entry.role === "captain",
+            );
+
+            if (
+              !this.options.peerMessage ||
+              !target ||
+              target.account === this.options.account
+            ) {
+              throw new FleetError(
+                "Peer messaging requires a configured remote captain.",
+              );
+            }
+
+            const channel = await this.options.peerMessage(
+              target,
+              value.input,
+              signal,
+            );
+
+            sendJson(response, 200, {
+              result: {
+                channel,
+                target: target.id,
+                state: "sent",
+                humanApproval: false,
+              },
+            });
+
+            return;
+          }
 
           const result =
             value.operation === "review"

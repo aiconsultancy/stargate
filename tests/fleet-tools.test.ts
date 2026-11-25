@@ -22,6 +22,8 @@ import { SessionMessage } from "@opencode/schema/session-message";
 import { Tool } from "@opencode/schema/tool";
 import { Result, Schema } from "effect";
 import crewPlugin from "../plugins/opencode/crew/plugin";
+import { dmInputSchema } from "../src/coordination/crew/messaging/messaging";
+import { messageOpenCodeInput } from "../src/coordination/crew/messaging/message-tool-input";
 import { fleetRequest } from "../src/coordination/fleet/client";
 import {
   FleetControl,
@@ -33,6 +35,7 @@ import fleetPlugin, {
 } from "../plugins/opencode/fleet/plugin";
 import {
   type FleetCaller,
+  type FleetRequest,
   FleetError,
   type FleetSource,
   fleetControlSchema,
@@ -143,6 +146,93 @@ async function fixture() {
     },
   };
 }
+
+test("peer DM IPC requires an exact captain target, native pin and separate grant", async () => {
+  const runtime = await fixture();
+  const calls: string[] = [];
+
+  try {
+    const { socketPath } = await runtime.open("ses_owner", {
+      config: {
+        socketPath: join(runtime.directory, "ses_owner.sock"),
+        statePath: runtime.statePath,
+        targets: [{ ...target, role: "captain" }],
+      },
+      permissions: [
+        { action: "*", resource: "*", effect: "deny" },
+        { action: "fleet_peer_message", resource: target.id, effect: "allow" },
+      ],
+      peerMessage: async (peer) => {
+        calls.push(peer.account);
+
+        return peer.channel;
+      },
+    });
+
+    const message: FleetRequest = {
+      operation: "peer-message",
+      caller: caller(),
+      input: {
+        op: "send",
+        to: target.id,
+        text: "Hello",
+        via: "ship",
+        delivery: "steer",
+      },
+    };
+
+    await expect(fleetRequest(socketPath, message, signal())).resolves.toEqual({
+      channel: target.channel,
+      target: target.id,
+      state: "sent",
+      humanApproval: false,
+    });
+    await expect(
+      fleetRequest(
+        socketPath,
+        { ...message, caller: caller("ses_foreign") },
+        signal(),
+      ),
+    ).rejects.toThrow("native session pin");
+    await expect(
+      fleetRequest(
+        socketPath,
+        { ...message, input: { ...message.input, to: "another" } },
+        signal(),
+      ),
+    ).rejects.toThrow("policy refuses");
+    expect(calls).toEqual([target.account]);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test("a native-only DM ask rule leaves the fleet listener available when peer routing is off", async () => {
+  const runtime = await fixture();
+
+  try {
+    const { socketPath } = await runtime.open("ses_owner", {
+      permissions: [
+        { action: "stargate_dm", resource: "*", effect: "ask" },
+        { action: "fleet_status", resource: "*", effect: "allow" },
+      ],
+    });
+
+    await expect(
+      fleetRequest(
+        socketPath,
+        {
+          operation: "status",
+          caller: caller(),
+          input: {},
+        },
+        signal(),
+      ),
+    ).resolves.toMatchObject({ account: "coordinator" });
+  } finally {
+    await runtime.close();
+  }
+});
 
 test("control is opt-in, requires pins/targets and rejects arbitrary destinations", () => {
   expect(
@@ -597,22 +687,63 @@ test("OpenCode tools assert native permission and bind native caller, never mode
   const permissions: unknown[] = [];
 
   try {
-    const owner = await setup.open();
+    const owner = await setup.open("ses_owner", {
+      config: {
+        socketPath: join(setup.directory, "ses_owner.sock"),
+        statePath: setup.statePath,
+        targets: [{ ...target, role: "captain" }],
+      },
+      peerMessage: async (peer) => peer.channel,
+    });
+
     owner.control.recordSource(source);
 
+    const localSchema = messageOpenCodeInput(dmInputSchema);
+
+    const localDm: Info & { id: string } = {
+      id: "stargate_dm",
+      name: "stargate_dm",
+      description: "Local mail",
+      input: localSchema,
+      options: { permission: "stargate_mail" },
+      async execute() {
+        return { content: "local" };
+      },
+    };
+
     const editor: ToolEditor = {
-      list: () => [],
+      list: () => [localDm],
       get: () => undefined,
       namespace() {},
       add(tool) {
         tools.push(tool);
       },
-      update() {},
+      update(id, change) {
+        expect(id).toBe(localDm.id);
+        change(localDm);
+      },
       remove() {},
     };
 
-    const cleanup = await installFleetTools({
+    const off = await installFleetTools({
       options: { socketPath: owner.socketPath },
+      tool: {
+        async transform(callback) {
+          callback(editor);
+
+          return { async dispose() {} };
+        },
+      },
+      permission: { async assert() {} },
+    });
+
+    expect(localDm.input).toBe(localSchema);
+    expect(localDm.description).toBe("Local mail");
+    await off();
+    tools.length = 0;
+
+    const cleanup = await installFleetTools({
+      options: { socketPath: owner.socketPath, peerMessages: true },
       tool: {
         async transform(callback) {
           callback(editor);
@@ -681,6 +812,40 @@ test("OpenCode tools assert native permission and bind native caller, never mode
         save: [source.reference],
       },
     ]);
+    expect((await localDm.execute({ op: "send" }, context)).content).toBe(
+      "local",
+    );
+
+    const advertised = localDm.input as typeof localSchema;
+    const peer = { op: "send", to: target.id, via: "ship", text: "Hello" };
+    expect(
+      advertised["~standard"].jsonSchema.input({ target: "draft-2020-12" }),
+    ).toHaveProperty("properties.via.enum", ["ship", "command"]);
+    expect(await advertised["~standard"].validate(peer)).toEqual({
+      value: { ...peer, delivery: "steer" },
+    });
+    expect(
+      await advertised["~standard"].validate({
+        ...peer,
+        text: "first\nsecond",
+      }),
+    ).toHaveProperty("issues");
+
+    const routed = await localDm.execute(
+      { op: "send", to: target.id, via: "ship", text: "Hello" },
+      context,
+    );
+
+    expect(JSON.parse(String(routed.content))).toMatchObject({
+      state: "sent",
+      target: target.id,
+      channel: target.channel,
+      humanApproval: false,
+    });
+    expect(permissions.at(-1)).toMatchObject({
+      action: "stargate_mail",
+      resources: ["send"],
+    });
     denied = true;
     await expect(
       verify?.execute({ reference: source.reference }, context),

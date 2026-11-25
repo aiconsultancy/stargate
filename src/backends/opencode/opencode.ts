@@ -580,7 +580,13 @@ export class OpenCodeBackend implements AgentBackend {
     messageID: string,
     inputID: string,
     signal: AbortSignal,
-    expected?: { agent: string; id: string; tool: string; input: unknown },
+    expected?: {
+      agent: string;
+      id: string;
+      tool: string;
+      input: unknown;
+      normaliseInput?: (raw: unknown) => unknown;
+    },
   ) {
     if (sessionID !== this.sessionID) {
       return false;
@@ -616,7 +622,12 @@ export class OpenCodeBackend implements AgentBackend {
           tool.name !== expected.tool ||
           tool.state.status !== "running" ||
           tool.time.completed !== undefined ||
-          !isDeepStrictEqual(tool.state.input, expected.input)
+          !isDeepStrictEqual(
+            expected.normaliseInput
+              ? expected.normaliseInput(tool.state.input)
+              : tool.state.input,
+            expected.input,
+          )
         ) {
           return false;
         }

@@ -377,6 +377,7 @@ export class CrewMessaging {
     }
 
     const input = parsed.success;
+
     caller = await this.engine.authorizeMail(caller);
     // A bound IRC session: member identity from the binding, no task, and
     // The pinned captain as its captain context.
