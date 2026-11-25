@@ -199,6 +199,15 @@ notification route in this version. For downgrade, restore the prior TCP `listen
 `api` when no Fleet API is needed; keep private state. See [API limits and Unix
 access](api.md#private-unix-mode).
 
+## Usage guard
+
+Set `usageGuard.enabled` to turn on the rear admiral's per-ship quota notices
+and crew cutoffs. Set the sender registration, quota proxy and state file.
+The default limits are 20% warning and 10% cutoff for Claude and Codex.
+The crew plugin reads the shared state through its `usageGuardFile` option.
+See [Fleet usage guard](usage.md#fleet-usage-guard) for the provider, model and
+message settings.
+
 ## Agent dispatch
 
 The optional top-level `agentDispatch` object lets the rear admiral's IRC

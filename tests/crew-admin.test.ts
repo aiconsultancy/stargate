@@ -57,7 +57,11 @@ function git(directory: string, ...args: string[]) {
 }
 
 async function fixture(
-  options: { repository?: boolean; exclusiveWorkerInput?: boolean } = {},
+  options: {
+    repository?: boolean;
+    exclusiveWorkerInput?: boolean;
+    usageGuard?: boolean;
+  } = {},
 ) {
   const base = await mkdtemp(
     join(options.repository ? tmpdir() : fixtureRoot(), "stargate-admin-"),
@@ -90,6 +94,7 @@ async function fixture(
 
   const config = {
     namespace: "admin",
+    ...(options.usageGuard && { usageGuardFile: join(base, "quota.json") }),
     exclusiveWorkerInput: options.exclusiveWorkerInput ?? true,
     stateDirectory: join(base, "state"),
     captainDirectory: join(base, "captain"),
@@ -100,6 +105,12 @@ async function fixture(
       captain: { id: "captain" },
       crew: crew.map((id) => ({
         id,
+        ...(options.usageGuard && {
+          model:
+            id === "chief"
+              ? "openai-proxy/gpt-fixture"
+              : "claude-proxy/claude-fixture",
+        }),
         role: "Implementation",
         permissionProfile: "coding" as const,
       })),
@@ -501,6 +512,61 @@ function finalAnswer(f: Fixture, task: CrewTask) {
     content: [{ type: "text", text: "Original task complete." }],
   });
 }
+
+test("usage cutoff blocks fresh and queued work and explicit resumes for the affected provider", async () => {
+  const f = await fixture({ usageGuard: true });
+
+  try {
+    const task = await stuckTask(f);
+    const queued = (await f.dispatch("bosun", "Next assignment", true)).task;
+    const file = f.engine.options.usageGuardFile;
+
+    if (!file || !queued) {
+      throw new Error("Missing guard or queued fixture task");
+    }
+
+    const pause = {
+      claude: {
+        modelPrefixes: ["claude-proxy/"],
+        remainingPercent: 10,
+        observedAt: Date.now(),
+        resetAt: null,
+        mode: "pause",
+        notice: null,
+        attempted: [],
+      },
+    };
+
+    await writeFile(file, JSON.stringify(pause));
+    await expect(f.dispatch("roslin", "New")).rejects.toThrow(
+      "claude crew starts and resumptions are paused",
+    );
+    await expect(f.engine.run(resumeInput(task), f.captain())).rejects.toThrow(
+      "claude crew starts and resumptions are paused",
+    );
+    expect(
+      await f.engine.run({ op: "status", taskID: queued.id }, f.captain()),
+    ).toMatchObject({ status: "queued" });
+    expect(f.calls).not.toContain("synthetic");
+    expect(f.prompts()).toBe(1);
+
+    const other = (await f.dispatch("chief", "Different provider")).task;
+
+    if (!other) {
+      throw new Error("Missing Codex fixture task");
+    }
+
+    expect(other.status).toBe("running");
+    expect(f.prompts()).toBe(2);
+    await writeFile(file, "{}");
+    expect(await f.engine.run(resumeInput(task), f.captain())).toMatchObject({
+      status: "resume-admitted",
+    });
+    expect(f.calls).toContain("synthetic");
+  } finally {
+    await f.close();
+  }
+});
 
 test("captain resumes the original worker, and the final answer completes that task", async () => {
   const f = await fixture();

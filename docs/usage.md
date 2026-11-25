@@ -63,6 +63,103 @@ account rows and sixteen windows per account. Larger built-in inventories
 fail closed. The optional plugin pass uses up to two seconds of the remaining
 time and reads up to twenty plugin credentials.
 
+## Fleet usage guard
+
+`usageGuard` is off by default in Stargate. Enable it in the gateway that
+holds the fleet's rear admiral IRC registration:
+
+```json
+{
+  "usageGuard": {
+    "enabled": true,
+    "sender": "example-admiral",
+    "proxy": {
+      "baseURL": "http://127.0.0.1:8317",
+      "managementKeyFile": "/private/proxy-management.key"
+    },
+    "stateFile": "/var/lib/example-fleet/usage-guard/quota.json"
+  }
+}
+```
+
+In each captain's `stargate.crew` plugin options, set `usageGuardFile` to the
+same absolute path. The gateway must own the directory and the crew engines
+must be able to read the file. The gateway publishes it with mode 0644. It
+contains quota percentages and notice receipts. Keep it in a directory the
+gateway alone can write. The Subspace fleet installer configures both sides.
+Restart the gateway and crew engines when enabling or disabling the guard.
+
+The guard uses the existing quota watcher and runs without a model call or a
+cron job. By default it watches Claude and Codex independently. It uses the
+tightest active subscription limit for each account and the highest of those
+balances for the configured provider pool. Set `proxy.accounts` to the crew
+logins if they have dedicated subscriptions. Set `nativeCodexFile` to use the
+[trusted local receipt](#crew-quota-notices) for native Codex. You can add
+a discovered proxy plugin provider by its quota ID.
+
+- At **20% remaining** or less, the rear admiral asks each captain to run at
+  most one crew worker of that kind and let excess crew finish or checkpoint.
+  Captains apply this warning.
+- At **10% remaining** or less, the crew plugin refuses new assignments,
+  explicit resumptions, and other idle starts for the affected model. Work
+  already underway keeps running so crews can finish, save and push at a
+  safe point. Queued work keeps its identity and position.
+- After a fresh reading above the cutoff, captains can resume saved work
+  within any remaining warning limit. Above the warning limit, the rear
+  admiral tells them normal capacity is back. A reset time passing on its
+  own supplies no evidence of recovery.
+
+The gateway addresses every configured captain by its verified current nick
+in its ship channel. Captains may switch worker models, so all captains get
+the same provider-specific notice and apply it only where relevant. By
+default, the guard finds captain registrations on the sender's IRC server
+and uses `fleetChannels.home` or the first channel. If another gateway owns
+some captain connections, set `captains` on the sender's guard to a list such
+as `[{"account":"orion","channel":"#orion"}]`. The rear admiral must join those
+ship channels, and the captains' IRC access must admit the rear admiral as a
+peer for the notices to wake them.
+
+The guard sends once per provider transition and ship, with the reported
+balance and known limiting-window reset in UTC. If the provider remains
+below a threshold across a verified reset, the notice re-arms. If IRC is
+unavailable before sending, the guard retries on the next fresh reading.
+If IRC reports that nothing was sent, the guard retries. If a send may
+already have reached IRC, it logs that uncertainty and keeps the receipt
+across restarts. A missing or stale reading logs a warning and
+holds the last verified policy. Before the first reading there is no cutoff
+for that provider. A missing sender is a configuration error, and a missing
+ship route is logged while enforcement continues.
+
+To customise the limits, replace the `providers` member with one entry per
+provider to watch. Use `modelPrefixes` matching each worker's
+`provider/model` reference, an optional `message` on each limit, and an
+optional top-level `recoveryMessage`. Use one or both actions. If both are
+set, the cutoff must be lower than the warning.
+
+```json
+{
+  "providers": {
+    "claude": {
+      "modelPrefixes": ["claude-proxy/", "anthropic/"],
+      "limits": [
+        {
+          "remainingPercent": 30,
+          "action": "warn",
+          "message": "Prepare to checkpoint Claude work."
+        },
+        { "remainingPercent": 20, "action": "pause" }
+      ]
+    }
+  }
+}
+```
+
+The cutoff applies to worker turns admitted through `stargate.crew`
+including its native OpenCode and Pi workers. Configure a model for each
+worker if OpenCode supplies only a server default. During a cutoff the
+guard holds starts whose model cannot be identified. Officer turns and
+model use outside the crew plugin follow their own controls.
+
 ## Crew quota notices
 
 A gateway can poll the same quota reader every two minutes and post changes
@@ -90,6 +187,8 @@ should own the file and post the notices.
 Choose a channel the reporting bot can post to and the affected captains
 watch. This grants outbound delivery to that channel without permitting
 incoming conversations there. Explicit channel denies still apply.
+When the fleet usage guard is also enabled, Slack reports the observed
+balance and refers captains to the guard for crew availability.
 The example account selector is optional. With dedicated
 captain and crew logins, list the crew login emails for each applicable
 provider so reserved balances cannot clear a crew pause. Those selectors

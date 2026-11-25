@@ -4,7 +4,7 @@
 
 ### Feature flags
 
-- New flags: none.
+- New flags: `usageGuard.enabled`, default off.
 - Default changes: the `stargate.crew` plugin's `feedbackEnabled` option changes
   from off to on for pinned teams. Submit and captain review still require
   separate native permissions.
@@ -16,6 +16,9 @@
   default.
 
 ### Changes
+
+- Add the usage guard for rear admiral quota notices in each ship channel
+  and provider-specific cutoffs on new crew turns.
 
 - Reorganize source code into bounded slices. Chat features live in `src/chat/`,
   and Fleet dispatch lives under `src/coordination/fleet/dispatch/`.

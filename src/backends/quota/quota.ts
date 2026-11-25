@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { Option, Schema } from "effect";
 import { isLoopbackAddress } from "../../lib/loopback";
@@ -557,7 +557,6 @@ export async function readPluginQuota(
         }),
       );
     } catch {
-      signal.throwIfAborted();
       accounts.push(account);
     }
   }
@@ -569,6 +568,7 @@ export async function readPluginQuota(
 export class QuotaReader {
   private readonly config: typeof quotaConfigSchema.Type | undefined;
   private cache?: QuotaObservation;
+  private pending?: Promise<QuotaObservation> | undefined;
   public constructor(
     config?: typeof quotaConfigSchema.Encoded,
     private readonly now = Date.now,
@@ -610,6 +610,43 @@ export class QuotaReader {
       return structuredClone({ ...this.cache, cached: true });
     }
 
+    if (this.pending) {
+      const stopped = Promise.withResolvers<void>();
+
+      const abort = () => {
+        stopped.reject(caller.reason);
+      };
+
+      caller.addEventListener("abort", abort, { once: true });
+
+      try {
+        await Promise.race([this.pending.catch(() => {}), stopped.promise]);
+      } finally {
+        caller.removeEventListener("abort", abort);
+      }
+
+      return this.readForCron(caller);
+    }
+
+    this.pending = this.refresh(now, caller);
+
+    try {
+      return await this.pending;
+    } finally {
+      this.pending = undefined;
+    }
+  }
+
+  private async refresh(
+    now: number,
+    caller: AbortSignal,
+  ): Promise<QuotaObservation> {
+    const config = this.config;
+
+    if (!config) {
+      throw new Error("Quota not configured");
+    }
+
     const signal = AbortSignal.any([caller, AbortSignal.timeout(8000)]);
 
     let snapshot: QuotaObservation = {
@@ -627,7 +664,7 @@ export class QuotaReader {
         await this.request("/v8/management/credentials", key, signal),
       );
 
-      const selected = this.config.accounts;
+      const selected = config.accounts;
 
       const active = credentials.files.filter((file) => {
         const provider = decodeProvider(file.provider ?? file.type);
@@ -753,7 +790,7 @@ export class QuotaReader {
           account.observedAt = this.now();
         } catch {
           // Account failures never return upstream error bodies or SDK objects.
-          signal.throwIfAborted();
+          caller.throwIfAborted();
         }
       }
 
@@ -949,4 +986,99 @@ export function formatQuota(
   }
 
   return lines;
+}
+
+const receiptSchema = Schema.Struct({
+  remainingPercent: Schema.Finite,
+  observedAt: Schema.Int,
+  resetAt: Schema.NullOr(Schema.Int),
+  modelPrefixes: Schema.Array(Schema.String),
+  mode: Schema.Literals(["normal", "warn", "pause"]),
+  notice: Schema.NullOr(
+    Schema.Literals(["warn", "pause", "recover", "reopen"]),
+  ),
+  attempted: Schema.mutableKey(Schema.Array(Schema.String)),
+});
+
+const guardStateSchema = settingsRecord(Schema.String, receiptSchema);
+const decodeGuard = Schema.decodeUnknownOption(guardStateSchema);
+
+export const defaultUsageGuardModels = {
+  claude: ["claude/", "claude-proxy/", "anthropic/"],
+  codex: [
+    "codex/",
+    "codex-proxy/",
+    "openai-proxy/",
+    "openai/gpt-",
+    "openai/codex",
+  ],
+};
+
+const decodeLegacyQuotaPolicy = Schema.decodeUnknownSync(
+  settingsRecord(
+    Schema.String,
+    settingsStruct({
+      mode: Schema.Literals(["normal", "limited", "paused"]),
+      observedAt: Schema.Int.check(Schema.isGreaterThan(0)),
+    }),
+  ),
+);
+
+export type GuardState = typeof guardStateSchema.Type;
+
+export async function readUsageGuard(path: string): Promise<GuardState> {
+  const raw = await readFile(path, "utf8").catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        return null;
+      }
+
+      throw error;
+    },
+  );
+
+  if (raw === null) {
+    return {};
+  }
+
+  const parsed: unknown = JSON.parse(raw);
+  const state = decodeGuard(parsed);
+
+  if (Option.isSome(state)) {
+    return state.value;
+  }
+
+  // A previous watcher may have already published policy at this path.
+  // Preserve it until the first fresh observation supplies actual percentages.
+  const legacy = decodeLegacyQuotaPolicy(parsed);
+  const modes = { normal: "normal", limited: "warn", paused: "pause" } as const;
+
+  return Object.fromEntries(
+    Object.entries(legacy).map(([provider, row]) => [
+      provider,
+      {
+        remainingPercent: 0,
+        observedAt: row.observedAt * 1000,
+        resetAt: null,
+        modelPrefixes:
+          provider === "claude" || provider === "codex"
+            ? defaultUsageGuardModels[provider]
+            : [`${provider}/`],
+        mode: modes[row.mode],
+        notice: row.mode === "normal" ? null : modes[row.mode],
+        attempted: [],
+      },
+    ]),
+  );
+}
+
+export async function crewUsageBlock(path: string, model: string | undefined) {
+  const state = await readUsageGuard(path);
+
+  return Object.entries(state).find(
+    ([, receipt]) =>
+      receipt.mode === "pause" &&
+      (model === undefined ||
+        receipt.modelPrefixes.some((prefix) => model.startsWith(prefix))),
+  )?.[0];
 }

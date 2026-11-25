@@ -1,4 +1,5 @@
 import {
+  chmod,
   readFile,
   realpath,
   rename,
@@ -33,6 +34,10 @@ export async function atomicWrite(
   });
 
   try {
+    if (mode !== undefined) {
+      await chmod(temp, mode);
+    }
+
     await rename(temp, real);
   } catch (error) {
     await unlink(temp).catch(() => {});

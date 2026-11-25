@@ -1421,6 +1421,21 @@ export class CrewState {
       .immediate();
   }
 
+  /** Release the model-control lock and reserve the checked admission in one write. */
+  public admitAfterControl<T>(
+    crewID: string,
+    token: string,
+    admit: () => T,
+  ): T {
+    return this.db
+      .transaction(() => {
+        this.releaseControl(crewID, token);
+
+        return admit();
+      })
+      .immediate();
+  }
+
   public releaseControl(crewID: string, token: string) {
     liveControls.delete(`${this.path}\0${token}`);
     this.db

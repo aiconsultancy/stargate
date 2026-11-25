@@ -239,6 +239,10 @@ maintenance tasks.
 
 ## Quota events, models and arbitration (opt-in)
 
+For fleet-wide quota notices and limits on crew starts, enable the built-in
+[usage guard](usage.md#fleet-usage-guard). It uses the quota watcher directly
+and needs no cron job.
+
 `bots[].cronjobs.advanced` is **off by default**. Enable it explicitly on the
 intended registration; it does not enable itself on upgrade. Existing clock
 jobs keep their behaviour when the flag is absent or false. Advanced definitions

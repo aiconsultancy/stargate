@@ -151,7 +151,7 @@ export interface IrcEvents {
 
 /** The connection is not registered; the caller retries later. */
 export class IrcUnavailable extends Error {
-  public constructor() {
+  public constructor(public readonly notSent = false) {
     super("IRC connection unavailable");
   }
 }
@@ -975,7 +975,7 @@ export class IrcClient {
     priority: SendPriority = "normal",
   ): Promise<void> {
     if (!this.registeredNow || !this.socket) {
-      return Promise.reject(new IrcUnavailable());
+      return Promise.reject(new IrcUnavailable(true));
     }
 
     const result = Promise.withResolvers<void>();
@@ -1321,16 +1321,17 @@ export class IrcClient {
 
     this.pumpTimer = undefined;
     const error = new IrcUnavailable();
+    const unsent = new IrcUnavailable(true);
 
     for (const output of buffered) {
-      output.done?.(error);
+      output.done?.(output.started ? error : unsent);
     }
 
     for (const item of [
       ...this.queue.splice(0),
       ...this.background.splice(0),
     ]) {
-      item.done?.(error);
+      item.done?.(unsent);
     }
 
     for (const label of this.labels.keys()) {
