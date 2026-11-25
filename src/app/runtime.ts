@@ -99,8 +99,7 @@ import {
 } from "../notifications/ingest/slack";
 import { PairingUI } from "../transports/slack/pairing";
 import { PeerDirectory } from "../gateway/peers";
-import { QuotaReader } from "../backends/quota/quota";
-import { QuotaWatch } from "../backends/quota/quota-watch";
+import { quotaWorkers } from "./usage-guard";
 import {
   type Identity,
   backendFingerprint,
@@ -472,6 +471,11 @@ export function serve(
         );
 
       const workers: { key: string; work: Effect.Effect<void> }[] = [];
+
+      const quota = quotaWorkers(config, log, (worker) => {
+        workers.push(worker);
+      });
+
       let updateSnapshot: UpdateSnapshot | undefined;
       const updateTargets = new Map<AgentBackend, string>();
 
@@ -774,33 +778,7 @@ export function serve(
           });
         }
 
-        const quota = config.quotaWatch;
-
-        if (quota?.report.bot === bot.id) {
-          const viaProxy = quota.providers.filter(
-            (provider) => provider !== "codex" || !quota.nativeCodexFile,
-          );
-
-          const watcher = new QuotaWatch(
-            quota,
-            new QuotaReader(quota.proxy, Date.now, viaProxy),
-            async (text, signal) => {
-              if (
-                !currentBot.access.deniedChannels.some(
-                  (rule) => rule === "*" || rule === quota.report.channel,
-                )
-              ) {
-                await slack.announce(quota.report.channel, text, signal);
-              }
-            },
-            botLog,
-          );
-
-          workers.push({
-            key: `quota:${bot.id}`,
-            work: abortable((signal) => watcher.work(signal)),
-          });
-        }
+        quota.slack(bot.id, () => currentBot, slack, botLog);
 
         let closing: Promise<void> | undefined;
 
@@ -1169,6 +1147,11 @@ export function serve(
         );
         log.info({ irc: irc.id }, "IRC connecting");
       }
+
+      quota.irc(
+        (id) => ircBindings.get(id)?.ship.registrations[0]?.client,
+        () => open,
+      );
 
       // Off unless enabled: then nothing is opened, listened to or contacted.
       const agentDispatch = yield* Effect.acquireRelease(

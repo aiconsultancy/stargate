@@ -14,8 +14,10 @@ import {
   quotaConfigSchema,
 } from "./quota";
 import {
+  settingsCheck,
   settingsDefault,
   settingsPattern,
+  settingsRecord,
   settingsRefine,
   settingsStruct,
 } from "../../config/settings-schema";
@@ -48,9 +50,143 @@ export const quotaWatchSchema = settingsStruct({
   }),
 });
 
-type QuotaWatchConfig = typeof quotaWatchSchema.Type;
+const providerKey = Schema.String.check(
+  settingsPattern(/^[a-z0-9][a-z0-9._-]{0,63}$/),
+);
 
-type Provider = typeof providerSchema.Type;
+const modelPrefix = Schema.String.check(
+  settingsPattern(/^[^/\s#]+\/[^\s#]*$/),
+).check(Schema.isMaxLength(120));
+
+const actionText = Schema.String.check(
+  settingsRefine(
+    (text) =>
+      text.trim() === text &&
+      text.length > 0 &&
+      !/\p{Cc}/u.test(text) &&
+      Buffer.byteLength(text) <= 180,
+    { message: "Use one line of at most 180 UTF-8 bytes" },
+  ),
+);
+
+const limitSchema = settingsStruct({
+  remainingPercent: Schema.Int.check(
+    Schema.isBetween({ minimum: 0, maximum: 99 }),
+  ),
+  action: Schema.Literals(["warn", "pause"]),
+  message: Schema.optional(actionText),
+});
+
+const providerGuardSchema = settingsStruct({
+  modelPrefixes: Schema.Array(modelPrefix).check(Schema.isBetweenLength(1, 20)),
+  limits: Schema.Array(limitSchema).check(Schema.isBetweenLength(1, 2)),
+}).check(
+  settingsCheck(({ limits }, context) => {
+    const warn = limits.find(({ action }) => action === "warn");
+    const pause = limits.find(({ action }) => action === "pause");
+
+    if (
+      limits.length === 2 &&
+      (!warn || !pause || warn.remainingPercent <= pause.remainingPercent)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "The warning must be higher than the cutoff, with one of each action",
+      });
+    }
+  }),
+);
+
+const defaultLimits = [
+  { remainingPercent: 25, action: "warn" },
+  { remainingPercent: 20, action: "pause" },
+] as const;
+
+export const usageGuardSchema = settingsStruct({
+  enabled: Schema.Boolean.pipe(settingsDefault(false)),
+  sender: Schema.optional(
+    Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
+  ),
+  proxy: Schema.optional(quotaConfigSchema),
+  nativeCodexFile: Schema.optional(absolutePath),
+  stateFile: Schema.optional(absolutePath),
+  captains: Schema.optional(
+    Schema.Array(
+      settingsStruct({
+        account: Schema.String.check(
+          settingsPattern(/^[A-Za-z[\]\\`_^{|}][A-Za-z0-9[\]\\`_^{|}-]{0,31}$/),
+        ),
+        channel: Schema.String.check(
+          settingsPattern(/^[#&][^\s,:]{1,49}$/),
+        ).check(
+          settingsRefine(
+            (text) => !/\p{Cc}/u.test(text) && Buffer.byteLength(text) <= 50,
+            { message: "Use a valid IRC channel of at most 50 UTF-8 bytes" },
+          ),
+        ),
+      }),
+    ),
+  ),
+  providers: settingsRecord(providerKey, providerGuardSchema).pipe(
+    settingsDefault({
+      claude: {
+        modelPrefixes: ["claude/", "claude-proxy/", "anthropic/"],
+        limits: defaultLimits,
+      },
+      codex: {
+        modelPrefixes: [
+          "codex/",
+          "codex-proxy/",
+          "openai-proxy/",
+          "openai/gpt-",
+          "openai/codex",
+        ],
+        limits: defaultLimits,
+      },
+    }),
+  ),
+  recoveryMessage: Schema.optional(actionText),
+}).check(
+  settingsCheck((guard, context) => {
+    if (
+      guard.enabled &&
+      (!guard.sender ||
+        !guard.proxy ||
+        !guard.stateFile ||
+        Object.keys(guard.providers).length === 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Enabled usageGuard requires sender, proxy, stateFile and at least one provider",
+      });
+    }
+
+    const prefixes = Object.values(guard.providers).flatMap(
+      (provider) => provider.modelPrefixes,
+    );
+
+    if (
+      prefixes.some((prefix, index) =>
+        prefixes
+          .slice(index + 1)
+          .some(
+            (other) => prefix.startsWith(other) || other.startsWith(prefix),
+          ),
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Usage guard model prefixes must not overlap",
+      });
+    }
+  }),
+);
+
+export type UsageGuardConfig = typeof usageGuardSchema.Type;
+
+type QuotaWatchConfig = typeof quotaWatchSchema.Type;
 
 const epochSeconds = Schema.Int.check(Schema.isGreaterThan(0));
 
@@ -95,7 +231,7 @@ function policy(remaining: number, observedAt: number): Observation {
   };
 }
 
-async function nativeCodexPolicy(path: string, now: number) {
+async function nativeCodexReading(path: string, now: number): Promise<Reading> {
   try {
     const file = await open(
       path,
@@ -111,7 +247,7 @@ async function nativeCodexPolicy(path: string, now: number) {
         stat.uid !== process.getuid?.() ||
         stat.size > 256
       ) {
-        return;
+        return { status: "unavailable" };
       }
 
       const native = decodeNativeQuota(JSON.parse(await file.readFile("utf8")));
@@ -121,105 +257,133 @@ async function nativeCodexPolicy(path: string, now: number) {
         !fresh(seen, now) ||
         (native.resetAt !== null && native.resetAt * 1000 <= now)
       ) {
-        return;
+        return { status: "stale" };
       }
 
-      return policy(native.remainingPercent, seen);
+      return {
+        status: "ok",
+        value: {
+          remainingPercent: native.remainingPercent,
+          observedAt: seen,
+          resetAt: native.resetAt === null ? null : native.resetAt * 1000,
+        },
+      };
     } finally {
       await file.close();
     }
   } catch {
     // A missing or invalid receipt is unknown; never use a proxy login instead.
-    return;
+    return { status: "unavailable" };
   }
 }
 
-function currentPolicy(
-  snapshot: QuotaSnapshot,
-  provider: Provider,
-  now: number,
-): Observation | undefined {
-  const accounts = snapshot.accounts.filter((row) => row.provider === provider);
+type QuotaReading = {
+  remainingPercent: number;
+  observedAt: number;
+  resetAt: number | null;
+};
 
+type Reading =
+  | { status: "ok"; value: QuotaReading }
+  | { status: "unavailable" | "stale" };
+
+function readAccounts(
+  accounts: readonly {
+    status: string;
+    observedAt: number | null;
+    windows: readonly {
+      remainingPercent: number | null;
+      resetAt: number | null;
+    }[];
+  }[],
+  now: number,
+): Reading {
   if (accounts.length === 0) {
-    return;
+    return { status: "unavailable" };
   }
 
-  let remaining = 0;
+  let best: QuotaReading | undefined;
   let observedAt = now;
 
   for (const account of accounts) {
     const seen = account.observedAt;
 
-    if (account.status !== "ok" || seen === null || !fresh(seen, now)) {
-      return;
+    if (
+      account.status !== "ok" ||
+      seen === null ||
+      account.windows.length === 0
+    ) {
+      return { status: "unavailable" };
     }
 
-    const windows = account.windows.filter(
-      (window) => window.scope === "subscription" && window.active !== false,
-    );
-
-    if (windows.length === 0) {
-      return;
+    if (!fresh(seen, now)) {
+      return { status: "stale" };
     }
 
-    let usable = 100;
-
-    for (const { remainingPercent, resetAt } of windows) {
-      if (remainingPercent === null || (resetAt !== null && resetAt <= now)) {
-        return;
-      }
-
-      usable = Math.min(usable, remainingPercent);
-    }
-
-    remaining = Math.max(remaining, usable);
     observedAt = Math.min(observedAt, seen);
-  }
-
-  return policy(remaining, observedAt);
-}
-
-function currentPluginPolicy(
-  snapshot: QuotaSnapshot,
-  provider: string,
-  now: number,
-): Observation | undefined {
-  const accounts = snapshot.pluginAccounts?.filter(
-    (row) => row.provider === provider,
-  );
-
-  if (!accounts || accounts.length === 0) {
-    return;
-  }
-
-  let remaining = 0;
-  let observedAt = now;
-
-  for (const account of accounts) {
-    if (account.status !== "ok" || !fresh(account.observedAt, now)) {
-      return;
-    }
-
-    if (account.windows.length === 0) {
-      return;
-    }
-
-    let usable = 100;
+    let limiting: QuotaReading | undefined;
 
     for (const { remainingPercent, resetAt } of account.windows) {
-      if (resetAt !== null && resetAt <= now) {
-        return;
+      if (remainingPercent === null) {
+        return { status: "unavailable" };
       }
 
-      usable = Math.min(usable, remainingPercent);
+      if (resetAt !== null && resetAt <= now) {
+        return { status: "stale" };
+      }
+
+      if (
+        !limiting ||
+        remainingPercent < limiting.remainingPercent ||
+        (remainingPercent === limiting.remainingPercent &&
+          (resetAt ?? Infinity) < (limiting.resetAt ?? Infinity))
+      ) {
+        limiting = { remainingPercent, resetAt, observedAt: seen };
+      }
     }
 
-    remaining = Math.max(remaining, usable);
-    observedAt = Math.min(observedAt, account.observedAt);
+    if (
+      limiting &&
+      (!best || limiting.remainingPercent > best.remainingPercent)
+    ) {
+      best = limiting;
+    }
   }
 
-  return policy(remaining, observedAt);
+  return best
+    ? { status: "ok", value: { ...best, observedAt } }
+    : { status: "unavailable" };
+}
+
+export async function quotaReading(
+  snapshot: QuotaSnapshot,
+  provider: string,
+  nativeCodexFile: string | undefined,
+  now: number,
+): Promise<Reading> {
+  if (provider === "codex" && nativeCodexFile) {
+    return nativeCodexReading(nativeCodexFile, now);
+  }
+
+  if (provider !== "claude" && provider !== "codex") {
+    return readAccounts(
+      snapshot.pluginAccounts?.filter((row) => row.provider === provider) ?? [],
+      now,
+    );
+  }
+
+  return readAccounts(
+    snapshot.accounts
+      .filter((row) => row.provider === provider)
+      .map((row) => ({
+        ...row,
+        windows: row.windows.filter(
+          (window) =>
+            window.scope === "subscription" && window.active !== false,
+        ),
+      })),
+    now,
+  );
 }
 
 function pluginLabel(snapshot: QuotaSnapshot, provider: string): string {
@@ -278,12 +442,17 @@ export class QuotaWatch {
     for (const provider of watched) {
       const builtIn = provider === "claude" || provider === "codex";
 
+      const reading = await quotaReading(
+        snapshot,
+        provider,
+        this.config.nativeCodexFile,
+        now,
+      );
+
       const current =
-        provider === "codex" && this.config.nativeCodexFile
-          ? await nativeCodexPolicy(this.config.nativeCodexFile, now)
-          : builtIn
-            ? currentPolicy(snapshot, provider, now)
-            : currentPluginPolicy(snapshot, provider, now);
+        reading.status === "ok"
+          ? policy(reading.value.remainingPercent, reading.value.observedAt)
+          : undefined;
 
       const previous = Object.hasOwn(before, provider)
         ? before[provider]

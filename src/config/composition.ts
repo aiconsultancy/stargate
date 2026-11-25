@@ -29,7 +29,10 @@ import {
   piCrewBackendSchema,
   piDurableBackendSchema,
 } from "../backends/pi/config";
-import { quotaWatchSchema } from "../backends/quota/quota-watch";
+import {
+  quotaWatchSchema,
+  usageGuardSchema,
+} from "../backends/quota/quota-watch";
 import { decodeSettings } from "./settings-errors";
 import {
   absolutePath,
@@ -753,6 +756,8 @@ const configFields = settingsStruct({
   maintenance: Schema.optional(maintenanceSchema),
   /** Read subscription quota and announce changes to crew availability. */
   quotaWatch: Schema.optional(quotaWatchSchema),
+  /** Rear admiral ship notices and crew quota cutoffs; off by default. */
+  usageGuard: Schema.optional(usageGuardSchema),
   /** Rear admiral agent dispatch from Subspace issues; off by default. */
   agentDispatch: Schema.optional(agentDispatchSchema),
   /** Officers' Subspace API keys and signing proxy; absent by default. */
@@ -1008,11 +1013,45 @@ const configCheck = (liveNotificationPolicy = false) =>
     },
   );
 
-export const configSchema = configFields.check(configCheck());
+const usageGuardConfigCheck = settingsCheck<typeof configFields.Type>(
+  ({ usageGuard, irc, quotaWatch }, context) => {
+    if (
+      usageGuard?.enabled &&
+      !irc.some(
+        (registration) =>
+          registration.id === usageGuard.sender &&
+          registration.fleetPolicy?.role === "rear_admiral",
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["usageGuard", "sender"],
+        message:
+          "Usage guard sender must name a rear admiral's IRC registration",
+      });
+    }
+
+    if (usageGuard?.enabled && usageGuard.stateFile === quotaWatch?.stateFile) {
+      context.addIssue({
+        code: "custom",
+        path: ["usageGuard", "stateFile"],
+        message: "Usage guard and quotaWatch must use separate state files",
+      });
+    }
+  },
+);
+
+export const configSchema = configFields.check(
+  configCheck(),
+  usageGuardConfigCheck,
+);
 
 /** Live access changes may revoke pending display work, never redirect it.
  * The reload planner still requires identical notification topology. */
-export const reloadConfigSchema = configFields.check(configCheck(true));
+export const reloadConfigSchema = configFields.check(
+  configCheck(true),
+  usageGuardConfigCheck,
+);
 
 export type BotConfig = typeof botSchema.Type;
 

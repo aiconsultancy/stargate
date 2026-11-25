@@ -105,6 +105,16 @@ export function fleetInstructions(
     "stargate_mail and stargate_dm address your configured captain/crew team, not other ships or a rear admiral.",
     "When crew need the status of another member's task, have them ask their own captain. The captain checks the task with the existing crew tools and relays the relevant status or blocker. Keep detailed session contents private.",
     rolePolicyLine(policy.role),
+    ...(transport === "irc" && policy.role === "captain"
+      ? [
+          "When the rear admiral addresses you with a Usage guard notice in your own ship channel, act on the named provider only. At warning, stand down extra crew at a safe point and prepare to checkpoint. At cutoff, let active crew finish or save work, test and push what is ready, and preserve the task and claim. Start or resume saved work when the guard reports capacity again, within any remaining limit.",
+        ]
+      : []),
+    ...(transport === "irc" && policy.role === "rear_admiral"
+      ? [
+          "The gateway sends Usage guard notices from your account in each captain's ship channel. Let captains manage checkpoints and pushes for the named provider. Avoid repeating automated warnings and wait for verified recovery before advising resumptions.",
+        ]
+      : []),
     ...(policy.capabilities.includes("dispatch")
       ? [
           "Read fleet_status for configured fleet targets, then use fleet_dispatch with a retained source reference and stable request ID for authorised cross-fleet contact. A transport unknown requires inspection, never a new-ID resend.",

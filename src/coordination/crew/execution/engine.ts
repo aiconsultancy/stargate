@@ -33,6 +33,7 @@ import {
 } from "../../../automation/maintenance/maintenance-drain";
 import {
   QuotaReader,
+  crewUsageBlock,
   quotaConfigSchema,
   quotaInputSchema,
 } from "../../../backends/quota/quota";
@@ -164,6 +165,7 @@ export const crewOptionsSchema = settingsStruct({
   projects: Schema.optional(projectsSchema),
   team: Schema.optional(teamSchema),
   quota: Schema.optional(quotaConfigSchema),
+  usageGuardFile: Schema.optional(directory),
   cron: Schema.optional(
     settingsStruct({
       configPath: directory,
@@ -1229,14 +1231,16 @@ export class CrewEngine {
         }
       }
 
-      if (peer && !this.member(peer.crewID).backend) {
-        this.validPeer(
-          await this.sessions.get(
-            { sessionID: peer.sessionID },
-            { signal: caller.signal },
-          ),
-          peer,
-        );
+      const session =
+        peer && !this.member(peer.crewID).backend
+          ? await this.sessions.get(
+              { sessionID: peer.sessionID },
+              { signal: caller.signal },
+            )
+          : undefined;
+
+      if (peer && session) {
+        this.validPeer(session, peer);
       }
 
       if (peer && busy) {
@@ -1259,7 +1263,11 @@ export class CrewEngine {
         }
       }
 
-      if (!busy && this.drain()) {
+      if (
+        !busy &&
+        ((peer && (await this.usageBlock(peer.crewID, session?.model))) ||
+          this.drain())
+      ) {
         return "deferred";
       }
 
@@ -1645,12 +1653,14 @@ export class CrewEngine {
       }
 
       if (input.op === "compact") {
-        await this.withWorkerControl(input.crew, caller, (peer) =>
-          this.sessions.compact(
+        await this.withWorkerControl(input.crew, caller, async (peer) => {
+          await this.checkUsage(input.crew, peer.model);
+
+          return this.sessions.compact(
             { sessionID: peer.sessionID, delivery: "steer" },
             { signal: caller.signal },
-          ),
-        );
+          );
+        });
 
         return { status: "compaction-admitted" };
       }
@@ -1901,6 +1911,38 @@ export class CrewEngine {
     return member;
   }
 
+  private async usageBlock(crewID: string, model?: CrewSession["model"]) {
+    const path = this.options.usageGuardFile;
+
+    if (!path) {
+      return;
+    }
+
+    const member = this.member(crewID);
+
+    const selected =
+      member.backend?.model ??
+      (model ? `${model.providerID}/${model.id}` : member.model);
+
+    try {
+      return await crewUsageBlock(path, selected);
+    } catch {
+      throw new CrewError(
+        "Usage guard policy is unreadable. Ask the operator to check the gateway state file.",
+      );
+    }
+  }
+
+  private async checkUsage(crewID: string, model?: CrewSession["model"]) {
+    const provider = await this.usageBlock(crewID, model);
+
+    if (provider) {
+      throw new CrewError(
+        `Usage guard: ${provider} crew starts and resumptions are paused. Keep the saved work until quota recovers.`,
+      );
+    }
+  }
+
   /** Read one existing own-roster model target, without ensure, prompt or control. */
   public async inspectWorkerModel(
     crewID: string,
@@ -1962,7 +2004,7 @@ export class CrewEngine {
     // Must not call ensure, even if a peer disappears before the guard is held.
     let peer: WorkerModelPeer | undefined = options.requireReady
       ? undefined
-      : await this.ensure(crewID, caller.signal);
+      : await this.ensure(crewID, caller.signal, true);
 
     const active = this.state.activeTask(crewID);
 
@@ -2035,7 +2077,11 @@ export class CrewEngine {
     }
   }
 
-  private async ensure(crewID: CrewID, signal: AbortSignal): Promise<Peer> {
+  private async ensure(
+    crewID: CrewID,
+    signal: AbortSignal,
+    includeModel = false,
+  ): Promise<WorkerModelPeer> {
     const member = this.member(crewID);
     const worktree = this.options.worktrees[crewID];
 
@@ -2117,7 +2163,11 @@ export class CrewEngine {
     this.validPeer(session, peer);
     this.state.readyPeer(crewID);
 
-    return { ...peer, status: "ready" };
+    return {
+      ...peer,
+      status: "ready",
+      ...(includeModel && session.model && { model: session.model }),
+    };
   }
 
   private ownedCaptainTask(id: string, caller: CrewCaller): CrewTask {
@@ -2531,7 +2581,7 @@ export class CrewEngine {
           );
         }
 
-        return execution;
+        return { execution, model: session.model };
       };
 
       const id = resumeMessageID(task, expected.idleAt);
@@ -2550,7 +2600,7 @@ export class CrewEngine {
         };
       }
 
-      const before = await inspect();
+      const { execution: before } = await inspect();
       const workerAgent = member.agent ?? task.crewID;
       const placement = await observePlacement(api, task, signal, workerAgent);
 
@@ -2586,7 +2636,7 @@ export class CrewEngine {
         }
       }
 
-      const after = await inspect();
+      const { execution: after, model } = await inspect();
 
       if (JSON.stringify(before) !== JSON.stringify(after)) {
         throw new CrewError(
@@ -2594,6 +2644,7 @@ export class CrewEngine {
         );
       }
 
+      await this.checkUsage(task.crewID, model);
       signal.throwIfAborted();
       this.state.recordResumeAttempt(
         task,
@@ -3169,7 +3220,8 @@ export class CrewEngine {
       };
     }
 
-    const peer = await this.ensure(input.crew, caller.signal);
+    const peer = await this.ensure(input.crew, caller.signal, true);
+    await this.checkUsage(input.crew, peer.model);
 
     const enqueue = () =>
       this.state.enqueue(
@@ -3236,6 +3288,7 @@ export class CrewEngine {
         : busy;
     }
 
+    await this.checkUsage(input.crew, peer.model);
     caller.signal.throwIfAborted();
     const afterIdle = this.drain();
 
@@ -3254,6 +3307,9 @@ export class CrewEngine {
           "Maintenance drain active; assignment queued durably. Do not resubmit.",
       };
     }
+
+    await this.checkUsage(input.crew, peer.model);
+    caller.signal.throwIfAborted();
 
     const task = this.state.reserveTask(
       peer,
@@ -3337,7 +3393,12 @@ export class CrewEngine {
       return task;
     }
 
-    const peer = await this.ensure(task.crewID, caller.signal);
+    const peer = await this.ensure(task.crewID, caller.signal, true);
+
+    if (await this.usageBlock(task.crewID, peer.model)) {
+      return task;
+    }
+
     let active = this.state.activeTask(task.crewID);
 
     if (active) {
@@ -3354,10 +3415,11 @@ export class CrewEngine {
 
     caller.signal.throwIfAborted();
 
-    if (this.drain()) {
+    if ((await this.usageBlock(task.crewID, peer.model)) || this.drain()) {
       return task;
     }
 
+    caller.signal.throwIfAborted();
     const promoted = this.state.promote(task.id, active?.id ?? null);
 
     if (promoted) {

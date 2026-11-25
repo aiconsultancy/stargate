@@ -1198,6 +1198,7 @@
         "src/config-reload.ts",
         "src/app/irc-reload.ts",
         "src/app/notification-shutdown.ts",
+        "src/app/usage-guard.ts",
         "src/main.ts",
         "src/profile.ts",
         "src/provision.ts",
@@ -1566,8 +1567,16 @@
     },
     "quota": {
       "layer": "slices",
-      "files": ["src/quota-watch.ts", "src/quota.ts"],
-      "public": ["src/quota-watch.ts", "src/quota.ts"],
+      "files": [
+        "src/quota-watch.ts",
+        "src/quota.ts",
+        "src/backends/quota/usage-guard.ts"
+      ],
+      "public": [
+        "src/quota-watch.ts",
+        "src/quota.ts",
+        "src/backends/quota/usage-guard.ts"
+      ],
       "neighbours": ["config", "lib", "maintenance"]
     },
     "subspace": {
