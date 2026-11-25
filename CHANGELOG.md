@@ -21,6 +21,13 @@
   reasoning text, unredacted and untruncated. The gateway feature
   `api.agentActivity` reports it.
 
+- No new flag: `/api/v1/agents/{id}/activity?request=<msgid>`, optionally
+  with `&channel=<channel>`, returns an officer's retained turns that answer
+  an IRC message. Every turn, in snapshots and `agent-activity` events, lists
+  its IRC `requests`. The jobs and IRC burst tables each gain one nullable
+  column; requests queued before the upgrade are not backfilled.
+  `api.agentActivity` covers both.
+
 - No new flag: `/api/v1/events?agent=<id>` streams an officer's turn changes
   as `agent-activity` events on the same terms, within the existing eight
   streams and 256 KiB per viewer; `api.agentActivity` now covers the event
