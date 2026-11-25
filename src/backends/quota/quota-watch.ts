@@ -59,12 +59,15 @@ const observation = settingsStruct({
   observedAt: epochSeconds,
 });
 
-const decodePolicy = Schema.decodeUnknownSync(
-  settingsStruct({
-    claude: Schema.optional(observation),
-    codex: Schema.optional(observation),
-  }),
+const policyKey = Schema.String.check(
+  settingsPattern(/^[a-z0-9][a-z0-9._-]{0,63}$/),
 );
+
+const decodePolicy = Schema.decodeUnknownSync(
+  Schema.Record(policyKey, observation),
+);
+
+type Policy = Record<string, Observation>;
 
 type Observation = typeof observation.Type;
 
@@ -177,6 +180,55 @@ function currentPolicy(
   return policy(remaining, observedAt);
 }
 
+function currentPluginPolicy(
+  snapshot: QuotaSnapshot,
+  provider: string,
+  now: number,
+): Observation | undefined {
+  const accounts = snapshot.pluginAccounts?.filter(
+    (row) => row.provider === provider,
+  );
+
+  if (!accounts || accounts.length === 0) {
+    return;
+  }
+
+  let remaining = 0;
+  let observedAt = now;
+
+  for (const account of accounts) {
+    if (account.status !== "ok" || !fresh(account.observedAt, now)) {
+      return;
+    }
+
+    if (account.windows.length === 0) {
+      return;
+    }
+
+    let usable = 100;
+
+    for (const { remainingPercent, resetAt } of account.windows) {
+      if (resetAt !== null && resetAt <= now) {
+        return;
+      }
+
+      usable = Math.min(usable, remainingPercent);
+    }
+
+    remaining = Math.max(remaining, usable);
+    observedAt = Math.min(observedAt, account.observedAt);
+  }
+
+  return policy(remaining, observedAt);
+}
+
+function pluginLabel(snapshot: QuotaSnapshot, provider: string): string {
+  return (
+    snapshot.pluginAccounts?.find((row) => row.provider === provider)?.label ??
+    provider
+  );
+}
+
 const message = {
   paused:
     "Pause crew launches and resumes. Checkpoint active crew work at its next safe point and preserve task claims.",
@@ -209,17 +261,31 @@ export class QuotaWatch {
     const snapshot = await this.reader.read(signal);
     signal.throwIfAborted();
     const raw = await readOptional(this.config.stateFile);
-    const before = raw === null ? {} : decodePolicy(JSON.parse(raw));
-    const after = { ...before };
+    const before: Policy = raw === null ? {} : decodePolicy(JSON.parse(raw));
+    const after: Policy = { ...before };
     const notices: string[] = [];
     let updated = false;
     const now = this.now();
 
-    for (const provider of this.config.providers) {
+    // Configured OAuth providers plus every discovered plugin provider,
+    // So adding or removing a provider is automatic.
+    const pluginProviders = new Set(
+      (snapshot.pluginAccounts ?? []).map((row) => row.provider),
+    );
+
+    const watched = [...this.config.providers, ...pluginProviders];
+
+    for (const provider of watched) {
+      const isPlugin =
+        pluginProviders.has(provider) &&
+        !this.config.providers.includes(provider as Provider);
+
       const current =
-        provider === "codex" && this.config.nativeCodexFile
+        !isPlugin && provider === "codex" && this.config.nativeCodexFile
           ? await nativeCodexPolicy(this.config.nativeCodexFile, now)
-          : currentPolicy(snapshot, provider, now);
+          : isPlugin
+            ? currentPluginPolicy(snapshot, provider, now)
+            : currentPolicy(snapshot, provider as Provider, now);
 
       const previous = before[provider];
 
@@ -237,7 +303,12 @@ export class QuotaWatch {
         continue;
       }
 
-      const name = provider === "claude" ? "Claude" : "Codex";
+      const name = isPlugin
+        ? pluginLabel(snapshot, provider)
+        : provider === "claude"
+          ? "Claude"
+          : "Codex";
+
       notices.push(
         `${name} crew quota: ${heading[current.mode]} ${message[current.mode]}`,
       );

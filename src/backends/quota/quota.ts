@@ -5,6 +5,11 @@ import { isAbsolute } from "node:path";
 import { Option, Schema } from "effect";
 import { isLoopbackAddress } from "../../lib/loopback";
 import {
+  type QuotaFetchBody,
+  pluginAccountSchema,
+  readPluginQuota,
+} from "./plugin-quota";
+import {
   settingsEmail,
   settingsPattern,
   settingsRecord,
@@ -122,6 +127,13 @@ export const quotaSnapshotSchema = settingsStruct({
   accounts: Schema.mutable(Schema.Array(settingsStruct(accountFields))).check(
     Schema.isMaxLength(10),
   ),
+  // Discovery-driven plugin quotas: the set of providers is read from the
+  // Proxy at request time, never enumerated here.
+  pluginAccounts: Schema.optional(
+    Schema.mutable(Schema.Array(pluginAccountSchema)).check(
+      Schema.isMaxLength(20),
+    ),
+  ),
 });
 
 export type QuotaSnapshot = typeof quotaSnapshotSchema.Type;
@@ -138,6 +150,11 @@ export const quotaObservationSchema = settingsStruct({
   ...snapshotFields,
   accounts: Schema.mutable(Schema.Array(observedAccount)).check(
     Schema.isMaxLength(10),
+  ),
+  pluginAccounts: Schema.optional(
+    Schema.mutable(Schema.Array(pluginAccountSchema)).check(
+      Schema.isMaxLength(20),
+    ),
   ),
 });
 
@@ -351,13 +368,6 @@ const upstreams = {
 const ttl = 60_000;
 
 /** The proxy's management request that reads one upstream usage endpoint. */
-type ApiCallBody = {
-  auth_index: string;
-  method: "GET";
-  url: string;
-  header: Record<string, string>;
-};
-
 /** One opt-in reader per host binding. No URL/auth/reset controls reach callers. */
 export class QuotaReader {
   private readonly config: typeof quotaConfigSchema.Type | undefined;
@@ -560,6 +570,19 @@ export class QuotaReader {
         }
       }
 
+      // Dynamic plugin quotas: discovery-driven, best-effort, and never
+      // Degrading the claude/codex account status above.
+      try {
+        snapshot.pluginAccounts = await readPluginQuota(
+          (path, inner, body) => this.request(path, key, inner, body),
+          credentials.files,
+          signal,
+          this.now,
+        );
+      } catch {
+        signal.throwIfAborted();
+      }
+
       const available = snapshot.accounts.filter(
         (account) => account.status === "ok",
       ).length;
@@ -626,7 +649,7 @@ export class QuotaReader {
     path: string,
     key: string,
     signal: AbortSignal,
-    body?: ApiCallBody,
+    body?: QuotaFetchBody | (Record<string, unknown> & object),
   ): Promise<unknown> {
     if (!this.config) {
       throw new Error("Quota not configured");

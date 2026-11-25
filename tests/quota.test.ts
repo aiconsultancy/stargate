@@ -234,6 +234,12 @@ test("collector uses fixed read endpoints, strips secrets, caches then fails clo
         });
       }
 
+      // The plugin quota discovery pass sends GETs with no JSON body; the
+      // Fixture has no plugin providers, so answer 404 and let it skip.
+      if (request.method === "GET") {
+        return new Response(null, { status: 404 });
+      }
+
       const body = await request.json();
       calls.push({ path, body });
       const codex = body.auth_index === "private-codex";
