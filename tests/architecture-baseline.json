@@ -11,7 +11,7 @@
     "src/runtime.ts"
   ],
   "sourceFiles": 330,
-  "sourceEdges": 1367,
+  "sourceEdges": 1366,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -198,8 +198,6 @@
     "private:src/crew/cron-execution.ts -> src/cron-decision.ts",
     "private:src/crew/cron.ts -> src/cron-control.ts",
     "private:src/crew/notifications.ts -> src/notification-store.ts",
-    "private:src/crew/origin.ts -> src/input-boundary.ts",
-    "private:src/crew/origin.ts -> src/input-origin.ts",
     "private:src/crew/pi-worker.ts -> src/backends/pi-durable.ts",
     "private:src/crew/pi-worker.ts -> src/backends/pi-history.ts",
     "private:src/cron-control.ts -> src/backends/opencode.ts",

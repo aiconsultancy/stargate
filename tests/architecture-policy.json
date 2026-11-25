@@ -77,7 +77,8 @@
     "src/crew/origin.ts": [
       "src/crew/origin.ts",
       "src/crew/execution/origin.ts",
-      "src/coordination/crew/execution/origin.ts"
+      "src/coordination/crew/execution/origin.ts",
+      "src/backends/opencode/native-input-origin.ts"
     ],
     "src/crew/native-wait.ts": [
       "src/crew/native-wait.ts",
@@ -1764,6 +1765,7 @@
         "src/backends/opencode/crew-status.ts",
         "src/crew/instruction-context.ts",
         "src/backends/opencode/activity.ts",
+        "src/crew/origin.ts",
         "src/backends/opencode/notices.ts",
         "src/backends/opencode/questions.ts",
         "src/backends/claude/config.ts",
@@ -1776,6 +1778,7 @@
         "src/backends/config.ts",
         "src/backends/opencode/config.ts",
         "src/crew/instruction-context.ts",
+        "src/crew/origin.ts",
         "src/backends/opencode/questions.ts",
         "src/pi-model.ts",
         "src/backends/claude/config.ts",
@@ -1838,7 +1841,6 @@
         "src/crew/models.ts",
         "src/crew/native-wait.ts",
         "src/crew/notifications.ts",
-        "src/crew/origin.ts",
         "src/crew/pending.ts",
         "src/crew/pi-extension.ts",
         "src/crew/pi-worker.ts",
