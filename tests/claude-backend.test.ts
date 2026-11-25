@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { BUILTIN_TOOL_NAMES } from "@anthropic-ai/claude-agent-sdk";
 import { Predicate, Result, Schema, SchemaTransformation } from "effect";
+import type { TurnActivityRecorder } from "../src/backends/backend";
 import { createBackend } from "../src/backends/factory";
 import {
   ClaudeBackend,
@@ -33,6 +34,8 @@ import {
   BackendFailure,
 } from "../src/shared/request-failure";
 import { backendFingerprint } from "../src/gateway/routing";
+import { createActivityHub } from "../src/observability/dashboard/api/v1/activity";
+import type { TurnProgress } from "../src/shared/turn-progress";
 import { zodStringRecord } from "./fixtures/zod-string-record";
 
 const apiKeyEnv = "STARGATE_CLAUDE_TEST_PROXY_KEY";
@@ -136,6 +139,7 @@ async function open(
   extra: Record<string, unknown> = {},
   version = "2.1.327 (Claude Code)",
   runtime: Pick<ClaudeRuntime, "versionTimeoutMs"> = {},
+  activity?: TurnActivityRecorder,
 ) {
   const root = await mkdtemp(join(tmpdir(), "stargate-claude-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -151,7 +155,7 @@ async function open(
 
   const backend = await ClaudeBackend.open(
     config(extra, root),
-    { dataDirectory },
+    { dataDirectory, ...(activity && { activity }) },
     { executable, graceMs: 200, ...runtime },
   );
 
@@ -173,6 +177,288 @@ const signal = () => AbortSignal.timeout(20_000);
 
 const session = (backend: ClaudeBackend) =>
   backend.createSession({ key: "k", title: "Stargate test", signal: signal() });
+
+test("Claude activity replays SDK frames without changing reply or progress", async () => {
+  const hub = createActivityHub();
+  const recording = await open({}, undefined, {}, hub.recorder("officer"));
+  const plain = await open();
+  const requests = [{ channel: "#Bridge", msgid: "claude-request" }];
+
+  const replay = async (backend: ClaudeBackend) => {
+    const previews: string[] = [];
+    const progress: Omit<TurnProgress, "observedAt">[] = [];
+
+    const answer = await backend.prompt(
+      await session(backend),
+      "activity frames",
+      signal(),
+      (text) => {
+        previews.push(text);
+      },
+      undefined,
+      [],
+      undefined,
+      ({ observedAt: _, ...update }) => {
+        progress.push(update);
+      },
+      undefined,
+      () => requests,
+    );
+
+    return { answer, previews, progress };
+  };
+
+  const baseline = await replay(plain.backend);
+  expect(baseline.answer).toBe("reply\n\t");
+  expect(baseline.previews).toContain("reply\n\t");
+  expect(baseline.progress.some(({ stage }) => stage === "reasoning")).toBe(
+    true,
+  );
+  expect(await replay(recording.backend)).toEqual(baseline);
+
+  const turns = hub.turns("officer")?.turns ?? [];
+  const [root] = turns;
+
+  const child = turns.find(
+    (turn) => turn.session?.parent?.callId === "tool_child",
+  );
+
+  const background = turns.find(
+    (turn) => turn.session?.parent?.callId === "tool_background",
+  );
+
+  const tokens = {
+    input: 3,
+    output: 7,
+    reasoning: 0,
+    cacheRead: 4,
+    cacheWrite: 5,
+  };
+
+  expect(root).toMatchObject({
+    status: "completed",
+    requests,
+    usage: { steps: 1, tokens, cost: 0.25 },
+  });
+  expect(root?.items).toMatchObject([
+    {
+      kind: "step",
+      status: "completed",
+      model: { id: "fixture" },
+      firstTokenAt: expect.any(Number),
+      finish: "tool_use",
+      tokens,
+      cost: null,
+      unavailable: ["cost", "tokens.reasoning"],
+    },
+    { kind: "reasoning", status: "completed", text: "think\u0002" },
+    { kind: "reasoning", status: "completed", text: "", unavailable: ["text"] },
+    { kind: "text", status: "completed", text: "reply\n\t" },
+    {
+      kind: "tool",
+      callId: "tool_ok",
+      name: "Read",
+      status: "completed",
+      executed: true,
+      rawInput: '{"key": "value"}',
+      input: { key: "value" },
+      content: [{ type: "text", text: "tool output\u0001" }],
+      metadata: {
+        elapsed_time_seconds: 1.5,
+        tool_use_result: { text: "tool output\u0001" },
+      },
+    },
+    {
+      kind: "tool",
+      callId: "tool_denied",
+      status: "failed",
+      executed: false,
+      error: {
+        type: "permission_denied",
+        message: "Permission denied (fixture)",
+      },
+    },
+    {
+      kind: "tool",
+      callId: "tool_child",
+      metadata: {
+        task: {
+          description: "updated child",
+          status: "completed",
+          summary: "child finished",
+          usage: { total_tokens: 5 },
+        },
+      },
+    },
+    {
+      kind: "tool",
+      callId: "tool_background",
+      unavailable: ["after-turn"],
+      metadata: { task: { task_type: "local_agent" } },
+    },
+    {
+      kind: "tool",
+      callId: "tool_server",
+      name: "web_search",
+      status: "running",
+      rawInput: '{"query":"fixture"}',
+      input: { query: "fixture" },
+    },
+  ]);
+  expect(turns).toHaveLength(3);
+  expect(child).toMatchObject({
+    status: "completed",
+    requests: [],
+    session: { parent: { turnId: root?.id, callId: "tool_child" } },
+    items: [
+      { kind: "step" },
+      { kind: "text", text: "child only" },
+      { kind: "step", status: "completed", finish: "end_turn" },
+      { kind: "reasoning", status: "completed", text: "child thought" },
+      { kind: "text", status: "completed", text: "child partial" },
+    ],
+  });
+  expect(background).toMatchObject({
+    status: "cancelled",
+    session: { parent: { turnId: root?.id, callId: "tool_background" } },
+  });
+  expect(JSON.stringify(turns)).not.toContain("unlinked");
+  expect(JSON.stringify(turns)).not.toContain("provider-ciphertext");
+
+  // Forcing partial frames must not alter the answer when there are no sinks.
+  const answer = (backend: ClaudeBackend) =>
+    session(backend).then((id) =>
+      backend.prompt(id, "activity frames", signal()),
+    );
+
+  expect(await answer(recording.backend)).toBe(await answer(plain.backend));
+  const [, forced] = await recording.runs();
+  const [, unforced] = await plain.runs();
+  expect(forced?.argv).toContain("--include-partial-messages");
+  expect(unforced?.argv).not.toContain("--include-partial-messages");
+});
+
+test("a background Bash task stays on the spawning tool without making a child turn", async () => {
+  const hub = createActivityHub();
+  const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
+  await backend.prompt(
+    await session(backend),
+    "background bash activity",
+    signal(),
+  );
+  const turns = hub.turns("officer")?.turns;
+  expect(turns).toMatchObject([
+    {
+      items: [
+        { kind: "step" },
+        {
+          kind: "tool",
+          callId: "bash_call",
+          status: "running",
+          unavailable: ["after-turn"],
+          metadata: {
+            task: { task_type: "local_bash", is_backgrounded: true },
+          },
+        },
+      ],
+    },
+  ]);
+});
+
+test("Claude appends a multi-block assistant envelope after a finalized prefix", async () => {
+  const hub = createActivityHub();
+  const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
+  await backend.prompt(
+    await session(backend),
+    "batched assistant activity",
+    signal(),
+  );
+  expect(hub.turns("officer")?.turns[0]?.items).toMatchObject([
+    { kind: "step" },
+    { kind: "reasoning", text: "first" },
+    { kind: "text", text: "second" },
+    { kind: "tool", callId: "third_call" },
+  ]);
+});
+
+test("Claude distinguishes a full envelope from a batch with matching block types", async () => {
+  const hub = createActivityHub();
+  const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
+  await backend.prompt(
+    await session(backend),
+    "repeated block types activity",
+    signal(),
+  );
+  expect(hub.turns("officer")?.turns[0]?.items).toMatchObject([
+    { kind: "step" },
+    { kind: "text", text: "first" },
+    { kind: "tool", callId: "call_a" },
+    { kind: "text", text: "first" },
+    { kind: "tool", callId: "call_b" },
+  ]);
+});
+
+test("Claude appends a text-first batch when the finalized prefix has different text", async () => {
+  const hub = createActivityHub();
+  const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
+  await backend.prompt(
+    await session(backend),
+    "text prefix activity",
+    signal(),
+  );
+  expect(hub.turns("officer")?.turns[0]?.items).toMatchObject([
+    { kind: "step" },
+    { kind: "text", text: "a" },
+    { kind: "text", text: "b" },
+    { kind: "tool", callId: "call_x" },
+  ]);
+});
+
+test("subagent tool frames preserve failure ran evidence with and without Claude activity", async () => {
+  const hub = createActivityHub();
+  const plain = await open();
+  const recording = await open({}, undefined, {}, hub.recorder("officer"));
+
+  for (const { backend } of [plain, recording]) {
+    try {
+      await backend.prompt(
+        await session(backend),
+        "subagent fail:rate_limit:429",
+        signal(),
+      );
+      throw new Error("Expected provider failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(BackendFailure);
+      expect(error).toMatchObject({
+        ran: true,
+        failure: "provider:quota:429:ran",
+      });
+    }
+  }
+});
+
+test("a recorder that throws cannot fail a Claude query", async () => {
+  const { backend } = await open(
+    {},
+    undefined,
+    {},
+    {
+      begin: () => ({
+        update() {
+          throw new Error("recorder update failed");
+        },
+        reconnected() {},
+        end() {
+          throw new Error("recorder end failed");
+        },
+      }),
+    },
+  );
+
+  expect(
+    await backend.prompt(await session(backend), "activity frames", signal()),
+  ).toBe("reply\n\t");
+});
 
 function alive(pid: number) {
   try {
@@ -642,7 +928,15 @@ test("cancelling a Claude version probe stops it before any SDK turn starts", as
 });
 
 test("cancelling a Claude turn stops the CLI and its tool processes", async () => {
-  const { backend, log, runs, dataDirectory } = await open();
+  const hub = createActivityHub();
+
+  const { backend, log, runs, dataDirectory } = await open(
+    {},
+    undefined,
+    {},
+    hub.recorder("officer"),
+  );
+
   const id = await session(backend);
   const controller = new AbortController();
   const turn = backend.prompt(id, "hang", controller.signal, () => {});
@@ -658,6 +952,7 @@ test("cancelling a Claude turn stops the CLI and its tool processes", async () =
   expect(JSON.parse(await readFile(record, "utf8")).pid).toBe(run?.pid ?? -1);
   controller.abort();
   await expect(turn).rejects.toThrow();
+  expect(hub.turns("officer")?.turns).toMatchObject([{ status: "cancelled" }]);
   const pids = [run?.pid ?? 0, (await grandchild()) ?? 0];
   await until(() => pids.every((pid) => !alive(pid)));
   await expect(readFile(record)).rejects.toThrow();
