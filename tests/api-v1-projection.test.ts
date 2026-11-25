@@ -15,7 +15,10 @@ import { diffEvents } from "../src/observability/dashboard/api/v1/diff";
 import { createEventStreams } from "../src/observability/dashboard/api/v1/events";
 import type { ApiV1Config } from "../src/observability/dashboard/api/v1/features";
 import { createGitReader } from "../src/observability/dashboard/api/v1/git";
-import { createApiV1Source } from "../src/observability/dashboard/api/v1/projection";
+import {
+  createApiV1Source,
+  reportedGit,
+} from "../src/observability/dashboard/api/v1/projection";
 import type { CrewGitInput } from "../src/coordination/crew/reporting/fleet-status";
 import { createCrewGitReader } from "../src/coordination/crew/workspace/workspace";
 import { startApiV1Server } from "../src/observability/dashboard/api/v1/server";
@@ -176,7 +179,7 @@ function fixture(
     session("second", {
       parentID: "root-default",
       updatedAt: at - 1,
-      title: "Authorization: Bearer fixture-value",
+      title: `Review ${privateProject}-pilot-default with token=fixture-value`,
     }),
     session("third", { parentID: "root-ops", updatedAt: at - 2 }),
     session("fourth", { parentID: "root-default", updatedAt: at - 3 }),
@@ -1478,6 +1481,65 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("v1 projection: crew detail passes task text through in full; ship detail bounds it without redaction", async () => {
+    const text = `Edit ${privateProject}-pilot-default/notes with Authorization: Bearer fixture-value token=fixture-value ${"x".repeat(450)}`;
+
+    const bounded = (limit: number) =>
+      Array.from(text).slice(0, limit).join("");
+
+    expect(text.length).toBeGreaterThan(400);
+    const f = fixture();
+    f.set("captain", [
+      context("pilot", {
+        current: task("task-1", "running", {
+          summary: text,
+          phase: text,
+          progress: text,
+        }),
+      }),
+    ]);
+
+    const detail = await f.source.crew("captain", "pilot", signal);
+    expect(detail?.member.contexts[0]?.current).toMatchObject({
+      summary: text,
+      phase: text,
+      progress: text,
+    });
+
+    const ship = await f.source.ship("captain", signal);
+    const current = ship?.crewMembers[0]?.contexts[0]?.current;
+    expect(current).toMatchObject({
+      summary: bounded(180),
+      phase: bounded(80),
+      progress: bounded(400),
+    });
+    expect(current?.progress).toContain(
+      "Bearer fixture-value token=fixture-value",
+    );
+    expect(current?.phase).toContain(`${privateProject}-pilot-default`);
+  });
+
+  test("credential-shaped branch and base names from the plugin are reported as written", () => {
+    expect(
+      reportedGit(
+        {
+          branch: "fix/token=fixture-value",
+          commit: "a".repeat(40),
+          base: "origin/sk-fixture",
+          ahead: 0,
+          behind: 0,
+          changedFiles: 0,
+          remote: null,
+          checkedAt: 1,
+        },
+        "/fixture",
+      ),
+    ).toMatchObject({
+      branch: "fix/token=fixture-value",
+      base: "origin/sk-fixture",
+    });
+  });
+
   test("an older captain plugin leaves the gateway reading Git itself", async () => {
     const f = fixture(undefined, undefined, async () => undefined);
     f.set("captain", [context("pilot")]);
@@ -1914,7 +1976,7 @@ describe("Fleet API projection", () => {
     ).toBe(uncertain);
   });
 
-  test("uses only scoped roots, returns the newest three children and shows paths only as worktrees", async () => {
+  test("uses only scoped roots, returns the newest three children and shows task text as written", async () => {
     const f = fixture();
     f.set("captain", [
       context("pilot", {
@@ -1944,27 +2006,28 @@ describe("Fleet API projection", () => {
       "third",
     ]);
     expect(f.calls.children.sort()).toEqual(["root-default", "root-ops"]);
+    // Subagent titles are crew output too, shown as written.
+    expect(
+      detail?.member.subagents.find((child) => child.id === "second")?.title,
+    ).toBe(`Review ${privateProject}-pilot-default with token=fixture-value`);
     expect(f.calls.status.at(-1)).toBe("captain/pilot");
     expect(f.calls.git.sort()).toEqual([
       `${privateProject}-pilot-default`,
       `${privateProject}-pilot-ops`,
     ]);
-    // The checkout path appears only as the context's Git worktree.
     expect(
       detail?.member.contexts.map((context) => context.git?.worktree),
     ).toEqual([
       `${privateProject}-pilot-default`,
       `${privateProject}-pilot-ops`,
     ]);
-    expect(
-      JSON.stringify(detail, (key, value: unknown) =>
-        key === "worktree" ? undefined : value,
-      ),
-    ).not.toContain(privateProject);
-    expect(JSON.stringify(detail)).not.toContain("fixture-value");
+    // Task text keeps checkout paths and credential-shaped text.
+    expect(detail?.member.contexts[0]?.current?.summary).toBe(
+      "Authorization: Bearer fixture-value",
+    );
     expect(detail?.member.contexts[1]?.current).toMatchObject({
       summary: "Project assignment",
-      progress: "Working in [checkout]",
+      progress: `Working in ${privateProject}-pilot-ops`,
     });
     await expect(
       f.source.crew("other", "pilot", signal),

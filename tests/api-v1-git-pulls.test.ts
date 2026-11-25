@@ -141,7 +141,7 @@ test("maps PR state and check rollups and restricts URL and title output", () =>
   expect(parse()).toEqual({
     number: 42,
     url: base.url,
-    title: "Fix layout with token=[REDACTED]",
+    title: "Fix layout with token=example-value",
     state: "draft",
     checks: "none",
   });
@@ -154,6 +154,10 @@ test("maps PR state and check rollups and restricts URL and title output", () =>
       ],
     }),
   ).toMatchObject({ state: "open", checks: "passing" });
+  // Titles are cut to 180 code points, not redacted.
+  expect(
+    parse({ title: `token=example-value ${"é".repeat(200)}` }),
+  ).toMatchObject({ title: `token=example-value ${"é".repeat(160)}` });
   expect(
     parse({
       state: "MERGED",

@@ -23,7 +23,7 @@ const metadata = exactStruct({
   ).check(Schema.isMaxLength(20)),
 });
 
-/** Internal, location-scoped RPC. The Fleet API shows checkout paths only as `git.worktree`. */
+/** Internal, location-scoped RPC. The Fleet API also shows checkout paths that crew task text contains. */
 export const fleetCrewStatusInputSchema = exactStruct({
   member: Schema.optional(agentIDSchema),
 });

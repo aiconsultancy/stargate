@@ -58,6 +58,10 @@ function shipDetail({
 const clean = (text: string, limit: number) =>
   redactCredentials(text, limit).replace(/\s+/g, " ").trim();
 
+// Task text and branch names come from crew output, shown as written.
+const crewText = (text: string, limit: number) =>
+  Array.from(text).slice(0, limit).join("").replace(/\s+/g, " ").trim();
+
 const sentence = (text: string) => `${text.slice(0, 199)}.`;
 
 function availability(ship: V1Ship, at: number): V1Event {
@@ -76,7 +80,7 @@ function availability(ship: V1Ship, at: number): V1Event {
 }
 
 function quoted(prefix: string, text: string, suffix = "") {
-  return `${prefix}“${clean(text, 197 - prefix.length - suffix.length) || "Task"}”${suffix}.`;
+  return `${prefix}“${crewText(text, 197 - prefix.length - suffix.length) || "Task"}”${suffix}.`;
 }
 
 function outcomes({ recent, lastOutcome }: V1CrewContext) {
@@ -133,7 +137,7 @@ function contextEvents(
   if (current && next.activity === "running" && current.id !== old?.id) {
     emit("dispatch", quoted(`${name} started `, current.summary));
   } else if (current && old?.id === current.id && old.phase !== current.phase) {
-    const phase = clean(current.phase, 45);
+    const phase = crewText(current.phase, 45);
     emit(
       "phase",
       quoted(

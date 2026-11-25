@@ -2,12 +2,12 @@
  * Fleet API v1: the read-only contract the Subspace Fleet Bridge web Space
  * reads. Additive changes only; never remove or retype a field.
  *
- * Times are epoch milliseconds. Byte counts are integers. In the fleet, ship
- * and crew routes, text that came from crew or model output is bounded and
- * redacted exactly as the dashboard's crew status already is. The agent
- * activity route is the exception by the owner's rule: it serves tool input
- * and output, errors, reply and reasoning text complete and unredacted, and
- * pages large items instead of cutting them.
+ * Times are epoch milliseconds. Byte counts are integers. The API neither
+ * redacts nor rewrites crew task text or branch names; the crew route adds no
+ * length limit. The crew plugin still stores task text bounded and redacted.
+ * The agent activity route serves tool input and output, errors, reply and
+ * reasoning text complete and unredacted, and pages large items instead of
+ * cutting them. The fleet, ship and crew routes carry no prompt or reply text.
  *
  * Routes (all GET, bearer token, private networks only, `Cache-Control:
  * no-store`):
@@ -54,11 +54,11 @@ export type V1Task = {
   id: string;
   status: V1TaskStatus;
   kind: "assignment" | "report" | "unknown";
-  /** At most 180 characters. */
+  /** At most 180 characters; the crew member route adds no limit. */
   summary: string;
-  /** At most 80 characters. */
+  /** At most 80 characters; the crew member route adds no limit. */
   phase: string;
-  /** At most 400 characters. */
+  /** At most 400 characters; the crew member route adds no limit. */
   progress: string;
   createdAt: number | null;
   startedAt: number | null;

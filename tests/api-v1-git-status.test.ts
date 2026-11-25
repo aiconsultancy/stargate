@@ -112,6 +112,20 @@ test("reads a linked worktree split index without updating the checkout indexes"
   }
 });
 
+test("reports a credential-shaped branch name as written", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+
+  try {
+    git(directory, "init", "-b", "fix/token=fixture-value");
+    git(directory, "commit", "--allow-empty", "-m", "Initial");
+    expect(
+      await createGitReader()(directory, AbortSignal.timeout(4500)),
+    ).toMatchObject({ branch: "fix/token=fixture-value", changedFiles: 0 });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("rejects a primary index path outside the checkout and its Git directories", async () => {
   const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
 

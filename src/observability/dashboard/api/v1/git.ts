@@ -18,7 +18,6 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Semaphore } from "effect";
-import { containsCredential } from "../../../../lib/credentials";
 import { abortable, runAbortable } from "../../../../lib/effect";
 import { readWithDeadline } from "../../../../lib/read-deadline";
 import {
@@ -46,8 +45,7 @@ class MetadataLimitExceeded extends Error {}
 // Digest.
 export { githubRepository, isGitHubRepositoryName };
 
-const safeRef = (ref: string) =>
-  ref.length <= 255 && !containsCredential(ref) ? ref : null;
+const safeRef = (ref: string) => (ref.length <= 255 ? ref : null);
 
 const statusSettings =
   /^(core\.(filemode|ignorecase|symlinks|precomposeunicode|autocrlf|eol|sparsecheckout|sparsecheckoutcone|checkstat|trustctime|ignorestat)|(diff|status)\.renames)$/;
