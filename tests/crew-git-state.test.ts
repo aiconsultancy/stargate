@@ -1,6 +1,7 @@
 import { afterAll, expect, spyOn, test } from "bun:test";
 import * as childProcess from "node:child_process";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   realpath,
@@ -154,6 +155,53 @@ test("a detached checkout without upstream has no branch or base", async () => {
     remote: null,
     checkedAt: 1,
   });
+});
+
+test("Fleet status starts before the remote read completes", async () => {
+  const directory = await repository();
+  const bin = await mkdtemp(join(root, "git-overlap-"));
+  const realGit = Bun.which("git");
+  const path = process.env["PATH"];
+  const wrapper = join(bin, "git");
+
+  if (!realGit) {
+    throw new Error("Git is required for the overlap fixture.");
+  }
+
+  await git(directory, "remote", "add", "origin", "https://example.test/repo");
+  await writeFile(
+    wrapper,
+    `#!/bin/sh
+marker="\${0%/*}/status-started"
+case " $* " in
+  *' status --porcelain=v1 '*) touch "$marker" ;;
+  *' remote get-url origin '*)
+    attempts=0
+    until test -f "$marker"; do
+      test "$attempts" -lt 40 || exit 1
+      attempts=$((attempts + 1))
+      sleep 0.05
+    done
+    ;;
+esac
+exec '${realGit.replaceAll("'", "'\\''")}' "$@"
+`,
+  );
+  await chmod(wrapper, 0o700);
+  process.env["PATH"] = path === undefined ? bin : `${bin}:${path}`;
+
+  try {
+    expect(await createCrewGitReader()(directory, signal)).toMatchObject({
+      changedFiles: 0,
+      remote: "https://example.test/repo",
+    });
+  } finally {
+    if (path === undefined) {
+      delete process.env["PATH"];
+    } else {
+      process.env["PATH"] = path;
+    }
+  }
 });
 
 test.each([

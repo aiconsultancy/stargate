@@ -961,7 +961,7 @@ async function inspect(
         ])),
     );
 
-    const [paths, config, excludes, remote, counts] = await Promise.all([
+    const statusRead = Promise.all([
       run([
         "rev-parse",
         "--show-object-format",
@@ -977,6 +977,12 @@ async function inspect(
       ]),
       optional(statusConfigArgs),
       optional(excludesConfigArgs, { HOME: homedir() }),
+    ]).then(([paths, config, excludes]) =>
+      fleetStatus(directory, commit, signal, paths, config, excludes),
+    );
+
+    const [status, remote, counts] = await Promise.all([
+      statusRead,
       optional(["remote", "get-url", "origin"]),
       base && commit
         ? run([
@@ -989,15 +995,6 @@ async function inspect(
           ])
         : null,
     ]);
-
-    const status = await fleetStatus(
-      directory,
-      commit,
-      signal,
-      paths,
-      config,
-      excludes,
-    );
 
     const changedFiles = countChangedPaths(status);
     const divergence = counts === null ? null : parseAheadBehind(counts);
