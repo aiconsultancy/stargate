@@ -5,6 +5,7 @@ import {
   maxAttachmentBytes,
   maxAttachmentTotalBytes,
   maxAttachments,
+  safeAttachmentMime,
 } from "../../chat/attachments/attachments";
 import { isLoopbackAddress } from "../../lib/loopback";
 
@@ -45,35 +46,6 @@ export function filehostURL(value: string, tlsIrc: boolean) {
 /** A hosted file URL fit to post: the FILEHOST origin, no userinfo. */
 export function safeFileURL(url: URL, filehost: URL) {
   return url.origin === filehost.origin && !url.username && !url.password;
-}
-
-const mimePattern = /^[\w.+-]+\/[\w.+-]+$/;
-
-const htmlTypes = new Set([
-  "text/html",
-  "application/xhtml+xml",
-  "image/svg+xml",
-]);
-
-/**
- * The declared type, made safe: HTML, XHTML and SVG become text/plain so
- * the backend reads source text and never renders or executes it; a body
- * that looks like HTML is text/plain whatever its declared type.
- */
-function safeMime(header: string | null, data: Uint8Array) {
-  const declared = header?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  const start = new TextDecoder().decode(data.subarray(0, 512));
-
-  if (
-    htmlTypes.has(declared) ||
-    /^\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b|<script\b|<svg\b)/i.test(
-      start,
-    )
-  ) {
-    return "text/plain";
-  }
-
-  return mimePattern.test(declared) ? declared : "application/octet-stream";
 }
 
 /** File name from Content-Disposition, else the URL's last path segment. */
@@ -300,7 +272,7 @@ export class Filehost {
 
         files.push({
           name: fileName(response.headers.get("content-disposition"), url),
-          mime: safeMime(response.headers.get("content-type"), data),
+          mime: safeAttachmentMime(response.headers.get("content-type"), data),
           data,
           source: { id: url.href },
         });

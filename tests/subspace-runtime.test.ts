@@ -1,10 +1,17 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, chown, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Effect, Schema } from "effect";
 import type { AgentBackend } from "../src/backends/backend";
-import { type BackendConfig, type BotConfig, botSchema } from "../src/config";
+import type { Attachment } from "../src/chat/attachments/attachments";
+import {
+  type BackendConfig,
+  type BotConfig,
+  botSchema,
+  ircSchema,
+} from "../src/config";
 import {
   type RuntimeDependencies,
   type SlackApp,
@@ -16,8 +23,9 @@ import {
   setDefaultLockCommandForTests,
 } from "../src/lib/unix-socket";
 import { parseBundle } from "../src/subspace/certificate";
+import { IrcShip } from "../src/transports/irc/ship";
 import { identity } from "./fixtures";
-import { until } from "./irc-fixture";
+import { FakeIrcServer, lineOf, until } from "./irc-fixture";
 import {
   ENROLMENT_TOKEN,
   StubApi,
@@ -196,6 +204,183 @@ async function officerSocket() {
 
   return join(await childDirectory(sockets, "captain-a", 0o700), "a.sock");
 }
+
+test("an addressed IRC upload reaches the officer's turn through that officer's API key", async () => {
+  const stub = stubApi();
+  const socketPath = await officerSocket();
+  const dataDirectory = await privateDirectory();
+  const reference = "UPL-AQEBAQEBAQEBAQEBAQEBAQ";
+  const missing = "UPL-AgICAgICAgICAgICAgICAg";
+  const path = `/api/v1/chat/uploads/${reference}`;
+  const bytes = Buffer.from("Review the shared plan.");
+
+  stub.handler = (request) => {
+    switch (request.path) {
+      case enrol:
+        return enrolled(request);
+      case path:
+        return Response.json({
+          reference,
+          fileName: "plan.txt",
+          contentType: "text/plain",
+          sizeBytes: bytes.length,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        });
+      case `${path}/content`:
+        return new Response(new Uint8Array(bytes));
+      default:
+        return new Response(null, { status: 410 });
+    }
+  };
+
+  const fake = new FakeIrcServer({
+    accounts: { "captain-a": "test-password" },
+    caps: [
+      "sasl=PLAIN",
+      "account-tag",
+      "message-tags",
+      "batch",
+      "echo-message",
+      "labeled-response",
+      "draft/multiline=max-bytes=4096,max-lines=10",
+    ],
+  }).start();
+
+  cleanup.push(() => fake.stop());
+
+  const config = Schema.decodeUnknownSync(ircSchema)({
+    id: "example-ship",
+    server: { host: "127.0.0.1", port: fake.port, tls: false },
+    account: "captain-a",
+    passwordEnv: "EXAMPLE_IRC_PASSWORD",
+    channels: ["#example-ship"],
+    access: { allowedAccounts: ["member"] },
+    backend: {
+      type: "opencode",
+      url: "http://localhost:4096",
+      directory: "/workspace",
+      sessionID: "ses_example",
+    },
+  });
+
+  const requests: { text: string; files: Attachment[] }[] = [];
+  const controller = new AbortController();
+  const { log, lines } = capturedLog();
+
+  const running = Effect.runPromise(
+    serve(
+      {
+        dataDirectory,
+        bots: [],
+        irc: [config],
+        subspaceAgents: section(stub.url, [
+          captain("captain-a", { socketPath }),
+        ]),
+      },
+      log,
+      controller.signal,
+      {
+        slack: () => {
+          throw new Error("Slack is not configured");
+        },
+        backend: async () => ({
+          sessionID: "ses_example",
+          supportsAttachments: true,
+          async createSession() {
+            return "ses_example";
+          },
+          async prompt(_session, text, _signal, _onText, _onInput, files) {
+            requests.push({ text, files: [...(files ?? [])] });
+
+            return "I received the plan.";
+          },
+          async close() {},
+        }),
+        irc: (config, store, log, options) =>
+          IrcShip.create(config, store, log, {
+            ...options,
+            env: { EXAMPLE_IRC_PASSWORD: "test-password" },
+          }),
+        subspaceAgents: { env, ownership },
+      },
+    ),
+  );
+
+  cleanup.push(async () => {
+    controller.abort();
+    await running;
+  });
+  const members = () => fake.members.get("#example-ship")?.size;
+  await until(() => members() === 1, 3000, "officer joined IRC", {
+    state: () => lines.slice(-8),
+  });
+
+  fake.sayLines({ nick: "member", account: "member" }, "#example-ship", [
+    { text: "captain-a: please review this" },
+    { text: `${reference} plan.txt (${bytes.length} bytes)` },
+  ]);
+  await until(
+    () => requests.length === 1,
+    3000,
+    "officer turn with attachment",
+    {
+      state: () => ({
+        log: lines.slice(-10),
+        routes: stub.requests.map((request) => request.path),
+        replies: lineOf(fake.received("captain-a"), "PRIVMSG").map(
+          (message) => message.params[1],
+        ),
+      }),
+    },
+  );
+  expect(requests[0]?.text).toContain(`please review this\n${reference}`);
+  expect(requests[0]?.files).toEqual([
+    {
+      name: "plan.txt",
+      mime: "text/plain",
+      data: bytes,
+      source: { id: reference },
+    },
+  ]);
+
+  const key = parseBundle(
+    await readFile(
+      join(dataDirectory, "subspace-agents", "captain-a.pem"),
+      "utf8",
+    ),
+  );
+
+  const reads = stub.requests.filter((request) => request.method === "GET");
+  expect(reads.map((request) => request.path)).toEqual([
+    path,
+    `${path}/content`,
+  ]);
+
+  for (const request of reads) {
+    const verified = await verifyAgentToken(
+      bearer(request),
+      key.certificate,
+      stub.url,
+    );
+
+    expect(verified.payload.sub).toBe(key.fingerprint);
+  }
+
+  fake.say(
+    { nick: "member", account: "member" },
+    "#example-ship",
+    `captain-a: review ${missing}`,
+  );
+  await until(
+    () =>
+      lineOf(fake.received("captain-a"), "PRIVMSG").some((message) =>
+        message.params[1]?.includes("Stargate could not pass the shared files"),
+      ),
+    5000,
+    "expired file notice",
+  );
+  expect(requests).toHaveLength(1);
+});
 
 for (const variant of ["absent", "enabled: false"] as const) {
   test(`runtime: subspaceAgents ${variant} creates, opens, logs and contacts nothing`, async () => {

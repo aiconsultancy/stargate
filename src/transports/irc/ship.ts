@@ -38,6 +38,7 @@ import { questionFingerprint } from "../../chat/questions/native-question";
 import { type Identity, backendFingerprint } from "../../gateway/routing";
 import type { Incoming, Store } from "../../gateway/store";
 import { turnProgressText } from "../../shared/turn-progress";
+import type { ReadChatUpload } from "../../chat/attachments/attachments";
 import { IrcAudit, ctcp, serviceNick } from "./audit";
 import { ircBurstEligible } from "./burst";
 import {
@@ -163,6 +164,10 @@ type ShipOptions = {
   crewLink?: CrewLink | null;
   /** Stargate_dm outbox poll interval (default 2000 ms). */
   copyPollMs?: number;
+  subspaceUpload?: (
+    registration: string,
+    account: string,
+  ) => ReadChatUpload | undefined;
 };
 
 const copyRetryMs = 10 * 60_000;
@@ -988,6 +993,7 @@ export class IrcShip {
     );
 
     const memberLog = this.log.child({ irc: member.id });
+    const upload = this.options.subspaceUpload?.(member.id, member.account);
 
     const identity: IrcMember = {
       id: member.id,
@@ -1240,7 +1246,14 @@ export class IrcShip {
               this.stop(registration, message);
             }
           } else {
-            this.receive(identity, client, message, filehost, replay);
+            this.receive(
+              identity,
+              client,
+              message,
+              filehost,
+              upload !== undefined,
+              replay,
+            );
           }
         },
         sent: (sent) => {
@@ -1350,6 +1363,7 @@ export class IrcShip {
           reactions: config.features.reactions,
         },
         (thread) => this.store.irc.ircReplyParent(key, thread),
+        upload,
       ),
       filehost,
       client,
@@ -1451,6 +1465,7 @@ export class IrcShip {
     client: IrcClient,
     message: IrcMessage,
     filehost: () => URL | undefined,
+    subspaceUploads: boolean,
     replay = false,
   ) {
     if (!this.open()) {
@@ -1545,6 +1560,7 @@ export class IrcShip {
       now: Date.now,
       fold: client.fold,
       filehost: this.config.features.filesIn ? filehost() : undefined,
+      subspaceUploads,
     });
 
     if (control) {

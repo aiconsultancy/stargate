@@ -6,6 +6,8 @@ import type { BackendConfig } from "../config";
 import type { SubspaceAgentsConfig } from "../config/composition";
 import type { Ownership } from "../lib/unix-socket";
 import type { AgentKey } from "./certificate";
+import type { ReadChatUpload } from "../chat/attachments/attachments";
+import { chatUploadReader } from "./chat-uploads";
 import { enrolOfficers } from "./enrol";
 import {
   DistinctCertificates,
@@ -35,6 +37,7 @@ export type SubspaceAgentsHost = {
 export type SubspaceAgentsRuntime = {
   /** A gateway-launched backend's configuration with its officer's bridge. */
   backend(registration: string, backend: BackendConfig): BackendConfig;
+  upload(registration: string, account: string): ReadChatUpload | undefined;
   close(): Promise<void>;
 };
 
@@ -228,6 +231,24 @@ export async function startSubspaceAgents(
   );
 
   return {
+    upload(registration, account) {
+      const explicit = section.officers.find(
+        (entry) => entry.registration === registration,
+      );
+
+      const matching = section.officers.filter(
+        (entry) =>
+          entry.registration === undefined &&
+          entry.ircNick?.toLowerCase() === account.toLowerCase(),
+      );
+
+      const officer =
+        explicit ?? (matching.length === 1 ? matching[0] : undefined);
+
+      return officer?.socketPath
+        ? chatUploadReader(officer.socketPath)
+        : undefined;
+    },
     backend(registration, backend) {
       const officer = section.officers.find(
         (entry) => entry.registration === registration,

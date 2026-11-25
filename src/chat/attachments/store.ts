@@ -17,13 +17,15 @@ export type AttachmentDelivery = PublishedFile & {
   noticeSent?: boolean;
 };
 
-// Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
+// Slack file IDs, IRC FILEHOST URLs or Subspace chat references.
 const decodeInputFiles = Schema.decodeUnknownSync(
   Schema.mutable(
     Schema.Array(
       Schema.String.check(
         Schema.isMaxCodePoints(2048),
-        settingsPattern(/^(?:F[A-Z0-9]+|https?:\/\/\S+)$/),
+        settingsPattern(
+          /^(?:F[A-Z0-9]+|https?:\/\/\S+|UPL-[A-Za-z0-9_-]{22})$/,
+        ),
       ),
     ),
   ).check(Schema.isMaxLength(10)),

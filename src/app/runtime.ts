@@ -50,7 +50,10 @@ import {
 } from "../observability/dashboard/dashboard-source";
 import { sendDispatchAnswer } from "../coordination/fleet/dispatch/irc";
 import { startAgentDispatch } from "../coordination/fleet/dispatch/start";
-import type { SubspaceAgentsHost } from "../subspace/start";
+import type {
+  SubspaceAgentsHost,
+  SubspaceAgentsRuntime,
+} from "../subspace/start";
 import { abortable } from "../lib/effect";
 import {
   FleetControl,
@@ -112,7 +115,7 @@ import {
   type SlackInteractions,
 } from "../transports/slack/slack";
 import { openStore } from "./open-store";
-import { type Store } from "../gateway/store";
+import type { Store } from "../gateway/store";
 import { TeamsRegistration } from "../transports/teams/registration";
 import { createTranscriber } from "../chat/transcription/startup";
 import {
@@ -213,7 +216,7 @@ export type RuntimeDependencies = {
     context: BackendContext,
   ): Promise<AgentBackend>;
   /** IRC ship connections; tests shorten the timings. */
-  irc?: (config: IrcConfig, store: Store, log: Logger) => Promise<IrcShip>;
+  irc?: typeof IrcShip.create;
   /** Short test-only outage/observation timings; never a host flag. */
   connectionTiming?: { outageMs: number; pollMs: number };
   /** Host maintenance drain. Absent in tests, so nothing touches host state. */
@@ -315,14 +318,21 @@ function registrationBackends(
   return subspaceAgents(config, log, dependencies).pipe(
     Effect.map((bridged) => ({
       activity,
+      irc: (irc: IrcConfig, store: Store) =>
+        (dependencies.irc ?? IrcShip.create)(irc, store, log, {
+          ...(bridged.upload && { subspaceUpload: bridged.upload }),
+        }),
       create: (
         registration: { id: string; backend: BackendConfig },
         dataDirectory: string,
       ) =>
-        dependencies.backend(bridged(registration), {
-          dataDirectory,
-          ...(activity && { activity: activity.recorder(registration.id) }),
-        }),
+        dependencies.backend(
+          bridged.backend(registration.id, registration.backend),
+          {
+            dataDirectory,
+            ...(activity && { activity: activity.recorder(registration.id) }),
+          },
+        ),
     })),
   );
 }
@@ -340,13 +350,18 @@ function subspaceAgents(
   config: ServeConfig,
   log: Logger,
   dependencies: RuntimeDependencies,
-) {
+): Effect.Effect<
+  Pick<SubspaceAgentsRuntime, "backend"> &
+    Partial<Pick<SubspaceAgentsRuntime, "upload">>,
+  never,
+  Scope.Scope
+> {
   const section = config.subspaceAgents;
 
   if (!section?.enabled) {
-    return Effect.succeed(
-      (registration: { backend: BackendConfig }) => registration.backend,
-    );
+    return Effect.succeed({
+      backend: (_registration, backend) => backend,
+    });
   }
 
   return Effect.acquireRelease(
@@ -359,11 +374,6 @@ function subspaceAgents(
       }),
     ),
     (started) => Effect.promise(() => started.close()),
-  ).pipe(
-    Effect.map(
-      (started) => (registration: { id: string; backend: BackendConfig }) =>
-        started.backend(registration.id, registration.backend),
-    ),
   );
 }
 
@@ -1008,9 +1018,7 @@ export function serve(
       const ircBindings = new Map<string, IrcBinding>();
 
       for (const irc of config.irc ?? []) {
-        const ship = yield* Effect.promise(() =>
-          (dependencies.irc ?? IrcShip.create)(irc, store, log),
-        );
+        const ship = yield* Effect.promise(() => backends.irc(irc, store));
 
         const entries = new Map<string, IrcRuntimeRegistration>();
 

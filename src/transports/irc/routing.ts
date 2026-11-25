@@ -56,6 +56,8 @@ export type IrcRouteContext = {
   fold(this: void, value: string): string;
   /** Current FILEHOST upload URL; its links become attachments. */
   filehost?: URL | undefined;
+  /** This registration has its own Subspace API signing proxy. */
+  subspaceUploads?: boolean;
 };
 
 /**
@@ -93,6 +95,27 @@ export function filehostLinks(text: string, filehost: URL | undefined) {
   }
 
   return links;
+}
+
+function admittedFiles(body: string, context: IrcRouteContext) {
+  const files = filehostLinks(body, context.filehost);
+
+  if (context.subspaceUploads) {
+    const pattern =
+      /(?<![A-Za-z0-9_-])UPL-[A-Za-z0-9_-]{22}(?![A-Za-z0-9_-])/gu;
+
+    for (const [reference] of body.matchAll(pattern)) {
+      if (files.length === maxAttachments) {
+        break;
+      }
+
+      if (!files.includes(reference)) {
+        files.push(reference);
+      }
+    }
+  }
+
+  return files;
 }
 
 /** Case folding for names: the server's CASEMAPPING, rfc1459 by default. */
@@ -727,7 +750,7 @@ export function routeIrcMessage(
         .slice(0, 32)}`;
 
   const requestChannel = direct ? account : target;
-  const files = filehostLinks(body, context.filehost);
+  const files = admittedFiles(body, context);
 
   // Persist the root at intake. In-flight answers keep their wire shape on upgrade.
   const parent = validMsgid(reply)

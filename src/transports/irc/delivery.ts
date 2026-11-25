@@ -1,6 +1,12 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { Schema } from "effect";
 import type { AttachmentTransport } from "../../chat/attachments/attachment-delivery";
+import {
+  type Attachment,
+  type ReadChatUpload,
+  chatUploadReference,
+  checkAttachments,
+} from "../../chat/attachments/attachments";
 import type {
   DeliveryUnit,
   IrcTurnStatus,
@@ -161,6 +167,7 @@ export class IrcDelivery implements TransportDelivery {
     private readonly presence: IrcPresence = noPresence(),
     /** Thread roots resolve separately from their request/Stop identity. */
     private readonly replyParent?: (request: string) => string | undefined,
+    private readonly readChatUpload?: ReadChatUpload,
   ) {
     // Without reactions the gateway never asks for one.
     if (presence.reactions !== false) {
@@ -468,26 +475,45 @@ export class IrcDelivery implements TransportDelivery {
     return { batched: true, units: packBatches(parts, limits) };
   }
 
-  /**
-   * FILEHOST attachments while the server offers one; undefined otherwise,
-   * so the gateway keeps its "attachment unavailable" behaviour.
-   */
+  /** Signed Subspace uploads and, where offered, IRC FILEHOST. */
   public get files(): AttachmentTransport | undefined {
-    const hosted = this.hosted;
+    const hosted = this.hosted?.filehost() ? this.hosted : undefined;
+    const readChatUpload = this.readChatUpload;
 
-    if (!hosted?.filehost()) {
+    if (!hosted && !readChatUpload) {
       return undefined;
     }
 
     return {
-      download: (urls, _channel, signal) => {
-        if (!hosted.download) {
-          return Promise.reject(new Error("IRC file input is off"));
+      download: async (ids, _channel, signal) => {
+        if (
+          !readChatUpload ||
+          !ids.some((id) => chatUploadReference.test(id))
+        ) {
+          if (!hosted?.download) {
+            throw new Error("IRC FILEHOST input is off");
+          }
+
+          return hosted.files.download(ids, signal);
         }
 
-        return hosted.files.download(urls, signal);
+        const files: Attachment[] = [];
+
+        for (const id of ids) {
+          if (chatUploadReference.test(id)) {
+            files.push(await readChatUpload(id, signal));
+          } else if (hosted?.download) {
+            files.push(...(await hosted.files.download([id], signal)));
+          } else {
+            throw new Error("IRC FILEHOST input is off");
+          }
+
+          checkAttachments(files);
+        }
+
+        return files;
       },
-      ...(hosted.upload && {
+      ...(hosted?.upload && {
         upload: (file, signal) => hosted.files.upload(file, signal),
         link: (channel, thread, url, title, _signal, allowed) =>
           this.link(channel, thread, url, title, allowed),

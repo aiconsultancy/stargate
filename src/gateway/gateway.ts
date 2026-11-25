@@ -12,6 +12,7 @@ import {
 import {
   type Attachment,
   type PublishedFile,
+  chatUploadReference,
   checkAttachments,
   parseAttachments,
 } from "../chat/attachments/attachments";
@@ -1919,6 +1920,47 @@ export class Gateway {
     }
   }
 
+  private statusText(
+    job: Job,
+    surface: GatewayTransport["name"],
+    cause: RequestFailure,
+  ) {
+    if (job.deferDelivery && cause === "history") {
+      return "The agent finished, but its public reply is not yet readable in session history. Stargate will retain it locally when it becomes readable. The request was not repeated.";
+    }
+
+    if (
+      cause === "attachments" &&
+      surface === "irc" &&
+      this.store.attachmentRecords
+        .inputFiles(job.id)
+        .some((id) => chatUploadReference.test(id))
+    ) {
+      return "Stargate could not pass the shared files to the agent. Check the upload in Subspace, its 30-day expiry, and the model's supported file types. Automatic delivery accepts up to 10 MiB per file and 25 MiB total. No agent turn was started.";
+    }
+
+    return failureText(cause);
+  }
+
+  private inputFileIDs(
+    job: number,
+    surface: GatewayTransport["name"],
+    transcriber?: Transcriber,
+  ) {
+    const fileIDs = this.store.attachmentRecords.inputFiles(job);
+
+    if (
+      surface === "irc" &&
+      !this.backend.supportsAttachments &&
+      !transcriber
+    ) {
+      // A text-only officer can read the original reference with its Subspace tool.
+      return fileIDs.filter((id) => !chatUploadReference.test(id));
+    }
+
+    return fileIDs;
+  }
+
   private async processTurn(
     held: Job,
     shutdown: AbortSignal,
@@ -2005,11 +2047,6 @@ export class Gateway {
           });
       }
     };
-
-    const statusText = (cause: RequestFailure) =>
-      job.deferDelivery && cause === "history"
-        ? "The agent finished, but its public reply is not yet readable in session history. Stargate will retain it locally when it becomes readable. The request was not repeated."
-        : failureText(cause);
 
     let output: ReplyChunk[];
     let failure = job.failure ?? undefined;
@@ -2307,7 +2344,12 @@ export class Gateway {
             );
           }
 
-          const fileIDs = this.store.attachmentRecords.inputFiles(job.id);
+          const fileIDs = this.inputFileIDs(
+            job.id,
+            transport.name,
+            transcriber,
+          );
+
           let inputFiles: Attachment[] = [];
 
           // A spoken-mention gate already transcribed this message.
@@ -2486,7 +2528,7 @@ export class Gateway {
 
           if (deferred) {
             failure = "history";
-            output = [statusText(failure)];
+            output = [this.statusText(job, transport.name, failure)];
           } else {
             output =
               (reacted || silent) && !answer.trim()
@@ -2540,8 +2582,8 @@ export class Gateway {
           );
           output = [
             failure === "timeout" && observeProgress
-              ? `${statusText(failure)} ${turnProgressText(progress)}`
-              : statusText(failure),
+              ? `${this.statusText(job, transport.name, failure)} ${turnProgressText(progress)}`
+              : this.statusText(job, transport.name, failure),
           ];
           transcript = undefined;
 
@@ -2600,7 +2642,7 @@ export class Gateway {
 
           if (!reactionDelivered) {
             failure = "reaction";
-            output = [statusText(failure)];
+            output = [this.statusText(job, transport.name, failure)];
           }
         }
 
@@ -2622,7 +2664,11 @@ export class Gateway {
 
           // Another writer moved the cursor: catch-up delivers from there.
           failure = "history";
-          output = this.store.respond(job.id, [statusText(failure)], failure);
+          output = this.store.respond(
+            job.id,
+            [this.statusText(job, transport.name, failure)],
+            failure,
+          );
           this.queueTranscript(this.catchUpKey(job.conversation));
         }
 

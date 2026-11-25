@@ -18,12 +18,13 @@ type SocketReply = {
 };
 
 /** One HTTP request over the officer's socket; never a TCP fallback. */
-function socketRequest(
+export function socketRequest(
   socketPath: string,
   method: string,
   path: string,
   headers: Record<string, string>,
   body: Buffer | undefined,
+  signal?: AbortSignal,
 ): Promise<SocketReply> {
   return new Promise((resolve, reject) => {
     const outgoing = request(
@@ -33,6 +34,7 @@ function socketRequest(
         method,
         agent: false,
         timeout: socketIdleMs,
+        ...(signal && { signal }),
         headers: {
           ...headers,
           ...(body && { "content-length": String(body.length) }),
@@ -55,7 +57,7 @@ function socketRequest(
   });
 }
 
-async function readAll(body: Readable, limit: number) {
+export async function readAll(body: Readable, limit: number) {
   const chunks: Buffer[] = [];
   let size = 0;
 

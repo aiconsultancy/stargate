@@ -736,12 +736,35 @@ a Stop cannot be undone.
 - **Buttons and interactive controls.** Stop is a reaction
   ([Stop by reaction](#stop-by-reaction)); there is no Stop button.
 - **Undo of Stop.** `+draft/unreact` is ignored.
-- **Files without a FILEHOST.** Files move only through a FILEHOST (see
-  [files](#files)); without one, a published file posts a short
-  "attachment is unavailable" notice.
+- **Files without a FILEHOST.** Subspace chat uploads can reach enrolled
+  officers over the Subspace API. Publishing a local file from a reply uses
+  FILEHOST and needs an available host. See [files](#files).
 - **Slash commands.** No `/cron`, `/stargate` commands or scheduled prompts.
 
 ## Files
+
+### Subspace chat uploads
+
+The Subspace desktop includes a visible `UPL-…` reference for each file in
+the same IRC message as the request. Stargate recognises these references
+after admitting the message. It uses the addressed officer's
+[Subspace signing proxy](subspace-agents.md) to read the file's metadata
+and bytes, verifies their size and digest, and passes the files with the
+request on attachment-capable backends. This works with SASL EXTERNAL.
+It uses the configured signing socket for the IRC registration, or the
+single enrolled officer whose configured `ircNick` matches the IRC account.
+The IRC message and its references remain visible.
+
+The upload expires after 30 days. The same limits as FILEHOST apply to
+automatic delivery, including 10 MiB per file and 25 MiB in total. A missing,
+expired or oversized file produces a notice in the originating conversation.
+On installations or backends that receive the reference as text, an officer
+with Subspace API access can use `subspace_read_chat_upload` or fetch
+`/api/v1/chat/uploads/<reference>/content` through its existing API access.
+Captains can include the original reference in a crew assignment. Crew with
+their captain's Subspace access can read it using the same routes.
+
+### IRC FILEHOST
 
 Ergo can advertise a FILEHOST: an upload URL in ISUPPORT
 (`soju.im/FILEHOST` or `draft/FILEHOST`, see the
