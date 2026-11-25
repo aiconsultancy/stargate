@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   lstat,
@@ -40,9 +39,7 @@ async function readConfig(
 
 type FleetHead = { ref: string | null; oid: string | null };
 
-export async function captureFleetHead(
-  run: FleetGitCommand,
-): Promise<FleetHead> {
+async function captureFleetHead(run: FleetGitCommand): Promise<FleetHead> {
   const ref = await run(["symbolic-ref", "-q", "HEAD"]);
   const name = ref?.code === 0 ? ref.stdout.trim() : null;
 
@@ -78,13 +75,33 @@ export async function captureFleetHead(
   throw new Error("Git HEAD unavailable");
 }
 
-export async function fleetHeadMatches(
+/** Classify even a failed sample against the checkout it started on. */
+export async function guardFleetHead<T>(
   run: FleetGitCommand,
-  before: FleetHead,
+  deadline: () => AbortSignal,
+  sample: (head: FleetHead) => Promise<T>,
 ) {
-  const after = await captureFleetHead(run);
+  const before = await captureFleetHead(run);
+  const [result] = await Promise.allSettled([sample(before)]);
+  deadline().throwIfAborted();
 
-  return before.ref === after.ref && before.oid === after.oid;
+  const after = await captureFleetHead(run).catch((error: unknown) => {
+    deadline().throwIfAborted();
+    // An unreadable HEAD must not erase a more specific sample failure.
+    throw result.status === "rejected" ? result.reason : error;
+  });
+
+  deadline().throwIfAborted();
+
+  if (before.ref !== after.ref || before.oid !== after.oid) {
+    return { kind: "moved" as const };
+  }
+
+  if (result.status === "rejected") {
+    throw result.reason;
+  }
+
+  return { kind: "sample" as const, value: result.value };
 }
 
 class UnsafeStatusTemp extends Error {}
@@ -405,123 +422,72 @@ export class FleetStatusRead {
   }
 }
 
-/** Bind all live checkout reads to the captain's directory and cancellation. */
-export function liveFleetGit(directory: string, signal: AbortSignal) {
-  const command = async (
-    args: string[],
-    overrides?: NodeJS.ProcessEnv,
-    limit?: number,
-  ) => {
-    const result = await spawnGit(
-      directory,
-      [...fleetGitOptions, ...args],
-      { PATH: process.env["PATH"], LC_ALL: "C", ...fleetGitEnv, ...overrides },
-      { signal, limit },
-    );
-
-    signal.throwIfAborted();
-
-    return result.truncated || result.code === null
-      ? null
-      : { code: result.code, stdout: result.stdout };
-  };
-
-  return {
-    command,
-    head: () => captureFleetHead(command),
-    headMatches: (head: FleetHead) => fleetHeadMatches(command, head),
-    async status(head: string | null) {
-      await using checkout = new FleetStatusRead();
-
-      try {
-        const status = await checkout.read({
-          directory,
-          head,
-          signal,
-          run: command,
-          status: (args, env) => command(args, env, 16 * 1024 * 1024),
-        });
-
-        return status?.code === 0
-          ? { kind: "value" as const, stdout: status.stdout }
-          : { kind: "unavailable" as const };
-      } catch (error) {
-        signal.throwIfAborted();
-
-        return {
-          kind:
-            error instanceof UnsafeStatusTemp
-              ? ("unsafe-temp" as const)
-              : ("unavailable" as const),
-        };
-      }
-    },
-  };
-}
-
-/** Reads are bounded. A write is never killed by a timer: SIGKILL mid-write
- * can leave index.lock or a partial result. Only an explicit caller signal
- * stops it; ambiguous writes are reported, never retried or rolled back.
- */
-export function gitProcessOptions(write: boolean, signal?: AbortSignal) {
-  return {
-    ...(signal && { signal }),
-    ...(!write && { timeout: 60_000 }),
-    killSignal: "SIGKILL" as const,
-  };
-}
-
-export function spawnGit(
+type FleetGitProcess = (
   directory: string,
   args: string[],
   env: NodeJS.ProcessEnv,
-  options: {
-    limit?: number | undefined;
-    signal?: AbortSignal | undefined;
-    write?: boolean;
-  },
-): Promise<{ stdout: string; code: number | null; truncated: boolean }> {
-  const limit = options.limit ?? 1024 * 1024;
+  options: { signal: AbortSignal; limit?: number | undefined },
+) => Promise<{ stdout: string; code: number | null; truncated: boolean }>;
 
-  return new Promise((resolve) => {
-    const child = spawn("git", ["-C", directory, ...args], {
-      cwd: directory,
-      env,
-      stdio: ["ignore", "pipe", "ignore"],
-      ...gitProcessOptions(!!options.write, options.signal),
-    });
+/** Bind all live checkout reads to the captain's directory and cancellation. */
+export function liveFleetGit(spawnGit: FleetGitProcess) {
+  return (directory: string, signal: AbortSignal) => {
+    const command = async (
+      args: string[],
+      overrides?: NodeJS.ProcessEnv,
+      limit?: number,
+    ) => {
+      const result = await spawnGit(
+        directory,
+        [...fleetGitOptions, ...args],
+        {
+          PATH: process.env["PATH"],
+          LC_ALL: "C",
+          ...fleetGitEnv,
+          ...overrides,
+        },
+        { signal, limit },
+      );
 
-    const chunks: Buffer[] = [];
-    let length = 0;
-    let truncated = false;
-    let failed = false;
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (truncated) {
-        return;
-      }
+      signal.throwIfAborted();
 
-      if (length + chunk.length > limit) {
-        chunks.push(chunk.subarray(0, limit - length));
-        truncated = true;
-        child.kill("SIGKILL");
+      return result.truncated || result.code === null
+        ? null
+        : { code: result.code, stdout: result.stdout };
+    };
 
-        return;
-      }
+    return {
+      command,
+      guard: <T>(sample: (head: FleetHead) => Promise<T>) =>
+        guardFleetHead(command, () => signal, sample),
+      async status(head: string | null) {
+        await using checkout = new FleetStatusRead();
 
-      chunks.push(chunk);
-      length += chunk.length;
-    });
-    child.on("error", () => {
-      failed = true;
-    });
-    child.on("close", (code) => {
-      resolve({
-        stdout: Buffer.concat(chunks).toString("utf8"),
-        code: failed ? null : code,
-        truncated,
-      });
-    });
-  });
+        try {
+          const status = await checkout.read({
+            directory,
+            head,
+            signal,
+            run: command,
+            status: (args, env) => command(args, env, 16 * 1024 * 1024),
+          });
+
+          return status?.code === 0
+            ? { kind: "value" as const, stdout: status.stdout }
+            : { kind: "unavailable" as const };
+        } catch (error) {
+          signal.throwIfAborted();
+
+          return {
+            kind:
+              error instanceof UnsafeStatusTemp
+                ? ("unsafe-temp" as const)
+                : ("unavailable" as const),
+          };
+        }
+      },
+    };
+  };
 }
 
 const statusDirectoryName = "stargate-git-status";

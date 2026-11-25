@@ -20,16 +20,15 @@ type CheckoutGit = (
   signal: AbortSignal,
 ) => {
   command(args: string[]): Promise<{ code: number; stdout: string } | null>;
-  head(): Promise<Head>;
-  headMatches(before: Head): Promise<boolean>;
+  guard<T>(
+    sample: (head: Head) => Promise<T>,
+  ): Promise<{ kind: "sample"; value: T } | { kind: "moved" }>;
   status(
     oid: string | null,
   ): Promise<
     { kind: "value"; stdout: string } | { kind: "unavailable" | "unsafe-temp" }
   >;
 };
-
-class HeadChanged extends Error {}
 
 /** The remote URL without user information, which can hold a credential. */
 export function remoteWithoutUser(remote: string): string | null {
@@ -75,7 +74,7 @@ async function inspect(
   signal: AbortSignal,
   now: () => number,
   open: CheckoutGit,
-): Promise<CrewGitState | null> {
+): Promise<CrewGitState | null | "head-moved"> {
   try {
     if (!(await stat(directory)).isDirectory()) {
       return { ...emptyState(now()), error: gitUnavailable };
@@ -116,86 +115,94 @@ async function inspect(
       throw new Error(gitUnavailable);
     }
 
-    const head = await git.head();
-    const commit = head.oid;
+    const guarded = await git.guard(async (head): Promise<CrewGitState> => {
+      const commit = head.oid;
 
-    const branch = head.ref?.startsWith("refs/heads/")
-      ? head.ref.slice("refs/heads/".length)
-      : null;
+      const branch = head.ref?.startsWith("refs/heads/")
+        ? head.ref.slice("refs/heads/".length)
+        : null;
 
-    const upstream = branch
-      ? await optional([
-          "rev-parse",
-          "--verify",
-          "-q",
-          "--abbrev-ref",
-          "--symbolic-full-name",
-          "--end-of-options",
-          `${branch}@{upstream}`,
-        ])
-      : null;
-
-    const base = name(
-      upstream ??
-        (await optional([
-          "symbolic-ref",
-          "--short",
-          "-q",
-          "refs/remotes/origin/HEAD",
-        ])),
-    );
-
-    const [status, remote, counts] = await Promise.all([
-      git.status(commit),
-      optional(["remote", "get-url", "origin"]),
-      base && commit
-        ? run([
-            "rev-list",
-            "--left-right",
-            "--count",
+      const upstream = branch
+        ? await optional([
+            "rev-parse",
+            "--verify",
+            "-q",
+            "--abbrev-ref",
+            "--symbolic-full-name",
             "--end-of-options",
-            `${base}...${commit}`,
-            "--",
+            `${branch}@{upstream}`,
           ])
-        : null,
-    ]);
+        : null;
 
-    if (!(await git.headMatches(head))) {
-      throw new HeadChanged();
-    }
+      const base = name(
+        upstream ??
+          (await optional([
+            "symbolic-ref",
+            "--short",
+            "-q",
+            "refs/remotes/origin/HEAD",
+          ])),
+      );
 
-    if (status.kind === "unsafe-temp") {
+      // A failed comparison must not make the guard check HEAD before status ends.
+      const [statusRead, remoteRead, comparison] = await Promise.allSettled([
+        git.status(commit),
+        optional(["remote", "get-url", "origin"]),
+        base && commit
+          ? run([
+              "rev-list",
+              "--left-right",
+              "--count",
+              "--end-of-options",
+              `${base}...${commit}`,
+              "--",
+            ])
+          : null,
+      ]);
+
+      if (
+        statusRead.status === "rejected" ||
+        remoteRead.status === "rejected" ||
+        comparison.status === "rejected"
+      ) {
+        throw new Error(gitUnavailable);
+      }
+
+      const { value: status } = statusRead;
+      const { value: remote } = remoteRead;
+      const { value: counts } = comparison;
+
+      if (status.kind === "unsafe-temp") {
+        return {
+          ...emptyState(now()),
+          error: "Git status requires a safe temporary directory.",
+        };
+      }
+
+      const changedFiles =
+        status.kind === "value" ? countChangedPaths(status.stdout) : null;
+
+      const divergence = counts === null ? null : parseAheadBehind(counts);
+
+      if (changedFiles === null || (counts !== null && divergence === null)) {
+        throw new Error(gitUnavailable);
+      }
+
       return {
-        ...emptyState(now()),
-        error: "Git status requires a safe temporary directory.",
+        branch: name(branch),
+        commit,
+        base,
+        ahead: divergence?.ahead ?? null,
+        behind: divergence?.behind ?? null,
+        changedFiles,
+        remote: remote === null ? null : remoteWithoutUser(remote),
+        checkedAt: now(),
       };
-    }
+    });
 
-    const changedFiles =
-      status.kind === "value" ? countChangedPaths(status.stdout) : null;
-
-    const divergence = counts === null ? null : parseAheadBehind(counts);
-
-    if (changedFiles === null || (counts !== null && divergence === null)) {
-      throw new Error(gitUnavailable);
-    }
-
-    return {
-      branch: name(branch),
-      commit,
-      base,
-      ahead: divergence?.ahead ?? null,
-      behind: divergence?.behind ?? null,
-      changedFiles,
-      remote: remote === null ? null : remoteWithoutUser(remote),
-      checkedAt: now(),
-    };
-  } catch (error) {
+    return guarded.kind === "moved" ? "head-moved" : guarded.value;
+  } catch {
     signal.throwIfAborted();
-
-    if (error instanceof HeadChanged) {
-      throw error;
-    }
 
     return { ...emptyState(now()), error: gitUnavailable };
   }
@@ -242,17 +249,20 @@ export function createCrewGitReader(
           abortable((reading) => inspect(directory, reading, now, open)),
         ),
         deadline,
-      ).catch((error: unknown) => {
-        if (error instanceof HeadChanged) {
-          if (cache.get(directory)?.value === value) {
-            cache.delete(directory);
+      ).then(
+        (result) => {
+          if (result === "head-moved") {
+            if (cache.get(directory)?.value === value) {
+              cache.delete(directory);
+            }
+
+            return { ...emptyState(now()), error: gitUnavailable };
           }
 
-          return { ...emptyState(now()), error: gitUnavailable };
-        }
-
-        return { ...emptyState(now()), error: "Git read timed out." };
-      });
+          return result;
+        },
+        () => ({ ...emptyState(now()), error: "Git read timed out." }),
+      );
 
       entry = { expiresAt: at + gitStateTTL, value };
       cache.set(directory, entry);

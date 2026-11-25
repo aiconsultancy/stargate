@@ -22,6 +22,7 @@ import {
   createCrewGitReader as makeCrewGitReader,
   remoteWithoutUser,
 } from "../src/coordination/crew/workspace/git-state";
+import { spawnGit } from "../src/coordination/crew/workspace/git-runner";
 import { liveFleetGit } from "../src/coordination/crew/workspace/git-status";
 import { readCommand } from "../src/observability/dashboard/api/v1/command";
 import { createGitReader } from "../src/observability/dashboard/api/v1/git";
@@ -35,7 +36,7 @@ afterAll(() => rm(root, { recursive: true, force: true }));
 const signal = new AbortController().signal;
 
 const createCrewGitReader = (now?: () => number, monotonic?: () => number) =>
-  makeCrewGitReader(liveFleetGit, now, monotonic);
+  makeCrewGitReader(liveFleetGit(spawnGit), now, monotonic);
 
 async function git(directory: string, ...args: string[]) {
   const child = Bun.spawn(
@@ -245,6 +246,61 @@ esac`,
     },
   );
 });
+
+test.each([
+  ["status", true],
+  ["rev-list", true],
+  ["status", false],
+  ["rev-list", false],
+] as const)(
+  "Fleet %s failure only bypasses cache on a HEAD move (%s)",
+  async (phase, move) => {
+    const directory = await repository();
+    await git(directory, "branch", "other");
+    await git(directory, "update-ref", "refs/remotes/origin/main", "HEAD");
+    await git(
+      directory,
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/main",
+    );
+    let clock = 0;
+    const read = createCrewGitReader(Date.now, () => clock);
+
+    await withGitWrapper(
+      `case " $* " in
+  *' ${phase} '*)
+    marker="\${0%/*}/failed"
+    if ! test -f "$marker"; then
+      touch "$marker" || exit 3
+      ${move ? '(unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY; "$real" symbolic-ref HEAD refs/heads/other) || exit 3' : ":"}
+      exit 2
+    fi
+    ;;
+esac`,
+      async () => {
+        const failed = await read(directory, signal);
+        expect(failed).toMatchObject({
+          branch: null,
+          changedFiles: null,
+          error: "Git state unavailable.",
+        });
+
+        if (!move) {
+          expect(await read(directory, signal)).toBe(failed);
+          clock += 15_001;
+        }
+
+        expect(await read(directory, signal)).toMatchObject({
+          branch: move ? "other" : "main",
+          changedFiles: 0,
+          ahead: 0,
+          behind: 0,
+        });
+      },
+    );
+  },
+);
 
 test("a Fleet status config output limit fails closed instead of returning a count", async () => {
   const directory = await repository();

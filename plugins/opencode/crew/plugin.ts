@@ -66,6 +66,7 @@ import {
 import { CrewPost } from "../../../src/coordination/crew/controls/post";
 import { effectProjectToolInput } from "../../../src/coordination/crew/input/project-options";
 import { createCrewGitReader } from "../../../src/coordination/crew/workspace/git-state";
+import { spawnGit } from "../../../src/coordination/crew/workspace/git-runner";
 import { liveFleetGit } from "../../../src/coordination/crew/workspace/git-status";
 import { CrewProjects } from "../../../src/coordination/crew/workspace/projects";
 import {
@@ -294,7 +295,7 @@ const plugin = Plugin.define({
       (maintenance) => maintenance.dispose(),
     );
 
-    const gitStates = createCrewGitReader(liveFleetGit);
+    const gitStates = createCrewGitReader(liveFleetGit(spawnGit));
 
     const report = async <T>(
       signal: AbortSignal,

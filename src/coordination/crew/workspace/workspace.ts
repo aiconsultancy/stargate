@@ -10,7 +10,7 @@ import {
 } from "../../../config/settings-schema";
 import { CrewError } from "../execution/state";
 import { agentIDSchema } from "../team";
-import { spawnGit } from "./git-status";
+import { spawnGit } from "./git-runner";
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 

@@ -24,10 +24,9 @@ import {
   type FleetGitCommand,
   FleetStatusRead,
   type StatusStorage,
-  captureFleetHead,
   fleetGitEnv,
   fleetGitOptions,
-  fleetHeadMatches,
+  guardFleetHead,
   outsideCheckout,
   privateStatusDirectory,
   removeStatusDirectory,
@@ -50,8 +49,6 @@ const patternsLimit = mib;
 const metadataLimit = 192 * mib;
 
 class MetadataLimitExceeded extends Error {}
-
-class HeadChanged extends Error {}
 
 // Kept in their own module so config.ts can validate repository names without
 // Pulling this file, which looks up its own location, into the crew plugin's
@@ -489,7 +486,7 @@ async function inspect(
   command: typeof readCommand,
   checkout: FleetStatusRead,
   statusParent: StatusStorage["parent"],
-): Promise<V1Git | null> {
+): Promise<V1Git | null | "head-moved"> {
   const state = emptyState(now());
   let deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
 
@@ -549,113 +546,113 @@ async function inspect(
       throw new Error("Checkout root unavailable");
     }
 
-    const before = await captureFleetHead(runCommand);
-    const oid = before.oid;
+    const guarded = await guardFleetHead(
+      runCommand,
+      () => deadline,
+      async (before): Promise<V1Git> => {
+        const oid = before.oid;
 
-    const branch = before.ref?.startsWith("refs/heads/")
-      ? before.ref.slice("refs/heads/".length)
-      : null;
+        const branch = before.ref?.startsWith("refs/heads/")
+          ? before.ref.slice("refs/heads/".length)
+          : null;
 
-    const upstream = branch
-      ? await run(
-          "rev-parse",
-          "--verify",
-          "--abbrev-ref",
-          "--symbolic-full-name",
-          "--end-of-options",
-          `${branch}@{upstream}`,
-        )
-      : undefined;
+        const upstream = branch
+          ? await run(
+              "rev-parse",
+              "--verify",
+              "--abbrev-ref",
+              "--symbolic-full-name",
+              "--end-of-options",
+              `${branch}@{upstream}`,
+            )
+          : undefined;
 
-    const base =
-      upstream?.code === 0
-        ? upstream
-        : await run(
-            "symbolic-ref",
-            "--short",
-            "-q",
-            "refs/remotes/origin/HEAD",
-          );
+        const base =
+          upstream?.code === 0
+            ? upstream
+            : await run(
+                "symbolic-ref",
+                "--short",
+                "-q",
+                "refs/remotes/origin/HEAD",
+              );
 
-    const baseRef = base.code === 0 ? base.stdout.trim() : null;
-    deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
-
-    const changed = await checkout.read({
-      directory,
-      head: oid,
-      signal: deadline,
-      run: runCommand,
-      storage: {
-        parent: statusParent,
-        install: snapshotMetadata(directory, deadline, command),
-      },
-      status: (args, env) => {
-        // Snapshot I/O and index inspection have a separate status budget.
+        const baseRef = base.code === 0 ? base.stdout.trim() : null;
         deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
 
-        return runCommand(args, env);
+        const changed = await checkout.read({
+          directory,
+          head: oid,
+          signal: deadline,
+          run: runCommand,
+          storage: {
+            parent: statusParent,
+            install: snapshotMetadata(directory, deadline, command),
+          },
+          status: (args, env) => {
+            // Snapshot I/O and index inspection have a separate status budget.
+            deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
+
+            return runCommand(args, env);
+          },
+        });
+
+        const changedFiles =
+          changed?.code === 0 ? countChangedPaths(changed.stdout) : null;
+
+        if (changedFiles === null) {
+          throw new Error("Git state unavailable");
+        }
+
+        const branchName = branch && safeRef(branch);
+
+        const [remote, head] = await Promise.all([
+          run("remote", "get-url", "origin"),
+          oid ? run("rev-parse", "--short", "--verify", oid) : null,
+        ]);
+
+        const abbreviation = head?.code === 0 ? head.stdout.trim() : "";
+        let counts: ReturnType<typeof parseAheadBehind> = null;
+
+        if (baseRef && oid) {
+          const result = await run(
+            "rev-list",
+            "--left-right",
+            "--count",
+            "--end-of-options",
+            `${baseRef}...${oid}`,
+            "--",
+          );
+
+          counts = result.code === 0 ? parseAheadBehind(result.stdout) : null;
+
+          if (!counts) {
+            throw new Error("Git comparison unavailable");
+          }
+        }
+
+        return {
+          ...state,
+          branch: branchName,
+          head:
+            oid?.startsWith(abbreviation) &&
+            /^[a-f0-9]{4,64}$/.test(abbreviation)
+              ? abbreviation
+              : null,
+          commit: oid ?? null,
+          base: baseRef ? safeRef(baseRef) : null,
+          ...counts,
+          changedFiles,
+          repository:
+            remote.code === 0 ? githubRepository(remote.stdout.trim()) : null,
+          checkedAt: now(),
+        };
       },
-    });
+    );
 
-    const changedFiles =
-      changed?.code === 0 ? countChangedPaths(changed.stdout) : null;
-
-    if (changedFiles === null) {
-      throw new Error("Git state unavailable");
-    }
-
-    const branchName = branch && safeRef(branch);
-
-    const [remote, head] = await Promise.all([
-      run("remote", "get-url", "origin"),
-      oid ? run("rev-parse", "--short", "--verify", oid) : null,
-    ]);
-
-    const abbreviation = head?.code === 0 ? head.stdout.trim() : "";
-    let counts: ReturnType<typeof parseAheadBehind> = null;
-
-    if (baseRef && oid) {
-      const result = await run(
-        "rev-list",
-        "--left-right",
-        "--count",
-        "--end-of-options",
-        `${baseRef}...${oid}`,
-        "--",
-      );
-
-      counts = result.code === 0 ? parseAheadBehind(result.stdout) : null;
-
-      if (!counts) {
-        throw new Error("Git comparison unavailable");
-      }
-    }
-
-    if (!(await fleetHeadMatches(runCommand, before))) {
-      throw new HeadChanged();
-    }
-
-    return {
-      ...state,
-      branch: branchName,
-      head:
-        oid?.startsWith(abbreviation) && /^[a-f0-9]{4,64}$/.test(abbreviation)
-          ? abbreviation
-          : null,
-      commit: oid ?? null,
-      base: baseRef ? safeRef(baseRef) : null,
-      ...counts,
-      changedFiles,
-      repository:
-        remote.code === 0 ? githubRepository(remote.stdout.trim()) : null,
-      checkedAt: now(),
-    };
+    return guarded.kind === "moved" ? "head-moved" : guarded.value;
   } catch (error) {
     signal.throwIfAborted();
-
-    if (error instanceof HeadChanged) {
-      throw error;
-    }
 
     return {
       ...state,
@@ -787,16 +784,16 @@ export function createGitReader(
                 );
 
                 deadline.throwIfAborted();
-                reply.resolve(cacheResult(directory, value));
+                reply.resolve(
+                  value === "head-moved"
+                    ? {
+                        ...emptyState(now()),
+                        error: "Git state unavailable.",
+                      }
+                    : cacheResult(directory, value),
+                );
               } catch (error) {
-                if (error instanceof HeadChanged) {
-                  reply.resolve({
-                    ...emptyState(now()),
-                    error: "Git state unavailable.",
-                  });
-                } else {
-                  reply.reject(error);
-                }
+                reply.reject(error);
               }
             }),
           ),
