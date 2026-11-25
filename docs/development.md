@@ -236,10 +236,13 @@ files and edits before running this secret check manually. The scanner does
 not read Git history, untracked files, or ignored local credentials. Scanner
 output is redacted; do not add real credentials to test the hook. Keep secrets
 outside tracked files and use environment references in configuration.
-GitHub Actions runs this gate and an explicit `mise run check` for pull requests
-and pushes to `main`, using pinned tools and frozen dependency installation.
-The hosted **Quality checks** gate always runs the full suite, plus self-update environment checks. No Slack or provider
-credentials are required.
+GitHub Actions runs this gate for pull requests and pushes to `main`, using
+pinned tools and frozen dependency installation. The hooks run strict typecheck
+and lint but select no tests from the clean index. The hosted **Quality checks**
+gate runs the suite with `mise run test-release-env`, using the same minimal
+environment and hidden temporary directory as self-updates. The Mesij
+integration tests also run with `mise` on `PATH` so they can use the pinned
+binary. No Slack or provider credentials are required.
 
 `check-affected` keeps the strict typecheck and lint. It selects transitive
 importers from private HEAD and Git-index snapshots, not unstaged files.

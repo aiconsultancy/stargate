@@ -55,7 +55,7 @@ name = "Strict TypeScript, Oxlint, and affected tests"
 # Resolve staged dependencies before clearing Git's local environment for tests.
 # Untrusted paths defer to hosted Quality checks by default; select known tests.
 # STARGATE_UNTRUSTED_TESTS=full opts in to a local full run for untrusted paths.
-# Selection errors always run all tests. CI also runs check explicitly.
+# Selection errors always run all tests. CI runs the full suite in the updater environment.
 # Successful selections above 20 files defer to CI unless explicitly forced.
 # See STARGATE_AFFECTED_TEST_LIMIT and STARGATE_FORCE_AFFECTED_TESTS in docs.
 entry = "mise run check-affected"

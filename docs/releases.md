@@ -2,7 +2,8 @@
 
 Stargate publishes releases on [GitHub][releases]. The public release
 sequence starts at `v0.20.3`. Merging to `main` does **not** publish a release.
-Checks, including the self-update environment test, still run on each merge.
+Checks run on each merge. They test the self-update environment and run the
+Mesij integration tests separately with pinned tools.
 The updater reads published GitHub releases, not commits on `main`; merged
 changes wait until a person approves a release.
 
@@ -29,8 +30,7 @@ requires a new quality review. Ask for fresh approval after a rebase even if
 the reviewer can reuse the previous findings.
 
 The release workflow publishes only the current
-`main` commit, and only after **Quality checks**, including the full test suite
-and the self-update environment test, have passed on that commit.
+`main` commit, and only after **Quality checks** have passed on that commit.
 
 ## Prepare release notes
 

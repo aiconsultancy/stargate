@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 
-test("main checks do not invoke a release and retain self-update environment tests", async () => {
+test("main checks do not invoke a release or run a second full suite", async () => {
   const check = await readFile(
     new URL("../.github/workflows/check.yml", import.meta.url),
     "utf8",
@@ -9,7 +9,11 @@ test("main checks do not invoke a release and retain self-update environment tes
 
   expect(check).not.toContain("uses: ./.github/workflows/release.yml");
   expect(check).not.toMatch(/^ {2}release:/m);
+  expect(check).not.toMatch(/^\s+run: mise run check\s*$/m);
   expect(check).toContain("mise run test-release-env");
+  expect(check).toMatch(
+    /^\s+run: mise exec -- bun test tests\/mesij\.test\.ts$/m,
+  );
 });
 
 test("only explicit manual publication crosses the release environment approval gate", async () => {

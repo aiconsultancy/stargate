@@ -36,7 +36,8 @@ Run the smallest relevant test while changing behavior. Commits run strict
 typecheck, lint, and affected tests. Untrusted paths defer to hosted checks by
 default; selection errors still run the full suite. Set
 `STARGATE_UNTRUSTED_TESTS=full` to opt in to full tests for untrusted paths.
-Hosted **Quality checks** explicitly runs the full check before merge.
+Hosted **Quality checks** runs typecheck, lint, the suite in the self-update
+environment, and separate Mesij integration tests with pinned tools.
 For repeated failure measurements and load reporting, see [Repeated test comparisons](docs/development.md#repeated-test-comparisons).
 The affected-test limit defaults to 20 files. Larger selected sets are named
 and deferred to hosted Quality; typecheck and lint still run locally.
