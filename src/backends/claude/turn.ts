@@ -65,18 +65,36 @@ const resultFrame = Schema.Struct({
   api_error_status: Schema.optional(Schema.NullOr(Schema.Finite)),
 });
 
-// Any frame of a tool call: this turn did work.
+const blockType = Schema.Struct({ type: Schema.String });
+
+const contentWith = (type: string) =>
+  Schema.Struct({
+    content: Schema.Array(blockType).check(
+      Schema.makeFilter((blocks) =>
+        blocks.some((block) => block.type === type),
+      ),
+    ),
+  });
+
+// A forwarded preview or text-only child message is not evidence of tool work.
 const toolFrame = Schema.Union([
-  Schema.Struct({ parent_tool_use_id: Schema.String }),
+  Schema.Struct({
+    parent_tool_use_id: Schema.String,
+    type: Schema.optional(Schema.String).check(
+      Schema.makeFilter(
+        (type) =>
+          type !== "assistant" && type !== "user" && type !== "stream_event",
+      ),
+    ),
+  }),
   Schema.Struct({
     type: Schema.Literal("assistant"),
-    message: Schema.Struct({
-      content: Schema.Array(Schema.Struct({ type: Schema.String })).check(
-        Schema.makeFilter((blocks) =>
-          blocks.some((block) => block.type === "tool_use"),
-        ),
-      ),
-    }),
+    message: contentWith("tool_use"),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("user"),
+    parent_tool_use_id: Schema.String,
+    message: contentWith("tool_result"),
   }),
 ]);
 
@@ -86,6 +104,13 @@ const decodeAssistantFrame = Schema.decodeUnknownOption(assistantFrame);
 const decodeInitFrame = Schema.decodeUnknownOption(initFrame);
 const decodeResultFrame = Schema.decodeUnknownOption(resultFrame);
 const isToolFrame = Schema.is(toolFrame);
+
+/** Decoder's decision for this SDK frame, independent of any recorder. */
+export type ClaudeFrameDecision = {
+  changed: boolean;
+  toolEvidence: boolean;
+  resultFallback: string;
+};
 
 /** Fixed causes only; raw SDK, CLI and provider text never leaves here. */
 const knownCauses = new Set([
@@ -161,12 +186,25 @@ export class ClaudeTurn {
     | { ok: false; cause: string; status?: number }
     | undefined;
 
-  /** Returns true when the visible text may have changed. */
-  public add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
-    if (isToolFrame(raw)) {
-      this.worked = true;
-    }
+  public constructor(private readonly visiblePartials = true) {}
 
+  public add(
+    raw: unknown,
+    stage?: (stage: TurnStage) => void,
+  ): ClaudeFrameDecision {
+    const toolEvidence = isToolFrame(raw);
+    this.worked ||= toolEvidence;
+    const prior = this.result;
+    const changed = this.decode(raw, stage);
+
+    return {
+      changed,
+      toolEvidence,
+      resultFallback: prior !== this.result ? this.resultFallback() : "",
+    };
+  }
+
+  private decode(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
     const init = decodeInitFrame(raw);
 
     if (Option.isSome(init)) {
@@ -178,7 +216,9 @@ export class ClaudeTurn {
     const frame = decodeStreamFrame(raw);
 
     if (Option.isSome(frame)) {
-      return this.addStreamEvent(frame.value.event, stage);
+      return (
+        this.visiblePartials && this.addStreamEvent(frame.value.event, stage)
+      );
     }
 
     const assistant = decodeAssistantFrame(raw);
@@ -323,6 +363,10 @@ export class ClaudeTurn {
       .filter(Boolean)
       .join("\n\n");
 
-    return text || (this.result?.ok ? this.result.text : "");
+    return text || this.resultFallback();
+  }
+
+  private resultFallback() {
+    return this.complete.size === 0 && this.result?.ok ? this.result.text : "";
   }
 }

@@ -65,8 +65,8 @@ type StoredTurn = {
   session?: V1ActivityTurn["session"];
   usage?: ActivityUsage;
   items: Map<string, StoredItem>;
-  /** Serialized size, measured once when the turn ends. */
-  bytes: number;
+  /** Cached serialized size; a write invalidates it. */
+  bytes?: number;
 };
 
 /** One coalesced change, encoded once for every viewer of its agent. */
@@ -300,6 +300,22 @@ function mark(
   }
 }
 
+function measuredBytes(turn: StoredTurn) {
+  try {
+    return (turn.bytes ??= Buffer.byteLength(
+      JSON.stringify({
+        requests: turn.requests,
+        session: turn.session,
+        usage: usage(turn),
+        items: [...turn.items.values()].map((item) => itemJson(item)),
+      }),
+    ));
+  } catch {
+    // Unmeasurable data cannot be retained inside a bounded settled family.
+    return (turn.bytes = Infinity);
+  }
+}
+
 /** Evict settled families together so a retained child never loses its parent. */
 function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
   type Family = {
@@ -333,7 +349,6 @@ function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
         family.endedAt === null || turn.endedAt === null
           ? null
           : Math.max(family.endedAt, turn.endedAt);
-      family.bytes += turn.bytes;
       families.set(turn.root, family);
     }
 
@@ -345,6 +360,10 @@ function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
       }
 
       if (excess <= 0) {
+        family.bytes = family.turns.reduce(
+          (bytes, turn) => bytes + measuredBytes(turn),
+          0,
+        );
         ended.push(family);
 
         continue;
@@ -451,7 +470,6 @@ export function createActivityHub(
       requests: requests.map(({ channel, msgid }) => ({ channel, msgid })),
       ...(session && { session }),
       items: new Map(),
-      bytes: 0,
     };
 
     owner.turns.push(turn);
@@ -467,10 +485,23 @@ export function createActivityHub(
     const keys = new Map<string, StoredItem>();
 
     const touch = (at: number) => {
+      delete turn.bytes;
       turn.seq = ++owner.seq;
       turn.updatedAt = Math.max(turn.updatedAt, at);
 
       return turn.seq;
+    };
+
+    const evictAfterLateWrite = () => {
+      if (
+        turn.endedAt !== null &&
+        owner.turns.includes(turn) &&
+        !owner.turns.some(
+          (other) => other.root === turn.root && other.endedAt === null,
+        )
+      ) {
+        evict(agents, limits);
+      }
     };
 
     const changed = (at: number) => {
@@ -505,6 +536,7 @@ export function createActivityHub(
             turn.items.set(item.id, item);
           }
 
+          delete turn.bytes;
           change?.(item.value);
           item.seq = touch(at);
           item.updatedAt = Math.max(item.updatedAt, at);
@@ -525,15 +557,19 @@ export function createActivityHub(
           );
         } catch {
           /* Never affects the turn. */
+        } finally {
+          evictAfterLateWrite();
         }
       },
       reconnected() {
         turn.reconnects += 1;
         changed(now());
+        evictAfterLateWrite();
       },
       setUsage(usage) {
         turn.usage = usage;
         changed(now());
+        evictAfterLateWrite();
       },
       child(callId, sessionId) {
         return begin(
@@ -552,19 +588,6 @@ export function createActivityHub(
         turn.status = outcome;
         turn.endedAt = at;
         changed(at);
-
-        try {
-          turn.bytes = Buffer.byteLength(
-            JSON.stringify({
-              requests: turn.requests,
-              session: turn.session,
-              usage: usage(turn),
-              items: [...turn.items.values()].map((item) => itemJson(item)),
-            }),
-          );
-        } catch {
-          turn.bytes = 0;
-        }
 
         evict(agents, limits);
       },

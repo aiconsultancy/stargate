@@ -499,6 +499,17 @@ async function answer(text: string) {
     return result("success", false, "result-only reply");
   }
 
+  if (text === "reply dropped after error") {
+    assistant("msg_dropped", { type: "text", text: "former reply" });
+    assistant(
+      "msg_dropped",
+      { type: "text", text: "synthetic error" },
+      "rate_limit",
+    );
+
+    return result("success", false, "fallback after error");
+  }
+
   if (text === "streamed partial reply") {
     // The preview stops at "hel"; no assistant message completes it.
     stream({ type: "message_start", message: { id: "msg_partial" } });

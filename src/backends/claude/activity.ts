@@ -15,6 +15,7 @@ import type {
   TurnActivityLog,
   TurnActivityRecorder,
 } from "../backend";
+import type { ClaudeFrameDecision } from "./turn";
 
 type Step = Extract<ActivityItem, { kind: "step" }>;
 
@@ -91,8 +92,6 @@ class Thread {
   private readonly messages = new Map<string, Message>();
   private streaming: Message | undefined;
   public ended = false;
-  /** A completed assistant message carried reply text, as `answer()` needs. */
-  public replied = false;
   public background = false;
   public observedOutcome: ActivityOutcome | undefined;
 
@@ -203,11 +202,6 @@ class Thread {
 
         if (mode === "final" || mode === "stop" || mode === "redacted") {
           item.status = "completed";
-        }
-
-        // As for the reply, a stream preview alone never counts.
-        if (kind === "text" && mode === "final" && item.text !== "") {
-          this.replied = true;
         }
       },
     );
@@ -699,7 +693,7 @@ export class ClaudeActivity {
     }
   }
 
-  private result(frame: SDKResultMessage, at: number) {
+  private result(frame: SDKResultMessage, at: number, fallback: string) {
     for (const denied of frame.permission_denials ?? []) {
       const call = this.calls.get(denied.tool_use_id);
 
@@ -714,20 +708,12 @@ export class ClaudeActivity {
 
     const root = this.root;
 
-    // The reply falls back to the result's text only when no text was sent.
-    if (
-      frame.subtype === "success" &&
-      !frame.is_error &&
-      typeof frame.result === "string" &&
-      frame.result !== "" &&
-      !root.replied
-    ) {
+    if (fallback) {
       root.log.update("result:text", at, () => ({
         kind: "text",
         status: "completed",
-        text: frame.result,
+        text: fallback,
       }));
-      root.replied = true;
     }
 
     const errors =
@@ -769,38 +755,12 @@ export class ClaudeActivity {
     }
   }
 
-  /** Do not count collection-only frames as reply or tool-execution evidence. */
-  public replyFrame(frame: SDKMessage, visiblePartials: boolean): boolean {
-    try {
-      if (frame.type === "stream_event") {
-        return visiblePartials && frame.parent_tool_use_id === null;
-      }
-
-      if (frame.type === "assistant" && frame.parent_tool_use_id !== null) {
-        return frame.message.content.some((block) => block.type === "tool_use");
-      }
-
-      if (frame.type === "user" && frame.parent_tool_use_id !== null) {
-        const content = frame.message.content;
-
-        return (
-          typeof content !== "string" &&
-          content.some((block) => block.type === "tool_result")
-        );
-      }
-    } catch {
-      // Leave malformed frames to the existing reply decoder.
-    }
-
-    return true;
-  }
-
-  public add(frame: SDKMessage) {
+  public add(frame: SDKMessage, decision: ClaudeFrameDecision) {
     try {
       const at = Date.now();
 
       if (frame.type === "result") {
-        this.result(frame, at);
+        this.result(frame, at, decision.resultFallback);
       } else if (frame.type === "system") {
         switch (frame.subtype) {
           case "permission_denied":

@@ -601,22 +601,20 @@ export class ClaudeBackend implements AgentBackend {
         spawnClaudeCodeProcess: (spawn) => this.spawn(run, spawn),
       };
 
-      const turn = new ClaudeTurn();
+      const turn = new ClaudeTurn(visiblePartials);
       let settle: ReturnType<typeof setTimeout> | undefined;
 
       try {
         for await (const frame of query({ prompt: messages(), options })) {
-          const changed =
-            (!activity || activity.replyFrame(frame, visiblePartials)) &&
-            turn.add(frame, stage);
+          const decision = turn.add(frame, stage);
 
           if (turn.session !== undefined && turn.session !== id) {
             throw new ClaudeTurnError("Claude session identity changed");
           }
 
-          activity?.add(frame);
+          activity?.add(frame, decision);
 
-          if (changed && onText) {
+          if (decision.changed && onText) {
             const visible = turn.visible();
 
             if (visible) {

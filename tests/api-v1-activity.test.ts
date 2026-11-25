@@ -534,6 +534,61 @@ test("a settled family over a global limit on its own goes first", () => {
   expect(snapshot(byBytes, "captain").turns).toHaveLength(1);
 });
 
+test.each([false, true])(
+  "a late nested-task update counts toward family eviction (root settled: %s)",
+  (settled) => {
+    const hub = createActivityHub({ bytes: 1000 });
+    hub.recorder("captain").begin().end("completed");
+    const root = hub.recorder("claude").begin(undefined, "root");
+    const child = root.child?.("outer", "child");
+
+    if (!child) {
+      throw new Error("Expected a child writer");
+    }
+
+    child.update("nested", 1, () => ({
+      kind: "tool",
+      name: "Agent",
+      callId: "nested",
+      status: "running",
+      rawInput: "",
+      input: null,
+      executed: true,
+      metadata: null,
+      content: null,
+      error: null,
+    }));
+    child.end("completed");
+
+    if (settled) {
+      root.end("completed");
+    }
+
+    expect(snapshot(hub, "claude").turns).toHaveLength(2);
+    const description = "x".repeat(5000);
+    child.update(
+      "nested",
+      2,
+      () => text("unexpected new item"),
+      (item) => {
+        if (item.kind === "tool") {
+          item.metadata = { task: { description, status: "completed" } };
+        }
+      },
+    );
+
+    if (!settled) {
+      expect(snapshot(hub, "claude").turns[1]?.items[0]).toMatchObject({
+        metadata: { task: { description } },
+      });
+      root.end("completed");
+    }
+
+    expect(snapshot(hub, "claude").turns).toEqual([]);
+    expect(snapshot(hub, "captain").turns).toHaveLength(1);
+  },
+);
+
 test("activity reads validate the agent and every parameter", () => {
   const hub = createActivityHub();
   const log = hub.recorder("captain").begin();

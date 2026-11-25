@@ -487,6 +487,34 @@ test("ran evidence on a failed turn is the same with and without Claude activity
   }
 });
 
+test("Claude activity records the reply decoder's fallback after an error drops completed text", async () => {
+  const hub = createActivityHub();
+  const recorded = await open({}, undefined, {}, hub.recorder("officer"));
+  const plain = await open();
+  const prompt = "reply dropped after error";
+
+  const answer = await recorded.backend.prompt(
+    await session(recorded.backend),
+    prompt,
+    signal(),
+  );
+
+  expect(answer).toBe("fallback after error");
+  expect(
+    await plain.backend.prompt(await session(plain.backend), prompt, signal()),
+  ).toBe(answer);
+  expect(hub.turns("officer")?.turns[0]).toMatchObject({
+    status: "completed",
+    items: expect.arrayContaining([
+      expect.objectContaining({
+        kind: "text",
+        status: "completed",
+        text: answer,
+      }),
+    ]),
+  });
+});
+
 test("Claude result text and errors reach activity, without repeating a reply", async () => {
   const hub = createActivityHub();
   const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
@@ -1263,7 +1291,7 @@ test("Claude frames preserve optional fields, safe indices and finite statuses",
           index,
           content_block: { type: "text", extra: 1 },
         }),
-      ),
+      ).changed,
     ).toBe(accepted);
     expect(
       turn.add(
@@ -1272,7 +1300,7 @@ test("Claude frames preserve optional fields, safe indices and finite statuses",
           index,
           delta: { type: "text_delta", text: "visible", extra: 1 },
         }),
-      ),
+      ).changed,
     ).toBe(accepted);
     expect(turn.visible()).toBe(accepted ? "visible" : "");
   }
