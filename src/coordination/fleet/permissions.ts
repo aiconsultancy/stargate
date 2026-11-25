@@ -10,6 +10,7 @@ type FleetAction =
   | "fleet_verify_instruction"
   | "fleet_dispatch"
   | "fleet_status"
+  | "fleet_peer_message"
   | "fleet_answer_offer";
 
 type ReviewAction = "fleet_review";
@@ -20,6 +21,7 @@ const actions: readonly (FleetAction | ReviewAction)[] = [
   "fleet_status",
   "fleet_review",
   "fleet_answer_offer",
+  "fleet_peer_message",
 ];
 
 // Deliberately smaller than a general native glob language. Punctuation that
@@ -111,6 +113,8 @@ export function fleetRequestAction(request: FleetRequest): {
       };
     case "dispatch":
       return { action: "fleet_dispatch", resource: request.input.target };
+    case "peer-message":
+      return { action: "fleet_peer_message", resource: request.input.to };
     case "status":
       return {
         action: "fleet_status",

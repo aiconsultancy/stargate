@@ -201,7 +201,13 @@ export interface AgentBackend {
     messageID: string,
     inputID: string,
     signal: AbortSignal,
-    expected?: { agent: string; id: string; tool: string; input: unknown },
+    expected?: {
+      agent: string;
+      id: string;
+      tool: string;
+      input: unknown;
+      normaliseInput?: (raw: unknown) => unknown;
+    },
   ): Promise<boolean>;
   pendingPermissions?(
     sessionID: string,

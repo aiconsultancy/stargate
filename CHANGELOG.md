@@ -4,7 +4,7 @@
 
 ### Feature flags
 
-- New flags: `usageGuard.enabled`, default off.
+- New flags: `usageGuard.enabled`, default off. OpenCode captain peer DMs require the fleet plugin option `peerMessages` (default off) and an explicit gateway grant.
 - Default changes: the `stargate.crew` plugin's `feedbackEnabled` option changes
   from off to on for pinned teams. Submit and captain review still require
   separate native permissions.

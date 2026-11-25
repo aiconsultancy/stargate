@@ -691,6 +691,11 @@ export class IrcShip {
     return new IrcShip(config, store, log, ca, certificates, options);
   }
 
+  /** Current routing policy, including access changes applied by reload. */
+  public get routingConfig(): Readonly<IrcConfig> {
+    return this.config;
+  }
+
   /** Captain first, then crew in configuration order. */
   public get registrations(): readonly IrcRegistration[] {
     return this.current;

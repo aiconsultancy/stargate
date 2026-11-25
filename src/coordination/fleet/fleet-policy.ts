@@ -102,7 +102,7 @@ export function fleetInstructions(
           "Use an interactive clarification form only in a verified human IRC turn that supports the question bridge. For peer, crew, or scheduled work, report a decision you need in the normal reply or task result and finish the turn so the session can accept another request.",
         ]
       : []),
-    "stargate_mail and stargate_dm address your configured captain/crew team, not other ships or a rear admiral.",
+    "stargate_mail and plain stargate_dm address your local captain and crew.",
     "When crew need the status of another member's task, have them ask their own captain. The captain checks the task with the existing crew tools and relays the relevant status or blocker. Keep detailed session contents private.",
     rolePolicyLine(policy.role),
     ...(transport === "irc" && policy.role === "captain"

@@ -267,3 +267,19 @@ callbacks, with no provider calls:
 ```sh
 bun test tests/fleet-tools.test.ts tests/fleet-results.test.ts
 ```
+
+## Enable captain peer messages
+
+Load the captain's OpenCode crew plugin before the fleet plugin and set
+`peerMessages: true` in the fleet plugin options. Allow `fleet_peer_message` on the gateway
+for the exact fleet target IDs that captain may contact. The existing native
+`stargate_mail` grant still governs use of the crew tool. The gateway requires
+a pinned active native tool call, an enrolled captain target and a joined,
+permitted channel. Set the target's `role` to `captain`. Provide
+`fleetChannels.command` if command-channel routing is needed.
+
+With `peerMessages` enabled, `stargate_dm` advertises `via: "ship"` or
+`via: "command"` for cross-ship chat. Send 1–1,800 characters on one line,
+without `@` or control characters. Omit `via` for local-team mail.
+Fleet peer messages carry agent identity and no approval authority. Use
+`fleet_dispatch` for work that needs a retained instruction or review context.

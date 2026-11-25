@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { effectiveIrcConfig, ircSchema } from "../src/config";
+import { sendFleetPeerMessage } from "../src/coordination/fleet/fleet-irc";
+import { peerMessageInputSchema } from "../src/coordination/fleet/protocol";
 import { fleetInstructions } from "../src/coordination/fleet/fleet-policy";
 import {
   fold,
@@ -74,6 +76,187 @@ function input(account = "discovery") {
   };
 }
 
+test("peer DM uses the verified current nick and sends only to the selected room", async () => {
+  const config = effective(input());
+
+  const target = config.fleetControl?.targets.find(
+    ({ id }) => id === "phoenix",
+  );
+
+  if (!target) {
+    throw new Error("Missing test target");
+  }
+
+  const sent: [string, string][] = [];
+
+  const client = {
+    fold,
+    inChannel: (channel: string) => config.channels.includes(channel),
+    verifiedNick: async (account: string) => {
+      expect(account).toBe("phoenix");
+
+      return "phoenix-current";
+    },
+    recipientGuard: () => () => true,
+    waitReady: async () => {},
+    budget: () => 300,
+    multiline: undefined,
+    privmsg: async (
+      channel: string,
+      text: string,
+      _tags?: Record<string, string>,
+      guard?: () => boolean,
+    ) => {
+      expect(guard?.()).toBe(true);
+      sent.push([channel, text]);
+    },
+    sendBatch: async () => {
+      throw new Error("Expected one message");
+    },
+  };
+
+  for (const via of ["ship", "command"]) {
+    const message = Schema.decodeUnknownSync(peerMessageInputSchema)({
+      op: "send",
+      to: "phoenix",
+      text: "Hello from Discovery",
+      via,
+    });
+
+    await sendFleetPeerMessage(
+      () => config,
+      client,
+      target,
+      message,
+      () => true,
+      AbortSignal.timeout(1000),
+    );
+  }
+
+  expect(sent).toEqual([
+    ["#phoenix", "@phoenix @phoenix-current: Hello from Discovery"],
+    ["#command", "@phoenix @phoenix-current: Hello from Discovery"],
+  ]);
+
+  const message = Schema.decodeUnknownSync(peerMessageInputSchema)({
+    op: "send",
+    to: "phoenix",
+    text: "Hello",
+    via: "command",
+  });
+
+  const denied = {
+    ...config,
+    access: { ...config.access, deniedChannels: ["#command"] },
+  };
+
+  await expect(
+    sendFleetPeerMessage(
+      () => denied,
+      client,
+      target,
+      message,
+      () => true,
+      AbortSignal.timeout(1000),
+    ),
+  ).rejects.toThrow("unavailable");
+
+  expect(() =>
+    Schema.decodeUnknownSync(peerMessageInputSchema)({
+      op: "send",
+      to: "phoenix",
+      text: "Also @prometheus",
+      via: "command",
+    }),
+  ).toThrow();
+  let live = config;
+
+  const reloading = {
+    ...client,
+    async verifiedNick(account: string) {
+      const nick = await client.verifiedNick(account);
+      live = denied;
+
+      return nick;
+    },
+  };
+
+  await expect(
+    sendFleetPeerMessage(
+      () => live,
+      reloading,
+      target,
+      message,
+      () => true,
+      AbortSignal.timeout(1000),
+    ),
+  ).rejects.toThrow("no longer allowed");
+
+  expect(sent).toHaveLength(2);
+});
+
+test("a peer DM wakes only its explicitly addressed captain, even when the body names another", () => {
+  for (const results of [true, false]) {
+    const receive = (
+      account: string,
+      currentNick: string,
+      channel: string,
+      text = "@phoenix @phoenix-current: Please ask prometheus",
+    ) => {
+      const raw = input(account);
+
+      const config = effective({
+        ...raw,
+        fleetControl: { ...raw.fleetControl, results },
+      });
+
+      const message = parseMessage(
+        formatMessage("PRIVMSG", [channel, text], {
+          account: "discovery",
+          bot: "",
+          msgid: "peer-dm-single-recipient",
+        }).replace(/^(@\S+ )/, "$1:discovery!u@fixture "),
+      );
+
+      if (!message) {
+        throw new Error("Invalid IRC fixture");
+      }
+
+      return routeIrcMessage(message, {
+        config,
+        member: {
+          id: account,
+          key: account,
+          account,
+          nick: account,
+          channels: config.channels,
+          role: "captain",
+        },
+        currentNick,
+        fold,
+        now: () => 1,
+        sent: () => false,
+        joined: () => true,
+      });
+    };
+
+    for (const channel of ["#phoenix", "#command"]) {
+      expect(receive("phoenix", "phoenix-current", channel)?.sender).toBe(
+        "captain",
+      );
+      expect(receive("prometheus", "prometheus", channel)).toBeUndefined();
+      expect(
+        receive(
+          "prometheus",
+          "prometheus",
+          channel,
+          "@alice: can @prometheus check this?",
+        )?.sender,
+      ).toBe("captain");
+    }
+  }
+});
+
 test("configured fleet defaults join only enrolled target channels and apply role-aware wake rules", () => {
   for (const account of [
     "vance",
@@ -114,7 +297,7 @@ test("configured fleet defaults join only enrolled target channels and apply rol
     }
 
     expect(fleetInstructions(config.fleetPolicy)).toContain(
-      "stargate_mail and stargate_dm address your configured captain/crew team",
+      "stargate_mail and plain stargate_dm address your local captain and crew",
     );
   }
 });

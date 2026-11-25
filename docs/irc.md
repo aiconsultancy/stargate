@@ -524,10 +524,18 @@ the rear admiral already listens. Captains can then tag the rear admiral there,
 without joining its private home or broadcasting a human request in command.
 Set every known target's explicit `role` (`captain` or `rear_admiral`) in the new
 fleet setup; role metadata guides membership and grants no human authority.
-`stargate_mail` and `stargate_dm` address the local captain/crew team. For
-cross-fleet contact, read `fleet_status` for actual target IDs and use
+`stargate_mail` and ordinary `stargate_dm` calls address the local team.
+OpenCode captains with fleet peer messaging enabled can use
+`stargate_dm({"op":"send","to":"captain-two","text":"Can you confirm the test result?","via":"ship"})`.
+The gateway sends one tagged IRC message to that captain's configured ship
+channel. Use `via: "command"` to send it in the configured fleet command channel.
+The gateway verifies the recipient's current nick and adds the only mention.
+Keep the message body free of `@` characters. A send receipt confirms transport
+only. Inspect the channel before sending again after an uncertain outcome.
+
+For formal work or review assignments, read `fleet_status` for target IDs and use
 `fleet_dispatch` with the retained original source and a stable request ID.
-An unknown outcome is inspected and never resent under a new ID.
+Inspect an unknown dispatch outcome with the original ID.
 
 ### Peer captains
 

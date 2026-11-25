@@ -61,10 +61,17 @@ import { sendDispatchAnswer } from "../coordination/fleet/dispatch/irc";
 import { startAgentDispatch } from "../coordination/fleet/dispatch/start";
 import type { SubspaceAgentsHost } from "../subspace/start";
 import { abortable } from "../lib/effect";
-import { FleetControl } from "../coordination/fleet/control";
+import {
+  FleetControl,
+  type FleetControlOptions,
+} from "../coordination/fleet/control";
 import { fleetRequestAction } from "../coordination/fleet/permissions";
+import { peerMessageInputSchema } from "../coordination/fleet/protocol";
 import { FleetResults, fleetOrigin } from "../coordination/fleet/results";
-import { sendFleetAssignment } from "../coordination/fleet/fleet-irc";
+import {
+  sendFleetAssignment,
+  sendFleetPeerMessage,
+} from "../coordination/fleet/fleet-irc";
 import { Gateway } from "../gateway/gateway";
 import type { TransportDelivery } from "../gateway/ports";
 import { createHealthReader } from "../observability/health/health";
@@ -122,6 +129,55 @@ import {
   type UpdateSnapshot,
   buildUpdateSnapshot,
 } from "../automation/maintenance/update-notice";
+
+const normalisePeerInput = Schema.decodeUnknownSync(peerMessageInputSchema, {
+  onExcessProperty: "error",
+});
+
+/** Bind fleet calls to an executing native input and matching tool payload. */
+function fleetAuthorizer(
+  store: Pick<Store, "permissionCandidates">,
+  backend: Pick<AgentBackend, "toolBelongsToInput">,
+  pin: string,
+  keys: readonly string[],
+): FleetControlOptions["authorize"] {
+  return async (caller, signal, request) => {
+    const { action } = fleetRequestAction(request);
+    const peerMessage = request.operation === "peer-message";
+
+    const expected = {
+      agent: caller.agent,
+      id: caller.id,
+      tool: peerMessage ? "stargate_dm" : action,
+      input: request.input,
+      ...(peerMessage && { normaliseInput: normalisePeerInput }),
+    };
+
+    for (const key of keys) {
+      for (const job of store.permissionCandidates(key)) {
+        if (
+          job.input &&
+          (await backend.toolBelongsToInput?.(
+            pin,
+            caller.messageID,
+            job.input,
+            signal,
+            expected,
+          ))
+        ) {
+          return {
+            botKey: job.botKey,
+            eventId: job.eventId,
+            sessionID: pin,
+            inputID: job.input,
+          };
+        }
+      }
+    }
+
+    throw new Error("Fleet caller is not an active native input");
+  };
+}
 
 export function lockInstance(path: string) {
   const lock = new Database(path, { create: true });
@@ -1036,41 +1092,10 @@ export function serve(
                         Promise.reject(new Error("Review backend unavailable")),
                     },
                   }),
-                authorize: async (caller, signal, request) => {
-                  const { action } = fleetRequestAction(request);
-
-                  for (const key of [
-                    primary.key,
-                    ...relatedTeams.map((team) => team.key),
-                  ]) {
-                    for (const job of store.permissionCandidates(key)) {
-                      if (
-                        job.input &&
-                        (await entry.resource.backend.toolBelongsToInput?.(
-                          pin,
-                          caller.messageID,
-                          job.input,
-                          signal,
-                          {
-                            agent: caller.agent,
-                            id: caller.id,
-                            tool: action,
-                            input: request.input,
-                          },
-                        ))
-                      ) {
-                        return {
-                          botKey: job.botKey,
-                          eventId: job.eventId,
-                          sessionID: pin,
-                          inputID: job.input,
-                        };
-                      }
-                    }
-                  }
-
-                  throw new Error("Fleet caller is not an active native input");
-                },
+                authorize: fleetAuthorizer(store, entry.resource.backend, pin, [
+                  primary.key,
+                  ...relatedTeams.map((team) => team.key),
+                ]),
                 send: async (target, text, signal) => {
                   await sendFleetAssignment(
                     primary.client,
@@ -1080,6 +1105,15 @@ export function serve(
                     signal,
                   );
                 },
+                peerMessage: (target, input, signal) =>
+                  sendFleetPeerMessage(
+                    () => ship.routingConfig,
+                    primary.client,
+                    target,
+                    input,
+                    () => open,
+                    signal,
+                  ),
                 answer: (offer, answer, reason, signal) =>
                   sendDispatchAnswer(
                     primary.client,

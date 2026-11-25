@@ -290,8 +290,9 @@ function addressedToFleetPeer(
   currentNick: string,
   text: string,
   caseFold: Fold,
+  exactLeading = false,
 ) {
-  if (!config.fleetControl?.results) {
+  if (!config.fleetControl || (!config.fleetControl.results && !exactLeading)) {
     return false;
   }
 
@@ -330,7 +331,10 @@ function addressedToFleetPeer(
     return false;
   }
 
-  return withoutAddress(body, peers, caseFold, true) !== body;
+  return (
+    (exactLeading && peers.some((name) => invited.includes(caseFold(name)))) ||
+    withoutAddress(body, peers, caseFold, true) !== body
+  );
 }
 
 /**
@@ -408,6 +412,7 @@ export function ircResultJobAllowed(
         recipient ?? member.nick,
         job.text,
         caseFold,
+        true,
       )
     );
   }
@@ -626,7 +631,14 @@ export function routeIrcMessage(
     (human || fleetPeer) &&
     !humanWake &&
     !(protectedHuman && currentMention) &&
-    addressedToFleetPeer(config, member, context.currentNick, body, caseFold)
+    addressedToFleetPeer(
+      config,
+      member,
+      context.currentNick,
+      body,
+      caseFold,
+      fleetPeer === true,
+    )
   ) {
     return;
   }

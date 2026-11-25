@@ -423,6 +423,22 @@ export const dispatchInputSchema = settingsStruct({
 
 export type DispatchInput = typeof dispatchInputSchema.Type;
 
+export const peerDestinationSchema = Schema.Literals(["ship", "command"]);
+
+export const peerMessageInputSchema = settingsStruct({
+  op: Schema.Literal("send"),
+  to: identifier,
+  text: Schema.Trim.check(
+    Schema.isMinCodePoints(1),
+    Schema.isMaxCodePoints(1800),
+    Schema.makeFilter((text) => !/[@\p{Cc}]/u.test(text)),
+  ),
+  via: peerDestinationSchema,
+  delivery: Schema.Literal("steer").pipe(settingsDefault("steer")),
+});
+
+export type PeerMessageInput = typeof peerMessageInputSchema.Type;
+
 export const statusInputSchema = settingsStruct({
   requestID: Schema.optional(identifier),
 });
@@ -483,6 +499,11 @@ export const requestSchema = settingsDiscriminatedUnion("operation", [
     operation: Schema.Literal("dispatch"),
     caller: callerSchema,
     input: dispatchInputSchema,
+  }),
+  settingsStruct({
+    operation: Schema.Literal("peer-message"),
+    caller: callerSchema,
+    input: peerMessageInputSchema,
   }),
   settingsStruct({
     operation: Schema.Literal("status"),
