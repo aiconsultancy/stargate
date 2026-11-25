@@ -12,7 +12,6 @@ import {
 import {
   type Attachment,
   type PublishedFile,
-  chatUploadReference,
   checkAttachments,
   parseAttachments,
 } from "../chat/attachments/attachments";
@@ -32,6 +31,7 @@ import type { BotConfig } from "../config";
 import { abortable, runAbortable } from "../lib/effect";
 import { fleetResultSource } from "../coordination/fleet/fleet-source";
 import type {
+  AttachmentInput,
   GatewayAccessContext,
   GatewayTransport,
   RequestOutcome,
@@ -184,6 +184,12 @@ export type GatewayConfig =
       | "transcription"
     > & { steerThreadFollowUps?: boolean });
 
+function statusText(job: Job, cause: RequestFailure) {
+  return job.deferDelivery && cause === "history"
+    ? "The agent finished, but its public reply is not yet readable in session history. Stargate will retain it locally when it becomes readable. The request was not repeated."
+    : failureText(cause);
+}
+
 /** The failure a thrown error names when no signal ended the turn. */
 function errorFailure(error: unknown): RequestFailure {
   if (error instanceof BackendFailure) {
@@ -199,7 +205,7 @@ function errorFailure(error: unknown): RequestFailure {
   }
 
   if (error instanceof AttachmentInputUnavailable) {
-    return "attachments";
+    return error.failure;
   }
 
   if (error instanceof TranscriptionUnavailable) {
@@ -1920,37 +1926,15 @@ export class Gateway {
     }
   }
 
-  private statusText(
-    job: Job,
-    surface: GatewayTransport["name"],
-    cause: RequestFailure,
-  ) {
-    if (job.deferDelivery && cause === "history") {
-      return "The agent finished, but its public reply is not yet readable in session history. Stargate will retain it locally when it becomes readable. The request was not repeated.";
-    }
+  private attachmentInput(jobId: number): AttachmentInput {
+    const ids = this.store.attachmentRecords.inputFiles(jobId);
 
-    if (
-      cause === "attachments" &&
-      surface === "irc" &&
-      this.store.attachmentRecords
-        .inputFiles(job.id)
-        .some((id) => chatUploadReference.test(id))
-    ) {
-      return "Stargate could not pass the shared files to the agent. Check IRC file input, access to the original files, and the model's supported file types. Subspace uploads expire after 30 days. Automatic delivery accepts up to 10 MiB per file and 25 MiB total. No agent turn was started.";
-    }
-
-    return failureText(cause);
-  }
-
-  private inputFileIDs(job: number, surface: GatewayTransport["name"]) {
-    const fileIDs = this.store.attachmentRecords.inputFiles(job);
-
-    if (surface === "irc" && !this.backend.supportsAttachments) {
-      // A text-only officer can read the original reference with its Subspace tool.
-      return fileIDs.filter((id) => !chatUploadReference.test(id));
-    }
-
-    return fileIDs;
+    return (
+      this.slack.attachmentInput?.(
+        ids,
+        this.backend.supportsAttachments === true,
+      ) ?? { ids }
+    );
   }
 
   private async processTurn(
@@ -2336,14 +2320,18 @@ export class Gateway {
             );
           }
 
-          const fileIDs = this.inputFileIDs(job.id, transport.name);
+          const { ids: fileIDs, failure: attachmentFailure } =
+            this.attachmentInput(job.id);
 
           let inputFiles: Attachment[] = [];
 
           // A spoken-mention gate already transcribed this message.
           if (heard) {
             if (heard.files.length > 0 && !this.backend.supportsAttachments) {
-              throw new AttachmentInputUnavailable();
+              throw new AttachmentInputUnavailable(
+                "Attachment input unavailable",
+                attachmentFailure,
+              );
             }
 
             inputFiles = heard.files;
@@ -2382,7 +2370,10 @@ export class Gateway {
               }
             } catch {
               signal.throwIfAborted();
-              throw new AttachmentInputUnavailable();
+              throw new AttachmentInputUnavailable(
+                "Attachment input unavailable",
+                attachmentFailure,
+              );
             }
 
             signal.throwIfAborted();
@@ -2516,7 +2507,7 @@ export class Gateway {
 
           if (deferred) {
             failure = "history";
-            output = [this.statusText(job, transport.name, failure)];
+            output = [statusText(job, failure)];
           } else {
             output =
               (reacted || silent) && !answer.trim()
@@ -2570,8 +2561,8 @@ export class Gateway {
           );
           output = [
             failure === "timeout" && observeProgress
-              ? `${this.statusText(job, transport.name, failure)} ${turnProgressText(progress)}`
-              : this.statusText(job, transport.name, failure),
+              ? `${statusText(job, failure)} ${turnProgressText(progress)}`
+              : statusText(job, failure),
           ];
           transcript = undefined;
 
@@ -2630,7 +2621,7 @@ export class Gateway {
 
           if (!reactionDelivered) {
             failure = "reaction";
-            output = [this.statusText(job, transport.name, failure)];
+            output = [statusText(job, failure)];
           }
         }
 
@@ -2654,7 +2645,7 @@ export class Gateway {
           failure = "history";
           output = this.store.respond(
             job.id,
-            [this.statusText(job, transport.name, failure)],
+            [statusText(job, failure)],
             failure,
           );
           this.queueTranscript(this.catchUpKey(job.conversation));

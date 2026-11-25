@@ -5,7 +5,10 @@ import { chmod, chown, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Effect, Schema } from "effect";
 import type { AgentBackend } from "../src/backends/backend";
-import type { Attachment } from "../src/chat/attachments/attachments";
+import {
+  type Attachment,
+  maxAttachmentBytes,
+} from "../src/chat/attachments/attachments";
 import {
   type BackendConfig,
   type BotConfig,
@@ -411,6 +414,66 @@ test("an addressed IRC upload reaches the officer's turn through that officer's 
     "expired file notice",
   );
   expect(requests).toHaveLength(1);
+});
+
+test("the upload reader refuses inconsistent metadata and unverified bytes", async () => {
+  const stub = stubApi();
+  const socketPath = await officerSocket();
+  const reference = "UPL-AQEBAQEBAQEBAQEBAQEBAQ";
+  const bytes = "shared plan";
+
+  const metadata = {
+    reference,
+    fileName: "plan.txt",
+    contentType: "text/plain",
+    sizeBytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+
+  const { log } = capturedLog();
+
+  const started = await startSubspaceAgents({
+    config: section(stub.url, [captain("captain-a", { socketPath })]),
+    dataDirectory: await privateDirectory(),
+    irc: [{ id: "ship-a", account: "captain-a" }],
+    log,
+    env,
+    ownership,
+  });
+
+  cleanup.push(() => started.close());
+  const read = started.upload("ship-a");
+
+  if (!read) {
+    throw new Error("Missing upload reader");
+  }
+
+  for (const [changes, body, error] of [
+    [{ reference: "UPL-AgICAgICAgICAgICAgICAg" }, null, "invalid metadata"],
+    [{ sizeBytes: 0 }, null, "invalid metadata"],
+    [{ sizeBytes: maxAttachmentBytes + 1 }, null, "exceeds the size limit"],
+    [{ sizeBytes: bytes.length + 1 }, bytes, "did not match its metadata"],
+    [{ sizeBytes: bytes.length - 1 }, bytes, "Response too large"],
+    [{ sha256: "0".repeat(64) }, bytes, "did not match its metadata"],
+  ] as const) {
+    const reads: string[] = [];
+    stub.handler = (request) => {
+      if (request.path === enrol) {
+        return enrolled(request);
+      }
+
+      reads.push(request.path);
+
+      return request.path.endsWith("/content")
+        ? new Response(body)
+        : Response.json({ ...metadata, ...changes });
+    };
+
+    await expect(read(reference, AbortSignal.timeout(5000))).rejects.toThrow(
+      error,
+    );
+    expect(reads).toHaveLength(body === null ? 1 : 2);
+  }
 });
 
 for (const variant of ["absent", "enabled: false"] as const) {

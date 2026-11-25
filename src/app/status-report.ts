@@ -264,6 +264,7 @@ const failures = new Set<string>([
   "cancelled",
   "context",
   "attachments",
+  "shared-attachments",
   "transcription",
   "interrupted",
   "reaction",

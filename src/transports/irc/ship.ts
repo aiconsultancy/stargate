@@ -50,7 +50,7 @@ import {
 import { clientPem } from "./client-pem";
 import { type CrewLink, crewLink } from "./crew-link";
 import { CrewQuestionGateway } from "./crew-question-gateway";
-import { IrcDelivery } from "./delivery";
+import { IrcDelivery, type IrcFiles } from "./delivery";
 import { copyTag, copyText, isOwnDmCopy } from "./dm-copies";
 import { Filehost, filehostURL } from "./filehost";
 import {
@@ -1246,14 +1246,7 @@ export class IrcShip {
               this.stop(registration, message);
             }
           } else {
-            this.receive(
-              identity,
-              client,
-              message,
-              filehost,
-              upload !== undefined,
-              replay,
-            );
+            this.receive(identity, client, message, attachments, replay);
           }
         },
         sent: (sent) => {
@@ -1323,6 +1316,18 @@ export class IrcShip {
         })
       : undefined;
 
+    const attachments: IrcFiles = {
+      ...(files && {
+        hosted: {
+          files,
+          filehost,
+          download: config.features.filesIn,
+          upload: config.features.filesOut,
+        },
+      }),
+      ...(upload && { readChatUpload: upload }),
+    };
+
     const registration: IrcRegistration = {
       ...identity,
       settings: gatewaySettings(config, member),
@@ -1339,14 +1344,7 @@ export class IrcShip {
       delivery: new IrcDelivery(
         client,
         this.options.readyMs,
-        files
-          ? {
-              files,
-              filehost,
-              download: config.features.filesIn,
-              upload: config.features.filesOut,
-            }
-          : undefined,
+        attachments,
         {
           plan: (unit, plan) =>
             this.store.deliveryPlan(unit.job, unit.part, plan),
@@ -1363,7 +1361,6 @@ export class IrcShip {
           reactions: config.features.reactions,
         },
         (thread) => this.store.irc.ircReplyParent(key, thread),
-        upload,
       ),
       filehost,
       client,
@@ -1464,8 +1461,7 @@ export class IrcShip {
     member: IrcMember,
     client: IrcClient,
     message: IrcMessage,
-    filehost: () => URL | undefined,
-    subspaceUploads: boolean,
+    attachments: IrcFiles,
     replay = false,
   ) {
     if (!this.open()) {
@@ -1559,8 +1555,10 @@ export class IrcShip {
       replay,
       now: Date.now,
       fold: client.fold,
-      filehost: this.config.features.filesIn ? filehost() : undefined,
-      subspaceUploads,
+      filehost: attachments.hosted?.download
+        ? attachments.hosted.filehost()
+        : undefined,
+      subspaceUploads: attachments.readChatUpload !== undefined,
     });
 
     if (control) {

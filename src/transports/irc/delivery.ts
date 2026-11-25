@@ -6,8 +6,10 @@ import {
   type ReadChatUpload,
   chatUploadReference,
   checkAttachments,
+  maxAttachments,
 } from "../../chat/attachments/attachments";
 import type {
+  AttachmentInput,
   DeliveryUnit,
   IrcTurnStatus,
   RequestOutcome,
@@ -39,7 +41,7 @@ const emoji: Record<ReactionName, string> = {
 };
 
 /** FILEHOST access of one IRC registration. */
-export type IrcFiles = {
+type HostedFiles = {
   files: Filehost;
   /** Effective FILEHOST now; undefined means files are unavailable. */
   filehost(): URL | undefined;
@@ -47,6 +49,12 @@ export type IrcFiles = {
   download: boolean;
   /** Features.filesOut: upload published files and post their links. */
   upload: boolean;
+};
+
+/** Incoming file sources and outgoing FILEHOST for one IRC registration. */
+export type IrcFiles = {
+  hosted?: HostedFiles;
+  readChatUpload?: ReadChatUpload;
 };
 
 /** Optional per-turn signals. */
@@ -162,12 +170,11 @@ export class IrcDelivery implements TransportDelivery {
     private readonly client: IrcClient,
     /** Wait for a reconnect before a delivery attempt fails. */
     private readonly readyMs = 30_000,
-    private readonly hosted?: IrcFiles,
+    private readonly attachments?: IrcFiles,
     private readonly progress?: IrcProgress,
     private readonly presence: IrcPresence = noPresence(),
     /** Thread roots resolve separately from their request/Stop identity. */
     private readonly replyParent?: (request: string) => string | undefined,
-    private readonly readChatUpload?: ReadChatUpload,
   ) {
     // Without reactions the gateway never asks for one.
     if (presence.reactions !== false) {
@@ -475,10 +482,25 @@ export class IrcDelivery implements TransportDelivery {
     return { batched: true, units: packBatches(parts, limits) };
   }
 
+  public attachmentInput(
+    ids: readonly string[],
+    supportsAttachments: boolean,
+  ): AttachmentInput {
+    return {
+      ids: supportsAttachments
+        ? ids
+        : ids.filter((id) => !chatUploadReference.test(id)),
+      ...(ids.some((id) => chatUploadReference.test(id)) && {
+        failure: "shared-attachments",
+      }),
+    };
+  }
+
   /** Signed Subspace uploads and, where offered, IRC FILEHOST. */
   public get files(): AttachmentTransport | undefined {
-    const hosted = this.hosted?.filehost() ? this.hosted : undefined;
-    const readChatUpload = this.readChatUpload;
+    const candidate = this.attachments?.hosted;
+    const hosted = candidate?.filehost() ? candidate : undefined;
+    const readChatUpload = this.attachments?.readChatUpload;
 
     if (!hosted && !readChatUpload) {
       return undefined;
@@ -486,26 +508,19 @@ export class IrcDelivery implements TransportDelivery {
 
     return {
       download: async (ids, _channel, signal) => {
-        if (
-          !readChatUpload ||
-          !ids.some((id) => chatUploadReference.test(id))
-        ) {
-          if (!hosted?.download) {
-            throw new Error("IRC FILEHOST input is off");
-          }
-
-          return hosted.files.download(ids, signal);
+        if (ids.length > maxAttachments) {
+          throw new Error("Too many attachments");
         }
 
         const files: Attachment[] = [];
 
         for (const id of ids) {
-          if (chatUploadReference.test(id)) {
+          if (readChatUpload && chatUploadReference.test(id)) {
             files.push(await readChatUpload(id, signal));
           } else if (hosted?.download) {
             files.push(...(await hosted.files.download([id], signal)));
           } else {
-            throw new Error("IRC FILEHOST input is off");
+            throw new Error("IRC file input is unavailable");
           }
 
           checkAttachments(files);
@@ -530,7 +545,7 @@ export class IrcDelivery implements TransportDelivery {
     allowed?: () => boolean,
   ) {
     await this.client.waitReady(this.readyMs);
-    const host = this.hosted?.filehost();
+    const host = this.attachments?.hosted?.filehost();
 
     if (!host || !URL.canParse(url) || !safeFileURL(new URL(url), host)) {
       throw new Error("IRC file link is not a plain FILEHOST URL");

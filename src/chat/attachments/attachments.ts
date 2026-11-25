@@ -16,7 +16,12 @@ import { settingsPattern, settingsStruct } from "../../config/settings-schema";
 export const maxAttachmentBytes = 10 * 1024 * 1024;
 export const maxAttachments = 10;
 export const maxAttachmentTotalBytes = 25 * 1024 * 1024;
-export const chatUploadReference = /^UPL-[A-Za-z0-9_-]{22}$/u;
+export const chatUploadReferenceSource = "UPL-[A-Za-z0-9_-]{22}";
+
+export const chatUploadReference = new RegExp(
+  `^${chatUploadReferenceSource}$`,
+  "u",
+);
 
 export type Attachment = {
   name: string;

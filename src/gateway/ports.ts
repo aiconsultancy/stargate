@@ -8,7 +8,10 @@ import type { AttachmentTransport } from "../chat/attachments/attachment-deliver
 import type { ActivityRequest, PromptSourceContext } from "../backends/backend";
 import type { QuestionPort } from "../chat/questions/questions";
 import type { ReactionName } from "../shared/reactions";
-import type { RequestFailure } from "../shared/request-failure";
+import type {
+  AttachmentInputFailure,
+  RequestFailure,
+} from "../shared/request-failure";
 import type { Identity } from "./routing";
 import type { ReplyChunk, SlackContent } from "../shared/slack-format";
 import type { Incoming, Job } from "./store-types";
@@ -35,9 +38,19 @@ export type ReactionTargetRequest = {
   signal: AbortSignal;
 };
 
+export type AttachmentInput = {
+  ids: readonly string[];
+  failure?: AttachmentInputFailure;
+};
+
 export interface TransportDelivery {
   /** Undefined (or absent) while the transport cannot move files. */
   readonly files?: AttachmentTransport | undefined;
+  /** Select file inputs for this backend, including when downloading is unavailable. */
+  attachmentInput?(
+    ids: readonly string[],
+    supportsAttachments: boolean,
+  ): AttachmentInput;
   /** Replace a preview when ts is set; false means it was removed. */
   failure?(
     channel: string,

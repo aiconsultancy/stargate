@@ -320,7 +320,7 @@ function registrationBackends(
       activity,
       irc: (irc: IrcConfig, store: Store) =>
         (dependencies.irc ?? IrcShip.create)(irc, store, log, {
-          ...(bridged.upload && { subspaceUpload: bridged.upload }),
+          subspaceUpload: bridged.upload,
         }),
       create: (
         registration: { id: string; backend: BackendConfig },
@@ -351,8 +351,7 @@ function subspaceAgents(
   log: Logger,
   dependencies: RuntimeDependencies,
 ): Effect.Effect<
-  Pick<SubspaceAgentsRuntime, "backend"> &
-    Partial<Pick<SubspaceAgentsRuntime, "upload">>,
+  Pick<SubspaceAgentsRuntime, "backend" | "upload">,
   never,
   Scope.Scope
 > {
@@ -361,6 +360,9 @@ function subspaceAgents(
   if (!section?.enabled) {
     return Effect.succeed({
       backend: (_registration, backend) => backend,
+      upload(): undefined {
+        return;
+      },
     });
   }
 

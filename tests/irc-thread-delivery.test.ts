@@ -144,7 +144,7 @@ test("IRC file links use the persisted root, while main-room and capless lines s
   const delivery = new IrcDelivery(
     wire,
     100,
-    { files, filehost, download: true, upload: true },
+    { hosted: { files, filehost, download: true, upload: true } },
     undefined,
     undefined,
     (request) => (request === "thread" ? "root" : undefined),

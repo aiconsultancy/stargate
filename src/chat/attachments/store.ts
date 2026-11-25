@@ -1,7 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { Schema } from "effect";
 import { settingsPattern } from "../../config/settings-schema";
-import type { PreparedAttachment, PublishedFile } from "./attachments";
+import {
+  type PreparedAttachment,
+  type PublishedFile,
+  chatUploadReferenceSource,
+} from "./attachments";
 
 export type AttachmentDelivery = PublishedFile & {
   title?: string;
@@ -24,7 +28,10 @@ const decodeInputFiles = Schema.decodeUnknownSync(
       Schema.String.check(
         Schema.isMaxCodePoints(2048),
         settingsPattern(
-          /^(?:F[A-Z0-9]+|https?:\/\/\S+|UPL-[A-Za-z0-9_-]{22})$/,
+          new RegExp(
+            String.raw`^(?:F[A-Z0-9]+|https?://\S+|${chatUploadReferenceSource})$`,
+            "u",
+          ),
         ),
       ),
     ),

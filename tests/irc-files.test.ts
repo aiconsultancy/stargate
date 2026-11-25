@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Result, Schema } from "effect";
 import pino from "pino";
 import {
+  type ReadChatUpload,
   maxAttachmentBytes,
   UploadRefused,
 } from "../src/chat/attachments/attachments";
@@ -72,6 +73,8 @@ async function ship(
     transcriber?: Transcriber;
     answer?: string | ((directory: string) => string);
     features?: Record<string, boolean>;
+    readChatUpload?: ReadChatUpload;
+    supportsAttachments?: boolean;
   } = {},
 ) {
   const host = filehostServer();
@@ -103,6 +106,9 @@ async function ship(
       env,
       timing: { reconnectMinMs: 20, intervalMs: 5, burst: 20 },
       readyMs: 2000,
+      ...(options.readChatUpload && {
+        subspaceUpload: () => options.readChatUpload,
+      }),
     },
   );
 
@@ -110,7 +116,7 @@ async function ship(
 
   const agent: AgentBackend = {
     sessionID: "ses_captain",
-    supportsAttachments: true,
+    supportsAttachments: options.supportsAttachments ?? true,
     async createSession() {
       return "ses_captain";
     },
@@ -309,6 +315,69 @@ test("irc files in: a FILEHOST link reaches the backend as an attachment", async
     { name: "log.txt", mime: "text/plain", text: "line one" },
   ]);
   expect(host.requests.every((r) => r.user === "galactica")).toBe(true);
+});
+
+test("irc files in: text-only backends keep Subspace references without fetching them", async () => {
+  const { fake, prompts } = await ship({
+    supportsAttachments: false,
+    readChatUpload: async () => {
+      throw new Error("Upload reader unexpectedly called");
+    },
+    transcriber: {
+      label: "Test speech",
+      async transcribe() {
+        throw new Error("Transcriber unexpectedly called");
+      },
+    },
+  });
+
+  const reference = "UPL-AQEBAQEBAQEBAQEBAQEBAQ";
+
+  fake.say(
+    { nick: "jack", account: "jack" },
+    "#galactica",
+    `galactica: read ${reference}`,
+  );
+  await until(() => prompts.length === 1, 5000, "text-only prompt");
+  expect(prompts[0]?.text).toContain(reference);
+  expect(prompts[0]?.files).toEqual([]);
+});
+
+test("irc files in: mixed downloads preserve input order and share the batch limit", async () => {
+  const data = new Uint8Array(maxAttachmentBytes);
+
+  const { host, captain } = await ship({
+    readChatUpload: async (id) => ({
+      name: `${id}.bin`,
+      mime: "application/octet-stream",
+      data,
+    }),
+  });
+
+  const url = host.put("/files/report.bin", {
+    name: "report.bin",
+    type: "application/octet-stream",
+    body: data,
+  });
+
+  const first = "UPL-AQEBAQEBAQEBAQEBAQEBAQ";
+  const second = "UPL-AgICAgICAgICAgICAgICAg";
+  const files = captain.delivery.files;
+
+  if (!files) {
+    throw new Error("Missing file transport");
+  }
+
+  const signal = AbortSignal.timeout(5000);
+
+  expect(
+    (await files.download([first, url], "#galactica", signal)).map(
+      (file) => file.name,
+    ),
+  ).toEqual([`${first}.bin`, "report.bin"]);
+  await expect(
+    files.download([first, url, second], "#galactica", signal),
+  ).rejects.toThrow("Attachments exceed total size limit");
 });
 
 test("irc files in: audio goes through transcription like Slack voice notes", async () => {

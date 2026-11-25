@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { maxAttachments } from "../../chat/attachments/attachments";
+import {
+  chatUploadReferenceSource,
+  maxAttachments,
+} from "../../chat/attachments/attachments";
 import {
   type IrcConfig,
   defaultAllCallWords,
@@ -60,6 +63,11 @@ export type IrcRouteContext = {
   subspaceUploads?: boolean;
 };
 
+const chatUploadTokens = new RegExp(
+  `(?<![A-Za-z0-9_-])${chatUploadReferenceSource}(?![A-Za-z0-9_-])`,
+  "gu",
+);
+
 const httpLinks = /https?:\/\/[^\s<>"'`]+/gi;
 
 /**
@@ -103,10 +111,9 @@ function admittedFiles(body: string, context: IrcRouteContext) {
   const files = filehostLinks(body, context.filehost);
 
   if (context.subspaceUploads) {
-    const pattern =
-      /(?<![A-Za-z0-9_-])UPL-[A-Za-z0-9_-]{22}(?![A-Za-z0-9_-])/gu;
-
-    for (const [reference] of body.replace(httpLinks, " ").matchAll(pattern)) {
+    for (const [reference] of body
+      .replace(httpLinks, " ")
+      .matchAll(chatUploadTokens)) {
       if (files.length === maxAttachments) {
         break;
       }
