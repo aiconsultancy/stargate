@@ -1,5 +1,4 @@
 {
-  "baselineSha256": "67d6221f570d58f6f83d845205ac39915fcec2c4b59f5a8d7173e00811a1307a",
-  "closureAdditions": ["src/coordination/crew/execution/task-records.ts"],
+  "baselineSha256": "ce869506135146e5a093a0cd06a7c4bf7053b9f6786403ef0e73fb8e200e4a5b",
   "pruneStale": true
 }

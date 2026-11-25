@@ -39,7 +39,6 @@ import type { Attachment } from "../../chat/attachments/attachments";
 import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import type { piDurableBackendSchema } from "./config";
 import { redactCredentials, secret } from "../../lib/credentials";
-import { workingAgreementNotice } from "../../coordination/crew/instructions";
 import {
   type PiModelSettings,
   piClaudeProxyModel,
@@ -423,7 +422,7 @@ export class PiDurableBackend implements AgentBackend {
 
     if (context.workingAgreement) {
       const agreement = context.workingAgreement;
-      const notice = workingAgreementNotice(agreement.path);
+      const notice = agreement.createNotice();
       registry.install(
         defineExtension({
           name: "stargate.working-agreement",
