@@ -36,6 +36,23 @@ const config: ApiV1Config = Schema.decodeUnknownSync(configSchema)({
   bots: [
     bot("captain"),
     {
+      ...bot("claude"),
+      slack: {
+        appId: "A789",
+        appTokenEnv: "CLAUDE_APP_TOKEN",
+        botTokenEnv: "CLAUDE_BOT_TOKEN",
+      },
+      backend: {
+        type: "claude",
+        model: "claude-sonnet-5-5",
+        directory: "/w",
+        provider: {
+          baseURL: "http://127.0.0.1:8317/v1",
+          apiKeyEnv: "CLAUDE_PROVIDER_KEY",
+        },
+      },
+    },
+    {
       ...bot("pi"),
       slack: {
         appId: "A456",
@@ -716,6 +733,204 @@ test("activity frames go one at a time and never past a viewer's 256 KiB queue",
     );
   } finally {
     streams.stop();
+  }
+});
+
+test("Claude family changes converge with the snapshot after the child and root settle", async () => {
+  const hub = createActivityHub();
+  const viewer = watch(hub, "agent=claude");
+  const requests = [{ channel: "#Bridge", msgid: "claude-request" }];
+
+  const usage = {
+    steps: 1,
+    tokens: { input: 2, output: 3, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+    cost: 0.25,
+  };
+
+  try {
+    const root = hub.recorder("claude").begin(requests, "root");
+    const initial = snapshot(hub, "claude");
+    const parent = { turnId: initial.turns[0]?.id ?? "", callId: "agent-call" };
+    const child = root.child?.(parent.callId, "child");
+    expect(child).toBeDefined();
+    child?.update("oversized", 1, () => ({
+      ...text("\u0001" + "x".repeat(activityPageBytes)),
+      unavailable: ["after-turn"],
+    }));
+    child?.update("encrypted", 2, () => ({
+      kind: "reasoning",
+      status: "completed",
+      text: "",
+      unavailable: ["text"],
+    }));
+    child?.setUsage?.(usage);
+    await flushed();
+
+    child?.end("completed");
+    root.setUsage?.(usage);
+    root.end("completed");
+    await flushed();
+
+    const events = viewer.events();
+    const final = snapshot(hub, "claude");
+    const childId = final.turns[1]?.id ?? "";
+    expect(
+      events.map(({ seq, turnId, change }) => [seq, turnId, change.type]),
+    ).toEqual([
+      [1, parent.turnId, "turn-started"],
+      [2, childId, "turn-started"],
+      [3, childId, "item"],
+      [4, childId, "item"],
+      [5, childId, "turn-updated"],
+      [6, childId, "turn-ended"],
+      [8, parent.turnId, "turn-ended"],
+    ]);
+    const common = { agentId: "claude", generation: initial.cursor.generation };
+    expect(
+      events.every(
+        (event) =>
+          event.agentId === common.agentId &&
+          event.generation === common.generation,
+      ),
+    ).toBe(true);
+    const childSummary = { requests: [], session: { id: "child", parent } };
+    expect(events[0]?.change).toMatchObject({
+      turn: {
+        requests,
+        session: { id: "root", parent: null },
+        status: "running",
+      },
+    });
+    expect(events[1]?.change).toMatchObject({
+      turn: { ...childSummary, usage: null },
+    });
+    expect(events[2]?.change).toMatchObject({
+      item: { unavailable: ["after-turn"], paged: { pages: 2 } },
+    });
+    expect(events[3]?.change).toMatchObject({
+      item: { kind: "reasoning", text: "", unavailable: ["text"] },
+    });
+    expect(events[4]?.change).toMatchObject({
+      turn: { ...childSummary, status: "running", usage },
+    });
+    expect(events[5]?.change).toMatchObject({
+      turn: { ...childSummary, status: "completed", usage },
+    });
+
+    const joined = modelOf(initial);
+
+    for (const event of events.filter(({ seq }) => seq > initial.cursor.seq)) {
+      apply(joined, event);
+    }
+
+    expect(joined).toEqual(modelOf(final));
+    expect(events.at(-1)?.seq).toBe(final.cursor.seq);
+  } finally {
+    viewer.stop();
+  }
+});
+
+test("a Claude root subscription follows child changes in sequence order", async () => {
+  const hub = createActivityHub();
+  const recorder = hub.recorder("claude");
+  const root = recorder.begin(undefined, "root");
+  const rootId = snapshot(hub, "claude").turns[0]?.id ?? "";
+  const viewer = watch(hub, `agent=claude&turn=${rootId}`);
+
+  try {
+    const child = root.child?.("call", "child");
+    const childId = snapshot(hub, "claude").turns[1]?.id ?? "";
+    const unrelated = recorder.begin();
+    unrelated.end("completed");
+    child?.update("reply", 1, () => text("child output"));
+    child?.end("completed");
+    root.end("completed");
+    await flushed();
+
+    expect(
+      viewer
+        .events()
+        .map(({ seq, turnId, change }) => [seq, turnId, change.type]),
+    ).toEqual([
+      [2, childId, "turn-started"],
+      [5, childId, "item"],
+      [6, childId, "turn-ended"],
+      [7, rootId, "turn-ended"],
+    ]);
+  } finally {
+    viewer.stop();
+  }
+});
+
+test("a Claude child subscription follows only that child's events in sequence order", async () => {
+  const hub = createActivityHub();
+  const root = hub.recorder("claude").begin(undefined, "root");
+  const child = root.child?.("call", "child");
+  const childId = snapshot(hub, "claude").turns[1]?.id ?? "";
+  const viewer = watch(hub, `agent=claude&turn=${childId}`);
+
+  try {
+    const sibling = root.child?.("other-call", "sibling");
+    root.update("reply", 1, () => text("root output"));
+    child?.update("reply", 2, () => text("child output"));
+    sibling?.update("reply", 3, () => text("sibling output"));
+    child?.update("another", 4, () => text("more child output"));
+    sibling?.end("completed");
+    child?.end("completed");
+    root.end("completed");
+    await flushed();
+
+    expect(
+      viewer
+        .events()
+        .map(({ seq, turnId, change }) => [seq, turnId, change.type]),
+    ).toEqual([
+      [5, childId, "item"],
+      [7, childId, "item"],
+      [9, childId, "turn-ended"],
+    ]);
+  } finally {
+    viewer.stop();
+  }
+});
+
+test("evicting a Claude family before the flush preserves both ends and the link", async () => {
+  const hub = createActivityHub({ bytes: 10 });
+  const viewer = watch(hub, "agent=claude");
+
+  try {
+    const root = hub.recorder("claude").begin(undefined, "root");
+    const child = root.child?.("call", "child");
+    const [rootTurn, childTurn] = snapshot(hub, "claude").turns;
+
+    if (!rootTurn || !childTurn) {
+      throw new Error("Expected a Claude family before eviction");
+    }
+
+    child?.update("text", 1, () => text("\u0001child output"));
+    child?.end("completed");
+    root.end("completed");
+    const empty = snapshot(hub, "claude");
+    expect(empty.turns).toEqual([]);
+    await flushed();
+
+    const events = viewer.events();
+    expect(events.map(({ turnId, change }) => [turnId, change.type])).toEqual([
+      [rootTurn.id, "turn-started"],
+      [childTurn.id, "turn-started"],
+      [childTurn.id, "item"],
+      [childTurn.id, "turn-ended"],
+      [rootTurn.id, "turn-ended"],
+    ]);
+    expect(events[1]?.change).toMatchObject({
+      turn: { session: { parent: { turnId: rootTurn.id, callId: "call" } } },
+    });
+    expect(events[2]?.change).toMatchObject({
+      item: { text: "\u0001child output" },
+    });
+    expect(events.filter(({ seq }) => seq > empty.cursor.seq)).toEqual([]);
+  } finally {
+    viewer.stop();
   }
 });
 

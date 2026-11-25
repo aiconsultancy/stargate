@@ -3,7 +3,6 @@
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "braceMigrationFileLimits": {
     "src/automation/maintenance/nightly/journal.ts": 1049,
-    "src/backends/claude.ts": 1013,
     "src/chat/questions/questions.ts": 1031
   },
   "aliases": {
@@ -1759,6 +1758,8 @@
         "src/backends/opencode/notices.ts",
         "src/backends/opencode/questions.ts",
         "src/backends/claude/config.ts",
+        "src/backends/claude/activity.ts",
+        "src/backends/claude/executable.ts",
         "src/backends/codex/config.ts",
         "src/backends/codex/preflight.ts"
       ],

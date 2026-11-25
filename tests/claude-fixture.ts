@@ -111,17 +111,22 @@ function result(
   });
 }
 
-function assistant(id: string, block: object, error?: string) {
+function assistant(
+  id: string,
+  block: object,
+  error?: string,
+  parent: string | null = null,
+) {
   write({
     type: "assistant",
-    parent_tool_use_id: null,
+    parent_tool_use_id: parent,
     ...(error ? { error } : {}),
     message: {
       id,
       type: "message",
       role: "assistant",
       model: "fixture",
-      content: [block],
+      content: Array.isArray(block) ? block : [block],
       stop_reason: null,
       usage: { input_tokens: 1, output_tokens: 1 },
     },
@@ -135,6 +140,237 @@ function stream(event: object, parent: string | null = null) {
     parent_tool_use_id: parent,
     event,
     ...base(),
+  });
+}
+
+let forwardSubagentText = false;
+
+/** Replay SDK stream-json frames, one final assistant envelope per block. */
+function activityFrames() {
+  const emit = (frame: object) => write({ ...base(), ...frame });
+
+  const usage = {
+    input_tokens: 3,
+    output_tokens: 7,
+    cache_read_input_tokens: 4,
+    cache_creation_input_tokens: 5,
+  };
+
+  const partial = process.argv.includes("--include-partial-messages")
+    ? stream
+    : () => {};
+
+  const id = "msg_activity";
+  const model = "fixture";
+  partial({
+    type: "message_start",
+    message: { id, model, usage: { ...usage, output_tokens: 0 } },
+  });
+
+  const blocks = [
+    [
+      { type: "thinking", thinking: "" },
+      { type: "thinking_delta", thinking: "think\u0002" },
+      { type: "thinking", thinking: "think\u0002" },
+    ],
+    [
+      { type: "redacted_thinking", data: "provider-ciphertext" },
+      null,
+      { type: "redacted_thinking", data: "provider-ciphertext" },
+    ],
+    [
+      { type: "text", text: "" },
+      { type: "text_delta", text: "reply\n\t" },
+      { type: "text", text: "reply\n\t" },
+    ],
+    ...["tool_ok", "tool_denied", "tool_child", "tool_background"].map((id) => [
+      {
+        type: "tool_use",
+        id,
+        name:
+          id.startsWith("tool_c") || id.endsWith("background")
+            ? "Agent"
+            : "Read",
+        input: {},
+      },
+      { type: "input_json_delta", partial_json: '{"key": "value"}' },
+      {
+        type: "tool_use",
+        id,
+        name:
+          id.startsWith("tool_c") || id.endsWith("background")
+            ? "Agent"
+            : "Read",
+        input: { key: "value" },
+      },
+    ]),
+    [
+      {
+        type: "server_tool_use",
+        id: "tool_server",
+        name: "web_search",
+        input: {},
+      },
+      { type: "input_json_delta", partial_json: '{"query":"fixture"}' },
+      {
+        type: "server_tool_use",
+        id: "tool_server",
+        name: "web_search",
+        input: { query: "fixture" },
+      },
+    ],
+  ] as const;
+
+  for (const [index, [start, delta, final]] of blocks.entries()) {
+    partial({ type: "content_block_start", index, content_block: start });
+
+    if (delta) {
+      partial({ type: "content_block_delta", index, delta });
+    }
+
+    partial({ type: "content_block_stop", index });
+
+    if (final) {
+      assistant(id, final);
+    }
+  }
+
+  partial({ type: "message_delta", delta: { stop_reason: "tool_use" }, usage });
+  partial({ type: "message_stop" });
+  emit({
+    type: "tool_progress",
+    tool_use_id: "tool_ok",
+    tool_name: "Read",
+    parent_tool_use_id: null,
+    elapsed_time_seconds: 1.5,
+  });
+  emit({
+    type: "system",
+    subtype: "permission_denied",
+    tool_use_id: "tool_denied",
+    tool_name: "Read",
+    message: "Permission denied (fixture)",
+  });
+
+  for (const [id, text, failed] of [
+    ["tool_ok", "tool output\u0001", false],
+    ["tool_denied", "denial result", true],
+  ] as const) {
+    emit({
+      type: "user",
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: id,
+            content: text,
+            is_error: failed,
+          },
+        ],
+      },
+      tool_use_result: { text },
+    });
+  }
+
+  emit({
+    type: "system",
+    subtype: "task_started",
+    task_id: "task-1",
+    run_id: "run-1",
+    tool_use_id: "tool_child",
+    description: "child",
+    is_backgrounded: false,
+  });
+  emit({
+    type: "system",
+    subtype: "task_started",
+    task_id: "task-2",
+    run_id: "run-2",
+    tool_use_id: "tool_background",
+    task_type: "local_agent",
+    description: "background",
+    is_backgrounded: true,
+  });
+
+  if (forwardSubagentText) {
+    assistant(
+      "msg_child",
+      { type: "text", text: "child only" },
+      undefined,
+      "tool_child",
+    );
+    assistant(
+      "msg_unknown",
+      { type: "text", text: "unlinked" },
+      undefined,
+      "unknown",
+    );
+    const child = (event: object) => partial(event, "tool_child");
+    child({
+      type: "message_start",
+      message: { id: "msg_child_partial", model, usage },
+    });
+    child({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "thinking", thinking: "" },
+    });
+    child({
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "thinking_delta", thinking: "child thought" },
+    });
+    child({ type: "content_block_stop", index: 0 });
+    child({
+      type: "content_block_start",
+      index: 1,
+      content_block: { type: "text", text: "" },
+    });
+    child({
+      type: "content_block_delta",
+      index: 1,
+      delta: { type: "text_delta", text: "child partial" },
+    });
+    child({ type: "content_block_stop", index: 1 });
+    child({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage });
+    child({ type: "message_stop" });
+  }
+
+  emit({
+    type: "system",
+    subtype: "task_progress",
+    task_id: "task-1",
+    run_id: "run-1",
+    tool_use_id: "tool_child",
+    description: "updated child",
+    usage: { total_tokens: 5, duration_ms: 3, tool_uses: 1 },
+  });
+  emit({
+    type: "system",
+    subtype: "task_updated",
+    task_id: "task-1",
+    run_id: "run-1",
+    patch: { description: "updated child" },
+  });
+  emit({
+    type: "system",
+    subtype: "task_notification",
+    task_id: "task-1",
+    run_id: "run-1",
+    status: "completed",
+    summary: "child finished",
+  });
+  emit({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "reply\n\t",
+    num_turns: 1,
+    total_cost_usd: 0.25,
+    usage,
+    permission_denials: [],
   });
 }
 
@@ -197,11 +433,83 @@ async function answer(text: string) {
     process.exit(3);
   }
 
+  if (text === "activity frames") {
+    activityFrames();
+
+    return;
+  }
+
+  if (text === "background bash activity") {
+    assistant("msg_bash", {
+      type: "tool_use",
+      id: "bash_call",
+      name: "Bash",
+      input: { command: "echo fixture" },
+    });
+    write({
+      type: "system",
+      subtype: "task_started",
+      task_id: "bash_task",
+      tool_use_id: "bash_call",
+      task_type: "local_bash",
+      is_backgrounded: true,
+      description: "background shell",
+      ...base(),
+    });
+
+    return result("success", false, "bash observed");
+  }
+
+  if (text === "batched assistant activity") {
+    assistant("msg_batch", { type: "thinking", thinking: "first" });
+    assistant("msg_batch", [
+      { type: "text", text: "second" },
+      { type: "tool_use", id: "third_call", name: "Read", input: {} },
+    ]);
+
+    return result("success", false, "second");
+  }
+
+  if (text === "repeated block types activity") {
+    const first = { type: "tool_use", id: "call_a", name: "Read", input: {} };
+    assistant("msg_repeat", [{ type: "text", text: "first" }, first]);
+    // A full replay shares both content and tool ID; the later batch does not.
+    assistant("msg_repeat", [{ type: "text", text: "first" }, first]);
+    assistant("msg_repeat", [
+      { type: "text", text: "first" },
+      { type: "tool_use", id: "call_b", name: "Read", input: {} },
+    ]);
+
+    return result("success", false, "first");
+  }
+
+  if (text === "text prefix activity") {
+    assistant("msg_prefix", { type: "text", text: "a" });
+    assistant("msg_prefix", [
+      { type: "text", text: "b" },
+      { type: "tool_use", id: "call_x", name: "Read", input: {} },
+    ]);
+
+    return result("success", false, "b");
+  }
+
   // "fail", "fail:<cause>" or "fail:<cause>:<status>"; "tool" runs one first.
   const failure = /fail(?::(\w+))?(?::(\d+))?/.exec(text);
 
   if (failure) {
-    if (text.includes("tool")) {
+    if (text.startsWith("subagent ")) {
+      assistant(
+        "msg_subagent_tool",
+        {
+          type: "tool_use",
+          id: "child_call",
+          name: "Read",
+          input: {},
+        },
+        undefined,
+        "parent_call",
+      );
+    } else if (text.includes("tool")) {
       assistant("msg_tool", {
         type: "tool_use",
         id: "toolu_1",
@@ -300,6 +608,10 @@ process.stdin.on("data", (chunk: string) => {
     log({ input: frame });
 
     if (frame.type === "control_request") {
+      if (frame.request?.subtype === "initialize") {
+        forwardSubagentText = frame.request.forwardSubagentText === true;
+      }
+
       write({
         type: "control_response",
         response: {

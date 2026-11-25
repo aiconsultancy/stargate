@@ -333,14 +333,37 @@ change, and `cursor.seq` is the latest change included. `cursor.generation`
 changes when the gateway restarts. `turn.reconnects` counts times the live
 provider stream reattached during the turn, when changes can be missing.
 `agent.collected` is false for backends this gateway does not collect yet;
-today only OpenCode officers are collected.
+OpenCode and Claude Agent SDK officers are collected.
+
+For Claude, `agent.unavailable` lists `step.cost` and
+`step.tokens.reasoning`, and each step has `unavailable: ["cost",
+"tokens.reasoning"]`. The SDK reports cost on the query's result, not per
+step: `step.cost` is `null`, and the SDK's reported cost is on the root
+turn's `usage`. Its result token counters cover the main agent loop, not the
+child turns; the reported cost can include subagents and other calls. The SDK
+does not split reasoning tokens out of the output total, so the reasoning
+counter is `0`.
+
+An item with `unavailable: ["text"]` is a reasoning block whose text the
+provider encrypted. The item is present with `text: ""`; the gateway never
+received its plaintext. `session.id` is the session ID in the SDK envelope,
+which may be shared with the root. Child turns carry `session.parent` with
+the spawning `turnId` and `callId`, and are linked only when the call was
+observed during the same query. The SDK can send complete blocks instead of
+partial deltas for children. Task status and progress are on the spawning
+tool's `metadata.task`. Only subagents become child turns; background shells,
+monitors and workflows stay on the tool. If a background task outlives the
+query, the spawning tool has `unavailable: ["after-turn"]`. The child turn's
+`cancelled` status in that case means observation ended, not that the SDK
+confirmed a cancellation. This route does not follow task output files or
+reconstruct missed frames.
 
 | Query parameter | Meaning                                             |
 | --------------- | --------------------------------------------------- |
 | `turn`          | Only that turn; 404 once it is gone                 |
 | `item`          | With `turn`: one page of that item's JSON           |
 | `page`          | With `item`: the zero-based page number (default 0) |
-| `request`       | All retained turns answering this IRC message ID    |
+| `request`       | All retained families for this IRC message ID       |
 | `channel`       | With `request`: filter by IRC channel or DM account |
 
 To open a turn from an IRC request, URL-encode its IRCv3 message ID and use
@@ -348,9 +371,9 @@ To open a turn from an IRC request, URL-encode its IRCv3 message ID and use
 be combined with `turn`, `item` or `page`. The message ID must contain 1–128
 printable non-space ASCII characters, and `channel` must be 1–512 UTF-8 bytes
 if supplied. Message IDs match exactly; channel matching folds only ASCII
-letters A–Z. The snapshot contains every matching retained turn of the
-officer in the path, in snapshot order, including retries. If none match,
-the response is an empty 404.
+letters A–Z. The snapshot contains every matching retained root turn of the
+officer in the path, including retries, and all their descendants in snapshot
+order. If no root matches, the response is an empty 404.
 
 Every turn includes `requests: [{ channel, msgid }, …]` from its accepted
 IRC job, in intake order for a burst. Channel names and IDs are returned as
@@ -359,36 +382,44 @@ array is empty for other transports or when the original IRC message ID is
 unknown. Requests queued before link data was recorded are not backfilled.
 A follow-up steered into an already-running input is not a new turn and is
 not included in these links.
+Claude child turns always have `requests: []`: the IRC message started the
+root, not the subagent. `session.parent.turnId` names each child's immediate
+parent.
 
 Unknown, repeated or malformed parameters return 400. An item whose JSON
-exceeds 64 KiB appears in the turn with only its identity, kind, status and
-`paged: { pages, bytes }`. Fetch every page with `?turn=&item=&page=`; each
-`V1ActivityItemPage.data` holds at most 64 KiB of UTF-8 and the pages join
-into the complete item JSON. Pages with different `seq` values belong to
-different versions of a changing item; start again from page 0.
+exceeds 64 KiB appears in the turn as a stub with identity, kind, status,
+any `unavailable` entries, and `paged: { pages, bytes }`. Fetch every page
+with `?turn=&item=&page=`; each `V1ActivityItemPage.data` holds at most
+64 KiB of UTF-8 and the pages join into the complete item JSON. Pages with
+different `seq` values belong to different versions of a changing item;
+start again from page 0.
 
-The gateway keeps the last 16 turns per officer, in memory only, however
-long the officer stays idle. Across all officers, ended turns are evicted
-oldest first beyond 256 turns or 64 MiB of settled turn JSON. Eviction always
-removes a whole turn; a running turn is never evicted, and no content is cut.
-Turns appear from the moment the officer's input is submitted. Output from a
-neighbouring input in the same session is shown only once the turn's own
-transcript placement proves it belongs to this turn.
+The gateway keeps the last 16 root turns and their children per officer, in
+memory only, however long the officer stays idle. Across all officers,
+settled families are evicted oldest first beyond 256 settled turns (including
+children) or 64 MiB of settled turn JSON. A family is evicted together;
+running families do not count toward those global limits. No content is cut.
+OpenCode turns appear when the input is submitted and include output only
+once transcript placement proves it belongs to that turn. Claude recording
+starts at query submission, after stopping orphans, probing the CLI version,
+and creating the private temporary directory with `mkdtemp`.
 
 #### Live activity events
 
 `GET /api/v1/events?agent=<id>` adds `agent-activity` events for that
 officer to everything the [event stream](#events) sends. Repeat `agent` for
-up to eight distinct officers. `turn=<id>` with exactly one `agent` limits
-the events to that turn. With either parameter present, the query is checked
-before the stream takes one of the eight viewer places: an unknown, repeated
-or malformed parameter, a ninth agent, or `turn` without exactly one `agent`
-returns 400; an ID that is not a registration, or a turn the gateway no
-longer keeps, returns 404. Officers' [sockets](#officers) answer 404 to any
-`agent` or `turn` and never send `agent-activity`. Without either parameter
-the stream is unchanged and ignores its query, as before. These 400 and 404
-answers come even when all eight places are taken; only a valid
-subscription that finds no free place gets 503.
+up to eight distinct officers. `turn=<id>` with exactly one `agent` follows
+the whole family for a root ID, or only the selected turn for a child ID.
+The snapshot's `turn` and `item` selectors still address exact IDs. With
+either stream parameter present, the query is checked before the stream
+takes one of the eight viewer places: an unknown, repeated or malformed
+parameter, a ninth agent, or `turn` without exactly one `agent` returns 400;
+an ID that is not a registration, or a turn the gateway no longer keeps,
+returns 404. Officers' [sockets](#officers) answer 404 to any `agent` or
+`turn` and never send `agent-activity`. Without either parameter the stream
+is unchanged and ignores its query, as before. These 400 and 404 answers
+come even when all eight places are taken; only a valid subscription that
+finds no free place gets 503.
 
 ```text
 event: agent-activity
@@ -404,11 +435,13 @@ shapes:
 | `change.type`  | Payload                                                 |
 | -------------- | ------------------------------------------------------- |
 | `turn-started` | `turn`: the turn without `items`                        |
-| `turn-updated` | `turn`: after the live provider stream reattached       |
+| `turn-updated` | `turn`: after a reattachment or usage update            |
 | `turn-ended`   | `turn`: with its outcome, `endedAt` and settled `usage` |
 | `item`         | `item`: the item, or its identity and `paged`           |
 
-All turn upserts include `requests`, starting with `turn-started`.
+All turn upserts include `requests`, starting with `turn-started`. Claude
+root and child events share the officer's `agentId`, sequence and generation;
+their turn upserts include `session` exactly as in the snapshot.
 
 Changes are coalesced per officer over 150 ms: a burst of changes to one
 item sends its latest value once, with the `seq` of its latest change.
@@ -418,19 +451,22 @@ is the turn as it was at that event's own `seq`: a turn that starts and ends
 within one window sends a `turn-started` that shows it running, then a
 `turn-ended`. A turn's `seq`, `updatedAt` and `usage` are as of its latest
 turn event: `item` events do not repeat them, and `turn-ended` carries the
-settled values. An item whose JSON
-exceeds 64 KiB arrives as its identity plus `paged: { pages, bytes }`; read
-its pages through the snapshot route, as above. Nothing is cut. Publishing
-never waits for a viewer. Each `agent-activity` event is queued on its own
-and must fit the stream's 256 KiB queue, even an empty one; a stream that
-backs up is closed, as for every other event, and its connection is freed
-at once.
+settled values. OpenCode and Claude tool items may remain `input` or
+`running` after `turn-ended` if no terminal tool status was observed. An
+item whose JSON exceeds 64 KiB arrives as the same paged stub as in the
+snapshot, including any `unavailable` entries. Read its pages through the
+snapshot route, as above. Nothing is cut. Publishing never waits for a
+viewer. Each `agent-activity` event is queued on its own and must fit the
+stream's 256 KiB queue, even an empty one; a stream that backs up is closed,
+as for every other event, and its connection is freed at once.
 
-The snapshot keeps only the last 16 turns per officer, and the global limits
-above can evict a turn sooner, even as it ends. Eviction is never announced:
-a change made before a turn was evicted, such as its `turn-ended`, is still
-sent, but later snapshots no longer list the turn. A client that keeps turns
-from events alone keeps its own cap.
+The snapshot keeps only the last 16 root turns and their children per
+officer, and the global limits above can evict a family sooner, even as it
+ends. Eviction is never announced: pending events are still sent for every
+evicted turn, root and children alike, in sequence order. A snapshot after
+eviction contains none of the family and its cursor already covers those
+pending events. A client keeping turns from events alone keeps its own cap
+and should discard a root and its children together.
 
 To follow an officer without a gap:
 

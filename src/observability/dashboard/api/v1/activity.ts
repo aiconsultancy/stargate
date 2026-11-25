@@ -3,6 +3,7 @@ import type {
   ActivityItem,
   ActivityOutcome,
   ActivityRequest,
+  ActivityUsage,
   TurnActivityLog,
   TurnActivityRecorder,
 } from "../../../../backends/backend";
@@ -52,6 +53,7 @@ type StoredItem = {
 
 type StoredTurn = {
   id: string;
+  root: string;
   agent: string;
   seq: number;
   status: V1ActivityTurn["status"];
@@ -60,13 +62,20 @@ type StoredTurn = {
   endedAt: number | null;
   reconnects: number;
   requests: ActivityRequest[];
+  session?: V1ActivityTurn["session"];
+  usage?: ActivityUsage;
   items: Map<string, StoredItem>;
   /** Serialized size, measured once when the turn ends. */
   bytes: number;
 };
 
 /** One coalesced change, encoded once for every viewer of its agent. */
-export type ActivityFrame = { turnId: string; seq: number; bytes: Uint8Array };
+export type ActivityFrame = {
+  turnId: string;
+  root: string;
+  seq: number;
+  bytes: Uint8Array;
+};
 
 type ActivityWatcher = (frames: readonly ActivityFrame[]) => void;
 
@@ -106,6 +115,10 @@ function itemJson(item: StoredItem): V1ActivityItem {
 }
 
 function usage(turn: StoredTurn): V1ActivityUsage | null {
+  if (turn.usage) {
+    return structuredClone(turn.usage);
+  }
+
   let result: V1ActivityUsage | null = null;
 
   for (const { value } of turn.items.values()) {
@@ -183,6 +196,7 @@ function itemView(stored: StoredItem): V1ActivityItem | V1ActivityPagedItem {
     updatedAt: item.updatedAt,
     kind: item.kind,
     status: item.status,
+    ...(item.unavailable && { unavailable: item.unavailable }),
     ...(item.kind === "tool" && { callId: item.callId, name: item.name }),
     paged: { pages: pages(json).length, bytes },
   };
@@ -198,6 +212,7 @@ function turnSummary(turn: StoredTurn): V1ActivityTurnSummary {
     endedAt: turn.endedAt,
     reconnects: turn.reconnects,
     requests: turn.requests.map((request) => ({ ...request })),
+    ...(turn.session && { session: structuredClone(turn.session) }),
     usage: usage(turn),
   };
 }
@@ -241,6 +256,7 @@ function flush(generation: string, agentId: string, owner: Agent) {
 
       frames.push({
         turnId: pending.turn.id,
+        root: pending.turn.root,
         seq: pending.seq,
         bytes: encoder.encode(
           `event: agent-activity\ndata: ${JSON.stringify(data)}\n\n`,
@@ -284,9 +300,80 @@ function mark(
   }
 }
 
+/** Evict settled families together so a retained child never loses its parent. */
+function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
+  type Family = {
+    owner: Agent;
+    turns: StoredTurn[];
+    endedAt: number | null;
+    bytes: number;
+  };
+
+  const ended: Family[] = [];
+
+  function remove(family: Family) {
+    for (const turn of family.turns) {
+      family.owner.turns.splice(family.owner.turns.indexOf(turn), 1);
+    }
+  }
+
+  for (const owner of agents.values()) {
+    const families = new Map<string, Family>();
+
+    for (const turn of owner.turns) {
+      const family = families.get(turn.root) ?? {
+        owner,
+        turns: [],
+        endedAt: 0,
+        bytes: 0,
+      };
+
+      family.turns.push(turn);
+      family.endedAt =
+        family.endedAt === null || turn.endedAt === null
+          ? null
+          : Math.max(family.endedAt, turn.endedAt);
+      family.bytes += turn.bytes;
+      families.set(turn.root, family);
+    }
+
+    let excess = families.size - limits.turnsPerAgent;
+
+    for (const family of families.values()) {
+      if (family.endedAt === null) {
+        continue;
+      }
+
+      if (excess <= 0) {
+        ended.push(family);
+
+        continue;
+      }
+
+      remove(family);
+      excess -= 1;
+    }
+  }
+
+  let bytes = ended.reduce((sum, family) => sum + family.bytes, 0);
+  // In-flight families do not spend the settled-turn budget.
+  let turnCount = ended.reduce((sum, family) => sum + family.turns.length, 0);
+  ended.sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+
+  for (const family of ended) {
+    if (turnCount <= limits.turns && bytes <= limits.bytes) {
+      break;
+    }
+
+    remove(family);
+    turnCount -= family.turns.length;
+    bytes -= family.bytes;
+  }
+}
+
 /**
  * Bounded in-memory officer turns for the Fleet API. Writers mutate in place
- * and never wait; readers copy. Eviction drops whole ended turns only.
+ * and never wait; readers copy. Eviction drops whole ended families only.
  */
 export function createActivityHub(
   options: Partial<Limits> & { now?: () => number } = {},
@@ -296,7 +383,6 @@ export function createActivityHub(
   /** Turn IDs stay unique across restarts. */
   const generation = `${now().toString(36)}${randomBytes(4).toString("hex")}`;
   const agents = new Map<string, Agent>();
-  let turnCount = 0;
 
   const agent = (id: string) => {
     let result = agents.get(id);
@@ -330,53 +416,20 @@ export function createActivityHub(
     };
   }
 
-  function remove(owner: Agent, turn: StoredTurn) {
-    owner.turns.splice(owner.turns.indexOf(turn), 1);
-    turnCount -= 1;
-  }
-
-  /** Bound memory by count and size only; no turn expires with time. */
-  function evict() {
-    for (const owner of agents.values()) {
-      // Running turns stay; a full agent drops its oldest ended turns.
-      for (const turn of owner.turns.filter((turn) => turn.endedAt !== null)) {
-        if (owner.turns.length <= limits.turnsPerAgent) {
-          break;
-        }
-
-        remove(owner, turn);
-      }
-    }
-
-    const ended = [...agents.values()]
-      .flatMap((owner) =>
-        owner.turns
-          .filter((turn) => turn.endedAt !== null)
-          .map((turn) => ({ owner, turn })),
-      )
-      .toSorted((a, b) => (a.turn.endedAt ?? 0) - (b.turn.endedAt ?? 0));
-
-    let bytes = ended.reduce((sum, { turn }) => sum + turn.bytes, 0);
-
-    for (const { owner, turn } of ended) {
-      if (turnCount <= limits.turns && bytes <= limits.bytes) {
-        break;
-      }
-
-      remove(owner, turn);
-      bytes -= turn.bytes;
-    }
-  }
-
   function begin(
     agentId: string,
     requests: readonly ActivityRequest[] = [],
+    session?: V1ActivityTurn["session"],
+    root?: string,
   ): TurnActivityLog {
     const owner = agent(agentId);
     const startedAt = now();
 
+    const id = `${generation}-${(++owner.seq).toString(36)}`;
+
     const turn: StoredTurn = {
-      id: `${generation}-${(++owner.seq).toString(36)}`,
+      id,
+      root: root ?? id,
       agent: agentId,
       seq: owner.seq,
       status: "running",
@@ -385,13 +438,13 @@ export function createActivityHub(
       endedAt: null,
       reconnects: 0,
       requests: requests.map(({ channel, msgid }) => ({ channel, msgid })),
+      ...(session && { session }),
       items: new Map(),
       bytes: 0,
     };
 
     owner.turns.push(turn);
-    turnCount += 1;
-    evict();
+    evict(agents, limits);
 
     mark(generation, agentId, owner, `start:${turn.id}`, () => ({
       seq: turn.seq,
@@ -467,6 +520,18 @@ export function createActivityHub(
         turn.reconnects += 1;
         changed(now());
       },
+      setUsage(usage) {
+        turn.usage = usage;
+        changed(now());
+      },
+      child(callId, sessionId) {
+        return begin(
+          agentId,
+          [],
+          { id: sessionId, parent: { turnId: turn.id, callId } },
+          turn.root,
+        );
+      },
       end(outcome: ActivityOutcome) {
         if (turn.endedAt !== null) {
           return;
@@ -481,6 +546,8 @@ export function createActivityHub(
           turn.bytes = Buffer.byteLength(
             JSON.stringify({
               requests: turn.requests,
+              session: turn.session,
+              usage: usage(turn),
               items: [...turn.items.values()].map((item) => itemJson(item)),
             }),
           );
@@ -488,7 +555,7 @@ export function createActivityHub(
           turn.bytes = 0;
         }
 
-        evict();
+        evict(agents, limits);
       },
     };
   }
@@ -501,40 +568,51 @@ export function createActivityHub(
      */
     watch,
     recorder(agentId: string): TurnActivityRecorder {
-      return { begin: (requests) => begin(agentId, requests) };
+      return {
+        begin: (requests, id) =>
+          begin(agentId, requests, id ? { id, parent: null } : undefined),
+      };
     },
     hasTurn(agentId: string, turnId: string) {
       return (
         agents.get(agentId)?.turns.some((turn) => turn.id === turnId) ?? false
       );
     },
-    /** All retained turns, one by ID, or every turn matching an IRC request. */
+    /** All retained turns, one by ID, or families matching an IRC request. */
     turns(
       agentId: string,
       selector?: string | { msgid: string; channel: string | undefined },
     ) {
       const owner = agents.get(agentId);
 
-      const channelKey =
-        typeof selector === "object" && selector.channel !== undefined
-          ? foldActivityChannel(selector.channel)
-          : undefined;
+      const retained = owner?.turns ?? [];
+      let selected = retained;
 
-      const selected = (owner?.turns ?? []).filter((turn) => {
-        if (typeof selector === "string") {
-          return turn.id === selector;
-        }
+      if (typeof selector === "string") {
+        selected = retained.filter((turn) => turn.id === selector);
+      } else if (selector !== undefined) {
+        const channelKey =
+          selector.channel === undefined
+            ? undefined
+            : foldActivityChannel(selector.channel);
 
-        return (
-          selector === undefined ||
-          turn.requests.some(
-            ({ channel, msgid }) =>
-              msgid === selector.msgid &&
-              (channelKey === undefined ||
-                foldActivityChannel(channel) === channelKey),
-          )
+        const roots = new Set(
+          retained
+            .filter(
+              (turn) =>
+                turn.id === turn.root &&
+                turn.requests.some(
+                  ({ channel, msgid }) =>
+                    msgid === selector.msgid &&
+                    (channelKey === undefined ||
+                      foldActivityChannel(channel) === channelKey),
+                ),
+            )
+            .map((turn) => turn.id),
         );
-      });
+
+        selected = retained.filter((turn) => roots.has(turn.root));
+      }
 
       if (selector !== undefined && selected.length === 0) {
         return;
@@ -687,7 +765,10 @@ export function readActivity(
         id: agentId,
         role: agent.role,
         backend: agent.backend,
-        collected: agent.backend === "opencode",
+        collected: agent.backend === "opencode" || agent.backend === "claude",
+        ...(agent.backend === "claude" && {
+          unavailable: ["step.cost", "step.tokens.reasoning"],
+        }),
       },
       ...snapshot,
     },
@@ -759,7 +840,9 @@ export function subscribeActivity(
           const chosen =
             turn === undefined
               ? frames
-              : frames.filter((frame) => frame.turnId === turn);
+              : frames.filter(
+                  (frame) => frame.root === turn || frame.turnId === turn,
+                );
 
           // One frame at a time, each within the viewer's queue.
           for (const frame of chosen) {
