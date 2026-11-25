@@ -4,12 +4,56 @@
 
 ### Feature flags
 
-- New flag: OpenCode `stargate.crew` plugin option `feedbackEnabled` defaults
-  on for pinned teams. Set it to `false` to disable the private ship feedback
-  inbox tools. Submit and captain review require separate native permissions.
+- New flags: none.
+- Default changes: the `stargate.crew` plugin's `feedbackEnabled` option changes
+  from off to on for pinned teams. Submit and captain review still require
+  separate native permissions.
+- Enabled by default: `feedbackEnabled` for pinned teams. Set it to `false`
+  in the plugin options to disable the private feedback inbox tools.
 
-- Crew names that differ from their IDs: none. No flag is added and no
-  default changes; a team without such names behaves as before.
+- Crew names and officers' Fleet API sockets add no flags and change no
+  defaults. Officer sockets require `subspaceAgents`, which remains off by
+  default.
+
+### Changes
+
+- Reorganize source code into bounded slices. Chat features live in `src/chat/`,
+  and Fleet dispatch lives under `src/coordination/fleet/dispatch/`.
+- Move the OpenCode plugin entry points to `plugins/opencode/`. Crew still
+  loads from the repository root. For Fleet, use `plugins/opencode/fleet/`.
+  Migrate existing `src/fleet/` configurations before the temporary shim is
+  removed. Configure only one Fleet package path.
+
+- In IRC, a top-level channel request to a captain starts a thread. Enrolled
+  humans can continue the thread without naming the captain again.
+- The Fleet API can read Crew Git state through the captain's Crew plugin.
+  After you update the plugin, Git state and pull request lookup work even if
+  the gateway cannot read the captain's home directory.
+
+- Let a fleet's officers and their crew read the whole fleet's Fleet API,
+  read-only and without the fleet token ([docs](docs/api.md#officers)). The
+  gateway with `subspaceAgents` enabled serves `GET` and `HEAD` for the four
+  Fleet API routes on `fleet-api.sock` in each officer's socket directory (mode
+  `0660`, the directory's group), with or without the `api` listener, using
+  officers' own read and stream slots. `stargate fleet request [--socket
+  PATH] /api/v1/...` reads it. A `socketPath` named `fleet-api.sock` is
+  refused, and start-up stops, naming both, if another configured socket is
+  at that path. Fleet Control's `fleet.sock` may share the directory.
+
+- Let a crew member's `name` differ from its ID in the crew plugin's team
+  ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`
+  Kestrel. The ID still keys the member's state, tasks, sessions, worktree and
+  branch, so renaming keeps them. Crew names must be unique in the team,
+  ignoring case, and differ from the captain's name, other members' IDs,
+  `captain` and `all`. A captain's name must still match its ID.
+
+## 0.45.0
+
+### Feature flags
+
+- New flag: OpenCode `stargate.crew` plugin option `feedbackEnabled` defaults
+  off. It enables the private ship feedback inbox for pinned teams. Submit
+  and captain review require separate native permissions.
 
 - New flag: `subspaceAgents.enabled`; the whole `subspaceAgents` section is
   absent by default, and absent or off loads nothing, creates no file or
@@ -46,33 +90,8 @@
   question alerts still require a configured `questionOperator`.
 - Teams waiting phrases: none. They use the existing Teams `livePresence`
   flag and `waiting` settings; no flag is added and no default changes.
-- Officers' Fleet API sockets: none, by the project lead's decision that
-  people and a fleet's own officers see everything. They come with
-  `subspaceAgents` (itself off by default): each officer with a `socketPath`
-  gets a read-only `fleet-api.sock` beside it.
 
 ### Changes
-
-- Let a fleet's officers and their crew read the whole fleet's Fleet API,
-  read-only and without the fleet token ([docs](docs/api.md#officers)). The
-  gateway with `subspaceAgents` enabled serves `GET` and `HEAD` for the four
-  Fleet API routes on `fleet-api.sock` in each officer's socket directory (mode
-  `0660`, the directory's group), with or without the `api` listener, using
-  officers' own read and stream slots. `stargate fleet request [--socket
-  PATH] /api/v1/...` reads it. A `socketPath` named `fleet-api.sock` is
-  refused, and start-up stops, naming both, if another configured socket is
-  at that path. Fleet Control's `fleet.sock` may share the directory.
-
-- Move OpenCode plugin implementations under `plugins/opencode/`. Crew still
-  loads from the repository root. Fleet configurations can keep using
-  `src/fleet/` temporarily; new installs use `plugins/opencode/fleet/`.
-
-- Let a crew member's `name` differ from its ID in the crew plugin's team
-  ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`
-  Kestrel. The ID still keys the member's state, tasks, sessions, worktree and
-  branch, so renaming keeps them. Crew names must be unique in the team,
-  ignoring case, and differ from the captain's name, other members' IDs,
-  `captain` and `all`. A captain's name must still match its ID.
 
 - Add optional Subspace API agent identity
   ([docs](docs/subspace-agents.md)). `stargate subspace enrol` gives each
