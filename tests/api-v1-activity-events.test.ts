@@ -751,9 +751,11 @@ test("each lifecycle event shows the turn as it was at its own seq", async () =>
   const hub = createActivityHub({ now: () => clock });
   const viewer = watch(hub, "agent=captain");
 
+  const requests = [{ channel: "#Bridge", msgid: "wire-request" }];
+
   try {
     // Start, reconnect and end all inside one flush window.
-    const log = hub.recorder("captain").begin();
+    const log = hub.recorder("captain").begin(requests);
     clock = 110;
     log.update("a", 110, () => text("one"));
     clock = 120;
@@ -789,6 +791,7 @@ test("each lifecycle event shows the turn as it was at its own seq", async () =>
           updatedAt: 100,
           endedAt: null,
           reconnects: 0,
+          requests,
           usage: null,
         },
       },
@@ -803,6 +806,7 @@ test("each lifecycle event shows the turn as it was at its own seq", async () =>
           updatedAt: 130,
           endedAt: 130,
           reconnects: 1,
+          requests,
           usage: null,
         },
       },
