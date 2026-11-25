@@ -130,6 +130,34 @@ function route(
   });
 }
 
+test("an UPL token inside a FILEHOST URL does not trigger a second download", () => {
+  const filehost = new URL("https://files.example.com");
+  const upload = "UPL-AQEBAQEBAQEBAQEBAQEBAQ";
+  const link = `${filehost.origin}/${upload}.pdf`;
+  const shared = "UPL-AgICAgICAgICAgICAgICAg";
+
+  const incoming = message(
+    "#galactica",
+    `galactica: see ${link} and ${shared} ${shared}`,
+    { account: "jack" },
+  );
+
+  const context = {
+    config,
+    member: captain,
+    currentNick: captain.nick,
+    sent: () => false,
+    now: () => 0,
+    fold: (value: string) => fold(value),
+    filehost,
+  };
+
+  expect(
+    routeIrcMessage(incoming, { ...context, subspaceUploads: true })?.files,
+  ).toEqual([link, shared]);
+  expect(routeIrcMessage(incoming, context)?.files).toEqual([link]);
+});
+
 test("irc nick-mention access requires a live joined target, exact nick, and an allowlisted account with a msgid", () => {
   const restricted = shipConfig({
     access: {
@@ -946,6 +974,34 @@ test("irc casemapping: one folded channel key for caps, routing and denies", asy
       fold(v, "ascii"),
     ),
   ).toBe(true);
+});
+
+test("disabling IRC file input also blocks a previously queued Subspace download", async () => {
+  const store = openStore(":memory:");
+  cleanup.push(() => store.close());
+
+  const upload = async () => ({
+    name: "plan.txt",
+    mime: "text/plain",
+    data: Uint8Array.of(65),
+  });
+
+  for (const filesIn of [true, false]) {
+    const ship = await IrcShip.create(
+      shipConfig({ crew: [], features: { filesIn } }),
+      store,
+      pino({ level: "silent" }),
+      {
+        env: { STARGATE_IRC_GALACTICA: "fixture-password" },
+        subspaceUpload: () => upload,
+      },
+    );
+
+    cleanup.push(() => ship.close());
+    expect(Boolean(ship.registrations[0]?.delivery.files?.download)).toBe(
+      filesIn,
+    );
+  }
 });
 
 test("irc namespace: host, port and network name select a new namespace", async () => {

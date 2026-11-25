@@ -16,6 +16,12 @@ import { settingsPattern, settingsStruct } from "../../config/settings-schema";
 export const maxAttachmentBytes = 10 * 1024 * 1024;
 export const maxAttachments = 10;
 export const maxAttachmentTotalBytes = 25 * 1024 * 1024;
+export const chatUploadReferenceSource = "UPL-[A-Za-z0-9_-]{22}";
+
+export const chatUploadReference = new RegExp(
+  `^${chatUploadReferenceSource}$`,
+  "u",
+);
 
 export type Attachment = {
   name: string;
@@ -30,10 +36,42 @@ export type Attachment = {
   };
 };
 
+export type ReadChatUpload = (
+  reference: string,
+  signal: AbortSignal,
+) => Promise<Attachment>;
+
 const mimePattern = /^[\w.+-]+\/[\w.+-]+$/;
 const maxCaption = 1000;
 const maxDestination = 4096;
 const maxName = 255;
+
+const htmlTypes = new Set([
+  "text/html",
+  "application/xhtml+xml",
+  "image/svg+xml",
+]);
+
+/**
+ * The declared type, made safe: HTML, XHTML and SVG become text/plain so
+ * the backend reads source text and never renders or executes it; a body
+ * that looks like HTML is text/plain whatever its declared type.
+ */
+export function safeAttachmentMime(header: string | null, data: Uint8Array) {
+  const declared = header?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const start = new TextDecoder().decode(data.subarray(0, 512));
+
+  if (
+    htmlTypes.has(declared) ||
+    /^\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b|<script\b|<svg\b)/i.test(
+      start,
+    )
+  ) {
+    return "text/plain";
+  }
+
+  return mimePattern.test(declared) ? declared : "application/octet-stream";
+}
 
 /** Control characters, NUL and both path separators are never valid names. */
 function unsafeName(name: string) {

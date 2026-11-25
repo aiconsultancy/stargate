@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { maxAttachments } from "../../chat/attachments/attachments";
+import {
+  chatUploadReference,
+  chatUploadReferenceSource,
+  maxAttachments,
+} from "../../chat/attachments/attachments";
 import {
   type IrcConfig,
   defaultAllCallWords,
@@ -56,43 +60,53 @@ export type IrcRouteContext = {
   fold(this: void, value: string): string;
   /** Current FILEHOST upload URL; its links become attachments. */
   filehost?: URL | undefined;
+  /** This registration has its own Subspace API signing proxy. */
+  subspaceUploads?: boolean;
 };
 
-/**
- * Links on the FILEHOST origin, in order, at most `maxAttachments`. Other
- * hosts are never collected (and so never fetched). Trailing punctuation
- * from prose is trimmed.
- */
-export function filehostLinks(text: string, filehost: URL | undefined) {
-  if (!filehost) {
-    return [];
+const httpLink = /https?:\/\/[^\s<>"'`]+/;
+const uploadToken = `(?<![A-Za-z0-9_-])${chatUploadReferenceSource}(?![A-Za-z0-9_-])`;
+const attachmentTokens = new RegExp(`${httpLink.source}|${uploadToken}`, "giu");
+
+function filehostLink(token: string, filehost: URL | undefined) {
+  const candidate = token.replace(/[)\].,;:!?]+$/, "");
+
+  if (!filehost || !URL.canParse(candidate)) {
+    return;
   }
 
-  const links: string[] = [];
+  const url = new URL(candidate);
 
-  for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
-    const candidate = match[0].replace(/[)\].,;:!?]+$/, "");
+  if (url.origin === filehost.origin && !url.username && !url.password) {
+    return url.href;
+  }
 
-    if (!URL.canParse(candidate)) {
-      continue;
-    }
+  return;
+}
 
-    const url = new URL(candidate);
+function admittedFiles(body: string, context: IrcRouteContext) {
+  const files: string[] = [];
 
-    if (url.origin !== filehost.origin || url.username || url.password) {
-      continue;
-    }
+  if (!context.filehost && !context.subspaceUploads) {
+    return files;
+  }
 
-    if (!links.includes(url.href)) {
-      links.push(url.href);
-    }
+  for (const [token] of body.matchAll(attachmentTokens)) {
+    const file =
+      context.subspaceUploads && chatUploadReference.test(token)
+        ? token
+        : filehostLink(token, context.filehost);
 
-    if (links.length === maxAttachments) {
-      break;
+    if (file && !files.includes(file)) {
+      files.push(file);
+
+      if (files.length === maxAttachments) {
+        break;
+      }
     }
   }
 
-  return links;
+  return files;
 }
 
 /** Case folding for names: the server's CASEMAPPING, rfc1459 by default. */
@@ -727,7 +741,7 @@ export function routeIrcMessage(
         .slice(0, 32)}`;
 
   const requestChannel = direct ? account : target;
-  const files = filehostLinks(body, context.filehost);
+  const files = admittedFiles(body, context);
 
   // Persist the root at intake. In-flight answers keep their wire shape on upgrade.
   const parent = validMsgid(reply)

@@ -1,7 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { Schema } from "effect";
 import { settingsPattern } from "../../config/settings-schema";
-import type { PreparedAttachment, PublishedFile } from "./attachments";
+import {
+  type PreparedAttachment,
+  type PublishedFile,
+  chatUploadReferenceSource,
+} from "./attachments";
 
 export type AttachmentDelivery = PublishedFile & {
   title?: string;
@@ -17,13 +21,18 @@ export type AttachmentDelivery = PublishedFile & {
   noticeSent?: boolean;
 };
 
-// Slack file IDs, or IRC FILEHOST URLs that the transport rechecks.
+// Slack file IDs, IRC FILEHOST URLs or Subspace chat references.
 const decodeInputFiles = Schema.decodeUnknownSync(
   Schema.mutable(
     Schema.Array(
       Schema.String.check(
         Schema.isMaxCodePoints(2048),
-        settingsPattern(/^(?:F[A-Z0-9]+|https?:\/\/\S+)$/),
+        settingsPattern(
+          new RegExp(
+            String.raw`^(?:F[A-Z0-9]+|https?://\S+|${chatUploadReferenceSource})$`,
+            "u",
+          ),
+        ),
       ),
     ),
   ).check(Schema.isMaxLength(10)),

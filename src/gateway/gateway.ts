@@ -31,6 +31,7 @@ import type { BotConfig } from "../config";
 import { abortable, runAbortable } from "../lib/effect";
 import { fleetResultSource } from "../coordination/fleet/fleet-source";
 import type {
+  AttachmentInput,
   GatewayAccessContext,
   GatewayTransport,
   RequestOutcome,
@@ -70,6 +71,7 @@ import { type QuestionPort, Questions } from "../chat/questions/questions";
 import type { QuestionControl } from "../chat/questions/text-controls";
 import { parseReactionReply } from "../shared/reactions";
 import {
+  type AttachmentInputFailure,
   AttachmentInputUnavailable,
   BackendFailure,
   PendingBackendQuestion,
@@ -183,8 +185,17 @@ export type GatewayConfig =
       | "transcription"
     > & { steerThreadFollowUps?: boolean });
 
+function statusText(job: Job, cause: RequestFailure) {
+  return job.deferDelivery && cause === "history"
+    ? "The agent finished, but its public reply is not yet readable in session history. Stargate will retain it locally when it becomes readable. The request was not repeated."
+    : failureText(cause);
+}
+
 /** The failure a thrown error names when no signal ended the turn. */
-function errorFailure(error: unknown): RequestFailure {
+function errorFailure(
+  error: unknown,
+  attachmentFailure?: AttachmentInputFailure,
+): RequestFailure {
   if (error instanceof BackendFailure) {
     return error.failure;
   }
@@ -198,7 +209,7 @@ function errorFailure(error: unknown): RequestFailure {
   }
 
   if (error instanceof AttachmentInputUnavailable) {
-    return "attachments";
+    return attachmentFailure ?? "attachments";
   }
 
   if (error instanceof TranscriptionUnavailable) {
@@ -1919,6 +1930,56 @@ export class Gateway {
     }
   }
 
+  private attachmentInput(jobId: number): AttachmentInput {
+    const ids = this.store.attachmentRecords.inputFiles(jobId);
+
+    return (
+      this.slack.attachmentInput?.(
+        ids,
+        this.backend.supportsAttachments === true,
+      ) ?? { ids }
+    );
+  }
+
+  private async downloadFileInput(
+    job: Job,
+    ids: readonly string[],
+    canTranscribe: boolean,
+    signal: AbortSignal,
+  ): Promise<Attachment[]> {
+    try {
+      const transport = this.slack.files;
+
+      if (
+        job.deferDelivery ||
+        !transport ||
+        !(this.backend.supportsAttachments || canTranscribe)
+      ) {
+        throw new Error("Attachment input is unavailable for this backend");
+      }
+
+      const files = await transport.download(ids, job.channel, signal);
+      checkAttachments(files);
+
+      if (files.length !== ids.length) {
+        throw new Error("Some requested attachments are unavailable");
+      }
+
+      // Speech alone needs no file input.
+      if (
+        !this.backend.supportsAttachments &&
+        !files.every((item) => isMedia(item))
+      ) {
+        throw new Error("Backend accepts no files");
+      }
+
+      return files;
+    } catch {
+      signal.throwIfAborted();
+      throw new AttachmentInputUnavailable();
+    }
+  }
+
   private async processTurn(
     held: Job,
     shutdown: AbortSignal,
@@ -2005,11 +2066,6 @@ export class Gateway {
           });
       }
     };
-
-    const statusText = (cause: RequestFailure) =>
-      job.deferDelivery && cause === "history"
-        ? "The agent finished, but its public reply is not yet readable in session history. Stargate will retain it locally when it becomes readable. The request was not repeated."
-        : failureText(cause);
 
     let output: ReplyChunk[];
     let failure = job.failure ?? undefined;
@@ -2129,6 +2185,8 @@ export class Gateway {
 
         return parseAttachments(parsed.text, complete).text;
       };
+
+      let attachments: AttachmentInput = { ids: [] };
 
       try {
         try {
@@ -2307,7 +2365,8 @@ export class Gateway {
             );
           }
 
-          const fileIDs = this.store.attachmentRecords.inputFiles(job.id);
+          attachments = this.attachmentInput(job.id);
+
           let inputFiles: Attachment[] = [];
 
           // A spoken-mention gate already transcribed this message.
@@ -2320,40 +2379,13 @@ export class Gateway {
             text = [text, spokenMentionNote, ...heard.blocks]
               .filter(Boolean)
               .join("\n\n");
-          } else if (fileIDs.length > 0) {
-            try {
-              if (
-                job.deferDelivery ||
-                !this.slack.files ||
-                !(this.backend.supportsAttachments || transcriber)
-              ) {
-                throw new Error(
-                  "Attachment input is unavailable for this backend",
-                );
-              }
-
-              inputFiles = await this.slack.files.download(
-                fileIDs,
-                job.channel,
-                signal,
-              );
-              checkAttachments(inputFiles);
-
-              if (inputFiles.length !== fileIDs.length) {
-                throw new Error("Some requested attachments are unavailable");
-              }
-
-              // Refuse before any audio leaves: speech alone needs no file input.
-              if (
-                !this.backend.supportsAttachments &&
-                !inputFiles.every((item) => isMedia(item))
-              ) {
-                throw new Error("Backend accepts no files");
-              }
-            } catch {
-              signal.throwIfAborted();
-              throw new AttachmentInputUnavailable();
-            }
+          } else if (attachments.ids.length > 0) {
+            inputFiles = await this.downloadFileInput(
+              job,
+              attachments.ids,
+              Boolean(transcriber),
+              signal,
+            );
 
             signal.throwIfAborted();
 
@@ -2486,7 +2518,7 @@ export class Gateway {
 
           if (deferred) {
             failure = "history";
-            output = [statusText(failure)];
+            output = [statusText(job, failure)];
           } else {
             output =
               (reacted || silent) && !answer.trim()
@@ -2520,7 +2552,7 @@ export class Gateway {
               ? "interrupted"
               : budget.controller.signal.aborted
                 ? "timeout"
-                : errorFailure(error);
+                : errorFailure(error, attachments.failure);
           // Category, provider status and backend only: never error text.
           const detail = providerFailure(failure);
           this.log.warn(
@@ -2540,8 +2572,8 @@ export class Gateway {
           );
           output = [
             failure === "timeout" && observeProgress
-              ? `${statusText(failure)} ${turnProgressText(progress)}`
-              : statusText(failure),
+              ? `${statusText(job, failure)} ${turnProgressText(progress)}`
+              : statusText(job, failure),
           ];
           transcript = undefined;
 
@@ -2600,7 +2632,7 @@ export class Gateway {
 
           if (!reactionDelivered) {
             failure = "reaction";
-            output = [statusText(failure)];
+            output = [statusText(job, failure)];
           }
         }
 
@@ -2622,7 +2654,11 @@ export class Gateway {
 
           // Another writer moved the cursor: catch-up delivers from there.
           failure = "history";
-          output = this.store.respond(job.id, [statusText(failure)], failure);
+          output = this.store.respond(
+            job.id,
+            [statusText(job, failure)],
+            failure,
+          );
           this.queueTranscript(this.catchUpKey(job.conversation));
         }
 

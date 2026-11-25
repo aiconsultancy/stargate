@@ -38,6 +38,9 @@
 
 ### Changes
 
+- Attach Subspace chat uploads to admitted IRC requests through the addressed
+  officer's existing signing proxy. This uses `subspaceAgents` and adds no flag.
+
 - Add the usage guard for rear admiral quota notices in each ship channel
   and provider-specific cutoffs on new crew turns.
 

@@ -109,7 +109,7 @@ const ircFeaturesSchema = settingsStruct({
   steerThreadFollowUps: Schema.Boolean.pipe(settingsDefault(false)),
   /** Bridge native clarification forms to their original authenticated requester. */
   questions: Schema.optional(Schema.Boolean),
-  /** Download FILEHOST links in admitted messages as attachments. */
+  /** Download FILEHOST links and Subspace uploads from admitted messages. */
   filesIn: Schema.Boolean.pipe(settingsDefault(true)),
   /** Upload published reply files to FILEHOST and post their links. */
   filesOut: Schema.Boolean.pipe(settingsDefault(true)),

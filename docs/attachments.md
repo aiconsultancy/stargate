@@ -1,8 +1,9 @@
 # Images and attachments
 
-Stargate supports files on accepted Slack messages and explicit file publication in
-agent replies. User and channel allowlists, deny rules, bot rejection and source
-ownership apply to both directions. OAuth scopes do not change those rules.
+Stargate supports files on accepted Slack and IRC messages and explicit file
+publication in agent replies. User and channel allowlists, deny rules, bot
+rejection and source ownership apply to both directions. See [IRC files](irc.md#files)
+for Subspace chat uploads and IRC FILEHOST.
 
 ## Slack to agent
 

@@ -1592,6 +1592,7 @@
       "files": [
         "src/subspace/bridge.ts",
         "src/subspace/certificate.ts",
+        "src/subspace/chat-uploads.ts",
         "src/subspace/cli.ts",
         "src/subspace/enrol.ts",
         "src/subspace/files.ts",
@@ -1601,7 +1602,7 @@
         "src/subspace/upstream.ts"
       ],
       "public": ["src/subspace/cli.ts", "src/subspace/start.ts"],
-      "neighbours": ["config", "lib"]
+      "neighbours": ["attachments", "config", "lib"]
     },
     "fleet": {
       "layer": "slices",

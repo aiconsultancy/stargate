@@ -9,6 +9,8 @@ const plain = (text: string) => ({
 export const cancellationNotice =
   "Stargate received your stop request. Work may have run; existing effects may remain. The request was not repeated. Check agent state before trying again.";
 
+export type AttachmentInputFailure = "attachments" | "shared-attachments";
+
 export class AttachmentInputUnavailable extends Error {}
 
 export class PromptNotSubmitted extends Error {}
@@ -143,7 +145,7 @@ export type RequestFailure =
   | "cancelled"
   | "backend"
   | "context"
-  | "attachments"
+  | AttachmentInputFailure
   | "transcription"
   | "interrupted"
   | "reaction"
@@ -266,6 +268,10 @@ const failures = {
   attachments: {
     title: "Attachments unavailable",
     text: "Stargate could not pass these attachments to the agent. Check files:read access, channel sharing, supported file types and size limits. No agent turn was admitted; the files were not silently dropped.",
+  },
+  "shared-attachments": {
+    title: "Attachments unavailable",
+    text: "Stargate could not pass the shared files to the agent. Check IRC file input, access to the original files, and the model's supported file types. Subspace uploads expire after 30 days. Automatic delivery accepts up to 10 MiB per file and 25 MiB total. No agent turn was started.",
   },
   transcription: {
     title: "Voice message not transcribed: please type it",

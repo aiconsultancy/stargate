@@ -38,6 +38,7 @@ import { questionFingerprint } from "../../chat/questions/native-question";
 import { type Identity, backendFingerprint } from "../../gateway/routing";
 import type { Incoming, Store } from "../../gateway/store";
 import { turnProgressText } from "../../shared/turn-progress";
+import type { ReadChatUpload } from "../../chat/attachments/attachments";
 import { IrcAudit, ctcp, serviceNick } from "./audit";
 import { ircBurstEligible } from "./burst";
 import {
@@ -49,7 +50,7 @@ import {
 import { clientPem } from "./client-pem";
 import { type CrewLink, crewLink } from "./crew-link";
 import { CrewQuestionGateway } from "./crew-question-gateway";
-import { IrcDelivery } from "./delivery";
+import { IrcDelivery, type IrcFiles } from "./delivery";
 import { copyTag, copyText, isOwnDmCopy } from "./dm-copies";
 import { Filehost, filehostURL } from "./filehost";
 import {
@@ -163,6 +164,7 @@ type ShipOptions = {
   crewLink?: CrewLink | null;
   /** Stargate_dm outbox poll interval (default 2000 ms). */
   copyPollMs?: number;
+  subspaceUpload?: (registration: string) => ReadChatUpload | undefined;
 };
 
 const copyRetryMs = 10 * 60_000;
@@ -989,6 +991,10 @@ export class IrcShip {
 
     const memberLog = this.log.child({ irc: member.id });
 
+    const upload = config.features.filesIn
+      ? this.options.subspaceUpload?.(member.id)
+      : undefined;
+
     const identity: IrcMember = {
       id: member.id,
       role: member.role,
@@ -1240,7 +1246,7 @@ export class IrcShip {
               this.stop(registration, message);
             }
           } else {
-            this.receive(identity, client, message, filehost, replay);
+            this.receive(identity, client, message, attachments, replay);
           }
         },
         sent: (sent) => {
@@ -1310,6 +1316,18 @@ export class IrcShip {
         })
       : undefined;
 
+    const attachments: IrcFiles = {
+      ...(files && {
+        hosted: {
+          files,
+          filehost,
+          download: config.features.filesIn,
+          upload: config.features.filesOut,
+        },
+      }),
+      ...(upload && { readChatUpload: upload }),
+    };
+
     const registration: IrcRegistration = {
       ...identity,
       settings: gatewaySettings(config, member),
@@ -1326,14 +1344,7 @@ export class IrcShip {
       delivery: new IrcDelivery(
         client,
         this.options.readyMs,
-        files
-          ? {
-              files,
-              filehost,
-              download: config.features.filesIn,
-              upload: config.features.filesOut,
-            }
-          : undefined,
+        attachments,
         {
           plan: (unit, plan) =>
             this.store.deliveryPlan(unit.job, unit.part, plan),
@@ -1450,7 +1461,7 @@ export class IrcShip {
     member: IrcMember,
     client: IrcClient,
     message: IrcMessage,
-    filehost: () => URL | undefined,
+    attachments: IrcFiles,
     replay = false,
   ) {
     if (!this.open()) {
@@ -1544,7 +1555,10 @@ export class IrcShip {
       replay,
       now: Date.now,
       fold: client.fold,
-      filehost: this.config.features.filesIn ? filehost() : undefined,
+      filehost: attachments.hosted?.download
+        ? attachments.hosted.filehost()
+        : undefined,
+      subspaceUploads: attachments.readChatUpload !== undefined,
     });
 
     if (control) {
