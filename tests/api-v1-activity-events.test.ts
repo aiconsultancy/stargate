@@ -234,7 +234,13 @@ test("subscribe, snapshot and events join with no gap or duplicate", async () =>
 test("coalescing sends each item's latest value with its latest seq", async () => {
   const hub = createActivityHub();
   const viewer = watch(hub, "agent=captain");
-  const log = hub.recorder("captain").begin();
+
+  const requests = [
+    { channel: "#Bridge", msgid: "wire-A" },
+    { channel: "#Bridge", msgid: "wire-B" },
+  ];
+
+  const log = hub.recorder("captain").begin(requests);
 
   for (let i = 0; i < 50; i++) {
     log.update(
@@ -259,6 +265,10 @@ test("coalescing sends each item's latest value with its latest seq", async () =
     "item",
     "item",
   ]);
+  expect(events[0]?.change).toMatchObject({
+    type: "turn-started",
+    turn: { requests },
+  });
   const change = events[1]?.change;
   expect(change?.type === "item" ? change.item : undefined).toEqual(
     turn?.items[0],
@@ -275,7 +285,10 @@ test("coalescing sends each item's latest value with its latest seq", async () =
   await flushed();
   expect(viewer.events().at(-1)).toMatchObject({
     seq: 53,
-    change: { type: "turn-ended", turn: { status: "failed", seq: 53 } },
+    change: {
+      type: "turn-ended",
+      turn: { status: "failed", seq: 53, requests },
+    },
   });
   viewer.stop();
 });
@@ -390,7 +403,8 @@ test("two viewers see the same sequence, and an unwatched agent costs nothing", 
 test("a turn-scoped stream never sees a neighbouring turn", async () => {
   const hub = createActivityHub();
   const recorder = hub.recorder("captain");
-  const own = recorder.begin();
+  const requests = [{ channel: "#Bridge", msgid: "own-request" }];
+  const own = recorder.begin(requests);
   const turnId = snapshot(hub, "captain").turns[0]?.id ?? "";
   const viewer = watch(hub, `agent=captain&turn=${turnId}`);
   const neighbour = recorder.begin();
@@ -409,6 +423,7 @@ test("a turn-scoped stream never sees a neighbouring turn", async () => {
     "turn-updated",
     "turn-ended",
   ]);
+  expect(events[1]?.change).toMatchObject({ turn: { requests } });
   expect(events.at(-1)?.change).toMatchObject({
     turn: { status: "cancelled", reconnects: 1 },
   });
@@ -736,9 +751,11 @@ test("each lifecycle event shows the turn as it was at its own seq", async () =>
   const hub = createActivityHub({ now: () => clock });
   const viewer = watch(hub, "agent=captain");
 
+  const requests = [{ channel: "#Bridge", msgid: "wire-request" }];
+
   try {
     // Start, reconnect and end all inside one flush window.
-    const log = hub.recorder("captain").begin();
+    const log = hub.recorder("captain").begin(requests);
     clock = 110;
     log.update("a", 110, () => text("one"));
     clock = 120;
@@ -774,6 +791,7 @@ test("each lifecycle event shows the turn as it was at its own seq", async () =>
           updatedAt: 100,
           endedAt: null,
           reconnects: 0,
+          requests,
           usage: null,
         },
       },
@@ -788,6 +806,7 @@ test("each lifecycle event shows the turn as it was at its own seq", async () =>
           updatedAt: 130,
           endedAt: 130,
           reconnects: 1,
+          requests,
           usage: null,
         },
       },

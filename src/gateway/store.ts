@@ -142,14 +142,15 @@ export class Store {
     return (
       this.db
         .query(`INSERT OR IGNORE INTO jobs
-      (eventId,botKey,conversation,channel,thread,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at,fleet_context,notification_context,slack_reaction)
-      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt,$fleet,$notification,$slackReaction)`)
+      (eventId,botKey,conversation,channel,thread,ircRequestChannel,replyParent,user,text,input_files,deferDelivery,sender,gate,textMention,received,retry_at,fleet_context,notification_context,slack_reaction)
+      VALUES ($eventId,$botKey,$conversation,$channel,$thread,$ircRequestChannel,$replyParent,$user,$text,$files,$deferDelivery,$sender,$gate,$textMention,$received,$retryAt,$fleet,$notification,$slackReaction)`)
         .run({
           $eventId: input.eventId,
           $botKey: input.botKey,
           $conversation: input.conversation,
           $channel: input.channel,
           $thread: input.thread,
+          $ircRequestChannel: input.ircRequestChannel ?? null,
           $replyParent: input.replyParent ?? null,
           $user: input.user,
           $text: input.text,
@@ -706,6 +707,7 @@ export class Store {
               messages.length,
               input.botKey,
               message,
+              input.ircRequestChannel,
             );
 
             if (options.trackThreads) {
@@ -751,7 +753,13 @@ export class Store {
         deadline,
         now + ircBurstLimits.waitMs,
       );
-      this.irc.saveIrcBurstMessage(job.id, 0, input.botKey, message);
+      this.irc.saveIrcBurstMessage(
+        job.id,
+        0,
+        input.botKey,
+        message,
+        input.ircRequestChannel,
+      );
 
       return true;
     })();

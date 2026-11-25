@@ -131,6 +131,8 @@ export function initializeStoreSchema(db: Database) {
   column("jobs", "activity", "TEXT");
   column("jobs", "input", "TEXT");
   column("jobs", "input_files", "TEXT");
+  column("jobs", "ircRequestChannel", "TEXT");
+  column("irc_burst_messages", "requestChannel", "TEXT");
   column("jobs", "output_files", "TEXT");
   column("jobs", "deferDelivery", "INTEGER NOT NULL DEFAULT 0");
   column("jobs", "sender", "TEXT");

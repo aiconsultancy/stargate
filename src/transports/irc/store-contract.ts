@@ -27,6 +27,10 @@ export interface IrcOperations {
   ): void;
   extendIrcBurst(job: number, deadline: number): void;
   ircBurstMessages(job: number): IrcBurstMessage[];
+  ircBurstRequests(
+    job: number,
+    botKey: string,
+  ): { eventId: string; channel: string }[];
   ircBurstRequest(
     botKey: string,
     channel: string,
@@ -37,6 +41,7 @@ export interface IrcOperations {
     ordinal: number,
     botKey: string,
     message: IrcBurstMessage,
+    requestChannel?: string,
   ): void;
   ircThreadRoot(
     botKey: string,

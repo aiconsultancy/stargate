@@ -5,6 +5,7 @@ import { Schema } from "effect";
 import pino from "pino";
 import type {
   AgentBackend,
+  ActivityRequest,
   PromptSourceContext,
 } from "../src/backends/backend";
 import { ircSchema } from "../src/config";
@@ -369,7 +370,7 @@ test("restart preserves original evidence, deduplication, and per-member native-
   cleanup.push(() => store.close());
 
   const sources = ["a", "b"].map((id, index) => {
-    const input = incoming(id);
+    const input = incoming(id, { ircRequestChannel: "#Bridge" });
 
     const source = ledger.record("ses_captain", {
       reference: fleetSourceReference("irc", "captain", "#bridge", id),
@@ -417,6 +418,11 @@ test("restart preserves original evidence, deduplication, and per-member native-
   }
 
   expect(store.irc.ircBurstMessages(job.id)).toHaveLength(2);
+  expect(store.irc.ircBurstRequests(job.id, "captain")).toEqual([
+    { eventId: "#bridge:a", channel: "#Bridge" },
+    { eventId: "#bridge:b", channel: "#Bridge" },
+  ]);
+  expect(store.irc.ircBurstRequests(job.id, "other-captain")).toEqual([]);
   expect(store.enqueue(incoming("b"))).toBe(false);
   expect(() =>
     ledger.verify("unrelated-session", sources[1]?.reference ?? ""),
@@ -469,7 +475,13 @@ async function live(
 test("real IRC intake batches admitted human fragments once, preserves source IDs and thread gating, and keeps late input queued", async () => {
   const f = await live(250);
   const { registration: primary } = f;
-  const prompts: { text: string; context?: PromptSourceContext }[] = [];
+
+  const prompts: {
+    text: string;
+    context?: PromptSourceContext;
+    requests: readonly ActivityRequest[];
+  }[] = [];
+
   let release: (() => void) | undefined;
 
   const wait = new Promise<void>((resolve) => {
@@ -481,8 +493,23 @@ test("real IRC intake batches admitted human fragments once, preserves source ID
     async createSession() {
       return "ses_discovery";
     },
-    async prompt(_session, text, _signal, _onText, onInput, _files, context) {
-      prompts.push({ text, ...(context ? { context } : {}) });
+    async prompt(
+      _session,
+      text,
+      _signal,
+      _onText,
+      onInput,
+      _files,
+      context,
+      _progress,
+      _live,
+      requests,
+    ) {
+      prompts.push({
+        text,
+        ...(context ? { context } : {}),
+        requests: requests?.() ?? [],
+      });
       onInput?.(`native-${prompts.length}`);
 
       if (prompts.length === 1) {
@@ -537,6 +564,9 @@ test("real IRC intake batches admitted human fragments once, preserves source ID
   }
 
   expect(prompts[0]?.context?.source.message).toBe(ids[0]);
+  expect(prompts[0]?.requests).toEqual(
+    ids.map((msgid) => ({ channel: "#bridge", msgid })),
+  );
   const head = f.store.jobByEvent(primary.key, `#bridge:${ids[0]}`);
 
   if (!head) {
@@ -576,6 +606,7 @@ test("real IRC intake batches admitted human fragments once, preserves source ID
     "late input executes after first turn",
   );
   expect(prompts[1]?.text).toContain("A later independent message");
+  expect(prompts[1]?.requests).toEqual([{ channel: "#bridge", msgid: late }]);
 });
 
 test("default IRC intake, bots, and replay do not acquire a human burst", async () => {
@@ -600,6 +631,9 @@ test("default IRC intake, bots, and replay do not acquire a human burst", async 
     }
 
     expect(f.store.irc.ircBurstMessages(job.id)).toEqual([]);
+    expect(f.registration.transport.activityRequests?.(job)).toEqual([
+      { channel: "#bridge", msgid: id },
+    ]);
   }
 
   const opted = await live(250);

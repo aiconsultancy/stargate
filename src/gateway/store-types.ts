@@ -10,6 +10,8 @@ export type Incoming = {
   conversation: string;
   channel: string;
   thread: string;
+  /** Original IRC target (account for a DM), only for a real msgid in thread. */
+  ircRequestChannel?: string;
   /** IRC thread root; null/absent means an ordinary main-channel request. */
   replyParent?: string | null;
   user: string;

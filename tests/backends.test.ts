@@ -1086,6 +1086,12 @@ test("OpenCode records the prompt's own turn activity without changing the reply
     "Review this PR",
     controller.signal,
     () => {},
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    false,
+    () => [{ channel: "#Review", msgid: "irc-wire-id" }],
   );
 
   const items = () => hub.turns("captain")?.turns[0]?.items ?? [];
@@ -1129,6 +1135,9 @@ test("OpenCode records the prompt's own turn activity without changing the reply
 
     const turn = hub.turns("captain")?.turns[0];
     expect(turn?.status).toBe("completed");
+    expect(turn?.requests).toEqual([
+      { channel: "#Review", msgid: "irc-wire-id" },
+    ]);
     expect(turn?.items).toMatchObject([
       { id: "i1", kind: "reasoning", text: "Thinking it over." },
       { id: "i2", kind: "tool", callId: "call-1", rawInput: '{"path":' },

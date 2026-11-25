@@ -239,6 +239,8 @@ export interface AgentBackend {
     context?: PromptSourceContext,
     onProgress?: (progress: TurnProgress) => void,
     liveProgress?: boolean,
+    /** Lazy input provenance for activity collection, never model text. */
+    activityRequests?: () => readonly ActivityRequest[],
   ): Promise<string>;
   interrupt?(sessionId: string, signal: AbortSignal): Promise<void>;
   /** Withdraw this input; interrupt only if raw history proves it is current. */
@@ -385,6 +387,8 @@ export type ActivityItem =
 
 export type ActivityOutcome = "completed" | "failed" | "cancelled";
 
+export type ActivityRequest = { channel: string; msgid: string };
+
 /** One officer turn's writer. Calls never throw, block or affect the turn. */
 export type TurnActivityLog = {
   /** Create the item for a backend-local key, then apply a change observed at `at`. */
@@ -401,7 +405,7 @@ export type TurnActivityLog = {
 
 /** Collects officer turns for operator views; one per registration. */
 export type TurnActivityRecorder = {
-  begin(): TurnActivityLog;
+  begin(requests?: readonly ActivityRequest[]): TurnActivityLog;
 };
 
 export type BackendContext = {

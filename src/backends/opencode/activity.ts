@@ -4,6 +4,7 @@ import type {
   ActivityError,
   ActivityItem,
   ActivityOutcome,
+  ActivityRequest,
   TurnActivityLog,
   TurnActivityRecorder,
 } from "../backend";
@@ -118,7 +119,15 @@ class TurnCollector {
   public submitted(input: string) {
     if (this.input === undefined && !this.ended) {
       this.input = input;
-      this.log = this.recorder.begin();
+      let requests: readonly ActivityRequest[] | undefined;
+
+      try {
+        requests = this.source.requests?.();
+      } catch {
+        // An unavailable request link must not affect prompt submission.
+      }
+
+      this.log = this.recorder.begin(requests);
     }
   }
 

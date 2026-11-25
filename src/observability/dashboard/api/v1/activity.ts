@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type {
   ActivityItem,
   ActivityOutcome,
+  ActivityRequest,
   TurnActivityLog,
   TurnActivityRecorder,
 } from "../../../../backends/backend";
@@ -17,6 +18,10 @@ import type {
   V1AgentActivityChange,
   V1AgentActivityEvent,
 } from "./types";
+
+/** Channel selectors fold ASCII letters only, not Unicode or IRC punctuation. */
+const foldActivityChannel = (value: string) =>
+  value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 
 /** Items whose JSON is larger are served in pages of at most this size. */
 export const activityPageBytes = 64 * 1024;
@@ -54,6 +59,7 @@ type StoredTurn = {
   updatedAt: number;
   endedAt: number | null;
   reconnects: number;
+  requests: ActivityRequest[];
   items: Map<string, StoredItem>;
   /** Serialized size, measured once when the turn ends. */
   bytes: number;
@@ -191,6 +197,7 @@ function turnSummary(turn: StoredTurn): V1ActivityTurnSummary {
     updatedAt: turn.updatedAt,
     endedAt: turn.endedAt,
     reconnects: turn.reconnects,
+    requests: turn.requests.map((request) => ({ ...request })),
     usage: usage(turn),
   };
 }
@@ -361,7 +368,10 @@ export function createActivityHub(
     }
   }
 
-  function begin(agentId: string): TurnActivityLog {
+  function begin(
+    agentId: string,
+    requests: readonly ActivityRequest[] = [],
+  ): TurnActivityLog {
     const owner = agent(agentId);
     const startedAt = now();
 
@@ -374,6 +384,7 @@ export function createActivityHub(
       updatedAt: startedAt,
       endedAt: null,
       reconnects: 0,
+      requests: requests.map(({ channel, msgid }) => ({ channel, msgid })),
       items: new Map(),
       bytes: 0,
     };
@@ -468,9 +479,10 @@ export function createActivityHub(
 
         try {
           turn.bytes = Buffer.byteLength(
-            JSON.stringify(
-              [...turn.items.values()].map((item) => itemJson(item)),
-            ),
+            JSON.stringify({
+              requests: turn.requests,
+              items: [...turn.items.values()].map((item) => itemJson(item)),
+            }),
           );
         } catch {
           turn.bytes = 0;
@@ -489,22 +501,42 @@ export function createActivityHub(
      */
     watch,
     recorder(agentId: string): TurnActivityRecorder {
-      return { begin: () => begin(agentId) };
+      return { begin: (requests) => begin(agentId, requests) };
     },
     hasTurn(agentId: string, turnId: string) {
       return (
         agents.get(agentId)?.turns.some((turn) => turn.id === turnId) ?? false
       );
     },
-    /** Every retained turn, or one; undefined when that turn is gone. */
-    turns(agentId: string, turnId?: string) {
+    /** All retained turns, one by ID, or every turn matching an IRC request. */
+    turns(
+      agentId: string,
+      selector?: string | { msgid: string; channel: string | undefined },
+    ) {
       const owner = agents.get(agentId);
 
-      const selected = (owner?.turns ?? []).filter(
-        (turn) => turnId === undefined || turn.id === turnId,
-      );
+      const channelKey =
+        typeof selector === "object" && selector.channel !== undefined
+          ? foldActivityChannel(selector.channel)
+          : undefined;
 
-      if (turnId !== undefined && selected.length === 0) {
+      const selected = (owner?.turns ?? []).filter((turn) => {
+        if (typeof selector === "string") {
+          return turn.id === selector;
+        }
+
+        return (
+          selector === undefined ||
+          turn.requests.some(
+            ({ channel, msgid }) =>
+              msgid === selector.msgid &&
+              (channelKey === undefined ||
+                foldActivityChannel(channel) === channelKey),
+          )
+        );
+      });
+
+      if (selector !== undefined && selected.length === 0) {
         return;
       }
 
@@ -574,6 +606,10 @@ const parameters = {
   turn: /^[a-z0-9]{1,40}-[a-z0-9]{1,16}$/,
   item: /^i[1-9][0-9]{0,8}$/,
   page: /^(?:0|[1-9][0-9]{0,8})$/,
+  /** Same printable wire msgid bounds as IRC intake. */
+  request: /^[!-~]{1,128}$/,
+  /** Intentionally unanchored: require at least one character of any kind. */
+  channel: /[\s\S]/,
 } as const;
 
 type Parameter = keyof typeof parameters;
@@ -586,8 +622,8 @@ export type ActivityRead =
   | { status: 200; body: V1AgentActivity | V1ActivityItemPage };
 
 /**
- * `GET /api/v1/agents/{id}/activity[?turn=[&item=[&page=]]]`. Every query
- * parameter is validated; unknown or repeated ones are rejected.
+ * `GET /api/v1/agents/{id}/activity` with a turn/item/page or IRC request
+ * selector. Every parameter is validated; unknown or repeated ones are rejected.
  */
 export function readActivity(
   hub: ActivityHub,
@@ -607,7 +643,11 @@ export function readActivity(
 
   if (
     (values.item !== undefined && values.turn === undefined) ||
-    (values.page !== undefined && values.item === undefined)
+    (values.page !== undefined && values.item === undefined) ||
+    (values.channel !== undefined &&
+      (values.request === undefined ||
+        Buffer.byteLength(values.channel) > 512)) ||
+    (values.request !== undefined && values.turn !== undefined)
   ) {
     return { status: 400 };
   }
@@ -629,7 +669,12 @@ export function readActivity(
     return page ? { status: 200, body: page } : { status: 404 };
   }
 
-  const snapshot = hub.turns(agentId, values.turn);
+  const snapshot = hub.turns(
+    agentId,
+    values.request === undefined
+      ? values.turn
+      : { msgid: values.request, channel: values.channel },
+  );
 
   if (!snapshot) {
     return { status: 404 };

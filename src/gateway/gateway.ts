@@ -220,6 +220,13 @@ function knownRequestFailure(cause: RequestFailure) {
   );
 }
 
+/** Only chat requests have wire provenance, and only an observer reads it. */
+function activityRequestsFor(transport: GatewayTransport, job: Job) {
+  return !job.deferDelivery && transport.activityRequests
+    ? () => transport.activityRequests?.(job) ?? []
+    : undefined;
+}
+
 /** Slack rules: bot/app/workspace namespace and Slack message timestamps. */
 export function slackTransport(
   config: BotConfig,
@@ -2412,6 +2419,7 @@ export class Gateway {
                 }
               : undefined,
             turnStatus === "live",
+            activityRequestsFor(transport, job),
           );
 
           if (turnStatus === "live") {

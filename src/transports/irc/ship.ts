@@ -390,6 +390,25 @@ function shipTransport(
   };
 
   return {
+    activityRequests(job) {
+      const messages = store.irc.ircBurstRequests(job.id, member.key);
+
+      const primary = job.ircRequestChannel
+        ? [{ eventId: job.eventId, channel: job.ircRequestChannel }]
+        : [];
+
+      const prefix = `${job.channel}:`;
+
+      return (messages.length > 0 ? messages : primary).flatMap(
+        ({ eventId, channel }) => {
+          const msgid = eventId.startsWith(prefix)
+            ? eventId.slice(prefix.length)
+            : undefined;
+
+          return validMsgid(msgid) ? [{ channel, msgid }] : [];
+        },
+      );
+    },
     progressRequest: (job) =>
       job.received !== null &&
       job.received !== undefined &&
