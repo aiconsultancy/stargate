@@ -976,6 +976,34 @@ test("irc casemapping: one folded channel key for caps, routing and denies", asy
   ).toBe(true);
 });
 
+test("disabling IRC file input also blocks a previously queued Subspace download", async () => {
+  const store = openStore(":memory:");
+  cleanup.push(() => store.close());
+
+  const upload = async () => ({
+    name: "plan.txt",
+    mime: "text/plain",
+    data: Uint8Array.of(65),
+  });
+
+  for (const filesIn of [true, false]) {
+    const ship = await IrcShip.create(
+      shipConfig({ crew: [], features: { filesIn } }),
+      store,
+      pino({ level: "silent" }),
+      {
+        env: { STARGATE_IRC_GALACTICA: "fixture-password" },
+        subspaceUpload: () => upload,
+      },
+    );
+
+    cleanup.push(() => ship.close());
+    expect(Boolean(ship.registrations[0]?.delivery.files?.download)).toBe(
+      filesIn,
+    );
+  }
+});
+
 test("irc namespace: host, port and network name select a new namespace", async () => {
   const keys = async (server: Record<string, unknown>) => {
     const ship = await IrcShip.create(

@@ -990,7 +990,10 @@ export class IrcShip {
     );
 
     const memberLog = this.log.child({ irc: member.id });
-    const upload = this.options.subspaceUpload?.(member.id);
+
+    const upload = config.features.filesIn
+      ? this.options.subspaceUpload?.(member.id)
+      : undefined;
 
     const identity: IrcMember = {
       id: member.id,
@@ -1557,7 +1560,7 @@ export class IrcShip {
       now: Date.now,
       fold: client.fold,
       filehost: this.config.features.filesIn ? filehost() : undefined,
-      subspaceUploads: subspaceUploads && this.config.features.filesIn,
+      subspaceUploads,
     });
 
     if (control) {

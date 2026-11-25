@@ -1936,7 +1936,7 @@ export class Gateway {
         .inputFiles(job.id)
         .some((id) => chatUploadReference.test(id))
     ) {
-      return "Stargate could not pass the shared files to the agent. Check the upload in Subspace, its 30-day expiry, and the model's supported file types. Automatic delivery accepts up to 10 MiB per file and 25 MiB total. No agent turn was started.";
+      return "Stargate could not pass the shared files to the agent. Check IRC file input, access to the original files, and the model's supported file types. Subspace uploads expire after 30 days. Automatic delivery accepts up to 10 MiB per file and 25 MiB total. No agent turn was started.";
     }
 
     return failureText(cause);
