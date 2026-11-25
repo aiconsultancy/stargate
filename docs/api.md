@@ -241,6 +241,10 @@ ignore files. The gateway instead copies it under the snapshot limits below
 because it can run as a different Linux user. Git versions that support
 `GIT_ATTR_SOURCE` also ignore worktree `.gitattributes`. The captain caches
 each checkout's result for 15 seconds, with a five-second read limit.
+The temporary directory (`TMPDIR`, or the system default) must resolve outside
+the checkout. It and its ancestors must be owned by root or the captain's
+Linux user and must have the sticky bit if group- or world-writable. If those
+safety checks fail, `git.error` is `Git status requires a safe temporary directory.`
 
 Each `git` object may carry these optional fields, added without changing the
 existing ones:

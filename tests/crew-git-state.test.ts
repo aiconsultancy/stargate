@@ -362,6 +362,28 @@ test("a missing checkout is null and a plain directory is unavailable", async ()
   });
 });
 
+test("Fleet Git explains why a non-sticky, group-writable TMPDIR is rejected", async () => {
+  const directory = await repository();
+  const temporary = await mkdtemp(join(root, "unsafe-temp-"));
+  const previous = process.env["TMPDIR"];
+  await chmod(temporary, 0o775);
+  process.env["TMPDIR"] = temporary;
+
+  try {
+    expect(await createCrewGitReader()(directory, signal)).toMatchObject({
+      branch: null,
+      changedFiles: null,
+      error: "Git status requires a safe temporary directory.",
+    });
+  } finally {
+    if (previous === undefined) {
+      delete process.env["TMPDIR"];
+    } else {
+      process.env["TMPDIR"] = previous;
+    }
+  }
+});
+
 test("results are cached briefly and shared by concurrent callers", async () => {
   const directory = await repository();
   let clock = 0;

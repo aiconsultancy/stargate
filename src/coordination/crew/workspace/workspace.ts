@@ -714,6 +714,8 @@ const gitStateTimeout = 5000;
 const statusLimit = 16 * 1024 * 1024;
 const gitUnavailable = "Git state unavailable.";
 
+class UnsafeStatusTemp extends Error {}
+
 /** The remote URL without user information, which can hold a credential. */
 export function remoteWithoutUser(remote: string): string | null {
   const value = remote.trim();
@@ -779,7 +781,7 @@ async function fleetStatusTemp(directory: string) {
   const temporary = await realpath(tmpdir());
 
   if (within(await realpath(directory), temporary)) {
-    throw new Error(gitUnavailable);
+    throw new UnsafeStatusTemp();
   }
 
   // A private directory cannot protect Git's config if another user can
@@ -796,7 +798,7 @@ async function fleetStatusTemp(directory: string) {
       (info.uid !== 0 && info.uid !== process.getuid?.()) ||
       (info.mode & 0o022 && !(info.mode & 0o1000))
     ) {
-      throw new Error(gitUnavailable);
+      throw new UnsafeStatusTemp();
     }
   }
 
@@ -1013,10 +1015,16 @@ async function inspect(
       remote: remote === null ? null : remoteWithoutUser(remote),
       checkedAt: now(),
     };
-  } catch {
+  } catch (error) {
     signal.throwIfAborted();
 
-    return { ...emptyState(now()), error: gitUnavailable };
+    return {
+      ...emptyState(now()),
+      error:
+        error instanceof UnsafeStatusTemp
+          ? "Git status requires a safe temporary directory."
+          : gitUnavailable,
+    };
   }
 }
 
