@@ -2,7 +2,7 @@ import { isAbsolute } from "node:path";
 import { Schema } from "effect";
 import { crewStatusSchema } from "../../../shared/crew-status";
 import { HISTORY_PAGE, exactStruct } from "../../../shared/session-history";
-import { effectProjectKeySchema } from "../input/project-options";
+import { effectProjectKeySchema } from "../protocol/project-key";
 import { agentIDSchema } from "../team";
 
 const directory = Schema.String.check(

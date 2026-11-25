@@ -12,17 +12,9 @@ import {
   settingsRefine,
   settingsStruct,
 } from "../../../config/settings-schema";
+import { effectProjectKeySchema } from "../protocol/project-key";
 import { agentIDSchema } from "../team";
 import { type EffectToolInput, effectToolInputFields } from "./tool-input";
-
-const projectKeyPattern = /^[a-z][a-z0-9_-]{0,47}$/u;
-
-export const effectProjectKeySchema = Schema.String.check(
-  Schema.makeFilter(
-    (key) => !["__proto__", "prototype", "constructor"].includes(key),
-  ),
-  Schema.isPattern(projectKeyPattern),
-);
 
 const directory = Schema.String.check(
   settingsRefine(

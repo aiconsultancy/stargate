@@ -14,10 +14,8 @@ import {
   settingsStartsWith,
   settingsStruct,
 } from "../../../config/settings-schema";
-import {
-  effectProjectKeySchema,
-  effectProjectToolInput,
-} from "./project-options";
+import { effectProjectKeySchema } from "../protocol/project-key";
+import { effectProjectToolInput } from "./project-options";
 
 import {
   abandonInputSchema,

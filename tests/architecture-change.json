@@ -1,5 +1,5 @@
 {
-  "baselineSha256": "3219a72f80cdcdd488d8ae5ca1cea5346de2f34fc721133a96026b152c9dbef6",
+  "baselineSha256": "6fd7f6ccfcfab3b9f093725d9f5e851a9718d3b0e8744ce726842a22e8cc4b5b",
   "pruneStale": true,
-  "closureAdditions": ["src/automation/cron/database.ts"]
+  "closureAdditions": ["src/coordination/crew/protocol/project-key.ts"]
 }

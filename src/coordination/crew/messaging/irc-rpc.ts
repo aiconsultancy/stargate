@@ -5,7 +5,7 @@ import {
   settingsStruct,
 } from "../../../config/settings-schema";
 import { messagePortableSchema } from "./message-tool-input";
-import { effectProjectKeySchema } from "../input/project-options";
+import { effectProjectKeySchema } from "../protocol/project-key";
 
 const sessionID = Schema.String.check(
   Schema.isMaxCodePoints(256),

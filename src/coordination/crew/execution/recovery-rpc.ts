@@ -8,7 +8,7 @@ import {
   settingsStruct,
 } from "../../../config/settings-schema";
 import type { CrewEngine } from "./engine";
-import { effectProjectKeySchema } from "../input/project-options";
+import { effectProjectKeySchema } from "../protocol/project-key";
 import {
   abandonInputSchema,
   inspectInputSchema,

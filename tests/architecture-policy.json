@@ -1841,6 +1841,7 @@
         "src/crew/plugin.ts",
         "src/crew/policy.ts",
         "src/crew/post.ts",
+        "src/coordination/crew/protocol/project-key.ts",
         "src/crew/project-options.ts",
         "src/crew/projects.ts",
         "src/crew/question-handoff.ts",
@@ -1867,6 +1868,7 @@
         "src/crew/identity.ts",
         "src/crew/message-protocol.ts",
         "src/crew/plugin.ts",
+        "src/coordination/crew/protocol/project-key.ts",
         "src/crew/report-rpc.ts",
         "src/crew/team.ts"
       ],
@@ -1875,6 +1877,7 @@
         "src/coordination/crew/workspace/git-status.ts",
         "src/crew/identity.ts",
         "src/crew/message-protocol.ts",
+        "src/coordination/crew/protocol/project-key.ts",
         "src/crew/report-rpc.ts",
         "src/crew/team.ts"
       ],
