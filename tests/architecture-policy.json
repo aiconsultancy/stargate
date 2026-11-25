@@ -2,7 +2,7 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "braceMigrationFileLimits": {
-    "src/backends/claude.ts": 1013
+    "src/chat/questions/questions.ts": 1031
   },
   "aliases": {
     "src/crew/plugin.ts": [
@@ -1770,6 +1770,7 @@
         "src/backends/opencode/questions.ts",
         "src/backends/opencode/reviews.ts",
         "src/backends/claude/config.ts",
+        "src/backends/claude/turn.ts",
         "src/backends/codex/config.ts",
         "src/backends/codex/preflight.ts"
       ],

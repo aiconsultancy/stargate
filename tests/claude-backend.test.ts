@@ -17,10 +17,10 @@ import { createBackend } from "../src/backends/factory";
 import {
   ClaudeBackend,
   type ClaudeRuntime,
-  ClaudeTurn,
   claudeEnvironment,
   claudeInputContent,
 } from "../src/backends/claude";
+import { ClaudeTurn } from "../src/backends/claude/turn";
 import { inheritedEnvironment } from "../src/backends/cli-agent";
 import {
   backendSchema,
