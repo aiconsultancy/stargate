@@ -19,6 +19,7 @@ import {
 } from "../../chat/attachments/attachments";
 import {
   type ActivityOutcome,
+  type ActivityRequest,
   type AgentBackend,
   type PromptSourceContext,
   type SteerInput,
@@ -210,6 +211,7 @@ function generationFailureKind(error: {
 export type OpenCodeTurnObserver = (source: {
   sessionID: string;
   events: OpenCodeClient["event"];
+  requests?: () => readonly ActivityRequest[];
   /** The prompt's transcript-placement proof; undefined is not yet provable. */
   owns(
     assistantID: string,
@@ -1196,6 +1198,7 @@ export class OpenCodeBackend implements AgentBackend {
     context?: PromptSourceContext,
     onProgress?: (progress: TurnProgress) => void,
     liveProgress = false,
+    activityRequests?: () => readonly ActivityRequest[],
   ) {
     checkAttachments(files);
 
@@ -1229,6 +1232,7 @@ export class OpenCodeBackend implements AgentBackend {
     const activity = this.observeTurn?.({
       sessionID: sessionId,
       events: this.client.event,
+      ...(activityRequests && { requests: activityRequests }),
       owns: (assistant, input, check) =>
         inputOwnership(this.client, sessionId, input, check, assistant),
     });

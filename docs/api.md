@@ -184,7 +184,7 @@ and `Last-Event-ID` without a token.
 | `/api/v1/fleet`                    | Fleet overview with captain summaries, host metrics, and gateway version and features |
 | `/api/v1/ships/{id}`               | Ship detail, including crew members                                                   |
 | `/api/v1/ships/{id}/crew/{member}` | One member's detail                                                                   |
-| `/api/v1/agents/{id}/activity`     | An officer's recent turns, or one page of one item                                    |
+| `/api/v1/agents/{id}/activity`     | An officer's recent turns, a turn by IRC request, or one page of one item             |
 | `/api/v1/events`                   | Server-sent events                                                                    |
 
 `{member}` is a crew member's configured ID. Each of a ship's `crewMembers`
@@ -335,11 +335,29 @@ provider stream reattached during the turn, when changes can be missing.
 `agent.collected` is false for backends this gateway does not collect yet;
 today only OpenCode officers are collected.
 
-| Query parameter | Meaning                                             |
-| --------------- | --------------------------------------------------- |
-| `turn`          | Only that turn; 404 once it is gone                 |
-| `item`          | With `turn`: one page of that item's JSON           |
-| `page`          | With `item`: the zero-based page number (default 0) |
+| Query parameter | Meaning                                                    |
+| --------------- | ---------------------------------------------------------- |
+| `turn`          | Only that turn; 404 once it is gone                        |
+| `item`          | With `turn`: one page of that item's JSON                  |
+| `page`          | With `item`: the zero-based page number (default 0)        |
+| `request`       | Only the turn answering this IRC message ID                |
+| `channel`       | With `request`: match this exact IRC channel or DM account |
+
+To open a turn from an IRC request, URL-encode its IRCv3 message ID and use
+`?request=<msgid>`, optionally with `&channel=<channel>`. The selector cannot
+be combined with `turn`, `item` or `page`. The message ID must contain 1–128
+printable non-space ASCII characters, and `channel` must be 1–512 UTF-8 bytes
+if supplied. Matching is exact and scoped to the officer in the path. A
+missing, ambiguous or evicted match returns an empty 404; supply the channel
+when the same message ID matches turns in more than one channel.
+
+Every turn includes `requests: [{ channel, msgid }, …]` from its accepted
+IRC job, in intake order for a burst. Channel names and IDs are returned as
+received; a direct message uses the sender's IRC account as `channel`. The
+array is empty for other transports or when the original IRC message ID is
+unknown. Requests queued before link data was recorded are not backfilled.
+A follow-up steered into an already-running input is not a new turn and is
+not included in these links.
 
 Unknown, repeated or malformed parameters return 400. An item whose JSON
 exceeds 64 KiB appears in the turn with only its identity, kind, status and
@@ -388,6 +406,8 @@ shapes:
 | `turn-updated` | `turn`: after the live provider stream reattached       |
 | `turn-ended`   | `turn`: with its outcome, `endedAt` and settled `usage` |
 | `item`         | `item`: the item, or its identity and `paged`           |
+
+All turn upserts include `requests`, starting with `turn-started`.
 
 Changes are coalesced per officer over 150 ms: a burst of changes to one
 item sends its latest value once, with the `seq` of its latest change.

@@ -714,6 +714,7 @@ export function routeIrcMessage(
         .digest("hex")
         .slice(0, 32)}`;
 
+  const requestChannel = direct ? account : target;
   const files = filehostLinks(body, context.filehost);
 
   // Persist the root at intake. In-flight answers keep their wire shape on upgrade.
@@ -735,6 +736,10 @@ export function routeIrcMessage(
     conversation: JSON.stringify([member.key, channel]),
     channel,
     thread: msgid,
+    ...(validMsgid(tagged) &&
+      Buffer.byteLength(requestChannel) <= 512 && {
+        ircRequestChannel: requestChannel,
+      }),
     ...(validMsgid(parent) && { replyParent: parent }),
     ...(protectedHuman &&
       currentMention && { threadInvitation: true as const }),

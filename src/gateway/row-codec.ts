@@ -9,9 +9,15 @@ import type { Job } from "./store-types";
 
 export type StoredJob = Omit<
   Job,
-  "deferDelivery" | "fleet" | "makers" | "notification" | "slackReaction"
+  | "deferDelivery"
+  | "fleet"
+  | "ircRequestChannel"
+  | "makers"
+  | "notification"
+  | "slackReaction"
 > & {
   deferDelivery: number;
+  ircRequestChannel: string | null;
   fleet_context: string | null;
   makers: string | null;
   fleet_exported: number;
@@ -31,6 +37,7 @@ const decodeMakers = Schema.decodeUnknownSync(
 export function decodeStoredJob(row: StoredJob): Job {
   const {
     fleet_context,
+    ircRequestChannel,
     makers,
     fleet_exported: _exported,
     notification_context,
@@ -42,6 +49,7 @@ export function decodeStoredJob(row: StoredJob): Job {
   return {
     ...job,
     deferDelivery: row.deferDelivery === 1,
+    ...(ircRequestChannel && { ircRequestChannel }),
     ...(slack_reaction && {
       slackReaction: decodeReaction(JSON.parse(slack_reaction)),
     }),

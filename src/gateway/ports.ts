@@ -5,7 +5,7 @@
 
 import type { ActivityView } from "../chat/activity/activity";
 import type { AttachmentTransport } from "../chat/attachments/attachment-delivery";
-import type { PromptSourceContext } from "../backends/backend";
+import type { ActivityRequest, PromptSourceContext } from "../backends/backend";
 import type { QuestionPort } from "../chat/questions/questions";
 import type { ReactionName } from "../shared/reactions";
 import type { RequestFailure } from "../shared/request-failure";
@@ -138,6 +138,7 @@ export interface GatewayTransport {
   instructions?(job: Job): string;
   turnStatus?(job: Job): IrcTurnStatus | undefined;
   progressRequest?(job: Job): string | undefined;
+  activityRequests?(job: Job): readonly ActivityRequest[];
   /**
    * Best effort, before each turn of an unpinned session (IRC crew: bind
    * the session to its crew member). Never fails or blocks the turn.

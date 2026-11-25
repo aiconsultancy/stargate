@@ -93,6 +93,15 @@ export class IrcRecords implements IrcOperations {
       );
   }
 
+  public ircBurstRequests(job: number, botKey: string) {
+    return this.db
+      .query<{ eventId: string; channel: string }, [number, string]>(
+        `SELECT eventId,requestChannel AS channel FROM irc_burst_messages
+         WHERE job=? AND botKey=? AND requestChannel IS NOT NULL ORDER BY ordinal`,
+      )
+      .all(job, botKey);
+  }
+
   /** Stop can resolve a grouped member without changing ordinary thread state. */
   public ircBurstRequest(
     botKey: string,
@@ -112,12 +121,20 @@ export class IrcRecords implements IrcOperations {
     ordinal: number,
     botKey: string,
     message: IrcBurstMessage,
+    requestChannel?: string,
   ) {
     this.db
       .query(
-        "INSERT INTO irc_burst_messages(botKey,eventId,job,ordinal,message) VALUES(?,?,?,?,?)",
+        "INSERT INTO irc_burst_messages(botKey,eventId,job,ordinal,message,requestChannel) VALUES(?,?,?,?,?,?)",
       )
-      .run(botKey, message.eventId, job, ordinal, JSON.stringify(message));
+      .run(
+        botKey,
+        message.eventId,
+        job,
+        ordinal,
+        JSON.stringify(message),
+        requestChannel ?? null,
+      );
   }
 
   public ircThreadRoot(

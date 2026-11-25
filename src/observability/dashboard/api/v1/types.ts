@@ -424,6 +424,8 @@ export type V1ActivityTurnSummary = {
   startedAt: number;
   updatedAt: number;
   endedAt: number | null;
+  /** Original IRC requests in intake order; empty when no wire msgid is known. */
+  requests: { channel: string; msgid: string }[];
   /** Times the live provider stream reattached; changes can be missing. */
   reconnects: number;
   /** Null until a step settles. */

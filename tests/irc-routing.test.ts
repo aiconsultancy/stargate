@@ -258,6 +258,7 @@ test("irc routing: account tag is identity; own and denied accounts never admit"
     conversation: JSON.stringify(["captain-key", "#galactica"]),
     channel: "#galactica",
     thread: "abc123",
+    ircRequestChannel: "#Galactica",
     replyParent: "abc123",
     user: "jack",
     text: "status?",
@@ -420,6 +421,10 @@ test("irc routing: direct messages are per account and captain-only", () => {
   expect(direct?.channel).toBe("jack");
   expect(direct?.conversation).toBe(JSON.stringify(["captain-key", "jack"]));
   expect(direct?.eventId).toBe("jack:abc123");
+  expect(direct?.ircRequestChannel).toBe("jack");
+  expect(route("#Galactica", "galactica: hello")?.ircRequestChannel).toBe(
+    "#Galactica",
+  );
   expect(route("someone-else", "hello")).toBeUndefined();
   expect(route("galactica-chief", "hello", undefined, chief)).toBeUndefined();
 
@@ -455,6 +460,7 @@ test("irc routing: direct messages are per account and captain-only", () => {
 
   const first = routeIrcMessage(parsed, context);
   expect(first?.thread).toMatch(/^stargate-[0-9a-f]{32}$/);
+  expect(first?.ircRequestChannel).toBeUndefined();
   expect(routeIrcMessage(parsed, context)?.eventId).toBe(first?.eventId);
 });
 

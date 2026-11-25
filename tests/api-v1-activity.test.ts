@@ -492,9 +492,23 @@ const source: ApiV1Source = {
 test("the activity route serves GET and HEAD, 404 and 400", async () => {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-activity-"));
   const shutdown = new AbortController();
-  const hub = createActivityHub();
-  const log = hub.recorder("captain").begin();
+  const hub = createActivityHub({ turnsPerAgent: 2 });
+  const recorder = hub.recorder("captain");
+
+  const requests = [
+    { channel: "#Bridge", msgid: "wire+A&=" },
+    { channel: "#Bridge", msgid: "wire-B" },
+  ];
+
+  recorder.begin([{ channel: "#Bridge", msgid: "evicted" }]).end("completed");
+  const log = recorder.begin(requests);
   log.update("k", 1, () => text("hello"));
+  recorder
+    .begin()
+    .update("k", 1, () => text("Replies mention unknown and wire-B"));
+  hub
+    .recorder("admiral")
+    .begin([{ channel: "#Bridge", msgid: "another-agent" }]);
 
   const reservation = Bun.serve({
     hostname: "127.0.0.1",
@@ -540,7 +554,55 @@ test("the activity route serves GET and HEAD, 404 and 400", async () => {
         collected: true,
       });
       expect(body.turns[0]?.items[0]).toMatchObject({ text: "hello" });
+      expect(body.turns[0]?.requests).toEqual(requests);
+      expect(body.turns[1]?.requests).toEqual([]);
       expect(body.cursor.generation).toBe(hub.generation);
+
+      const route = "/api/v1/agents/captain/activity";
+      const byTurn = await get(`${route}?turn=${body.turns[0]?.id}`);
+      const byRequest = await get(`${route}?request=wire-B`);
+      expect(byRequest.status).toBe(200);
+      expect(await byRequest.json()).toEqual(await byTurn.json());
+
+      for (const { msgid, channel } of requests) {
+        const response = await get(
+          `${route}?${new URLSearchParams({ request: msgid, channel })}`,
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          ...body,
+          turns: [body.turns[0]],
+        });
+      }
+
+      for (const query of [
+        "request=unknown",
+        "request=evicted",
+        "request=another-agent",
+        "request=wire-B&channel=%23bridge",
+      ]) {
+        const response = await get(`${route}?${query}`);
+
+        expect(response.status).toBe(404);
+        expect(await response.text()).toBe("");
+      }
+
+      for (const query of [
+        "request=",
+        "request=bad%20id",
+        "request=id%0A",
+        `request=${"x".repeat(129)}`,
+        "request=a&request=b",
+        "channel=%23Bridge",
+        "request=a&channel=",
+        `request=a&channel=${"x".repeat(513)}`,
+        `request=wire-B&turn=${body.turns[0]?.id}`,
+        "request=wire-B&item=i1",
+        "request=wire-B&page=0",
+      ]) {
+        expect((await get(`${route}?${query}`)).status).toBe(400);
+      }
 
       const head = await get("/api/v1/agents/captain/activity", "HEAD");
       expect(head.status).toBe(200);
@@ -565,4 +627,24 @@ test("the activity route serves GET and HEAD, 404 and 400", async () => {
     shutdown.abort();
     await rm(dataDirectory, { recursive: true, force: true });
   }
+});
+
+test("a shared IRC message ID needs its channel to select a retained turn", () => {
+  const hub = createActivityHub();
+  const recorder = hub.recorder("captain");
+  recorder.begin([{ channel: "#One", msgid: "wire" }]).end("completed");
+  recorder.begin([{ channel: "#Two", msgid: "wire" }]);
+
+  const read = (query: string) =>
+    readActivity(hub, config, "captain", new URLSearchParams(query));
+
+  expect(read("request=wire")).toEqual({ status: 404 });
+  expect(read("request=wire&channel=%23Two")).toMatchObject({
+    status: 200,
+    body: { turns: [snapshot(hub, "captain").turns[1]] },
+  });
+  expect(read("request=wire&channel=%23One")).toMatchObject({
+    status: 200,
+    body: { turns: [snapshot(hub, "captain").turns[0]] },
+  });
 });
