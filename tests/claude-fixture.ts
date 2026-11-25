@@ -441,6 +441,53 @@ async function answer(text: string) {
     return;
   }
 
+  if (text === "late task run activity") {
+    const task = {
+      type: "system",
+      task_id: "task-resumed",
+      tool_use_id: "tool_resumed",
+    };
+
+    assistant("msg_spawn", {
+      type: "tool_use",
+      id: task.tool_use_id,
+      name: "Agent",
+      input: {},
+    });
+
+    for (const runId of ["001", "002"]) {
+      write({
+        ...base(),
+        ...task,
+        subtype: "task_started",
+        run_id: runId,
+        task_type: "local_agent",
+        description: `Started ${runId}`,
+        is_backgrounded: runId === "002",
+      });
+    }
+
+    write({
+      ...base(),
+      ...task,
+      subtype: "task_notification",
+      run_id: "001",
+      status: "completed",
+      summary: "Stale completion",
+    });
+    write({
+      ...base(),
+      type: "system",
+      subtype: "task_updated",
+      task_id: task.task_id,
+      run_id: "002",
+      patch: { description: "Current run updated" },
+    });
+    assistant("msg_observed", { type: "text", text: "Task observed" });
+
+    return result("success", false, "Task observed");
+  }
+
   if (text === "background bash activity") {
     assistant("msg_bash", {
       type: "tool_use",

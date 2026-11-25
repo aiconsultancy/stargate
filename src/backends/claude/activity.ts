@@ -598,8 +598,18 @@ export class ClaudeActivity {
   }
 
   private task(frame: Task, at: number) {
-    const explicit = "tool_use_id" in frame ? frame.tool_use_id : undefined;
     const known = this.tasks.get(frame.task_id);
+
+    // The SDK orders a task's run IDs by plain string comparison.
+    if (
+      known?.runId !== undefined &&
+      frame.run_id !== undefined &&
+      frame.run_id < known.runId
+    ) {
+      return;
+    }
+
+    const explicit = "tool_use_id" in frame ? frame.tool_use_id : undefined;
 
     const sameRun =
       known &&

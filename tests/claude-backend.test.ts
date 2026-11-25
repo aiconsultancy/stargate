@@ -338,6 +338,42 @@ test("Claude activity replays SDK frames without changing reply or progress", as
   expect(unforced?.argv).not.toContain("--include-partial-messages");
 });
 
+test("a newer Claude task run rebinds and ignores an explicitly linked stale completion", async () => {
+  const hub = createActivityHub();
+  const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
+  let live: ReturnType<typeof hub.turns>;
+
+  await backend.prompt(
+    await session(backend),
+    "late task run activity",
+    signal(),
+    (text) => {
+      if (text === "Task observed") {
+        live = hub.turns("officer");
+      }
+    },
+  );
+
+  const tool = live?.turns[0]?.items.find(
+    (item) => item.kind === "tool" && item.callId === "tool_resumed",
+  );
+
+  expect(tool).toMatchObject({
+    metadata: {
+      task: {
+        run_id: "002",
+        description: "Current run updated",
+        is_backgrounded: true,
+      },
+    },
+  });
+  expect(tool).not.toHaveProperty("metadata.task.status");
+  expect(tool).not.toHaveProperty("metadata.task.summary");
+  expect(
+    live?.turns.find((turn) => turn.session?.parent?.callId === "tool_resumed"),
+  ).toMatchObject({ status: "running" });
+});
+
 test("a background Bash task stays on the spawning tool without making a child turn", async () => {
   const hub = createActivityHub();
   const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
