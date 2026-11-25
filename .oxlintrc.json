@@ -1129,7 +1129,7 @@
         "eslint/max-statements": [
           "error",
           {
-            "max": 70
+            "max": 68
           }
         ]
       }

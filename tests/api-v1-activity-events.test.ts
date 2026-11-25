@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { connect } from "node:net";
 import { join } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 import { Schema } from "effect";
@@ -478,7 +479,7 @@ test("activity subscriptions validate before a stream is opened", () => {
   expect(status(`agent=pi&turn=${turnId}`)).toBe(404);
 });
 
-test("over HTTP, a refused subscription never takes a viewer place", async () => {
+test("over HTTP, a refused subscription answers its status and never takes a viewer place, even at capacity", async () => {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-activity-"));
   const shutdown = new AbortController();
   const hub = createActivityHub();
@@ -526,11 +527,11 @@ test("over HTTP, a refused subscription never takes a viewer place", async () =>
       }
     };
 
-    for (let i = 1; i < 7; i++) {
+    for (let i = 1; i < 8; i++) {
       await open();
     }
 
-    // Seven streams are open: refusals leave the eighth place free.
+    // All eight places are taken, yet a bad subscription gets its own status.
     for (let i = 0; i < 3; i++) {
       expect((await get("/api/v1/events?agent=captain&x=1")).status).toBe(400);
       expect((await get("/api/v1/events?turn=a")).status).toBe(400);
@@ -543,8 +544,11 @@ test("over HTTP, a refused subscription never takes a viewer place", async () =>
       );
     }
 
-    await open();
+    // A valid subscription finds no place.
     expect((await get("/api/v1/events?agent=captain")).status).toBe(503);
+    expect((await get("/api/v1/events")).status).toBe(503);
+    // Reads still answer at stream capacity.
+    expect((await get("/api/v1/agents/captain/activity")).status).toBe(200);
 
     // The plain stream's text so far holds no activity frame.
     const more = await Promise.race([reader.read(), wait(50)]);
@@ -639,6 +643,278 @@ test("a viewer that backs up is closed while the collector carries on", async ()
     streams.stop();
   }
 });
+
+test("activity frames go one at a time and never past a viewer's 256 KiB queue", async () => {
+  const hub = createActivityHub();
+  const streams = eventStreams();
+
+  const subscription = subscribeActivity(
+    hub,
+    config,
+    new URLSearchParams("agent=captain"),
+  );
+
+  if (subscription.status !== 200) {
+    throw new Error("Unexpected refusal");
+  }
+
+  const sizes: number[] = [];
+  let accepted: number | undefined;
+
+  try {
+    const stream = streams.open(new AbortController().signal, (send) => {
+      const stop = subscription.watch((bytes) => {
+        sizes.push(bytes.length);
+        send(bytes);
+      });
+
+      return () => {
+        // The frame that did not fit is the last one handed over.
+        accepted ??= sizes.slice(0, -1).reduce((sum, size) => sum + size, 0);
+        stop();
+      };
+    });
+
+    if (!stream) {
+      throw new Error("Cannot open event stream");
+    }
+
+    // Six inline items just under 64 KiB, all in one flush, with no reader.
+    const log = hub.recorder("captain").begin();
+    const chunk = "x".repeat(activityPageBytes - 512);
+
+    for (let i = 0; i < 6; i++) {
+      log.update(`k${i}`, i, () => text(chunk));
+    }
+
+    await flushed();
+
+    // Each frame arrived on its own, inline, and the viewer was closed.
+    expect(sizes.length).toBeGreaterThan(1);
+    expect(Math.max(...sizes)).toBeLessThan(activityPageBytes + 1024);
+    expect(accepted).toBeDefined();
+    expect(accepted ?? Infinity).toBeLessThanOrEqual(256 * 1024);
+
+    const reader = stream.getReader();
+    expect(String(await reader.read().catch((error) => error))).toContain(
+      "backed up",
+    );
+  } finally {
+    streams.stop();
+  }
+});
+
+test("a turn evicted as it ends still sends its end", async () => {
+  // Any ended turn is over this byte budget, so it goes at once.
+  const hub = createActivityHub({ bytes: 10 });
+  const viewer = watch(hub, "agent=captain");
+
+  try {
+    const log = hub.recorder("captain").begin();
+    log.update("a", 1, () => text("a reply well over ten bytes"));
+    log.end("failed");
+    expect(snapshot(hub, "captain").turns).toEqual([]);
+    await flushed();
+
+    const events = viewer.events();
+    expect(events.map((event) => event.change.type)).toEqual([
+      "turn-started",
+      "item",
+      "turn-ended",
+    ]);
+
+    const ended = events.at(-1)?.change;
+    expect(ended?.type === "turn-ended" && ended.turn.status).toBe("failed");
+    expect(snapshot(hub, "captain").turns).toEqual([]);
+  } finally {
+    viewer.stop();
+  }
+});
+
+test("each lifecycle event shows the turn as it was at its own seq", async () => {
+  let clock = 100;
+  const hub = createActivityHub({ now: () => clock });
+  const viewer = watch(hub, "agent=captain");
+
+  try {
+    // Start, reconnect and end all inside one flush window.
+    const log = hub.recorder("captain").begin();
+    clock = 110;
+    log.update("a", 110, () => text("one"));
+    clock = 120;
+    log.reconnected();
+    clock = 130;
+    log.end("completed");
+    await flushed();
+
+    const events = viewer.events();
+
+    const turns = events.flatMap((event) =>
+      event.change.type === "item"
+        ? []
+        : [
+            {
+              type: event.change.type,
+              seq: event.seq,
+              turn: event.change.turn,
+            },
+          ],
+    );
+
+    // The reconnect and the end share a key: the end, as recorded, wins.
+    expect(turns).toEqual([
+      {
+        type: "turn-started",
+        seq: 1,
+        turn: {
+          id: turns[0]?.turn.id ?? "",
+          seq: 1,
+          status: "running",
+          startedAt: 100,
+          updatedAt: 100,
+          endedAt: null,
+          reconnects: 0,
+          usage: null,
+        },
+      },
+      {
+        type: "turn-ended",
+        seq: 4,
+        turn: {
+          id: turns[0]?.turn.id ?? "",
+          seq: 4,
+          status: "completed",
+          startedAt: 100,
+          updatedAt: 130,
+          endedAt: 130,
+          reconnects: 1,
+          usage: null,
+        },
+      },
+    ]);
+
+    const item = events.find((event) => event.change.type === "item");
+    expect(item?.seq).toBe(2);
+  } finally {
+    viewer.stop();
+  }
+});
+
+test("over HTTP, a viewer that never reads frees its place once it overflows", async () => {
+  const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-activity-"));
+  const shutdown = new AbortController();
+  const hub = createActivityHub();
+  const server = await listen(dataDirectory, hub, shutdown.signal);
+  const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
+  const url = new URL(server.url);
+
+  const stalled = connect({
+    host: url.hostname,
+    port: Number(url.port),
+  });
+
+  const connected = new Promise<void>((resolve, reject) => {
+    stalled.once("connect", resolve);
+    stalled.once("error", reject);
+  });
+
+  try {
+    const token = await apiToken(dataDirectory);
+
+    const get = (path: string) =>
+      fetch(new URL(path, server.url), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+    // Seven plain viewers that read, and one activity viewer that never does.
+    for (let i = 0; i < 7; i++) {
+      const plain = await get("/api/v1/events");
+      expect(plain.status).toBe(200);
+      const reader = plain.body?.getReader();
+
+      if (reader) {
+        readers.push(reader);
+      }
+    }
+
+    await connected;
+    stalled.on("error", () => {});
+    stalled.write(
+      `GET /api/v1/events?agent=captain HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${token}\r\n\r\n`,
+    );
+    stalled.pause();
+
+    const ninth = async () => {
+      const response = await get("/api/v1/events?agent=captain");
+
+      if (response.status === 200) {
+        readers.push(
+          response.body?.getReader() ?? new ReadableStream().getReader(),
+        );
+      } else {
+        await response.body?.cancel();
+      }
+
+      return response.status;
+    };
+
+    // Wait until the stalled viewer holds the eighth place.
+    const deadline = Date.now() + 5000;
+
+    while (
+      (await get("/api/v1/agents/captain/activity")).status !== 200 ||
+      (await ninth()) !== 503
+    ) {
+      if (Date.now() > deadline) {
+        throw new Error("The stalled viewer never took a place");
+      }
+    }
+
+    // Fill the socket and then the queue; the collector never waits.
+    const log = hub.recorder("captain").begin();
+    const chunk = "y".repeat(activityPageBytes - 512);
+    const started = Date.now();
+    let status = 503;
+
+    // Each flush fits an empty queue, so only a stalled socket overflows it.
+    for (let round = 0; round < 400 && status !== 200; round++) {
+      for (let i = 0; i < 3; i++) {
+        log.update(`r${round}-${i}`, round, () => text(chunk));
+      }
+
+      await wait(activityFlushMs + 20);
+      status = round % 4 === 3 ? await ninth() : 503;
+    }
+
+    expect(status).toBe(200);
+    // Well before the 60-second socket timeout.
+    expect(Date.now() - started).toBeLessThan(30_000);
+  } finally {
+    stalled.destroy();
+
+    for (const reader of readers) {
+      await reader.cancel().catch(() => {});
+    }
+
+    await server.stop();
+    shutdown.abort();
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+}, 60_000);
+
+function eventStreams() {
+  return createEventStreams(
+    {
+      ...source,
+      diff: () => [],
+      readHost: async () => host,
+      snapshotHost: () => host,
+      completeFleet: async (fleet) => ({ ...fleet, host, gateway }),
+      fallbackFleet: (fleet) => ({ ...fleet, host, gateway }),
+    },
+    { pollMs: 1000, hostMs: 1000, heartbeatMs: 1000 },
+  );
+}
 
 const host: V1Host = {
   hostname: "example",

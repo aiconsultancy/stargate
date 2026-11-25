@@ -367,7 +367,9 @@ or malformed parameter, a ninth agent, or `turn` without exactly one `agent`
 returns 400; an ID that is not a registration, or a turn the gateway no
 longer keeps, returns 404. Officers' [sockets](#officers) answer 404 to any
 `agent` or `turn` and never send `agent-activity`. Without either parameter
-the stream is unchanged and ignores its query, as before.
+the stream is unchanged and ignores its query, as before. These 400 and 404
+answers come even when all eight places are taken; only a valid
+subscription that finds no free place gets 503.
 
 ```text
 event: agent-activity
@@ -390,13 +392,24 @@ shapes:
 Changes are coalesced per officer over 150 ms: a burst of changes to one
 item sends its latest value once, with the `seq` of its latest change.
 `seq` therefore rises with every event but can skip values, and a
-`turn`-scoped stream also skips other turns' values. A turn's `seq`,
-`updatedAt` and `usage` are as of its latest turn event: `item` events do not
-repeat them, and `turn-ended` carries the settled values. An item whose JSON
+`turn`-scoped stream also skips other turns' values. Each turn event's `turn`
+is the turn as it was at that event's own `seq`: a turn that starts and ends
+within one window sends a `turn-started` that shows it running, then a
+`turn-ended`. A turn's `seq`, `updatedAt` and `usage` are as of its latest
+turn event: `item` events do not repeat them, and `turn-ended` carries the
+settled values. An item whose JSON
 exceeds 64 KiB arrives as its identity plus `paged: { pages, bytes }`; read
 its pages through the snapshot route, as above. Nothing is cut. Publishing
-never waits for a viewer: a stream that backs up past its 256 KiB queue is
-closed, as for every other event.
+never waits for a viewer. Each `agent-activity` event is queued on its own
+and must fit the stream's 256 KiB queue, even an empty one; a stream that
+backs up is closed, as for every other event, and its connection is freed
+at once.
+
+The snapshot keeps only the last 16 turns per officer, and the global limits
+above can evict a turn sooner, even as it ends. Eviction is never announced:
+a change made before a turn was evicted, such as its `turn-ended`, is still
+sent, but later snapshots no longer list the turn. A client that keeps turns
+from events alone keeps its own cap.
 
 To follow an officer without a gap:
 
@@ -416,9 +429,6 @@ To follow an officer without a gap:
    start again from step 1. The server never drops an event from an open
    stream; it closes the stream instead.
 
-The changes of one 150 ms flush are written as one chunk, so, as with the
-initial snapshot, an empty queue accepts it even above 256 KiB.
-
 ## Events
 
 Use a streaming browser `fetch` with an `Authorization` header. A connection
@@ -434,6 +444,8 @@ deadline, so a fallback or an error can still be sent. Within that, `GET
 (14 seconds by default) and reports any captain that hasn't answered as
 unavailable. The fleet overview, ship detail, and crew detail routes share
 eight HTTP read slots. These routes answer 503 when all eight slots are occupied.
+An event stream request holds a read slot only while it is checked, and
+moves to a stream place once it opens.
 When an overview read fails or times out, the poller can republish the last
 successful overview with `overviewStale: true` and its original `generatedAt`.
 That fallback expires 75 seconds after the successful read and is discarded
@@ -502,8 +514,9 @@ data: {"at":1730000000000}
 
 Up to eight clients can stream at once, with or without
 [`agent-activity`](#live-activity-events) subscriptions. Further connections
-receive 503, and streams that fall behind are closed. Reconnect for a new
-snapshot. There is no event replay.
+receive 503, and streams that fall behind are closed; a closed stream's
+place is free at once, even if its reader stopped reading. Reconnect for a
+new snapshot. There is no event replay.
 
 ## Host limits
 

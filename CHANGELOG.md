@@ -22,8 +22,9 @@
   `api.agentActivity` reports it.
 
 - No new flag: `/api/v1/events?agent=<id>` streams an officer's turn changes
-  as `agent-activity` events on the same terms; `api.agentActivity` now
-  covers the event too.
+  as `agent-activity` events on the same terms, within the existing eight
+  streams and 256 KiB per viewer; `api.agentActivity` now covers the event
+  too.
 
 ### Changes
 

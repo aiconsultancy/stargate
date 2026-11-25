@@ -64,12 +64,18 @@ export type ActivityFrame = { turnId: string; seq: number; bytes: Uint8Array };
 
 type ActivityWatcher = (frames: readonly ActivityFrame[]) => void;
 
-/** A change waiting for the flush; its value is read when the flush runs. */
+type Lifecycle = Exclude<V1AgentActivityChange, { type: "item" }>;
+
+/**
+ * A change waiting for the flush. A lifecycle change carries the summary
+ * recorded when it happened, so its payload matches its `seq`; an item's
+ * latest value is read when the flush runs.
+ */
 type Pending = {
   seq: number;
   at: number;
   turn: StoredTurn;
-  change: "started" | "turn" | StoredItem;
+  change: Lifecycle | StoredItem;
 };
 
 /** Only while someone watches the agent; otherwise changes cost nothing. */
@@ -196,19 +202,8 @@ function turnJson(turn: StoredTurn): V1ActivityTurn {
   };
 }
 
-function changeOf({ turn, change }: Pending): V1AgentActivityChange {
-  if (change === "started") {
-    return { type: "turn-started", turn: turnSummary(turn) };
-  }
-
-  if (change === "turn") {
-    return {
-      type: turn.endedAt === null ? "turn-updated" : "turn-ended",
-      turn: turnSummary(turn),
-    };
-  }
-
-  return { type: "item", item: itemView(change) };
+function changeOf({ change }: Pending): V1AgentActivityChange {
+  return "type" in change ? change : { type: "item", item: itemView(change) };
 }
 
 /** Send an agent's coalesced changes to everyone watching it. */
@@ -224,12 +219,9 @@ function flush(generation: string, agentId: string, owner: Agent) {
   feed.pending.clear();
   const frames: ActivityFrame[] = [];
 
+  // An evicted turn still gets the changes marked before, such as its end.
+  // Eviction is never announced, so viewers keep their own cap.
   for (const pending of due) {
-    // An evicted turn is gone from the snapshot too.
-    if (!owner.turns.includes(pending.turn)) {
-      continue;
-    }
-
     try {
       const data: V1AgentActivityEvent = {
         agentId,
@@ -267,7 +259,7 @@ function mark(
   agentId: string,
   owner: Agent,
   key: string,
-  pending: Pending,
+  pending: () => Pending,
 ) {
   const feed = owner.feed;
 
@@ -275,7 +267,7 @@ function mark(
     return;
   }
 
-  feed.pending.set(key, pending);
+  feed.pending.set(key, pending());
 
   if (feed.timer === undefined) {
     feed.timer = setTimeout(() => {
@@ -390,12 +382,12 @@ export function createActivityHub(
     turnCount += 1;
     evict();
 
-    mark(generation, agentId, owner, `start:${turn.id}`, {
+    mark(generation, agentId, owner, `start:${turn.id}`, () => ({
       seq: turn.seq,
       at: startedAt,
       turn,
-      change: "started",
-    });
+      change: { type: "turn-started", turn: turnSummary(turn) },
+    }));
 
     const keys = new Map<string, StoredItem>();
 
@@ -407,12 +399,17 @@ export function createActivityHub(
     };
 
     const changed = (at: number) => {
-      mark(generation, agentId, owner, `turn:${turn.id}`, {
-        seq: touch(at),
+      const seq = touch(at);
+
+      mark(generation, agentId, owner, `turn:${turn.id}`, () => ({
+        seq,
         at,
         turn,
-        change: "turn",
-      });
+        change: {
+          type: turn.endedAt === null ? "turn-updated" : "turn-ended",
+          turn: turnSummary(turn),
+        },
+      }));
     };
 
     return {
@@ -437,12 +434,20 @@ export function createActivityHub(
           item.seq = touch(at);
           item.updatedAt = Math.max(item.updatedAt, at);
 
-          mark(generation, agentId, owner, `item:${turn.id}:${item.id}`, {
-            seq: item.seq,
-            at,
-            turn,
-            change: item,
-          });
+          const stored = item;
+
+          mark(
+            generation,
+            agentId,
+            owner,
+            `item:${turn.id}:${item.id}`,
+            () => ({
+              seq: stored.seq,
+              at,
+              turn,
+              change: stored,
+            }),
+          );
         } catch {
           /* Never affects the turn. */
         }
@@ -711,8 +716,9 @@ export function subscribeActivity(
               ? frames
               : frames.filter((frame) => frame.turnId === turn);
 
-          if (chosen.length > 0) {
-            send(Buffer.concat(chosen.map((frame) => frame.bytes)));
+          // One frame at a time, each within the viewer's queue.
+          for (const frame of chosen) {
+            send(frame.bytes);
           }
         }),
       );

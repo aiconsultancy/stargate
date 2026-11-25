@@ -36,7 +36,8 @@ type Options = Pick<ApiV1Source, "fleet" | "ship" | "shipIdentities"> & {
 };
 
 type Client = {
-  send(bytes: Uint8Array): void;
+  /** `strict` frames must fit the queue's room, even when it is empty. */
+  send(bytes: Uint8Array, strict?: boolean): void;
   close(error?: Error): void;
 };
 
@@ -581,8 +582,9 @@ export function createEventStreams(
   return {
     /**
      * One viewer, within the shared cap. `watch` adds a subscriber's own
-     * frames (officer turn activity) to the same bounded queue, so a viewer
-     * that backs up is closed whichever events filled it.
+     * frames (officer turn activity) to the same bounded queue, one at a
+     * time and never past its 256 KiB, so a viewer that backs up is closed
+     * whichever events filled it.
      */
     open(
       signal: AbortSignal,
@@ -626,13 +628,15 @@ export function createEventStreams(
             };
 
             const client: Client = {
-              send(bytes) {
+              send(bytes, strict = false) {
                 const available = controller.desiredSize;
 
-                // An empty queue can carry one full snapshot, even for a large fleet.
+                // An empty queue carries one full snapshot, even a large one.
+                // Strict activity frames never go past the queue's bound.
                 if (
                   available !== null &&
-                  (available === bufferBytes || bytes.length <= available)
+                  (bytes.length <= available ||
+                    (!strict && available === bufferBytes))
                 ) {
                   controller.enqueue(bytes);
                 } else {
@@ -659,7 +663,7 @@ export function createEventStreams(
 
             if (session.clients.has(client) && watch) {
               unwatch = watch((bytes) => {
-                client.send(bytes);
+                client.send(bytes, true);
               });
             }
           },
