@@ -234,9 +234,13 @@ plugin uses the crew workspace tool's Git helper, without the gateway's index
 snapshot: repository hooks, fsmonitor, optional locks and lazy fetches are
 off. For status it uses the checkout's objects and live index, but runs in a
 private Git directory without checkout filter configuration or
-`info/attributes`. Git versions that support `GIT_ATTR_SOURCE` also ignore
-worktree `.gitattributes`. It caches each checkout's result for 15 seconds,
-with a five-second read limit.
+`info/attributes`. Both readers use the same status configuration allow-list
+and discard multiline values. The captain reads the configured
+`core.excludesFile` as live ignore data, like the live repository's other
+ignore files. The gateway instead copies it under the snapshot limits below
+because it can run as a different Linux user. Git versions that support
+`GIT_ATTR_SOURCE` also ignore worktree `.gitattributes`. The captain caches
+each checkout's result for 15 seconds, with a five-second read limit.
 
 Each `git` object may carry these optional fields, added without changing the
 existing ones:

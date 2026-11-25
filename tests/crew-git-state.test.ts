@@ -1,4 +1,5 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
+import * as childProcess from "node:child_process";
 import {
   mkdir,
   mkdtemp,
@@ -19,6 +20,8 @@ import {
   createCrewGitReader,
   remoteWithoutUser,
 } from "../src/coordination/crew/workspace/workspace";
+import { readCommand } from "../src/observability/dashboard/api/v1/command";
+import { createGitReader } from "../src/observability/dashboard/api/v1/git";
 
 const root = await realpath(
   await mkdtemp(join(tmpdir(), "stargate-crew-git-")),
@@ -232,6 +235,49 @@ test.each(["sha1", "sha256"])(
     });
   },
 );
+
+test("both Fleet readers drop rejected settings and multiline values before status", async () => {
+  const directory = await repository();
+  await git(directory, "config", "filter.probe.clean", "false");
+  await git(directory, "config", "status.renames", "invalid\nvalue");
+
+  const spawn = spyOn(childProcess, "spawn");
+
+  try {
+    // If forwarded, the invalid Boolean prevents Git from running status.
+    expect(await createCrewGitReader()(directory, signal)).toMatchObject({
+      changedFiles: 0,
+    });
+
+    const captainStatus = spawn.mock.calls
+      .map(([, args]) => args)
+      .find((args) => Array.isArray(args) && args.includes("--porcelain=v1"));
+
+    expect(captainStatus).toBeDefined();
+    expect(captainStatus?.join("\0")).not.toMatch(
+      /filter\.probe|status\.renames/,
+    );
+  } finally {
+    spawn.mockRestore();
+  }
+
+  const commands: string[][] = [];
+
+  const gateway = createGitReader(Date.now, (args, options) => {
+    commands.push(args);
+
+    return readCommand(args, options);
+  });
+
+  try {
+    expect(await gateway(directory, signal)).toMatchObject({ changedFiles: 0 });
+    const status = commands.find((args) => args.includes("--porcelain=v1"));
+    expect(status).toBeDefined();
+    expect(status?.join("\0")).not.toMatch(/filter\.probe|status\.renames/);
+  } finally {
+    await gateway.stop();
+  }
+});
 
 test("Fleet status reads a linked worktree's split index and ignore rules", async () => {
   const directory = await repository();

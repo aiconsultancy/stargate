@@ -1853,11 +1853,13 @@
         "src/crew/team.ts",
         "src/crew/tool-input.ts",
         "src/crew/waiting.ts",
-        "src/crew/workspace.ts"
+        "src/crew/workspace.ts",
+        "src/coordination/crew/workspace/git-status.ts"
       ],
       "public": [
         "src/crew/engine.ts",
         "src/crew/fleet-status.ts",
+        "src/coordination/crew/workspace/git-status.ts",
         "src/crew/identity.ts",
         "src/crew/message-protocol.ts",
         "src/crew/plugin.ts",
@@ -1866,6 +1868,7 @@
       ],
       "contracts": [
         "src/crew/fleet-status.ts",
+        "src/coordination/crew/workspace/git-status.ts",
         "src/crew/identity.ts",
         "src/crew/message-protocol.ts",
         "src/crew/report-rpc.ts",

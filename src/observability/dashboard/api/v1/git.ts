@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { constants, createWriteStream } from "node:fs";
 import {
   type FileHandle,
@@ -15,15 +14,23 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Semaphore } from "effect";
-import { abortable, runAbortable } from "../../../../lib/effect";
-import { readWithDeadline } from "../../../../lib/read-deadline";
 import {
   countChangedPaths,
   parseAheadBehind,
 } from "../../../../coordination/crew/reporting/fleet-status";
+import {
+  configuredExcludesPath,
+  excludesConfigArgs,
+  fleetGitEnv,
+  fleetGitOptions,
+  isolatedGitStatus,
+  statusConfigArgs,
+} from "../../../../coordination/crew/workspace/git-status";
+import { abortable, runAbortable } from "../../../../lib/effect";
+import { readWithDeadline } from "../../../../lib/read-deadline";
 import { readCommand } from "./command";
 import { githubRepository, isGitHubRepositoryName } from "./github-repository";
 import type { V1Git } from "./types";
@@ -46,27 +53,6 @@ class MetadataLimitExceeded extends Error {}
 export { githubRepository, isGitHubRepositoryName };
 
 const safeRef = (ref: string) => (ref.length <= 255 ? ref : null);
-
-const statusSettings =
-  /^(core\.(filemode|ignorecase|symlinks|precomposeunicode|autocrlf|eol|sparsecheckout|sparsecheckoutcone|checkstat|trustctime|ignorestat)|(diff|status)\.renames)$/;
-
-function statusOptions(output: string) {
-  const options: string[] = [];
-
-  for (const entry of output.split("\0")) {
-    if (!entry) {
-      continue;
-    }
-
-    const [key, value = "true", ...rest] = entry.split("\n");
-
-    if (key && statusSettings.test(key) && rest.length === 0) {
-      options.push("-c", `${key}=${value}`);
-    }
-  }
-
-  return options;
-}
 
 const metadataFlags =
   constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
@@ -527,15 +513,8 @@ async function prepareStatus(
       "--git-common-dir",
       "--show-object-format",
     ),
-    run("config", "--null", "--get-regexp", statusSettings.source),
-    runWithEnv(
-      { HOME: homedir() },
-      "config",
-      "--null",
-      "--path",
-      "--get",
-      "core.excludesFile",
-    ),
+    run(...statusConfigArgs),
+    runWithEnv({ HOME: homedir() }, ...excludesConfigArgs),
   ]);
 
   const [
@@ -548,9 +527,6 @@ async function prepareStatus(
     format,
     ...rest
   ] = paths.stdout.trimEnd().split("\n");
-
-  const [excludesPath, terminator, ...extraExcludes] =
-    excludes.stdout.split("\0");
 
   if (
     paths.code !== 0 ||
@@ -580,11 +556,9 @@ async function prepareStatus(
   signal.throwIfAborted();
 
   const configuredExcludes =
-    excludes.code === 0 &&
-    terminator === "" &&
-    extraExcludes.length === 0 &&
-    excludesPath &&
-    resolve(directory, excludesPath);
+    excludes.code === 0
+      ? configuredExcludesPath(directory, excludes.stdout)
+      : undefined;
 
   const copiedExcludes = "info/configured-excludes";
   const budget = { remaining: metadataLimit };
@@ -651,11 +625,9 @@ async function prepareStatus(
     writeFile(join(gitDir, "objects", "info", "alternates"), `${objects}\n`),
     snapshotPattern(exclude, "info/exclude"),
     snapshotPattern(sparse, "info/sparse-checkout"),
-    configuredExcludes !== false &&
-    configuredExcludes !== undefined &&
-    configuredExcludes !== ""
+    configuredExcludes
       ? snapshotPattern(configuredExcludes, copiedExcludes)
-      : configuredExcludes,
+      : undefined,
   ]);
 
   for (const file of files) {
@@ -664,27 +636,13 @@ async function prepareStatus(
     }
   }
 
-  return {
-    env: {
-      GIT_DIR: gitDir,
-      GIT_WORK_TREE: directory,
-      GIT_ATTR_NOSYSTEM: "1",
-      GIT_ATTR_SOURCE: createHash(format).update("tree 0\0").digest("hex"),
-    },
-    args: [
-      ...statusOptions(settings.stdout),
-      "-c",
-      `core.excludesFile=${join(gitDir, copiedExcludes)}`,
-      "-c",
-      "core.attributesFile=/dev/null",
-      "status",
-      "--porcelain=v1",
-      "-z",
-      "--untracked-files=all",
-      // Count changed gitlinks without reading submodule worktree configuration.
-      "--ignore-submodules=dirty",
-    ],
-  };
+  return isolatedGitStatus(
+    directory,
+    gitDir,
+    format,
+    settings.stdout,
+    join(gitDir, copiedExcludes),
+  );
 }
 
 async function readHeadRef(run: RunGit) {
@@ -751,27 +709,12 @@ async function inspect(
     deadline.throwIfAborted();
 
     const result = await command(
-      [
-        "git",
-        "--no-optional-locks",
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.untrackedCache=false",
-        "-c",
-        "core.hooksPath=/dev/null",
-        ...args,
-      ],
+      ["git", "--no-optional-locks", ...fleetGitOptions, ...args],
       {
         cwd: directory,
         env: {
           PATH: process.env["PATH"],
-          GIT_ALLOW_PROTOCOL: "",
-          GIT_CONFIG_GLOBAL: "/dev/null",
-          GIT_CONFIG_NOSYSTEM: "1",
-          GIT_NO_LAZY_FETCH: "1",
-          GIT_OPTIONAL_LOCKS: "0",
-          GIT_TERMINAL_PROMPT: "0",
+          ...fleetGitEnv,
           LC_ALL: "C",
           ...overrides,
         },
