@@ -355,12 +355,24 @@ function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
     }
   }
 
-  let bytes = ended.reduce((sum, family) => sum + family.bytes, 0);
-  // In-flight families do not spend the settled-turn budget.
-  let turnCount = ended.reduce((sum, family) => sum + family.turns.length, 0);
-  ended.sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+  // A family over a global limit on its own can never be kept: drop it
+  // First, so it does not clear every older family on its way out.
+  const fitting = ended.filter((family) => {
+    if (family.turns.length <= limits.turns && family.bytes <= limits.bytes) {
+      return true;
+    }
 
-  for (const family of ended) {
+    remove(family);
+
+    return false;
+  });
+
+  let bytes = fitting.reduce((sum, family) => sum + family.bytes, 0);
+  // In-flight families do not spend the settled-turn budget.
+  let turnCount = fitting.reduce((sum, family) => sum + family.turns.length, 0);
+  fitting.sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+
+  for (const family of fitting) {
     if (turnCount <= limits.turns && bytes <= limits.bytes) {
       break;
     }

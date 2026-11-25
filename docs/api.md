@@ -398,7 +398,10 @@ The gateway keeps the last 16 root turns and their children per officer, in
 memory only, however long the officer stays idle. Across all officers,
 settled families are evicted oldest first beyond 256 settled turns (including
 children) or 64 MiB of settled turn JSON. A family is evicted together;
-running families do not count toward those global limits. No content is cut.
+running families do not count toward those global limits. A settled family
+that exceeds either global limit on its own is evicted first, before any
+older family. Eviction does not limit a running family's child turns: they
+are bounded only by the query's own turns and tool calls. No content is cut.
 OpenCode turns appear when the input is submitted and include output only
 once transcript placement proves it belongs to that turn. Claude recording
 starts at query submission, after stopping orphans, probing the CLI version,
