@@ -506,7 +506,32 @@ test("settled bytes include Claude turn usage", () => {
     cost: 1,
   });
   second.end("completed");
-  expect(snapshot(hub, "claude").turns).toEqual([]);
+  // Usage alone takes the second turn over the cap; the first stays.
+  expect(snapshot(hub, "claude").turns).toMatchObject([
+    { session: { id: "first" } },
+  ]);
+});
+
+test("a settled family over a global limit on its own goes first", () => {
+  const byTurns = createActivityHub({ turns: 3 });
+  byTurns.recorder("captain").begin().end("completed");
+  const root = byTurns.recorder("claude").begin(undefined, "root");
+
+  for (let index = 0; index < 3; index++) {
+    root.child?.(`call-${index}`, `child-${index}`)?.end("completed");
+  }
+
+  root.end("completed");
+  expect(snapshot(byTurns, "claude").turns).toEqual([]);
+  expect(snapshot(byTurns, "captain").turns).toHaveLength(1);
+
+  const byBytes = createActivityHub({ bytes: 1000 });
+  byBytes.recorder("captain").begin().end("completed");
+  const large = byBytes.recorder("claude").begin(undefined, "large");
+  large.update("k", 1, () => text("x".repeat(5000)));
+  large.end("completed");
+  expect(snapshot(byBytes, "claude").turns).toEqual([]);
+  expect(snapshot(byBytes, "captain").turns).toHaveLength(1);
 });
 
 test("activity reads validate the agent and every parameter", () => {
