@@ -467,6 +467,10 @@ describe("source size gate", () => {
     expect(await sizeRegressions(root, policy, [])).toEqual([
       `new:large-file:${path}:${path}:1003 non-blank lines > 1002`,
     ]);
+    await writeFile(join(root, path), "// counted\n".repeat(1001));
+    expect(await sizeRegressions(root, policy, [])).toEqual([
+      `stale:brace-migration-file-limit:${path}:lower 1002 to 1001`,
+    ]);
     await writeFile(join(root, path), "// counted\n".repeat(1000));
     expect(await sizeRegressions(root, policy, [])).toEqual([
       `stale:brace-migration-file-limit:${path}`,

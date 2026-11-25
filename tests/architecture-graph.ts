@@ -238,6 +238,10 @@ export async function sizeRegressions(
         failures.push(
           `new:large-file:${path}:${id}:${count} non-blank lines > ${braceLimit}`,
         );
+      } else if (count < braceLimit) {
+        failures.push(
+          `stale:brace-migration-file-limit:${path}:lower ${braceLimit} to ${count}`,
+        );
       }
     } else if (!allowed.has(id)) {
       failures.push(

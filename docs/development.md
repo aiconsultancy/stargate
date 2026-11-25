@@ -68,15 +68,17 @@ the general set for the lint-list checker and formatter; it exempts no file.
 Seven ceiling rules apply outside `tests/**` and the four fixed
 entry files: at most 250 lines in a function (blank lines and comments not
 counted), 60 statements, 6 parameters, block depth 6, complexity 40, nested
-calls 6 and 3 classes in a file. For each rule, one override in
-`.oxlintrc.json` lists the files that already exceed the limit, with literal
-sorted paths, and sets that rule to the largest value in its files. These
-ceiling lists may only shrink. One raise is recorded: with the async rules
+calls 6 and 3 classes in a file. A rule can have multiple ceiling overrides
+in `.oxlintrc.json`. Each lists literal sorted paths and sets the rule to its
+measured maximum for those files. A file can appear in only one list per rule.
+Do not raise these ceilings to pass a regression. With the async rules
 (NET-1822, comment `d65f8ac4`), the `eslint/max-lines-per-function` maximum
 for `serve` in `src/app/runtime.ts` went from 1,334 to 1,350. The approved
-repairs put braces around callbacks and add no statement to `serve`. It is
-the only raise. `eslint/max-lines` stays off: the architecture size guard
-owns file length (non-blank lines, limit 1,000, with its own list).
+repairs put braces around callbacks and add no statement to `serve`.
+The 24 November 2026 brace migration (PR #336) was a one-time exception.
+It set measured ceilings for files that exceeded the statement or function
+line limits after adding braces. `eslint/max-lines` stays off because the
+architecture size guard owns the 1,000 non-blank line limit and its exceptions.
 An exception list is an override that turns one or more rules off for literal,
 sorted file paths, because those files hold places that must stay as they are.
 Exception lists may also only shrink.
