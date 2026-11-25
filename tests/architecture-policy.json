@@ -1415,6 +1415,7 @@
     "cron": {
       "layer": "slices",
       "files": [
+        "src/automation/cron/database.ts",
         "src/automation/cron/report-receipts.ts",
         "src/cron-advanced.ts",
         "src/cron-control.ts",

@@ -1,14 +1,5 @@
 {
-  "baselineSha256": "393afbe4a163834d48cfc0fc0fa591a05d17595c3274456a8fdf8d7cd5579b02",
+  "baselineSha256": "3219a72f80cdcdd488d8ae5ca1cea5346de2f34fc721133a96026b152c9dbef6",
   "pruneStale": true,
-  "rekeyExceptions": [
-    {
-      "oldKey": "direction:src/store.ts -> src/irc/burst.ts",
-      "newKey": "direction:src/gateway/irc-admission.ts -> src/irc/burst.ts"
-    },
-    {
-      "oldKey": "private:src/store.ts -> src/irc/burst.ts",
-      "newKey": "private:src/gateway/irc-admission.ts -> src/irc/burst.ts"
-    }
-  ]
+  "closureAdditions": ["src/automation/cron/database.ts"]
 }
