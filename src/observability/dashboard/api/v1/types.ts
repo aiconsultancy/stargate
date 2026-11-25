@@ -4,7 +4,7 @@
  *
  * Times are epoch milliseconds. Byte counts are integers. The API neither
  * redacts nor rewrites crew task text or branch names; the crew route adds no
- * length limit. The crew plugin still stores task text bounded and redacted.
+ * limit beyond the plugin's 64,000 characters. Older plugins answer redacted.
  * The agent activity route serves tool input and output, errors, reply and
  * reasoning text complete and unredacted, and pages large items instead of
  * cutting them. The crew diff routes serve every changed path's patch and

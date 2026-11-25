@@ -39,7 +39,7 @@ import {
   crewTurnsInputSchema,
   crewTurnsSchema,
   fleetCrewStatusInputSchema,
-  fleetCrewStatusSchema,
+  fleetCrewStatusOutputSchema,
 } from "./fleet-status";
 import { messagePortableSchema } from "../messaging/message-tool-input";
 
@@ -171,7 +171,7 @@ export const CrewReporting = Rpc.define({
     },
     fleetStatus: {
       input: portable(fleetCrewStatusInputSchema),
-      output: portable(fleetCrewStatusSchema),
+      output: portable(fleetCrewStatusOutputSchema),
     },
     // Read-only Git state, read as the captain who owns the worktrees.
     crewGit: {

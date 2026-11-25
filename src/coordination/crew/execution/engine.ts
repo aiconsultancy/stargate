@@ -513,13 +513,19 @@ export class CrewEngine {
    */
   public status(
     input: CrewStatusInput,
-    options: { aggregate: true },
+    options: { aggregate: true; fullText?: boolean },
   ): CrewStatus & { busy: number };
-  public status(input?: CrewStatusInput): CrewStatus;
+  public status(
+    input?: CrewStatusInput,
+    options?: { fullText?: boolean },
+  ): CrewStatus;
+  /** `fullText` returns raw task text, outside the ordinary status limits. */
   public status(
     input: CrewStatusInput = {},
-    options?: { aggregate: true },
+    options?: { aggregate?: true; fullText?: boolean },
   ): CrewStatus {
+    const fullText = options?.fullText ?? false;
+
     const members = this.options.team.crew.filter(
       ({ id }) => !input.member || input.member === id,
     );
@@ -544,8 +550,8 @@ export class CrewEngine {
           backend: member.backend ? "pi-durable" : "opencode",
           provisioned: peer?.status ?? "unprovisioned",
           observed: !!current && !!member.backend && this.pi.observed(current),
-          current: current ? this.state.activity.task(current) : null,
-          ...this.state.activity.read(member.id),
+          current: current ? this.state.activity.task(current, fullText) : null,
+          ...this.state.activity.read(member.id, fullText),
         };
       }),
       total: members.length,

@@ -24,6 +24,8 @@ import {
 import {
   crewGitSchema,
   crewTurnsSchema,
+  fleetCrewFullStatusSchema,
+  fleetCrewStatusInputSchema,
   fleetCrewStatusSchema,
   settledTasksPerMember,
 } from "../src/coordination/crew/reporting/fleet-status";
@@ -704,6 +706,48 @@ test("status and history identify all project contexts while legacy output stays
       ],
     });
     expect(JSON.stringify(status)).not.toContain(f.base.projectDirectory);
+
+    // Fleet status gives one member's raw task text only when asked.
+    const engine = projects.get("stargate");
+    const peer = engine.state.peer("worker");
+    const text = `Fix token=fixture-value ${"x".repeat(300)}`;
+    const task = peer && engine.state.reserveTask(peer, "captain", text);
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    engine.state.running(task.id);
+    engine.state.activity.progress(task.id, `Bearer fixture-value done`);
+
+    const ordinary = Schema.decodeUnknownSync(fleetCrewStatusSchema)(
+      projects.fleetStatus({ member: "worker" }),
+    );
+
+    const masked = ordinary.status.members.find((m) => m.current)?.current;
+    expect(masked?.summary).toBe(
+      `Fix token=[REDACTED] ${"x".repeat(180 - 21)}`,
+    );
+    expect(JSON.stringify(ordinary)).not.toContain("fixture-value");
+    expect(ordinary).not.toHaveProperty("taskText");
+
+    const full = Schema.decodeUnknownSync(fleetCrewFullStatusSchema)(
+      projects.fleetStatus({ member: "worker", fullTaskText: true }),
+    );
+
+    expect(full.taskText).toBe("full");
+    expect(full.metadata).toEqual(ordinary.metadata);
+    expect(full.status.members.find((m) => m.current)?.current).toMatchObject({
+      summary: text,
+      progress: "Bearer fixture-value done",
+    });
+
+    // Full text names one member, and old callers' input stays valid.
+    const input = Schema.decodeUnknownSync(fleetCrewStatusInputSchema);
+    expect(() => input({ fullTaskText: true })).toThrow();
+    expect(() => input({ member: "worker", fullTaskText: false })).toThrow();
+    expect(input({ member: "worker" })).toEqual({ member: "worker" });
+
     const roots = await projects.historyRoots(new AbortController().signal);
     expect(roots.sessions).toHaveLength(2);
     expect(new Set(roots.sessions.map((s) => s.id)).size).toBe(2);

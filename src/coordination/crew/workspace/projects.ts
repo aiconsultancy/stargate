@@ -23,6 +23,7 @@ import type {
   CrewTurns,
   CrewTurnsInput,
   FleetCrewStatus,
+  FleetCrewStatusInput,
 } from "../reporting/fleet-status";
 import { crewTurns } from "../reporting/member-activity";
 import type { CheckoutDiffReader } from "./checkout-diff";
@@ -317,14 +318,15 @@ export class CrewProjects {
     return this.enabled ? { ...result, project: selected.project } : result;
   }
 
-  public status(input: CrewStatusInput = {}): CrewStatus {
+  /** `fullText` returns raw task text, only for the Fleet API's crew detail. */
+  public status(input: CrewStatusInput = {}, fullText = false): CrewStatus {
     if (!this.enabled) {
-      return this.default.status(input);
+      return this.default.status(input, { fullText });
     }
 
     const pages = [...this.contexts].map(([project, engine]) => ({
       project,
-      status: engine.status(input, { aggregate: true }),
+      status: engine.status(input, { aggregate: true, fullText }),
     }));
 
     const members = pages.flatMap(({ project, status }) =>
@@ -339,8 +341,9 @@ export class CrewProjects {
     };
   }
 
-  public fleetStatus(input: CrewStatusInput): FleetCrewStatus {
-    const status = this.status(input);
+  public fleetStatus(input: FleetCrewStatusInput): FleetCrewStatus {
+    const { fullTaskText, ...filter } = input;
+    const status = this.status(filter, fullTaskText === true);
 
     const contexts = status.members.flatMap(({ id, project }) => {
       const { options } = this.get(project ?? "default");
@@ -364,13 +367,14 @@ export class CrewProjects {
       ];
     });
 
-    return {
-      status,
-      metadata: {
-        projectDirectory: this.default.options.projectDirectory,
-        contexts,
-      },
+    const metadata = {
+      projectDirectory: this.default.options.projectDirectory,
+      contexts,
     };
+
+    return fullTaskText
+      ? { status, metadata, taskText: "full" }
+      : { status, metadata };
   }
 
   /** Peer sessions and recent task inputs, to attribute crew turns. */

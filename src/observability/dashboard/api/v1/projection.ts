@@ -995,7 +995,12 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
 
       const result = await detail(
         registration,
-        await dashboard.shipWithCrew(ship, signal, { member }),
+        // Only this route asks for raw task text.
+        // An older crew plugin answers redacted; the route shows that as is.
+        await dashboard.shipWithCrew(ship, signal, {
+          member,
+          fullTaskText: true,
+        }),
         signal,
         member,
       );

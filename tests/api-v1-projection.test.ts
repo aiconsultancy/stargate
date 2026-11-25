@@ -20,7 +20,10 @@ import {
   crewDiffSource,
   reportedGit,
 } from "../src/observability/dashboard/api/v1/projection";
-import type { CrewGitInput } from "../src/coordination/crew/reporting/fleet-status";
+import type {
+  CrewGitInput,
+  FleetCrewStatusInput,
+} from "../src/coordination/crew/reporting/fleet-status";
 import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
 import { spawnGit } from "../src/coordination/crew/workspace/git-runner";
 import { liveFleetGit } from "../src/coordination/crew/workspace/git-status";
@@ -166,6 +169,7 @@ function fixture(
     children: [] as string[],
     git: [] as string[],
     diffs: [] as { ship: string; member: string }[],
+    fullTaskText: [] as boolean[],
   };
 
   const roots = [
@@ -245,7 +249,11 @@ function fixture(
       ...(id === "captain" && captainGit && { crewGit: captainGit }),
       ...(id === "captain"
         ? {
-            async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+            async fleetCrewStatus(
+              input: FleetCrewStatusInput,
+              signal: AbortSignal,
+            ) {
+              calls.fullTaskText.push(input.fullTaskText === true);
               crewSignals.set(id, signal);
               const scoped = await status(id, input);
 
@@ -1146,6 +1154,75 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("full task text: a plugin that rejects the field is asked again without it, then not for a minute", async () => {
+    const asked: boolean[] = [];
+    let old = false;
+
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const full = (await request.text()).includes("fullTaskText");
+        asked.push(full);
+
+        if (old && full) {
+          return Response.json(
+            {
+              _tag: "RpcError",
+              type: "rpc.invalid_input",
+              message: "Fixture RPC failure",
+            },
+            { status: 400 },
+          );
+        }
+
+        return Response.json({
+          output: {
+            status: { members: [], total: 0, truncated: false },
+            metadata: { projectDirectory: "/fixture", contexts: [] },
+            ...(full && { taskText: "full" }),
+          },
+        });
+      },
+    });
+
+    try {
+      const config = Schema.decodeUnknownSync(backendSchema)({
+        type: "opencode",
+        url: server.url.href,
+        directory: "/",
+      });
+
+      if (config.type !== "opencode") {
+        throw new Error("Invalid backend fixture");
+      }
+
+      const backend = new OpenCodeBackend(config);
+      const input = { member: "pilot", fullTaskText: true } as const;
+
+      try {
+        expect(await backend.fleetCrewStatus(input, signal)).toMatchObject({
+          taskText: "full",
+        });
+        expect(
+          await backend.fleetCrewStatus({ member: "pilot" }, signal),
+        ).not.toHaveProperty("taskText");
+        expect(asked).toEqual([true, false]);
+
+        old = true;
+        const masked = await backend.fleetCrewStatus(input, signal);
+        expect(masked).toMatchObject({ metadata: { contexts: [] } });
+        expect(masked).not.toHaveProperty("taskText");
+        await backend.fleetCrewStatus(input, signal);
+        expect(asked).toEqual([true, false, true, false, false]);
+      } finally {
+        await backend.close();
+      }
+    } finally {
+      await server.stop(true);
+    }
+  });
+
   test("an older OpenCode plugin without crewGit is skipped for a minute", async () => {
     const methods: string[] = [];
     let missing = false;
@@ -1522,8 +1599,11 @@ describe("Fleet API projection", () => {
       phase: text,
       progress: text,
     });
+    // Crew detail alone asks the plugin for full task text.
+    expect(f.calls.fullTaskText).toEqual([true]);
 
     const ship = await f.source.ship("captain", signal);
+    expect(f.calls.fullTaskText).toEqual([true, false]);
     const current = ship?.crewMembers[0]?.contexts[0]?.current;
     expect(current).toMatchObject({
       summary: bounded(180),
@@ -1571,6 +1651,20 @@ describe("Fleet API projection", () => {
     expect(reportedGit(state, "/fixture", true)).toMatchObject({
       fingerprint: "b".repeat(32),
     });
+  });
+
+  test("v1 projection: crew detail returns control and bidi characters in task progress unchanged", async () => {
+    // ESC, BEL, a C1 control (CSI) and RIGHT-TO-LEFT OVERRIDE.
+    const progress = "Build \u001b[31mred\u001b[0m \u0007 \u009b2J \u202eevil";
+    const f = fixture();
+    f.set("captain", [
+      context("pilot", {
+        current: task("task-1", "running", { progress }),
+      }),
+    ]);
+
+    const detail = await f.source.crew("captain", "pilot", signal);
+    expect(detail?.member.contexts[0]?.current?.progress).toBe(progress);
   });
 
   test("credential-shaped branch and base names from the plugin are reported as written", () => {

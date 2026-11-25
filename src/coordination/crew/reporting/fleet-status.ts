@@ -1,6 +1,9 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
-import { crewStatusSchema } from "../../../shared/crew-status";
+import {
+  crewStatusSchema,
+  crewStatusSchemaWith,
+} from "../../../shared/crew-status";
 import {
   HISTORY_PAGE,
   MAX_CREW_CONTEXTS,
@@ -27,17 +30,53 @@ const metadata = exactStruct({
   ).check(Schema.isMaxLength(20)),
 });
 
-/** Internal, location-scoped RPC. The Fleet API also shows checkout paths that crew task text contains. */
+/**
+ * Internal, location-scoped RPC. The Fleet API also shows checkout paths that
+ * crew task text contains. `fullTaskText` asks for one member's task text
+ * raw; plugins older than it reject the field, and the caller asks again
+ * without it.
+ */
 export const fleetCrewStatusInputSchema = exactStruct({
   member: Schema.optional(agentIDSchema),
-});
+  fullTaskText: Schema.optional(Schema.Literal(true)),
+}).check(
+  Schema.makeFilter((input) =>
+    input.fullTaskText && input.member === undefined
+      ? { path: ["member"], issue: "Full task text needs one member." }
+      : undefined,
+  ),
+);
 
+export type FleetCrewStatusInput = typeof fleetCrewStatusInputSchema.Type;
+
+/** Raw task text bound, in code points: the dispatch text limit. */
+export const fullTaskTextLimit = 64_000;
+
+const fullTextStatus = crewStatusSchemaWith({
+  summary: fullTaskTextLimit,
+  phase: fullTaskTextLimit,
+  progress: fullTaskTextLimit,
+}).status;
+
+/** Ordinary status, as every caller that does not ask for full text gets it. */
 export const fleetCrewStatusSchema = exactStruct({
   status: crewStatusSchema,
   metadata,
 });
 
-export type FleetCrewStatus = typeof fleetCrewStatusSchema.Type;
+/** Raw task text; `taskText` tells the caller it is not redacted. */
+export const fleetCrewFullStatusSchema = exactStruct({
+  status: fullTextStatus,
+  metadata,
+  taskText: Schema.Literal("full"),
+});
+
+export const fleetCrewStatusOutputSchema = Schema.Union([
+  fleetCrewStatusSchema,
+  fleetCrewFullStatusSchema,
+]);
+
+export type FleetCrewStatus = typeof fleetCrewStatusOutputSchema.Type;
 
 const index = Schema.Finite.check(
   Schema.isInt(),

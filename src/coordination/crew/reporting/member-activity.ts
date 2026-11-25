@@ -11,9 +11,35 @@ import {
 import {
   type CrewStatusTask,
   crewAssignmentText,
+  crewTaskTextLimits,
 } from "../../../shared/crew-status";
 
 type Activity = Omit<CrewStatusTask, "id" | "status">;
+
+/** The dispatch text limit, in code points. Stored task text is raw. */
+export const activityTextLimit = 64_000;
+
+/** `text` cut to the stored task text limit. */
+export function activityText(text: string) {
+  return text.length <= activityTextLimit
+    ? text
+    : Array.from(text).slice(0, activityTextLimit).join("");
+}
+
+/**
+ * How ordinary crew status shows stored text: redacted and bounded, exactly
+ * as the store held it before it kept raw text. Rows written then are
+ * already redacted, and redacting them again leaves them unchanged.
+ */
+function maskedActivity(activity: Activity): Activity {
+  return {
+    ...activity,
+    summary: redactCredentials(activity.summary, crewTaskTextLimits.summary),
+    progress: redactCredentials(activity.progress, activityTextLimit).slice(
+      -crewTaskTextLimits.progress,
+    ),
+  };
+}
 
 type ActivityTask = {
   id: string;
@@ -56,7 +82,7 @@ export class MemberActivityStore {
         report ? "report" : "assignment",
         report
           ? "Prepare crew activity report"
-          : redactCredentials(crewAssignmentText(text), 180),
+          : activityText(crewAssignmentText(text)),
         task.status,
         now,
         now,
@@ -99,19 +125,25 @@ export class MemberActivityStore {
   }
 
   public progress(taskID: string, text: string) {
-    const safe = redactCredentials(text, 64_000).slice(-400);
+    const raw = activityText(text);
     this.db
       .query(`UPDATE member_activity SET progress=?,updatedAt=?
       WHERE taskID=? AND progress<>?`)
-      .run(safe, Date.now(), taskID, safe);
+      .run(raw, Date.now(), taskID, raw);
   }
 
-  public task(task: Pick<ActivityTask, "id" | "status">): CrewStatusTask {
-    const activity = this.db
+  /** Redacted and bounded task text unless `fullText` asks for it raw. */
+  public task(
+    task: Pick<ActivityTask, "id" | "status">,
+    fullText = false,
+  ): CrewStatusTask {
+    const stored = this.db
       .query<Activity, [string]>(`SELECT kind,summary,phase,
       progress,createdAt,startedAt,updatedAt,finishedAt
       FROM member_activity WHERE taskID=?`)
       .get(task.id);
+
+    const activity = stored && (fullText ? stored : maskedActivity(stored));
 
     // Known local decision; the external native stop is reported separately.
     const stop =
@@ -148,7 +180,7 @@ export class MemberActivityStore {
     };
   }
 
-  public read(crewID: string) {
+  public read(crewID: string, fullText = false) {
     const queued = this.db
       .query<Pick<ActivityTask, "id" | "status">, [string]>(
         `SELECT id,status FROM pending_tasks WHERE crewID=? AND status='queued'
@@ -175,7 +207,7 @@ export class MemberActivityStore {
         `SELECT id,status FROM (${terminal}) ORDER BY time DESC,sequence DESC LIMIT 8`,
       )
       .all(crewID, crewID)
-      .map((task) => this.task(task));
+      .map((task) => this.task(task, fullText));
 
     const recentCount =
       this.db
@@ -185,7 +217,7 @@ export class MemberActivityStore {
         .get(crewID, crewID)?.count ?? 0;
 
     return {
-      queued: queued.map((task) => this.task(task)),
+      queued: queued.map((task) => this.task(task, fullText)),
       queuedCount,
       lastOutcome: recent[0] ?? null,
       recent,

@@ -8,7 +8,6 @@ import type {
   TextSink,
 } from "../../../backends/backend";
 import type { piDurableBackendSchema } from "../../../backends/pi/config";
-import { redactCredentials } from "../../../lib/credentials";
 import type { SessionHistory } from "../../../shared/session-history";
 import {
   piDefinitionPath,
@@ -23,6 +22,7 @@ import {
   type Peer,
 } from "../execution/state";
 import type { CrewMember } from "../team";
+import { activityText } from "../reporting/member-activity";
 
 type PiConfig = typeof piDurableBackendSchema.Type;
 
@@ -714,8 +714,8 @@ export class PiCrewWorkers {
           return;
         }
 
-        // Bound and redact before buffering, not just at the SQLite boundary.
-        pendingProgress = redactCredentials(text, 64_000).slice(-400);
+        // Bound before buffering; crew status readers redact on read.
+        pendingProgress = activityText(text);
 
         if (cancelProgress) {
           return;

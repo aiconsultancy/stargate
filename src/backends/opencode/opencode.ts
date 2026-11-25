@@ -58,6 +58,7 @@ import type { CrewStatusInput } from "../../shared/crew-status";
 import type {
   CheckoutDiffInput,
   CrewGitInput,
+  FleetCrewStatusInput,
 } from "../../coordination/crew/reporting/fleet-status";
 import { quotaObservationSchema, quotaSnapshotSchema } from "../quota/quota";
 import {
@@ -494,7 +495,7 @@ export class OpenCodeBackend implements AgentBackend {
     return this.crewStatusProbe.crewStatus(input, signal);
   }
 
-  public fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+  public fleetCrewStatus(input: FleetCrewStatusInput, signal: AbortSignal) {
     return this.crewStatusProbe.fleetCrewStatus(input, signal);
   }
 

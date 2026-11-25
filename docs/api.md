@@ -199,11 +199,21 @@ names appear exactly as the crew wrote them: the API neither redacts
 credential-shaped text nor replaces checkout paths. Ship detail and the
 `ship` event keep task text to at most 180, 80 and 400 characters (the fleet
 overview carries no task text); the crew member route applies no limit of
-its own. The crew plugin currently still stores task text bounded to 180, 80
-and 400 characters and redacted, so the API cannot show more than that yet;
-a follow-up removes that. Subagent titles and pull request titles are also
-shown as written, cut to 180 characters. Activity events quote task text and
-branch names unredacted, with whitespace collapsed.
+its own: it returns the task text the crew plugin stores, up to 64,000
+characters each, unredacted. The plugin stores task text raw and redacts and
+bounds it on read for every other reader (the Slack crew command, health,
+the operator dashboard and the crew status tool), so their output is
+unchanged. A crew plugin older than the gateway answers crew detail with
+that redacted, 180/80/400 text. Subagent titles and pull request titles are
+also shown as written, cut to 180 characters. Activity events quote task
+text and branch names unredacted, with whitespace collapsed.
+
+These text fields (task text, branch and base names, subagent titles and
+pull request titles) can hold any Unicode character, including control
+characters such as ESC and BEL, C1 controls, and bidirectional formatting
+characters such as U+202E. The API does not strip them; only the length
+limits above apply. A client that prints them, to a terminal or a page, must
+escape them, for example by showing each as a visible marker.
 
 `HEAD` returns headers without a body. Unknown ships, members, and routes
 return 404. Missing or invalid tokens receive 401 (officers' sockets need

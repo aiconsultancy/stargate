@@ -4,9 +4,10 @@ import {
   type CheckoutDiffInput,
   type CrewGitInput,
   type FleetCrewStatus,
+  type FleetCrewStatusInput,
   checkoutDiffSchema,
   crewGitSchema,
-  fleetCrewStatusSchema,
+  fleetCrewStatusOutputSchema,
 } from "../../coordination/crew/reporting/fleet-status";
 import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
 import { createReadSlot, readWithDeadline } from "../../lib/read-deadline";
@@ -25,6 +26,13 @@ const isMethodNotFound = (error: unknown) =>
   "type" in error &&
   error.type === "rpc.method_not_found";
 
+/** An older crew plugin that rejects an input field it does not know. */
+const isInvalidInput = (error: unknown) =>
+  error !== null &&
+  typeof error === "object" &&
+  "type" in error &&
+  error.type === "rpc.invalid_input";
+
 /** Reads location-scoped crew status and coalesced fleet status probes. */
 export class OpenCodeCrewStatus {
   private fleetStatusRetryAt = 0;
@@ -35,6 +43,7 @@ export class OpenCodeCrewStatus {
   );
   private fleetStatusProbe?: {
     member: CrewStatusInput["member"];
+    fullTaskText: boolean;
     result: Promise<FleetCrewStatus | undefined>;
     controller: AbortController;
     waiters: number;
@@ -42,6 +51,7 @@ export class OpenCodeCrewStatus {
 
   private crewGitRetryAt = 0;
   private checkoutDiffRetryAt = 0;
+  private fullTaskTextRetryAt = 0;
 
   public constructor(
     private readonly client: OpenCodeClient,
@@ -145,7 +155,14 @@ export class OpenCodeCrewStatus {
     }
   }
 
-  public async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+  /**
+   * `fullTaskText` asks for raw task text. A plugin older than the field
+   * answers with ordinary, redacted status instead, which callers must accept.
+   */
+  public async fleetCrewStatus(
+    input: FleetCrewStatusInput,
+    signal: AbortSignal,
+  ) {
     for (;;) {
       signal.throwIfAborted();
       const pending = this.fleetStatusRead.pending;
@@ -169,7 +186,10 @@ export class OpenCodeCrewStatus {
           () => probe.result,
         ).result;
 
-        if (probe.member === input.member) {
+        if (
+          probe.member === input.member &&
+          probe.fullTaskText === (input.fullTaskText === true)
+        ) {
           return result;
         }
 
@@ -186,7 +206,34 @@ export class OpenCodeCrewStatus {
     }
   }
 
-  private startFleetStatusProbe(input: CrewStatusInput) {
+  private async fleetStatusRpc(
+    input: FleetCrewStatusInput,
+    signal: AbortSignal,
+  ) {
+    const rpc = this.client.rpc(CrewReporting);
+    const options = { location: { directory: this.directory() }, signal };
+    const ordinary = input.member === undefined ? {} : { member: input.member };
+
+    if (!input.fullTaskText || performance.now() < this.fullTaskTextRetryAt) {
+      return rpc.fleetStatus(ordinary, options);
+    }
+
+    try {
+      return await rpc.fleetStatus(input, options);
+    } catch (error) {
+      if (!isInvalidInput(error)) {
+        throw error;
+      }
+
+      // An older plugin rejects the field: ask again without it.
+      // Full text is not asked for again until an upgrade may have happened.
+      this.fullTaskTextRetryAt = performance.now() + 60_000;
+
+      return rpc.fleetStatus(ordinary, options);
+    }
+  }
+
+  private startFleetStatusProbe(input: FleetCrewStatusInput) {
     // Start with a short probe and leave time for ordinary crew status.
     const probeMs = this.fleetStatusProbeMs;
     const controller = new AbortController();
@@ -194,11 +241,7 @@ export class OpenCodeCrewStatus {
 
     const { result: probe } = this.fleetStatusRead.start(
       controller.signal,
-      (reading) =>
-        this.client.rpc(CrewReporting).fleetStatus(input, {
-          location: { directory: this.directory() },
-          signal: reading,
-        }),
+      (reading) => this.fleetStatusRpc(input, reading),
       {
         timeout: probeMs,
         onAbandon: () => {
@@ -217,7 +260,10 @@ export class OpenCodeCrewStatus {
           return;
         }
 
-        const result = Schema.decodeUnknownSync(fleetCrewStatusSchema)(status);
+        const result = Schema.decodeUnknownSync(fleetCrewStatusOutputSchema)(
+          status,
+        );
+
         this.fleetStatusFailures = 0;
 
         return result;
@@ -245,6 +291,12 @@ export class OpenCodeCrewStatus {
         return;
       });
 
-    return { member: input.member, result, controller, waiters: 0 };
+    return {
+      member: input.member,
+      fullTaskText: input.fullTaskText === true,
+      result,
+      controller,
+      waiters: 0,
+    };
   }
 }

@@ -353,6 +353,8 @@ async function fixture(report = false) {
     },
     settled: settled.promise,
     progress: () => state.activity.task(state.task(task.id) ?? task).progress,
+    rawProgress: () =>
+      state.activity.task(state.task(task.id) ?? task, true).progress,
     async close() {
       await workers.close();
       state.close();
@@ -408,7 +410,7 @@ test("ordinary Pi Slack prompt retains cumulative visible return and live callba
   }
 });
 
-test("Pi progress flushes latest burst tail while still busy and redacts before storage", async () => {
+test("Pi progress flushes latest burst tail while still busy; stored raw, redacted on read", async () => {
   const f = await fixture();
 
   try {
@@ -421,6 +423,7 @@ test("Pi progress flushes latest burst tail while still busy and redacts before 
     expect(f.progress()).toBe("First update");
     f.clock.advance(800);
     expect(f.progress()).toBe("Latest update token=[REDACTED]");
+    expect(f.rawProgress()).toBe("Latest update token=private-secret");
     expect(f.state.task(f.task.id)?.status).toBe("running");
     f.clock.advance(1000);
     expect(f.clock.timers.size).toBe(0);

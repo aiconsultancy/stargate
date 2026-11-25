@@ -148,8 +148,15 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   crew wrote them, without credential redaction or `[checkout]` path
   replacement. Ship detail and the `ship` event keep the 180/80/400 character
   limits; the crew member route adds no limit. Subagent titles and pull
-  request titles are also shown as written, cut to 180 characters. The crew
-  plugin still stores task text bounded and redacted.
+  request titles are also shown as written, cut to 180 characters.
+- The crew plugin stores crew task text raw, up to 64,000 characters, and
+  redacts and bounds it on read, so the Slack crew command, health, the
+  operator dashboard and the crew status tool show exactly what they did.
+  The fleet status RPC takes `fullTaskText: true` for one member and then
+  returns that text unredacted; only the Fleet API's crew member route asks
+  for it. An older plugin answers redacted, and the gateway falls back.
+  Fleet API text fields keep control and bidirectional formatting
+  characters; clients that print them must escape them.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`

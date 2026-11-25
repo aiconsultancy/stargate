@@ -12,7 +12,15 @@ import {
 } from "../src/coordination/crew/execution/engine";
 import { MemberActivityStore } from "../src/coordination/crew/reporting/member-activity";
 import { teamSchema } from "../src/coordination/crew/team";
-import { crewStatusSchema } from "../src/shared/crew-status";
+import { redactCredentials } from "../src/lib/credentials";
+import {
+  dashboardCrewMembers,
+  dashboardCrewSummary,
+} from "../src/observability/dashboard/dashboard-projection";
+import {
+  crewAssignmentText,
+  crewStatusSchema,
+} from "../src/shared/crew-status";
 import { CrewUI, crewStatusView } from "../src/transports/slack/crew-ui";
 import type { CronView, SlackAck } from "../src/automation/cron/ui";
 import { bot, identity } from "./fixtures";
@@ -184,6 +192,77 @@ test("read-only roster shows Pi/OpenCode/unprovisioned, stale running and bounde
     } finally {
       db.close();
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test("crew status readers show raw stored task text exactly as before: redacted and bounded on read", async () => {
+  const f = await fixture();
+
+  try {
+    const twiki = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const assignment = `Deploy with token=fixture-value ${"é".repeat(300)} end`;
+    const progress = `${"p".repeat(500)} password=fixture-value tail`;
+    const task = f.engine.state.reserveTask(twiki, "captain", assignment);
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+    f.engine.state.activity.progress(task.id, progress);
+    f.engine.state.enqueue(twiki, "captain", assignment);
+
+    // What the store held before it kept raw text.
+    const summary = redactCredentials(crewAssignmentText(assignment), 180);
+    const tail = redactCredentials(progress, 64_000).slice(-400);
+    expect(summary).toContain("token=[REDACTED]");
+    expect(tail).toContain("password=[REDACTED]");
+
+    // Crew status RPC and tool: the engine's ordinary status.
+    const status = f.engine.status({ member: "twiki" });
+    const member = status.members[0];
+    expect(member?.current).toMatchObject({ summary, progress: tail });
+    expect(member?.queued.map((queued) => queued.summary)).toEqual([summary]);
+
+    // Health parses with the shared CrewStatus caps, which raw text exceeds.
+    expect(Schema.decodeUnknownSync(crewStatusSchema)(status)).toEqual(status);
+
+    // Slack crew UI and the operator dashboard render only that status.
+    for (const shown of [
+      crewStatusView(status, true),
+      crewStatusView(f.engine.status(), false),
+      dashboardCrewMembers(status),
+      dashboardCrewSummary(status),
+    ]) {
+      expect(JSON.stringify(shown)).not.toContain("fixture-value");
+    }
+
+    expect(JSON.stringify(crewStatusView(status, true))).toContain(
+      "token=[REDACTED]",
+    );
+
+    // Only an explicit full-text read sees the stored text.
+    const full = f.engine.status({ member: "twiki" }, { fullText: true });
+    expect(full.members[0]?.current).toMatchObject({
+      summary: assignment,
+      progress,
+    });
+    expect(full.members[0]?.queued[0]?.summary).toBe(assignment);
+
+    // Raw text keeps control and bidi characters; ordinary readers still
+    // Strip C0/C1 controls on read, as before.
+    const controls = "Run \u001b[2J \u0007 \u009b1m \u202edone";
+    f.engine.state.activity.progress(task.id, controls);
+    expect(
+      f.engine.status({ member: "twiki" }, { fullText: true }).members[0]
+        ?.current?.progress,
+    ).toBe(controls);
+    expect(
+      f.engine.status({ member: "twiki" }).members[0]?.current?.progress,
+    ).toBe(redactCredentials(controls, 64_000).slice(-400));
   } finally {
     await f.close();
   }

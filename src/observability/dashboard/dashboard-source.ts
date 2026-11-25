@@ -6,8 +6,11 @@ import {
   type TeamsConfig,
   effectiveIrcConfig,
 } from "../../config";
-import type { FleetCrewStatus } from "../../coordination/crew/reporting/fleet-status";
-import type { CrewStatus, CrewStatusInput } from "../../shared/crew-status";
+import type {
+  FleetCrewStatus,
+  FleetCrewStatusInput,
+} from "../../coordination/crew/reporting/fleet-status";
+import type { CrewStatus } from "../../shared/crew-status";
 import type {
   DashboardCaptain,
   DashboardSource,
@@ -283,7 +286,7 @@ export function dashboardSource(
   async function crew(
     ship: DashboardShip,
     signal: AbortSignal,
-    fleetInput?: CrewStatusInput,
+    fleetInput?: FleetCrewStatusInput,
   ): Promise<CrewRead> {
     if (!ship.backend.crewStatus) {
       return { status: null };
@@ -299,8 +302,14 @@ export function dashboardSource(
         }
       }
 
+      // Ordinary status never carries raw task text.
+      const member = fleetInput?.member;
+
       return {
-        status: await ship.backend.crewStatus(fleetInput ?? {}, signal),
+        status: await ship.backend.crewStatus(
+          member === undefined ? {} : { member },
+          signal,
+        ),
       };
     } catch {
       signal.throwIfAborted();
@@ -686,7 +695,7 @@ export function dashboardSource(
   async function readShip(
     id: string,
     signal: AbortSignal,
-    fleetInput?: CrewStatusInput,
+    fleetInput?: FleetCrewStatusInput,
     sample?: CrewRead,
   ): Promise<
     | {
@@ -842,7 +851,7 @@ export function dashboardSource(
     shipWithCrew: (
       id: string,
       signal: AbortSignal,
-      input: CrewStatusInput = {},
+      input: FleetCrewStatusInput = {},
     ) => readShip(id, signal, input),
 
     async children(id, input, signal) {
@@ -889,7 +898,7 @@ export function dashboardSource(
     shipWithCrew: (
       id: string,
       signal: AbortSignal,
-      input?: CrewStatusInput,
+      input?: FleetCrewStatusInput,
     ) => ReturnType<typeof readShip>;
   };
 }
