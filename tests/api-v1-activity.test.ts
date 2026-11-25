@@ -560,7 +560,7 @@ test("the activity route serves GET and HEAD, 404 and 400", async () => {
 
       const route = "/api/v1/agents/captain/activity";
       const byTurn = await get(`${route}?turn=${body.turns[0]?.id}`);
-      const byRequest = await get(`${route}?request=wire-B`);
+      const byRequest = await get(`${route}?request=wire-B&channel=%23bridge`);
       expect(byRequest.status).toBe(200);
       expect(await byRequest.json()).toEqual(await byTurn.json());
 
@@ -580,7 +580,7 @@ test("the activity route serves GET and HEAD, 404 and 400", async () => {
         "request=unknown",
         "request=evicted",
         "request=another-agent",
-        "request=wire-B&channel=%23bridge",
+        "request=wire-B&channel=%23other",
       ]) {
         const response = await get(`${route}?${query}`);
 
@@ -629,22 +629,37 @@ test("the activity route serves GET and HEAD, 404 and 400", async () => {
   }
 });
 
-test("a shared IRC message ID needs its channel to select a retained turn", () => {
+test("request lookup returns all matching turns in snapshot order, optionally filtered by channel", () => {
   const hub = createActivityHub();
   const recorder = hub.recorder("captain");
-  recorder.begin([{ channel: "#One", msgid: "wire" }]).end("completed");
+  recorder.begin([{ channel: "#OneÉ[", msgid: "wire" }]).end("failed");
+  recorder.begin([{ channel: "#OneÉ[", msgid: "other" }]).end("completed");
   recorder.begin([{ channel: "#Two", msgid: "wire" }]);
+  recorder.begin([{ channel: "#oNEÉ[", msgid: "wire" }]);
 
   const read = (query: string) =>
     readActivity(hub, config, "captain", new URLSearchParams(query));
 
-  expect(read("request=wire")).toEqual({ status: 404 });
-  expect(read("request=wire&channel=%23Two")).toMatchObject({
+  const { turns } = snapshot(hub, "captain");
+
+  expect(read("request=wire")).toMatchObject({
     status: 200,
-    body: { turns: [snapshot(hub, "captain").turns[1]] },
+    body: { turns: [turns[0], turns[2], turns[3]] },
   });
-  expect(read("request=wire&channel=%23One")).toMatchObject({
+  expect(read("request=wire&channel=%23two")).toMatchObject({
     status: 200,
-    body: { turns: [snapshot(hub, "captain").turns[0]] },
+    body: { turns: [turns[2]] },
+  });
+  expect(
+    read(`request=wire&channel=${encodeURIComponent("#oneÉ[")}`),
+  ).toMatchObject({
+    status: 200,
+    body: { turns: [turns[0], turns[3]] },
+  });
+  expect(read(`request=wire&channel=${encodeURIComponent("#oneé[")}`)).toEqual({
+    status: 404,
+  });
+  expect(read(`request=wire&channel=${encodeURIComponent("#oneÉ{")}`)).toEqual({
+    status: 404,
   });
 });

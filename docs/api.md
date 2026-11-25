@@ -335,21 +335,22 @@ provider stream reattached during the turn, when changes can be missing.
 `agent.collected` is false for backends this gateway does not collect yet;
 today only OpenCode officers are collected.
 
-| Query parameter | Meaning                                                    |
-| --------------- | ---------------------------------------------------------- |
-| `turn`          | Only that turn; 404 once it is gone                        |
-| `item`          | With `turn`: one page of that item's JSON                  |
-| `page`          | With `item`: the zero-based page number (default 0)        |
-| `request`       | Only the turn answering this IRC message ID                |
-| `channel`       | With `request`: match this exact IRC channel or DM account |
+| Query parameter | Meaning                                             |
+| --------------- | --------------------------------------------------- |
+| `turn`          | Only that turn; 404 once it is gone                 |
+| `item`          | With `turn`: one page of that item's JSON           |
+| `page`          | With `item`: the zero-based page number (default 0) |
+| `request`       | All retained turns answering this IRC message ID    |
+| `channel`       | With `request`: filter by IRC channel or DM account |
 
 To open a turn from an IRC request, URL-encode its IRCv3 message ID and use
 `?request=<msgid>`, optionally with `&channel=<channel>`. The selector cannot
 be combined with `turn`, `item` or `page`. The message ID must contain 1–128
 printable non-space ASCII characters, and `channel` must be 1–512 UTF-8 bytes
-if supplied. Matching is exact and scoped to the officer in the path. A
-missing, ambiguous or evicted match returns an empty 404; supply the channel
-when the same message ID matches turns in more than one channel.
+if supplied. Message IDs match exactly; channel matching folds only ASCII
+letters A–Z. The snapshot contains every matching retained turn of the
+officer in the path, in snapshot order, including retries. If none match,
+the response is an empty 404.
 
 Every turn includes `requests: [{ channel, msgid }, …]` from its accepted
 IRC job, in intake order for a burst. Channel names and IDs are returned as

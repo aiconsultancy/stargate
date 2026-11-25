@@ -19,6 +19,10 @@ import type {
   V1AgentActivityEvent,
 } from "./types";
 
+/** Channel selectors fold ASCII letters only, not Unicode or IRC punctuation. */
+const foldActivityChannel = (value: string) =>
+  value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+
 /** Items whose JSON is larger are served in pages of at most this size. */
 export const activityPageBytes = 64 * 1024;
 
@@ -504,12 +508,17 @@ export function createActivityHub(
         agents.get(agentId)?.turns.some((turn) => turn.id === turnId) ?? false
       );
     },
-    /** Every retained turn, or one; missing or ambiguous selectors do not match. */
+    /** All retained turns, one by ID, or every turn matching an IRC request. */
     turns(
       agentId: string,
       selector?: string | { msgid: string; channel: string | undefined },
     ) {
       const owner = agents.get(agentId);
+
+      const channelKey =
+        typeof selector === "object" && selector.channel !== undefined
+          ? foldActivityChannel(selector.channel)
+          : undefined;
 
       const selected = (owner?.turns ?? []).filter((turn) => {
         if (typeof selector === "string") {
@@ -521,12 +530,13 @@ export function createActivityHub(
           turn.requests.some(
             ({ channel, msgid }) =>
               msgid === selector.msgid &&
-              (selector.channel === undefined || channel === selector.channel),
+              (channelKey === undefined ||
+                foldActivityChannel(channel) === channelKey),
           )
         );
       });
 
-      if (selector !== undefined && selected.length !== 1) {
+      if (selector !== undefined && selected.length === 0) {
         return;
       }
 
@@ -598,6 +608,7 @@ const parameters = {
   page: /^(?:0|[1-9][0-9]{0,8})$/,
   /** Same printable wire msgid bounds as IRC intake. */
   request: /^[!-~]{1,128}$/,
+  /** Intentionally unanchored: require at least one character of any kind. */
   channel: /[\s\S]/,
 } as const;
 
