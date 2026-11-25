@@ -92,6 +92,7 @@ function result(
   isError: boolean,
   text?: string,
   status?: number,
+  errors?: string[],
 ) {
   write({
     type: "result",
@@ -99,6 +100,7 @@ function result(
     is_error: isError,
     ...(text === undefined ? {} : { result: text }),
     ...(status === undefined ? {} : { api_error_status: status }),
+    ...(errors === undefined ? {} : { errors }),
     duration_ms: 1,
     duration_api_ms: 1,
     num_turns: 1,
@@ -493,11 +495,59 @@ async function answer(text: string) {
     return result("success", false, "b");
   }
 
+  if (text === "result only reply") {
+    return result("success", false, "result-only reply");
+  }
+
+  if (text === "result errors") {
+    return result("error_max_turns", true, undefined, undefined, [
+      "first error",
+      "second error\twith detail",
+    ]);
+  }
+
   // "fail", "fail:<cause>" or "fail:<cause>:<status>"; "tool" runs one first.
   const failure = /fail(?::(\w+))?(?::(\d+))?/.exec(text);
 
   if (failure) {
-    if (text.startsWith("subagent ")) {
+    if (text.startsWith("subagent result ")) {
+      // Subagent tool results reach the SDK whether or not text is forwarded.
+      write({
+        type: "user",
+        parent_tool_use_id: "parent_call",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "child_call",
+              content: "child output",
+              is_error: false,
+            },
+          ],
+        },
+        ...base(),
+      });
+    } else if (text.startsWith("subagent text ")) {
+      // Only a forwarding consumer receives subagent text, and the pinned
+      // CLI never sends a parented stream_event: this one proves it ignored.
+      if (forwardSubagentText) {
+        assistant(
+          "msg_subagent_text",
+          { type: "text", text: "child text" },
+          undefined,
+          "parent_call",
+        );
+        stream(
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "child delta" },
+          },
+          "parent_call",
+        );
+      }
+    } else if (text.startsWith("subagent ")) {
       assistant(
         "msg_subagent_tool",
         {
