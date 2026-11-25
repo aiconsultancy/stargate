@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  chatUploadReference,
   chatUploadReferenceSource,
   maxAttachments,
 } from "../../chat/attachments/attachments";
@@ -63,63 +64,44 @@ export type IrcRouteContext = {
   subspaceUploads?: boolean;
 };
 
-const chatUploadTokens = new RegExp(
-  `(?<![A-Za-z0-9_-])${chatUploadReferenceSource}(?![A-Za-z0-9_-])`,
-  "gu",
-);
+const httpLink = /https?:\/\/[^\s<>"'`]+/;
+const uploadToken = `(?<![A-Za-z0-9_-])${chatUploadReferenceSource}(?![A-Za-z0-9_-])`;
+const attachmentTokens = new RegExp(`${httpLink.source}|${uploadToken}`, "giu");
 
-const httpLinks = /https?:\/\/[^\s<>"'`]+/gi;
+function filehostLink(token: string, filehost: URL | undefined) {
+  const candidate = token.replace(/[)\].,;:!?]+$/, "");
 
-/**
- * Links on the FILEHOST origin, in order, at most `maxAttachments`. Other
- * hosts are never collected (and so never fetched). Trailing punctuation
- * from prose is trimmed.
- */
-export function filehostLinks(text: string, filehost: URL | undefined) {
-  if (!filehost) {
-    return [];
+  if (!filehost || !URL.canParse(candidate)) {
+    return;
   }
 
-  const links: string[] = [];
+  const url = new URL(candidate);
 
-  for (const match of text.matchAll(httpLinks)) {
-    const candidate = match[0].replace(/[)\].,;:!?]+$/, "");
-
-    if (!URL.canParse(candidate)) {
-      continue;
-    }
-
-    const url = new URL(candidate);
-
-    if (url.origin !== filehost.origin || url.username || url.password) {
-      continue;
-    }
-
-    if (!links.includes(url.href)) {
-      links.push(url.href);
-    }
-
-    if (links.length === maxAttachments) {
-      break;
-    }
+  if (url.origin === filehost.origin && !url.username && !url.password) {
+    return url.href;
   }
 
-  return links;
+  return;
 }
 
 function admittedFiles(body: string, context: IrcRouteContext) {
-  const files = filehostLinks(body, context.filehost);
+  const files: string[] = [];
 
-  if (context.subspaceUploads) {
-    for (const [reference] of body
-      .replace(httpLinks, " ")
-      .matchAll(chatUploadTokens)) {
+  if (!context.filehost && !context.subspaceUploads) {
+    return files;
+  }
+
+  for (const [token] of body.matchAll(attachmentTokens)) {
+    const file =
+      context.subspaceUploads && chatUploadReference.test(token)
+        ? token
+        : filehostLink(token, context.filehost);
+
+    if (file && !files.includes(file)) {
+      files.push(file);
+
       if (files.length === maxAttachments) {
         break;
-      }
-
-      if (!files.includes(reference)) {
-        files.push(reference);
       }
     }
   }

@@ -11,14 +11,7 @@ export const cancellationNotice =
 
 export type AttachmentInputFailure = "attachments" | "shared-attachments";
 
-export class AttachmentInputUnavailable extends Error {
-  public constructor(
-    message?: string,
-    public readonly failure: AttachmentInputFailure = "attachments",
-  ) {
-    super(message);
-  }
-}
+export class AttachmentInputUnavailable extends Error {}
 
 export class PromptNotSubmitted extends Error {}
 

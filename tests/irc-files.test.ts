@@ -16,6 +16,7 @@ import type {
 } from "../src/backends/backend";
 import { type IrcConfig, ircSchema } from "../src/config";
 import { Gateway } from "../src/gateway/gateway";
+import { AttachmentInputUnavailable } from "../src/shared/request-failure";
 import { Filehost, filehostURL } from "../src/transports/irc/filehost";
 import { fold, parseMessage } from "../src/transports/irc/protocol";
 import { routeIrcMessage } from "../src/transports/irc/routing";
@@ -344,9 +345,9 @@ test("irc files in: text-only backends keep Subspace references without fetching
 });
 
 test("irc files in: mixed downloads preserve input order and share the batch limit", async () => {
-  const data = new Uint8Array(maxAttachmentBytes);
+  let data = Uint8Array.of(65);
 
-  const { host, captain } = await ship({
+  const { host, fake, captain, prompts } = await ship({
     readChatUpload: async (id) => ({
       name: `${id}.bin`,
       mime: "application/octet-stream",
@@ -362,6 +363,25 @@ test("irc files in: mixed downloads preserve input order and share the batch lim
 
   const first = "UPL-AQEBAQEBAQEBAQEBAQEBAQ";
   const second = "UPL-AgICAgICAgICAgICAgICAg";
+  fake.say(
+    { nick: "jack", account: "jack" },
+    "#galactica",
+    `galactica: read ${first} then ${url}`,
+  );
+  await until(() => prompts.length === 1, 5000, "mixed file prompt");
+  expect(prompts[0]?.files.map((file) => file.name)).toEqual([
+    `${first}.bin`,
+    "report.bin",
+  ]);
+
+  data = new Uint8Array(maxAttachmentBytes);
+
+  const bigURL = host.put("/files/big.bin", {
+    name: "big.bin",
+    type: "application/octet-stream",
+    body: data,
+  });
+
   const files = captain.delivery.files;
 
   if (!files) {
@@ -370,14 +390,43 @@ test("irc files in: mixed downloads preserve input order and share the batch lim
 
   const signal = AbortSignal.timeout(5000);
 
-  expect(
-    (await files.download([first, url], "#galactica", signal)).map(
-      (file) => file.name,
-    ),
-  ).toEqual([`${first}.bin`, "report.bin"]);
   await expect(
-    files.download([first, url, second], "#galactica", signal),
+    files.download([first, bigURL, second], "#galactica", signal),
   ).rejects.toThrow("Attachments exceed total size limit");
+});
+
+test("irc files in: a backend file-type rejection keeps the shared-file notice", async () => {
+  const { fake, captain, store, prompts } = await ship({
+    readChatUpload: async () => ({
+      name: "plan.pdf",
+      mime: "application/pdf",
+      data: new TextEncoder().encode("%PDF-1.7"),
+    }),
+    answer: () => {
+      throw new AttachmentInputUnavailable("Unsupported file type");
+    },
+  });
+
+  const reference = "UPL-AQEBAQEBAQEBAQEBAQEBAQ";
+
+  const msgid = fake.say(
+    { nick: "jack", account: "jack" },
+    "#galactica",
+    `galactica: read ${reference}`,
+  );
+
+  const job = () => store.jobByEvent(captain.key, `#galactica:${msgid}`);
+
+  await until(
+    () => job()?.status === "done",
+    5000,
+    "backend attachment refusal",
+  );
+  expect(prompts[0]?.files[0]?.name).toBe("plan.pdf");
+  expect(job()?.failure).toBe("shared-attachments");
+  expect(lineOf(fake.received("galactica"), "PRIVMSG")[0]?.params[1]).toContain(
+    "Subspace uploads expire after 30 days",
+  );
 });
 
 test("irc files in: audio goes through transcription like Slack voice notes", async () => {

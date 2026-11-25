@@ -71,6 +71,7 @@ import { type QuestionPort, Questions } from "../chat/questions/questions";
 import type { QuestionControl } from "../chat/questions/text-controls";
 import { parseReactionReply } from "../shared/reactions";
 import {
+  type AttachmentInputFailure,
   AttachmentInputUnavailable,
   BackendFailure,
   PendingBackendQuestion,
@@ -191,7 +192,10 @@ function statusText(job: Job, cause: RequestFailure) {
 }
 
 /** The failure a thrown error names when no signal ended the turn. */
-function errorFailure(error: unknown): RequestFailure {
+function errorFailure(
+  error: unknown,
+  attachmentFailure?: AttachmentInputFailure,
+): RequestFailure {
   if (error instanceof BackendFailure) {
     return error.failure;
   }
@@ -205,7 +209,7 @@ function errorFailure(error: unknown): RequestFailure {
   }
 
   if (error instanceof AttachmentInputUnavailable) {
-    return error.failure;
+    return attachmentFailure ?? "attachments";
   }
 
   if (error instanceof TranscriptionUnavailable) {
@@ -1937,6 +1941,45 @@ export class Gateway {
     );
   }
 
+  private async downloadFileInput(
+    job: Job,
+    ids: readonly string[],
+    canTranscribe: boolean,
+    signal: AbortSignal,
+  ): Promise<Attachment[]> {
+    try {
+      const transport = this.slack.files;
+
+      if (
+        job.deferDelivery ||
+        !transport ||
+        !(this.backend.supportsAttachments || canTranscribe)
+      ) {
+        throw new Error("Attachment input is unavailable for this backend");
+      }
+
+      const files = await transport.download(ids, job.channel, signal);
+      checkAttachments(files);
+
+      if (files.length !== ids.length) {
+        throw new Error("Some requested attachments are unavailable");
+      }
+
+      // Speech alone needs no file input.
+      if (
+        !this.backend.supportsAttachments &&
+        !files.every((item) => isMedia(item))
+      ) {
+        throw new Error("Backend accepts no files");
+      }
+
+      return files;
+    } catch {
+      signal.throwIfAborted();
+      throw new AttachmentInputUnavailable();
+    }
+  }
+
   private async processTurn(
     held: Job,
     shutdown: AbortSignal,
@@ -2143,6 +2186,8 @@ export class Gateway {
         return parseAttachments(parsed.text, complete).text;
       };
 
+      let attachments: AttachmentInput = { ids: [] };
+
       try {
         try {
           signal.throwIfAborted();
@@ -2320,61 +2365,27 @@ export class Gateway {
             );
           }
 
-          const { ids: fileIDs, failure: attachmentFailure } =
-            this.attachmentInput(job.id);
+          attachments = this.attachmentInput(job.id);
 
           let inputFiles: Attachment[] = [];
 
           // A spoken-mention gate already transcribed this message.
           if (heard) {
             if (heard.files.length > 0 && !this.backend.supportsAttachments) {
-              throw new AttachmentInputUnavailable(
-                "Attachment input unavailable",
-                attachmentFailure,
-              );
+              throw new AttachmentInputUnavailable();
             }
 
             inputFiles = heard.files;
             text = [text, spokenMentionNote, ...heard.blocks]
               .filter(Boolean)
               .join("\n\n");
-          } else if (fileIDs.length > 0) {
-            try {
-              if (
-                job.deferDelivery ||
-                !this.slack.files ||
-                !(this.backend.supportsAttachments || transcriber)
-              ) {
-                throw new Error(
-                  "Attachment input is unavailable for this backend",
-                );
-              }
-
-              inputFiles = await this.slack.files.download(
-                fileIDs,
-                job.channel,
-                signal,
-              );
-              checkAttachments(inputFiles);
-
-              if (inputFiles.length !== fileIDs.length) {
-                throw new Error("Some requested attachments are unavailable");
-              }
-
-              // Refuse before any audio leaves: speech alone needs no file input.
-              if (
-                !this.backend.supportsAttachments &&
-                !inputFiles.every((item) => isMedia(item))
-              ) {
-                throw new Error("Backend accepts no files");
-              }
-            } catch {
-              signal.throwIfAborted();
-              throw new AttachmentInputUnavailable(
-                "Attachment input unavailable",
-                attachmentFailure,
-              );
-            }
+          } else if (attachments.ids.length > 0) {
+            inputFiles = await this.downloadFileInput(
+              job,
+              attachments.ids,
+              Boolean(transcriber),
+              signal,
+            );
 
             signal.throwIfAborted();
 
@@ -2541,7 +2552,7 @@ export class Gateway {
               ? "interrupted"
               : budget.controller.signal.aborted
                 ? "timeout"
-                : errorFailure(error);
+                : errorFailure(error, attachments.failure);
           // Category, provider status and backend only: never error text.
           const detail = providerFailure(failure);
           this.log.warn(
