@@ -2,8 +2,7 @@
   "sourceCommit": "254b157a63bc00539a6fa350d7c5c6d22ec96acf",
   "rules": "docs/design.md#source-layout-and-boundary-rules",
   "braceMigrationFileLimits": {
-    "src/backends/claude.ts": 1013,
-    "src/chat/questions/questions.ts": 1031
+    "src/backends/claude.ts": 1013
   },
   "aliases": {
     "src/crew/plugin.ts": [
