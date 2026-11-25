@@ -18,6 +18,7 @@ import {
   checkAttachments,
 } from "../../chat/attachments/attachments";
 import {
+  type ActivityOutcome,
   type AgentBackend,
   type PromptSourceContext,
   type SteerInput,
@@ -204,6 +205,18 @@ function generationFailureKind(error: {
 
   return undefined;
 }
+
+/** Observes one prompt's turn for operator views; it never affects the turn. */
+export type OpenCodeTurnObserver = (source: {
+  sessionID: string;
+  events: OpenCodeClient["event"];
+  /** The prompt's transcript-placement proof; undefined is not yet provable. */
+  owns(
+    assistantID: string,
+    inputID: string,
+    signal: AbortSignal,
+  ): Promise<boolean | undefined>;
+}) => { submitted(inputID: string): void; end(outcome: ActivityOutcome): void };
 
 export class OpenCodeBackend implements AgentBackend {
   public async pinnedBackgroundQuestions(signal: AbortSignal) {
@@ -689,6 +702,7 @@ export class OpenCodeBackend implements AgentBackend {
   public constructor(
     private readonly config: Config,
     verifiedClient?: OpenCodeClient,
+    private readonly observeTurn?: OpenCodeTurnObserver,
   ) {
     const options = {
       baseUrl: config.url,
@@ -1210,6 +1224,16 @@ export class OpenCodeBackend implements AgentBackend {
 
     this.inputs.delete(sessionId);
     signal.throwIfAborted();
+
+    // Its own subscriber and ownership reads: never alters replies or progress.
+    const activity = this.observeTurn?.({
+      sessionID: sessionId,
+      events: this.client.event,
+      owns: (assistant, input, check) =>
+        inputOwnership(this.client, sessionId, input, check, assistant),
+    });
+
+    let failed = false;
     const stop = new AbortController();
     const timer = new AbortController();
     const connected = Promise.withResolvers<void>();
@@ -1571,6 +1595,7 @@ export class OpenCodeBackend implements AgentBackend {
       onInput?.(id);
       signal.throwIfAborted();
       phase = { type: "submitting", input: id };
+      activity?.submitted(id);
       this.inputs.set(sessionId, id);
 
       if (onProgress) {
@@ -1708,6 +1733,8 @@ export class OpenCodeBackend implements AgentBackend {
 
       throw new Error("OpenCode input was not found in session history");
     } catch (error) {
+      failed = true;
+
       // Correlate a lost admission response without submitting again. A known
       // ID permits withdrawal, but only readable placement permits interruption.
       if (phase.type === "submitting" || phase.type === "submitted") {
@@ -1731,6 +1758,9 @@ export class OpenCodeBackend implements AgentBackend {
 
       throw error;
     } finally {
+      activity?.end(
+        signal.aborted ? "cancelled" : failed ? "failed" : "completed",
+      );
       phase = { type: "settled" };
       timer.abort();
       stop.abort();

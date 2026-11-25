@@ -181,6 +181,7 @@ and `Last-Event-ID` without a token.
 | `/api/v1/fleet`                    | Fleet overview with captain summaries, host metrics, and gateway version and features |
 | `/api/v1/ships/{id}`               | Ship detail, including crew members                                                   |
 | `/api/v1/ships/{id}/crew/{member}` | One member's detail                                                                   |
+| `/api/v1/agents/{id}/activity`     | An officer's recent turns, or one page of one item                                    |
 | `/api/v1/events`                   | Server-sent events                                                                    |
 
 `{member}` is a crew member's configured ID. Each of a ship's `crewMembers`
@@ -303,6 +304,54 @@ omitted. With no binding or no readable branch and commit, `pullRequest` is
 null and `pullRequestKnown` is absent. A context with `pullRequestKnown: true`
 and `pullRequest: null` has a settled lookup with no matching PR. A failed
 or incomplete refresh retains the last successful lookup result.
+
+### Officer activity
+
+`GET /api/v1/agents/{id}/activity` serves what an officer's agent is doing
+in its turns: model steps with settled tokens and cost, tool calls with their
+streamed and parsed input, progress metadata, results and errors, reply text
+and reasoning text. `{id}` is a registration ID from `bots`, `irc` or
+`teams`, so it covers the rear admiral and every captain. An unknown ID
+returns 404. The route is on whenever the Fleet API is, behind the same
+token, network check and `Cache-Control: no-store`; the gateway feature
+`api.agentActivity` reports it.
+
+Unlike the other routes, this one is neither redacted nor truncated. It
+serves tool input and output, provider errors, reply and reasoning text
+exactly as the agent saw them, including any secret a tool printed. Treat the
+API token accordingly. Officers' [sockets](#officers) do not serve it: it
+answers 404 there, so no officer reads another officer's turns.
+
+The response is `V1AgentActivity`: `{ agent, turns, cursor }`. Turns are
+oldest first. Turn IDs are unique across restarts, and item IDs (`i1`, `i2`,
+...) are stable within their turn. Every change takes the next value of a
+per-agent sequence: each turn and item carries the `seq` of its latest
+change, and `cursor.seq` is the latest change included. `cursor.generation`
+changes when the gateway restarts. `turn.reconnects` counts times the live
+provider stream reattached during the turn, when changes can be missing.
+`agent.collected` is false for backends this gateway does not collect yet;
+today only OpenCode officers are collected.
+
+| Query parameter | Meaning                                             |
+| --------------- | --------------------------------------------------- |
+| `turn`          | Only that turn; 404 once it is gone                 |
+| `item`          | With `turn`: one page of that item's JSON           |
+| `page`          | With `item`: the zero-based page number (default 0) |
+
+Unknown, repeated or malformed parameters return 400. An item whose JSON
+exceeds 64 KiB appears in the turn with only its identity, kind, status and
+`paged: { pages, bytes }`. Fetch every page with `?turn=&item=&page=`; each
+`V1ActivityItemPage.data` holds at most 64 KiB of UTF-8 and the pages join
+into the complete item JSON. Pages with different `seq` values belong to
+different versions of a changing item; start again from page 0.
+
+The gateway keeps the last 16 turns per officer, in memory only, however
+long the officer stays idle. Across all officers, ended turns are evicted
+oldest first beyond 256 turns or 64 MiB of settled turn JSON. Eviction always
+removes a whole turn; a running turn is never evicted, and no content is cut.
+Turns appear from the moment the officer's input is submitted. Output from a
+neighbouring input in the same session is shown only once the turn's own
+transcript placement proves it belongs to this turn.
 
 ## Events
 

@@ -111,6 +111,7 @@ async function startFixture(
     diff?: ApiV1Diff;
     fleetReadMs?: number;
     timing?: { headersMs?: number; requestMs?: number };
+    activity?: Parameters<typeof startApiV1Server>[0]["activity"];
   } = {},
 ) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-"));
@@ -130,6 +131,7 @@ async function startFixture(
         ? { fleetReadMs: options.fleetReadMs }
         : {}),
       ...(options.timing ? { timing: options.timing } : {}),
+      ...(options.activity ? { activity: options.activity } : {}),
       signal: shutdown.signal,
     });
 
@@ -519,6 +521,22 @@ test("HTTP detail deadlines release the handlers but retain capacity for uncoope
   const server = await startFixture({
     source: { ...source, ship: readingShip, crew: readingCrew },
     timing: { requestMs: 160 },
+    activity: (agent) =>
+      agent === "captain"
+        ? {
+            status: 200,
+            body: {
+              agent: {
+                id: "captain",
+                role: "captain",
+                backend: "opencode",
+                collected: true,
+              },
+              turns: [],
+              cursor: { generation: "g", seq: 0 },
+            },
+          }
+        : { status: 404 },
   });
 
   const shipPath = "/api/v1/ships/explorer";
@@ -537,12 +555,26 @@ test("HTTP detail deadlines release the handlers but retain capacity for uncoope
     expect(results.map(({ status }) => status)).toEqual(Array(8).fill(500));
     expect((await get(shipPath)).status).toBe(503);
     expect((await get(crewPath)).status).toBe(503);
+    expect((await get("/api/v1/agents/captain/activity")).status).toBe(503);
+
+    // Unknown or malformed paths answer 404 without needing a read slot.
+    for (const path of [
+      "/api/v1/agents/nobody/activity",
+      "/api/v1/agents/%2F/activity",
+      "/api/v1/ships/%2F",
+      `${shipPath}/crew/%2F`,
+      `${shipPath}/unknown`,
+    ]) {
+      expect((await get(path)).status).toBe(404);
+    }
+
     expect(readingShip).toHaveBeenCalledTimes(4);
     expect(readingCrew).toHaveBeenCalledTimes(4);
     held.resolve();
     await nextTurn();
     expect((await get(shipPath)).status).toBe(200);
     expect((await get(crewPath)).status).toBe(200);
+    expect((await get("/api/v1/agents/captain/activity")).status).toBe(200);
   } finally {
     held.resolve();
     await server.close();

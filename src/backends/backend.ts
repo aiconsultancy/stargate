@@ -326,8 +326,88 @@ type CrewBinding = {
   ): Promise<unknown>;
 };
 
+/** A provider failure exactly as the agent saw it. */
+export type ActivityError = {
+  type: string;
+  message: string;
+  status: number | null;
+  responseBody: string | null;
+  retryAfterMs: number | null;
+};
+
+export type ActivityContent =
+  | { type: "text"; text: string }
+  | { type: "file"; uri: string; mime: string; name: string | null };
+
+export type ActivityTokens = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+/** One turn item as a backend projects it; never a raw provider frame. */
+export type ActivityItem =
+  | {
+      kind: "step";
+      status: "running" | "completed" | "failed";
+      model: { provider: string; id: string; variant: string | null } | null;
+      firstTokenAt: number | null;
+      streamedAt: number | null;
+      endedAt: number | null;
+      finish: string | null;
+      tokens: ActivityTokens | null;
+      /** USD, when the step settled with a cost. */
+      cost: number | null;
+      error: ActivityError | null;
+    }
+  | {
+      kind: "text" | "reasoning";
+      status: "streaming" | "completed";
+      text: string;
+    }
+  | {
+      kind: "tool";
+      callId: string;
+      name: string | null;
+      status: "input" | "running" | "completed" | "failed";
+      /** Raw input as the model streamed it. */
+      rawInput: string;
+      /** Parsed input once the call was made. */
+      input: Readonly<Record<string, unknown>> | null;
+      executed: boolean | null;
+      /** Latest progress or result metadata, replaced as it changes. */
+      metadata: Readonly<Record<string, unknown>> | null;
+      content: ActivityContent[] | null;
+      error: ActivityError | null;
+    };
+
+export type ActivityOutcome = "completed" | "failed" | "cancelled";
+
+/** One officer turn's writer. Calls never throw, block or affect the turn. */
+export type TurnActivityLog = {
+  /** Create the item for a backend-local key, then apply a change observed at `at`. */
+  update(
+    key: string,
+    at: number,
+    create: () => ActivityItem,
+    change?: (item: ActivityItem) => void,
+  ): void;
+  /** The backend's live event stream reattached; changes can be missing. */
+  reconnected(): void;
+  end(outcome: ActivityOutcome): void;
+};
+
+/** Collects officer turns for operator views; one per registration. */
+export type TurnActivityRecorder = {
+  begin(): TurnActivityLog;
+};
+
 export type BackendContext = {
   dataDirectory: string;
   crew?: CrewBinding;
   workingAgreement?: { path: string; owns(conversationID: string): boolean };
+  /** Present when the Fleet API serves officer activity. */
+  activity?: TurnActivityRecorder;
 };

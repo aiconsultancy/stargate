@@ -3,6 +3,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { readWithDeadline } from "../../../../lib/read-deadline";
 import type { ApiRoute } from "../route";
+import type { ActivityRead } from "./activity";
 import { apiRequestMs, maxFleetReads, startApiServer } from "../server";
 import type { ApiV1Config } from "./config";
 import {
@@ -29,7 +30,14 @@ import {
   shipRoute,
 } from "./officers";
 import { apiToken } from "./token";
-import type { ApiV1Source, V1Fleet, V1Gateway, V1Snapshot } from "./types";
+import type {
+  ApiV1Source,
+  V1ActivityItemPage,
+  V1AgentActivity,
+  V1Fleet,
+  V1Gateway,
+  V1Snapshot,
+} from "./types";
 
 type Options = {
   /** The operator listener, behind the fleet token; absent for officers alone. */
@@ -43,6 +51,11 @@ type Options = {
     opencodeVersion: OpenCodeVersionLookup;
   };
   signal: AbortSignal;
+  /**
+   * Officer turn activity, for the operator listener only: officers' sockets
+   * serve the four fleet routes. Absent, the route answers 404.
+   */
+  activity?: (agentId: string, query: URLSearchParams) => ActivityRead;
   fleetReadMs?: number;
   routes?: readonly ApiRoute[];
   /** Compose trusted producer policies against the exact loaded operator token. */
@@ -113,9 +126,58 @@ function routeId(encoded: string) {
 
 type ApiServer = Awaited<ReturnType<typeof startApiServer>>;
 
+type DetailRead = (
+  signal: AbortSignal,
+) => Promise<
+  | NonNullable<Awaited<ReturnType<ApiV1Source["ship" | "crew"]>>>
+  | V1AgentActivity
+  | V1ActivityItemPage
+  | number
+>;
+
+/**
+ * Match a ship, crew or agent activity path before any read slot is taken. An
+ * unknown or invalid path answers its status at once; only a matched route
+ * starts a read, which is undefined when every read slot is busy.
+ */
+function readDetail(
+  core: Pick<FleetCore, "crew" | "ship" | "activity">,
+  url: URL,
+  start: (read: DetailRead) => ReturnType<DetailRead> | undefined,
+) {
+  const agent = /^\/api\/v1\/agents\/([^/]+)\/activity$/.exec(url.pathname);
+
+  if (agent) {
+    const id = routeId(agent[1] ?? "");
+
+    const read =
+      id === undefined ? undefined : core.activity?.(id, url.searchParams);
+
+    return read?.status === 200
+      ? start(() => Promise.resolve(read.body))
+      : (read?.status ?? 404);
+  }
+
+  const match = shipRoute.exec(url.pathname);
+  const id = match?.[1] && routeId(match[1]);
+  const member = match?.[2] && routeId(match[2]);
+
+  if (!id || (match?.[2] && !member)) {
+    return 404;
+  }
+
+  return start(
+    async (signal) =>
+      (await (member
+        ? core.crew(id, member, signal)
+        : core.ship(id, signal))) ?? 404,
+  );
+}
+
 /** What every Fleet API read needs, the same for operators and officers. */
 type FleetCore = Pick<ApiV1Source, "crew" | "ship" | "shipIdentities"> & {
   diff: ApiV1Diff;
+  activity?: Options["activity"];
   readFleet: ApiV1Source["fleet"];
   completeFleet: (
     fleet: V1Snapshot["fleet"],
@@ -191,7 +253,8 @@ async function answer(
 ) {
   const empty = (status: number) => new Response(null, { status, headers });
   const method = request.method;
-  const pathname = new URL(request.url).pathname;
+  const url = new URL(request.url);
+  const { pathname } = url;
   const { fleetReadMs } = core;
 
   try {
@@ -264,33 +327,17 @@ async function answer(
       return Response.json(result, { headers });
     }
 
-    const match = shipRoute.exec(pathname);
+    const detail = readDetail(core, url, (run) => startHttpRead(read, run));
 
-    const id = match?.[1] && routeId(match[1]);
-
-    if (!id) {
-      return empty(404);
-    }
-
-    const member = match?.[2] && routeId(match[2]);
-
-    if (match?.[2] && !member) {
-      return empty(404);
-    }
-
-    const detail = startHttpRead(read, async (reading) =>
-      member ? core.crew(id, member, reading) : core.ship(id, reading),
-    );
-
-    if (!detail) {
-      return empty(503);
+    if (typeof detail !== "object") {
+      return empty(detail ?? 503);
     }
 
     const result = await detail;
     read.throwIfAborted();
 
-    if (!result) {
-      return empty(404);
+    if (typeof result === "number") {
+      return empty(result);
     }
 
     return method === "HEAD" ? empty(200) : Response.json(result, { headers });
@@ -322,7 +369,8 @@ async function officerRequest(
     return new Response(null, { status: 404, headers });
   }
 
-  return answer(core, readers, request, headers);
+  // Turn activity is unredacted: operators only, never an officer's socket.
+  return answer({ ...core, activity: undefined }, readers, request, headers);
 }
 
 export async function startApiV1Server(options: Options) {
@@ -406,6 +454,7 @@ export async function startApiV1Server(options: Options) {
     ship: (id, signal) => source.ship(id, signal),
     ...(shipIdentities && { shipIdentities }),
     diff: options.diff,
+    ...(options.activity && { activity: options.activity }),
     readFleet: async (signal, captureShipRead, crewDeadline) => ({
       ...(await source.fleet(signal, captureShipRead, crewDeadline)),
       name: fleetName,

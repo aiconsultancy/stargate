@@ -52,6 +52,13 @@ export function gatewayFeatures(config: ApiV1Config): V1Feature[] {
       config.dashboardSocket?.groupAccess === true,
     ),
     flag("api", "Fleet API", config.api !== undefined),
+    // No switch of its own: on whenever the Fleet API is.
+    flag(
+      "api.agentActivity",
+      "Officer turn activity",
+      config.api !== undefined,
+      true,
+    ),
     flag(
       "cronjobs",
       "File-backed cron",
