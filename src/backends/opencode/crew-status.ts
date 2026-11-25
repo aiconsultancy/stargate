@@ -38,7 +38,7 @@ export class OpenCodeCrewStatus {
   private fleetStatusRetryAt = 0;
   private fleetStatusFailures = 0;
   private fleetStatusProbeMs = 400;
-  private readonly fleetStatusRead = createReadSlot<unknown>(
+  private readonly fleetStatusRead = createReadSlot<FleetCrewStatus>(
     maxFleetStatusProbeMs,
   );
   private fleetStatusProbe?: {
@@ -214,12 +214,26 @@ export class OpenCodeCrewStatus {
     const options = { location: { directory: this.directory() }, signal };
     const ordinary = input.member === undefined ? {} : { member: input.member };
 
+    const read = async (requested: FleetCrewStatusInput) => {
+      const result = Schema.decodeUnknownSync(fleetCrewStatusOutputSchema)(
+        await rpc.fleetStatus(requested, options),
+      );
+
+      if ("taskText" in result && result.taskText !== requested.taskText) {
+        throw new Error(
+          "Fleet crew status answered with the wrong task text view.",
+        );
+      }
+
+      return result;
+    };
+
     if (!input.taskText || performance.now() < this.taskTextRetryAt) {
-      return rpc.fleetStatus(ordinary, options);
+      return read(ordinary);
     }
 
     try {
-      return await rpc.fleetStatus(input, options);
+      return await read(input);
     } catch (error) {
       if (!isInvalidInput(error)) {
         throw error;
@@ -229,7 +243,7 @@ export class OpenCodeCrewStatus {
       // Mode is asked for again until an upgrade may have happened.
       this.taskTextRetryAt = performance.now() + 60_000;
 
-      return rpc.fleetStatus(ordinary, options);
+      return read(ordinary);
     }
   }
 
@@ -260,13 +274,9 @@ export class OpenCodeCrewStatus {
           return;
         }
 
-        const result = Schema.decodeUnknownSync(fleetCrewStatusOutputSchema)(
-          status,
-        );
-
         this.fleetStatusFailures = 0;
 
-        return result;
+        return status;
       })
       .catch((error: unknown): undefined => {
         if (controller.signal.aborted || failureCounted) {

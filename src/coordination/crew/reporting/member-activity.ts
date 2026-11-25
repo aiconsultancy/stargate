@@ -45,6 +45,17 @@ export function activityText(text: string) {
   return head(text, crewTaskTextLimit);
 }
 
+function maskTaskText(text: string, limit: number, keep: "head" | "tail") {
+  // Control stripping can expose a credential the first pass did not see.
+  const stripped = redactCredentials(text, crewTaskTextLimit);
+  const window = keep === "tail" ? stripped.slice(-limit) : stripped;
+  const masked = redactCredentials(window, crewTaskTextLimit);
+
+  return (
+    keep === "tail" ? masked.slice(-limit) : masked.slice(0, limit)
+  ).toWellFormed();
+}
+
 /**
  * How ordinary crew status shows stored text: redacted and bounded, exactly
  * as the store held it before it kept raw text. Rows written then are
@@ -53,18 +64,10 @@ export function activityText(text: string) {
 function maskedActivity(activity: Activity): Activity {
   const { summary, progress } = crewTaskTextLimits;
 
-  // Control stripping can expose a credential the first pass did not see.
-  const progressTail = redactCredentials(
-    activity.progress,
-    crewTaskTextLimit,
-  ).slice(-progress);
-
   return {
     ...activity,
-    summary: redactCredentials(activity.summary, summary).toWellFormed(),
-    progress: redactCredentials(progressTail, crewTaskTextLimit)
-      .slice(-progress)
-      .toWellFormed(),
+    summary: maskTaskText(activity.summary, summary, "head"),
+    progress: maskTaskText(activity.progress, progress, "tail"),
   };
 }
 

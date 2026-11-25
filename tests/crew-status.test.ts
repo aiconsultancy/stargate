@@ -269,6 +269,38 @@ test("crew status readers show raw stored task text exactly as before: redacted 
   }
 });
 
+test("ordinary task text masks credentials revealed by stripping controls", async () => {
+  const f = await fixture();
+
+  try {
+    const peer = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const text = "Check to\u0007ken=fixture-value before deployment";
+    const task = f.engine.state.reserveTask(peer, "captain", text);
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+    f.engine.state.activity.progress(task.id, text);
+    const masked = "Check token=[REDACTED] before deployment";
+    expect(
+      f.engine.status({ member: "twiki" }).members[0]?.current,
+    ).toMatchObject({ summary: masked, progress: masked });
+
+    for (const taskText of ["unredacted", "full"] as const) {
+      const status = f.engine.status({ member: "twiki" }, { taskText });
+      expect(status.members[0]?.current).toMatchObject({
+        summary: text,
+        progress: text,
+      });
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test("ordinary task summary and progress replace a surrogate split at the display cut", async () => {
   const f = await fixture();
 
