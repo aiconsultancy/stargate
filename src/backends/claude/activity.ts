@@ -750,7 +750,13 @@ export class ClaudeActivity {
         finish: frame.subtype,
         tokens: null,
         cost: null,
-        error: activityError(type, errors.join("\n") || type),
+        error: {
+          ...activityError(type, errors.join("\n") || type),
+          status:
+            frame.subtype === "success"
+              ? (frame.api_error_status ?? null)
+              : null,
+        },
       }));
     }
 

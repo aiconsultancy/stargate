@@ -548,6 +548,40 @@ test("Claude result text and errors reach activity, without repeating a reply", 
   );
 });
 
+test("a Claude success result marked as an error is an unredacted failed step", async () => {
+  const hub = createActivityHub();
+  const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
+
+  await expect(
+    backend.prompt(await session(backend), "result marked error", signal()),
+  ).rejects.toThrow();
+
+  // The route is unredacted: the raw text is the error, never also a reply.
+  expect(hub.turns("officer")?.turns).toMatchObject([
+    {
+      status: "failed",
+      items: [
+        {
+          kind: "step",
+          status: "failed",
+          finish: "success",
+          error: {
+            type: "is_error",
+            message:
+              "API Error: 529 upstream said sk-ant-api03-fixture-credential",
+            status: 529,
+          },
+        },
+      ],
+    },
+  ]);
+  expect(
+    hub
+      .turns("officer")
+      ?.turns[0]?.items.filter((item) => item.kind === "text"),
+  ).toEqual([]);
+});
+
 test("a recorder that throws cannot fail a Claude query", async () => {
   const { backend } = await open(
     {},

@@ -355,8 +355,7 @@ function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
     }
   }
 
-  // A family over a global limit on its own can never be kept: drop it
-  // First, so it does not clear every older family on its way out.
+  // Drop a family over a global limit on its own before older families.
   const fitting = ended.filter((family) => {
     if (family.turns.length <= limits.turns && family.bytes <= limits.bytes) {
       return true;

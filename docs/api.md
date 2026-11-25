@@ -378,7 +378,8 @@ text, that text is a `text` item; otherwise nothing is repeated. A stream
 preview alone does not count as the reply. A failed result is a `failed`
 step with `model: null` and `finish` set to the result's subtype. Its
 `error.type` is that subtype, or `is_error` for a result marked as an error,
-and `error.message` is the result's errors, one per line, or its text.
+`error.message` is the result's errors, one per line, or its text, and
+`error.status` is the result's API error status, if any.
 
 An item with `unavailable: ["text"]` is a reasoning block whose text the
 provider encrypted. The item is present with `text: ""`; the gateway never

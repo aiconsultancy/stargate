@@ -517,6 +517,15 @@ async function answer(text: string) {
     return result("success", false, "hello");
   }
 
+  if (text === "result marked error") {
+    return result(
+      "success",
+      true,
+      "API Error: 529 upstream said sk-ant-api03-fixture-credential",
+      529,
+    );
+  }
+
   if (text === "result errors") {
     return result("error_max_turns", true, undefined, undefined, [
       "first error",
