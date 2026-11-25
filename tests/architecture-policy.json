@@ -1201,6 +1201,7 @@
         "src/config-reload.ts",
         "src/app/irc-reload.ts",
         "src/app/notification-shutdown.ts",
+        "src/app/reload-transaction.ts",
         "src/app/usage-guard.ts",
         "src/main.ts",
         "src/profile.ts",
