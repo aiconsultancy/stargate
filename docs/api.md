@@ -231,8 +231,12 @@ both the project and crew checkouts. If that request fails or reaches its
 six-second timeout, the gateway reads the checkouts itself without asking the
 captain again. A fleet summary requests only the project checkout. The
 plugin uses the crew workspace tool's Git helper, without the gateway's index
-snapshot: repository hooks, fsmonitor and optional locks are off. It caches
-each checkout's result for 15 seconds, with a five-second read limit.
+snapshot: repository hooks, fsmonitor, optional locks and lazy fetches are
+off. For status it uses the checkout's objects and live index, but runs in a
+private Git directory without checkout filter configuration or
+`info/attributes`. Git versions that support `GIT_ATTR_SOURCE` also ignore
+worktree `.gitattributes`. It caches each checkout's result for 15 seconds,
+with a five-second read limit.
 
 Each `git` object may carry these optional fields, added without changing the
 existing ones:

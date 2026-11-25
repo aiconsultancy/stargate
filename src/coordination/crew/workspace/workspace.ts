@@ -1,6 +1,18 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, readFile, readlink, realpath, stat } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Schema, Semaphore } from "effect";
 import {
@@ -117,6 +129,7 @@ function git(
     limit?: number;
     truncate?: boolean;
     write?: boolean;
+    fleetRead?: Record<string, string>;
   },
 ): Promise<{ text: string; truncated: boolean }> {
   const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" };
@@ -129,6 +142,14 @@ function git(
 
   if (!options.write) {
     env["GIT_OPTIONAL_LOCKS"] = "0";
+  }
+
+  if (options.fleetRead) {
+    Object.assign(env, {
+      ...options.fleetRead,
+      GIT_ALLOW_PROTOCOL: "",
+      GIT_NO_LAZY_FETCH: "1",
+    });
   }
 
   const limit = options.limit ?? 1024 * 1024;
@@ -145,6 +166,7 @@ function git(
         "core.hooksPath=/dev/null",
         "-c",
         "submodule.recurse=false",
+        ...(options.fleetRead ? ["-c", "core.untrackedCache=false"] : []),
         ...args,
       ],
       {
@@ -728,6 +750,142 @@ function emptyState(checkedAt: number): CrewGitState {
   };
 }
 
+const statusSettings =
+  /^(core\.(filemode|ignorecase|symlinks|precomposeunicode|autocrlf|eol|sparsecheckout|sparsecheckoutcone|checkstat|trustctime|ignorestat|excludesfile)|(diff|status)\.renames)$/;
+
+async function fleetStatusTemp(directory: string) {
+  const temporary = await realpath(tmpdir());
+
+  if (within(await realpath(directory), temporary)) {
+    throw new Error(gitUnavailable);
+  }
+
+  // A private directory cannot protect Git's config if another user can
+  // Replace it or an ancestor. Sticky directories such as /tmp are safe
+  // When each entry belongs to root or the current user.
+  let ancestor: string = sep;
+
+  for (const part of temporary.split(sep)) {
+    ancestor = join(ancestor, part);
+    const info = await lstat(ancestor);
+
+    if (
+      !info.isDirectory() ||
+      (info.uid !== 0 && info.uid !== process.getuid?.()) ||
+      (info.mode & 0o022 && !(info.mode & 0o1000))
+    ) {
+      throw new Error(gitUnavailable);
+    }
+  }
+
+  return temporary;
+}
+
+async function fleetStatus(
+  directory: string,
+  commit: string | null,
+  signal: AbortSignal,
+  paths: string,
+  config: string | null,
+) {
+  const [format, objects, index, exclude, sparse, ...extra] = paths
+    .replace(/\n$/, "")
+    .split("\n");
+
+  if (
+    (format !== "sha1" && format !== "sha256") ||
+    !objects ||
+    !isAbsolute(objects) ||
+    !index ||
+    !isAbsolute(index) ||
+    !exclude ||
+    !isAbsolute(exclude) ||
+    !sparse ||
+    !isAbsolute(sparse) ||
+    extra.length > 0
+  ) {
+    throw new Error(gitUnavailable);
+  }
+
+  const temporary = await fleetStatusTemp(directory);
+  signal.throwIfAborted();
+  const gitDir = await mkdtemp(join(temporary, "stargate-crew-status-"));
+
+  try {
+    // An empty attribute tree does not suppress info/attributes, and Git
+    // Versions without GIT_ATTR_SOURCE can still see .gitattributes. Use a
+    // Private Git directory and forward only non-executable status settings.
+    await mkdir(join(gitDir, "info"));
+    await mkdir(join(gitDir, "refs"));
+    await writeFile(
+      join(gitDir, "HEAD"),
+      commit ? `${commit}\n` : "ref: refs/heads/unborn\n",
+    );
+
+    if (format === "sha256") {
+      await writeFile(
+        join(gitDir, "config"),
+        "[core]\nrepositoryformatversion=1\n[extensions]\nobjectformat=sha256\n",
+      );
+    }
+
+    await symlink(exclude, join(gitDir, "info", "exclude"));
+    await symlink(sparse, join(gitDir, "info", "sparse-checkout"));
+
+    const settings: string[] = [];
+
+    for (const entry of config?.split("\0") ?? []) {
+      const newline = entry.indexOf("\n");
+      const key = newline === -1 ? entry : entry.slice(0, newline);
+
+      if (statusSettings.test(key)) {
+        const value = newline === -1 ? "true" : entry.slice(newline + 1);
+        settings.push("-c", `${key}=${value}`);
+      }
+    }
+
+    signal.throwIfAborted();
+
+    return (
+      await git(
+        directory,
+        [
+          ...settings,
+          "-c",
+          "core.attributesFile=/dev/null",
+          "status",
+          "--porcelain=v1",
+          "-z",
+          "--untracked-files=all",
+          // Count changed gitlinks without reading submodule worktrees.
+          "--ignore-submodules=dirty",
+        ],
+        {
+          signal,
+          failure: gitUnavailable,
+          limit: statusLimit,
+          fleetRead: {
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_ATTR_NOSYSTEM: "1",
+            GIT_ATTR_SOURCE: createHash(format)
+              .update("tree 0\0")
+              .digest("hex"),
+            GIT_DIR: gitDir,
+            GIT_WORK_TREE: directory,
+            GIT_OBJECT_DIRECTORY: objects,
+            // Keep the original index timestamp. Git finds the shared part
+            // Of a split index beside this file if absent in the Git dir.
+            GIT_INDEX_FILE: index,
+          },
+        },
+      )
+    ).text;
+  } finally {
+    await rm(gitDir, { recursive: true, force: true });
+  }
+}
+
 async function inspect(
   directory: string,
   signal: AbortSignal,
@@ -745,12 +903,12 @@ async function inspect(
     return { ...emptyState(now()), error: gitUnavailable };
   }
 
-  const run = async (args: string[], limit?: number) =>
+  const run = async (args: string[]) =>
     (
       await git(directory, args, {
         signal,
         failure: gitUnavailable,
-        ...(limit !== undefined && { limit }),
+        fleetRead: {},
       })
     ).text;
 
@@ -814,18 +972,21 @@ async function inspect(
         ])),
     );
 
-    const [status, remote, counts] = await Promise.all([
-      run(
-        [
-          "status",
-          "--porcelain=v1",
-          "-z",
-          "--untracked-files=all",
-          // Count changed gitlinks without reading submodule worktrees.
-          "--ignore-submodules=dirty",
-        ],
-        statusLimit,
-      ),
+    const [paths, config, remote, counts] = await Promise.all([
+      run([
+        "rev-parse",
+        "--show-object-format",
+        "--path-format=absolute",
+        "--git-path",
+        "objects",
+        "--git-path",
+        "index",
+        "--git-path",
+        "info/exclude",
+        "--git-path",
+        "info/sparse-checkout",
+      ]),
+      optional(["config", "--null", "--get-regexp", statusSettings.source]),
       optional(["remote", "get-url", "origin"]),
       base && commit
         ? run([
@@ -839,6 +1000,7 @@ async function inspect(
         : null,
     ]);
 
+    const status = await fleetStatus(directory, commit, signal, paths, config);
     const changedFiles = countChangedPaths(status);
     const divergence = counts === null ? null : parseAheadBehind(counts);
 

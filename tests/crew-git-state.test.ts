@@ -1,5 +1,12 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -47,10 +54,10 @@ async function git(directory: string, ...args: string[]) {
 
 let count = 0;
 
-async function repository() {
+async function repository(format = "sha1") {
   const directory = join(root, `repo-${count++}`);
   await mkdir(directory);
-  await git(directory, "init");
+  await git(directory, "init", `--object-format=${format}`);
   await git(directory, "commit", "--allow-empty", "-m", "first");
 
   return directory;
@@ -143,6 +150,109 @@ test("a detached checkout without upstream has no branch or base", async () => {
     changedFiles: 0,
     remote: null,
     checkedAt: 1,
+  });
+});
+
+test.each([
+  ["clean", ".gitattributes"],
+  ["process", ".gitattributes"],
+  ["clean", ".git/info/attributes"],
+  ["process", ".git/info/attributes"],
+])(
+  "Fleet status skips the %s driver selected by %s",
+  async (driver, attributes) => {
+    const directory = await repository();
+    const tracked = join(directory, "tracked");
+    const marker = join(directory, ".git", "probe-ran");
+    const timestamp = 1_600_000_000;
+
+    await git(directory, "config", "core.trustctime", "false");
+    await writeFile(join(directory, attributes), "tracked filter=probe\n");
+    await writeFile(tracked, "before\n");
+    await utimes(tracked, timestamp, timestamp);
+    await git(directory, "add", ".");
+    await git(directory, "commit", "-m", "track probe file");
+    await git(
+      directory,
+      "config",
+      `filter.probe.${driver}`,
+      driver === "clean"
+        ? "touch .git/probe-ran && cat"
+        : "touch .git/probe-ran; exit 1",
+    );
+    await writeFile(tracked, "edited\n");
+    await utimes(tracked, timestamp, timestamp);
+    await utimes(join(directory, ".git", "index"), timestamp, timestamp);
+
+    // Positive control: ordinary status really invokes the driver, even for
+    // A same-size edit with an unchanged worktree timestamp.
+    // The process probe deliberately exits before the Git handshake.
+    Bun.spawnSync(["git", "--no-optional-locks", "status", "--porcelain=v1"], {
+      cwd: directory,
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    expect(await Bun.file(marker).exists()).toBe(true);
+    await rm(marker);
+
+    expect(await createCrewGitReader()(directory, signal)).toMatchObject({
+      changedFiles: 1,
+    });
+    expect(await Bun.file(marker).exists()).toBe(false);
+  },
+);
+
+test.each(["sha1", "sha256"])(
+  "Fleet status uses the %s empty tree for attributes",
+  async (format) => {
+    const directory = await repository(format);
+    await writeFile(join(directory, ".gitattributes"), "tracked text eol=lf\n");
+    await writeFile(join(directory, "tracked"), "original\n");
+    await git(directory, "add", ".");
+    await git(directory, "commit", "-m", "track LF text");
+
+    const emptyTree = await git(
+      directory,
+      "hash-object",
+      "-t",
+      "tree",
+      "--stdin",
+    );
+
+    const supportsAttributeSource =
+      Bun.spawnSync(
+        ["git", `--attr-source=${emptyTree}`, "check-attr", "text", "tracked"],
+        { cwd: directory },
+      ).exitCode === 0;
+
+    await writeFile(join(directory, "tracked"), "original\r\n");
+
+    expect(await createCrewGitReader()(directory, signal)).toMatchObject({
+      changedFiles: supportsAttributeSource ? 1 : 0,
+    });
+  },
+);
+
+test("Fleet status reads a linked worktree's split index and ignore rules", async () => {
+  const directory = await repository();
+  const linked = join(root, "linked-split");
+
+  await writeFile(join(directory, "tracked"), "initial\n");
+  await git(directory, "add", "tracked");
+  await git(directory, "commit", "-m", "track file");
+  await git(directory, "worktree", "add", "-b", "linked-split", linked);
+  await git(linked, "update-index", "--split-index");
+  await writeFile(join(directory, ".git", "info", "exclude"), "ignored-info\n");
+  const configured = join(directory, ".git", "custom-excludes");
+  await writeFile(configured, "ignored-config\n");
+  await git(directory, "config", "core.excludesFile", configured);
+  await writeFile(join(linked, "ignored-info"), "hidden\n");
+  await writeFile(join(linked, "ignored-config"), "hidden\n");
+  await writeFile(join(linked, "tracked"), "edited\n");
+
+  expect(await createCrewGitReader()(linked, signal)).toMatchObject({
+    branch: "linked-split",
+    changedFiles: 1,
   });
 });
 
