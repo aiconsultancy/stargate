@@ -643,7 +643,8 @@ export class ClaudeBackend implements AgentBackend {
       } finally {
         clearTimeout(settle);
         answered.resolve();
-        // Only the caller's own abort cancels; a timeout or lost CLI fails.
+        // Any caller abort (Stop, turn timeout, shutdown) cancels.
+        // A stop by the backend itself, such as a lost CLI, fails.
         activity?.end(
           signal.aborted
             ? "cancelled"

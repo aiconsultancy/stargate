@@ -1086,14 +1086,15 @@ test("a Claude turn stopped without a result fails unless its caller cancelled i
           .length >= count,
     );
 
-  // The backend's own abort, as on a lost CLI or interruption, is a failure.
+  // A stop by the backend itself, as for a lost CLI, is a failure.
+  // Only startup recovery calls interrupt(), never a user's Stop.
   const id = await session(backend);
   const stopped = backend.prompt(id, "hang", signal());
   await started(1);
   await backend.interrupt(id, signal());
   await expect(stopped).rejects.toThrow();
 
-  // The caller's abort is a cancellation.
+  // The caller's abort, as on a Slack or IRC Stop, is a cancellation.
   const controller = new AbortController();
 
   const cancelled = backend.prompt(
