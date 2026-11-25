@@ -2,7 +2,8 @@ import { join } from "node:path";
 import { Option, Schema } from "effect";
 import type { AgentBackend } from "../../backends/backend";
 import type { BotConfig, Config } from "../../config";
-import { crewStatusSchema } from "../../shared/crew-status";
+import { crewStatusSchemaWith } from "../../shared/crew-status";
+import { crewTaskTextLimits } from "../../shared/crew-task-text";
 import type { CronReportRow } from "../../automation/cron/advanced";
 import { type HealthConfig, healthConfigSchema } from "./config";
 import {
@@ -31,6 +32,8 @@ import { quotaSnapshotSchema } from "../../backends/quota/quota";
 import { botStatusReport } from "../../app/status-report";
 import { settingsPattern } from "../../config/settings-schema";
 import { exactStruct } from "../../shared/session-history";
+
+const crewStatusSchema = crewStatusSchemaWith(crewTaskTextLimits).status;
 
 export const healthSections = [
   "host",

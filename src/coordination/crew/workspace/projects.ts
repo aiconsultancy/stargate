@@ -292,6 +292,7 @@ export class CrewProjects {
   public async run(raw: unknown, caller: CrewCaller) {
     const selected = await this.select(raw, caller);
     const input = selected.input;
+    let assignmentPreamble = "";
 
     if (
       selected.project !== "default" &&
@@ -307,17 +308,17 @@ export class CrewProjects {
         throw new CrewError("Unknown configured crew member.");
       }
 
-      input["text"] = [
+      assignmentPreamble = [
         `Configured Stargate project: ${selected.project}.`,
         `Use only your permanent worktree: ${JSON.stringify(selected.engine.options.worktrees[member])}.`,
         "Read this repository's AGENTS.md and applicable delivery/security instructions. Project selection is not human approval.",
         "Omitted project arguments are bound to your actual native worker session. Never select another project's state or move this session.",
         "",
-        input["text"],
+        "",
       ].join("\n");
     }
 
-    const result = await selected.engine.run(input, caller);
+    const result = await selected.engine.run(input, caller, assignmentPreamble);
 
     return this.enabled ? { ...result, project: selected.project } : result;
   }

@@ -393,11 +393,14 @@ test("dispatch selects only protected paths; worker omission binds native contex
   const projects = await CrewProjects.open(f.options, f.factory);
 
   try {
+    const assignment =
+      'Configured Stargate project: sample.\nUse only your permanent worktree: "/fixture".\n\nRead the assigned repository';
+
     const result = await projects.run(
       {
         op: "dispatch",
         crew: "worker",
-        text: "Read the assigned repository",
+        text: assignment,
         project: "stargate",
       },
       f.captain(),
@@ -421,12 +424,33 @@ test("dispatch selects only protected paths; worker omission binds native contex
       f.options.projects?.["stargate"]?.worktrees["worker"] ?? "missing",
     );
     expect(f.prompts[0]?.text).toContain("not human approval");
-    expect(
-      projects
-        .status({ member: "worker" })
-        .members.find((member) => member.project === "stargate")?.current
-        ?.summary,
-    ).toBe("Read the assigned repository");
+    expect(f.prompts[0]?.text).toContain(`\n\n${assignment}\n\n`);
+
+    const queued = await projects.run(
+      {
+        op: "dispatch",
+        crew: "worker",
+        project: "stargate",
+        text: assignment,
+        queue: true,
+      },
+      f.captain(),
+    );
+
+    expect(queued.status).toBe("queued");
+
+    for (const input of [
+      { member: "worker" },
+      { member: "worker", taskText: "unredacted" },
+      { member: "worker", taskText: "full" },
+    ] as const) {
+      const member = projects
+        .fleetStatus(input)
+        .status.members.find((member) => member.project === "stargate");
+
+      expect(member?.current?.summary).toBe(assignment);
+      expect(member?.queued[0]?.summary).toBe(assignment);
+    }
 
     for (const mail of [false, true]) {
       await expect(
@@ -714,10 +738,11 @@ test("status and history identify all project contexts while legacy output stays
     // Fleet status shows task text in three modes. ESC, BEL, a C1 control
     // (CSI) and RIGHT-TO-LEFT OVERRIDE ride along with credential-shaped text.
     const controls = "\u001b[31m \u0007 \u009b2J \u202e";
+    const splitCredential = "s\u0007k-split-fixture";
     const engine = projects.get("stargate");
     const peer = engine.state.peer("worker");
     const text = `Fix token=fixture-value ${controls} ${"é".repeat(300)} end`;
-    const progress = `start ${"p".repeat(500)} Bearer fixture-value ${controls} tail`;
+    const progress = `start ${"p".repeat(500)} ${splitCredential} Bearer fixture-value ${controls} tail`;
     const task = peer && engine.state.reserveTask(peer, "captain", text);
 
     if (!task) {
@@ -740,9 +765,12 @@ test("status and history identify all project contexts while legacy output stays
 
     expect(current(ordinary)).toMatchObject({
       summary: redactCredentials(text, 180),
-      progress: redactCredentials(progress, 64_000).slice(-400),
     });
+    expect(current(ordinary)?.progress).toEndWith(
+      ` [REDACTED] [REDACTED AUTHORIZATION] ${redactCredentials(controls)} tail`,
+    );
     expect(JSON.stringify(ordinary)).not.toContain("fixture-value");
+    expect(JSON.stringify(ordinary)).not.toContain("sk-split-fixture");
     expect(JSON.stringify(ordinary)).not.toMatch(controlChars);
     expect(ordinary).not.toHaveProperty("taskText");
 
@@ -765,7 +793,7 @@ test("status and history identify all project contexts while legacy output stays
         `token=fixture-value ${controls}`,
       );
       expect(current(unredacted)?.progress).toEndWith(
-        `Bearer fixture-value ${controls} tail`,
+        `${splitCredential} Bearer fixture-value ${controls} tail`,
       );
     }
 

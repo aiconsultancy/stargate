@@ -7,8 +7,9 @@ import { redactCredentials } from "../../lib/credentials";
 import {
   type CrewStatus,
   type CrewStatusTask,
-  crewStatusSchema,
+  crewStatusSchemaWith,
 } from "../../shared/crew-status";
+import { crewTaskTextLimits } from "../../shared/crew-task-text";
 import {
   type QuotaSnapshot,
   formatQuota,
@@ -20,6 +21,8 @@ import {
   isAllowedUser,
 } from "../../gateway/routing";
 import { settingsPattern } from "../../config/settings-schema";
+
+const crewStatusSchema = crewStatusSchemaWith(crewTaskTextLimits).status;
 
 type CrewView = Extract<ViewsOpenArguments["view"], { type: "modal" }>;
 

@@ -10,21 +10,18 @@ import {
   type CrewOptions,
   type CrewSessions,
 } from "../src/coordination/crew/execution/engine";
+import { crewInputSchema } from "../src/coordination/crew/input/crew-tool-input";
+import { fleetCrewFullStatusSchema } from "../src/coordination/crew/reporting/fleet-status";
 import { MemberActivityStore } from "../src/coordination/crew/reporting/member-activity";
 import { teamSchema } from "../src/coordination/crew/team";
 import { redactCredentials } from "../src/lib/credentials";
-import {
-  activityText,
-  activityTextLimit,
-} from "../src/coordination/crew/reporting/member-activity";
+import { activityText } from "../src/coordination/crew/reporting/member-activity";
 import {
   dashboardCrewMembers,
   dashboardCrewSummary,
 } from "../src/observability/dashboard/dashboard-projection";
-import {
-  crewAssignmentText,
-  crewStatusSchema,
-} from "../src/shared/crew-status";
+import { crewStatusSchema } from "../src/shared/crew-status";
+import { crewTaskTextLimit } from "../src/shared/crew-task-text";
 import { CrewUI, crewStatusView } from "../src/transports/slack/crew-ui";
 import type { CronView, SlackAck } from "../src/automation/cron/ui";
 import { bot, identity } from "./fixtures";
@@ -220,7 +217,7 @@ test("crew status readers show raw stored task text exactly as before: redacted 
     f.engine.state.enqueue(twiki, "captain", assignment);
 
     // What the store held before it kept raw text.
-    const summary = redactCredentials(crewAssignmentText(assignment), 180);
+    const summary = redactCredentials(assignment, 180);
     const tail = redactCredentials(progress, 64_000).slice(-400);
     expect(summary).toContain("token=[REDACTED]");
     expect(tail).toContain("password=[REDACTED]");
@@ -272,6 +269,35 @@ test("crew status readers show raw stored task text exactly as before: redacted 
   }
 });
 
+test("ordinary task summary and progress replace a surrogate split at the display cut", async () => {
+  const f = await fixture();
+
+  try {
+    const peer = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+
+    const task = f.engine.state.reserveTask(
+      peer,
+      "captain",
+      `x${"😀".repeat(90)}`,
+    );
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+    f.engine.state.activity.progress(task.id, `${"😀".repeat(200)}y`);
+    const current = f.engine.status({ member: "twiki" }).members[0]?.current;
+    expect(current).toMatchObject({
+      summary: `x${"😀".repeat(89)}\uFFFD`,
+      progress: `\uFFFD${"😀".repeat(199)}y`,
+    });
+  } finally {
+    await f.close();
+  }
+});
+
 test("stored task text is cut at 64,000 code points without splitting a surrogate pair", async () => {
   const f = await fixture();
 
@@ -281,13 +307,18 @@ test("stored task text is cut at 64,000 code points without splitting a surrogat
     // One unit, then pairs: the cut lands mid-pair in UTF-16 units.
     const astral = `x${"😀".repeat(70_000)}`;
     const cut = activityText(astral);
-    expect(Array.from(cut)).toHaveLength(activityTextLimit);
-    expect(cut).toBe(`x${"😀".repeat(activityTextLimit - 1)}`);
+    expect(Array.from(cut)).toHaveLength(crewTaskTextLimit);
+    expect(cut).toBe(`x${"😀".repeat(crewTaskTextLimit - 1)}`);
     expect(cut.isWellFormed()).toBe(true);
+
+    const dispatch = Schema.decodeUnknownSync(crewInputSchema);
+    const input = { op: "dispatch", crew: "twiki", text: cut };
+    expect(dispatch(input)).toMatchObject({ text: cut });
+    expect(() => dispatch({ ...input, text: `${cut}😀` })).toThrow();
 
     // Only the head is scanned, however long the input is.
     expect(activityText("a".repeat(10_000_000))).toBe(
-      "a".repeat(activityTextLimit),
+      "a".repeat(crewTaskTextLimit),
     );
 
     const twiki = f.engine.state.reservePeer("twiki");
@@ -305,6 +336,23 @@ test("stored task text is cut at 64,000 code points without splitting a surrogat
       f.engine.status({ member: "twiki" }, { taskText }).members[0]?.current;
 
     expect(read("full")).toMatchObject({ summary: cut, progress: cut });
+
+    const fleet = {
+      status: f.engine.status({ member: "twiki" }, { taskText: "full" }),
+      metadata: { projectDirectory: "/fixture", contexts: [] },
+      taskText: "full" as const,
+    };
+
+    const decodeFleet = Schema.decodeUnknownSync(fleetCrewFullStatusSchema);
+    expect(decodeFleet(fleet)).toEqual(fleet);
+    const stored = fleet.status.members[0]?.current;
+
+    if (!stored) {
+      throw new Error("Missing current task");
+    }
+
+    stored.progress = `${cut}😀`;
+    expect(() => decodeFleet(fleet)).toThrow();
     // Unredacted keeps the summary's start and the progress tail, whole pairs.
     expect(read("unredacted")).toMatchObject({
       summary: `x${"😀".repeat(179)}`,

@@ -8,17 +8,16 @@ import {
   maxTaskInputs,
   settledTasksPerMember,
 } from "./fleet-status";
-import {
-  type CrewStatusTask,
-  type CrewTaskTextMode,
-  crewAssignmentText,
-  crewTaskTextLimits,
+import type {
+  CrewStatusTask,
+  CrewTaskTextMode,
 } from "../../../shared/crew-status";
+import {
+  crewTaskTextLimit,
+  crewTaskTextLimits,
+} from "../../../shared/crew-task-text";
 
 type Activity = Omit<CrewStatusTask, "id" | "status">;
-
-/** The dispatch text limit, in code points. Stored task text is raw. */
-export const activityTextLimit = 64_000;
 
 /**
  * The first `limit` code points. Only twice that many UTF-16 units are
@@ -43,7 +42,7 @@ function tail(text: string, limit: number) {
 
 /** `text` cut to the stored task text limit. */
 export function activityText(text: string) {
-  return head(text, activityTextLimit);
+  return head(text, crewTaskTextLimit);
 }
 
 /**
@@ -52,12 +51,20 @@ export function activityText(text: string) {
  * already redacted, and redacting them again leaves them unchanged.
  */
 function maskedActivity(activity: Activity): Activity {
+  const { summary, progress } = crewTaskTextLimits;
+
+  // Control stripping can expose a credential the first pass did not see.
+  const progressTail = redactCredentials(
+    activity.progress,
+    crewTaskTextLimit,
+  ).slice(-progress);
+
   return {
     ...activity,
-    summary: redactCredentials(activity.summary, crewTaskTextLimits.summary),
-    progress: redactCredentials(activity.progress, activityTextLimit).slice(
-      -crewTaskTextLimits.progress,
-    ),
+    summary: redactCredentials(activity.summary, summary).toWellFormed(),
+    progress: redactCredentials(progressTail, crewTaskTextLimit)
+      .slice(-progress)
+      .toWellFormed(),
   };
 }
 
@@ -69,7 +76,6 @@ function unredactedActivity(activity: Activity): Activity {
   return {
     ...activity,
     summary: head(activity.summary, crewTaskTextLimits.summary),
-    phase: head(activity.phase, crewTaskTextLimits.phase),
     progress: tail(activity.progress, crewTaskTextLimits.progress),
   };
 }
@@ -109,6 +115,8 @@ export class MemberActivityStore {
     task: T,
     text: string,
     report = false,
+    /** Only the dispatcher's own prefix is excluded, never matching user text. */
+    assignmentStart = 0,
   ) {
     const now = Date.now();
     this.db
@@ -121,7 +129,7 @@ export class MemberActivityStore {
         report ? "report" : "assignment",
         report
           ? "Prepare crew activity report"
-          : activityText(crewAssignmentText(text)),
+          : activityText(text.slice(assignmentStart)),
         task.status,
         now,
         now,
@@ -194,6 +202,16 @@ export class MemberActivityStore {
             .get(task.id)?.stop
         : undefined;
 
+    // Expiry can cancel queued reports directly. Durable task state wins over
+    // An older lifecycle label; reading must not write a repair event.
+    const phase =
+      activity?.phase === "Execution failed; outcome uncertain" &&
+      task.status === "uncertain"
+        ? activity.phase
+        : stop && stop !== "confirmed"
+          ? `abandoned; native stop ${stop}`
+          : task.status;
+
     return {
       id: task.id,
       status: task.status,
@@ -207,15 +225,10 @@ export class MemberActivityStore {
         updatedAt: null,
         finishedAt: null,
       }),
-      // Expiry can cancel queued reports directly. Durable task state wins over
-      // An older lifecycle label; reading must not write a repair event.
-      phase:
-        activity?.phase === "Execution failed; outcome uncertain" &&
-        task.status === "uncertain"
-          ? activity.phase
-          : stop && stop !== "confirmed"
-            ? `abandoned; native stop ${stop}`
-            : task.status,
+      phase: head(
+        phase,
+        mode === "full" ? crewTaskTextLimit : crewTaskTextLimits.phase,
+      ),
     };
   }
 

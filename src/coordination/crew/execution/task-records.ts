@@ -121,6 +121,7 @@ export class CrewTaskRecords {
     captainID: string,
     text = "",
     originInputID: string | null = null,
+    assignmentStart = 0,
   ): CrewTask | null {
     return this.db
       .transaction(() => {
@@ -145,7 +146,7 @@ export class CrewTaskRecords {
 
         if (task) {
           this.reporting.assignment(task, text);
-          this.activity.assignment(task, text);
+          this.activity.assignment(task, text, false, assignmentStart);
         }
 
         return task;

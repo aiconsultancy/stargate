@@ -4,6 +4,7 @@ import {
   crewStatusSchema,
   crewStatusSchemaWith,
 } from "../../../shared/crew-status";
+import { crewTaskTextLimit } from "../../../shared/crew-task-text";
 import {
   HISTORY_PAGE,
   MAX_CREW_CONTEXTS,
@@ -51,13 +52,10 @@ export const fleetCrewStatusInputSchema = exactStruct({
 
 export type FleetCrewStatusInput = typeof fleetCrewStatusInputSchema.Type;
 
-/** Raw task text bound, in code points: the dispatch text limit. */
-export const fullTaskTextLimit = 64_000;
-
 const fullTextStatus = crewStatusSchemaWith({
-  summary: fullTaskTextLimit,
-  phase: fullTaskTextLimit,
-  progress: fullTaskTextLimit,
+  summary: crewTaskTextLimit,
+  phase: crewTaskTextLimit,
+  progress: crewTaskTextLimit,
 }).status;
 
 /** Ordinary status, as every caller that does not ask for full text gets it. */

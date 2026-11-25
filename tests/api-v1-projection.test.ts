@@ -1583,18 +1583,19 @@ describe("Fleet API projection", () => {
     }
   });
 
-  test("v1 projection: crew detail passes task text through in full; ship detail bounds it without redaction", async () => {
-    const text = `Edit\t${privateProject}-pilot-default/notes with Authorization: Bearer fixture-value token=fixture-value ${"🚀".repeat(450)}`;
+  test("v1 projection preserves a preamble-shaped assignment and serializes the selected view unchanged", async () => {
+    const assignment =
+      'Configured Stargate project: sample.\nUse only your permanent worktree: "/fixture".\n\nRead the assigned repository';
 
-    const bounded = (limit: number) =>
-      Array.from(text).slice(0, limit).join("");
+    const trailer = `Edit\t${privateProject}-pilot-default/notes with Authorization: Bearer fixture-value token=fixture-value`;
+    const text = `${"🚀".repeat(450)} ${trailer}`;
 
     expect(text.length).toBeGreaterThan(400);
     const f = fixture();
     f.set("captain", [
       context("pilot", {
         current: task("task-1", "running", {
-          summary: text,
+          summary: assignment,
           phase: text,
           progress: text,
         }),
@@ -1603,29 +1604,48 @@ describe("Fleet API projection", () => {
 
     const detail = await f.source.crew("captain", "pilot", signal);
     expect(detail?.member.contexts[0]?.current).toMatchObject({
-      summary: text,
+      summary: assignment,
       phase: text,
       progress: text,
     });
     // Crew detail alone asks the plugin for full task text.
     expect(f.calls.taskText).toEqual(["full"]);
 
+    const boundedTask = {
+      summary: assignment,
+      phase: Array.from(trailer).slice(0, 80).join(""),
+      progress: Array.from(text).slice(-400).join(""),
+    };
+
+    // The plugin, not the gateway projection, supplies the bounded fields.
+    f.set("captain", [
+      context("pilot", { current: task("task-1", "running", boundedTask) }),
+    ]);
     const ship = await f.source.ship("captain", signal);
     expect(f.calls.taskText).toEqual(["full", "unredacted"]);
     const current = ship?.crewMembers[0]?.contexts[0]?.current;
-    expect(current).toMatchObject({
-      summary: bounded(180),
-      phase: bounded(80),
-      progress: bounded(400),
-    });
+    expect(current).toMatchObject(boundedTask);
     expect(current?.progress).toContain(
       "Bearer fixture-value token=fixture-value",
     );
     expect(current?.phase).toContain(`${privateProject}-pilot-default`);
 
     // The fleet sample, which also feeds each ship's event, asks unredacted.
-    await f.source.fleet(signal);
+    let readShip: ((reading: AbortSignal) => Promise<unknown>) | undefined;
+
+    await f.source.fleet(signal, (id, read) => {
+      if (id === "captain") {
+        readShip = read;
+      }
+    });
     expect(f.calls.taskText.slice(2)).toEqual(["unredacted"]);
+    expect(await readShip?.(signal)).toMatchObject({
+      crewMembers: [{ contexts: [{ current: boundedTask }] }],
+    });
+    expect(
+      (await f.dashboard.ship("captain", signal))?.crewMembers?.[0]?.contexts[0]
+        ?.current?.summary,
+    ).toBe(assignment);
   });
 
   test("crew diffs go to a captain's backend, never a rear admiral's", async () => {
@@ -2181,7 +2201,7 @@ describe("Fleet API projection", () => {
       context("pilot", {
         project: "ops",
         current: task("task-2", "running", {
-          summary: `Configured Stargate project: ops.\nUse only your permanent worktree: "${privateProject}-pilot-ops`,
+          summary: "Check the ops worktree",
           progress: `Working in ${privateProject}-pilot-ops`,
         }),
       }),
@@ -2219,7 +2239,7 @@ describe("Fleet API projection", () => {
       "Authorization: Bearer fixture-value",
     );
     expect(detail?.member.contexts[1]?.current).toMatchObject({
-      summary: "Project assignment",
+      summary: "Check the ops worktree",
       progress: `Working in ${privateProject}-pilot-ops`,
     });
     await expect(

@@ -581,7 +581,6 @@ export function dashboardSource(
     signal: AbortSignal,
     selected?: ReadonlySet<string>,
     crewDeadline?: AbortSignal,
-    crewInput: FleetCrewStatusInput = {},
   ) {
     const groups = captains();
 
@@ -619,11 +618,9 @@ export function dashboardSource(
             ? await readWithDeadline(retired, undefined, (active) => {
                 reading.throwIfAborted();
 
-                return crew(
-                  member,
-                  AbortSignal.any([reading, active]),
-                  crewInput,
-                );
+                return crew(member, AbortSignal.any([reading, active]), {
+                  taskText: "unredacted",
+                });
               }).result.catch((error: unknown) => {
                 reading.throwIfAborted();
 
@@ -852,8 +849,7 @@ export function dashboardSource(
       signal: AbortSignal,
       selected: ReadonlySet<string>,
       crewDeadline?: AbortSignal,
-      crewInput?: FleetCrewStatusInput,
-    ) => readFleet(signal, selected, crewDeadline, crewInput),
+    ) => readFleet(signal, selected, crewDeadline),
     shipWithCrew: (
       id: string,
       signal: AbortSignal,
@@ -896,12 +892,11 @@ export function dashboardSource(
     fleetBackend: (id: string) => AgentBackend | undefined;
     invalidateFleetCrew: () => void;
     retireFleetBackend: (backend: AgentBackend) => void;
-    /** `crewInput` names the Fleet API's task text mode; omitted is ordinary. */
+    /** The shared sample is always unfiltered, with bounded unredacted text. */
     fleetWithCrew: (
       signal: AbortSignal,
       selected: ReadonlySet<string>,
       crewDeadline?: AbortSignal,
-      crewInput?: FleetCrewStatusInput,
     ) => ReturnType<typeof readFleet>;
     shipWithCrew: (
       id: string,

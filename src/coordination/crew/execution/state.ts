@@ -664,8 +664,10 @@ export class CrewState {
     text: string,
     reportCaptureID?: string,
     originInputID: string | null = null,
-    /** Marks a task queued by a maintenance drain, for automatic resume. */
-    drainRunID?: string,
+    {
+      drainRunID,
+      assignmentStart = 0,
+    }: { drainRunID?: string; assignmentStart?: number } = {},
   ): CrewTask {
     return this.db
       .transaction(() => {
@@ -747,7 +749,12 @@ export class CrewState {
           this.reporting.assignment(task, text);
         }
 
-        this.activity.assignment(task, text, !!reportCaptureID);
+        this.activity.assignment(
+          task,
+          text,
+          !!reportCaptureID,
+          assignmentStart,
+        );
 
         return task;
       })
@@ -905,8 +912,15 @@ export class CrewState {
     captainID: string,
     text = "",
     originInputID: string | null = null,
+    assignmentStart = 0,
   ): CrewTask | null {
-    return this.taskRecords.reserveTask(peer, captainID, text, originInputID);
+    return this.taskRecords.reserveTask(
+      peer,
+      captainID,
+      text,
+      originInputID,
+      assignmentStart,
+    );
   }
 
   public controlled(crewID: string): boolean {

@@ -24,6 +24,7 @@ import {
   resumeInputSchema,
 } from "../execution/reconciliation";
 import { quotaInputSchema } from "../../../backends/quota/quota";
+import { crewTaskTextLimit } from "../../../shared/crew-task-text";
 import { agentIDSchema } from "../team";
 import { workspaceInputSchemas } from "../workspace/workspace";
 
@@ -34,7 +35,7 @@ const crewTaskID = Schema.String.check(
 
 const crewText = Schema.String.check(
   Schema.isMinCodePoints(1),
-  Schema.isMaxCodePoints(64_000),
+  Schema.isMaxCodePoints(crewTaskTextLimit),
 );
 
 export const crewInputBranches = Schema.Union([

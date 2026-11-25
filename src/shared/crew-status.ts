@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { crewTaskTextLimits } from "./crew-task-text";
 import { exactStruct } from "./session-history";
 
 // Zod's string bounds counted code points; keep that unit at this boundary.
@@ -109,13 +110,6 @@ export function crewStatusSchemaWith(limits: CrewTaskTextLimits) {
  */
 export type CrewTaskTextMode = "ordinary" | "unredacted" | "full";
 
-/** The limits every ordinary crew status reader shows. */
-export const crewTaskTextLimits: CrewTaskTextLimits = {
-  summary: 180,
-  phase: 80,
-  progress: 400,
-};
-
 const ordinary = crewStatusSchemaWith(crewTaskTextLimits);
 
 export const crewStatusSchema = ordinary.status;
@@ -125,19 +119,3 @@ export type CrewStatus = typeof crewStatusSchema.Type;
 export type CrewStatusInput = typeof crewStatusInputSchema.Type;
 
 export type CrewStatusTask = typeof ordinary.task.Type;
-
-/** Multi-project dispatch adds a worktree preamble for the worker, outside
- * the assignment itself. Older retained summaries may end inside it. */
-export function crewAssignmentText(text: string): string {
-  if (
-    !/^Configured Stargate project: [a-z][a-z0-9_-]*\.\nUse only your permanent worktree: /.test(
-      text,
-    )
-  ) {
-    return text;
-  }
-
-  const start = text.indexOf("\n\n");
-
-  return start === -1 ? "Project assignment" : text.slice(start + 2);
-}

@@ -353,6 +353,8 @@ async function fixture(report = false) {
     },
     settled: settled.promise,
     progress: () => state.activity.task(state.task(task.id) ?? task).progress,
+    unredactedProgress: () =>
+      state.activity.task(state.task(task.id) ?? task, "unredacted").progress,
     rawProgress: () =>
       state.activity.task(state.task(task.id) ?? task, "full").progress,
     async close() {
@@ -419,11 +421,13 @@ test("Pi progress flushes latest burst tail while still busy; stored raw, redact
     f.clock.advance(100);
     await f.emit("Second update");
     f.clock.advance(100);
-    await f.emit("Latest update token=private-secret");
+    const raw = "Latest update s\u0007k-split-fixture";
+    await f.emit(raw);
     expect(f.progress()).toBe("First update");
     f.clock.advance(800);
-    expect(f.progress()).toBe("Latest update token=[REDACTED]");
-    expect(f.rawProgress()).toBe("Latest update token=private-secret");
+    expect(f.progress()).toBe("Latest update [REDACTED]");
+    expect(f.unredactedProgress()).toBe(raw);
+    expect(f.rawProgress()).toBe(raw);
     expect(f.state.task(f.task.id)?.status).toBe("running");
     f.clock.advance(1000);
     expect(f.clock.timers.size).toBe(0);

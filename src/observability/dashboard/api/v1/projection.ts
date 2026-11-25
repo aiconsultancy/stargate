@@ -12,10 +12,9 @@ import type {
   CrewGitState,
   FleetCrewStatus,
 } from "../../../../coordination/crew/reporting/fleet-status";
-import {
-  type CrewStatus,
-  type CrewStatusTask,
-  crewAssignmentText,
+import type {
+  CrewStatus,
+  CrewStatusTask,
 } from "../../../../shared/crew-status";
 import type { DashboardCrewMember, ShipSummary } from "../../dashboard-model";
 import { dashboardCrewSummary } from "../../dashboard-projection";
@@ -262,19 +261,14 @@ function checkoutText(metadata?: Metadata) {
 
 type CrewText = ReturnType<typeof checkoutText>;
 
-/** Crew output is shown as written; only its length may be bounded. */
-type TaskText = (text: string, limit: number) => string;
-
-const fullText: TaskText = (text) => text;
-
-function v1Task(task: CrewStatusTask, text: TaskText): V1Task {
+function v1Task(task: CrewStatusTask): V1Task {
   return {
     id: task.id,
     status: task.status,
     kind: task.kind,
-    summary: text(crewAssignmentText(task.summary), 180),
-    phase: text(task.phase, 80),
-    progress: text(task.progress, 400),
+    summary: task.summary,
+    phase: task.phase,
+    progress: task.progress,
     createdAt: task.createdAt,
     startedAt: task.startedAt,
     updatedAt: task.updatedAt,
@@ -282,19 +276,17 @@ function v1Task(task: CrewStatusTask, text: TaskText): V1Task {
   };
 }
 
-function projectContext(context: Context, text: TaskText): V1CrewContext {
-  const task = (value: CrewStatusTask) => v1Task(value, text);
-
+function projectContext(context: Context): V1CrewContext {
   return {
     project: context.project === "default" ? null : (context.project ?? null),
     activity: contextActivity(context),
     provisioned: context.provisioned,
     observed: context.observed,
-    current: context.current && task(context.current),
+    current: context.current && v1Task(context.current),
     queuedCount: context.queuedCount,
-    queued: context.queued.slice(0, 5).map((item) => task(item)),
-    lastOutcome: context.lastOutcome && task(context.lastOutcome),
-    recent: context.recent.slice(0, 8).map((item) => task(item)),
+    queued: context.queued.map(v1Task),
+    lastOutcome: context.lastOutcome && v1Task(context.lastOutcome),
+    recent: context.recent.map(v1Task),
     recentCount: context.recentCount,
     git: null,
     pullRequest: null,
@@ -538,7 +530,6 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     person: DashboardCrewMember,
     at: number,
     { configured: configuredText }: CrewText,
-    taskText: TaskText,
     metadata?: Metadata,
     sessions?: HistorySession[],
   ): V1CrewMember[] {
@@ -552,9 +543,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       (entry) => entry.member === person.id,
     );
 
-    const contexts = person.contexts.map((context) =>
-      projectContext(context, taskText),
-    );
+    const contexts = person.contexts.map(projectContext);
 
     const activity =
       activityOrder.find((state) =>
@@ -740,15 +729,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     );
 
     const crewMembers = people.flatMap((person) =>
-      crewMember(
-        id,
-        person,
-        at,
-        text,
-        only ? fullText : truncateCodePoints,
-        metadata,
-        view.sessions,
-      ),
+      crewMember(id, person, at, text, metadata, view.sessions),
     );
 
     if (only && crewMembers.length === 0) {
@@ -882,7 +863,6 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         signal,
         new Set(configured.keys()),
         crewDeadline,
-        { taskText: "unredacted" },
       );
 
       signal.throwIfAborted();
@@ -923,14 +903,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         const text = checkoutText(metadata);
 
         const people = (row.members ?? []).flatMap((person) =>
-          crewMember(
-            summary.id,
-            person,
-            fleet.generatedAt,
-            text,
-            truncateCodePoints,
-            metadata,
-          ),
+          crewMember(summary.id, person, fleet.generatedAt, text, metadata),
         );
 
         for (const member of people) {

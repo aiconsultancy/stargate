@@ -1,5 +1,13 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterEach,
+  describe,
+  expect,
+  expectTypeOf,
+  mock,
+  test,
+} from "bun:test";
 import type { AgentBackend } from "../src/backends/backend";
+import type { FleetCrewStatusInput } from "../src/coordination/crew/reporting/fleet-status";
 import type { CrewStatus } from "../src/shared/crew-status";
 import { CronStore } from "../src/automation/cron/store";
 import {
@@ -176,6 +184,42 @@ function member(id: string, busy: boolean) {
 }
 
 describe("dashboard source", () => {
+  test("Fleet sampling only supports the unfiltered unredacted view", async () => {
+    const { ship, store, cronStore } = fixture();
+    const calls: FleetCrewStatusInput[] = [];
+    ship.backend.fleetCrewStatus = async (input) => {
+      calls.push(input);
+
+      const members = input.member
+        ? [member(input.member, true)]
+        : [member("pilot", true), member("other", false)];
+
+      return {
+        status: { members, total: members.length, truncated: false },
+        metadata: { projectDirectory: "/fixture", contexts: [] },
+      };
+    };
+
+    const source = dashboardSource([ship], store, cronStore);
+    expectTypeOf<
+      Parameters<typeof source.fleetWithCrew>["length"]
+    >().toEqualTypeOf<2 | 3>();
+
+    await source.shipWithCrew(ship.bot.id, signal, {
+      member: "pilot",
+      taskText: "full",
+    });
+    const sample = await source.fleetWithCrew(signal, new Set([ship.bot.id]));
+    expect(sample.ships[0]?.members?.map(({ id }) => id)).toEqual([
+      "pilot",
+      "other",
+    ]);
+    expect(calls).toEqual([
+      { member: "pilot", taskText: "full" },
+      { taskText: "unredacted" },
+    ]);
+  });
+
   test.each([true, false])(
     "retiring an unused alias leaves the primary crew read running (healthy: %s)",
     async (healthy) => {

@@ -1128,6 +1128,7 @@
       "layer": "contracts",
       "files": [
         "src/crew-status.ts",
+        "src/shared/crew-task-text.ts",
         "src/mentions.ts",
         "src/reactions.ts",
         "src/request-failure.ts",
@@ -1139,6 +1140,7 @@
       ],
       "public": [
         "src/crew-status.ts",
+        "src/shared/crew-task-text.ts",
         "src/mentions.ts",
         "src/reactions.ts",
         "src/request-failure.ts",
