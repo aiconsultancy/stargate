@@ -9,6 +9,7 @@ import type { ActivityItem } from "../src/backends/backend";
 import { openCodeTurnObserver } from "../src/backends/opencode/activity";
 import { configSchema } from "../src/config";
 import {
+  activityApi,
   activityPageBytes,
   createActivityHub,
   readActivity,
@@ -515,7 +516,7 @@ test("the activity route serves GET and HEAD, 404 and 400", async () => {
         opencodeVersion: async () => null,
         startedAt: 1,
       },
-      activity: (agent, query) => readActivity(hub, config, agent, query),
+      activity: activityApi(hub, () => config),
       signal: shutdown.signal,
     });
 

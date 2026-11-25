@@ -521,22 +521,25 @@ test("HTTP detail deadlines release the handlers but retain capacity for uncoope
   const server = await startFixture({
     source: { ...source, ship: readingShip, crew: readingCrew },
     timing: { requestMs: 160 },
-    activity: (agent) =>
-      agent === "captain"
-        ? {
-            status: 200,
-            body: {
-              agent: {
-                id: "captain",
-                role: "captain",
-                backend: "opencode",
-                collected: true,
+    activity: {
+      subscribe: () => ({ status: 404 }),
+      read: (agent) =>
+        agent === "captain"
+          ? {
+              status: 200,
+              body: {
+                agent: {
+                  id: "captain",
+                  role: "captain",
+                  backend: "opencode",
+                  collected: true,
+                },
+                turns: [],
+                cursor: { generation: "g", seq: 0 },
               },
-              turns: [],
-              cursor: { generation: "g", seq: 0 },
-            },
-          }
-        : { status: 404 },
+            }
+          : { status: 404 },
+    },
   });
 
   const shipPath = "/api/v1/ships/explorer";

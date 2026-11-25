@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 import { officerFleetSockets } from "../../../../config/composition";
-import { type ActivityHub, readActivity } from "./activity";
+import { type ActivityHub, activityApi } from "./activity";
 import { diffEvents } from "./diff";
 import { type OpenCodeVersionLookup, gatewayVersion } from "./gateway";
 import {
@@ -70,8 +70,7 @@ export async function startRuntimeApi({
       ...server,
       officers,
       ...(activity && {
-        activity: (agentId: string, query: URLSearchParams) =>
-          readActivity(activity, projection.config(), agentId, query),
+        activity: activityApi(activity, () => projection.config()),
       }),
       source: createApiV1Source(projection),
       diff: diffEvents,

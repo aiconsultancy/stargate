@@ -21,6 +21,11 @@
   reasoning text, unredacted and untruncated. The gateway feature
   `api.agentActivity` reports it.
 
+- No new flag: `/api/v1/events?agent=<id>` streams an officer's turn changes
+  as `agent-activity` events on the same terms, within the existing eight
+  streams and 256 KiB per viewer; `api.agentActivity` now covers the event
+  too.
+
 ### Changes
 
 - Add the usage guard for rear admiral quota notices in each ship channel

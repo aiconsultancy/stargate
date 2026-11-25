@@ -95,10 +95,13 @@ On the socket:
   `Allow: GET, HEAD`, and a request body is never read;
 - only the four routes above answer, at exactly normalised targets: no dot
   segment, doubled slash, encoded slash or dot, NUL, backslash or fragment.
-  Anything else gets 404. A query is ignored;
+  Anything else gets 404. A query is ignored, except that `/api/v1/events`
+  with an `agent` or `turn` parameter gets 404: officers never receive
+  `agent-activity`;
 - no token is needed and an `Authorization` header is ignored; no browser
   origin is granted CORS;
-- answers are the same JSON and event frames as on the operator listener.
+- answers are the same JSON and event frames as on the operator listener,
+  without officer turn activity.
 
 Officers' reads and event streams have their own eight HTTP read slots and
 eight stream slots, shared by all officers, so officers can never use up the
@@ -353,6 +356,79 @@ Turns appear from the moment the officer's input is submitted. Output from a
 neighbouring input in the same session is shown only once the turn's own
 transcript placement proves it belongs to this turn.
 
+#### Live activity events
+
+`GET /api/v1/events?agent=<id>` adds `agent-activity` events for that
+officer to everything the [event stream](#events) sends. Repeat `agent` for
+up to eight distinct officers. `turn=<id>` with exactly one `agent` limits
+the events to that turn. With either parameter present, the query is checked
+before the stream takes one of the eight viewer places: an unknown, repeated
+or malformed parameter, a ninth agent, or `turn` without exactly one `agent`
+returns 400; an ID that is not a registration, or a turn the gateway no
+longer keeps, returns 404. Officers' [sockets](#officers) answer 404 to any
+`agent` or `turn` and never send `agent-activity`. Without either parameter
+the stream is unchanged and ignores its query, as before. These 400 and 404
+answers come even when all eight places are taken; only a valid
+subscription that finds no free place gets 503.
+
+```text
+event: agent-activity
+data: {"agentId":"captain-a","turnId":"…","generation":"…","seq":42,"at":1730000000000,"change":{"type":"item","item":{"id":"i3","seq":42,…}}}
+
+```
+
+`V1AgentActivityEvent` is `{ agentId, turnId, generation, seq, at, change }`.
+`generation` and `seq` are the values of the snapshot's `cursor`, and `at` is
+when the change happened. `change` is an upsert by ID in the snapshot route's
+shapes:
+
+| `change.type`  | Payload                                                 |
+| -------------- | ------------------------------------------------------- |
+| `turn-started` | `turn`: the turn without `items`                        |
+| `turn-updated` | `turn`: after the live provider stream reattached       |
+| `turn-ended`   | `turn`: with its outcome, `endedAt` and settled `usage` |
+| `item`         | `item`: the item, or its identity and `paged`           |
+
+Changes are coalesced per officer over 150 ms: a burst of changes to one
+item sends its latest value once, with the `seq` of its latest change.
+`seq` therefore rises with every event but can skip values, and a
+`turn`-scoped stream also skips other turns' values. Each turn event's `turn`
+is the turn as it was at that event's own `seq`: a turn that starts and ends
+within one window sends a `turn-started` that shows it running, then a
+`turn-ended`. A turn's `seq`, `updatedAt` and `usage` are as of its latest
+turn event: `item` events do not repeat them, and `turn-ended` carries the
+settled values. An item whose JSON
+exceeds 64 KiB arrives as its identity plus `paged: { pages, bytes }`; read
+its pages through the snapshot route, as above. Nothing is cut. Publishing
+never waits for a viewer. Each `agent-activity` event is queued on its own
+and must fit the stream's 256 KiB queue, even an empty one; a stream that
+backs up is closed, as for every other event, and its connection is freed
+at once.
+
+The snapshot keeps only the last 16 turns per officer, and the global limits
+above can evict a turn sooner, even as it ends. Eviction is never announced:
+a change made before a turn was evicted, such as its `turn-ended`, is still
+sent, but later snapshots no longer list the turn. A client that keeps turns
+from events alone keeps its own cap.
+
+To follow an officer without a gap:
+
+1. Open `/api/v1/events?agent=<id>` and wait for its response (headers or
+   the first frame) before fetching the snapshot. The subscription starts
+   when the stream opens, so a snapshot fetched earlier can miss changes.
+   Keep the stream's `agent-activity` events.
+2. Fetch `/api/v1/agents/<id>/activity`.
+3. Apply each kept or later event whose `seq` is above that agent's snapshot
+   `cursor.seq`, replacing the turn or item with the same ID. Drop the rest:
+   the snapshot already holds them. `seq` and the cursor are per agent: with
+   several `agent` values, events from different officers interleave, and
+   each is compared only with its own agent's cursor and events.
+4. Refetch that agent's snapshot and apply again from step 3 when an event's
+   `generation` differs from its cursor's (the gateway restarted) or its `seq`
+   is not above the same agent's previous event. When the stream closes,
+   start again from step 1. The server never drops an event from an open
+   stream; it closes the stream instead.
+
 ## Events
 
 Use a streaming browser `fetch` with an `Authorization` header. A connection
@@ -368,6 +444,8 @@ deadline, so a fallback or an error can still be sent. Within that, `GET
 (14 seconds by default) and reports any captain that hasn't answered as
 unavailable. The fleet overview, ship detail, and crew detail routes share
 eight HTTP read slots. These routes answer 503 when all eight slots are occupied.
+An event stream request holds a read slot only while it is checked, and
+moves to a stream place once it opens.
 When an overview read fails or times out, the poller can republish the last
 successful overview with `overviewStale: true` and its original `generatedAt`.
 That fallback expires 75 seconds after the successful read and is discarded
@@ -434,9 +512,11 @@ data: {"at":1730000000000}
 
 ```
 
-Up to eight clients can stream at once. Further connections receive 503,
-and streams that fall behind are closed. Reconnect for a new snapshot.
-There is no event replay.
+Up to eight clients can stream at once, with or without
+[`agent-activity`](#live-activity-events) subscriptions. Further connections
+receive 503, and streams that fall behind are closed; a closed stream's
+place is free at once, even if its reader stopped reading. Reconnect for a
+new snapshot. There is no event replay.
 
 ## Host limits
 

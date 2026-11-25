@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { readWithDeadline } from "../../../../lib/read-deadline";
 import type { ApiRoute } from "../route";
-import type { ActivityRead } from "./activity";
+import type { ActivityApi } from "./activity";
 import { apiRequestMs, maxFleetReads, startApiServer } from "../server";
 import type { ApiV1Config } from "./config";
 import {
@@ -53,9 +53,9 @@ type Options = {
   signal: AbortSignal;
   /**
    * Officer turn activity, for the operator listener only: officers' sockets
-   * serve the four fleet routes. Absent, the route answers 404.
+   * serve neither the route nor the event. Absent, both answer 404.
    */
-  activity?: (agentId: string, query: URLSearchParams) => ActivityRead;
+  activity?: ActivityApi;
   fleetReadMs?: number;
   routes?: readonly ApiRoute[];
   /** Compose trusted producer policies against the exact loaded operator token. */
@@ -126,6 +126,26 @@ function routeId(encoded: string) {
 
 type ApiServer = Awaited<ReturnType<typeof startApiServer>>;
 
+/**
+ * An `agent` or `turn` parameter subscribes to officer turn activity and is
+ * validated first: a status to answer, or the subscriber's watch. Without
+ * either, the stream is unchanged and ignores its query as before.
+ */
+function activityWatch(
+  core: Pick<FleetCore, "activity">,
+  query: URLSearchParams,
+) {
+  if (!query.has("agent") && !query.has("turn")) {
+    return;
+  }
+
+  const subscription = core.activity?.subscribe(query);
+
+  return subscription?.status === 200
+    ? subscription.watch
+    : (subscription?.status ?? 404);
+}
+
 type DetailRead = (
   signal: AbortSignal,
 ) => Promise<
@@ -151,7 +171,7 @@ function readDetail(
     const id = routeId(agent[1] ?? "");
 
     const read =
-      id === undefined ? undefined : core.activity?.(id, url.searchParams);
+      id === undefined ? undefined : core.activity?.read(id, url.searchParams);
 
     return read?.status === 200
       ? start(() => Promise.resolve(read.body))
@@ -261,13 +281,19 @@ async function answer(
     const signal = AbortSignal.any([request.signal, core.lifetime]);
 
     if (pathname === "/api/v1/events") {
+      const watch = activityWatch(core, url.searchParams);
+
+      if (typeof watch === "number") {
+        return empty(watch);
+      }
+
       if (method === "HEAD") {
         headers.set("Content-Type", "text/event-stream");
 
         return empty(200);
       }
 
-      const stream = events.open(signal);
+      const stream = events.open(signal, watch);
 
       if (!stream) {
         return empty(503);

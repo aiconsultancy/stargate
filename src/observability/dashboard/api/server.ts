@@ -167,6 +167,20 @@ async function writeResponse(
 
   const reader = response.body.getReader();
   let cancellation: Promise<void> | undefined;
+  // A producer that errors or closes ends a wait for a reader who never reads.
+  let ended: "closed" | "errored" | undefined;
+  let wake: (() => void) | undefined;
+
+  void reader.closed.then(
+    () => {
+      ended ??= "closed";
+      wake?.();
+    },
+    () => {
+      ended ??= "errored";
+      wake?.();
+    },
+  );
 
   const cancel = () => {
     cancellation ??= reader.cancel().catch(() => {});
@@ -179,8 +193,13 @@ async function writeResponse(
       cancel();
     }
 
-    while (!signal.aborted) {
-      const chunk = await reader.read();
+    while (!signal.aborted && ended === undefined) {
+      const chunk = await reader.read().catch(() => null);
+
+      if (!chunk) {
+        ended = "errored";
+        break;
+      }
 
       if (chunk.done) {
         break;
@@ -189,6 +208,7 @@ async function writeResponse(
       if (!output.write(chunk.value)) {
         await new Promise<void>((resolve) => {
           const done = () => {
+            wake = undefined;
             output.off("drain", done);
             signal.removeEventListener("abort", done);
             resolve();
@@ -196,15 +216,18 @@ async function writeResponse(
 
           output.once("drain", done);
           signal.addEventListener("abort", done, { once: true });
+          wake = done;
 
-          if (signal.aborted) {
+          if (signal.aborted || ended !== undefined) {
             done();
           }
         });
       }
     }
 
-    if (!output.destroyed) {
+    if (ended === "errored") {
+      output.destroy();
+    } else if (!output.destroyed) {
       output.end();
     }
   } finally {
@@ -300,6 +323,60 @@ export async function startApiServer(options: Options) {
     output.end();
   });
 
+  /**
+   * A stream request is a read while it is validated, so a refusal answers
+   * its own status. Only a returned stream takes one of the stream places.
+   */
+  async function fleetResponse(
+    request: IncomingMessage,
+    headers: Headers,
+    signal: AbortSignal,
+  ): Promise<{ response: Response; place?: "read" | "stream" }> {
+    if (reads >= maxFleetReads) {
+      return { response: failure(503, "unavailable") };
+    }
+
+    reads++;
+    let response: Response;
+
+    try {
+      response = await options.fleet(
+        new Request(`http://localhost${request.url}`, {
+          method: request.method ?? "GET",
+          headers,
+          signal,
+        }),
+        "unix" in options.listen ? undefined : request.socket.remoteAddress,
+        request.url ?? "",
+      );
+    } catch (error) {
+      reads--;
+      throw error;
+    }
+
+    const stream =
+      request.method === "GET" &&
+      (request.url ?? "").split("?")[0] === "/api/v1/events" &&
+      response.status === 200 &&
+      response.body !== null;
+
+    if (!stream) {
+      return { response, place: "read" };
+    }
+
+    reads--;
+
+    if (streams >= maxFleetStreams) {
+      await response.body?.cancel();
+
+      return { response: failure(503, "unavailable") };
+    }
+
+    streams++;
+
+    return { response, place: "stream" };
+  }
+
   async function handle(request: IncomingMessage, output: ServerResponse) {
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, lifetime.signal]);
@@ -383,6 +460,7 @@ export async function startApiServer(options: Options) {
     signal.addEventListener("abort", abort, { once: true });
     output.once("finish", destroy);
     let admitted = false;
+    let place: "read" | "stream" | undefined;
 
     try {
       let response: Response;
@@ -442,30 +520,13 @@ export async function startApiServer(options: Options) {
           }
         }
       } else if (fleet) {
-        if (streaming ? streams >= maxFleetStreams : reads >= maxFleetReads) {
-          response = failure(503, "unavailable");
-        } else {
-          if (streaming) {
-            streams++;
-          } else {
-            reads++;
-          }
+        const fleetAnswer = await fleetResponse(request, headers, signal);
+        response = fleetAnswer.response;
+        place = fleetAnswer.place;
+        admitted = place !== undefined;
 
-          admitted = true;
-
-          if (streaming) {
-            request.socket.setTimeout(60_000, destroy);
-          }
-
-          response = await options.fleet(
-            new Request(`http://localhost${request.url}`, {
-              method: request.method ?? "GET",
-              headers,
-              signal,
-            }),
-            "unix" in options.listen ? undefined : request.socket.remoteAddress,
-            request.url ?? "",
-          );
+        if (place === "stream") {
+          request.socket.setTimeout(60_000, destroy);
         }
       } else {
         response = failure(404, "not_found");
@@ -498,7 +559,7 @@ export async function startApiServer(options: Options) {
         if (route) {
           notifications--;
           counts.set(route.owner, (counts.get(route.owner) ?? 1) - 1);
-        } else if (streaming) {
+        } else if (place === "stream") {
           streams--;
         } else {
           reads--;
