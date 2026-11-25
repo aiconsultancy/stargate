@@ -1718,7 +1718,6 @@
         "scripts/irc-question-smoke.ts",
         "src/automation/cron/index.ts",
         "src/backends/opencode/opencode-history.ts",
-        "src/backends/opencode/opencode.ts",
         "src/gateway/gateway.ts"
       ],
       "rules": {

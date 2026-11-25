@@ -36,6 +36,7 @@
       "src/backends/opencode/crew-status.ts",
       "src/backends/opencode/notices.ts",
       "src/backends/opencode/questions.ts",
+      "src/backends/opencode/reviews.ts",
       "src/backends/pi-attachments.ts",
       "src/backends/pi-durable.ts",
       "src/backends/pi-history.ts",

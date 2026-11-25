@@ -1768,6 +1768,7 @@
         "src/crew/origin.ts",
         "src/backends/opencode/notices.ts",
         "src/backends/opencode/questions.ts",
+        "src/backends/opencode/reviews.ts",
         "src/backends/claude/config.ts",
         "src/backends/codex/config.ts",
         "src/backends/codex/preflight.ts"
