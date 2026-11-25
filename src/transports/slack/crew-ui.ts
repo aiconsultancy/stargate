@@ -188,7 +188,7 @@ export function quotaStatusView(
   snapshot: QuotaSnapshot,
   now = Date.now(),
 ): CrewView {
-  // At most 10 accounts x 16 windows. Group each account, not one block per row.
+  // Pack quota lines into sections, not one block per account or window.
   const lines = formatQuota(snapshot, now);
   const blocks = [section(lines.slice(0, 2).join("\n"))];
   let text = "";

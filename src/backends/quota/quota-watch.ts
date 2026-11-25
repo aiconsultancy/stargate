@@ -267,27 +267,27 @@ export class QuotaWatch {
     let updated = false;
     const now = this.now();
 
-    // Configured OAuth providers plus every discovered plugin provider,
-    // So adding or removing a provider is automatic.
     const pluginProviders = new Set(
       (snapshot.pluginAccounts ?? []).map((row) => row.provider),
     );
 
+    pluginProviders.delete("claude");
+    pluginProviders.delete("codex");
     const watched = [...this.config.providers, ...pluginProviders];
 
     for (const provider of watched) {
-      const isPlugin =
-        pluginProviders.has(provider) &&
-        !this.config.providers.includes(provider as Provider);
+      const builtIn = provider === "claude" || provider === "codex";
 
       const current =
-        !isPlugin && provider === "codex" && this.config.nativeCodexFile
+        provider === "codex" && this.config.nativeCodexFile
           ? await nativeCodexPolicy(this.config.nativeCodexFile, now)
-          : isPlugin
-            ? currentPluginPolicy(snapshot, provider, now)
-            : currentPolicy(snapshot, provider as Provider, now);
+          : builtIn
+            ? currentPolicy(snapshot, provider, now)
+            : currentPluginPolicy(snapshot, provider, now);
 
-      const previous = before[provider];
+      const previous = Object.hasOwn(before, provider)
+        ? before[provider]
+        : undefined;
 
       if (!current || (previous && current.observedAt <= previous.observedAt)) {
         continue;
@@ -303,11 +303,11 @@ export class QuotaWatch {
         continue;
       }
 
-      const name = isPlugin
-        ? pluginLabel(snapshot, provider)
-        : provider === "claude"
+      const name = builtIn
+        ? provider === "claude"
           ? "Claude"
-          : "Codex";
+          : "Codex"
+        : pluginLabel(snapshot, provider);
 
       notices.push(
         `${name} crew quota: ${heading[current.mode]} ${message[current.mode]}`,

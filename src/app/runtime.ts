@@ -783,11 +783,7 @@ export function serve(
 
           const watcher = new QuotaWatch(
             quota,
-            new QuotaReader(
-              viaProxy.length > 0 ? quota.proxy : undefined,
-              Date.now,
-              viaProxy,
-            ),
+            new QuotaReader(quota.proxy, Date.now, viaProxy),
             async (text, signal) => {
               if (
                 !currentBot.access.deniedChannels.some(
