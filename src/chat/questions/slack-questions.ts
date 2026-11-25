@@ -1,5 +1,6 @@
 import { Option, Schema } from "effect";
 import type { BotConfig } from "../../config";
+import { truncateCodePoints as short } from "../../lib/code-points";
 import type { QuestionOffer } from "./questions";
 import {
   type NativeQuestion,
@@ -153,9 +154,6 @@ const plain = (text: string) => ({
   text,
   emoji: false,
 });
-
-const short = (text: string, limit: number) =>
-  Array.from(text).slice(0, limit).join("");
 
 const selectionBlock = (token: string, revision: number, group: number) =>
   `${token}:${revision}${group ? `:${group}` : ""}`;

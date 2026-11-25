@@ -13,6 +13,7 @@ import {
   cronRuntimeBinding,
 } from "./job-manager";
 import type { QuotaObservation } from "../../backends/quota/quota";
+import { truncateCodePoints } from "../../lib/code-points";
 import { readWithDeadline } from "../../lib/read-deadline";
 import {
   type Identity,
@@ -464,7 +465,7 @@ export class CronScheduler {
     try {
       await this.slack.announce(
         scope.channel,
-        Array.from(text).slice(0, 2800).join(""),
+        truncateCodePoints(text, 2800),
         signal,
       );
       this.store.finishDailyReport(scope, date, "done");

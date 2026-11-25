@@ -1482,7 +1482,7 @@ describe("Fleet API projection", () => {
   });
 
   test("v1 projection: crew detail passes task text through in full; ship detail bounds it without redaction", async () => {
-    const text = `Edit ${privateProject}-pilot-default/notes with Authorization: Bearer fixture-value token=fixture-value ${"x".repeat(450)}`;
+    const text = `Edit\t${privateProject}-pilot-default/notes with Authorization: Bearer fixture-value token=fixture-value ${"🚀".repeat(450)}`;
 
     const bounded = (limit: number) =>
       Array.from(text).slice(0, limit).join("");
@@ -1551,6 +1551,39 @@ describe("Fleet API projection", () => {
       worktree: `${privateProject}-pilot-default`,
       dirty: false,
       source: "gateway",
+    });
+  });
+
+  test("one failed captain Git request falls back to the gateway for ship detail", async () => {
+    const crewGit = mock(async (_input: CrewGitInput, _signal: AbortSignal) => {
+      throw new Error("Captain did not answer");
+    });
+
+    const f = fixture(undefined, undefined, crewGit);
+    f.set("captain", [context("pilot")]);
+
+    const ship = await f.source.ship("captain", signal);
+
+    expect(crewGit.mock.calls).toEqual([[{}, signal]]);
+    expect(f.calls.git).toEqual([
+      `${privateProject}-pilot-default`,
+      privateProject,
+    ]);
+    expect(ship).toMatchObject({ repository: "example/project" });
+    expect(ship?.crewMembers[0]?.contexts[0]?.git).toMatchObject({
+      source: "gateway",
+    });
+
+    crewGit.mockClear();
+    f.calls.git.length = 0;
+
+    const fleet = await f.source.fleet(signal);
+
+    expect(crewGit).toHaveBeenCalledTimes(1);
+    expect(crewGit.mock.calls[0]?.[0]).toEqual({ crew: false });
+    expect(f.calls.git).toContain(privateProject);
+    expect(fleet.ships.find(({ id }) => id === "captain")).toMatchObject({
+      repository: "example/project",
     });
   });
 
