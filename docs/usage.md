@@ -123,8 +123,9 @@ The guard sends once per provider transition and ship, with the reported
 balance and known limiting-window reset in UTC. If the provider remains
 below a threshold across a verified reset, the notice re-arms. If IRC is
 unavailable before sending, the guard retries on the next fresh reading.
-If a send may already have reached IRC it logs that uncertainty and keeps
-the receipt across restarts. A missing or stale reading logs a warning and
+If IRC reports that nothing was sent, the guard retries. If a send may
+already have reached IRC, it logs that uncertainty and keeps the receipt
+across restarts. A missing or stale reading logs a warning and
 holds the last verified policy. Before the first reading there is no cutoff
 for that provider. A missing sender is a configuration error, and a missing
 ship route is logged while enforcement continues.
@@ -154,8 +155,10 @@ set, the cutoff must be lower than the warning.
 ```
 
 The cutoff applies to worker turns admitted through `stargate.crew`
-including its native OpenCode and Pi workers. Officer turns and model use
-outside the crew plugin follow their own controls.
+including its native OpenCode and Pi workers. Configure a model for each
+worker if OpenCode supplies only a server default. During a cutoff the
+guard holds starts whose model cannot be identified. Officer turns and
+model use outside the crew plugin follow their own controls.
 
 ## Crew quota notices
 
@@ -182,7 +185,8 @@ should own the file and post the notices.
 ```
 
 Choose a channel the reporting bot can post to and the affected captains
-watch. This grants outbound delivery to that channel without permitting
+watch. When the fleet usage guard is also enabled, Slack reports the
+observed balance and refers captains to the guard for crew availability. This grants outbound delivery to that channel without permitting
 incoming conversations there. Explicit channel denies still apply.
 The example account selector is optional. With dedicated
 captain and crew logins, list the crew login emails for each applicable

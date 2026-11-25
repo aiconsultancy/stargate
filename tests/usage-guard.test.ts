@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -12,6 +12,7 @@ import {
 import { UsageGuard } from "../src/backends/quota/usage-guard";
 import { usageGuardSchema } from "../src/backends/quota/quota-watch";
 import { configSchema } from "../src/config";
+import { IrcSendExpired } from "../src/transports/irc/client";
 
 const proxy = {
   baseURL: "http://127.0.0.1:8317",
@@ -210,6 +211,7 @@ test("guard sends one named PRIVMSG per captain from the rear admiral's IRC conn
   });
 
   const messages: [string, string][] = [];
+  let expired = false;
 
   if (!config.usageGuard) {
     throw new Error("Missing IRC fixture guard");
@@ -242,11 +244,19 @@ test("guard sends one named PRIVMSG per captain from the rear admiral's IRC conn
         budget: () => 400,
         privmsg: async (channel, text, _tags, allowed) => {
           expect(allowed?.()).toBe(true);
+
+          if (channel === "#vega" && !expired) {
+            expired = true;
+            throw new IrcSendExpired();
+          }
+
           messages.push([channel, text]);
         },
       },
     });
 
+    await guard.tick(signal);
+    expect(messages).toHaveLength(1);
     await guard.tick(signal);
     expect(
       messages.map(([channel, text]) => [
@@ -267,9 +277,13 @@ test("enabled guard requires a rear admiral and correctly ordered thresholds", (
   const guard = { ...settings, stateFile: "/example/quota.json" };
   const parse = Schema.decodeUnknownSync(configSchema);
 
-  expect(() => parse({ dataDirectory, usageGuard: guard })).toThrow(
-    "rear admiral",
-  );
+  expect(() =>
+    parse({
+      dataDirectory,
+      irc: [registration("orion", "captain", ["#orion"])],
+      usageGuard: guard,
+    }),
+  ).toThrow("rear admiral");
   expect(() =>
     parse({
       dataDirectory,
@@ -288,4 +302,25 @@ test("enabled guard requires a rear admiral and correctly ordered thresholds", (
       },
     }),
   ).toThrow("warning must be higher");
+});
+
+test("a previously written Slack watcher policy holds a verified pause until the guard can refresh it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "usage-guard-old-"));
+  const file = join(directory, "quota.json");
+
+  try {
+    await writeFile(
+      file,
+      JSON.stringify({ claude: { mode: "paused", observedAt: 1_794_744_000 } }),
+    );
+    expect(await crewUsageBlock(file, "claude-proxy/claude-fixture")).toBe(
+      "claude",
+    );
+    expect(
+      await crewUsageBlock(file, "openai-proxy/gpt-fixture"),
+    ).toBeUndefined();
+    expect(await crewUsageBlock(file, undefined)).toBe("claude");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

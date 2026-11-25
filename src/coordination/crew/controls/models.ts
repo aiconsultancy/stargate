@@ -209,6 +209,7 @@ export interface ModelAuthority {
   };
   captain(caller: CrewCaller): Promise<void>;
   authorize(caller: CrewCaller): Promise<void>;
+  checkWorkerQuota?(crewID: string, model?: ModelRef): Promise<void>;
   inspectWorkerModel(
     crewID: string,
     caller: CrewCaller,
@@ -437,6 +438,8 @@ export class CrewModels {
         caller,
         async (peer) => {
           if (input.compactFirst) {
+            await this.authority.checkWorkerQuota?.(peer.crewID, peer.model);
+
             try {
               await this.compactAndWait(peer.sessionID, caller.signal);
             } catch {

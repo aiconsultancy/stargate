@@ -11,6 +11,7 @@ import {
 import {
   type QuotaReader,
   type QuotaSnapshot,
+  defaultUsageGuardModels,
   quotaConfigSchema,
 } from "./quota";
 import {
@@ -131,17 +132,11 @@ export const usageGuardSchema = settingsStruct({
   providers: settingsRecord(providerKey, providerGuardSchema).pipe(
     settingsDefault({
       claude: {
-        modelPrefixes: ["claude/", "claude-proxy/", "anthropic/"],
+        modelPrefixes: defaultUsageGuardModels.claude,
         limits: defaultLimits,
       },
       codex: {
-        modelPrefixes: [
-          "codex/",
-          "codex-proxy/",
-          "openai-proxy/",
-          "openai/gpt-",
-          "openai/codex",
-        ],
+        modelPrefixes: defaultUsageGuardModels.codex,
         limits: defaultLimits,
       },
     }),
@@ -419,6 +414,7 @@ export class QuotaWatch {
     ) => Promise<void>,
     private readonly log: Pick<Logger, "warn">,
     private readonly now = Date.now,
+    private readonly observationsOnly = false,
   ) {}
 
   public async tick(signal: AbortSignal) {
@@ -478,9 +474,15 @@ export class QuotaWatch {
           : "Codex"
         : pluginLabel(snapshot, provider);
 
-      notices.push(
-        `${name} crew quota: ${heading[current.mode]} ${message[current.mode]}`,
-      );
+      if (this.observationsOnly && reading.status === "ok") {
+        notices.push(
+          `${name} quota reading: ${reading.value.remainingPercent}% remaining. Follow the usage guard for crew availability.`,
+        );
+      } else {
+        notices.push(
+          `${name} crew quota: ${heading[current.mode]} ${message[current.mode]}`,
+        );
+      }
     }
 
     if (!updated) {

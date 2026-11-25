@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
@@ -14,7 +14,7 @@ type Prepare = (
   target: Target,
   message: string,
   signal: AbortSignal,
-) => Promise<() => Promise<void>>;
+) => Promise<() => Promise<void | "retry">>;
 
 const defaults = {
   warn: "Stand down extra crew of this kind. Run at most one per ship. Checkpoint and push active work at a safe point.",
@@ -141,10 +141,16 @@ export class UsageGuard {
     }
 
     signal.throwIfAborted();
-    await mkdir(dirname(this.config.stateFile), {
-      recursive: true,
-      mode: 0o755,
-    });
+    const directory = dirname(this.config.stateFile);
+    const created = await mkdir(directory, { recursive: true, mode: 0o755 });
+
+    if (created === directory) {
+      await chmod(directory, 0o755);
+    } else if (created) {
+      this.log.warn(
+        "Usage guard created missing parent directories; ensure crew engines can traverse the state path",
+      );
+    }
 
     // Publish all cutoffs before touching IRC. Simultaneous crossings cannot
     // Wait on an offline captain before taking effect.
@@ -205,7 +211,7 @@ export class UsageGuard {
         channel: target.channel,
       };
 
-      let send: () => Promise<void>;
+      let send: () => Promise<void | "retry">;
 
       try {
         send = await this.prepare(target, message, signal);
@@ -225,7 +231,13 @@ export class UsageGuard {
       await this.save(state);
 
       try {
-        await send();
+        if ((await send()) === "retry") {
+          receipt.attempted = receipt.attempted.filter(
+            (item) => item !== account,
+          );
+          await this.save(state);
+          this.warn(key, "Usage guard notice was not sent; will retry", fields);
+        }
       } catch {
         this.log.warn(
           fields,

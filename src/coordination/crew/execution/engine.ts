@@ -1654,7 +1654,7 @@ export class CrewEngine {
 
       if (input.op === "compact") {
         await this.withWorkerControl(input.crew, caller, async (peer) => {
-          await this.checkUsage(input.crew, peer.model);
+          await this.checkWorkerQuota(input.crew, peer.model);
 
           return this.sessions.compact(
             { sessionID: peer.sessionID, delivery: "steer" },
@@ -1924,22 +1924,76 @@ export class CrewEngine {
       member.backend?.model ??
       (model ? `${model.providerID}/${model.id}` : member.model);
 
+    let provider: string | undefined;
+
     try {
-      return await crewUsageBlock(path, selected);
+      provider = await crewUsageBlock(path, selected);
     } catch {
       throw new CrewError(
         "Usage guard policy is unreadable. Ask the operator to check the gateway state file.",
       );
     }
+
+    if (provider && !selected) {
+      throw new CrewError(
+        "Usage guard cannot identify this worker's model while a cutoff is active. Set its model before resuming.",
+      );
+    }
+
+    return provider;
   }
 
-  private async checkUsage(crewID: string, model?: CrewSession["model"]) {
+  public async checkWorkerQuota(crewID: string, model?: CrewSession["model"]) {
     const provider = await this.usageBlock(crewID, model);
 
     if (provider) {
-      throw new CrewError(
-        `Usage guard: ${provider} crew starts and resumptions are paused. Keep the saved work until quota recovers.`,
+      throw this.quotaPaused(provider);
+    }
+  }
+
+  private quotaPaused(provider: string) {
+    return new CrewError(
+      `Usage guard: ${provider} crew starts and resumptions are paused. Keep the saved work until quota recovers.`,
+    );
+  }
+
+  private async guardAdmission<T>(
+    peer: Peer,
+    signal: AbortSignal,
+    admit: (blocked?: string) => T,
+  ): Promise<T | undefined> {
+    if (!this.options.usageGuardFile) {
+      return admit();
+    }
+
+    const active = this.state.activeTask(peer.crewID);
+
+    if (
+      this.state.controlled(peer.crewID) ||
+      (active && (active.status !== "completed" || active.notifying))
+    ) {
+      return;
+    }
+
+    const token = this.state.reserveControl(peer.crewID);
+
+    try {
+      const session = this.member(peer.crewID).backend
+        ? undefined
+        : await this.sessions.get({ sessionID: peer.sessionID }, { signal });
+
+      if (session) {
+        this.validPeer(session, peer);
+      }
+
+      const blocked = await this.usageBlock(peer.crewID, session?.model);
+      signal.throwIfAborted();
+
+      return this.state.admitAfterControl(peer.crewID, token, () =>
+        admit(blocked),
       );
+    } finally {
+      this.state.releaseControl(peer.crewID, token);
     }
   }
 
@@ -2644,7 +2698,7 @@ export class CrewEngine {
         );
       }
 
-      await this.checkUsage(task.crewID, model);
+      await this.checkWorkerQuota(task.crewID, model);
       signal.throwIfAborted();
       this.state.recordResumeAttempt(
         task,
@@ -3220,8 +3274,7 @@ export class CrewEngine {
       };
     }
 
-    const peer = await this.ensure(input.crew, caller.signal, true);
-    await this.checkUsage(input.crew, peer.model);
+    const peer = await this.ensure(input.crew, caller.signal);
 
     const enqueue = () =>
       this.state.enqueue(
@@ -3288,35 +3341,54 @@ export class CrewEngine {
         : busy;
     }
 
-    await this.checkUsage(input.crew, peer.model);
     caller.signal.throwIfAborted();
-    const afterIdle = this.drain();
 
-    if (afterIdle) {
+    const admission = await this.guardAdmission(
+      peer,
+      caller.signal,
+      (blocked) => {
+        const drain = this.drain();
+
+        if (drain) {
+          return {
+            held: true,
+            task: this.state.enqueue(
+              peer,
+              caller.sessionID,
+              input.text,
+              undefined,
+              originInputID,
+              drain.runID,
+            ),
+          };
+        }
+
+        if (blocked) {
+          throw this.quotaPaused(blocked);
+        }
+
+        return {
+          held: false,
+          task: this.state.reserveTask(
+            peer,
+            caller.sessionID,
+            input.text,
+            originInputID,
+          ),
+        };
+      },
+    );
+
+    if (admission?.held && admission.task) {
       return {
         status: "queued",
-        task: this.state.enqueue(
-          peer,
-          caller.sessionID,
-          input.text,
-          undefined,
-          originInputID,
-          afterIdle.runID,
-        ),
+        task: admission.task,
         diagnostic:
           "Maintenance drain active; assignment queued durably. Do not resubmit.",
       };
     }
 
-    await this.checkUsage(input.crew, peer.model);
-    caller.signal.throwIfAborted();
-
-    const task = this.state.reserveTask(
-      peer,
-      caller.sessionID,
-      input.text,
-      originInputID,
-    );
+    const task = admission?.task;
 
     if (!task) {
       return input.queue
@@ -3393,12 +3465,7 @@ export class CrewEngine {
       return task;
     }
 
-    const peer = await this.ensure(task.crewID, caller.signal, true);
-
-    if (await this.usageBlock(task.crewID, peer.model)) {
-      return task;
-    }
-
+    const peer = await this.ensure(task.crewID, caller.signal);
     let active = this.state.activeTask(task.crewID);
 
     if (active) {
@@ -3415,12 +3482,11 @@ export class CrewEngine {
 
     caller.signal.throwIfAborted();
 
-    if ((await this.usageBlock(task.crewID, peer.model)) || this.drain()) {
-      return task;
-    }
-
-    caller.signal.throwIfAborted();
-    const promoted = this.state.promote(task.id, active?.id ?? null);
+    const promoted = await this.guardAdmission(peer, caller.signal, (blocked) =>
+      blocked || this.drain()
+        ? null
+        : this.state.promote(task.id, active?.id ?? null),
+    );
 
     if (promoted) {
       const result = await this.admit(promoted.task, promoted.text, caller);

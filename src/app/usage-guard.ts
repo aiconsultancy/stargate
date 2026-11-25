@@ -13,7 +13,11 @@ import {
   effectiveIrcConfig,
 } from "../config";
 import { abortable } from "../lib/effect";
-import type { IrcClient } from "../transports/irc/client";
+import {
+  type IrcClient,
+  IrcRecipientChanged,
+  IrcSendExpired,
+} from "../transports/irc/client";
 
 export function startUsageGuard(options: {
   config: UsageGuardConfig;
@@ -117,16 +121,29 @@ export function startUsageGuard(options: {
       }
 
       return async () => {
-        await client.privmsg(
-          channel,
-          text,
-          {},
-          () =>
-            allowed() &&
-            !signal.aborted &&
-            recipient() &&
-            client.inChannel(channel),
-        );
+        try {
+          await client.privmsg(
+            channel,
+            text,
+            {},
+            () =>
+              allowed() &&
+              !signal.aborted &&
+              recipient() &&
+              client.inChannel(channel),
+          );
+        } catch (error) {
+          if (
+            error instanceof IrcRecipientChanged ||
+            error instanceof IrcSendExpired
+          ) {
+            return "retry" as const;
+          }
+
+          throw error;
+        }
+
+        return;
       };
     },
     log,
@@ -199,6 +216,8 @@ export function quotaWorkers(
           }
         },
         botLog,
+        Date.now,
+        config.usageGuard?.enabled === true,
       );
 
       add({

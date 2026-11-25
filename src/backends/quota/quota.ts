@@ -791,7 +791,7 @@ export class QuotaReader {
           account.observedAt = this.now();
         } catch {
           // Account failures never return upstream error bodies or SDK objects.
-          signal.throwIfAborted();
+          caller.throwIfAborted();
         }
       }
 
@@ -989,7 +989,7 @@ export function formatQuota(
   return lines;
 }
 
-const receiptSchema = settingsStruct({
+const receiptSchema = Schema.Struct({
   remainingPercent: Schema.Finite,
   observedAt: Schema.Int,
   resetAt: Schema.NullOr(Schema.Int),
@@ -998,11 +998,32 @@ const receiptSchema = settingsStruct({
   notice: Schema.NullOr(
     Schema.Literals(["warn", "pause", "recover", "reopen"]),
   ),
-  attempted: Schema.Array(Schema.String),
+  attempted: Schema.mutableKey(Schema.Array(Schema.String)),
 });
 
 const guardStateSchema = settingsRecord(Schema.String, receiptSchema);
-const decodeGuard = Schema.decodeUnknownSync(guardStateSchema);
+const decodeGuard = Schema.decodeUnknownOption(guardStateSchema);
+
+export const defaultUsageGuardModels = {
+  claude: ["claude/", "claude-proxy/", "anthropic/"],
+  codex: [
+    "codex/",
+    "codex-proxy/",
+    "openai-proxy/",
+    "openai/gpt-",
+    "openai/codex",
+  ],
+};
+
+const decodeLegacyQuotaPolicy = Schema.decodeUnknownSync(
+  settingsRecord(
+    Schema.String,
+    settingsStruct({
+      mode: Schema.Literals(["normal", "limited", "paused"]),
+      observedAt: Schema.Int.check(Schema.isGreaterThan(0)),
+    }),
+  ),
+);
 
 export type GuardState = typeof guardStateSchema.Type;
 
@@ -1017,7 +1038,39 @@ export async function readUsageGuard(path: string): Promise<GuardState> {
     },
   );
 
-  return raw === null ? {} : decodeGuard(JSON.parse(raw));
+  if (raw === null) {
+    return {};
+  }
+
+  const parsed: unknown = JSON.parse(raw);
+  const state = decodeGuard(parsed);
+
+  if (Option.isSome(state)) {
+    return state.value;
+  }
+
+  // A previous watcher may have already published policy at this path.
+  // Preserve it until the first fresh observation supplies actual percentages.
+  const legacy = decodeLegacyQuotaPolicy(parsed);
+  const modes = { normal: "normal", limited: "warn", paused: "pause" } as const;
+
+  return Object.fromEntries(
+    Object.entries(legacy).map(([provider, row]) => [
+      provider,
+      {
+        remainingPercent: 0,
+        observedAt: row.observedAt * 1000,
+        resetAt: null,
+        modelPrefixes:
+          provider === "claude" || provider === "codex"
+            ? defaultUsageGuardModels[provider]
+            : [`${provider}/`],
+        mode: modes[row.mode],
+        notice: row.mode === "normal" ? null : modes[row.mode],
+        attempted: [],
+      },
+    ]),
+  );
 }
 
 export async function crewUsageBlock(path: string, model: string | undefined) {
@@ -1026,7 +1079,7 @@ export async function crewUsageBlock(path: string, model: string | undefined) {
   return Object.entries(state).find(
     ([, receipt]) =>
       receipt.mode === "pause" &&
-      model !== undefined &&
-      receipt.modelPrefixes.some((prefix) => model.startsWith(prefix)),
+      (model === undefined ||
+        receipt.modelPrefixes.some((prefix) => model.startsWith(prefix))),
   )?.[0];
 }
