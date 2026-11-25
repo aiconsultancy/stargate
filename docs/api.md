@@ -198,8 +198,9 @@ credential-shaped text nor replaces checkout paths. Ship detail and the
 overview carries no task text); the crew member route applies no limit of
 its own. The crew plugin currently still stores task text bounded to 180, 80
 and 400 characters and redacted, so the API cannot show more than that yet;
-a follow-up removes that. Activity events quote task text and branch names
-unredacted, with whitespace collapsed.
+a follow-up removes that. Subagent titles and pull request titles are also
+shown as written, cut to 180 characters. Activity events quote task text and
+branch names unredacted, with whitespace collapsed.
 
 `HEAD` returns headers without a body. Unknown ships, members, and routes
 return 404. Missing or invalid tokens receive 401 (officers' sockets need

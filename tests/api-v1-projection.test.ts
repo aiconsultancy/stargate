@@ -179,7 +179,7 @@ function fixture(
     session("second", {
       parentID: "root-default",
       updatedAt: at - 1,
-      title: "Authorization: Bearer fixture-value",
+      title: `Review ${privateProject}-pilot-default with token=fixture-value`,
     }),
     session("third", { parentID: "root-ops", updatedAt: at - 2 }),
     session("fourth", { parentID: "root-default", updatedAt: at - 3 }),
@@ -2006,6 +2006,10 @@ describe("Fleet API projection", () => {
       "third",
     ]);
     expect(f.calls.children.sort()).toEqual(["root-default", "root-ops"]);
+    // Subagent titles are crew output too, shown as written.
+    expect(
+      detail?.member.subagents.find((child) => child.id === "second")?.title,
+    ).toBe(`Review ${privateProject}-pilot-default with token=fixture-value`);
     expect(f.calls.status.at(-1)).toBe("captain/pilot");
     expect(f.calls.git.sort()).toEqual([
       `${privateProject}-pilot-default`,

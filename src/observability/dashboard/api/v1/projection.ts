@@ -260,7 +260,7 @@ const boundedText: TaskText = (text, limit) =>
 
 const fullText: TaskText = (text) => text;
 
-function safeTask(task: CrewStatusTask, text: TaskText): V1Task {
+function v1Task(task: CrewStatusTask, text: TaskText): V1Task {
   return {
     id: task.id,
     status: task.status,
@@ -276,7 +276,7 @@ function safeTask(task: CrewStatusTask, text: TaskText): V1Task {
 }
 
 function projectContext(context: Context, text: TaskText): V1CrewContext {
-  const task = (value: CrewStatusTask) => safeTask(value, text);
+  const task = (value: CrewStatusTask) => v1Task(value, text);
 
   return {
     project: context.project === "default" ? null : (context.project ?? null),
@@ -619,7 +619,6 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     ship: string,
     roots: HistorySession[],
     at: number,
-    text: CrewText,
     signal: AbortSignal,
   ): Promise<V1Subagent[]> {
     const pages = await Promise.all(
@@ -669,7 +668,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       .slice(0, subagentLimit)
       .map((child) => ({
         id: child.id,
-        title: text(child.title ?? "Subagent", 180),
+        title: boundedText(child.title ?? "Subagent", 180),
         updatedAt: child.updatedAt ?? null,
       }));
   }
@@ -758,7 +757,6 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
             id,
             roots.filter((root) => root.member === member.id),
             at,
-            text,
             signal,
           ),
         ]);

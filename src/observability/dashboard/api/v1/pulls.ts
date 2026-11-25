@@ -1,5 +1,4 @@
 import { Option, Schema } from "effect";
-import { redactCredentials } from "../../../../lib/credentials";
 import { readCommand } from "./command";
 import type { V1PullRequest } from "./types";
 
@@ -94,7 +93,7 @@ export function mapPullRequest(
     return {
       number: pr.number,
       url: url.href,
-      title: redactCredentials(pr.title, 180),
+      title: Array.from(pr.title).slice(0, 180).join(""),
       state: pullState(pr.state, pr.isDraft),
       checks: result,
     };

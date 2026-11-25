@@ -59,8 +59,9 @@
 - Fleet API v1 reports crew task text and Git branch and base names as the
   crew wrote them, without credential redaction or `[checkout]` path
   replacement. Ship detail and the `ship` event keep the 180/80/400 character
-  limits; the crew member route adds no limit. The crew plugin still stores
-  task text bounded and redacted.
+  limits; the crew member route adds no limit. Subagent titles and pull
+  request titles are also shown as written, cut to 180 characters. The crew
+  plugin still stores task text bounded and redacted.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`
