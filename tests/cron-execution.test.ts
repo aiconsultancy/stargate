@@ -430,7 +430,7 @@ test("configured Pi arbiter runs tools-off in its own store, not its busy peer",
       opened[0]?.config.type === "pi-durable" && opened[0].config.systemPrompt,
     ).not.toContain("UNRELATED WORKER INSTRUCTIONS");
     const context = opened[0]?.context;
-    expect(context?.crew).toBeUndefined();
+    expect(context).not.toHaveProperty("crew");
     expect(
       context?.dataDirectory.startsWith(join(directory, "cron-evaluations/")),
     ).toBe(true);

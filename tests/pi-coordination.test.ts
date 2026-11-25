@@ -3,16 +3,25 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
+import { defineExtension } from "@earendil-works/pi-durable";
 import { Schema } from "effect";
 import { PiDurableBackend } from "../src/backends/pi/pi-durable";
 import { piDurableBackendSchema } from "../src/config";
-import { piCrewExtension } from "../src/coordination/crew/pi/pi-extension";
+import {
+  type PiCrewBinding,
+  piCrewExtension,
+} from "../src/coordination/crew/pi/pi-extension";
 import { CrewError } from "../src/coordination/crew/execution/state";
 import { zodStringRecord } from "./fixtures/zod-string-record";
 
 const decodeMessages = Schema.decodeUnknownSync(
   Schema.Array(Schema.Struct({ role: Schema.String, content: Schema.Unknown })),
 );
+
+function crewExtensionFor(binding: PiCrewBinding) {
+  return (readHistory: Parameters<typeof piCrewExtension>[1]) =>
+    piCrewExtension(binding, readHistory);
+}
 
 function completion(
   text: string,
@@ -209,9 +218,10 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
         "Shared working agreement: /captain/WAYS_OF_WORKING.md. Read initially; reread when updated.",
     });
 
-    backend = await PiDurableBackend.open(config, {
-      dataDirectory: directory,
-      crew: {
+    backend = await PiDurableBackend.open(
+      config,
+      { dataDirectory: directory },
+      crewExtensionFor({
         authorize(id) {
           expect(id).toBe(saved);
           authorized++;
@@ -221,8 +231,8 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
             "History must use the existing native conversation, not another crew API",
           );
         },
-      },
-    });
+      }),
+    );
     saved = await backend.createSession({
       key: "member",
       title: "Member",
@@ -286,6 +296,45 @@ test("real Pi crew extension reads only native self history and deduplicates DM 
     await backend?.close();
     await server.stop(true);
 
+    if (previous === undefined) {
+      delete process.env[apiKeyEnv];
+    } else {
+      process.env[apiKeyEnv] = previous;
+    }
+
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Pi constructs the injected Crew extension only for coding tools", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-pi-factory-"));
+  const apiKeyEnv = "STARGATE_PI_EXTENSION_TEST_KEY";
+  const previous = process.env[apiKeyEnv];
+  process.env[apiKeyEnv] = "fixture-only";
+  let constructed = 0;
+
+  try {
+    for (const tools of ["none", "coding"] as const) {
+      const backend = await PiDurableBackend.open(
+        Schema.decodeUnknownSync(piDurableBackendSchema)({
+          type: "pi-durable",
+          model: "openai/opencode-go/deepseek-v4.1-flash",
+          directory,
+          tools,
+          provider: { baseURL: "http://127.0.0.1:1/v1", apiKeyEnv },
+        }),
+        { dataDirectory: directory },
+        () => {
+          constructed++;
+
+          return defineExtension({ name: "fixture.crew" });
+        },
+      );
+
+      await backend.close();
+      expect(constructed).toBe(tools === "coding" ? 1 : 0);
+    }
+  } finally {
     if (previous === undefined) {
       delete process.env[apiKeyEnv];
     } else {
@@ -482,6 +531,15 @@ for (const scenario of [
     error: "Saved member conversation required.",
   },
   {
+    title: "denied native history returns no page",
+    name: "pi_history",
+    args: { limit: 20 },
+    input: null,
+    denied: true,
+    result: null,
+    error: "Saved member conversation required.",
+  },
+  {
     title: "journal page over 16 KB remains valid JSON",
     name: "stargate_journal",
     args: { op: "read", after: 0, limit: 20 },
@@ -574,25 +632,23 @@ for (const scenario of [
           tools: "coding",
           provider: { baseURL: new URL("/v1", server.url).href, apiKeyEnv },
         }),
-        {
-          dataDirectory: directory,
-          crew: {
-            authorize() {
-              if ("denied" in scenario && scenario.denied) {
-                throw new CrewError("Saved member conversation required.");
-              }
-            },
-            async run(_name, input) {
-              inputs.push(input);
-
-              if (scenario.result === null) {
-                throw new CrewError(scenario.error ?? "");
-              }
-
-              return scenario.result;
-            },
+        { dataDirectory: directory },
+        crewExtensionFor({
+          authorize() {
+            if ("denied" in scenario && scenario.denied) {
+              throw new CrewError("Saved member conversation required.");
+            }
           },
-        },
+          async run(_name, input) {
+            inputs.push(input);
+
+            if (scenario.result === null) {
+              throw new CrewError(scenario.error ?? "");
+            }
+
+            return scenario.result;
+          },
+        }),
       );
       const signal = new AbortController().signal;
 
@@ -616,6 +672,7 @@ for (const scenario of [
         expect(output).toContain(scenario.error);
         expect(output).not.toContain("nextAfter");
         expect(output).not.toContain('"entries"');
+        expect(output).not.toContain('"items"');
         expect(output).not.toContain('"messages"');
         expect(output).not.toContain("private wrong-branch value");
       } else if (
@@ -690,15 +747,13 @@ test("native Pi history bounds visible text and retains the raw page cursor", as
         tools: "coding",
         provider: { baseURL: new URL("/v1", server.url).href, apiKeyEnv },
       }),
-      {
-        dataDirectory: directory,
-        crew: {
-          authorize() {},
-          async run() {
-            throw new Error("Native history only");
-          },
+      { dataDirectory: directory },
+      crewExtensionFor({
+        authorize() {},
+        async run() {
+          throw new Error("Native history only");
         },
-      },
+      }),
     );
     const signal = new AbortController().signal;
 

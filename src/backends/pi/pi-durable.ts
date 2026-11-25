@@ -21,6 +21,7 @@ import {
   CompactionTask,
   type ConversationId,
   type ConversationView,
+  type Cursor,
   GenerationTask,
   Harness,
   ProviderDoc,
@@ -39,7 +40,6 @@ import type { AgentBackend, BackendContext, TextSink } from "../backend";
 import type { piDurableBackendSchema } from "./config";
 import { redactCredentials, secret } from "../../lib/credentials";
 import { workingAgreementNotice } from "../../coordination/crew/instructions";
-import { piCrewExtension } from "../../coordination/crew/pi/pi-extension";
 import {
   type PiModelSettings,
   piClaudeProxyModel,
@@ -56,6 +56,14 @@ import { piInputContent } from "./pi-attachments";
 import { piSessionHistory } from "./pi-history";
 
 type Config = typeof piDurableBackendSchema.Type;
+
+type PiCrewExtensionFactory = (
+  readHistory: (
+    id: string,
+    input: { limit: number; cursor?: Cursor | undefined },
+    signal: AbortSignal,
+  ) => Promise<unknown>,
+) => ReturnType<typeof defineExtension>;
 
 // Leading zeros are accepted; the decoded safe integer is the native ID.
 const conversationId = Schema.decodeUnknownSync(
@@ -408,6 +416,7 @@ export class PiDurableBackend implements AgentBackend {
     this: void,
     config: Config,
     context: BackendContext,
+    createCrewExtension?: PiCrewExtensionFactory,
   ) {
     const models = piModels(config);
     const registry = createRegistry();
@@ -454,9 +463,9 @@ export class PiDurableBackend implements AgentBackend {
       registry.install(CodingTools);
     }
 
-    if (config.tools === "coding" && context.crew) {
+    if (config.tools === "coding" && createCrewExtension) {
       registry.install(
-        piCrewExtension(context.crew, async (id, input, signal) => {
+        createCrewExtension(async (id, input, signal) => {
           const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
 
           const conversation = await openedHarness?.conversation(

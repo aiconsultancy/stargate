@@ -323,17 +323,6 @@ export interface AgentBackend {
   close(): Promise<void>;
 }
 
-type CrewBinding = {
-  authorize(conversationID: string): void;
-  run(
-    name: string,
-    input: unknown,
-    conversationID: string,
-    id: string,
-    signal: AbortSignal,
-  ): Promise<unknown>;
-};
-
 /** A provider failure exactly as the agent saw it. */
 export type ActivityError = {
   type: string;
@@ -416,7 +405,6 @@ export type TurnActivityRecorder = {
 
 export type BackendContext = {
   dataDirectory: string;
-  crew?: CrewBinding;
   workingAgreement?: { path: string; owns(conversationID: string): boolean };
   /** Present when the Fleet API serves officer activity. */
   activity?: TurnActivityRecorder;
