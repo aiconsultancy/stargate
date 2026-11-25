@@ -626,23 +626,31 @@ test("officers: turn activity is served to the operator's token only, never on a
   await reservation.stop(true);
 
   const reads: string[] = [];
+  const subscriptions: string[] = [];
 
-  const { server, dataDirectory } = await start(officers, listen, (agent) => {
-    reads.push(agent);
+  const { server, dataDirectory } = await start(officers, listen, {
+    read(agent) {
+      reads.push(agent);
 
-    return {
-      status: 200,
-      body: {
-        agent: {
-          id: agent,
-          role: "captain",
-          backend: "opencode",
-          collected: true,
+      return {
+        status: 200,
+        body: {
+          agent: {
+            id: agent,
+            role: "captain",
+            backend: "opencode",
+            collected: true,
+          },
+          turns: [],
+          cursor: { generation: "g", seq: 0 },
         },
-        turns: [],
-        cursor: { generation: "g", seq: 0 },
-      },
-    };
+      };
+    },
+    subscribe(query) {
+      subscriptions.push(query.toString());
+
+      return { status: 400 };
+    },
   });
 
   const path = "/api/v1/agents/captain-a/activity";
@@ -662,4 +670,28 @@ test("officers: turn activity is served to the operator's token only, never on a
   }
 
   expect(reads).toEqual(["captain-a"]);
+
+  // The agent-activity event is the operator's too: an officer's socket
+  // Refuses the subscription without consulting the hub.
+  for (const query of ["agent=captain-a", "agent=captain-a&turn=t", "turn=t"]) {
+    expect(
+      (
+        await overSocket(
+          officers[0]?.socketPath ?? "",
+          "GET",
+          `/api/v1/events?${query}`,
+        )
+      ).status,
+    ).toBe(404);
+  }
+
+  expect(subscriptions).toEqual([]);
+
+  const operatorStream = await fetch(
+    new URL("/api/v1/events?agent=captain-a", server.url),
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  expect(operatorStream.status).toBe(400);
+  expect(subscriptions).toEqual(["agent=captain-a"]);
 });

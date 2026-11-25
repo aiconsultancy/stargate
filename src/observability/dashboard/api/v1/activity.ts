@@ -11,12 +11,21 @@ import type {
   V1ActivityItemPage,
   V1ActivityPagedItem,
   V1ActivityTurn,
+  V1ActivityTurnSummary,
   V1ActivityUsage,
   V1AgentActivity,
+  V1AgentActivityChange,
+  V1AgentActivityEvent,
 } from "./types";
 
 /** Items whose JSON is larger are served in pages of at most this size. */
 export const activityPageBytes = 64 * 1024;
+
+/**
+ * Streamed changes are coalesced per agent over this window, keeping each
+ * item's latest value: at most about seven frames a second per agent.
+ */
+export const activityFlushMs = 150;
 
 const defaults = {
   turnsPerAgent: 16,
@@ -50,7 +59,29 @@ type StoredTurn = {
   bytes: number;
 };
 
-type Agent = { seq: number; turns: StoredTurn[] };
+/** One coalesced change, encoded once for every viewer of its agent. */
+export type ActivityFrame = { turnId: string; seq: number; bytes: Uint8Array };
+
+type ActivityWatcher = (frames: readonly ActivityFrame[]) => void;
+
+/** A change waiting for the flush; its value is read when the flush runs. */
+type Pending = {
+  seq: number;
+  at: number;
+  turn: StoredTurn;
+  change: "started" | "turn" | StoredItem;
+};
+
+/** Only while someone watches the agent; otherwise changes cost nothing. */
+type Feed = {
+  watchers: Set<ActivityWatcher>;
+  pending: Map<string, Pending>;
+  timer: ReturnType<typeof setTimeout> | undefined;
+};
+
+type Agent = { seq: number; turns: StoredTurn[]; feed?: Feed | undefined };
+
+const encoder = new TextEncoder();
 
 function itemJson(item: StoredItem): V1ActivityItem {
   return {
@@ -123,7 +154,29 @@ function pages(json: string, limit = activityPageBytes) {
   return result;
 }
 
-function turnJson(turn: StoredTurn): V1ActivityTurn {
+/** The item, or its identity and page count when its JSON is over 64 KiB. */
+function itemView(stored: StoredItem): V1ActivityItem | V1ActivityPagedItem {
+  const item = itemJson(stored);
+  const json = JSON.stringify(item);
+  const bytes = Buffer.byteLength(json);
+
+  if (bytes <= activityPageBytes) {
+    return item;
+  }
+
+  return {
+    id: item.id,
+    seq: item.seq,
+    startedAt: item.startedAt,
+    updatedAt: item.updatedAt,
+    kind: item.kind,
+    status: item.status,
+    ...(item.kind === "tool" && { callId: item.callId, name: item.name }),
+    paged: { pages: pages(json).length, bytes },
+  };
+}
+
+function turnSummary(turn: StoredTurn): V1ActivityTurnSummary {
   return {
     id: turn.id,
     seq: turn.seq,
@@ -133,29 +186,103 @@ function turnJson(turn: StoredTurn): V1ActivityTurn {
     endedAt: turn.endedAt,
     reconnects: turn.reconnects,
     usage: usage(turn),
-    items: [...turn.items.values()].map((stored) => {
-      const item = itemJson(stored);
-      const json = JSON.stringify(item);
-      const bytes = Buffer.byteLength(json);
+  };
+}
 
-      if (bytes <= activityPageBytes) {
-        return item;
-      }
+function turnJson(turn: StoredTurn): V1ActivityTurn {
+  return {
+    ...turnSummary(turn),
+    items: [...turn.items.values()].map((stored) => itemView(stored)),
+  };
+}
 
-      const paged: V1ActivityPagedItem = {
-        id: item.id,
-        seq: item.seq,
-        startedAt: item.startedAt,
-        updatedAt: item.updatedAt,
-        kind: item.kind,
-        status: item.status,
-        ...(item.kind === "tool" && { callId: item.callId, name: item.name }),
-        paged: { pages: pages(json).length, bytes },
+function changeOf({ turn, change }: Pending): V1AgentActivityChange {
+  if (change === "started") {
+    return { type: "turn-started", turn: turnSummary(turn) };
+  }
+
+  if (change === "turn") {
+    return {
+      type: turn.endedAt === null ? "turn-updated" : "turn-ended",
+      turn: turnSummary(turn),
+    };
+  }
+
+  return { type: "item", item: itemView(change) };
+}
+
+/** Send an agent's coalesced changes to everyone watching it. */
+function flush(generation: string, agentId: string, owner: Agent) {
+  const feed = owner.feed;
+
+  if (!feed) {
+    return;
+  }
+
+  feed.timer = undefined;
+  const due = [...feed.pending.values()].toSorted((a, b) => a.seq - b.seq);
+  feed.pending.clear();
+  const frames: ActivityFrame[] = [];
+
+  for (const pending of due) {
+    // An evicted turn is gone from the snapshot too.
+    if (!owner.turns.includes(pending.turn)) {
+      continue;
+    }
+
+    try {
+      const data: V1AgentActivityEvent = {
+        agentId,
+        turnId: pending.turn.id,
+        generation,
+        seq: pending.seq,
+        at: pending.at,
+        change: changeOf(pending),
       };
 
-      return paged;
-    }),
-  };
+      frames.push({
+        turnId: pending.turn.id,
+        seq: pending.seq,
+        bytes: encoder.encode(
+          `event: agent-activity\ndata: ${JSON.stringify(data)}\n\n`,
+        ),
+      });
+    } catch {
+      /* An unserializable value never stops the stream. */
+    }
+  }
+
+  for (const watcher of feed.watchers) {
+    try {
+      watcher(frames);
+    } catch {
+      /* A viewer never affects the agent or other viewers. */
+    }
+  }
+}
+
+/** Note a change for the next flush; nothing at all when unwatched. */
+function mark(
+  generation: string,
+  agentId: string,
+  owner: Agent,
+  key: string,
+  pending: Pending,
+) {
+  const feed = owner.feed;
+
+  if (!feed) {
+    return;
+  }
+
+  feed.pending.set(key, pending);
+
+  if (feed.timer === undefined) {
+    feed.timer = setTimeout(() => {
+      flush(generation, agentId, owner);
+    }, activityFlushMs);
+    feed.timer.unref?.();
+  }
 }
 
 /**
@@ -182,6 +309,27 @@ export function createActivityHub(
 
     return result;
   };
+
+  function watch(agentId: string, watcher: ActivityWatcher) {
+    const owner = agent(agentId);
+
+    owner.feed ??= {
+      watchers: new Set(),
+      pending: new Map(),
+      timer: undefined,
+    };
+    const feed = owner.feed;
+    feed.watchers.add(watcher);
+
+    return () => {
+      feed.watchers.delete(watcher);
+
+      if (feed.watchers.size === 0 && owner.feed === feed) {
+        clearTimeout(feed.timer);
+        owner.feed = undefined;
+      }
+    };
+  }
 
   function remove(owner: Agent, turn: StoredTurn) {
     owner.turns.splice(owner.turns.indexOf(turn), 1);
@@ -241,6 +389,14 @@ export function createActivityHub(
     owner.turns.push(turn);
     turnCount += 1;
     evict();
+
+    mark(generation, agentId, owner, `start:${turn.id}`, {
+      seq: turn.seq,
+      at: startedAt,
+      turn,
+      change: "started",
+    });
+
     const keys = new Map<string, StoredItem>();
 
     const touch = (at: number) => {
@@ -248,6 +404,15 @@ export function createActivityHub(
       turn.updatedAt = Math.max(turn.updatedAt, at);
 
       return turn.seq;
+    };
+
+    const changed = (at: number) => {
+      mark(generation, agentId, owner, `turn:${turn.id}`, {
+        seq: touch(at),
+        at,
+        turn,
+        change: "turn",
+      });
     };
 
     return {
@@ -271,13 +436,20 @@ export function createActivityHub(
           change?.(item.value);
           item.seq = touch(at);
           item.updatedAt = Math.max(item.updatedAt, at);
+
+          mark(generation, agentId, owner, `item:${turn.id}:${item.id}`, {
+            seq: item.seq,
+            at,
+            turn,
+            change: item,
+          });
         } catch {
           /* Never affects the turn. */
         }
       },
       reconnected() {
         turn.reconnects += 1;
-        touch(now());
+        changed(now());
       },
       end(outcome: ActivityOutcome) {
         if (turn.endedAt !== null) {
@@ -287,7 +459,7 @@ export function createActivityHub(
         const at = now();
         turn.status = outcome;
         turn.endedAt = at;
-        touch(at);
+        changed(at);
 
         try {
           turn.bytes = Buffer.byteLength(
@@ -306,8 +478,18 @@ export function createActivityHub(
 
   return {
     generation,
+    /**
+     * Coalesced changes for one agent, flushed by a timer: writers never
+     * wait for a watcher. Returns the call that stops watching.
+     */
+    watch,
     recorder(agentId: string): TurnActivityRecorder {
       return { begin: () => begin(agentId) };
+    },
+    hasTurn(agentId: string, turnId: string) {
+      return (
+        agents.get(agentId)?.turns.some((turn) => turn.id === turnId) ?? false
+      );
     },
     /** Every retained turn, or one; undefined when that turn is gone. */
     turns(agentId: string, turnId?: string) {
@@ -459,5 +641,103 @@ export function readActivity(
       },
       ...snapshot,
     },
+  };
+}
+
+/** Distinct agents one event stream may follow. */
+export const maxActivityAgents = 8;
+
+const agentParameter = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+type Watch = (send: (bytes: Uint8Array) => void) => () => void;
+
+export type ActivitySubscribe =
+  | { status: 400 | 404 }
+  | { status: 200; watch: Watch };
+
+/**
+ * `GET /api/v1/events?agent=<id>[&agent=<id>…][&turn=<id>]`. Checked before a
+ * viewer place is taken: anything but distinct, well-formed `agent` values
+ * (at most eight) and one `turn` with exactly one agent is 400; an agent that
+ * is not a registration, or a turn it no longer has, is 404.
+ */
+export function subscribeActivity(
+  hub: ActivityHub,
+  config: ApiV1Config,
+  query: URLSearchParams,
+): ActivitySubscribe {
+  const agents: string[] = [];
+  let turn: string | undefined;
+
+  for (const [key, value] of query) {
+    if (
+      key === "agent" &&
+      agentParameter.test(value) &&
+      !agents.includes(value) &&
+      agents.length < maxActivityAgents
+    ) {
+      agents.push(value);
+    } else if (
+      key === "turn" &&
+      turn === undefined &&
+      parameters.turn.test(value)
+    ) {
+      turn = value;
+    } else {
+      return { status: 400 };
+    }
+  }
+
+  const [first] = agents;
+
+  if (first === undefined || (turn !== undefined && agents.length !== 1)) {
+    return { status: 400 };
+  }
+
+  if (
+    agents.some((id) => !registration(config, id)) ||
+    (turn !== undefined && !hub.hasTurn(first, turn))
+  ) {
+    return { status: 404 };
+  }
+
+  return {
+    status: 200,
+    watch(send) {
+      const stops = agents.map((id) =>
+        hub.watch(id, (frames) => {
+          const chosen =
+            turn === undefined
+              ? frames
+              : frames.filter((frame) => frame.turnId === turn);
+
+          if (chosen.length > 0) {
+            send(Buffer.concat(chosen.map((frame) => frame.bytes)));
+          }
+        }),
+      );
+
+      return () => {
+        for (const stop of stops) {
+          stop();
+        }
+      };
+    },
+  };
+}
+
+/** The Fleet API's view of the hub: snapshot reads and stream subscriptions. */
+export type ActivityApi = {
+  read(agentId: string, query: URLSearchParams): ActivityRead;
+  subscribe(query: URLSearchParams): ActivitySubscribe;
+};
+
+export function activityApi(
+  hub: ActivityHub,
+  config: () => ApiV1Config,
+): ActivityApi {
+  return {
+    read: (agentId, query) => readActivity(hub, config(), agentId, query),
+    subscribe: (query) => subscribeActivity(hub, config(), query),
   };
 }

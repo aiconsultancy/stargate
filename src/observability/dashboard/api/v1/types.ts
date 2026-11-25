@@ -409,7 +409,13 @@ export type V1ActivityUsage = {
   cost: number;
 };
 
-export type V1ActivityTurn = {
+export type V1ActivityTurn = V1ActivityTurnSummary & {
+  /** In first-observed order. */
+  items: (V1ActivityItem | V1ActivityPagedItem)[];
+};
+
+/** A turn without its items, as the `agent-activity` event carries it. */
+export type V1ActivityTurnSummary = {
   /** Stable and unique across gateway restarts. */
   id: string;
   /** The agent change sequence of the turn's latest change. */
@@ -422,8 +428,6 @@ export type V1ActivityTurn = {
   reconnects: number;
   /** Null until a step settles. */
   usage: V1ActivityUsage | null;
-  /** In first-observed order. */
-  items: (V1ActivityItem | V1ActivityPagedItem)[];
 };
 
 /** Changes up to `seq` are included. `generation` changes on restart. */
@@ -458,6 +462,36 @@ export type V1ActivityItemPage = {
 };
 
 /**
+ * One coalesced change. Every change type is an upsert by ID: a turn's
+ * summary (`turn-started`, `turn-updated` for a reconnect, `turn-ended`
+ * with its outcome) or one item, as the snapshot route shows it.
+ */
+export type V1AgentActivityChange =
+  | {
+      type: "turn-started" | "turn-updated" | "turn-ended";
+      turn: V1ActivityTurnSummary;
+    }
+  | { type: "item"; item: V1ActivityItem | V1ActivityPagedItem };
+
+/**
+ * `agent-activity`, sent only to `/api/v1/events?agent=` subscribers.
+ * Wait for the stream's response before fetching the snapshot. `generation`
+ * and `seq` are the snapshot cursor's, per agent: apply events whose `seq` is
+ * above that agent's snapshot cursor. `seq` rises with every event but skips
+ * values for coalesced changes and other turns, so a skipped value is not a
+ * loss; a stream that falls behind is closed instead.
+ */
+export type V1AgentActivityEvent = {
+  agentId: string;
+  turnId: string;
+  generation: string;
+  seq: number;
+  /** When the change happened, in epoch milliseconds. */
+  at: number;
+  change: V1AgentActivityChange;
+};
+
+/**
  * Server-sent events. Each frame is `event: <type>` then `data: <json>`.
  * On connect the server sends `fleet` and one `ship` per ship, then changes.
  */
@@ -467,6 +501,7 @@ export type V1Event =
   | { type: "ship-sampled"; data: { id: string; detailUpdatedAt: number } }
   | { type: "host"; data: V1Host }
   | { type: "activity"; data: V1ActivityEvent }
+  | { type: "agent-activity"; data: V1AgentActivityEvent }
   | { type: "heartbeat"; data: { at: number } };
 
 export type V1ShipRead = (

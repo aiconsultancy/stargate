@@ -579,7 +579,15 @@ export function createEventStreams(
   }
 
   return {
-    open(signal: AbortSignal) {
+    /**
+     * One viewer, within the shared cap. `watch` adds a subscriber's own
+     * frames (officer turn activity) to the same bounded queue, so a viewer
+     * that backs up is closed whichever events filled it.
+     */
+    open(
+      signal: AbortSignal,
+      watch?: (send: (bytes: Uint8Array) => void) => () => void,
+    ) {
       expireOverview();
       active?.syncIdentities();
 
@@ -594,6 +602,7 @@ export function createEventStreams(
       active ??= startPolling();
       const session = active;
       let cleanup = noop;
+      let unwatch = noop;
 
       return new ReadableStream<Uint8Array>(
         {
@@ -608,6 +617,7 @@ export function createEventStreams(
               }
 
               signal.removeEventListener("abort", aborted);
+              unwatch();
 
               if (session.clients.size === 0) {
                 active = undefined;
@@ -646,6 +656,12 @@ export function createEventStreams(
 
             signal.addEventListener("abort", aborted, { once: true });
             session.add(client);
+
+            if (session.clients.has(client) && watch) {
+              unwatch = watch((bytes) => {
+                client.send(bytes);
+              });
+            }
           },
           cancel: () => {
             cleanup();
