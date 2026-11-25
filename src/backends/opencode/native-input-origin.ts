@@ -2,13 +2,12 @@ import {
   type InputBoundaryRecord,
   closesBoundaryContext,
   resolveBoundaryContext,
-} from "../../../backends/opencode/input-boundary";
-import { InputBoundaryReader } from "../../../backends/opencode/input-origin";
-import type { ResultAPI } from "./result";
+} from "./input-boundary";
+import { InputBoundaryReader, type OriginHistory } from "./input-origin";
 
 /** Resolve the tool's retained turn, not whichever input is newest now. */
 export async function readInputOrigin(
-  api: ResultAPI,
+  api: OriginHistory,
   sessionID: string,
   messageID: string,
   signal: AbortSignal,
