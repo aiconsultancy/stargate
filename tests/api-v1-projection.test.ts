@@ -20,7 +20,8 @@ import {
   reportedGit,
 } from "../src/observability/dashboard/api/v1/projection";
 import type { CrewGitInput } from "../src/coordination/crew/reporting/fleet-status";
-import { createCrewGitReader } from "../src/coordination/crew/workspace/workspace";
+import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
+import { liveFleetGit } from "../src/coordination/crew/workspace/git-status";
 import { startApiV1Server } from "../src/observability/dashboard/api/v1/server";
 import { apiToken } from "../src/observability/dashboard/api/v1/token";
 import type {
@@ -1410,7 +1411,11 @@ describe("Fleet API projection", () => {
       await writeFile(join(worktree, "draft.txt"), "draft\n");
 
       // The captain owns the worktree and reads it before the home is closed.
-      const captainState = await createCrewGitReader(() => 7)(worktree, signal);
+      const captainState = await createCrewGitReader(liveFleetGit, () => 7)(
+        worktree,
+        signal,
+      );
+
       await chmod(home, 0o000);
       const gatewayRead = createGitReader(() => 7);
 

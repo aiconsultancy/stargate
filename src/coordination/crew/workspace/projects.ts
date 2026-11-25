@@ -19,7 +19,7 @@ import type {
   CrewGitInput,
   FleetCrewStatus,
 } from "../reporting/fleet-status";
-import type { CrewGitReader } from "./workspace";
+import type { CrewGitReader } from "./git-state";
 import { effectProjectKeySchema } from "../input/project-options";
 import { CrewError } from "../execution/state";
 import { defaultTeam } from "../team";

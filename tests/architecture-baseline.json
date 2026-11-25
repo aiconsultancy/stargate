@@ -13,8 +13,8 @@
     "src/runtime.ts",
     "src/store.ts"
   ],
-  "sourceFiles": 318,
-  "sourceEdges": 1303,
+  "sourceFiles": 319,
+  "sourceEdges": 1305,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -49,6 +49,7 @@
       "src/config/waiting.ts",
       "src/coordination/crew/execution/drain-records.ts",
       "src/coordination/crew/execution/update-notices.ts",
+      "src/coordination/crew/workspace/git-state.ts",
       "src/coordination/crew/workspace/git-status.ts",
       "src/coordination/fleet/review-prompts.ts",
       "src/credentials.ts",

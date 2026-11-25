@@ -1,6 +1,7 @@
 import { afterAll, expect, spyOn, test } from "bun:test";
 import * as childProcess from "node:child_process";
 import {
+  appendFile,
   chmod,
   mkdir,
   mkdtemp,
@@ -18,9 +19,10 @@ import {
   parseAheadBehind,
 } from "../src/coordination/crew/reporting/fleet-status";
 import {
-  createCrewGitReader,
+  createCrewGitReader as makeCrewGitReader,
   remoteWithoutUser,
-} from "../src/coordination/crew/workspace/workspace";
+} from "../src/coordination/crew/workspace/git-state";
+import { liveFleetGit } from "../src/coordination/crew/workspace/git-status";
 import { readCommand } from "../src/observability/dashboard/api/v1/command";
 import { createGitReader } from "../src/observability/dashboard/api/v1/git";
 
@@ -31,6 +33,9 @@ const root = await realpath(
 afterAll(() => rm(root, { recursive: true, force: true }));
 
 const signal = new AbortController().signal;
+
+const createCrewGitReader = (now?: () => number, monotonic?: () => number) =>
+  makeCrewGitReader(liveFleetGit, now, monotonic);
 
 async function git(directory: string, ...args: string[]) {
   const child = Bun.spawn(
@@ -65,6 +70,34 @@ async function repository(format = "sha1") {
   await git(directory, "commit", "--allow-empty", "-m", "first");
 
   return directory;
+}
+
+async function withGitWrapper(body: string, read: () => Promise<void>) {
+  const bin = await mkdtemp(join(root, "git-wrapper-"));
+  const realGit = Bun.which("git");
+  const path = process.env["PATH"];
+  const wrapper = join(bin, "git");
+
+  if (!realGit) {
+    throw new Error("Git is required for the command fixture.");
+  }
+
+  await writeFile(
+    wrapper,
+    `#!/bin/sh\nreal='${realGit.replaceAll("'", "'\\''")}'\n${body}\nexec "$real" "$@"\n`,
+  );
+  await chmod(wrapper, 0o700);
+  process.env["PATH"] = path === undefined ? bin : `${bin}:${path}`;
+
+  try {
+    await read();
+  } finally {
+    if (path === undefined) {
+      delete process.env["PATH"];
+    } else {
+      process.env["PATH"] = path;
+    }
+  }
 }
 
 test("porcelain -z counts rename/copy records once and accepts literal path whitespace", () => {
@@ -159,20 +192,10 @@ test("a detached checkout without upstream has no branch or base", async () => {
 
 test("Fleet status starts before the remote read completes", async () => {
   const directory = await repository();
-  const bin = await mkdtemp(join(root, "git-overlap-"));
-  const realGit = Bun.which("git");
-  const path = process.env["PATH"];
-  const wrapper = join(bin, "git");
-
-  if (!realGit) {
-    throw new Error("Git is required for the overlap fixture.");
-  }
 
   await git(directory, "remote", "add", "origin", "https://example.test/repo");
-  await writeFile(
-    wrapper,
-    `#!/bin/sh
-marker="\${0%/*}/status-started"
+  await withGitWrapper(
+    `marker="\${0%/*}/status-started"
 case " $* " in
   *' status --porcelain=v1 '*) touch "$marker" ;;
   *' remote get-url origin '*)
@@ -184,24 +207,56 @@ case " $* " in
     done
     ;;
 esac
-exec '${realGit.replaceAll("'", "'\\''")}' "$@"
 `,
+    async () => {
+      expect(await createCrewGitReader()(directory, signal)).toMatchObject({
+        changedFiles: 0,
+        remote: "https://example.test/repo",
+      });
+    },
   );
-  await chmod(wrapper, 0o700);
-  process.env["PATH"] = path === undefined ? bin : `${bin}:${path}`;
+});
 
-  try {
-    expect(await createCrewGitReader()(directory, signal)).toMatchObject({
-      changedFiles: 0,
-      remote: "https://example.test/repo",
-    });
-  } finally {
-    if (path === undefined) {
-      delete process.env["PATH"];
-    } else {
-      process.env["PATH"] = path;
-    }
-  }
+test("Fleet status rejects a HEAD change at status and does not cache it", async () => {
+  const directory = await repository();
+  const start = await git(directory, "rev-parse", "HEAD");
+  await git(directory, "commit", "--allow-empty", "-m", "next");
+  const next = await git(directory, "rev-parse", "HEAD");
+  await git(directory, "update-ref", "HEAD", start);
+  const read = createCrewGitReader();
+
+  await withGitWrapper(
+    `case " $* " in
+  *' status --porcelain=v1 '*)
+    (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+     "$real" update-ref HEAD '${next}') || exit 2
+    ;;
+esac`,
+    async () => {
+      expect(await read(directory, signal)).toMatchObject({
+        commit: null,
+        changedFiles: null,
+        error: "Git state unavailable.",
+      });
+      expect(await read(directory, signal)).toMatchObject({
+        commit: next,
+        changedFiles: 0,
+      });
+    },
+  );
+});
+
+test("a Fleet status config output limit fails closed instead of returning a count", async () => {
+  const directory = await repository();
+  await appendFile(
+    join(directory, ".git", "config"),
+    `\n[status]\n\trenames = ${"x".repeat(1024 * 1024)}\n`,
+  );
+
+  expect(await createCrewGitReader()(directory, signal)).toMatchObject({
+    changedFiles: null,
+    error: "Git state unavailable.",
+  });
 });
 
 test.each([

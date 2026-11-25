@@ -1,4 +1,7 @@
 {
-  "baselineSha256": "f21868b705000f30c6aeda6ef84e49731c9ad7b8f66b2c974e70a208a26b1924",
-  "closureAdditions": ["src/coordination/crew/workspace/git-status.ts"]
+  "baselineSha256": "79e9fa06d7dcc665e365129ce05b55813c4c12d09fe7ae6d405890c421bd7b86",
+  "closureAdditions": [
+    "src/coordination/crew/workspace/git-state.ts",
+    "src/coordination/crew/workspace/git-status.ts"
+  ]
 }

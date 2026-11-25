@@ -25,7 +25,8 @@ import {
   crewGitSchema,
   fleetCrewStatusSchema,
 } from "../src/coordination/crew/reporting/fleet-status";
-import { createCrewGitReader } from "../src/coordination/crew/workspace/workspace";
+import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
+import { liveFleetGit } from "../src/coordination/crew/workspace/git-status";
 import { journalInputSchema } from "../src/coordination/crew/reporting/journal";
 import type {
   MesijClient,
@@ -717,7 +718,7 @@ test("status and history identify all project contexts while legacy output stays
 test("crew Git state covers every configured worktree, read as the captain", async () => {
   const f = await fixture(2);
   const projects = await CrewProjects.open(f.options, f.factory);
-  const read = createCrewGitReader(() => 7);
+  const read = createCrewGitReader(liveFleetGit, () => 7);
 
   try {
     // Not provisioned: the worktree exists but no worker session does.

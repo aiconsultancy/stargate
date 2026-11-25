@@ -1190,7 +1190,6 @@
         "src/coordination/crew/execution/engine.ts",
         "src/coordination/crew/pi/pi-worker.ts",
         "src/gateway/gateway.ts",
-        "src/observability/dashboard/api/v1/git.ts",
         "src/observability/dashboard/api/v1/projection.ts",
         "src/transports/irc/client.ts",
         "src/transports/irc/delivery.ts",
