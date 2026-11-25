@@ -305,7 +305,11 @@ test("runtime: enabled, keys are made, the socket signs, enrolment runs in the b
     405,
   );
   expect(existsSync(join(gateway.dataDirectory, "api-token"))).toBe(false);
-  expect(gateway.lines.join("\n")).toContain("Fleet API listening");
+  await until(
+    () => gateway.lines.join("\n").includes("Fleet API listening"),
+    3000,
+    "the Fleet API start-up log",
+  );
   await gateway.stop();
   expect(existsSync(socketPath)).toBe(false);
   expect(existsSync(fleetSocket)).toBe(false);
