@@ -162,12 +162,12 @@ unrelated Promise code or upgrade Effect as part of a schema change.
 
 Use trunk-based development. Never commit directly to `main`. Branch from the
 latest `main` and keep branches short-lived. Keep each PR to one small change.
-When the PR is ready, use `gh pr merge --auto --squash` so it merges when
-**Quality checks** pass on its exact head. Auto-merge and automatic
-remote-branch deletion are enabled. No approving review is required. You may
-ask another captain for a Go or No go, but the verdict is advice and never
-blocks the merge. The gate is a full test pass before a release; see
-`docs/releases.md`.
+Run the [thermo-nuclear code quality review](.agents/skills/thermo-nuclear-code-quality-review/SKILL.md)
+on each PR's final diff and record the findings in the PR discussion.
+The author may run it, but a different reviewer must
+confirm the result in an approving GitHub review on the latest push. Enable
+`gh pr merge --auto --squash` only after that confirmation. Required **Quality
+checks** and the [release gate](docs/releases.md) still apply.
 Do not stack PRs or keep long-lived branches;
 split a large feature into several PRs that each leave `main` working.
 Pre-commit tests union HEAD and index import graphs, including deletions,
@@ -180,8 +180,9 @@ Computation errors still run the full suite in either untrusted-path mode.
 The pre-push hook only enforces the rebase-before-push policy: every branch
 push must contain the freshly fetched `origin/main`, so a PR's head is
 always current before review. If `main` moves, `git fetch origin && git
-rebase origin/main`, then re-run checks; re-review only when the PR's own
-diff changed.
+rebase origin/main`, then re-run checks. If the diff changed, rerun the quality
+review before requesting approval on the new head. If it did not change, the
+reviewer can confirm the prior review still applies and approve the new head.
 Preserve unrelated user changes. Use Conventional Commits, for example
 `feat: add backend endpoint configuration` or
 `fix: preserve reply progress after delivery failure`. Stage only intended
