@@ -965,8 +965,9 @@ export class ClaudeBackend implements AgentBackend {
       } finally {
         clearTimeout(settle);
         answered.resolve();
+        // Only the caller's own abort cancels; a timeout or lost CLI fails.
         activity?.end(
-          signal.aborted || (run.controller.signal.aborted && !turn.result)
+          signal.aborted
             ? "cancelled"
             : turn.result?.ok
               ? "completed"
