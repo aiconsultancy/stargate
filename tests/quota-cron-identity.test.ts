@@ -42,6 +42,11 @@ test("cron identities survive credential reordering, disabling, removal and rest
         return Response.json({ files });
       }
 
+      // Plugin quota discovery GETs; this fixture has none.
+      if (request.method === "GET") {
+        return new Response(null, { status: 404 });
+      }
+
       const body = await request.json();
 
       return Response.json({

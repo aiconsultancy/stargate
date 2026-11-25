@@ -78,6 +78,47 @@ const offsetDateTime = Schema.String.check(
   ),
 );
 
+const remainingPercent = Schema.Finite.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(100),
+);
+
+const pluginProvider = Schema.String.check(
+  settingsPattern(/^[a-z0-9][a-z0-9._-]{0,63}$/),
+);
+
+const pluginLabel = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(128),
+);
+
+const pluginPlan = Schema.String.check(
+  Schema.isMinCodePoints(1),
+  Schema.isMaxCodePoints(64),
+);
+
+const pluginWindowName = Schema.String.check(Schema.isMaxCodePoints(64));
+
+const pluginAccount = settingsStruct({
+  provider: pluginProvider,
+  label: pluginLabel,
+  status: Schema.Literals(["ok", "unavailable"]),
+  observedAt: timestamp,
+  plan: Schema.NullOr(pluginPlan),
+  windows: Schema.mutable(
+    Schema.Array(
+      settingsStruct({
+        window: pluginWindowName,
+        remainingPercent,
+        resetAt: Schema.NullOr(timestamp),
+      }),
+    ),
+  ).check(Schema.isMaxLength(16)),
+});
+
+const maxPluginAccounts = 20;
+const decodePluginAccount = Schema.decodeUnknownSync(pluginAccount);
+
 const scopeSchema = Schema.Literals([
   "subscription",
   "opus",
@@ -91,12 +132,7 @@ const windowSchema = settingsStruct({
   window: Schema.Literals(["5h", "weekly", "other"]),
   scope: scopeSchema,
   usedPercent: Schema.NullOr(percent),
-  remainingPercent: Schema.NullOr(
-    Schema.Finite.check(
-      Schema.isGreaterThanOrEqualTo(0),
-      Schema.isLessThanOrEqualTo(100),
-    ),
-  ),
+  remainingPercent: Schema.NullOr(remainingPercent),
   resetAt: Schema.NullOr(timestamp),
   active: Schema.NullOr(Schema.Boolean),
 });
@@ -115,6 +151,11 @@ const snapshotFields = {
   status: Schema.Literals(["not-configured", "ok", "partial", "unavailable"]),
   observedAt: timestamp,
   cached: Schema.Boolean,
+  pluginAccounts: Schema.optional(
+    Schema.mutable(Schema.Array(pluginAccount)).check(
+      Schema.isMaxLength(maxPluginAccounts),
+    ),
+  ),
 };
 
 export const quotaSnapshotSchema = settingsStruct({
@@ -317,12 +358,7 @@ const credentialText = Schema.String.check(
 const credentialFile = Schema.Struct({
   provider: Schema.optional(Schema.String),
   type: Schema.optional(Schema.String),
-  auth_index: Schema.optional(
-    Schema.Union([
-      credentialText,
-      Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    ]),
-  ),
+  auth_index: Schema.optional(Schema.Unknown),
   disabled: Schema.optional(Schema.Boolean),
   email: Schema.optional(Schema.String),
   account_id: Schema.optional(credentialText),
@@ -337,6 +373,13 @@ const decodeCredentials = Schema.decodeUnknownSync(
 
 const decodeProvider = Schema.decodeUnknownOption(providerSchema);
 
+const decodeAuthIndex = Schema.decodeUnknownOption(
+  Schema.Union([
+    credentialText,
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  ]),
+);
+
 const decodeCall = Schema.decodeUnknownSync(
   Schema.Struct({ status_code: Schema.Int, body: Schema.Unknown }),
 );
@@ -350,13 +393,177 @@ const upstreams = {
 
 const ttl = 60_000;
 
-/** The proxy's management request that reads one upstream usage endpoint. */
 type ApiCallBody = {
   auth_index: string;
   method: "GET";
   url: string;
   header: Record<string, string>;
 };
+
+type QuotaFetchBody = { auth_index: string };
+
+export type QuotaRequest = (
+  path: string,
+  signal: AbortSignal,
+  body?: QuotaFetchBody,
+) => Promise<unknown>;
+
+export type QuotaCredential = Pick<
+  typeof credentialFile.Type,
+  "provider" | "type" | "auth_index" | "disabled"
+>;
+
+const decodePluginDiscovery = Schema.decodeUnknownSync(
+  Schema.Struct({
+    providers: Schema.Array(Schema.Unknown).check(Schema.isMaxLength(20)),
+  }),
+);
+
+const decodePluginProvider = Schema.decodeUnknownOption(
+  Schema.Struct({
+    provider: pluginProvider,
+    display_name: pluginLabel,
+    supported_providers: Schema.optional(
+      Schema.Array(pluginProvider).check(Schema.isMaxLength(100)),
+    ),
+  }),
+);
+
+const pluginBucket = Schema.Struct({
+  window: Schema.optional(pluginWindowName),
+  remainingFraction: Schema.Finite.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(1),
+  ),
+  resetTime: Schema.optional(Schema.NullOr(offsetDateTime)),
+});
+
+const pluginGroup = Schema.Struct({
+  buckets: Schema.Array(pluginBucket).check(Schema.isMaxLength(16)),
+});
+
+const decodePluginFetch = Schema.decodeUnknownSync(
+  Schema.Struct({
+    subscription: Schema.optional(
+      Schema.Struct({ plan: Schema.optional(pluginPlan) }),
+    ),
+    groups: Schema.optional(
+      Schema.Array(pluginGroup).check(Schema.isMaxLength(8)),
+    ),
+  }),
+);
+
+export async function readPluginQuota(
+  request: QuotaRequest,
+  credentials: readonly QuotaCredential[],
+  signal: AbortSignal,
+  now: () => number,
+): Promise<(typeof pluginAccount.Type)[]> {
+  const discovery = decodePluginDiscovery(
+    await request("/v0/management/quota/providers", signal),
+  );
+
+  const supported = new Map<string, string>();
+  const aliases = new Map<string, string>();
+
+  for (const row of discovery.providers) {
+    const entry = decodePluginProvider(row);
+
+    if (Option.isNone(entry)) {
+      continue;
+    }
+
+    const { provider, display_name, supported_providers } = entry.value;
+    supported.set(provider, display_name);
+
+    for (const alias of supported_providers ?? []) {
+      if (!aliases.has(alias)) {
+        aliases.set(alias, display_name);
+      }
+    }
+  }
+
+  const accounts: (typeof pluginAccount.Type)[] = [];
+  const labelled = new Map<string, number>();
+
+  for (const file of credentials) {
+    if (accounts.length === maxPluginAccounts) {
+      break;
+    }
+
+    const provider = file.provider ?? file.type;
+
+    if (
+      file.disabled ||
+      !provider ||
+      provider === "claude" ||
+      provider === "codex"
+    ) {
+      continue;
+    }
+
+    const base = supported.get(provider) ?? aliases.get(provider);
+
+    if (!base) {
+      continue;
+    }
+
+    const seen = (labelled.get(provider) ?? 0) + 1;
+    labelled.set(provider, seen);
+    const suffix = seen === 1 ? "" : ` ${seen}`;
+
+    const label =
+      Array.from(base)
+        .slice(0, 128 - suffix.length)
+        .join("") + suffix;
+
+    const account = decodePluginAccount({
+      provider,
+      label,
+      status: "unavailable",
+      observedAt: now(),
+      plan: null,
+      windows: [],
+    });
+
+    const authIndex = decodeAuthIndex(file.auth_index);
+
+    if (Option.isNone(authIndex)) {
+      accounts.push(account);
+      continue;
+    }
+
+    try {
+      const fetched = decodePluginFetch(
+        await request("/v0/management/quota/fetch", signal, {
+          auth_index: String(authIndex.value),
+        }),
+      );
+
+      const windows = (fetched.groups ?? []).flatMap((group) =>
+        group.buckets.map((bucket) => ({
+          window: bucket.window?.length ? bucket.window : "other",
+          remainingPercent: Math.round(bucket.remainingFraction * 10_000) / 100,
+          resetAt: bucket.resetTime ? Date.parse(bucket.resetTime) : null,
+        })),
+      );
+
+      accounts.push(
+        decodePluginAccount({
+          ...account,
+          status: windows.length > 0 ? "ok" : "unavailable",
+          plan: fetched.subscription?.plan ?? null,
+          windows,
+        }),
+      );
+    } catch {
+      signal.throwIfAborted();
+      accounts.push(account);
+    }
+  }
+
+  return accounts;
+}
 
 /** One opt-in reader per host binding. No URL/auth/reset controls reach callers. */
 export class QuotaReader {
@@ -474,6 +681,8 @@ export class QuotaReader {
           file.provider ?? file.type,
         );
 
+        const authIndex = decodeAuthIndex(file.auth_index);
+
         const account: QuotaObservation["accounts"][number] = {
           provider,
           account: `${provider}-${++counts[provider]}`,
@@ -482,9 +691,9 @@ export class QuotaReader {
           windows: [],
           // The proxy's auth_index hashes stable auth-file identity, not list
           // Position. Hash again with the provider to keep this key private.
-          ...(file.auth_index !== undefined && {
+          ...(Option.isSome(authIndex) && {
             identity: `sha256:${createHash("sha256")
-              .update(JSON.stringify([provider, String(file.auth_index)]))
+              .update(JSON.stringify([provider, String(authIndex.value)]))
               .digest("hex")}`,
           }),
         };
@@ -492,7 +701,7 @@ export class QuotaReader {
         snapshot.accounts.push(account);
 
         try {
-          if (file.auth_index === undefined) {
+          if (Option.isNone(authIndex)) {
             continue;
           }
 
@@ -522,7 +731,7 @@ export class QuotaReader {
               key,
               signal,
               {
-                auth_index: String(file.auth_index),
+                auth_index: String(authIndex.value),
                 method: "GET",
                 url: upstreams[provider],
                 header,
@@ -571,6 +780,18 @@ export class QuotaReader {
             ? "partial"
             : "unavailable";
       snapshot = decodeObservation(snapshot);
+
+      // Keep the built-in snapshot if the optional plugin pass times out.
+      try {
+        snapshot.pluginAccounts = await readPluginQuota(
+          (path, inner, body) => this.request(path, key, inner, body),
+          credentials.files,
+          AbortSignal.any([signal, AbortSignal.timeout(2000)]),
+          this.now,
+        );
+      } catch {
+        caller.throwIfAborted();
+      }
     } catch {
       // No raw request, credential metadata, exception or account text escapes.
       caller.throwIfAborted();
@@ -626,7 +847,7 @@ export class QuotaReader {
     path: string,
     key: string,
     signal: AbortSignal,
-    body?: ApiCallBody,
+    body?: ApiCallBody | QuotaFetchBody,
   ): Promise<unknown> {
     if (!this.config) {
       throw new Error("Quota not configured");
@@ -689,7 +910,10 @@ export function formatQuota(
 
   if (snapshot.status === "not-configured") {
     lines.push("Quota reader not configured.");
-  } else if (snapshot.accounts.length === 0) {
+  } else if (
+    snapshot.accounts.length === 0 &&
+    !snapshot.pluginAccounts?.length
+  ) {
     lines.push(
       "Quota unavailable. Check proxy access and private management-key configuration.",
     );
@@ -704,6 +928,22 @@ export function formatQuota(
       const expired = window.resetAt !== null && window.resetAt <= now;
       lines.push(
         `${window.scope} ${window.window}: ${window.usedPercent ?? "unknown"}% used; ${window.remainingPercent ?? "unknown"}% remaining. Reset: ${window.resetAt === null ? "unknown" : new Date(window.resetAt).toISOString()}.${window.active === false ? " INACTIVE scope; not routing evidence." : ""}${expired ? " Reset passed; current allowance unknown." : ""}`,
+      );
+    }
+  }
+
+  for (const account of snapshot.pluginAccounts ?? []) {
+    lines.push(
+      `${account.label}: ${account.status === "ok" ? (account.plan ?? "observed") : "unavailable; quota unknown"}`,
+    );
+
+    for (const { window, remainingPercent, resetAt } of account.windows) {
+      const reset =
+        resetAt === null ? "unknown" : new Date(resetAt).toISOString();
+
+      const expired = resetAt !== null && resetAt <= now;
+      lines.push(
+        `${window}: ${remainingPercent}% remaining. Reset: ${reset}.${expired ? " Reset passed; current allowance unknown." : ""}`,
       );
     }
   }

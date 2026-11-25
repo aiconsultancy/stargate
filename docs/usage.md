@@ -57,10 +57,11 @@ symlink and at most 4096 bytes. Never put the key value in chat, configuration
 examples or CLI arguments. Without options the tool returns `not-configured`.
 
 Only literal loopback HTTP origins are accepted (`127.0.0.1` or `[::1]`).
-Redirects fail closed. Response reads have an eight-second overall deadline
-and a one-MiB limit per response. The reader supports at most ten account rows
-and sixteen recognized windows per account; larger inventories fail closed
-rather than silently omit accounts.
+Redirects fail closed. Reads have an eight-second overall deadline and a
+one-MiB limit per response. The reader supports at most ten Claude and Codex
+account rows and sixteen windows per account. Larger built-in inventories
+fail closed. The optional plugin pass uses up to two seconds of the remaining
+time and reads up to twenty plugin credentials.
 
 ## Crew quota notices
 
@@ -102,6 +103,12 @@ absolute path of its trusted local quota receipt and include `"codex"` in
 `providers`. Stargate will use only that receipt for Codex and will skip Codex
 proxy calls.
 
+The watcher also reads all discovered plugin providers with active credentials.
+`providers` and `accounts` apply only to Claude and Codex. A plugin provider's
+policy uses the highest balance across its active proxy credentials, including
+any reserved captain logins. Keep reserved logins out of that proxy pool if
+the policy must reflect crew allowance only.
+
 The host should publish the minimum remaining percentage from the native
 Codex account's quota windows as
 `{"remainingPercent":7,"observedAt":1794744000,"resetAt":null}`. Both
@@ -124,7 +131,11 @@ restriction.
 
 The watcher writes the last verified mode atomically as
 `{"claude":{"mode":"limited","observedAt":1794744000}}`. The timestamp is
-epoch seconds. Codex uses the same fields under `codex`. Mode is
+epoch seconds. Codex and plugin providers use the same fields under their
+provider IDs. If discovery no longer reports a plugin provider, its last
+verified policy remains unchanged. Before rolling back to a version that
+accepts only `claude` and `codex`, stop the writer, back up the policy file,
+and remove its plugin keys. Mode is
 `normal`, `limited` or `paused`. A launcher may impose a tighter local
 limit and owns the decision to checkpoint, hold or resume.
 
@@ -140,6 +151,13 @@ The host reads `GET /v8/management/credentials` internally, then uses
 
 - Claude: `https://api.anthropic.com/api/oauth/usage`
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
+
+For plugins, the host discovers quota providers via
+`GET /v0/management/quota/providers` and lets the proxy run the selected plugin
+with its stored credential via `POST /v0/management/quota/fetch`.
+The pinned proxy exposes generic discovery and fetch only under the legacy
+v0 API. If either route goes away, plugin readings become unavailable;
+Claude and Codex still use v8.
 
 The proxy substitutes `$TOKEN$` server-side. Models cannot choose an upstream
 URL, account, method, header, key or reset action. Keys, credential identifiers,
