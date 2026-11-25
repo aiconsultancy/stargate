@@ -505,7 +505,15 @@ test("Claude result text and errors reach activity, without repeating a reply", 
     ),
   ).toBe("second");
 
-  const [reply, errors, normal] = hub.turns("officer")?.turns ?? [];
+  expect(
+    await backend.prompt(
+      await session(backend),
+      "streamed partial reply",
+      signal(),
+    ),
+  ).toBe("hello");
+
+  const [reply, errors, normal, partial] = hub.turns("officer")?.turns ?? [];
   expect(reply).toMatchObject({
     status: "completed",
     items: [{ kind: "text", status: "completed", text: "result-only reply" }],
@@ -530,6 +538,14 @@ test("Claude result text and errors reach activity, without repeating a reply", 
       .filter((item) => item.kind === "text")
       .map((item) => ("text" in item ? item.text : undefined)),
   ).toEqual(["second"]);
+  // A preview that no assistant message completed is not the reply.
+  expect(partial?.items).toContainEqual(
+    expect.objectContaining({
+      kind: "text",
+      status: "completed",
+      text: "hello",
+    }),
+  );
 });
 
 test("a recorder that throws cannot fail a Claude query", async () => {

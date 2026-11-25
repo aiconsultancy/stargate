@@ -372,9 +372,10 @@ child turns; the reported cost can include subagents and other calls. The SDK
 does not split reasoning tokens out of the output total, so the reasoning
 counter is `0`.
 
-The query's result adds to the root turn. If the SDK sent the reply only
-as the result's text, with no main-thread assistant text, that text is a
-`text` item; otherwise nothing is repeated. A failed result is a `failed`
+The query's result adds to the root turn. If the reply came only as the
+result's text, because no main-thread assistant message completed with
+text, that text is a `text` item; otherwise nothing is repeated. A stream
+preview alone does not count as the reply. A failed result is a `failed`
 step with `model: null` and `finish` set to the result's subtype. Its
 `error.type` is that subtype, or `is_error` for a result marked as an error,
 and `error.message` is the result's errors, one per line, or its text.

@@ -91,7 +91,7 @@ class Thread {
   private readonly messages = new Map<string, Message>();
   private streaming: Message | undefined;
   public ended = false;
-  /** Reply text was recorded from this thread's own assistant frames. */
+  /** A completed assistant message carried reply text, as `answer()` needs. */
   public replied = false;
   public background = false;
   public observedOutcome: ActivityOutcome | undefined;
@@ -205,7 +205,8 @@ class Thread {
           item.status = "completed";
         }
 
-        if (kind === "text" && item.text !== "") {
+        // As for the reply, a stream preview alone never counts.
+        if (kind === "text" && mode === "final" && item.text !== "") {
           this.replied = true;
         }
       },

@@ -499,6 +499,24 @@ async function answer(text: string) {
     return result("success", false, "result-only reply");
   }
 
+  if (text === "streamed partial reply") {
+    // The preview stops at "hel"; no assistant message completes it.
+    stream({ type: "message_start", message: { id: "msg_partial" } });
+    stream({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    stream({
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "hel" },
+    });
+    stream({ type: "content_block_stop", index: 0 });
+
+    return result("success", false, "hello");
+  }
+
   if (text === "result errors") {
     return result("error_max_turns", true, undefined, undefined, [
       "first error",
