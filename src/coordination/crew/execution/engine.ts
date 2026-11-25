@@ -70,7 +70,7 @@ import {
   type MailRoute,
   mailInputSchema,
 } from "../messaging/messaging";
-import { readInputOrigin } from "./origin";
+import { readInputOrigin } from "../../../backends/opencode/native-input-origin";
 import { CrewUpdateNotices } from "./update-notices";
 
 export { mailInputSchema } from "../messaging/messaging";

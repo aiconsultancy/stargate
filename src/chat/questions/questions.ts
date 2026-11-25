@@ -9,6 +9,7 @@ import {
   type NativeQuestion,
   type PendingQuestion,
   type QuestionAnswer,
+  type QuestionBackend,
   nativeQuestionSchema,
   questionAnswer,
 } from "./native-question";
@@ -104,54 +105,6 @@ type QuestionStore = {
       timeoutMs?: number,
     ): QuestionOffer | undefined;
   };
-};
-
-/**
- * Narrow backend surface the question engine reads. `AgentBackend`
- * satisfies it structurally; members mirror `backend.ts`. Keeps
- * `questions.ts` free of a backend import edge.
- */
-type QuestionBackend = {
-  readonly sessionID?: string | undefined;
-  pinnedBackgroundQuestions?(signal: AbortSignal): Promise<NativeQuestion[]>;
-  pendingQuestions?(
-    sessionID: string,
-    signal: AbortSignal,
-  ): Promise<PendingQuestion[]>;
-  questionState?(
-    sessionID: string,
-    formID: string,
-    signal: AbortSignal,
-  ): Promise<"pending" | "resolved" | "missing-session" | "unknown">;
-  questionBelongsToInput?(
-    sessionID: string,
-    formID: string,
-    inputID: string,
-    fingerprint: string,
-    signal: AbortSignal,
-  ): Promise<boolean>;
-  backgroundOutcome?(
-    session: string,
-    form: string,
-    fingerprint: string,
-    signal: AbortSignal,
-  ): Promise<"answered" | "cancelled" | undefined>;
-  replyQuestion?(
-    question: NativeQuestion,
-    answer: QuestionAnswer | null,
-    signal: AbortSignal,
-    allowed?: () => boolean,
-  ): Promise<void>;
-  questionInputSettled?(
-    sessionID: string,
-    inputID: string,
-    signal: AbortSignal,
-  ): Promise<boolean>;
-  interruptInput?(
-    sessionId: string,
-    inputId: string,
-    signal: AbortSignal,
-  ): Promise<void>;
 };
 
 /** Gateway-owned durable forms. Neither the model nor the dashboard can answer. */

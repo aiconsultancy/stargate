@@ -2,6 +2,7 @@ import { isIP } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Socket } from "bun";
 import type { Logger } from "pino";
+import { IrcCapabilities, chathistoryCaps } from "./client-capabilities";
 import {
   type Casemapping,
   type IrcMessage,
@@ -11,7 +12,6 @@ import {
   formatMessage,
   lineBytes,
   maxReceivedBytes,
-  parseCapabilities,
   parseMessage,
   sourceNick,
   tagBytes,
@@ -24,8 +24,6 @@ import {
   type StatusTiming,
   classifyStatusMetadataReply,
   formatStatusMetadataSet,
-  parseStatusMetadataLimit,
-  statusMetadataMaxValueBytes,
   statusMetadataSupported,
 } from "./status";
 
@@ -156,24 +154,6 @@ export class IrcUnavailable extends Error {
   }
 }
 
-/** Required for access decisions: no account tag means no admission. */
-const required = ["sasl", "account-tag"];
-
-const optional = [
-  "message-tags",
-  "server-time",
-  "batch",
-  "echo-message",
-  "labeled-response",
-  "account-notify",
-  "extended-join",
-];
-
-const chathistoryCaps = ["draft/chathistory", "chathistory"];
-
-/** Smallest draft/multiline max-bytes that Stargate uses. */
-const minMultilineBytes = 64;
-
 type Pending = {
   resolve(): void;
   reject(error: Error): void;
@@ -248,7 +228,7 @@ export class IrcClient {
   private mapping: Casemapping = "rfc1459";
   private socket: Socket | undefined;
   private generation = 0;
-  private caps = new Set<string>();
+  private readonly caps: IrcCapabilities;
   private currentNick: string;
   private registeredNow = false;
   /** 001 seen; readiness waits for the end of the registration burst. */
@@ -299,7 +279,6 @@ export class IrcClient {
     string,
     { open: IrcMessage; label: string | undefined; parts: IrcMessage[] }
   >();
-  private multilineOffer: { maxBytes: number; maxLines: number } | undefined;
   private readonly queue: Queued[] = [];
   /** Low-priority lane (DM audit lines): sent only when `queue` is empty. */
   private readonly background: Queued[] = [];
@@ -312,7 +291,6 @@ export class IrcClient {
   private lastData = 0;
   private lastPing = 0;
   private readonly status: IrcStatus | undefined;
-  private statusLimit = statusMetadataMaxValueBytes;
   private metadataPending:
     | {
         value: string | undefined;
@@ -344,6 +322,7 @@ export class IrcClient {
             (value, guard) => this.publishStatus(value, guard),
             options.statusTiming,
           );
+    this.caps = new IrcCapabilities(options, this.status !== undefined);
   }
 
   /** Case folding under the server's CASEMAPPING (rfc1459 until known). */
@@ -371,7 +350,7 @@ export class IrcClient {
   /** Draft/multiline limits when negotiated (needs batch). */
   public get multiline() {
     return this.caps.has("draft/multiline") && this.caps.has("batch")
-      ? this.multilineOffer
+      ? this.caps.multilineOffer
       : undefined;
   }
   /** True when the IRC connection uses TLS (FILEHOST must then be HTTPS). */
@@ -1089,8 +1068,7 @@ export class IrcClient {
       this.socket?.end();
     };
 
-    this.offered = new Map();
-    this.requested = 0;
+    this.caps.reset();
     const { host, port, tls, ca, clientCertificate } = this.options;
 
     const opened = Bun.connect({
@@ -1298,7 +1276,7 @@ export class IrcClient {
     this.advertisedFilehost = undefined;
     this.botMode = undefined;
     const buffered = this.output.splice(0);
-    this.caps = new Set();
+    this.caps.disconnect();
     this.joinedChannels.clear();
     // Offline, nick changes are unseen: start again from fresh evidence.
     this.accountNicks.clear();
@@ -2036,137 +2014,22 @@ export class IrcClient {
   }
 
   private capability(message: IrcMessage) {
-    const params = message.params;
-    const sub = params[1];
+    const result = this.caps.capability(message, this.welcomed);
 
-    if (sub === "LS") {
-      const more = params[2] === "*";
-
-      for (const [name, value] of parseCapabilities(params.at(-1) ?? "")) {
-        this.offered.set(name, value);
+    if (result.kind === "send") {
+      for (const line of result.lines) {
+        this.raw(line);
       }
-
-      if (more) {
-        return;
-      }
-
-      const offered = this.offered;
-      this.offered = new Map();
-      const sasl = offered.get("sasl");
-      const mechanism = this.options.clientCertificate ? "EXTERNAL" : "PLAIN";
-
-      if (
-        !required.every((cap) => offered.has(cap)) ||
-        (sasl && !sasl.split(",").includes(mechanism))
-      ) {
-        this.refuse(`IRC server lacks SASL ${mechanism} or account-tag`);
-
-        return;
-      }
-
-      const history =
-        this.options.catchUp === false
-          ? undefined
-          : chathistoryCaps.find((cap) => offered.has(cap));
-
-      const multiline = offered.get("draft/multiline");
-
-      if (multiline !== undefined) {
-        const limits = new Map(
-          multiline.split(",").map((item) => {
-            const [key = "", value = ""] = item.split("=");
-
-            return [key, Number(value)] as const;
-          }),
-        );
-
-        const maxBytes = limits.get("max-bytes") ?? 0;
-        const maxLines = limits.get("max-lines") ?? 100;
-        // Below 64 bytes a batch holds less than a plain line: not used.
-        this.multilineOffer =
-          Number.isInteger(maxBytes) && maxBytes >= minMultilineBytes
-            ? {
-                maxBytes,
-                maxLines:
-                  Number.isInteger(maxLines) && maxLines > 0 ? maxLines : 100,
-              }
-            : undefined;
-      } else {
-        this.multilineOffer = undefined;
-      }
-
-      const presence = this.options.presence;
-      const metadata = offered.get("draft/metadata-2");
-      this.statusLimit = parseStatusMetadataLimit(metadata);
-
-      const wanted = [
-        ...required,
-        ...optional.filter((cap) => offered.has(cap)),
-        ...(this.status && metadata !== undefined && offered.has("batch")
-          ? ["draft/metadata-2"]
-          : []),
-        ...(history ? [history] : []),
-        ...(presence?.alwaysOn !== false && offered.has("draft/persistence")
-          ? ["draft/persistence"]
-          : []),
-        ...(presence?.readMarker !== false && offered.has("draft/read-marker")
-          ? ["draft/read-marker"]
-          : []),
-        ...(this.multilineOffer && this.options.multiline !== false
-          ? ["draft/multiline"]
-          : []),
-      ];
-
-      this.requested = wanted.length;
-
-      for (const cap of wanted) {
-        this.raw(formatMessage("CAP", ["REQ", cap]));
-      }
-
-      return;
-    }
-
-    if (sub === "ACK" || sub === "NAK") {
-      for (const name of (params.at(-1) ?? "").split(" ")) {
-        if (!name) {
-          continue;
-        }
-
-        if (sub === "NAK") {
-          if (required.includes(name)) {
-            this.refuse("IRC server refused a required capability");
-
-            return;
-          }
-        } else if (name.startsWith("-")) {
-          this.caps.delete(name.slice(1));
-        } else {
-          this.caps.add(name);
-        }
-      }
-
-      if (this.welcomed || --this.requested > 0) {
-        return;
-      }
-
-      const mechanism = this.options.clientCertificate ? "EXTERNAL" : "PLAIN";
-      this.raw(`AUTHENTICATE ${mechanism}`);
-
-      return;
-    }
-
-    if (sub === "DEL") {
-      for (const name of (params.at(-1) ?? "").split(" ")) {
-        this.caps.delete(name);
-      }
-
-      if (!statusMetadataSupported((name) => this.hasCap(name))) {
-        this.status?.disconnected();
-      }
+    } else if (result.kind === "refuse") {
+      this.refuse(result.reason);
+    } else if (
+      result.kind === "deleted" &&
+      !statusMetadataSupported((name) => this.hasCap(name))
+    ) {
+      this.status?.disconnected();
     }
   }
-  private offered = new Map<string, string>();
-  private requested = 0;
+
   private reclaimed = 0;
   private refuse: (message: string) => void = () => {};
 
@@ -2217,7 +2080,7 @@ export class IrcClient {
     this.registeredNow = true;
 
     if (statusMetadataSupported((name) => this.hasCap(name))) {
-      this.status?.connected(this.statusLimit);
+      this.status?.connected(this.caps.statusLimit);
     }
 
     this.readyFilehost = this.advertisedFilehost;
