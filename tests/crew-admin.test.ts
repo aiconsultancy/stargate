@@ -29,7 +29,7 @@ import type {
 } from "../src/coordination/crew/execution/reconciliation";
 import { runRecoveryOperator } from "../src/coordination/crew/execution/recovery-rpc";
 import type { CrewTask } from "../src/coordination/crew/execution/state";
-import { gitProcessOptions } from "../src/coordination/crew/workspace/workspace";
+import { gitProcessOptions } from "../src/coordination/crew/workspace/git-runner";
 import { crewStatusSchema } from "../src/shared/crew-status";
 
 const crew = ["bosun", "chief", "roslin"] as const;

@@ -230,9 +230,24 @@ again after a minute. Each ship detail read makes one captain Git request for
 both the project and crew checkouts. If that request fails or reaches its
 six-second timeout, the gateway reads the checkouts itself without asking the
 captain again. A fleet summary requests only the project checkout. The
-plugin uses the crew workspace tool's Git helper, without the gateway's index
-snapshot: repository hooks, fsmonitor and optional locks are off. It caches
+plugin uses the same status setup as the gateway, without its index snapshot:
+repository hooks, fsmonitor, optional locks and lazy fetches are off. For
+status it uses the checkout's objects and live index, but runs in a
+private Git directory without checkout filter configuration or
+`info/attributes`. Both readers use the same status configuration allow-list
+and discard multiline values. A failed configuration read, including an
+output limit, makes the Git state unavailable. Both readers recheck the
+branch and commit after status and do not cache a result if either changed.
+The captain reads the configured `core.excludesFile` as live ignore data,
+like the live repository's other ignore files. The gateway can run as a
+different Linux user, so it copies that file under the snapshot limits below.
+Git versions that support
+`GIT_ATTR_SOURCE` also ignore worktree `.gitattributes`. The captain caches
 each checkout's result for 15 seconds, with a five-second read limit.
+The temporary directory (`TMPDIR`, or the system default) must resolve outside
+the checkout. It and its ancestors must be owned by root or the captain's
+Linux user and must have the sticky bit if group- or world-writable. If those
+safety checks fail, `git.error` is `Git status requires a safe temporary directory.`
 
 Each `git` object may carry these optional fields, added without changing the
 existing ones:

@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
 import { constants, createWriteStream } from "node:fs";
 import {
   type FileHandle,
   copyFile,
-  lstat,
   mkdir,
   mkdtemp,
   open,
@@ -14,24 +12,36 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Semaphore } from "effect";
-import { abortable, runAbortable } from "../../../../lib/effect";
-import { readWithDeadline } from "../../../../lib/read-deadline";
 import {
   countChangedPaths,
   parseAheadBehind,
 } from "../../../../coordination/crew/reporting/fleet-status";
+import {
+  type FleetGitCommand,
+  FleetStatusRead,
+  type StatusStorage,
+  fleetGitEnv,
+  fleetGitOptions,
+  guardFleetHead,
+  outsideCheckout,
+  privateStatusDirectory,
+  removeStatusDirectory,
+  statusDataDirectory,
+  statusDirectoryPrefix,
+  statusParent,
+} from "../../../../coordination/crew/workspace/git-status";
+import { abortable, runAbortable } from "../../../../lib/effect";
+import { readWithDeadline } from "../../../../lib/read-deadline";
 import { readCommand } from "./command";
 import { githubRepository, isGitHubRepositoryName } from "./github-repository";
 import type { V1Git } from "./types";
 
 const ttl = 15_000;
 const timeout = 2000;
-const statusDirectoryName = "stargate-git-status";
-const statusDirectoryPrefix = `${statusDirectoryName}-`;
 const staleDirectoryAge = 24 * 60 * 60_000;
 const mib = 1024 * 1024;
 const indexLimit = 128 * mib;
@@ -46,27 +56,6 @@ class MetadataLimitExceeded extends Error {}
 export { githubRepository, isGitHubRepositoryName };
 
 const safeRef = (ref: string) => (ref.length <= 255 ? ref : null);
-
-const statusSettings =
-  /^(core\.(filemode|ignorecase|symlinks|precomposeunicode|autocrlf|eol|sparsecheckout|sparsecheckoutcone|checkstat|trustctime|ignorestat)|(diff|status)\.renames)$/;
-
-function statusOptions(output: string) {
-  const options: string[] = [];
-
-  for (const entry of output.split("\0")) {
-    if (!entry) {
-      continue;
-    }
-
-    const [key, value = "true", ...rest] = entry.split("\n");
-
-    if (key && statusSettings.test(key) && rest.length === 0) {
-      options.push("-c", `${key}=${value}`);
-    }
-  }
-
-  return options;
-}
 
 const metadataFlags =
   constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
@@ -252,51 +241,6 @@ async function copyStatusFile(
   }
 }
 
-type RunGit = (...args: string[]) => Promise<{ code: number; stdout: string }>;
-
-async function privateStatusDirectory(path: string) {
-  const metadata = await lstat(path).catch(() => {});
-
-  if (
-    metadata?.isDirectory() &&
-    (metadata.mode & 0o777) === 0o700 &&
-    metadata.uid === process.getuid?.()
-  ) {
-    return metadata;
-  }
-
-  return;
-}
-
-async function trustedStatusRoot(path: string, serviceOwned = false) {
-  const canonical = await realpath(path).catch(() => {});
-
-  if (!canonical) {
-    return;
-  }
-
-  const uid = process.getuid?.();
-  // Walk from the root so each directory entry is protected before use.
-  // Sticky directories protect entries owned by root or the service user.
-  let ancestor: string = sep;
-
-  for (const part of canonical.split(sep)) {
-    ancestor = join(ancestor, part);
-    const info = await lstat(ancestor).catch(() => {});
-
-    if (
-      !info?.isDirectory() ||
-      (info.uid !== uid &&
-        (info.uid !== 0 || (serviceOwned && ancestor === canonical))) ||
-      (info.mode & 0o022 && !(info.mode & 0o1000))
-    ) {
-      return;
-    }
-  }
-
-  return canonical;
-}
-
 const temporaryStatusRoots = new Map<
   string,
   { path: Promise<string>; readers: number }
@@ -343,78 +287,45 @@ function retainTemporaryStatusRoot(directory: string) {
   };
 }
 
-function statusDirectories(
+function snapshotStatusDirectories(
   dataDirectory: string | undefined,
   temporaryDirectory: () => string,
 ) {
   let temporaryRoot: ReturnType<typeof retainTemporaryStatusRoot> | undefined;
 
+  async function retainedTemporary() {
+    const retained = temporaryRoot;
+
+    return retained?.path.catch(async (error: unknown) => {
+      if (temporaryRoot === retained) {
+        temporaryRoot = undefined;
+        await retained.release();
+      }
+
+      throw error;
+    });
+  }
+
   return {
-    async snapshot(this: void, checkout: string) {
-      const root = await realpath(checkout);
-
-      // The snapshot would appear as untracked files inside the worktree.
-      const outsideCheckout = (path: string) => {
-        const child = relative(root, path);
-
-        return (
-          child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)
-        );
-      };
-
-      if (dataDirectory) {
-        try {
-          const data = await trustedStatusRoot(dataDirectory, true);
-          const parent = data && join(data, statusDirectoryName);
-
-          if (parent && outsideCheckout(parent)) {
-            await mkdir(parent, { mode: 0o700 }).catch((error: unknown) => {
-              if (fileError(error) !== "EEXIST") {
-                throw error;
-              }
-            });
-
-            if (await privateStatusDirectory(parent)) {
-              return await mkdtemp(join(parent, statusDirectoryPrefix));
-            }
-          }
-        } catch (error) {
-          if (
-            !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
-              String(fileError(error)),
-            )
-          ) {
-            throw error;
-          }
-        }
-      }
-
-      if (!temporaryRoot) {
-        const temporary = await trustedStatusRoot(temporaryDirectory());
-
-        if (!temporary || !outsideCheckout(temporary)) {
-          throw new Error("No private Git status directory outside checkout");
-        }
-
-        temporaryRoot ??= retainTemporaryStatusRoot(temporary);
-      }
-
-      const retained = temporaryRoot;
-
-      const parent = await retained.path.catch(async (error: unknown) => {
-        if (temporaryRoot === retained) {
-          temporaryRoot = undefined;
-          await retained.release();
-        }
-
-        throw error;
+    async parent(this: void, root: string) {
+      const selected = await statusParent(root, {
+        dataDirectory,
+        temporaryDirectory,
+        retainedTemporary,
       });
 
-      if (!outsideCheckout(parent)) {
+      if (selected.kind === "ready") {
+        return selected.path;
+      }
+
+      temporaryRoot ??= retainTemporaryStatusRoot(selected.path);
+      const parent = await retainedTemporary();
+
+      if (!parent || !outsideCheckout(root, parent)) {
         throw new Error("No private Git status directory outside checkout");
       }
 
-      return mkdtemp(join(parent, statusDirectoryPrefix));
+      return parent;
     },
     async stop() {
       await temporaryRoot?.release();
@@ -422,20 +333,10 @@ function statusDirectories(
   };
 }
 
-async function removeStatusDirectory(path: string) {
-  await rm(path, { recursive: true, force: true }).catch(() => {});
-}
-
 async function sweepStatusDirectories(root: string) {
-  const canonical = await trustedStatusRoot(root, true);
+  const directory = await statusDataDirectory(root);
 
-  if (!canonical) {
-    return;
-  }
-
-  const directory = join(canonical, statusDirectoryName);
-
-  if (!(await privateStatusDirectory(directory))) {
+  if (!directory || !(await privateStatusDirectory(directory))) {
     return;
   }
 
@@ -501,223 +402,68 @@ async function readSharedIndexName(
   return name;
 }
 
-async function prepareStatus(
+function snapshotMetadata(
   directory: string,
-  head: string | undefined,
   signal: AbortSignal,
-  run: RunGit,
-  runWithEnv: (env: NodeJS.ProcessEnv, ...args: string[]) => ReturnType<RunGit>,
   command: typeof readCommand,
-  ownDirectory: (path: string) => void,
-  createStatusDirectory: (checkout: string) => Promise<string>,
-) {
-  const [paths, settings, excludes] = await Promise.all([
-    run(
-      "rev-parse",
-      "--path-format=absolute",
-      "--git-path",
-      "objects",
-      "--git-path",
-      "index",
-      "--git-path",
-      "info/exclude",
-      "--git-path",
-      "info/sparse-checkout",
-      "--absolute-git-dir",
-      "--git-common-dir",
-      "--show-object-format",
-    ),
-    run("config", "--null", "--get-regexp", statusSettings.source),
-    runWithEnv(
-      { HOME: homedir() },
-      "config",
-      "--null",
-      "--path",
-      "--get",
-      "core.excludesFile",
-    ),
-  ]);
+): StatusStorage["install"] {
+  return async (gitDir, { checkoutGit, commonGit, objects, index, format }) => {
+    const budget = { remaining: metadataLimit };
 
-  const [
-    objects,
-    index,
-    exclude,
-    sparse,
-    checkoutGit,
-    commonGit,
-    format,
-    ...rest
-  ] = paths.stdout.trimEnd().split("\n");
-
-  const [excludesPath, terminator, ...extraExcludes] =
-    excludes.stdout.split("\0");
-
-  if (
-    paths.code !== 0 ||
-    (settings.code !== 0 && !(settings.code === 1 && !settings.stdout)) ||
-    !objects ||
-    !isAbsolute(objects) ||
-    !index ||
-    !isAbsolute(index) ||
-    !exclude ||
-    !isAbsolute(exclude) ||
-    !sparse ||
-    !isAbsolute(sparse) ||
-    !checkoutGit ||
-    !isAbsolute(checkoutGit) ||
-    !commonGit ||
-    !isAbsolute(commonGit) ||
-    (format !== "sha1" && format !== "sha256") ||
-    rest.length > 0
-  ) {
-    throw new Error("Git metadata unavailable");
-  }
-
-  // Status only sees this repository's config, HEAD, index and object store.
-  // Never copy executable settings, hooks, info/attributes or a commondir.
-  const gitDir = await createStatusDirectory(directory);
-  ownDirectory(gitDir);
-  signal.throwIfAborted();
-
-  const configuredExcludes =
-    excludes.code === 0 &&
-    terminator === "" &&
-    extraExcludes.length === 0 &&
-    excludesPath &&
-    resolve(directory, excludesPath);
-
-  const copiedExcludes = "info/configured-excludes";
-  const budget = { remaining: metadataLimit };
-
-  const roots = await Promise.all(
-    [directory, checkoutGit, commonGit].map((path) => realpath(path)),
-  );
-
-  const snapshotIndex = (
-    source: string,
-    target: string,
-    kind: "primary" | "shared",
-  ) =>
-    copyStatusFile(
-      async () => {
-        const file = await openStatusFile(source, roots);
-
-        if (!file) {
-          throw new Error("Git metadata unavailable");
-        }
-
-        return file;
-      },
-      join(gitDir, target),
-      signal,
-      indexLimit,
-      budget,
-      kind,
+    const roots = await Promise.all(
+      [directory, checkoutGit, commonGit].map((path) => realpath(path)),
     );
 
-  await mkdir(join(gitDir, "objects", "info"), { recursive: true });
-  await mkdir(join(gitDir, "info"));
-  await mkdir(join(gitDir, "refs"));
+    const snapshotIndex = (
+      source: string,
+      target: string,
+      kind: "primary" | "shared",
+    ) =>
+      copyStatusFile(
+        async () => {
+          const file = await openStatusFile(source, roots);
 
-  if (await snapshotIndex(index, "index", "primary")) {
-    const shared = await readSharedIndexName(gitDir, format, signal, command);
+          if (!file) {
+            throw new Error("Git metadata unavailable");
+          }
 
-    if (shared) {
-      await snapshotIndex(join(dirname(index), shared), shared, "shared");
+          return file;
+        },
+        join(gitDir, target),
+        signal,
+        indexLimit,
+        budget,
+        kind,
+      );
+
+    await mkdir(join(gitDir, "objects", "info"), { recursive: true });
+
+    if (await snapshotIndex(index, "index", "primary")) {
+      const shared = await readSharedIndexName(gitDir, format, signal, command);
+
+      if (shared) {
+        await snapshotIndex(join(dirname(index), shared), shared, "shared");
+      }
     }
-  }
 
-  const snapshotPattern = (source: string, target: string) =>
-    copyStatusFile(
-      () => openStatusFile(source, roots),
-      join(gitDir, target),
-      signal,
-      patternsLimit,
-      budget,
-      "pattern",
+    await writeFile(
+      join(gitDir, "objects", "info", "alternates"),
+      `${objects}\n`,
     );
 
-  const files = await Promise.allSettled([
-    writeFile(
-      join(gitDir, "HEAD"),
-      head ? `${head}\n` : "ref: refs/heads/unborn\n",
-    ),
-    writeFile(
-      join(gitDir, "config"),
-      format === "sha256"
-        ? "[core]\nrepositoryformatversion = 1\n[extensions]\nobjectformat = sha256\n"
-        : "[core]\nrepositoryformatversion = 0\n",
-    ),
-    writeFile(join(gitDir, "objects", "info", "alternates"), `${objects}\n`),
-    snapshotPattern(exclude, "info/exclude"),
-    snapshotPattern(sparse, "info/sparse-checkout"),
-    configuredExcludes !== false &&
-    configuredExcludes !== undefined &&
-    configuredExcludes !== ""
-      ? snapshotPattern(configuredExcludes, copiedExcludes)
-      : configuredExcludes,
-  ]);
-
-  for (const file of files) {
-    if (file.status === "rejected") {
-      throw file.reason;
-    }
-  }
-
-  return {
-    env: {
-      GIT_DIR: gitDir,
-      GIT_WORK_TREE: directory,
-      GIT_ATTR_NOSYSTEM: "1",
-      GIT_ATTR_SOURCE: createHash(format).update("tree 0\0").digest("hex"),
-    },
-    args: [
-      ...statusOptions(settings.stdout),
-      "-c",
-      `core.excludesFile=${join(gitDir, copiedExcludes)}`,
-      "-c",
-      "core.attributesFile=/dev/null",
-      "status",
-      "--porcelain=v1",
-      "-z",
-      "--untracked-files=all",
-      // Count changed gitlinks without reading submodule worktree configuration.
-      "--ignore-submodules=dirty",
-    ],
+    return {
+      env: {},
+      pattern: (source, target) =>
+        copyStatusFile(
+          () => openStatusFile(source, roots),
+          join(gitDir, target),
+          signal,
+          patternsLimit,
+          budget,
+          "pattern",
+        ),
+    };
   };
-}
-
-async function readHeadRef(run: RunGit) {
-  const ref = await run("symbolic-ref", "-q", "HEAD");
-
-  // Detached.
-  if (ref.code === 1) {
-    return "HEAD";
-  }
-
-  const name = ref.stdout.trim();
-
-  if (ref.code !== 0 || !name.startsWith("refs/")) {
-    throw new Error("Git HEAD unavailable");
-  }
-
-  return name;
-}
-
-async function readCommit(run: RunGit, ref: string) {
-  const revision = await run("rev-parse", "--verify", "--end-of-options", ref);
-
-  if (revision.code !== 0) {
-    return;
-  }
-
-  const oid = revision.stdout.trim();
-
-  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid)) {
-    throw new Error("Git HEAD unavailable");
-  }
-
-  return oid;
 }
 
 function emptyState(checkedAt: number): V1Git {
@@ -738,40 +484,22 @@ async function inspect(
   now: () => number,
   signal: AbortSignal,
   command: typeof readCommand,
-  ownDirectory: (path: string) => void,
-  createStatusDirectory: (checkout: string) => Promise<string>,
-): Promise<V1Git | null> {
+  checkout: FleetStatusRead,
+  statusParent: StatusStorage["parent"],
+): Promise<V1Git | null | "head-moved"> {
   const state = emptyState(now());
   let deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
 
-  const runWithEnv = async (
-    overrides: NodeJS.ProcessEnv,
-    ...args: string[]
-  ) => {
+  const runCommand: FleetGitCommand = async (args, overrides) => {
     deadline.throwIfAborted();
 
     const result = await command(
-      [
-        "git",
-        "--no-optional-locks",
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.untrackedCache=false",
-        "-c",
-        "core.hooksPath=/dev/null",
-        ...args,
-      ],
+      ["git", "--no-optional-locks", ...fleetGitOptions, ...args],
       {
         cwd: directory,
         env: {
           PATH: process.env["PATH"],
-          GIT_ALLOW_PROTOCOL: "",
-          GIT_CONFIG_GLOBAL: "/dev/null",
-          GIT_CONFIG_NOSYSTEM: "1",
-          GIT_NO_LAZY_FETCH: "1",
-          GIT_OPTIONAL_LOCKS: "0",
-          GIT_TERMINAL_PROMPT: "0",
+          ...fleetGitEnv,
           LC_ALL: "C",
           ...overrides,
         },
@@ -782,14 +510,18 @@ async function inspect(
 
     deadline.throwIfAborted();
 
-    if (!result) {
+    return result;
+  };
+
+  const run = async (...args: string[]) => {
+    const result = await runCommand(args);
+
+    if (result === null) {
       throw new Error("Git unavailable");
     }
 
     return result;
   };
-
-  const run = (...args: string[]) => runWithEnv({}, ...args);
 
   try {
     try {
@@ -814,111 +546,111 @@ async function inspect(
       throw new Error("Checkout root unavailable");
     }
 
-    const branchRef = await readHeadRef(run);
+    const guarded = await guardFleetHead(
+      runCommand,
+      () => deadline,
+      async (before): Promise<V1Git> => {
+        const oid = before.oid;
 
-    const branch = branchRef.startsWith("refs/heads/")
-      ? branchRef.slice("refs/heads/".length)
-      : null;
+        const branch = before.ref?.startsWith("refs/heads/")
+          ? before.ref.slice("refs/heads/".length)
+          : null;
 
-    const [oid, upstream] = await Promise.all([
-      readCommit(run, branchRef),
-      branch
-        ? run(
-            "rev-parse",
-            "--verify",
-            "--abbrev-ref",
-            "--symbolic-full-name",
+        const upstream = branch
+          ? await run(
+              "rev-parse",
+              "--verify",
+              "--abbrev-ref",
+              "--symbolic-full-name",
+              "--end-of-options",
+              `${branch}@{upstream}`,
+            )
+          : undefined;
+
+        const base =
+          upstream?.code === 0
+            ? upstream
+            : await run(
+                "symbolic-ref",
+                "--short",
+                "-q",
+                "refs/remotes/origin/HEAD",
+              );
+
+        const baseRef = base.code === 0 ? base.stdout.trim() : null;
+        deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
+
+        const changed = await checkout.read({
+          directory,
+          head: oid,
+          signal: deadline,
+          run: runCommand,
+          storage: {
+            parent: statusParent,
+            install: snapshotMetadata(directory, deadline, command),
+          },
+          status: (args, env) => {
+            // Snapshot I/O and index inspection have a separate status budget.
+            deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
+
+            return runCommand(args, env);
+          },
+        });
+
+        const changedFiles =
+          changed?.code === 0 ? countChangedPaths(changed.stdout) : null;
+
+        if (changedFiles === null) {
+          throw new Error("Git state unavailable");
+        }
+
+        const branchName = branch && safeRef(branch);
+
+        const [remote, head] = await Promise.all([
+          run("remote", "get-url", "origin"),
+          oid ? run("rev-parse", "--short", "--verify", oid) : null,
+        ]);
+
+        const abbreviation = head?.code === 0 ? head.stdout.trim() : "";
+        let counts: ReturnType<typeof parseAheadBehind> = null;
+
+        if (baseRef && oid) {
+          const result = await run(
+            "rev-list",
+            "--left-right",
+            "--count",
             "--end-of-options",
-            `${branch}@{upstream}`,
-          )
-        : undefined,
-    ]);
-
-    const base =
-      upstream?.code === 0
-        ? upstream
-        : await run(
-            "symbolic-ref",
-            "--short",
-            "-q",
-            "refs/remotes/origin/HEAD",
+            `${baseRef}...${oid}`,
+            "--",
           );
 
-    const baseRef = base.code === 0 ? base.stdout.trim() : null;
-    deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
+          counts = result.code === 0 ? parseAheadBehind(result.stdout) : null;
 
-    const status = await prepareStatus(
-      directory,
-      oid,
-      deadline,
-      run,
-      runWithEnv,
-      command,
-      ownDirectory,
-      createStatusDirectory,
+          if (!counts) {
+            throw new Error("Git comparison unavailable");
+          }
+        }
+
+        return {
+          ...state,
+          branch: branchName,
+          head:
+            oid?.startsWith(abbreviation) &&
+            /^[a-f0-9]{4,64}$/.test(abbreviation)
+              ? abbreviation
+              : null,
+          commit: oid ?? null,
+          base: baseRef ? safeRef(baseRef) : null,
+          ...counts,
+          changedFiles,
+          repository:
+            remote.code === 0 ? githubRepository(remote.stdout.trim()) : null,
+          checkedAt: now(),
+        };
+      },
     );
 
-    deadline.throwIfAborted();
-    // Snapshot I/O and index inspection have a separate budget from status.
-    deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
-    const changed = await runWithEnv(status.env, ...status.args);
-
-    const changedFiles =
-      changed.code === 0 ? countChangedPaths(changed.stdout) : null;
-
-    if (changedFiles === null) {
-      throw new Error("Git state unavailable");
-    }
-
-    const branchName = branch && safeRef(branch);
-
-    const [remote, head] = await Promise.all([
-      run("remote", "get-url", "origin"),
-      oid ? run("rev-parse", "--short", "--verify", oid) : null,
-    ]);
-
-    const abbreviation = head?.code === 0 ? head.stdout.trim() : "";
-    let counts: ReturnType<typeof parseAheadBehind> = null;
-
-    if (baseRef && oid) {
-      const result = await run(
-        "rev-list",
-        "--left-right",
-        "--count",
-        "--end-of-options",
-        `${baseRef}...${oid}`,
-        "--",
-      );
-
-      counts = result.code === 0 ? parseAheadBehind(result.stdout) : null;
-
-      if (!counts) {
-        throw new Error("Git comparison unavailable");
-      }
-    }
-
-    if (
-      branchRef !== (await readHeadRef(run)) ||
-      oid !== (await readCommit(run, "HEAD"))
-    ) {
-      throw new Error("Git HEAD changed during status read");
-    }
-
-    return {
-      ...state,
-      branch: branchName,
-      head:
-        oid?.startsWith(abbreviation) && /^[a-f0-9]{4,64}$/.test(abbreviation)
-          ? abbreviation
-          : null,
-      commit: oid ?? null,
-      base: baseRef ? safeRef(baseRef) : null,
-      ...counts,
-      changedFiles,
-      repository:
-        remote.code === 0 ? githubRepository(remote.stdout.trim()) : null,
-      checkedAt: now(),
-    };
+    return guarded.kind === "moved" ? "head-moved" : guarded.value;
   } catch (error) {
     signal.throwIfAborted();
 
@@ -952,7 +684,12 @@ export function createGitReader(
   readMs: number = 2 * timeout,
 ): GitReader {
   const permits = Semaphore.makeUnsafe(4);
-  const directories = statusDirectories(dataDirectory, temporaryDirectory);
+
+  const directories = snapshotStatusDirectories(
+    dataDirectory,
+    temporaryDirectory,
+  );
+
   const lifetime = new AbortController();
   const reads = new Set<Promise<void>>();
   let stopping: Promise<void> | undefined;
@@ -1033,7 +770,8 @@ export function createGitReader(
                 return;
               }
 
-              let snapshot: string | undefined;
+              // Reply before disposal, but hold the permit until it finishes.
+              await using checkout = new FleetStatusRead();
 
               try {
                 const value = await inspect(
@@ -1041,22 +779,21 @@ export function createGitReader(
                   now,
                   reading,
                   command,
-                  (path) => {
-                    snapshot = path;
-                  },
-                  directories.snapshot,
+                  checkout,
+                  directories.parent,
                 );
 
                 deadline.throwIfAborted();
-                reply.resolve(cacheResult(directory, value));
+                reply.resolve(
+                  value === "head-moved"
+                    ? {
+                        ...emptyState(now()),
+                        error: "Git state unavailable.",
+                      }
+                    : cacheResult(directory, value),
+                );
               } catch (error) {
                 reply.reject(error);
-              } finally {
-                // The caller already has its result. Keep the permit until
-                // Removal finishes so stalled filesystems cannot queue copies.
-                if (snapshot) {
-                  await removeStatusDirectory(snapshot);
-                }
               }
             }),
           ),

@@ -289,18 +289,26 @@ test.each(["branch switch", "branch update", "switch during comparison"])(
         "refs/remotes/origin/main",
       );
 
+      let moved = false;
+
       const read = createGitReader(Date.now, async (args, options) => {
         const result = await readCommand(args, options);
+
+        if (moved) {
+          return result;
+        }
 
         if (
           (change === "branch switch" && args.includes("status")) ||
           (change === "switch during comparison" && args.includes("rev-list"))
         ) {
           git(directory, "switch", "other");
+          moved = true;
         }
 
         if (change === "branch update" && args.includes("status")) {
           git(directory, "update-ref", "refs/heads/main", next);
+          moved = true;
         }
 
         return result;
@@ -312,6 +320,109 @@ test.each(["branch switch", "branch update", "switch during comparison"])(
         changedFiles: null,
         error: "Git state unavailable.",
       });
+      expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+        branch: change === "branch update" ? "main" : "other",
+        commit: change === "branch update" ? next : start,
+        changedFiles: change === "branch update" ? 1 : 0,
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each([
+  ["status", true],
+  ["rev-list", true],
+  ["status", false],
+  ["rev-list", false],
+] as const)(
+  "gateway Git %s failure only bypasses cache on a HEAD move (%s)",
+  async (phase, move) => {
+    const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+
+    try {
+      git(directory, "init", "-b", "main");
+      git(directory, "commit", "--allow-empty", "-m", "First");
+      git(directory, "branch", "other");
+      git(directory, "update-ref", "refs/remotes/origin/main", "HEAD");
+      git(
+        directory,
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+      );
+      let clock = 0;
+      let injected = false;
+
+      const read = createGitReader(
+        Date.now,
+        (args, options) => {
+          if (!injected && args.includes(phase)) {
+            injected = true;
+
+            if (move) {
+              git(directory, "symbolic-ref", "HEAD", "refs/heads/other");
+            }
+
+            return Promise.resolve({ code: 2, stdout: "" });
+          }
+
+          return readCommand(args, options);
+        },
+        undefined,
+        undefined,
+        () => clock,
+      );
+
+      const failed = await read(directory, AbortSignal.timeout(3000));
+      expect(injected).toBe(true);
+      expect(failed).toMatchObject({
+        branch: null,
+        changedFiles: null,
+        error: "Git state unavailable.",
+      });
+
+      if (!move) {
+        expect(await read(directory, AbortSignal.timeout(3000))).toBe(failed);
+        clock += 15_001;
+      }
+
+      expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+        branch: move ? "other" : "main",
+        changedFiles: 0,
+        ahead: 0,
+        behind: 0,
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each([{ code: 2, stdout: "" }, { code: 1, stdout: "unexpected" }, null])(
+  "a failed Git excludes configuration read does not run status (%j)",
+  async (failure) => {
+    const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+    let ranStatus = false;
+
+    const read = createGitReader(Date.now, (args, options) => {
+      if (args.includes("core.excludesFile")) {
+        return Promise.resolve(failure);
+      }
+
+      ranStatus ||= args.includes("--porcelain=v1");
+
+      return readCommand(args, options);
+    });
+
+    try {
+      git(directory, "init", "-b", "main");
+      expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+        changedFiles: null,
+        error: "Git state unavailable.",
+      });
+      expect(ranStatus).toBe(false);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
