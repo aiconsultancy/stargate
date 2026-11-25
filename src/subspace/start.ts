@@ -2,7 +2,7 @@ import { lstatSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Logger } from "pino";
-import type { BackendConfig } from "../config";
+import type { BackendConfig, IrcConfig } from "../config";
 import type { SubspaceAgentsConfig } from "../config/composition";
 import type { Ownership } from "../lib/unix-socket";
 import type { AgentKey } from "./certificate";
@@ -27,6 +27,7 @@ import { subspaceUpstream } from "./upstream";
 export type SubspaceAgentsHost = {
   config: SubspaceAgentsConfig;
   dataDirectory: string;
+  irc?: readonly Pick<IrcConfig, "id" | "account">[];
   log: Logger;
   /** Tests only: the API transport, environment and socket lock command. */
   fetch?: typeof fetch;
@@ -37,9 +38,45 @@ export type SubspaceAgentsHost = {
 export type SubspaceAgentsRuntime = {
   /** A gateway-launched backend's configuration with its officer's bridge. */
   backend(registration: string, backend: BackendConfig): BackendConfig;
-  upload(registration: string, account: string): ReadChatUpload | undefined;
+  upload(registration: string): ReadChatUpload | undefined;
   close(): Promise<void>;
 };
+
+/** Account-only bindings are safe only when the account has one IRC registration. */
+function uploadSocket(registration: string, host: SubspaceAgentsHost) {
+  const irc = host.irc ?? [];
+  const receiving = irc.find((entry) => entry.id === registration);
+
+  if (!receiving) {
+    return;
+  }
+
+  const officers = host.config.officers;
+
+  const explicit = officers.find(
+    (entry) => entry.registration === registration,
+  );
+
+  if (explicit) {
+    return explicit.socketPath;
+  }
+
+  const account = receiving.account.toLowerCase();
+
+  if (
+    irc.filter((entry) => entry.account.toLowerCase() === account).length !== 1
+  ) {
+    return;
+  }
+
+  const matches = officers.filter(
+    (entry) =>
+      entry.ircNick?.toLowerCase() === account &&
+      !irc.some((other) => other.id === entry.registration),
+  );
+
+  return matches.length === 1 ? matches[0]?.socketPath : undefined;
+}
 
 const stamp = (path: string) => {
   try {
@@ -231,23 +268,10 @@ export async function startSubspaceAgents(
   );
 
   return {
-    upload(registration, account) {
-      const explicit = section.officers.find(
-        (entry) => entry.registration === registration,
-      );
+    upload(registration) {
+      const socket = uploadSocket(registration, host);
 
-      const matching = section.officers.filter(
-        (entry) =>
-          entry.registration === undefined &&
-          entry.ircNick?.toLowerCase() === account.toLowerCase(),
-      );
-
-      const officer =
-        explicit ?? (matching.length === 1 ? matching[0] : undefined);
-
-      return officer?.socketPath
-        ? chatUploadReader(officer.socketPath)
-        : undefined;
+      return socket ? chatUploadReader(socket) : undefined;
     },
     backend(registration, backend) {
       const officer = section.officers.find(

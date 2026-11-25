@@ -369,6 +369,7 @@ function subspaceAgents(
       (await import("../subspace/start")).startSubspaceAgents({
         config: section,
         dataDirectory: config.dataDirectory,
+        irc: config.irc ?? [],
         log,
         ...dependencies.subspaceAgents,
       }),

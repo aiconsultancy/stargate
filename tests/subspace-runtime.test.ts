@@ -23,6 +23,7 @@ import {
   setDefaultLockCommandForTests,
 } from "../src/lib/unix-socket";
 import { parseBundle } from "../src/subspace/certificate";
+import { startSubspaceAgents } from "../src/subspace/start";
 import { IrcShip } from "../src/transports/irc/ship";
 import { identity } from "./fixtures";
 import { FakeIrcServer, lineOf, until } from "./irc-fixture";
@@ -199,11 +200,41 @@ async function runGateway(
   };
 }
 
-async function officerSocket() {
+async function officerSocket(name = "captain-a") {
   const sockets = await privateDirectory("sg-");
 
-  return join(await childDirectory(sockets, "captain-a", 0o700), "a.sock");
+  return join(await childDirectory(sockets, name, 0o700), "a.sock");
 }
+
+test("chat upload account matching skips duplicate IRC accounts and accepts a parallel Slack binding", async () => {
+  const stub = stubApi();
+  const { log } = capturedLog();
+
+  const identity = await startSubspaceAgents({
+    config: section(stub.url, [
+      captain("captain-a", {
+        registration: "slack-a",
+        socketPath: await officerSocket(),
+      }),
+      captain("captain-b", { socketPath: await officerSocket("captain-b") }),
+    ]),
+    dataDirectory: await privateDirectory(),
+    irc: [
+      { id: "unique", account: "captain-a" },
+      { id: "first-network", account: "captain-b" },
+      { id: "second-network", account: "Captain-B" },
+    ],
+    log,
+    env,
+    ownership,
+  });
+
+  cleanup.push(() => identity.close());
+
+  expect(identity.upload("unique")).toBeFunction();
+  expect(identity.upload("first-network")).toBeUndefined();
+  expect(identity.upload("second-network")).toBeUndefined();
+});
 
 test("an addressed IRC upload reaches the officer's turn through that officer's API key", async () => {
   const stub = stubApi();

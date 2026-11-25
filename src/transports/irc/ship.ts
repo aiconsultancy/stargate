@@ -164,10 +164,7 @@ type ShipOptions = {
   crewLink?: CrewLink | null;
   /** Stargate_dm outbox poll interval (default 2000 ms). */
   copyPollMs?: number;
-  subspaceUpload?: (
-    registration: string,
-    account: string,
-  ) => ReadChatUpload | undefined;
+  subspaceUpload?: (registration: string) => ReadChatUpload | undefined;
 };
 
 const copyRetryMs = 10 * 60_000;
@@ -993,7 +990,7 @@ export class IrcShip {
     );
 
     const memberLog = this.log.child({ irc: member.id });
-    const upload = this.options.subspaceUpload?.(member.id, member.account);
+    const upload = this.options.subspaceUpload?.(member.id);
 
     const identity: IrcMember = {
       id: member.id,
@@ -1560,7 +1557,7 @@ export class IrcShip {
       now: Date.now,
       fold: client.fold,
       filehost: this.config.features.filesIn ? filehost() : undefined,
-      subspaceUploads,
+      subspaceUploads: subspaceUploads && this.config.features.filesIn,
     });
 
     if (control) {

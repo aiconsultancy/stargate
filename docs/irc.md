@@ -751,9 +751,12 @@ after admitting the message. It uses the addressed officer's
 [Subspace signing proxy](subspace-agents.md) to read the file's metadata
 and bytes, verifies their size and digest, and passes the files with the
 request on attachment-capable backends. This works with SASL EXTERNAL.
-It uses the configured signing socket for the IRC registration, or the
-single enrolled officer whose configured `ircNick` matches the IRC account.
-The IRC message and its references remain visible.
+It uses the configured signing socket for the IRC registration. An
+account-only match requires one IRC registration with that account and one
+enrolled officer with the matching `ircNick`. Keep `features.filesIn`
+enabled for automatic delivery. Keep `features.multiline` enabled so
+references on later lines of the same desktop message stay with the request.
+The IRC message and its references remain visible to organisation members.
 
 The upload expires after 30 days. The same limits as FILEHOST apply to
 automatic delivery, including 10 MiB per file and 25 MiB in total. A missing,

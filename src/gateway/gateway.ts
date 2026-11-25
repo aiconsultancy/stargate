@@ -1942,18 +1942,10 @@ export class Gateway {
     return failureText(cause);
   }
 
-  private inputFileIDs(
-    job: number,
-    surface: GatewayTransport["name"],
-    transcriber?: Transcriber,
-  ) {
+  private inputFileIDs(job: number, surface: GatewayTransport["name"]) {
     const fileIDs = this.store.attachmentRecords.inputFiles(job);
 
-    if (
-      surface === "irc" &&
-      !this.backend.supportsAttachments &&
-      !transcriber
-    ) {
+    if (surface === "irc" && !this.backend.supportsAttachments) {
       // A text-only officer can read the original reference with its Subspace tool.
       return fileIDs.filter((id) => !chatUploadReference.test(id));
     }
@@ -2344,11 +2336,7 @@ export class Gateway {
             );
           }
 
-          const fileIDs = this.inputFileIDs(
-            job.id,
-            transport.name,
-            transcriber,
-          );
+          const fileIDs = this.inputFileIDs(job.id, transport.name);
 
           let inputFiles: Attachment[] = [];
 

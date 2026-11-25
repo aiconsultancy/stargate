@@ -60,6 +60,8 @@ export type IrcRouteContext = {
   subspaceUploads?: boolean;
 };
 
+const httpLinks = /https?:\/\/[^\s<>"'`]+/gi;
+
 /**
  * Links on the FILEHOST origin, in order, at most `maxAttachments`. Other
  * hosts are never collected (and so never fetched). Trailing punctuation
@@ -72,7 +74,7 @@ export function filehostLinks(text: string, filehost: URL | undefined) {
 
   const links: string[] = [];
 
-  for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
+  for (const match of text.matchAll(httpLinks)) {
     const candidate = match[0].replace(/[)\].,;:!?]+$/, "");
 
     if (!URL.canParse(candidate)) {
@@ -104,7 +106,7 @@ function admittedFiles(body: string, context: IrcRouteContext) {
     const pattern =
       /(?<![A-Za-z0-9_-])UPL-[A-Za-z0-9_-]{22}(?![A-Za-z0-9_-])/gu;
 
-    for (const [reference] of body.matchAll(pattern)) {
+    for (const [reference] of body.replace(httpLinks, " ").matchAll(pattern)) {
       if (files.length === maxAttachments) {
         break;
       }

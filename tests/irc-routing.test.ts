@@ -130,6 +130,34 @@ function route(
   });
 }
 
+test("an UPL token inside a FILEHOST URL does not trigger a second download", () => {
+  const filehost = new URL("https://files.example.com");
+  const upload = "UPL-AQEBAQEBAQEBAQEBAQEBAQ";
+  const link = `${filehost.origin}/${upload}.pdf`;
+  const shared = "UPL-AgICAgICAgICAgICAgICAg";
+
+  const incoming = message(
+    "#galactica",
+    `galactica: see ${link} and ${shared} ${shared}`,
+    { account: "jack" },
+  );
+
+  const context = {
+    config,
+    member: captain,
+    currentNick: captain.nick,
+    sent: () => false,
+    now: () => 0,
+    fold: (value: string) => fold(value),
+    filehost,
+  };
+
+  expect(
+    routeIrcMessage(incoming, { ...context, subspaceUploads: true })?.files,
+  ).toEqual([link, shared]);
+  expect(routeIrcMessage(incoming, context)?.files).toEqual([link]);
+});
+
 test("irc nick-mention access requires a live joined target, exact nick, and an allowlisted account with a msgid", () => {
   const restricted = shipConfig({
     access: {
