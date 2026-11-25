@@ -958,6 +958,49 @@ test("cancelling a Claude turn stops the CLI and its tool processes", async () =
   await expect(readFile(record)).rejects.toThrow();
 });
 
+test("a Claude turn stopped without a result fails unless its caller cancelled it", async () => {
+  const hub = createActivityHub();
+
+  const { backend, log } = await open(
+    {},
+    undefined,
+    {},
+    hub.recorder("officer"),
+  );
+
+  const started = async (count: number) =>
+    until(
+      async () =>
+        (await log().catch(() => [])).filter((entry) => "grandchild" in entry)
+          .length >= count,
+    );
+
+  // The backend's own abort, as on a lost CLI or interruption, is a failure.
+  const id = await session(backend);
+  const stopped = backend.prompt(id, "hang", signal());
+  await started(1);
+  await backend.interrupt(id, signal());
+  await expect(stopped).rejects.toThrow();
+
+  // The caller's abort is a cancellation.
+  const controller = new AbortController();
+
+  const cancelled = backend.prompt(
+    await session(backend),
+    "hang",
+    controller.signal,
+  );
+
+  await started(2);
+  controller.abort();
+  await expect(cancelled).rejects.toThrow();
+
+  expect(hub.turns("officer")?.turns).toMatchObject([
+    { status: "failed" },
+    { status: "cancelled" },
+  ]);
+});
+
 test("no tool process outlives its Claude turn, even one ignoring SIGTERM", async () => {
   const { backend, log } = await open();
 
