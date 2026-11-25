@@ -100,8 +100,8 @@ const providerGuardSchema = settingsStruct({
 );
 
 const defaultLimits = [
-  { remainingPercent: 25, action: "warn" },
-  { remainingPercent: 20, action: "pause" },
+  { remainingPercent: 20, action: "warn" },
+  { remainingPercent: 10, action: "pause" },
 ] as const;
 
 export const usageGuardSchema = settingsStruct({

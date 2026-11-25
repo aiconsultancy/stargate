@@ -528,7 +528,7 @@ test("usage cutoff blocks fresh and queued work and explicit resumes for the aff
     const pause = {
       claude: {
         modelPrefixes: ["claude-proxy/"],
-        remainingPercent: 20,
+        remainingPercent: 10,
         observedAt: Date.now(),
         resetAt: null,
         mode: "pause",

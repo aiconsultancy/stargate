@@ -203,7 +203,7 @@ access](api.md#private-unix-mode).
 
 Set `usageGuard.enabled` to turn on the rear admiral's per-ship quota notices
 and crew cutoffs. Set the sender registration, quota proxy and state file.
-The default limits are 25% warning and 20% cutoff for Claude and Codex.
+The default limits are 20% warning and 10% cutoff for Claude and Codex.
 The crew plugin reads the shared state through its `usageGuardFile` option.
 See [Fleet usage guard](usage.md#fleet-usage-guard) for the provider, model and
 message settings.

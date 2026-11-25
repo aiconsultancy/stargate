@@ -97,10 +97,10 @@ logins if they have dedicated subscriptions. Set `nativeCodexFile` to use the
 [trusted local receipt](#crew-quota-notices) for native Codex. You can add
 a discovered proxy plugin provider by its quota ID.
 
-- At **25% remaining** or less, the rear admiral asks each captain to run at
+- At **20% remaining** or less, the rear admiral asks each captain to run at
   most one crew worker of that kind and let excess crew finish or checkpoint.
   Captains apply this warning.
-- At **20% remaining** or less, the crew plugin refuses new assignments,
+- At **10% remaining** or less, the crew plugin refuses new assignments,
   explicit resumptions, and other idle starts for the affected model. Work
   already underway keeps running so crews can finish, save and push at a
   safe point. Queued work keeps its identity and position.

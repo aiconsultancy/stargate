@@ -103,13 +103,18 @@ test("guard persists per-captain crossings, freezes stale cutoffs, and re-arms a
     );
 
   try {
+    snapshot = [account("claude", 21, now, reset)];
+    await create().tick(signal);
+    expect(sent).toHaveLength(0);
+
+    now += 1;
     snapshot = [
-      account("claude", 25, now, reset),
+      account("claude", 20, now, reset),
       account("codex", 80, now, reset),
     ];
     await create().tick(signal);
     expect(sent).toHaveLength(2);
-    expect(sent[0]).toContain("#orion Usage guard: Claude 25% remaining");
+    expect(sent[0]).toContain("#orion Usage guard: Claude 20% remaining");
     expect(sent[0]).toContain("Stand down extra crew");
     expect(log).toContain(
       "Usage guard delivery uncertain; attempt will not be repeated",
@@ -125,7 +130,18 @@ test("guard persists per-captain crossings, freezes stale cutoffs, and re-arms a
 
     now += 60_000;
     snapshot = [
-      account("claude", 20, now, reset),
+      account("claude", 11, now, reset),
+      account("codex", 80, now, reset),
+    ];
+    await create().tick(signal);
+    expect(sent).toHaveLength(3);
+    expect(
+      await crewUsageBlock(file, "claude-proxy/claude-fixture"),
+    ).toBeUndefined();
+
+    now += 60_000;
+    snapshot = [
+      account("claude", 10, now, reset),
       account("codex", 80, now, reset),
     ];
     await create().tick(signal);
@@ -161,10 +177,10 @@ test("guard persists per-captain crossings, freezes stale cutoffs, and re-arms a
     ).toBeUndefined();
 
     now += 60_000;
-    snapshot = [account("claude", 23, now, reset + 180_000)];
+    snapshot = [account("claude", 18, now, reset + 180_000)];
     await create().tick(signal);
     expect(sent).toHaveLength(12);
-    expect(sent[9]).toContain("Claude 23% remaining");
+    expect(sent[9]).toContain("Claude 18% remaining");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -231,7 +247,7 @@ test("guard sends one named PRIVMSG per captain from the rear admiral's IRC conn
             status: "ok",
             observedAt: now,
             cached: false,
-            accounts: [account("codex", 20, now, now + 60_000)],
+            accounts: [account("codex", 10, now, now + 60_000)],
           };
         },
       },
@@ -264,8 +280,8 @@ test("guard sends one named PRIVMSG per captain from the rear admiral's IRC conn
         text.split(" ", 6).join(" "),
       ]),
     ).toEqual([
-      ["#orion", "@orion-online Usage guard: Codex 20% remaining"],
-      ["#vega", "@vega-online Usage guard: Codex 20% remaining"],
+      ["#orion", "@orion-online Usage guard: Codex 10% remaining"],
+      ["#vega", "@vega-online Usage guard: Codex 10% remaining"],
     ]);
   } finally {
     await rm(directory, { recursive: true, force: true });
