@@ -18,7 +18,7 @@ jobs:
   quality:
     name: Quality checks
     runs-on: ubuntu-24.04
-    # The full suite takes 8–10 minutes on main; leave headroom for runner variance.
+    # Leave headroom for full-suite and runner variance.
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -52,6 +52,7 @@ jobs:
           test_tmp=$(mktemp -d "$RUNNER_TEMP/stargate-tests.XXXXXX")
           install -d -m 700 "$test_tmp/opencode" "$test_tmp/cache"
           printf 'TMPDIR=%s\nXDG_CACHE_HOME=%s/cache\n' "$test_tmp" "$test_tmp" >> "$GITHUB_ENV"
+      # This runs strict typecheck and lint. A clean index selects no tests.
       - name: Run pre-commit checks
         run: mise run hooks
       # Compares the checked-out tree with its first parent: for a PR the
@@ -74,12 +75,7 @@ jobs:
               ;;
           esac
           mise exec -- bun scripts/check-architecture-baseline.ts --root "$PWD" "$@"
-      # --all-files has no staged diff. Do not rely on affected-test selection
-      # for the hosted Quality gate: run typecheck, lint and the entire suite.
-      - name: Run full quality checks
-        run: mise run check
-      # Self-updates test a release with a minimal environment and a hidden
-      # TMPDIR; a test that only passes with the developer's environment
-      # would block every update.
-      - name: Run tests in the self-update environment
+      - name: Run Mesij integration tests with pinned tools
+        run: mise exec -- bun test tests/mesij.test.ts
+      - name: Run test suite in the self-update environment
         run: mise run test-release-env
