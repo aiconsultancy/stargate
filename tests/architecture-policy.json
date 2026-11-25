@@ -1922,6 +1922,7 @@
         "src/irc/protocol.ts",
         "src/irc/routing.ts",
         "src/irc/ship.ts",
+        "src/transports/irc/ship-transport.ts",
         "src/irc/status.ts",
         "src/irc/text.ts",
         "src/irc/store.ts",
