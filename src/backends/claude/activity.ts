@@ -91,6 +91,8 @@ class Thread {
   private readonly messages = new Map<string, Message>();
   private streaming: Message | undefined;
   public ended = false;
+  /** Reply text was recorded from this thread's own assistant frames. */
+  public replied = false;
   public background = false;
   public observedOutcome: ActivityOutcome | undefined;
 
@@ -201,6 +203,10 @@ class Thread {
 
         if (mode === "final" || mode === "stop" || mode === "redacted") {
           item.status = "completed";
+        }
+
+        if (kind === "text" && item.text !== "") {
+          this.replied = true;
         }
       },
     );
@@ -703,6 +709,48 @@ export class ClaudeActivity {
         tool.executed = false;
         tool.error ??= activityError("permission_denied", "Permission denied");
       });
+    }
+
+    const root = this.root;
+
+    // The reply falls back to the result's text only when no text was sent.
+    if (
+      frame.subtype === "success" &&
+      !frame.is_error &&
+      typeof frame.result === "string" &&
+      frame.result !== "" &&
+      !root.replied
+    ) {
+      root.log.update("result:text", at, () => ({
+        kind: "text",
+        status: "completed",
+        text: frame.result,
+      }));
+      root.replied = true;
+    }
+
+    const errors =
+      frame.subtype === "success"
+        ? frame.is_error && typeof frame.result === "string"
+          ? [frame.result]
+          : []
+        : (frame.errors ?? []);
+
+    if (frame.subtype !== "success" || frame.is_error) {
+      const type = frame.subtype === "success" ? "is_error" : frame.subtype;
+
+      root.log.update("result:error", at, () => ({
+        kind: "step",
+        status: "failed",
+        model: null,
+        firstTokenAt: null,
+        streamedAt: null,
+        endedAt: at,
+        finish: frame.subtype,
+        tokens: null,
+        cost: null,
+        error: activityError(type, errors.join("\n") || type),
+      }));
     }
 
     if (Predicate.isObject(frame.usage)) {

@@ -372,6 +372,13 @@ child turns; the reported cost can include subagents and other calls. The SDK
 does not split reasoning tokens out of the output total, so the reasoning
 counter is `0`.
 
+The query's result adds to the root turn. If the SDK sent the reply only
+as the result's text, with no main-thread assistant text, that text is a
+`text` item; otherwise nothing is repeated. A failed result is a `failed`
+step with `model: null` and `finish` set to the result's subtype. Its
+`error.type` is that subtype, or `is_error` for a result marked as an error,
+and `error.message` is the result's errors, one per line, or its text.
+
 An item with `unavailable: ["text"]` is a reasoning block whose text the
 provider encrypted. The item is present with `text: ""`; the gateway never
 received its plaintext. `session.id` is the session ID in the SDK envelope,

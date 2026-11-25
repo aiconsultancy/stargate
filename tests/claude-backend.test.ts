@@ -360,6 +360,8 @@ test("a background Bash task stays on the spawning tool without making a child t
             task: { task_type: "local_bash", is_backgrounded: true },
           },
         },
+        // The reply came only as the result's text.
+        { kind: "text", status: "completed", text: "bash observed" },
       ],
     },
   ]);
@@ -435,6 +437,99 @@ test("subagent tool frames preserve failure ran evidence with and without Claude
       });
     }
   }
+
+  const [root] = hub.turns("officer")?.turns ?? [];
+  expect(root).toMatchObject({ status: "failed" });
+  expect(root?.items).toContainEqual(
+    expect.objectContaining({
+      kind: "step",
+      status: "failed",
+      error: expect.objectContaining({ type: "rate_limit" }),
+    }),
+  );
+});
+
+// Pinned CLI 2.1.327 builds every stream_event with parent_tool_use_id null,
+// And passes a subagent on only as complete assistant and user messages:
+// Tool_use and tool_result always, text and thinking only when forwarded.
+// A parented stream_event is therefore never common to both modes.
+test("ran evidence on a failed turn is the same with and without Claude activity", async () => {
+  const plain = await open();
+
+  const recording = await open(
+    {},
+    undefined,
+    {},
+    createActivityHub().recorder("officer"),
+  );
+
+  const failure = async (backend: ClaudeBackend, prompt: string) => {
+    try {
+      await backend.prompt(await session(backend), prompt, signal());
+    } catch (error) {
+      expect(error).toBeInstanceOf(BackendFailure);
+
+      return error;
+    }
+
+    throw new Error("Expected provider failure");
+  };
+
+  for (const [prompt, ran] of [
+    // Common to both modes: a subagent's tool result is work.
+    ["subagent result fail:rate_limit:429", true],
+    // Forwarded subagent text and a parented stream_event are not.
+    ["subagent text fail:rate_limit:429", false],
+  ] as const) {
+    const expected = await failure(plain.backend, prompt);
+    expect(expected).toMatchObject({ ran });
+    expect(await failure(recording.backend, prompt)).toEqual(expected);
+  }
+});
+
+test("Claude result text and errors reach activity, without repeating a reply", async () => {
+  const hub = createActivityHub();
+  const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
+
+  expect(
+    await backend.prompt(await session(backend), "result only reply", signal()),
+  ).toBe("result-only reply");
+  await expect(
+    backend.prompt(await session(backend), "result errors", signal()),
+  ).rejects.toThrow();
+  expect(
+    await backend.prompt(
+      await session(backend),
+      "batched assistant activity",
+      signal(),
+    ),
+  ).toBe("second");
+
+  const [reply, errors, normal] = hub.turns("officer")?.turns ?? [];
+  expect(reply).toMatchObject({
+    status: "completed",
+    items: [{ kind: "text", status: "completed", text: "result-only reply" }],
+  });
+  expect(errors).toMatchObject({
+    status: "failed",
+    items: [
+      {
+        kind: "step",
+        status: "failed",
+        model: null,
+        finish: "error_max_turns",
+        error: {
+          type: "error_max_turns",
+          message: "first error\nsecond error\twith detail",
+        },
+      },
+    ],
+  });
+  expect(
+    normal?.items
+      .filter((item) => item.kind === "text")
+      .map((item) => ("text" in item ? item.text : undefined)),
+  ).toEqual(["second"]);
 });
 
 test("a recorder that throws cannot fail a Claude query", async () => {
