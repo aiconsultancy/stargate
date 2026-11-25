@@ -628,6 +628,17 @@ export class ClaudeActivity {
       return;
     }
 
+    // A newer start on this call owns a fresh child only after the old one ends.
+    if (
+      frame.subtype === "task_started" &&
+      known?.call === call &&
+      !sameRun &&
+      this.children.get(call.id)?.ended
+    ) {
+      this.children.delete(call.id);
+      delete call.taskOutcome;
+    }
+
     const type = frame.subtype === "task_started" ? frame.task_type : undefined;
 
     if (type !== undefined) {

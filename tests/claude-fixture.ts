@@ -441,7 +441,12 @@ async function answer(text: string) {
     return;
   }
 
-  if (text === "late task run activity") {
+  if (
+    text === "late task run activity" ||
+    text === "resumed task run activity"
+  ) {
+    const resumed = text === "resumed task run activity";
+
     const task = {
       type: "system",
       task_id: "task-resumed",
@@ -463,8 +468,47 @@ async function answer(text: string) {
         run_id: runId,
         task_type: "local_agent",
         description: `Started ${runId}`,
-        is_backgrounded: runId === "002",
+        is_backgrounded: !resumed && runId === "002",
       });
+
+      if (resumed && runId === "001") {
+        write({
+          ...base(),
+          ...task,
+          subtype: "task_notification",
+          run_id: runId,
+          status: "stopped",
+          summary: "Stopped before resume",
+        });
+      }
+    }
+
+    if (resumed) {
+      assistant(
+        "msg_resumed",
+        { type: "text", text: "Resumed output" },
+        undefined,
+        task.tool_use_id,
+      );
+      write({
+        ...base(),
+        type: "user",
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: task.tool_use_id,
+              content: "Resumed run failed",
+              is_error: true,
+            },
+          ],
+        },
+      });
+      assistant("msg_observed", { type: "text", text: "Task observed" });
+
+      return result("success", false, "Task observed");
     }
 
     write({

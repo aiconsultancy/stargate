@@ -374,6 +374,38 @@ test("a newer Claude task run rebinds and ignores an explicitly linked stale com
   ).toMatchObject({ status: "running" });
 });
 
+test("a resumed Claude run records a new child after its predecessor stopped", async () => {
+  const hub = createActivityHub();
+  const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
+
+  const children = () =>
+    hub
+      .turns("officer")
+      ?.turns.filter((turn) => turn.session?.parent?.callId === "tool_resumed");
+
+  let live: ReturnType<typeof children>;
+
+  await backend.prompt(
+    await session(backend),
+    "resumed task run activity",
+    signal(),
+    (text) => {
+      if (text === "Task observed") {
+        live = children();
+      }
+    },
+  );
+
+  expect(live).toMatchObject([{ status: "cancelled" }, { status: "running" }]);
+  expect(live?.[1]?.items.find((item) => item.kind === "text")).toMatchObject({
+    text: "Resumed output",
+  });
+  expect(children()).toMatchObject([
+    { id: live?.[0]?.id, status: "cancelled" },
+    { id: live?.[1]?.id, status: "failed" },
+  ]);
+});
+
 test("a background Bash task stays on the spawning tool without making a child turn", async () => {
   const hub = createActivityHub();
   const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
