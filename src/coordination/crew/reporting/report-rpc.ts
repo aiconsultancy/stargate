@@ -34,6 +34,8 @@ import { updateSnapshotSchema } from "../../../automation/maintenance/update-not
 import {
   crewGitInputSchema,
   crewGitSchema,
+  crewTurnsInputSchema,
+  crewTurnsSchema,
   fleetCrewStatusInputSchema,
   fleetCrewStatusSchema,
 } from "./fleet-status";
@@ -173,6 +175,11 @@ export const CrewReporting = Rpc.define({
     crewGit: {
       input: portable(crewGitInputSchema),
       output: portable(crewGitSchema),
+    },
+    // Read-only peer sessions and task inputs, to attribute crew turns.
+    crewTurns: {
+      input: portable(crewTurnsInputSchema),
+      output: portable(crewTurnsSchema),
     },
     // Read-only operator history. Roots list every provisioned crew member.
     // Describe, children and entries serve only this team's `pi:` sessions;

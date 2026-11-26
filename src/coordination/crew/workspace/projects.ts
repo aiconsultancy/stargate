@@ -1,12 +1,13 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { Result, Schema } from "effect";
+import { Predicate, Result, Schema } from "effect";
 import type { CrewStatus, CrewStatusInput } from "../../../shared/crew-status";
 import {
   HISTORY_PAGE,
   type HistoryChildrenInput,
   type HistoryEntriesInput,
   type HistorySession,
+  MAX_CREW_CONTEXTS,
 } from "../../../shared/session-history";
 import {
   type CrewCaller,
@@ -17,9 +18,13 @@ import {
 import type {
   CrewGit,
   CrewGitInput,
+  CrewTurns,
+  CrewTurnsInput,
   FleetCrewStatus,
 } from "../reporting/fleet-status";
+import { crewTurns } from "../reporting/member-activity";
 import type { CrewGitReader } from "./git-state";
+import { MAX_CREW_PROJECTS } from "../input/project-options";
 import { effectProjectKeySchema } from "../protocol/project-key";
 import { CrewError } from "../execution/state";
 import { defaultTeam } from "../team";
@@ -50,6 +55,18 @@ export class CrewProjects {
     raw: unknown,
     factory: Factory,
   ): Promise<CrewProjects> {
+    const projected = Predicate.hasProperty(raw, "projects") && raw.projects;
+
+    // Named before the generic invalid-configuration error.
+    if (
+      Predicate.isObject(projected) &&
+      Object.keys(projected).length > MAX_CREW_PROJECTS
+    ) {
+      throw new CrewError(
+        `Configure at most ${MAX_CREW_PROJECTS} additional crew projects.`,
+      );
+    }
+
     const parsed = Schema.decodeUnknownResult(crewOptionsSchema)(raw);
 
     if (Result.isFailure(parsed)) {
@@ -60,19 +77,18 @@ export class CrewProjects {
 
     const { projects, ...base } = parsed.success;
     const configurations = new Map<string, CrewOptions>([["default", base]]);
+    const team = base.team ?? defaultTeam;
+    const crew = team.crew.length;
+    const contexts = Object.keys(projects ?? {}).length + 1;
+
+    // With or without projects: each member context is a row of a bounded page.
+    if (crew * contexts > MAX_CREW_CONTEXTS) {
+      throw new CrewError(
+        `Configured crew members times project contexts (${crew} × ${contexts}) exceed ${MAX_CREW_CONTEXTS}.`,
+      );
+    }
 
     if (projects && Object.keys(projects).length > 0) {
-      const team = base.team ?? defaultTeam;
-
-      if (
-        (Object.keys(projects).length + 1) * team.crew.length >
-        HISTORY_PAGE
-      ) {
-        throw new CrewError(
-          "Configured project/member contexts exceed the bounded history limit.",
-        );
-      }
-
       for (const [key, project] of Object.entries(projects)) {
         const namespace = `${base.namespace}:project:${key}`;
 
@@ -352,6 +368,24 @@ export class CrewProjects {
         contexts,
       },
     };
+  }
+
+  /** Peer sessions and recent task inputs, to attribute crew turns. */
+  public crewTurns(input: CrewTurnsInput): CrewTurns {
+    return crewTurns(
+      [...this.contexts].map(([project, engine]) => ({
+        project: project === "default" ? null : project,
+        namespace: engine.options.namespace,
+        members: new Set(
+          engine.options.team.crew
+            .filter((member) => !member.backend)
+            .map(({ id }) => id),
+        ),
+        known: new Set(engine.options.team.crew.map(({ id }) => id)),
+        turns: engine.state.turns,
+      })),
+      input,
+    );
   }
 
   /** Git state of the project checkout and each configured crew worktree. */

@@ -60,6 +60,12 @@ export function gatewayFeatures(config: ApiV1Config): V1Feature[] {
       true,
     ),
     flag(
+      "api.crewActivity",
+      "Crew turn activity",
+      config.api !== undefined,
+      true,
+    ),
+    flag(
       "cronjobs",
       "File-backed cron",
       config.bots.some((bot) => !!bot.cronjobs),

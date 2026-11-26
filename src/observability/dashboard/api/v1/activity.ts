@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import type {
   ActivityOutcome,
   ActivityRequest,
-  TurnActivityLog,
+  CrewTurnActivityLog,
+  CrewTurnStart,
   TurnActivityRecorder,
 } from "../../../../backends/backend";
 import {
@@ -15,6 +16,8 @@ import {
   turnSummary,
   usage,
 } from "./activity-view";
+import { crewRecorder } from "./crew-recorder";
+import { remeasurer } from "./remeasure";
 import type { ApiV1Config } from "./features";
 import type {
   V1ActivityItemPage,
@@ -77,7 +80,24 @@ type Feed = {
   timer: ReturnType<typeof setTimeout> | undefined;
 };
 
-type Agent = { seq: number; turns: StoredTurn[]; feed?: Feed | undefined };
+/**
+ * An officer, or a crew member under its captain: crew subjects have their own
+ * `seq` and per-subject turn limit, and share the global limits.
+ */
+type Agent = {
+  agentId: string;
+  member: string | undefined;
+  seq: number;
+  turns: StoredTurn[];
+  feed?: Feed | undefined;
+};
+
+/**
+ * A hub subject key: an officer's registration ID, or `<ship>/<member>`.
+ * Neither ID can hold a slash.
+ */
+export const crewSubject = (ship: string, member: string) =>
+  `${ship}/${member}`;
 
 const encoder = new TextEncoder();
 
@@ -85,8 +105,44 @@ function changeOf({ change }: Pending): V1AgentActivityChange {
   return "type" in change ? change : { type: "item", item: itemView(change) };
 }
 
+type TurnSelector = string | { msgid: string; channel: string | undefined };
+
+/**
+ * All turns, one by ID, or the families whose root matches an IRC request:
+ * the matching roots and their descendants, in retained order.
+ */
+function selectTurns(turns: readonly StoredTurn[], selector?: TurnSelector) {
+  if (selector === undefined) {
+    return turns;
+  }
+
+  if (typeof selector === "string") {
+    return turns.filter((turn) => turn.id === selector);
+  }
+
+  const channelKey =
+    selector.channel === undefined
+      ? undefined
+      : foldActivityChannel(selector.channel);
+
+  const matches = (turn: StoredTurn) =>
+    turn.id === turn.root &&
+    turn.requests.some(
+      ({ channel, msgid }) =>
+        msgid === selector.msgid &&
+        (channelKey === undefined ||
+          foldActivityChannel(channel) === channelKey),
+    );
+
+  const roots = new Set(
+    turns.flatMap((turn) => (matches(turn) ? [turn.id] : [])),
+  );
+
+  return turns.filter((turn) => roots.has(turn.root));
+}
+
 /** Send an agent's coalesced changes to everyone watching it. */
-function flush(generation: string, agentId: string, owner: Agent) {
+function flush(generation: string, owner: Agent) {
   const feed = owner.feed;
 
   if (!feed) {
@@ -103,7 +159,8 @@ function flush(generation: string, agentId: string, owner: Agent) {
   for (const pending of due) {
     try {
       const data: V1AgentActivityEvent = {
-        agentId,
+        agentId: owner.agentId,
+        ...(owner.member !== undefined && { member: owner.member }),
         turnId: pending.turn.id,
         generation,
         seq: pending.seq,
@@ -136,7 +193,6 @@ function flush(generation: string, agentId: string, owner: Agent) {
 /** Note a change for the next flush; nothing at all when unwatched. */
 function mark(
   generation: string,
-  agentId: string,
   owner: Agent,
   key: string,
   pending: () => Pending,
@@ -151,30 +207,26 @@ function mark(
 
   if (feed.timer === undefined) {
     feed.timer = setTimeout(() => {
-      flush(generation, agentId, owner);
+      flush(generation, owner);
     }, activityFlushMs);
     feed.timer.unref?.();
   }
 }
 
-function measuredBytes(turn: StoredTurn) {
-  try {
-    return (turn.bytes ??= Buffer.byteLength(
-      JSON.stringify({
-        requests: turn.requests,
-        session: turn.session,
-        usage: usage(turn),
-        items: [...turn.items.values()].map((item) => itemJson(item)),
-      }),
-    ));
-  } catch {
-    // Unmeasurable data cannot be retained inside a bounded settled family.
-    return (turn.bytes = Infinity);
-  }
+/** A turn's cached size, measured again after a write cleared it. */
+function measuredBytes(turn: StoredTurn, measure: typeof settledBytes) {
+  return (turn.bytes ??= measure(turn));
 }
 
-/** Evict settled families together so a retained child never loses its parent. */
-function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
+/**
+ * Evict settled families together so a retained child never loses its
+ * parent, then tell each evicted turn's writer: every path evicts here.
+ */
+function evict(
+  agents: ReadonlyMap<string, Agent>,
+  limits: Limits,
+  measure: typeof settledBytes,
+) {
   type Family = {
     owner: Agent;
     turns: StoredTurn[];
@@ -183,10 +235,12 @@ function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
   };
 
   const ended: Family[] = [];
+  const removed: StoredTurn[] = [];
 
   function remove(family: Family) {
     for (const turn of family.turns) {
       family.owner.turns.splice(family.owner.turns.indexOf(turn), 1);
+      removed.push(turn);
     }
   }
 
@@ -218,7 +272,7 @@ function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
 
       if (excess <= 0) {
         family.bytes = family.turns.reduce(
-          (bytes, turn) => bytes + measuredBytes(turn),
+          (bytes, turn) => bytes + measuredBytes(turn, measure),
           0,
         );
         ended.push(family);
@@ -256,6 +310,80 @@ function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
     turnCount -= family.turns.length;
     bytes -= family.bytes;
   }
+
+  for (const turn of removed) {
+    turn.evicted?.();
+  }
+}
+
+/** A crew turn's task, first observed frame and eviction listener. */
+type CrewTurn = {
+  task: CrewTurnStart["task"];
+  startedAt: number | undefined;
+  evicted: (() => void) | undefined;
+};
+
+/** A settled turn's size, measured when it ends and after later changes. */
+export function settledBytes(turn: StoredTurn) {
+  try {
+    return Buffer.byteLength(
+      JSON.stringify({
+        requests: turn.requests,
+        session: turn.session,
+        usage: usage(turn),
+        task: turn.task,
+        items: [...turn.items.values()].map((item) => itemJson(item)),
+      }),
+    );
+  } catch {
+    // Unmeasurable data cannot be retained inside a bounded settled family.
+    return Infinity;
+  }
+}
+
+/** A change that an evicted turn ignores. */
+function live<A extends unknown[]>(
+  gone: () => boolean,
+  change: (...args: A) => void,
+) {
+  return (...args: A) => {
+    if (!gone()) {
+      change(...args);
+    }
+  };
+}
+
+/** One page of a retained item's JSON. */
+function itemPage(
+  owner: Agent | undefined,
+  turnId: string,
+  itemId: string,
+  page: number,
+): V1ActivityItemPage | undefined {
+  const turn = owner?.turns.find(({ id }) => id === turnId);
+  const stored = turn?.items.get(itemId);
+
+  if (!owner || !stored) {
+    return;
+  }
+
+  const json = JSON.stringify(itemJson(stored));
+  const split = pages(json);
+  const data = split[page];
+
+  return data === undefined
+    ? undefined
+    : {
+        agent: owner.agentId,
+        ...(owner.member !== undefined && { member: owner.member }),
+        turn: turnId,
+        item: itemId,
+        seq: stored.seq,
+        page,
+        pages: split.length,
+        bytes: Buffer.byteLength(json),
+        data,
+      };
 }
 
 /**
@@ -263,24 +391,60 @@ function evict(agents: ReadonlyMap<string, Agent>, limits: Limits) {
  * and never wait; readers copy. Eviction drops whole ended families only.
  */
 export function createActivityHub(
-  options: Partial<Limits> & { now?: () => number } = {},
+  options: Partial<Limits> & {
+    now?: () => number;
+    /** A settled turn's size; tests count its calls. */
+    measure?: typeof settledBytes;
+  } = {},
 ) {
   const limits = { ...defaults, ...options };
   const now = options.now ?? Date.now;
+  const measure = options.measure ?? settledBytes;
   /** Turn IDs stay unique across restarts. */
   const generation = `${now().toString(36)}${randomBytes(4).toString("hex")}`;
+  /**
+   * Only subjects with turns or watchers: one left with neither is
+   * reclaimed, and one that reappears continues after `reclaimedSeq`.
+   */
   const agents = new Map<string, Agent>();
+  let reclaimedSeq = 0;
+  /** Turn IDs are unique within a generation, across reclaimed subjects. */
+  let turnIds = 0;
+  /** Each ship's crew members with a peer session, while its plugin reports. */
+  const crews = new Map<string, ReadonlySet<string>>();
+  /** Each ship's newest recorder that wrote; older ones are fenced. */
+  const owners = new Map<string, number>();
+  const uncollected = new Map<string, ReadonlySet<string>>();
+  let recorders = 0;
 
   const agent = (id: string) => {
     let result = agents.get(id);
 
     if (!result) {
-      result = { seq: 0, turns: [] };
+      const [agentId = id, member] = id.split("/");
+      result = { agentId, member, seq: reclaimedSeq, turns: [] };
       agents.set(id, result);
     }
 
     return result;
   };
+
+  function reclaim() {
+    for (const [id, owner] of agents) {
+      if (owner.turns.length === 0 && !owner.feed) {
+        reclaimedSeq = Math.max(reclaimedSeq, owner.seq);
+        agents.delete(id);
+      }
+    }
+  }
+
+  function settle() {
+    remeasure.flush();
+    evict(agents, limits, measure);
+    reclaim();
+  }
+
+  const remeasure = remeasurer(settle, activityFlushMs);
 
   function watch(agentId: string, watcher: ActivityWatcher) {
     const owner = agent(agentId);
@@ -299,6 +463,7 @@ export function createActivityHub(
       if (feed.watchers.size === 0 && owner.feed === feed) {
         clearTimeout(feed.timer);
         owner.feed = undefined;
+        reclaim();
       }
     };
   }
@@ -308,11 +473,13 @@ export function createActivityHub(
     requests: readonly ActivityRequest[] = [],
     session?: V1ActivityTurn["session"],
     root?: string,
-  ): TurnActivityLog {
+    crew?: CrewTurn,
+  ): CrewTurnActivityLog {
     const owner = agent(agentId);
-    const startedAt = now();
+    const startedAt = Math.min(crew?.startedAt ?? Infinity, now());
 
-    const id = `${generation}-${(++owner.seq).toString(36)}`;
+    owner.seq += 1;
+    const id = `${generation}-${(++turnIds).toString(36)}`;
 
     const turn: StoredTurn = {
       id,
@@ -325,14 +492,16 @@ export function createActivityHub(
       endedAt: null,
       reconnects: 0,
       requests: requests.map(({ channel, msgid }) => ({ channel, msgid })),
-      ...(session && { session }),
+      ...(session && { session: structuredClone(session) }),
+      ...(crew && { task: structuredClone(crew.task) }),
       items: new Map(),
+      ...(crew?.evicted && { evicted: crew.evicted }),
     };
 
     owner.turns.push(turn);
-    evict(agents, limits);
+    settle();
 
-    mark(generation, agentId, owner, `start:${turn.id}`, () => ({
+    mark(generation, owner, `start:${turn.id}`, () => ({
       seq: turn.seq,
       at: startedAt,
       turn,
@@ -349,22 +518,10 @@ export function createActivityHub(
       return turn.seq;
     };
 
-    const evictAfterLateWrite = () => {
-      if (
-        turn.endedAt !== null &&
-        owner.turns.includes(turn) &&
-        !owner.turns.some(
-          (other) => other.root === turn.root && other.endedAt === null,
-        )
-      ) {
-        evict(agents, limits);
-      }
-    };
-
     const changed = (at: number) => {
       const seq = touch(at);
 
-      mark(generation, agentId, owner, `turn:${turn.id}`, () => ({
+      mark(generation, owner, `turn:${turn.id}`, () => ({
         seq,
         at,
         turn,
@@ -375,9 +532,18 @@ export function createActivityHub(
       }));
     };
 
+    /** A change after the end has the settled turn measured again, whole. */
+    const resize = () => {
+      remeasure(turn);
+    };
+
+    /** Evicted: it accepts no change and emits no event. */
+    const gone = () => turn.endedAt !== null && !owner.turns.includes(turn);
+
     return {
-      update(key, at, create, change) {
+      update: live(gone, (key, at, create, change) => {
         // Frames proven after the end still belong to the turn.
+
         try {
           let item = keys.get(key);
 
@@ -400,34 +566,28 @@ export function createActivityHub(
 
           const stored = item;
 
-          mark(
-            generation,
-            agentId,
-            owner,
-            `item:${turn.id}:${item.id}`,
-            () => ({
-              seq: stored.seq,
-              at,
-              turn,
-              change: stored,
-            }),
-          );
+          mark(generation, owner, `item:${turn.id}:${item.id}`, () => ({
+            seq: stored.seq,
+            at,
+            turn,
+            change: stored,
+          }));
         } catch {
           /* Never affects the turn. */
-        } finally {
-          evictAfterLateWrite();
         }
-      },
-      reconnected() {
+
+        resize();
+      }),
+      reconnected: live(gone, () => {
         turn.reconnects += 1;
         changed(now());
-        evictAfterLateWrite();
-      },
-      setUsage(usage) {
+        resize();
+      }),
+      setUsage: live(gone, (usage) => {
         turn.usage = usage;
         changed(now());
-        evictAfterLateWrite();
-      },
+        resize();
+      }),
       child(callId, sessionId) {
         return begin(
           agentId,
@@ -435,6 +595,26 @@ export function createActivityHub(
           { id: sessionId, parent: { turnId: turn.id, callId } },
           turn.root,
         );
+      },
+      attribute(task) {
+        // Crew turns only, and once: a late task lookup succeeded.
+        if (turn.task !== null || gone()) {
+          return;
+        }
+
+        turn.task = structuredClone(task);
+        const at = now();
+        const seq = touch(at);
+
+        // Its own upsert: it never replaces an end in the same flush, and
+        // After the end it is still an update, not another end.
+        mark(generation, owner, `task:${turn.id}`, () => ({
+          seq,
+          at,
+          turn,
+          change: { type: "turn-updated", turn: turnSummary(turn) },
+        }));
+        resize();
       },
       end(outcome: ActivityOutcome, lost?: true) {
         if (turn.endedAt !== null) {
@@ -451,8 +631,9 @@ export function createActivityHub(
         turn.endedAt = at;
         changed(at);
 
-        evict(agents, limits);
+        settle();
       },
+      retained: () => owner.turns.includes(turn),
     };
   }
 
@@ -469,46 +650,44 @@ export function createActivityHub(
           begin(agentId, requests, id ? { id, parent: null } : undefined),
       };
     },
+    /** One captain registration's crew turns, each under its member. */
+    crewRecorder: (ship: string) =>
+      crewRecorder(
+        ship,
+        ++recorders,
+        { owners, crews, uncollected },
+        (start, startedAt, evicted) =>
+          begin(crewSubject(ship, start.member), [], start.session, undefined, {
+            task: start.task,
+            startedAt,
+            evicted,
+          }),
+      ),
+    /** A ship's reporting crew members; undefined while not collected. */
+    crew(ship: string) {
+      return crews.get(ship);
+    },
+    /** A ship's known crew members whose turns are not collected. */
+    uncollected: (ship: string) => uncollected.get(ship),
+    /** Whether a subject retains any turn. */
+    retains(agentId: string) {
+      return (agents.get(agentId)?.turns.length ?? 0) > 0;
+    },
+    /** Subjects held: each has retained turns or a watcher. */
+    get subjects() {
+      return agents.size;
+    },
     hasTurn(agentId: string, turnId: string) {
       return (
         agents.get(agentId)?.turns.some((turn) => turn.id === turnId) ?? false
       );
     },
+    page: (agentId: string, turnId: string, itemId: string, page: number) =>
+      itemPage(agents.get(agentId), turnId, itemId, page),
     /** All retained turns, one by ID, or families matching an IRC request. */
-    turns(
-      agentId: string,
-      selector?: string | { msgid: string; channel: string | undefined },
-    ) {
+    turns(agentId: string, selector?: TurnSelector) {
       const owner = agents.get(agentId);
-
-      const retained = owner?.turns ?? [];
-      let selected = retained;
-
-      if (typeof selector === "string") {
-        selected = retained.filter((turn) => turn.id === selector);
-      } else if (selector !== undefined) {
-        const channelKey =
-          selector.channel === undefined
-            ? undefined
-            : foldActivityChannel(selector.channel);
-
-        const roots = new Set(
-          retained
-            .filter(
-              (turn) =>
-                turn.id === turn.root &&
-                turn.requests.some(
-                  ({ channel, msgid }) =>
-                    msgid === selector.msgid &&
-                    (channelKey === undefined ||
-                      foldActivityChannel(channel) === channelKey),
-                ),
-            )
-            .map((turn) => turn.id),
-        );
-
-        selected = retained.filter((turn) => roots.has(turn.root));
-      }
+      const selected = selectTurns(owner?.turns ?? [], selector);
 
       if (selector !== undefined && selected.length === 0) {
         return;
@@ -516,38 +695,8 @@ export function createActivityHub(
 
       return {
         turns: selected.map((turn) => turnJson(turn)),
-        cursor: { generation, seq: owner?.seq ?? 0 },
+        cursor: { generation, seq: owner?.seq ?? reclaimedSeq },
       };
-    },
-    page(
-      agentId: string,
-      turnId: string,
-      itemId: string,
-      page: number,
-    ): V1ActivityItemPage | undefined {
-      const turn = agents.get(agentId)?.turns.find(({ id }) => id === turnId);
-      const stored = turn?.items.get(itemId);
-
-      if (!stored) {
-        return;
-      }
-
-      const json = JSON.stringify(itemJson(stored));
-      const split = pages(json);
-      const data = split[page];
-
-      return data === undefined
-        ? undefined
-        : {
-            agent: agentId,
-            turn: turnId,
-            item: itemId,
-            seq: stored.seq,
-            page,
-            pages: split.length,
-            bytes: Buffer.byteLength(json),
-            data,
-          };
     },
   };
 }
@@ -595,21 +744,15 @@ export type ActivityRead =
   | { status: 400 | 404 }
   | { status: 200; body: V1AgentActivity | V1ActivityItemPage };
 
-/**
- * `GET /api/v1/agents/{id}/activity` with a turn/item/page or IRC request
- * selector. Every parameter is validated; unknown or repeated ones are rejected.
- */
-export function readActivity(
-  hub: ActivityHub,
-  config: ApiV1Config,
-  agentId: string,
-  query: URLSearchParams,
-): ActivityRead {
-  const values: Partial<Record<Parameter, string>> = {};
+type ActivityQuery = Partial<Record<Parameter, string>>;
+
+/** Every parameter is validated; unknown or repeated ones are rejected. */
+function activityQuery(query: URLSearchParams): ActivityQuery | undefined {
+  const values: ActivityQuery = {};
 
   for (const [key, value] of query) {
     if (!isParameter(key) || key in values || !parameters[key].test(value)) {
-      return { status: 400 };
+      return;
     }
 
     values[key] = value;
@@ -623,18 +766,22 @@ export function readActivity(
         Buffer.byteLength(values.channel) > 512)) ||
     (values.request !== undefined && values.turn !== undefined)
   ) {
-    return { status: 400 };
+    return;
   }
 
-  const agent = registration(config, agentId);
+  return values;
+}
 
-  if (!agent) {
-    return { status: 404 };
-  }
-
+/** One subject's snapshot, turn, request match or item page. */
+function readSubject(
+  hub: ActivityHub,
+  subject: string,
+  agent: V1AgentActivity["agent"],
+  values: ActivityQuery,
+): ActivityRead {
   if (values.turn !== undefined && values.item !== undefined) {
     const page = hub.page(
-      agentId,
+      subject,
       values.turn,
       values.item,
       Number(values.page ?? 0),
@@ -644,37 +791,136 @@ export function readActivity(
   }
 
   const snapshot = hub.turns(
-    agentId,
+    subject,
     values.request === undefined
       ? values.turn
       : { msgid: values.request, channel: values.channel },
   );
 
-  if (!snapshot) {
+  return snapshot
+    ? { status: 200, body: { agent, ...snapshot } }
+    : { status: 404 };
+}
+
+/**
+ * `GET /api/v1/agents/{id}/activity` with a turn/item/page or IRC request
+ * selector.
+ */
+export function readActivity(
+  hub: ActivityHub,
+  config: ApiV1Config,
+  agentId: string,
+  query: URLSearchParams,
+): ActivityRead {
+  const values = activityQuery(query);
+
+  if (!values) {
+    return { status: 400 };
+  }
+
+  const agent = registration(config, agentId);
+
+  if (!agent) {
     return { status: 404 };
   }
 
-  return {
-    status: 200,
-    body: {
-      agent: {
-        id: agentId,
-        role: agent.role,
-        backend: agent.backend,
-        collected: agent.backend === "opencode" || agent.backend === "claude",
-        ...(agent.backend === "claude" && {
-          unavailable: ["step.cost", "step.tokens.reasoning"],
-        }),
-      },
-      ...snapshot,
+  return readSubject(
+    hub,
+    agentId,
+    {
+      id: agentId,
+      role: agent.role,
+      backend: agent.backend,
+      collected: agent.backend === "opencode" || agent.backend === "claude",
+      ...(agent.backend === "claude" && {
+        unavailable: ["step.cost", "step.tokens.reasoning"],
+      }),
     },
-  };
+    values,
+  );
 }
 
-/** Distinct agents one event stream may follow. */
+const agentParameter = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+/**
+ * A crew member of a captain registration. While its crew plugin reports,
+ * `collected` follows the member's current configured backend: a configured
+ * OpenCode member is collected, with or without a peer session, and a member
+ * now on another backend, such as Pi, is not, though its retained turns stay
+ * readable. Only a member that is neither configured, a peer nor retained
+ * answers 404. Before the plugin answers, or for an older plugin, any member
+ * reads as not collected.
+ */
+function crewMember(
+  hub: ActivityHub,
+  config: ApiV1Config,
+  ship: string,
+  member: string,
+) {
+  const captain = registration(config, ship);
+  const roster = hub.crew(ship);
+
+  // A rear admiral has no crew of its own.
+  if (captain?.role !== "captain" || !agentParameter.test(member)) {
+    return;
+  }
+
+  if (!roster) {
+    return { captain, collected: false };
+  }
+
+  // The current configured backend wins over retained turns.
+  if (hub.uncollected(ship)?.has(member)) {
+    return { captain, collected: false };
+  }
+
+  return roster.has(member) || hub.retains(crewSubject(ship, member))
+    ? { captain, collected: true }
+    : undefined;
+}
+
+/**
+ * `GET /api/v1/ships/{ship}/crew/{member}/activity`: the officer route's
+ * parameters and errors, for one crew member's worker turns.
+ */
+export function readCrewActivity(
+  hub: ActivityHub,
+  config: ApiV1Config,
+  ship: string,
+  member: string,
+  query: URLSearchParams,
+): ActivityRead {
+  const values = activityQuery(query);
+
+  if (!values) {
+    return { status: 400 };
+  }
+
+  const crew = crewMember(hub, config, ship, member);
+
+  if (!crew) {
+    return { status: 404 };
+  }
+
+  return readSubject(
+    hub,
+    crewSubject(ship, member),
+    {
+      id: ship,
+      role: crew.captain.role,
+      backend: crew.captain.backend,
+      collected: crew.collected,
+      member,
+    },
+    values,
+  );
+}
+
+/** Distinct subjects, officers and crew members, one event stream may follow. */
 export const maxActivityAgents = 8;
 
-const agentParameter = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const crewParameter =
+  /^([a-z0-9][a-z0-9_-]{0,63})\/([a-z0-9][a-z0-9_-]{0,63})$/;
 
 type Watch = (send: (bytes: Uint8Array) => void) => () => void;
 
@@ -683,10 +929,11 @@ export type ActivitySubscribe =
   | { status: 200; watch: Watch };
 
 /**
- * `GET /api/v1/events?agent=<id>[&agent=<id>…][&turn=<id>]`. Checked before a
- * viewer place is taken: anything but distinct, well-formed `agent` values
- * (at most eight) and one `turn` with exactly one agent is 400; an agent that
- * is not a registration, or a turn it no longer has, is 404.
+ * `GET /api/v1/events?agent=<id>&crew=<ship>/<member>…[&turn=<id>]`. Checked
+ * before a viewer place is taken: anything but distinct, well-formed `agent`
+ * and `crew` values (at most eight together) and one `turn` with exactly one
+ * subject is 400; an agent that is not a registration, a crew member the
+ * route would not serve, or a turn its subject no longer has, is 404.
  */
 export function subscribeActivity(
   hub: ActivityHub,
@@ -694,16 +941,29 @@ export function subscribeActivity(
   query: URLSearchParams,
 ): ActivitySubscribe {
   const agents: string[] = [];
+  const crews: { ship: string; member: string }[] = [];
   let turn: string | undefined;
 
   for (const [key, value] of query) {
+    const crew = key === "crew" ? crewParameter.exec(value) : null;
+
+    const subject =
+      key === "agent" && agentParameter.test(value)
+        ? value
+        : crew?.[1] !== undefined && crew[2] !== undefined
+          ? crewSubject(crew[1], crew[2])
+          : undefined;
+
     if (
-      key === "agent" &&
-      agentParameter.test(value) &&
-      !agents.includes(value) &&
+      subject !== undefined &&
+      !agents.includes(subject) &&
       agents.length < maxActivityAgents
     ) {
-      agents.push(value);
+      agents.push(subject);
+
+      if (crew?.[1] !== undefined && crew[2] !== undefined) {
+        crews.push({ ship: crew[1], member: crew[2] });
+      }
     } else if (
       key === "turn" &&
       turn === undefined &&
@@ -722,7 +982,8 @@ export function subscribeActivity(
   }
 
   if (
-    agents.some((id) => !registration(config, id)) ||
+    agents.some((id) => !id.includes("/") && !registration(config, id)) ||
+    crews.some(({ ship, member }) => !crewMember(hub, config, ship, member)) ||
     (turn !== undefined && !hub.hasTurn(first, turn))
   ) {
     return { status: 404 };
@@ -759,6 +1020,8 @@ export function subscribeActivity(
 /** The Fleet API's view of the hub: snapshot reads and stream subscriptions. */
 export type ActivityApi = {
   read(agentId: string, query: URLSearchParams): ActivityRead;
+  /** Absent, the crew route answers 404. */
+  readCrew?(ship: string, member: string, query: URLSearchParams): ActivityRead;
   subscribe(query: URLSearchParams): ActivitySubscribe;
 };
 
@@ -768,6 +1031,8 @@ export function activityApi(
 ): ActivityApi {
   return {
     read: (agentId, query) => readActivity(hub, config(), agentId, query),
+    readCrew: (ship, member, query) =>
+      readCrewActivity(hub, config(), ship, member, query),
     subscribe: (query) => subscribeActivity(hub, config(), query),
   };
 }

@@ -43,15 +43,21 @@ async function running(
     crewStatus?: (id: string, signal: AbortSignal) => Promise<CrewStatus>;
     pinned?: readonly string[];
     closeBackend?: (id: string) => Promise<void>;
+    api?: boolean;
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "stargate-runtime-reload-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "stargate.json");
 
-  const reservation = options.crewStatus
-    ? Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() })
-    : undefined;
+  const reservation =
+    options.crewStatus || options.api
+      ? Bun.serve({
+          hostname: "127.0.0.1",
+          port: 0,
+          fetch: () => new Response(),
+        })
+      : undefined;
 
   const listen = reservation && `127.0.0.1:${reservation.port}`;
   await reservation?.stop(true);
@@ -116,6 +122,8 @@ async function running(
   const messages: string[] = [];
   const built: string[] = [];
   const closed: string[] = [];
+  /** Registrations given a crew turn recorder. */
+  const crewRecorders: string[] = [];
 
   const dependencies: RuntimeDependencies = {
     slack: (registration) =>
@@ -155,6 +163,11 @@ async function running(
       }
 
       built.push(id);
+
+      if (context.crewActivity) {
+        crewRecorders.push(id);
+      }
+
       const crewStatus = options.crewStatus;
 
       return {
@@ -219,6 +232,7 @@ async function running(
     messages,
     built,
     closed,
+    crewRecorders,
     write,
     writeEnvironment,
     accept,
@@ -751,5 +765,78 @@ test("reload retires every removed Fleet crew read before backend cleanup", asyn
     held.resolve(status);
     await reload;
     await response.catch(() => {});
+  }
+});
+
+test("only captains get a crew recorder, and a rejected staged addition is closed", async () => {
+  const server = new FakeIrcServer({
+    accounts: {
+      galactica: "captain-pass",
+      "galactica-chief": "chief-pass",
+      "galactica-deck": "deck-pass",
+    },
+  }).start();
+
+  cleanup.push(() => server.stop());
+
+  const registration = Schema.decodeUnknownSync(ircSchema)({
+    ...irc(server.port),
+    crew: [chief],
+  });
+
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+
+  const f = await running({
+    api: true,
+    irc: [registration],
+    environment: {
+      IRC_MAIN: "captain-pass",
+      IRC_CHIEF: "chief-pass",
+      IRC_DECK: "deck-pass",
+    },
+    async turn(id, signal) {
+      if (id === "fleet-chief") {
+        signal.addEventListener("abort", () => release.resolve(), {
+          once: true,
+        });
+        entered.resolve();
+        await release.promise;
+      }
+
+      return "Answer.";
+    },
+  });
+
+  await until(
+    () => server.members.get("#fleet")?.size === 2,
+    5000,
+    "crew joined",
+  );
+  server.say(
+    { nick: "jack", account: "jack" },
+    "#fleet",
+    "galactica-chief: inspect",
+  );
+  await entered.promise;
+
+  // Staged: deck is added while busy chief would be removed.
+  const deck = {
+    ...chief,
+    id: "deck",
+    account: "galactica-deck",
+    passwordEnv: "IRC_DECK",
+  };
+
+  await f.write({ ...f.config, irc: [{ ...registration, crew: [deck] }] });
+
+  try {
+    expect((await f.reload.request()).status).toBe("busy");
+    expect(f.built).toEqual(["helper", "fleet", "fleet-chief", "fleet-deck"]);
+    expect(f.closed).toEqual(["fleet-deck"]);
+    // Crew connections, staged or not, never collect a crew.
+    expect(f.crewRecorders).toEqual(["helper", "fleet"]);
+  } finally {
+    release.resolve();
   }
 });

@@ -23,7 +23,9 @@ import {
 } from "../src/coordination/crew/execution/engine";
 import {
   crewGitSchema,
+  crewTurnsSchema,
   fleetCrewStatusSchema,
+  settledTasksPerMember,
 } from "../src/coordination/crew/reporting/fleet-status";
 import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
 import { spawnGit } from "../src/coordination/crew/workspace/git-runner";
@@ -42,6 +44,7 @@ import { effectProjectKeySchema } from "../src/coordination/crew/protocol/projec
 import { CrewProjects } from "../src/coordination/crew/workspace/projects";
 import { teamSchema } from "../src/coordination/crew/team";
 import { crewStatusSchema } from "../src/shared/crew-status";
+import { MAX_CREW_CONTEXTS } from "../src/shared/session-history";
 import { CronStore } from "../src/automation/cron/store";
 import { dashboardSource } from "../src/observability/dashboard/dashboard-source";
 import { openStore } from "../src/app/open-store";
@@ -1489,3 +1492,136 @@ test("feedback persists redacted original and binds review to the ship across pr
     await f.close();
   }
 });
+
+/** Configuration only: the limits are checked before any path is opened. */
+function sized(crew: number, projects: number): CrewOptions {
+  const team = Schema.decodeUnknownSync(teamSchema)({
+    captain: { id: "captain", agent: "build", model: "fixture/captain" },
+    crew: Array.from({ length: crew }, (_, index) => ({
+      id: `worker${index + 1}`,
+      agent: `crew-worker${index + 1}`,
+      role: "Builder",
+      permissionProfile: "coding",
+      model: "fixture/worker",
+    })),
+  });
+
+  const worktrees = (project: string) =>
+    Object.fromEntries(
+      team.crew.map(({ id }) => [id, `/nonexistent/${project}/${id}`]),
+    );
+
+  return {
+    namespace: "limits",
+    stateDirectory: "/nonexistent/state",
+    captainDirectory: "/nonexistent/captain",
+    projectDirectory: "/nonexistent/default",
+    worktrees: worktrees("default"),
+    captainSessionID: "ses_captain",
+    team,
+    mesijCommand: "/not-executed",
+    ...(projects > 0 && {
+      projects: Object.fromEntries(
+        Array.from({ length: projects }, (_, index) => [
+          `p${index + 1}`,
+          {
+            projectDirectory: `/nonexistent/p${index + 1}`,
+            worktrees: worktrees(`p${index + 1}`),
+          },
+        ]),
+      ),
+    }),
+  };
+}
+
+/** The load error; a context never opens, so none is left running. */
+async function refusal(options: CrewOptions) {
+  return CrewProjects.open(options, async () => {
+    throw new Error("Never opened");
+  }).then(
+    () => "",
+    (reason: unknown) => (reason instanceof Error ? reason.message : ""),
+  );
+}
+
+test("a crew configuration over its limits is refused at load", async () => {
+  const contexts = /member contexts|times project contexts/;
+  const projects = /at most 8 additional crew projects/;
+
+  // At the limits: refused later, by the missing paths only.
+  expect(await refusal(sized(MAX_CREW_CONTEXTS, 0))).not.toMatch(contexts);
+  expect(await refusal(sized(10, 4))).not.toMatch(contexts);
+  expect(await refusal(sized(5, 8))).not.toMatch(projects);
+
+  // One over each limit.
+  expect(await refusal(sized(MAX_CREW_CONTEXTS + 1, 0))).toMatch(contexts);
+  expect(await refusal(sized(10, 4 + 1))).toMatch(contexts);
+  expect(await refusal(sized(11, 4))).toMatch(contexts);
+  expect(await refusal(sized(1, 8 + 1))).toMatch(projects);
+});
+
+/** Every member ready, running a task and holding its settled window. */
+function busy(engine: CrewEngine) {
+  const db = new Database(engine.state.path, { strict: true });
+
+  try {
+    for (const { id } of engine.options.team.crew) {
+      const { sessionID } = engine.state.reservePeer(id);
+      engine.state.readyPeer(id);
+
+      for (let index = 0; index <= settledTasksPerMember; index++) {
+        const status = index ? "completed" : "running";
+        const task = `${engine.options.namespace}-${id}-${index}`;
+        db.query(
+          `INSERT INTO tasks (id,crewID,workerSessionID,originCaptainID,inputID,status,released)
+          VALUES (?,?,?,?,?,?,?)`,
+        ).run(
+          task,
+          id,
+          sessionID,
+          "ses_captain",
+          `in-${task}`,
+          status,
+          index ? 1 : 0,
+        );
+      }
+    }
+  } finally {
+    db.close();
+  }
+}
+
+test.each([
+  ["default-only", MAX_CREW_CONTEXTS, 1],
+  ["multi-project", MAX_CREW_CONTEXTS / 2, 2],
+] as const)(
+  "a %s configuration at the member-context limit loads and reports whole",
+  async (layout, members, contexts) => {
+    const f = await fixture(members);
+    let projects: CrewProjects | undefined;
+
+    try {
+      const options = layout === "default-only" ? f.base : f.options;
+      projects = await CrewProjects.open(options, f.factory);
+      expect(projects.contexts.size).toBe(contexts);
+
+      for (const engine of projects.contexts.values()) {
+        busy(engine);
+      }
+
+      const report = Schema.decodeUnknownSync(crewTurnsSchema)(
+        Schema.encodeSync(crewTurnsSchema)(projects.crewTurns({})),
+      );
+
+      expect(report.members).toHaveLength(members);
+      expect(report.peers).toHaveLength(MAX_CREW_CONTEXTS);
+      expect(report.tasks).toHaveLength(
+        MAX_CREW_CONTEXTS * (settledTasksPerMember + 1),
+      );
+    } finally {
+      await projects?.close();
+      await f.close();
+    }
+  },
+  120_000,
+);

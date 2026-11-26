@@ -24,6 +24,9 @@ const directory = Schema.String.check(
   ),
 );
 
+/** Projects a crew configuration may add to its default context. */
+export const MAX_CREW_PROJECTS = 8;
+
 const projectRecordSchema = settingsRecord(
   effectProjectKeySchema,
   Schema.mutableKey(
@@ -35,7 +38,7 @@ const projectRecordSchema = settingsRecord(
 ).check(
   settingsCheck((projects, context) => {
     if (
-      Object.keys(projects).length > 8 ||
+      Object.keys(projects).length > MAX_CREW_PROJECTS ||
       Object.hasOwn(projects, "default")
     ) {
       context.addIssue({

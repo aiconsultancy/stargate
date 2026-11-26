@@ -418,6 +418,61 @@ export type TurnActivityRecorder = {
   ): TurnActivityLog;
 };
 
+/** The crew task whose input a worker turn answers. */
+export type CrewTurnTask = {
+  id: string;
+  inputId: string;
+  /** The crew project key; null for the captain's default project. */
+  project: string | null;
+};
+
+/** One crew worker turn's identity, fixed when it begins. */
+export type CrewTurnStart = {
+  member: string;
+  project: string | null;
+  session: {
+    id: string;
+    parent: { turnId: string; callId: string | null } | null;
+  };
+  /** Null outside a task, or until a slow task lookup attributes it. */
+  task: CrewTurnTask | null;
+};
+
+/** A crew turn's writer; the `TurnActivityLog` contract applies. */
+export type CrewTurnActivityLog = TurnActivityLog & {
+  /** A late task lookup attributed this turn to a task. */
+  attribute(task: CrewTurnTask): void;
+  /**
+   * False once the recorder no longer keeps the turn: the writer can drop it
+   * and ignore its later frames.
+   */
+  retained?(): boolean;
+};
+
+/** Collects crew worker turns for operator views; one per registration. */
+export type CrewTurnRecorder = {
+  /**
+   * `startedAt` is when its first frame was observed; now when absent.
+   * `evicted` is called once the recorder evicts the turn, on any path, so
+   * the writer can forget it at once.
+   */
+  begin(
+    turn: CrewTurnStart,
+    startedAt?: number,
+    evicted?: () => void,
+  ): CrewTurnActivityLog;
+  /**
+   * After each successful read, the crew members whose turns are collected
+   * (configured OpenCode members and current peers) and the known members
+   * that are not (Pi or other backends); undefined when the plugin is too
+   * old to report turns.
+   */
+  roster?(
+    members: readonly string[] | undefined,
+    uncollected?: readonly string[],
+  ): void;
+};
+
 export type BackendContext = {
   dataDirectory: string;
   workingAgreement?: {
@@ -426,4 +481,6 @@ export type BackendContext = {
   };
   /** Present when the Fleet API serves officer activity. */
   activity?: TurnActivityRecorder;
+  /** Present when the Fleet API serves crew activity. */
+  crewActivity?: CrewTurnRecorder;
 };

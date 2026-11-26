@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 import type { AgentBackend, BackendContext } from "./backend";
 import type { BackendConfig } from "./config";
 import { openCodeTurnObserver } from "./opencode/activity";
+import { crewActivityStarter } from "./opencode/crew-activity";
 import { OpenCodeBackend } from "./opencode/opencode";
 import { PiDurableBackend } from "./pi/pi-durable";
 
@@ -29,6 +30,7 @@ export async function createBackend(
         config,
         undefined,
         context.activity && openCodeTurnObserver(context.activity),
+        context.crewActivity && crewActivityStarter(context.crewActivity),
       );
     case "pi-durable":
       return PiDurableBackend.open(config, context);

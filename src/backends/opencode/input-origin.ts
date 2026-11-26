@@ -283,6 +283,24 @@ export async function inputOwnership(
     }
   }
 
+  const owner = await owningInput(client, sessionID, signal, assistant, input);
+
+  return owner === undefined ? undefined : owner.input === input;
+}
+
+/**
+ * The input that owns `assistant` (or, without one, the latest input), by
+ * transcript placement. Undefined when history cannot prove it yet: the
+ * assistant is not placed, or `before` is placed after it. `input` is
+ * undefined when the placement resolves to no input.
+ */
+export async function owningInput(
+  client: OpenCodeClient,
+  sessionID: string,
+  signal: AbortSignal,
+  assistant?: string,
+  before?: string,
+): Promise<{ input: string | undefined } | undefined> {
   const boundaries = new InputBoundaryReader(client, sessionID, signal);
   let found = assistant === undefined;
   let cursor: string | undefined;
@@ -299,7 +317,7 @@ export async function inputOwnership(
 
     for (const message of page.data) {
       if (!found) {
-        if (message.id === input) {
+        if (message.id === before) {
           return;
         }
 
@@ -315,7 +333,7 @@ export async function inputOwnership(
       if (chain.length > 0 && closesBoundaryContext(record)) {
         chain.push(record);
 
-        return resolveBoundaryContext(chain) === input;
+        return { input: resolveBoundaryContext(chain) };
       }
 
       if (record.input === undefined) {
@@ -323,7 +341,7 @@ export async function inputOwnership(
       }
 
       if (chain.length === 0 && record.type !== "synthetic") {
-        return record.input === input;
+        return { input: record.input };
       }
 
       chain.push(record);
@@ -340,5 +358,5 @@ export async function inputOwnership(
     }
   } while (cursor);
 
-  return found ? resolveBoundaryContext(chain) === input : undefined;
+  return found ? { input: resolveBoundaryContext(chain) } : undefined;
 }

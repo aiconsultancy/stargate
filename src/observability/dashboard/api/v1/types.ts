@@ -417,11 +417,11 @@ export type V1ActivityTurn = V1ActivityTurnSummary & {
 
 /** A turn without its items, as the `agent-activity` event carries it. */
 export type V1ActivityTurnSummary = {
-  /** SDK session and, for children, the parent turn and spawning call. */
-  session?: {
-    id: string;
-    parent: { turnId: string; callId: string | null } | null;
-  };
+  /**
+   * SDK session and, for children, the parent turn and spawning call; a
+   * crew turn's worker session, with `parent` null for its root.
+   */
+  session?: V1ActivityTurnSession;
   /** Stable and unique across gateway restarts. */
   id: string;
   /** The agent change sequence of the turn's latest change. */
@@ -438,6 +438,24 @@ export type V1ActivityTurnSummary = {
   reconnects: number;
   /** Null until a step settles. */
   usage: V1ActivityUsage | null;
+  /**
+   * Crew turns only: the task whose input this turn answers, matched by
+   * input ID; null for a turn outside any task (mail, notices, compaction).
+   */
+  task?: V1ActivityTurnTask | null;
+};
+
+export type V1ActivityTurnTask = {
+  id: string;
+  inputId: string;
+  /** The crew project key; null for the captain's default project. */
+  project: string | null;
+};
+
+export type V1ActivityTurnSession = {
+  id: string;
+  /** The turn and tool call that started this sub-session. */
+  parent: { turnId: string; callId: string | null } | null;
 };
 
 /** Changes up to `seq` are included. `generation` changes on restart. */
@@ -452,6 +470,8 @@ export type V1AgentActivity = {
     /** False when this gateway does not collect turns for the backend. */
     collected: boolean;
     unavailable?: string[];
+    /** Crew subjects only: the crew member ID under `id`'s captain. */
+    member?: string;
   };
   /** Oldest first; at most 16 recent root turns and their children. */
   turns: V1ActivityTurn[];
@@ -461,6 +481,8 @@ export type V1AgentActivity = {
 /** One page of one item's complete JSON, at most 64 KiB of UTF-8. */
 export type V1ActivityItemPage = {
   agent: string;
+  /** Crew subjects only. */
+  member?: string;
   turn: string;
   item: string;
   /** Pages of different `seq` values do not join; refetch from page 0. */
@@ -494,6 +516,11 @@ export type V1AgentActivityChange =
  */
 export type V1AgentActivityEvent = {
   agentId: string;
+  /**
+   * Crew subjects only: the crew member under captain `agentId`. Each member
+   * has its own `seq`; key cursors by `(agentId, member)`.
+   */
+  member?: string;
   turnId: string;
   generation: string;
   seq: number;

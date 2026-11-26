@@ -36,9 +36,13 @@ export type StoredTurn = {
   requests: ActivityRequest[];
   session?: V1ActivityTurn["session"];
   usage?: ActivityUsage;
+  /** Crew turns only. */
+  task?: V1ActivityTurnSummary["task"];
   items: Map<string, StoredItem>;
   /** Cached serialized size; a write invalidates it. */
   bytes?: number;
+  /** Told once the hub evicts the turn (crew turns only). */
+  evicted?: () => void;
 };
 
 export function itemJson(item: StoredItem): V1ActivityItem {
@@ -154,6 +158,7 @@ export function turnSummary(turn: StoredTurn): V1ActivityTurnSummary {
     requests: turn.requests.map((request) => ({ ...request })),
     ...(turn.session && { session: structuredClone(turn.session) }),
     usage: usage(turn),
+    ...(turn.task !== undefined && { task: structuredClone(turn.task) }),
   };
 }
 

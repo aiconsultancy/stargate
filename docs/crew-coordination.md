@@ -67,9 +67,15 @@ plugin, then add only their exact canonical paths to trusted plugin options:
 ```
 
 Include every configured crew member in each project's `worktrees` map. Keys
-are lowercase identifiers of at most48 characters, never paths; `default` and
-prototype-related keys are reserved. Up to eight additional contexts and fifty
-configured member contexts are accepted. The default repository must not be
+are lowercase identifiers of at most 48 characters, never paths; `default` and
+prototype-related keys are reserved. At most 8 additional projects and 50
+member contexts (configured crew members times project contexts, the default
+included) are accepted, with or without projects. Over either limit the plugin
+does not load, and says which: `Configure at most 8 additional crew projects.`
+or `Configured crew members times project contexts (11 × 5) exceed 50.` with
+its own counts. Crew history roots, crew Git state and the `crewTurns` report
+each hold one row per member context, so a configuration that loads always
+fits them. The default repository must not be
 duplicated under another key. All paths must exist, with distinct non-nested
 worker directories and no symbolic-link aliases. Each worker must have the same
 Git common directory as its configured project checkout; different project

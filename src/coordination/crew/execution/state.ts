@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { UpdateNotices } from "../../../automation/maintenance/update-notice";
 import { canExpandCrew } from "./identity";
 import { IrcSessions } from "../messaging/irc";
-import { MemberActivityStore } from "../reporting/member-activity";
+import {
+  CrewTurnStore,
+  MemberActivityStore,
+} from "../reporting/member-activity";
 import { MailRoutes } from "../messaging/messaging";
 import {
   CrewError,
@@ -81,6 +84,7 @@ export class CrewState {
   private readonly taskRecords: CrewTaskRecords;
   public readonly reporting: ReportingStore;
   public readonly activity: MemberActivityStore;
+  public readonly turns: CrewTurnStore;
   public readonly mailRoutes: MailRoutes;
   public readonly ircSessions: IrcSessions;
   private constructor(
@@ -93,6 +97,7 @@ export class CrewState {
     this.drainRecords = new CrewDrainRecords(db, this.updateNotices);
     this.reporting = new ReportingStore(db, (id) => this.captainRoute(id));
     this.activity = new MemberActivityStore(db);
+    this.turns = new CrewTurnStore(db);
     this.mailRoutes = new MailRoutes(db);
     this.ircSessions = new IrcSessions(db);
     this.taskRecords = new CrewTaskRecords(

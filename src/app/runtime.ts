@@ -322,15 +322,28 @@ function registrationBackends(
         (dependencies.irc ?? IrcShip.create)(irc, store, log, {
           subspaceUpload: bridged.upload,
         }),
+      /** Only a captain that is not a rear admiral collects its crew. */
       create: (
-        registration: { id: string; backend: BackendConfig },
+        registration: {
+          id: string;
+          backend: BackendConfig;
+          role?: "captain" | "crew";
+          fleetPolicy?: { role: string } | undefined;
+        },
         dataDirectory: string,
+        policy = registration.fleetPolicy,
       ) =>
         dependencies.backend(
           bridged.backend(registration.id, registration.backend),
           {
             dataDirectory,
-            ...(activity && { activity: activity.recorder(registration.id) }),
+            ...(activity && {
+              activity: activity.recorder(registration.id),
+              ...(registration.role !== "crew" &&
+                policy?.role !== "rear_admiral" && {
+                  crewActivity: activity.crewRecorder(registration.id),
+                }),
+            }),
           },
         ),
     })),
@@ -972,7 +985,7 @@ export function serve(
         await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
 
         const resource = ownedBackend(
-          await backends.create(registration, dataDirectory),
+          await backends.create(registration, dataDirectory, irc.fleetPolicy),
         );
 
         try {

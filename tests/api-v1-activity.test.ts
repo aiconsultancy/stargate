@@ -10,6 +10,7 @@ import { openCodeTurnObserver } from "../src/backends/opencode/activity";
 import { configSchema } from "../src/config";
 import {
   activityApi,
+  activityFlushMs,
   activityPageBytes,
   createActivityHub,
   readActivity,
@@ -536,7 +537,7 @@ test("a settled family over a global limit on its own goes first", () => {
 
 test.each([false, true])(
   "a late nested-task update counts toward family eviction (root settled: %s)",
-  (settled) => {
+  async (settled) => {
     const hub = createActivityHub({ bytes: 1000 });
     hub.recorder("captain").begin().end("completed");
     const root = hub.recorder("claude").begin(undefined, "root");
@@ -577,10 +578,14 @@ test.each([false, true])(
       },
     );
 
-    if (!settled) {
-      expect(snapshot(hub, "claude").turns[1]?.items[0]).toMatchObject({
-        metadata: { task: { description } },
-      });
+    expect(snapshot(hub, "claude").turns[1]?.items[0]).toMatchObject({
+      metadata: { task: { description } },
+    });
+
+    if (settled) {
+      // Retained until the late change's batch window measures it.
+      await wait(activityFlushMs * 2);
+    } else {
       root.end("completed");
     }
 
