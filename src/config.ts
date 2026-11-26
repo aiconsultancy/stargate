@@ -5,6 +5,7 @@ export { secret } from "./lib/credentials";
 export {
   agentDispatchDefaults,
   agentDispatchSchema,
+  agentDispatchActive,
   agentDispatchTarget,
   botSchema,
   claudeBackendSchema,

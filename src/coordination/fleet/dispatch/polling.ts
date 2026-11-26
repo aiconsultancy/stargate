@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import {
+  type DecisionOutcome,
   type DispatchApi,
   DispatchApiError,
   type DispatchIssue,
@@ -57,6 +58,12 @@ export interface DispatchMessenger {
     offer: { id: string; issue: IssueLabel; timeoutSeconds: number },
     signal: AbortSignal,
   ): Promise<{ messageID: string | undefined } | undefined>;
+  /** A fixed decision outcome sent privately to the recording captain. */
+  decisionOutcome?(
+    captain: CaptainRef,
+    outcome: DecisionOutcome,
+    signal: AbortSignal,
+  ): Promise<boolean>;
   /** A status line for people. Best effort; it never wakes an agent. */
   announce(event: DispatchEvent, signal: AbortSignal): Promise<void>;
 }
@@ -66,6 +73,8 @@ export type DispatchSettings = {
   fleet: string;
   pollIntervalMs: number;
   answerTimeoutMs: number;
+  decisionOutcomeDms?: boolean;
+  issueDispatch?: boolean;
   /** Waits between rounds; one more round than entries, then give up. */
   retryLadderMs: readonly number[];
   /** IRC (or other transport) account for an API agent name. */
@@ -93,7 +102,11 @@ export type AgentDispatcherOptions = {
 /** Fields added to a warning log line; never bodies or secrets. */
 type LogDetail = Readonly<Record<string, unknown>>;
 
-type Captain = CaptainRef & { available: boolean; reachable: boolean };
+type Captain = CaptainRef & {
+  available: boolean;
+  reachable: boolean;
+  registeredAccount?: string;
+};
 
 /** The fleet's captains, by user ID, and when the roster was read (ms). */
 type Roster = { captains: Map<string, Captain>; at: number };
@@ -134,6 +147,7 @@ export class DispatchPolling {
   private readySupported: boolean | undefined;
   /** Where the next poll goes on with a ready list longer than one poll reads. */
   private readyCursor: string | undefined;
+  private decisionOutcomeCursor: string | undefined;
   /**
    * The fleet's API ID once this process has confirmed that its credential
    * is that fleet's rear admiral. Nothing is written to the API before.
@@ -226,31 +240,109 @@ export class DispatchPolling {
 
     this.roster = this.captainsOf(roster, readAt);
 
-    try {
-      await this.pollAssigned(signal);
-      this.cleared("assigned");
-    } catch (error) {
-      signal.throwIfAborted();
-      this.apiFailed(
-        "assigned",
-        "Agent dispatch could not read assignments",
-        error,
-      );
+    if (this.settings.issueDispatch !== false) {
+      try {
+        await this.pollAssigned(signal);
+        this.cleared("assigned");
+      } catch (error) {
+        signal.throwIfAborted();
+        this.apiFailed(
+          "assigned",
+          "Agent dispatch could not read assignments",
+          error,
+        );
+      }
+
+      try {
+        await this.pollReady(signal);
+        this.cleared("ready");
+      } catch (error) {
+        signal.throwIfAborted();
+        this.apiFailed(
+          "ready",
+          "Agent dispatch could not read ready issues",
+          error,
+        );
+      }
     }
 
-    try {
-      await this.pollReady(signal);
-      this.cleared("ready");
-    } catch (error) {
-      signal.throwIfAborted();
-      this.apiFailed(
-        "ready",
-        "Agent dispatch could not read ready issues",
-        error,
-      );
+    if (this.settings.decisionOutcomeDms) {
+      try {
+        await this.pollDecisionOutcomes(roster.id, signal);
+        this.cleared("decision-outcomes");
+      } catch (error) {
+        signal.throwIfAborted();
+        this.decisionOutcomeCursor = undefined;
+        this.apiFailed(
+          "decision-outcomes",
+          "Agent dispatch could not deliver decision outcomes",
+          error,
+        );
+      }
     }
 
     this.options.ledger.prune(this.now());
+  }
+
+  private async pollDecisionOutcomes(fleetId: string, signal: AbortSignal) {
+    const { api, ledger, messenger } = this.options;
+
+    if (
+      !api.decisionOutcomes ||
+      !api.acknowledgeDecisionOutcome ||
+      !messenger.decisionOutcome
+    ) {
+      throw new Error("Decision outcome delivery is not available");
+    }
+
+    const page = await api.decisionOutcomes(
+      fleetId,
+      this.decisionOutcomeCursor,
+      signal,
+    );
+
+    let failed = false;
+
+    for (const outcome of page.items) {
+      try {
+        if (!ledger.decisionOutcomeSent(outcome.id)) {
+          const captain = this.roster?.captains.get(outcome.recordedByUserId);
+          const account = captain?.registeredAccount;
+
+          if (
+            !captain?.available ||
+            !account ||
+            !captain.reachable ||
+            !(
+              this.settings.sameAccount?.(account, captain.account) ??
+              account === captain.account
+            ) ||
+            !(await messenger.decisionOutcome(captain, outcome, signal))
+          ) {
+            continue;
+          }
+
+          ledger.recordDecisionOutcomeSent(outcome.id);
+        }
+
+        await api.acknowledgeDecisionOutcome(fleetId, outcome.id, signal);
+        ledger.clearDecisionOutcomeSent(outcome.id);
+      } catch (error) {
+        signal.throwIfAborted();
+        failed = true;
+        this.apiFailed(
+          "decision-outcome-send",
+          "Agent dispatch will retry a decision outcome",
+          error,
+        );
+      }
+    }
+
+    if (!failed) {
+      this.cleared("decision-outcome-send");
+    }
+
+    this.decisionOutcomeCursor = page.next;
   }
 
   /** Captains are the roster's agents of rank captain, with their chat accounts. */
@@ -279,6 +371,7 @@ export class DispatchPolling {
         account,
         available: agent.available,
         reachable,
+        ...(agent.ircNick && { registeredAccount: agent.ircNick }),
       });
     }
 

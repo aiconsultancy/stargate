@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino, { type Logger } from "pino";
 import {
+  type DecisionOutcome,
   type DispatchApi,
   type DispatchIdentity,
   type DispatchIssue,
@@ -114,6 +115,26 @@ export class FakeApi implements DispatchApi {
   comments: { issue: string; body: string }[] = [];
   edits: { issue: string; body: object }[] = [];
   calls: string[] = [];
+  pendingOutcomes = new Map<string, DecisionOutcome>();
+  acknowledgedOutcomes: string[] = [];
+  failOutcomeAcknowledgementFor?: string;
+
+  async decisionOutcomes(fleetId: string) {
+    this.calls.push(`decision outcomes ${fleetId}`);
+
+    return { items: [...this.pendingOutcomes.values()], next: undefined };
+  }
+
+  async acknowledgeDecisionOutcome(fleetId: string, id: string) {
+    this.calls.push(`ack outcome ${fleetId}`);
+
+    if (id === this.failOutcomeAcknowledgementFor) {
+      throw new Error("Subspace temporarily unavailable");
+    }
+
+    this.pendingOutcomes.delete(id);
+    this.acknowledgedOutcomes.push(id);
+  }
   agents = [
     {
       userId: REAR_ADMIRAL,
@@ -121,8 +142,20 @@ export class FakeApi implements DispatchApi {
       rank: "rearAdmiral",
       available: true,
     },
-    { userId: CAPTAIN_A, name: "captain-a", rank: "captain", available: true },
-    { userId: CAPTAIN_B, name: "captain-b", rank: "captain", available: true },
+    {
+      userId: CAPTAIN_A,
+      name: "captain-a",
+      rank: "captain",
+      available: true,
+      ircNick: "example-captain-a",
+    },
+    {
+      userId: CAPTAIN_B,
+      name: "captain-b",
+      rank: "captain",
+      available: true,
+      ircNick: "example-captain-b",
+    },
     { userId: CAPTAIN_C, name: "captain-c", rank: "captain", available: true },
     { userId: CREW_A, name: "crew-a", rank: "crew", available: true },
   ];
@@ -402,6 +435,21 @@ export type Line =
 export class FakeChat implements DispatchMessenger {
   lines: Line[] = [];
   offline = new Set<string>();
+  decisionDms: { account: string; identifier: string; status: string }[] = [];
+
+  async decisionOutcome(captain: CaptainRef, outcome: DecisionOutcome) {
+    if (this.offline.has(captain.account)) {
+      return false;
+    }
+
+    this.decisionDms.push({
+      account: captain.account,
+      identifier: outcome.identifier,
+      status: outcome.status,
+    });
+
+    return true;
+  }
   /** Our own chat connection is down: every send throws. */
   down = false;
   /** Identifiers this transport can never carry, and each refused request. */
@@ -798,6 +846,7 @@ export async function tempDirectory() {
 
 export type FixtureOptions = {
   ladder?: number[];
+  decisionOutcomeDms?: boolean;
   enrolled?: string[];
   path?: string;
   /** Use the real HTTP client over `FakeSubspaceHttp` instead of `FakeApi`. */
@@ -840,6 +889,7 @@ export async function fixture(options: FixtureOptions = {}) {
         fleet: "example-fleet",
         pollIntervalMs: 2 * MINUTE,
         answerTimeoutMs: 5 * MINUTE,
+        decisionOutcomeDms: options.decisionOutcomeDms ?? false,
         retryLadderMs: options.ladder ?? [HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR],
         captainAccount: (name) => `example-${name}`,
         enrolled: (account) => enrolled.has(account),
