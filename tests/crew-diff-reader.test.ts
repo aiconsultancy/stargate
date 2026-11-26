@@ -1332,6 +1332,50 @@ test("an untracked path deleted just before git add is computed again", async ()
   expect(stale).toEqual({ kind: "stale", fingerprint: expect.any(String) });
 });
 
+// Root reads a file of any mode.
+test.skipIf(process.getuid?.() === 0)(
+  "an untracked file that becomes unreadable after its check is computed again without bytes",
+  async () => {
+    const directory = await checkout();
+    const locked = join(directory, "locked");
+    await writeFile(locked, "secret\n");
+    await writeFile(join(directory, "other"), "ok\n");
+
+    for (const request of [
+      { kind: "list", start: 0 },
+      { kind: "patch", path: "other", offset: 0 },
+    ] as const) {
+      await chmod(locked, 0o644);
+      let adds = 0;
+
+      // Readable when checked, then not before Git reads it: chmod moves no
+      // Fingerprint, so only a second check of each file finds it.
+      const result = await beforeAdd(async () => {
+        if (adds++ === 0) {
+          await chmod(locked, 0o000);
+        }
+      })(directory, input(request), signal);
+
+      expect(adds).toBe(2);
+      expect(result).toMatchObject(
+        request.kind === "list"
+          ? {
+              kind: "list",
+              unstable: false,
+              files: [
+                { path: "locked", untracked: true, patch: null },
+                { path: "other", patch: "@@ -0,0 +1 @@\n+ok\n" },
+              ],
+            }
+          : {
+              kind: "patch",
+              file: { path: "other", patch: "@@ -0,0 +1 @@\n+ok\n" },
+            },
+      );
+    }
+  },
+);
+
 test("git add failing on an unchanged checkout is still a failure", async () => {
   const directory = await checkout();
   await writeFile(join(directory, "new"), "new\n");

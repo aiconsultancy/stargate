@@ -267,6 +267,17 @@ class IntentFailed extends Error {
   }
 }
 
+/**
+ * An untracked file Git could read when indexed became unreadable before
+ * `git diff` read it. The fingerprint does not see a mode change, so the
+ * diff is computed once more without it.
+ */
+class AccessLost extends Error {
+  public constructor() {
+    super("Untracked file became unreadable");
+  }
+}
+
 /** Untracked files Git can read, in batches like the fingerprint's. */
 async function readable(directory: string, untracked: Snapshot["untracked"]) {
   const files = [...untracked].flatMap(([bytes, { nested }]) =>
@@ -349,6 +360,7 @@ async function intentIndex(
 
   const unindexed = (indexed: Set<string>) => ({
     env,
+    files,
     unindexed: refused(untracked, indexed, checkout.format),
   });
 
@@ -510,9 +522,9 @@ async function diffPass<T>(
     const worktree = mode !== "committed";
     const old = mode === "working" ? (head ?? empty) : (base?.commit ?? empty);
 
-    const { env, unindexed } = worktree
+    const { env, files, unindexed } = worktree
       ? await intentIndex(directory, checkout, stream, state.untracked)
-      : { env: {}, unindexed: [] };
+      : { env: {}, files: new Set<string>(), unindexed: [] };
 
     // Git's entries, then the untracked paths outside its index.
     const all = (entries: DiffEntry[]): PassEntry[] => [
@@ -559,7 +571,11 @@ async function diffPass<T>(
     );
 
     if (!parser.done && code !== 0) {
-      throw new Error(gitUnavailable);
+      const now = await readable(directory, state.untracked);
+
+      throw [...files].some((bytes) => !now.has(bytes))
+        ? new AccessLost()
+        : new Error(gitUnavailable);
     }
 
     parser.end();
@@ -914,11 +930,13 @@ export function createCheckoutDiffReader(
 
       // A file that shrank while read, or one gone before the intent-to-add
       // Step, is a change like any other: the next snapshot shows it.
+      // One that became unreadable moves no fingerprint, yet is computed again.
       const result = await computeDiff(git, directory, input, state).catch(
         (error: unknown) => {
           if (
             error instanceof WorktreeChanged ||
-            error instanceof IntentFailed
+            error instanceof IntentFailed ||
+            error instanceof AccessLost
           ) {
             return error;
           }
@@ -934,7 +952,9 @@ export function createCheckoutDiffReader(
           throw result;
         }
 
-        if (!(result instanceof WorktreeChanged)) {
+        if (
+          !(result instanceof WorktreeChanged || result instanceof AccessLost)
+        ) {
           return result;
         }
       }
