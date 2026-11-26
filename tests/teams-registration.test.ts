@@ -804,8 +804,8 @@ describe("Opt-in Teams native permission decisions", () => {
   });
 });
 
-test("live Teams presence anchors an informative stage and closes it with the original reply", async () => {
-  const f = registrationFixture({ presence: true });
+test("Teams presence defaults on and closes the informative stage with the original reply", async () => {
+  const f = registrationFixture();
 
   try {
     const job = await f.running();
@@ -1128,4 +1128,119 @@ describe("Teams waiting phrases", () => {
       await f.close();
     }
   });
+});
+
+test("Teams can disable incoming screenshots while preserving text messages", async () => {
+  const f = registrationFixture({ incomingImages: false });
+
+  try {
+    const attachments = [
+      {
+        contentType: "image/png",
+        contentUrl: SERVICE_URL + "v3/attachments/test-image/views/original",
+      },
+    ];
+
+    expect(
+      await f.registration.accept(activity({ text: "", attachments })),
+    ).toBe(false);
+    expect(
+      await f.registration.accept(
+        activity({ text: "Please review", attachments }),
+      ),
+    ).toBe(true);
+    const jobs = f.store.ready(f.registration.key, Date.now(), 10);
+    expect(jobs).toHaveLength(1);
+    const job = jobs[0];
+
+    if (!job) {
+      throw new Error("text message was lost");
+    }
+
+    expect(f.store.attachmentRecords.inputFiles(job.id)).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("pasted screenshots are durable inputs even when the personal message has no text", async () => {
+  const f = registrationFixture();
+
+  try {
+    const url = SERVICE_URL + "v3/attachments/test-image/views/original";
+
+    const message = activity({
+      text: "",
+      attachments: [
+        { contentType: "image/*", contentUrl: url },
+        { contentType: "text/html" },
+      ],
+    });
+
+    const bad = {
+      ...message,
+      id: "invalid-image",
+      attachments: [
+        {
+          contentType: "image/png",
+          contentUrl: "https://example.org/image.png",
+        },
+      ],
+    };
+
+    expect(
+      await f.registration.accept({
+        ...bad,
+        conversation: {
+          ...message.conversation,
+          conversationType: "groupChat",
+        },
+        entities: [],
+      }),
+    ).toBe(false);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(await f.registration.accept(bad)).toBe(true);
+    }
+
+    const failed = f.store.ready(f.registration.key, Date.now(), 10);
+    expect(failed).toHaveLength(1);
+    const rejected = failed[0];
+
+    if (!rejected) {
+      throw new Error("invalid image turn was lost");
+    }
+
+    expect(f.store.attachmentRecords.inputFiles(rejected.id)).toEqual([
+      "teams:image-unavailable",
+    ]);
+    expect(
+      await f.registration.accept({
+        ...message,
+        conversation: { ...message.conversation, id: "image-chat" },
+      }),
+    ).toBe(true);
+
+    const job = f.store
+      .ready(f.registration.key, Date.now(), 10)
+      .find((row) => row.channel === "image-chat");
+
+    if (!job) {
+      throw new Error("image-only turn was lost");
+    }
+
+    expect(f.store.attachmentRecords.inputFiles(job.id)).toEqual([url]);
+    expect(
+      await f.registration.accept({
+        ...message,
+        id: "denied",
+        from: {
+          id: "29:unauthorised",
+          aadObjectId: "00000000-0000-4000-8000-000000000000",
+        },
+      }),
+    ).toBe(false);
+  } finally {
+    await f.close();
+  }
 });

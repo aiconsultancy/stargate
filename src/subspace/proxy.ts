@@ -48,6 +48,8 @@ const returnedResponseHeaders = [
 
 const methods = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
 const maxRequestBytes = 8 * 1024 * 1024;
+const maxChatUploadBytes = 10 * 1024 * 1024;
+const maxChatUploadRequestBytes = 4 * Math.ceil(maxChatUploadBytes / 3) + 4096;
 const maxResponseBytes = 64 * 1024 * 1024;
 const maxConcurrent = 32;
 const warningIntervalMs = 60_000;
@@ -102,22 +104,42 @@ function refuse(response: ServerResponse, status: number, message: string) {
 
 class TooLarge extends Error {}
 
-async function requestBody(request: IncomingMessage) {
+async function requestBody(request: IncomingMessage, chatUpload: boolean) {
   const chunks: Buffer[] = [];
   let size = 0;
+
+  const limit = chatUpload ? maxChatUploadRequestBytes : maxRequestBytes;
 
   for await (const chunk of request) {
     const buffer = chunk as Buffer;
     size += buffer.length;
 
-    if (size > maxRequestBytes) {
+    if (size > limit) {
       throw new TooLarge();
     }
 
     chunks.push(buffer);
   }
 
-  return Buffer.concat(chunks);
+  const body = Buffer.concat(chunks);
+
+  if (chatUpload && size > maxRequestBytes) {
+    const payload: unknown = JSON.parse(body.toString("utf8"));
+
+    const base64 =
+      payload !== null && typeof payload === "object" && "base64" in payload
+        ? payload.base64
+        : undefined;
+
+    if (
+      typeof base64 !== "string" ||
+      Buffer.byteLength(base64, "base64") > maxChatUploadBytes
+    ) {
+      throw new TooLarge();
+    }
+  }
+
+  return body;
 }
 
 export type OfficerProxyOptions = {
@@ -234,7 +256,10 @@ export class OfficerProxy {
       body =
         method === "GET" || method === "HEAD"
           ? undefined
-          : await requestBody(request);
+          : await requestBody(
+              request,
+              method === "POST" && path === "/api/v1/chat/uploads",
+            );
     } catch (error) {
       refuse(
         response,

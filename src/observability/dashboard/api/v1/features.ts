@@ -407,7 +407,7 @@ export async function registrationFeatures(
       flag(
         "teams.livePresence",
         "Teams typing and progress",
-        config.livePresence === true,
+        config.livePresence !== false,
       ),
       flag(
         "teams.approvals",

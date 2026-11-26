@@ -102,6 +102,7 @@ export function registrationFixture(
     approvals?: boolean;
     fleet?: boolean;
     presence?: boolean;
+    incomingImages?: boolean;
     agent?: string;
     displayName?: string;
   } = {},
@@ -112,7 +113,10 @@ export function registrationFixture(
 
   const config = Schema.decodeUnknownSync(teamsSchema)({
     id: "test-admiral",
-    livePresence: options.presence === true,
+    ...(options.presence !== undefined && { livePresence: options.presence }),
+    ...(options.incomingImages !== undefined && {
+      incomingImages: options.incomingImages,
+    }),
     botClientId: APP_ID,
     tenantId: TENANT_ID,
     socketPath: join(directory, "bridge.sock"),

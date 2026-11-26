@@ -85,6 +85,61 @@ it reports an unavailable or unconfirmed attachment rather than completing again
 or posting a replacement. This is not exactly-once delivery. Text and file
 delivery are separate; a visible text reply is not proof its files were shared.
 
+## Giving officers a file tool
+
+A captain or another officer can prepare files without a shell using the optional
+Bun TypeScript stdio MCP server on Linux or macOS. Register it in each officer's agent profile and grant
+that officer the `prepare_file` tool. Give each officer their own staging and
+export directories. The gateway needs read access to the export directory.
+For example, use this command array in an OpenCode local MCP registration:
+
+```json
+[
+  "bun",
+  "--config=/dev/null",
+  "--no-env-file",
+  "--no-install",
+  "/srv/stargate/scripts/officer-files.ts",
+  "--staging",
+  "/srv/officers/captain/outbox",
+  "--exports",
+  "/srv/exports/captain",
+  "--socket",
+  "/run/stargate/subspace/captain/api.sock"
+]
+```
+
+Install Bun and the reviewed Stargate dependencies, including Effect, before
+registering this command. Replace existing registrations of `officer_files.py`
+with the Bun command and restart the affected officer engine. Keep the prior
+profile and source together if you need to revert. Use
+`--config=/dev/null --no-env-file --no-install` in the registered Bun command.
+
+Use `--rest` for a signing socket that fronts the Subspace REST API, or use
+`--rest --endpoint URL --actor OFFICER` for the installer-controlled local
+agent listener. Point the endpoint only at that listener. Use `--legacy-upload`
+only for an existing IRC `upload_file` registration.
+
+The socket supplies the officer's own Subspace identity. Installations with an
+authenticated loopback MCP relay can use `--port PORT --actor OFFICER` instead.
+Use a plain filename and an allowed extension. Each file must contain 1 byte to 10 MiB. New text accepts up to 65,536 UTF-8 bytes. A staged file must be owned by the officer, have one hard link and be writable only by its owner. Both directories must be canonical absolute paths. Create the export directory
+setgid and grant its group to the intended gateway. Apply a retention policy to
+prepared exports after the outbox has completed delivery.
+
+| Source                    | Tool arguments                        | Result                                                                                                    |
+| ------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Issue image or document   | `source: "issue"`, `issue`, `mediaId` | Verifies the listed attachment belongs to this issue and retrieves its bytes with the officer's identity. |
+| Local image or document   | `source: "staged"`, `fileName`        | Reads one regular file by name from the officer's staging directory.                                      |
+| New text, Markdown or CSV | `source: "text"`, `fileName`, `text`  | Writes the supplied UTF-8 text. Use only the file name and text for this source.                          |
+
+To send a file another officer has already shared, use `source: "upload"` with its `reference`. The tool retrieves the original through the receiving officer's existing access and checks its size and SHA-256.
+
+Use the returned marker in the intended reply for Slack, IRC FILEHOST or an inline
+image preview in Teams (PNG, JPEG, WebP or GIF input up to 10 MiB). To share a supported document or image with Subspace desktop
+users over IRC, pass a fresh `chatUploadId` UUID and post the returned reference.
+This creates a 30-day copy readable by active Subspace members. Reuse the UUID
+if delivery is uncertain. To share both ways, prepare a marker for Teams and call again with the upload UUID for IRC. CSV and PPTX can be staged locally. The IRC chat upload accepts neither type.
+
 ## Setup and existing requests
 
 The generated manifest includes `files:read` and `files:write`. Existing apps
@@ -97,3 +152,31 @@ Existing completed requests are not replayed or bulk-exported. A historical proo
 file can be published in a new, explicitly requested reply to its proven source.
 Existing custom agent definitions are not overwritten by installation. Add the
 publication rule to their referenced instructions when updating an existing team.
+
+### Sending a Markdown document preview to Teams
+
+When the officer profile selects an offline browser, call `prepare_file` with
+`preview: "teams"` and the original file source. It accepts an issue attachment,
+an existing upload, an outbox file, or new text. The file must be Markdown or
+plain text. The returned marker points to a labelled PNG preview. Include it
+and the original file name in the Teams reply. The renderer accepts up to 32,000 UTF-8 bytes,
+produces an indexed PNG up to 22,000 bytes and supports pages 1 through 100.
+If the tool reports several
+pages, set `page` on subsequent calls. Do not supply a chat upload ID for a
+preview.
+
+To enable this tool, pass `--playwright` with the absolute path to the
+operator-installed Playwright module in the officer's MCP command. Use
+`--chromium` for a reviewed Chromium executable or `--browser-cache` for a
+reviewed Playwright browser cache. Chromium runs with its sandbox enabled.
+
+For a local shell workflow, the same renderer reads Markdown or plain text on stdin:
+
+```sh
+bun --config=/dev/null --no-env-file --no-install scripts/markdown-preview.ts \
+  --playwright /srv/browser-tools/node_modules/playwright/index.mjs \
+  --name notes.md --output /srv/officers/captain/outbox/notes-preview.png < notes.md
+```
+
+Use `--chromium` when the installation selects a specific reviewed executable.
+Prepare the resulting PNG from staging to get its publication marker.

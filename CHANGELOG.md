@@ -2,7 +2,16 @@
 
 ## Unreleased
 
+The shared officer file, repository refresh and GitHub tools run on Bun. Update
+existing file registrations to `scripts/officer-files.ts` after installing the
+reviewed Stargate dependencies. See [attachments](docs/attachments.md).
+
 ### Feature flags
+
+- Default change: Teams registrations enable `livePresence` by default. Set it to
+  `false` to disable typing and work-in-progress updates.
+- Teams registrations accept incoming screenshots by default. Set
+  `incomingImages: false` to turn off their download.
 
 - New flags: `usageGuard.enabled`, default off. OpenCode captain peer DMs require the fleet plugin option `peerMessages` (default off) and an explicit gateway grant.
 - Default changes: the `stargate.crew` plugin's `feedbackEnabled` option changes
@@ -101,6 +110,11 @@
   the pending batch evicted against the turns as they were, so a late change
   that takes one family over the budget no longer evicts an older one that
   fits.
+
+- Teams sends pasted screenshots to the model. The gateway accepts PNG, JPEG, GIF
+  and WebP sources up to 10 MiB and prepares inline image previews for replies.
+- Officers can prepare issue attachments, existing chat uploads, staged files
+  and new text documents with the optional file publishing tool.
 
 - Attach Subspace chat uploads to admitted IRC requests through the addressed
   officer's existing signing proxy. This uses `subspaceAgents` and adds no flag.

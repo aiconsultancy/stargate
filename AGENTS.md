@@ -89,6 +89,8 @@ comments. LF and CRLF count equally, and a final newline adds no line. See
 
 ## Engineering
 
+- Write all new Stargate implementation, helper scripts and their fixtures in TypeScript for Bun.
+
 - Use strict TypeScript and Effect Schema at input boundaries. The Zod
   migration is complete (`docs/effect-schema-migration.md`); do not import `zod`
   or its subpaths in first-party code or tests. The `no-restricted-imports` lint

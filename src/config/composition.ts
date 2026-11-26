@@ -618,6 +618,7 @@ function subspaceAgentsIssues(
 /** Bot Framework transport: exact sender IDs, no credential values in config. */
 export const teamsSchema = settingsStruct({
   livePresence: Schema.optional(Schema.Boolean),
+  incomingImages: Schema.optional(Schema.Boolean),
   id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
   displayName: Schema.optional(
     Schema.String.check(Schema.isMinCodePoints(1)).check(

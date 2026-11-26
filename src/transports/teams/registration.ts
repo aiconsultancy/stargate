@@ -1,3 +1,4 @@
+import { downloadImages, incomingImageRefs } from "./inbound-images";
 import { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync } from "node:fs";
@@ -77,6 +78,14 @@ export const activitySchema = Schema.Struct({
       tenant: Schema.optional(Schema.Struct({ id: settingsUUID })),
       channel: Schema.optional(Schema.Struct({ id: Schema.String })),
     }),
+  ),
+  attachments: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        contentType: Schema.optional(Schema.String),
+        contentUrl: Schema.optional(Schema.String),
+      }),
+    ),
   ),
   text: Schema.String.check(Schema.isMaxCodePoints(40_000)).pipe(
     settingsDefault(""),
@@ -160,7 +169,8 @@ export class TeamsRegistration {
   public readonly transport: GatewayTransport;
   public readonly delivery: TransportDelivery;
   private readonly db: Database;
-  private readonly connector: Pick<ConnectorClient, "sendToConversation">;
+  private readonly connector: Pick<ConnectorClient, "sendToConversation"> &
+    Partial<Pick<ConnectorClient, "fetchImage">>;
   private server: Server | undefined;
   private socketIdentity: SocketIdentity | undefined;
   private readonly abort = new AbortController();
@@ -171,7 +181,8 @@ export class TeamsRegistration {
     private readonly store: Store,
     private readonly backend: AgentBackend,
     private readonly log: (message: string) => void,
-    connector?: Pick<ConnectorClient, "sendToConversation">,
+    connector?: Pick<ConnectorClient, "sendToConversation"> &
+      Partial<Pick<ConnectorClient, "fetchImage">>,
   ) {
     this.key = JSON.stringify([
       "teams",
@@ -206,7 +217,10 @@ export class TeamsRegistration {
           clientId: config.botClientId,
         }),
       });
-    const presence = config.livePresence ? new TeamsPresence() : undefined;
+
+    const presence =
+      config.livePresence !== false ? new TeamsPresence() : undefined;
+
     this.transport = {
       ...(presence && {
         turnStatus: (job) =>
@@ -316,6 +330,29 @@ export class TeamsRegistration {
             },
           );
         },
+        async (refs, channel, stop) => {
+          const ref = this.reference(channel);
+
+          if (
+            !ref ||
+            !this.allowed(ref.user, channel) ||
+            !this.connector.fetchImage
+          ) {
+            throw new Error("Teams image unavailable");
+          }
+
+          const fetchImage = this.connector.fetchImage.bind(this.connector);
+
+          const signal = AbortSignal.any([
+            stop,
+            this.abort.signal,
+            AbortSignal.timeout(30_000),
+          ]);
+
+          return downloadImages(ref.service, refs, signal, (url, active) =>
+            fetchImage(ref.service, url, active),
+          );
+        },
       ),
       post: async (channel, thread, text, _stop, unit) => {
         if (unit?.allowed && !(await unit.allowed())) {
@@ -412,6 +449,23 @@ export class TeamsRegistration {
     const user = activity.from.aadObjectId?.toLowerCase() ?? "";
     const conversation = activity.conversation.id;
 
+    const files =
+      this.config.incomingImages === false
+        ? []
+        : incomingImageRefs(activity.serviceUrl, activity.attachments);
+
+    if (
+      files.length > 0 &&
+      activity.conversation.conversationType !== "personal" &&
+      !activity.entities?.some(
+        (entity) =>
+          entity.type === "mention" &&
+          entity.mentioned?.id === activity.recipient.id,
+      )
+    ) {
+      return false;
+    }
+
     const text = extractText({
       text: activity.text,
       recipient: { id: activity.recipient.id },
@@ -422,7 +476,7 @@ export class TeamsRegistration {
       })),
     });
 
-    if (!text) {
+    if (!text && files.length === 0) {
       return false;
     }
 
@@ -470,13 +524,14 @@ export class TeamsRegistration {
       conversation: JSON.stringify([this.key, conversation]),
       channel: conversation,
       thread: activity.id,
-      ...(this.config.livePresence && {
+      ...(this.config.livePresence !== false && {
         received: activity.timestamp
           ? Date.parse(activity.timestamp)
           : Date.now(),
       }),
       user,
-      text,
+      text: text || "Inspect the attached screenshot.",
+      files,
     });
 
     return true;

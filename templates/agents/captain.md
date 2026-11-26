@@ -219,3 +219,13 @@ blocker and what you already tried. Do not repeat completed external actions.
 
 Additional captain instructions:
 {{instructions}}
+
+## File and repository tools
+
+If your profile exposes `prepare_file`, use it for issue
+attachments, existing uploads or a file in your configured outbox. For Markdown
+and plain text in Teams, request `preview: teams` and post the returned marker
+with the original file name.
+
+Use the installed GitHub officer tool with the configured repository key.
+Confirm the PR head and required reviews before asking to merge.

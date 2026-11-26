@@ -1,3 +1,8 @@
+import { ConnectorClient } from "../src/transports/teams/connector";
+import {
+  downloadImages,
+  incomingImageRefs,
+} from "../src/transports/teams/inbound-images";
 import { expect, test } from "bun:test";
 import { crc32, deflateSync } from "node:zlib";
 import type { Attachment } from "../src/chat/attachments/attachments";
@@ -20,12 +25,12 @@ function chunk(type: string, content: Buffer): Buffer {
   return Buffer.concat([header, content, crc]);
 }
 
-function png(width = 1, height = 1, padding = 0): Buffer {
+function png(width = 1, height = 1, padding = 0, alpha = false): Buffer {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width);
   header.writeUInt32BE(height, 4);
   header[8] = 8;
-  header[9] = 2;
+  header[9] = alpha ? 6 : 2;
 
   const parts = [
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
@@ -45,7 +50,9 @@ function png(width = 1, height = 1, padding = 0): Buffer {
     chunk(
       "IDAT",
       deflateSync(
-        Buffer.alloc((Math.max(width, 1) * 3 + 1) * Math.max(height, 1)),
+        Buffer.alloc(
+          (Math.max(width, 1) * (alpha ? 4 : 3) + 1) * Math.max(height, 1),
+        ),
       ),
     ),
     chunk("IEND", Buffer.alloc(0)),
@@ -234,7 +241,7 @@ test("image upload is pure encoding; publication retains the exact bound channel
   expect(sends.at(-1)?.activity.attachments?.[0]?.name).toBe("screenshot.jpg");
 });
 
-test("image upload rejects MIME mismatch, unsupported bytes and encoded activity overflow", async () => {
+test("image upload rejects mismatched or unsupported bytes and fits large screenshots", async () => {
   let sends = 0;
 
   const adapter = teamsImageTransport(async () => {
@@ -245,9 +252,21 @@ test("image upload rejects MIME mismatch, unsupported bytes and encoded activity
     file(png(), "image/jpeg"),
     file(JPEG, "image/png"),
     file(Buffer.from("<svg></svg>"), "image/svg+xml"),
-    file(png(1, 1, 31_000)),
+    file(png(4097, 1)),
   ]) {
     await expect(adapter.upload(attachment, signal())).rejects.toThrow();
+  }
+
+  for (const image of [png(1, 1, 31_000), png(1920, 1080)]) {
+    const preview = await adapter.upload(file(image), signal());
+    expect(preview.startsWith("data:image/jpeg;base64,")).toBe(true);
+
+    const decoded = inspectScreenshot(
+      Buffer.from(preview.slice(preview.indexOf(",") + 1), "base64"),
+    );
+
+    expect(decoded.width).toBeLessThanOrEqual(1024);
+    expect(decoded.bytes.length).toBeLessThanOrEqual(22_000);
   }
 
   expect(sends).toBe(0);
@@ -311,4 +330,178 @@ test("abort/access revocation prevent publication and provider failures expose n
     adapter.link("channel", "thread", receipt, "caption", signal()),
   ).rejects.toThrow("unconfirmed");
   expect(sends).toBe(1);
+});
+
+test("10 MiB sources and supported image types produce bounded still previews", async () => {
+  const adapter = teamsImageTransport(async () => {});
+
+  const gif = Buffer.from(
+    "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
+    "base64",
+  );
+
+  const source = png(4096, 48);
+  const webp = Buffer.from(await new Bun.Image(source).webp().bytes());
+  const jpeg = Buffer.from(await new Bun.Image(source).jpeg().bytes());
+  const padding = 10 * 1024 * 1024 - png(1, 1, 1).length + 1;
+  const exact = png(1, 1, padding);
+  expect(exact.length).toBe(10 * 1024 * 1024);
+
+  for (const attachment of [
+    file(webp, "image/webp"),
+    file(png(1100, 4, 0, true)),
+    file(gif, "image/gif"),
+    file(jpeg, "image/jpeg"),
+    file(exact),
+  ]) {
+    const receipt = await adapter.upload(attachment, signal());
+    expect(receipt.startsWith("data:image/jpeg;base64,")).toBe(true);
+
+    const image = inspectScreenshot(
+      Buffer.from(receipt.slice(receipt.indexOf(",") + 1), "base64"),
+    );
+
+    expect(image.bytes.length).toBeLessThanOrEqual(22_000);
+  }
+
+  await expect(
+    adapter.upload(file(Buffer.concat([exact, Buffer.alloc(1)])), signal()),
+  ).rejects.toThrow("10 MiB");
+  const animatedHeader = Buffer.alloc(30);
+  animatedHeader.write("WEBPVP8X", 8);
+  animatedHeader[20] = 2;
+  await expect(
+    adapter.upload(file(animatedHeader, "image/webp"), signal()),
+  ).rejects.toThrow("Animated WebP");
+  await expect(
+    adapter.upload(file(webp, "image/gif"), signal()),
+  ).rejects.toThrow("MIME");
+});
+
+test("a busy native decoder can retry its local upload", async () => {
+  const adapter = teamsImageTransport(async () => {});
+  const input = file(png(2048, 48));
+  const first = adapter.upload(input, signal());
+  const second = adapter.upload(input, signal());
+  await expect(adapter.upload(input, signal())).rejects.toThrow(
+    "Upload refused",
+  );
+  await Promise.all([first, second]);
+  expect(await adapter.upload(input, signal())).toStartWith("data:image/jpeg;");
+});
+
+test("Teams downloads an admitted Connector image once with its own token and bounded content", async () => {
+  const service = "https://smba.trafficmanager.net/emea/";
+  const view = service + "v3/attachments/abc/views/original";
+  let tokens = 0;
+  let requests = 0;
+  const bytes = new Uint8Array(png(8, 5));
+
+  const request = async (input: RequestInfo | URL, options?: RequestInit) => {
+    expect(String(input)).toBe(view);
+    expect(new Headers(options?.headers).get("authorization")).toBe(
+      "Bearer test-token",
+    );
+    expect(options?.redirect).toBe("error");
+    requests++;
+
+    return new Response(bytes, { headers: { "content-type": "image/png" } });
+  };
+
+  const client = new ConnectorClient({
+    tokenProvider: {
+      invalidate() {},
+      async getToken() {
+        tokens++;
+
+        return "test-token";
+      },
+    },
+    fetch: Object.assign(request, { preconnect: fetch.preconnect }),
+  });
+
+  const load = (url: string, stop: AbortSignal) =>
+    client.fetchImage(service, url, stop);
+
+  const files = await downloadImages(service, [view], signal(), load);
+  expect(files[0]?.mime).toBe("image/png");
+  expect(Array.from(files[0]?.data ?? [])).toEqual(Array.from(bytes));
+
+  for (const bad of [
+    view + "?secret=1",
+    view.replace("emea", "amer"),
+    view.replace("smba.trafficmanager.net", "example.org"),
+    view.replace("abc", ".."),
+  ]) {
+    expect(
+      incomingImageRefs(service, [
+        { contentType: "image/png", contentUrl: bad },
+      ]),
+    ).toEqual(["teams:image-unavailable"]);
+    await expect(client.fetchImage(service, bad, signal())).rejects.toThrow();
+  }
+
+  expect(tokens).toBe(1);
+  expect(requests).toBe(1);
+  await expect(
+    downloadImages(
+      service,
+      [view],
+      signal(),
+      async () =>
+        new Response("no", {
+          headers: { "content-length": String(10 * 1024 * 1024 + 1) },
+        }),
+    ),
+  ).rejects.toThrow();
+  await expect(
+    downloadImages(
+      service,
+      [view],
+      signal(),
+      async () =>
+        new Response(bytes, { headers: { "content-type": "image/webp" } }),
+    ),
+  ).rejects.toThrow("mismatch");
+  await expect(
+    downloadImages(
+      service,
+      [view],
+      signal(),
+      async () => new Response("denied", { status: 403 }),
+    ),
+  ).rejects.toThrow();
+});
+
+test("Teams invalidates the image token once when the Connector rejects it", async () => {
+  const service = "https://smba.trafficmanager.net/emea/";
+  const view = service + "v3/attachments/fixture/views/original";
+  const headers: string[] = [];
+  let generation = 0;
+
+  const connector = new ConnectorClient({
+    tokenProvider: {
+      invalidate() {
+        generation++;
+      },
+      async getToken() {
+        return "fixture-" + generation;
+      },
+    },
+    fetch: Object.assign(
+      async (_target: RequestInfo | URL, options?: RequestInit) => {
+        headers.push(new Headers(options?.headers).get("authorization") ?? "");
+
+        return new Response(headers.length === 1 ? "expired" : "image", {
+          status: headers.length === 1 ? 401 : 200,
+        });
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  });
+
+  expect((await connector.fetchImage(service, view, signal())).status).toBe(
+    200,
+  );
+  expect(headers).toEqual(["Bearer fixture-0", "Bearer fixture-1"]);
 });

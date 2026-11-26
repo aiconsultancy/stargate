@@ -1,11 +1,15 @@
 // Image framing and bounds adapted from Starfleet Teams. File access remains
 // In Stargate's existing prepared-attachment boundary; this module never reads
-// Paths, fetches URLs or invokes an image decoder.
+// Paths or fetches URLs. Oversize static images are decoded within a pixel limit.
+import { crc32 } from "node:zlib";
 import type {
   AttachmentTransport,
   LinkTransport,
 } from "../../chat/attachments/attachment-delivery";
-import type { Attachment } from "../../chat/attachments/attachments";
+import {
+  type Attachment,
+  UploadRefused,
+} from "../../chat/attachments/attachments";
 import type { OutgoingActivity } from "./connector";
 import { TEAMS_SAFE_MESSAGE_BYTES } from "./teams";
 
@@ -23,34 +27,15 @@ export type Screenshot = {
   height: number;
 };
 
-function dimensions(width: number, height: number): void {
-  if (
-    !width ||
-    !height ||
-    width > MAX_IMAGE_DIMENSION ||
-    height > MAX_IMAGE_DIMENSION
-  ) {
+function dimensions(width: number, height: number, limit: number): void {
+  if (!width || !height || width > limit || height > limit) {
     throw new Error(
-      `screenshot dimensions must be between 1 and ${MAX_IMAGE_DIMENSION} pixels in each direction`,
+      `screenshot dimensions must be between 1 and ${limit} pixels in each direction`,
     );
   }
 }
 
-function crc32(bytes: Buffer): number {
-  let crc = 0xff_ff_ff_ff;
-
-  for (const byte of bytes) {
-    crc ^= byte;
-
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xed_b8_83_20 : 0);
-    }
-  }
-
-  return (crc ^ 0xff_ff_ff_ff) >>> 0;
-}
-
-function png(bytes: Buffer): Omit<Screenshot, "bytes"> {
+function png(bytes: Buffer, limit: number): Omit<Screenshot, "bytes"> {
   let offset = 8;
   let width = 0;
   let height = 0;
@@ -83,7 +68,7 @@ function png(bytes: Buffer): Omit<Screenshot, "bytes"> {
 
       width = bytes.readUInt32BE(offset + 8);
       height = bytes.readUInt32BE(offset + 12);
-      dimensions(width, height);
+      dimensions(width, height, limit);
 
       const depths: Record<number, number[]> = {
         0: [1, 2, 4, 8, 16],
@@ -127,7 +112,7 @@ function png(bytes: Buffer): Omit<Screenshot, "bytes"> {
   throw new Error("PNG screenshot is truncated");
 }
 
-function jpeg(bytes: Buffer): Omit<Screenshot, "bytes"> {
+function jpeg(bytes: Buffer, limit: number): Omit<Screenshot, "bytes"> {
   let offset = 2;
   let width = 0;
   let height = 0;
@@ -197,7 +182,7 @@ function jpeg(bytes: Buffer): Omit<Screenshot, "bytes"> {
 
       height = bytes.readUInt16BE(offset + 3);
       width = bytes.readUInt16BE(offset + 5);
-      dimensions(width, height);
+      dimensions(width, height, limit);
     } else if (
       marker >= 0xc0 &&
       marker <= 0xcf &&
@@ -228,24 +213,124 @@ function jpeg(bytes: Buffer): Omit<Screenshot, "bytes"> {
   throw new Error("JPEG screenshot is truncated");
 }
 
-export function inspectScreenshot(bytes: Buffer): Screenshot {
-  if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) {
+export function inspectScreenshot(
+  bytes: Buffer,
+  maxDimension = MAX_IMAGE_DIMENSION,
+  maxBytes = MAX_IMAGE_BYTES,
+): Screenshot {
+  if (bytes.length === 0 || bytes.length > maxBytes) {
     throw new Error(
-      `screenshot must contain at most ${MAX_IMAGE_BYTES} bytes. ${SMALLER_IMAGE_HINT}`,
+      `screenshot must contain at most ${maxBytes} bytes. ${SMALLER_IMAGE_HINT}`,
     );
   }
 
   if (
     bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
   ) {
-    return { bytes, ...png(bytes) };
+    return { bytes, ...png(bytes, maxDimension) };
   }
 
   if (bytes[0] === 0xff && bytes[1] === 0xd8) {
-    return { bytes, ...jpeg(bytes) };
+    return { bytes, ...jpeg(bytes, maxDimension) };
   }
 
   throw new Error("screenshot must have a PNG or JPEG signature");
+}
+
+const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
+const MAX_SOURCE_EDGE = 4096;
+const MAX_PREVIEW_BYTES = 22_000;
+let activePreviews = 0;
+
+/** Validate original PNG/JPEG framing before allowing pass-through. Other formats always become still previews. */
+async function inlineScreenshot(
+  file: Attachment,
+  signal: AbortSignal,
+): Promise<Screenshot> {
+  signal.throwIfAborted();
+
+  if (!file.data.byteLength || file.data.byteLength > MAX_SOURCE_BYTES) {
+    throw new Error("Teams screenshot source must contain 1 byte to 10 MiB");
+  }
+
+  const bytes = Buffer.from(
+    file.data.buffer,
+    file.data.byteOffset,
+    file.data.byteLength,
+  );
+
+  if (file.mime === "image/png" || file.mime === "image/jpeg") {
+    const original = inspectScreenshot(
+      bytes,
+      MAX_SOURCE_EDGE,
+      MAX_SOURCE_BYTES,
+    );
+
+    if (original.contentType !== file.mime) {
+      throw new Error("Teams screenshot MIME mismatch");
+    }
+
+    if (
+      original.width <= MAX_IMAGE_DIMENSION &&
+      original.height <= MAX_IMAGE_DIMENSION &&
+      bytes.length <= MAX_PREVIEW_BYTES
+    ) {
+      return original;
+    }
+  } else if (file.mime !== "image/webp" && file.mime !== "image/gif") {
+    throw new Error("Teams screenshots support PNG, JPEG, WebP and GIF");
+  }
+
+  // The WebP extended header reserves bit 1 for animation.
+  if (
+    file.mime === "image/webp" &&
+    bytes.length >= 30 &&
+    bytes.toString("ascii", 8, 16) === "WEBPVP8X" &&
+    ((bytes[20] ?? 0) & 2) !== 0
+  ) {
+    throw new Error("Animated WebP screenshots are not supported");
+  }
+
+  // Cap native decoder memory across registrations in this gateway process.
+  if (activePreviews >= 2) {
+    throw new UploadRefused();
+  }
+
+  activePreviews++;
+
+  try {
+    const source = new Bun.Image(bytes, { maxPixels: MAX_SOURCE_EDGE ** 2 });
+    const info = await source.metadata();
+
+    if (`image/${info.format}` !== file.mime) {
+      throw new Error("Teams screenshot MIME mismatch");
+    }
+
+    dimensions(info.width, info.height, MAX_SOURCE_EDGE);
+    let image = source;
+
+    for (const edge of [1024, 768, 512, 384, 256]) {
+      signal.throwIfAborted();
+
+      const preview = await image
+        .resize(edge, edge, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 74 })
+        .bytes();
+
+      signal.throwIfAborted();
+
+      if (preview.byteLength <= MAX_PREVIEW_BYTES) {
+        return inspectScreenshot(Buffer.from(preview));
+      }
+
+      // Only the first pass decodes the full-size source.
+      image = new Bun.Image(preview, { maxPixels: MAX_IMAGE_DIMENSION ** 2 });
+    }
+
+    throw new Error(SMALLER_IMAGE_HINT);
+  } finally {
+    activePreviews--;
+  }
 }
 
 /** Count the final JSON, including reply metadata, in UTF-8 and UTF-16. */
@@ -334,30 +419,22 @@ export type SendTeamsImage = (
  */
 export function teamsImageTransport(
   send: SendTeamsImage,
+  download?: AttachmentTransport["download"],
 ): AttachmentTransport & LinkTransport & { publishOnce: true } {
   return {
     publishOnce: true,
-    async download(_ids, _channel, signal) {
+    async download(ids, channel, signal) {
+      if (download) {
+        return download(ids, channel, signal);
+      }
+
       signal.throwIfAborted();
       throw new Error("Teams inbound attachment downloads are not supported");
     },
     async upload(file: Attachment, signal) {
       signal.throwIfAborted();
 
-      if (file.data.byteLength > MAX_IMAGE_BYTES) {
-        throw new Error(
-          `screenshot must contain at most ${MAX_IMAGE_BYTES} bytes. ${SMALLER_IMAGE_HINT}`,
-        );
-      }
-
-      const image = inspectScreenshot(Buffer.from(file.data));
-
-      if (file.mime !== image.contentType) {
-        throw new Error(
-          "Teams screenshot MIME does not match its PNG or JPEG bytes",
-        );
-      }
-
+      const image = await inlineScreenshot(file, signal);
       const activity = screenshotActivity(image);
       const receipt = activity.attachments?.[0]?.contentUrl;
 

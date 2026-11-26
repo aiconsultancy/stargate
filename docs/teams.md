@@ -153,15 +153,15 @@ repository or credential directory. Stargate's prepared-file checks validate the
 path and file identity before reading the bytes; the Teams image adapter reads
 no filesystem paths itself.
 
-Teams supports bounded inline PNG and JPEG screenshots here. The adapter checks
-signatures, framing, PNG chunk checksums and dimensions, rejects animation and
-unsupported types, and accepts at most 1,000,000 input bytes and 1024 pixels in
-each direction. The complete encoded activity, including base64, caption and
-reply metadata, must fit the 80 KB Teams safety budget in both UTF-8 and UTF-16.
-This often requires a smaller JPEG or a crop. Images are never truncated or
+Teams accepts PNG, JPEG, WebP and GIF sources up to 10 MiB. PNG and JPEG images up to 22,000 bytes and 1024 pixels per edge retain their original encoding.
+For other supported images Stargate prepares a still JPEG preview, preserving the aspect
+ratio. Source images can be up to 10 MiB and 4096 pixels per edge. The preview
+is at most 1024 pixels per edge and 22,000 bytes. Stargate checks the full activity,
+including its caption and reply metadata, against the Teams 80 KB budget.
+The gateway can reduce the longest edge to 256 pixels to fit the preview byte limit. Up to two native decoders run at once. GIF previews show the first frame. Animated PNG and animated WebP are refused. JPEG previews flatten transparency. A busy decoder can retry before publication.
+Images are never truncated or
 silently replaced by their captions. No arbitrary image URLs are fetched, and
-no extra public file endpoint is needed. Incoming attachment downloads remain
-unsupported.
+no extra public file endpoint is needed. Paste a screenshot into a Teams message for the officer to inspect. The registration option `incomingImages: false` disables incoming screenshot downloads. In groups and channels, mention the bot. Stargate downloads only inline image attachments from the authenticated Bot Connector for the admitted turn. PNG, JPEG, WebP and GIF can be up to 10 MiB each, 25 MiB total, and 4096 pixels per edge. HTML image sources and links to files in Microsoft 365 are separate from inline images.
 
 The local encoded receipt stays in private delivery state. Publication uses the
 original authenticated conversation and reply activity with a fresh access
@@ -209,8 +209,8 @@ repeating the assignment.
 
 ## Typing and progress
 
-Set `livePresence: true` on a Teams registration to show typing and short
-status updates for a recent human request. The update is anchored to that
+Teams registrations show typing and short status updates for a recent human
+request by default. Set `livePresence: false` on a registration to disable them. The update is anchored to that
 message. OpenCode reasoning, tool and reply events select fixed labels such as
 “Thinking”, “Using a tool” and “Writing a reply”. The first text reply for that request closes
 the stream.
@@ -226,4 +226,4 @@ and “Connection interrupted”, stays as it is. `waiting.delayMs: null` keeps
 the generic labels. A captain's waiting override applies as it does in Slack,
 and is read when the turn starts. Image-only replies use normal attachment delivery. Feedback stops
 when the turn ends or after ten minutes. Where informative updates are unavailable, Teams receives a typing
-activity while the turn runs. This option defaults to off.
+activity while the turn runs.
