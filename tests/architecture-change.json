@@ -1,4 +1,4 @@
 {
-  "baselineSha256": "99b1081e979bf9b8351b8d9686826a06b7cfaa8863ec7701a7ce9e40ea922dcf",
+  "baselineSha256": "e771ccca7002cff40332c740550963729ec40d6300ef5e62d5e5dc01241707aa",
   "closureAdditions": ["src/coordination/crew/workspace/diff-output.ts"]
 }
