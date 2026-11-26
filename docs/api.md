@@ -407,9 +407,11 @@ files and changes without hunks, such as a pure rename. Renames are found
 with Git's default similarity; a change of file type is one `modified`
 entry. A symbolic link is shown as its link text, never its target's
 content. A submodule shows its commit change and has no content. An
-untracked path that Git will not index, such as an empty nested repository
-(listed as a `submodule`) or a file under `.GIT/`, is still listed: `added`
-and `untracked`, with zero line counts, no patch and no content.
+untracked nested repository, with or without commits, is listed as a
+`submodule`: `added` and `untracked`, with zero line counts, no patch and no
+content. It is never indexed and Git never runs inside it, on every Git
+version. An untracked path that Git will not index, such as a file under
+`.GIT/`, is listed the same way, without `kind`.
 
 Paging limits:
 

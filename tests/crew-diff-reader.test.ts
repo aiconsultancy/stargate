@@ -503,28 +503,58 @@ test("a type change is one modified entry", async () => {
   );
 });
 
-test("an untracked embedded repository is an added submodule with no bytes", async () => {
+test("an untracked nested repository is a submodule with no bytes, never in Git's index", async () => {
   const directory = await checkout();
   const inner = join(directory, "inner");
   await mkdir(inner);
   await git(inner, "init", "--quiet");
   await git(inner, "commit", "--quiet", "--allow-empty", "-m", "inner");
+  await mkdir(join(directory, "empty"));
+  await git(join(directory, "empty"), "init", "--quiet");
+  await writeFile(join(directory, "file"), "file\n");
+  const pathspecs: string[] = [];
 
-  const result = await listed(directory);
-  expect(result.files).toEqual([
+  // Whatever Git would do with a nested repository, it is never asked.
+  const result = await beforeAdd(async (paths) => {
+    pathspecs.push(String(paths));
+  })(directory, input({ kind: "list", start: 0 }), signal);
+
+  expect(pathspecs).toEqual(["file\0"]);
+
+  const added = {
+    previousPath: null,
+    status: "added",
+    deletions: 0,
+    untracked: true,
+  } as const;
+
+  const nested = (path: string) =>
+    ({ ...added, path, additions: 0, patch: null, kind: "submodule" }) as const;
+
+  expect(result.kind === "list" && result.files).toEqual([
+    nested("empty"),
     {
-      path: "inner",
-      previousPath: null,
-      status: "added",
+      ...added,
+      path: "file",
       additions: 1,
-      deletions: 0,
-      untracked: true,
-      patch: expect.stringContaining("+Subproject commit "),
-      kind: "submodule",
+      patch: "@@ -0,0 +1 @@\n+file\n",
+      size: 5,
     },
+    nested("inner"),
   ]);
-  expect((await content(directory, "inner")).kind).toBe("absent");
-  expect(await patch(directory, "inner")).toMatchObject({ kind: "patch" });
+
+  for (const mode of ["branch", "working"] as const) {
+    expect(
+      (await content(directory, "inner", undefined, 0, { mode })).kind,
+    ).toBe("absent");
+    expect(
+      await readDiff(
+        directory,
+        input({ kind: "patch", path: "inner", offset: 0 }, { mode }),
+        signal,
+      ),
+    ).toMatchObject({ kind: "patch", file: nested("inner") });
+  }
 });
 
 test("an untracked path Git will not index is listed without bytes; the rest keep patches", async () => {
@@ -918,8 +948,14 @@ test("untracked names that are not UTF-8 are each listed with a patch", async ()
   ]);
 });
 
-/** A reader whose `git add` first runs `before`, and may answer `code`. */
-function beforeAdd(before: () => Promise<void>, code?: number) {
+/**
+ * A reader whose intent-to-add step first runs `before` with its pathspec,
+ * and may answer `code`.
+ */
+function beforeAdd(
+  before: (paths: string | Buffer | undefined) => Promise<void>,
+  code?: number,
+) {
   return createCheckoutDiffReader((at, reading) => {
     const live = checkoutGit(at, reading);
 
@@ -935,7 +971,7 @@ function beforeAdd(before: () => Promise<void>, code?: number) {
               return stream(args, env, onData, input);
             }
 
-            await before();
+            await before(input);
 
             return code ?? stream(args, env, onData, input);
           }),

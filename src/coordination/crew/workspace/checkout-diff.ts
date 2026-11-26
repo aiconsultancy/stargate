@@ -55,7 +55,7 @@ type Snapshot = {
   untrackedPaths: Set<string>;
 };
 
-/** A Git diff entry, or an untracked path Git would not index. */
+/** A Git diff entry, or an untracked path Git is not asked to index. */
 type PassEntry = DiffEntry & { unindexed?: true };
 
 /**
@@ -273,7 +273,11 @@ class IntentFailed extends Error {
   }
 }
 
-/** Index a copy of the checkout's index with untracked paths as intent-to-add. */
+/**
+ * Index a copy of the checkout's index with untracked files as intent-to-add.
+ * A nested repository never reaches Git: some versions index it as a gitlink
+ * that `git diff` then cannot read, and Git never runs inside it.
+ */
 async function intentIndex(
   checkout: IsolatedCheckout,
   stream: IsolatedStream,
@@ -320,15 +324,24 @@ async function intentIndex(
     GIT_ALTERNATE_OBJECT_DIRECTORIES: checkout.objects,
   };
 
-  // Status's own bytes: a path need not be valid UTF-8.
-  const paths = Buffer.from(
-    [...untracked.keys()].map((path) => `${path}\0`).join(""),
-    "latin1",
+  const files = new Set(
+    [...untracked].flatMap(([bytes, { nested }]) => (nested ? [] : [bytes])),
   );
 
-  if (paths.length === 0) {
-    return { env, unindexed: [] };
+  const unindexed = (indexed: Set<string>) => ({
+    env,
+    unindexed: refused(untracked, indexed, checkout.format),
+  });
+
+  if (files.size === 0) {
+    return unindexed(files);
   }
+
+  // Status's own bytes: a path need not be valid UTF-8.
+  const paths = Buffer.from(
+    [...files].map((path) => `${path}\0`).join(""),
+    "latin1",
+  );
 
   const add = checkout.command([
     "-c",
@@ -349,7 +362,7 @@ async function intentIndex(
   );
 
   if (code === 0) {
-    return { env, unindexed: [] };
+    return unindexed(files);
   }
 
   // 128 indexed nothing; the caller's next snapshot tells whether it moved.
@@ -357,8 +370,8 @@ async function intentIndex(
     throw new IntentFailed();
   }
 
-  // 1 means Git refused some paths, such as an empty nested repository or
-  // `.GIT/…`, and indexed the rest; anything else indexed nothing.
+  // 1 means Git refused some paths, such as `.GIT/…`, and indexed the rest;
+  // Anything else indexed nothing.
   if (code !== 1) {
     throw new Error("Untracked files unavailable");
   }
@@ -376,7 +389,7 @@ async function intentIndex(
       const path = rest.subarray(0, nul).toString("latin1");
       rest = rest.subarray(nul + 1);
 
-      if (untracked.has(path)) {
+      if (files.has(path)) {
         indexed.add(path);
       }
     }
@@ -388,12 +401,13 @@ async function intentIndex(
     throw new Error("Untracked files unavailable");
   }
 
-  return { env, unindexed: refused(untracked, indexed, checkout.format) };
+  return unindexed(indexed);
 }
 
 /**
- * Untracked paths Git refused to index, listed all the same with neither
- * patch nor content: nothing status shows is left out (SUB-70).
+ * Untracked paths outside Git's index: nested repositories, and files Git
+ * refused. Each is listed all the same, with neither patch nor content:
+ * nothing status shows is left out (SUB-70).
  */
 function refused(
   untracked: Snapshot["untracked"],
@@ -403,7 +417,7 @@ function refused(
   const none = "0".repeat(format === "sha256" ? 64 : 40);
 
   return [...untracked].flatMap(([bytes, { path, nested }]): PassEntry[] =>
-    indexed.has(bytes)
+    !nested && indexed.has(bytes)
       ? []
       : [
           {
@@ -472,7 +486,7 @@ async function diffPass<T>(
       ? await intentIndex(checkout, stream, state.untracked)
       : { env: {}, unindexed: [] };
 
-    // Git's entries, then any untracked path it would not index.
+    // Git's entries, then the untracked paths outside its index.
     const all = (entries: DiffEntry[]): PassEntry[] => [
       ...entries,
       ...unindexed,
