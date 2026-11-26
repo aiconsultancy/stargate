@@ -468,10 +468,10 @@ and creating the private temporary directory with `mkdtemp`.
 officer to everything the [event stream](#events) sends. Repeat `agent` for
 up to eight distinct officers. `turn=<id>` with exactly one `agent` follows
 the whole family for a root ID, or only the selected turn for a child ID.
-A root's stream also follows any child admitted unlinked after that family
-was evicted, with that child's own family and, transitively, children
-admitted unlinked from it in turn, for as long as the gateway keeps them:
-their events still carry their own root and `session.parent: null`.
+While a root's watch stays open, it also follows children admitted unlinked
+after that family was evicted, including their families and further unlinked
+descendants. An unlinked child's events still carry its own root and
+`session.parent: null`.
 The snapshot's `turn` and `item` selectors still address exact IDs. With
 either stream parameter present, the query is checked before the stream
 takes one of the eight viewer places: an unknown, repeated or malformed
