@@ -388,15 +388,16 @@ which may be shared with the root. Child turns carry `session.parent` with
 the spawning `turnId` and `callId`, and are linked only when the call was
 observed during the same query. The SDK can send complete blocks instead of
 partial deltas for children. A resumed subagent run gets its own child turn.
-If the previous run did not have a known outcome, its child ends as
-`cancelled` with `lost: true`: observation ended, but the SDK did not confirm
-a stop. Task status and progress are on the spawning tool's `metadata.task`;
-the prompt and description carry forward unless replaced. Only subagents
-become child turns; background shells, monitors and workflows stay on the
-tool. If a background task outlives the query, the spawning tool has
-`unavailable: ["after-turn"]`. In that case, the child's `cancelled` status
-also means observation ended, not that the SDK confirmed a cancellation.
-This route does not follow task output files or reconstruct missed frames.
+For a superseded run or a background child that outlives the query,
+`cancelled` with `lost: true` means observation ended without a confirmed
+native outcome. A foreground tool result can confirm the child's outcome;
+a background tool result only acknowledges the launch. Task status and
+progress are on the spawning tool's `metadata.task`; the prompt and
+description carry forward unless replaced. Only subagents become child
+turns; background shells, monitors and workflows stay on the tool. The
+spawning tool has `unavailable: ["after-turn"]` if a background task
+outlives the query. This route does not follow task output files or
+reconstruct missed frames.
 
 | Query parameter | Meaning                                             |
 | --------------- | --------------------------------------------------- |
@@ -495,7 +496,10 @@ within one window sends a `turn-started` that shows it running, then a
 `turn-ended`. A turn's `seq`, `updatedAt` and `usage` are as of its latest
 turn event: `item` events do not repeat them, and `turn-ended` carries the
 settled values. OpenCode and Claude tool items may remain `input` or
-`running` after `turn-ended` if no terminal tool status was observed. An
+`running` after `turn-ended` if no terminal tool status was observed. Steps
+in a Claude turn with `lost: true` keep their last observed state; an
+unsettled step can remain `running` with `endedAt: null`. The turn's `lost`
+flag is authoritative: a running step is not evidence of ongoing work. An
 item whose JSON exceeds 64 KiB arrives as the same paged stub as in the
 snapshot, including any `unavailable` entries. Read its pages through the
 snapshot route, as above. Nothing is cut. Publishing never waits for a

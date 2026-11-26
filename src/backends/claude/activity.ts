@@ -494,7 +494,25 @@ type TaskRun = {
   background?: boolean;
   taskOutcome?: ActivityOutcome;
   observedOutcome?: ActivityOutcome;
+  superseded?: true;
 };
+
+function settleRun(
+  run: TaskRun,
+  fallback: ActivityOutcome | undefined,
+  at: number,
+) {
+  const outcome =
+    run.taskOutcome ??
+    (run.background ? undefined : run.observedOutcome) ??
+    fallback;
+
+  if (outcome === undefined) {
+    run.child?.end("cancelled", at, true);
+  } else {
+    run.child?.end(outcome, at);
+  }
+}
 
 type TaskBinding = {
   call: Call;
@@ -552,6 +570,7 @@ export class ClaudeActivity {
   private child(call: Call | undefined, sessionId = this.sessionId) {
     if (
       !call?.canParent ||
+      call.run.superseded ||
       (call.taskType !== undefined && call.taskType !== "local_agent")
     ) {
       return;
@@ -641,10 +660,16 @@ export class ClaudeActivity {
       return;
     }
 
-    if (newer && known?.call === call) {
-      const previous = call.run;
+    if (newer && known) {
+      const previous = known.call.run;
+
+      // The old call cannot reopen a child unless another start reuses it.
+      previous.superseded = true;
+      settleRun(previous, undefined, at);
+    }
+
+    if (frame.subtype === "task_started" && call.run.superseded) {
       call.run = {};
-      previous.child?.end("cancelled", at, true);
     }
 
     const run = call.run;
@@ -655,12 +680,9 @@ export class ClaudeActivity {
     }
 
     // Untyped task frames can update a child, but cannot prove one exists.
-    const child =
-      call.taskType === "local_agent"
-        ? this.child(call, frame.session_id)
-        : call.taskType === undefined
-          ? run.child
-          : undefined;
+    if (call.taskType === "local_agent") {
+      this.child(call, frame.session_id);
+    }
 
     const details = frame.subtype === "task_updated" ? frame.patch : frame;
     const runId = incomingId ?? previousId;
@@ -720,7 +742,7 @@ export class ClaudeActivity {
 
     if (outcome) {
       run.taskOutcome = outcome;
-      child?.end(outcome, at);
+      settleRun(run, undefined, at);
     }
   }
 
@@ -860,27 +882,22 @@ export class ClaudeActivity {
     const at = Date.now();
 
     for (const call of this.calls.values()) {
-      const { child, background, taskOutcome, observedOutcome } = call.run;
+      const run = call.run;
+
+      if (run.superseded) {
+        continue;
+      }
 
       try {
-        if (
-          !child?.ended &&
-          background &&
-          outcome !== "cancelled" &&
-          !taskOutcome
-        ) {
+        const afterTurn = run.background && outcome !== "cancelled";
+
+        if (afterTurn && !run.child?.ended && !run.taskOutcome) {
           call.owner.tool(call.id, at, (tool) => {
             tool.unavailable = ["after-turn"];
           });
-          child?.end("cancelled", at);
-        } else {
-          child?.end(
-            outcome === "cancelled"
-              ? outcome
-              : (taskOutcome ?? observedOutcome ?? outcome),
-            at,
-          );
         }
+
+        settleRun(run, afterTurn ? undefined : outcome, at);
       } catch {
         // Continue settling the other logs if this one is unavailable.
       }

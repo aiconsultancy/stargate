@@ -77,11 +77,14 @@ function fixture() {
     });
   }
 
-  assistant(
-    "msg_spawn",
-    { type: "tool_use", id: callId, name: "Agent", input: {} },
-    null,
-  );
+  const spawn = (toolUseId: string) =>
+    assistant(
+      `msg_${toolUseId}`,
+      { type: "tool_use", id: toolUseId, name: "Agent", input: {} },
+      null,
+    );
+
+  spawn(callId);
 
   const taskFrame = (runId: string) => ({
     ...envelope(),
@@ -93,23 +96,41 @@ function fixture() {
   return {
     task,
     taskFrame,
-    start(runId: string, first = false) {
+    spawn,
+    start(runId: string, first = false, toolUseId = callId) {
       task({
         ...taskFrame(runId),
         subtype: "task_started",
-        tool_use_id: callId,
+        tool_use_id: toolUseId,
         task_type: "local_agent",
         description: "Review the fixture",
         ...(first && { prompt: "Check the examples", is_backgrounded: true }),
       });
     },
-    output(runId: string) {
+    output(runId: string, toolUseId = callId) {
       // Both runs reuse a message ID; deduplication must be scoped to each child.
       assistant(
         "msg_child",
         { type: "text", text: `Output ${runId}`, citations: null },
-        callId,
+        toolUseId,
       );
+    },
+    toolResult() {
+      add({
+        ...envelope(),
+        type: "user",
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: callId,
+              content: "Tool result",
+            },
+          ],
+        },
+      });
     },
     finish(runId: string, status: "stopped" | "failed") {
       task({
@@ -123,9 +144,7 @@ function fixture() {
     },
     end: () => activity.end("completed"),
     children: () =>
-      hub
-        .turns("officer")
-        ?.turns.filter((turn) => turn.session?.parent?.callId === callId) ?? [],
+      hub.turns("officer")?.turns.filter((turn) => turn.session?.parent) ?? [],
     tool: () =>
       hub
         .turns("officer")
@@ -166,6 +185,7 @@ test.each(["paused", "running", "settled"] as const)(
       expect(live[0]?.items[0]).toMatchObject({
         kind: "step",
         status: "running",
+        endedAt: null,
       });
     }
 
@@ -244,5 +264,92 @@ test("a settled Claude run does not pass its background flag to its successor", 
     "cancelled",
     "completed",
   ]);
+  expect(f.tool()).not.toHaveProperty("unavailable");
+});
+
+test("an after-turn background child is lost even after a launch acknowledgement", () => {
+  const f = fixture();
+  f.start("001", true);
+  f.output("001");
+  f.toolResult();
+  f.end();
+
+  expect(f.tool()).toMatchObject({
+    status: "completed",
+    unavailable: ["after-turn"],
+  });
+  expect(f.children()).toMatchObject([
+    { status: "cancelled", lost: true, endedAt: expect.any(Number) },
+  ]);
+});
+
+test("unsettled steps keep their last observed status after the background child ends", () => {
+  const f = fixture();
+  f.start("001", true);
+  f.output("001");
+
+  const step = f.children()[0]?.items[0];
+  expect(step).toMatchObject({
+    kind: "step",
+    status: "running",
+    endedAt: null,
+  });
+  f.end();
+
+  expect(f.children()[0]?.items[0]).toEqual(step);
+});
+
+test.each([false, true])(
+  "a superseded Claude child resolves its tool result (background: %s)",
+  (background) => {
+    const f = fixture();
+    f.start("001", background);
+    f.task({
+      ...f.taskFrame("001"),
+      subtype: "task_updated",
+      patch: { is_backgrounded: background },
+    });
+    f.output("001");
+    f.toolResult();
+    f.start("002");
+
+    const [previous, current] = f.children();
+    expect(previous).toMatchObject({
+      status: background ? "cancelled" : "completed",
+      endedAt: expect.any(Number),
+    });
+    expect(previous?.lost).toBe(background ? true : undefined);
+    expect(current?.status).toBe("running");
+    f.end();
+  },
+);
+
+test("a newer Claude task start settles the previous child across different calls", () => {
+  const f = fixture();
+  const second = "tool_successor";
+  f.start("001", true);
+  f.output("001");
+  f.spawn(second);
+  f.start("002", false, second);
+  f.output("002", second);
+
+  expect(f.children()).toMatchObject([
+    { status: "cancelled", lost: true, session: { parent: { callId } } },
+    { status: "running", session: { parent: { callId: second } } },
+  ]);
+
+  f.start("003");
+  f.output("003");
+
+  expect(f.children()).toMatchObject([
+    { status: "cancelled", lost: true, session: { parent: { callId } } },
+    {
+      status: "cancelled",
+      lost: true,
+      session: { parent: { callId: second } },
+    },
+    { status: "running", session: { parent: { callId } } },
+  ]);
+  f.end();
   expect(f.tool()).not.toHaveProperty("unavailable");
 });
