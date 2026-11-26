@@ -1,0 +1,52 @@
+name: Clear stale change requests
+
+on:
+  # Dismissal requires PR write access. Never check out or execute PR code.
+  # jactionlint ignore=dangerous-triggers
+  pull_request_target:
+    types: [synchronize]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: stale-reviews-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dismiss:
+    if: github.repository_id == '1459142785'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Dismiss change requests on the replaced head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PREVIOUS_HEAD: ${{ github.event.before }}
+          NEW_HEAD: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$PREVIOUS_HEAD" =~ ^[0-9a-f]{40}$ || ! "$NEW_HEAD" =~ ^[0-9a-f]{40}$ || "$PREVIOUS_HEAD" == "$NEW_HEAD" ]]; then
+            exit 0
+          fi
+
+          pr="repos/$GH_REPO/pulls/$PR_NUMBER"
+          reviews=$(gh api --paginate --slurp "$pr/reviews?per_page=100" |
+            jq -r --arg head "$NEW_HEAD" '
+              add | map(select(.user.id != null and .submitted_at != null and
+                (.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")))
+              | group_by(.user.id)[] | max_by([.submitted_at, .id])
+              | select(.state == "CHANGES_REQUESTED" and .commit_id != null and .commit_id != $head) | .id
+            ')
+
+          while IFS= read -r review; do
+            [[ -n "$review" ]] || continue
+            [[ "$(gh api "$pr" --jq .head.sha)" == "$NEW_HEAD" ]] || exit 0
+            gh api --method PUT "$pr/reviews/$review/dismissals" \
+              -f message="This change request was made on an older commit. The current head is $NEW_HEAD. The findings remain in the PR; dismissal does not confirm they were fixed." >/dev/null
+          done <<< "$reviews"

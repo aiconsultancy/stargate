@@ -27,8 +27,10 @@ Use short-lived branches and ready PRs. Before merging any PR:
 GitHub's `main` ruleset enforces linear history, no force-push, no deletion,
 and **Quality checks**, with no `pull_request` approval rule. Reviews (including
 `CHANGES_REQUESTED`) from other agents or reviewers are advisory and never block
-a merge. The pre-push hook requires every branch push to contain the freshly
-fetched `origin/main`. If `main` moves, rebase and run checks again. A changed
+a merge. A push to a PR targeting `main` clears stale change requests. The
+original findings remain in the PR, and reviewers can review the new head.
+The pre-push hook requires every branch push to contain the freshly fetched
+`origin/main`. If `main` moves, rebase and run checks again. A changed
 diff requires a new independent quality review and attestation for the new head.
 If the diff did not change, post a short confirmation that the prior attestation
 still applies to the new head.
