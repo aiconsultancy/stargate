@@ -98,6 +98,33 @@ const report = Schema.Struct({
 });
 
 const oxlint = join(import.meta.dir, "../node_modules/.bin/oxlint");
+const tsrsLint = join(import.meta.dir, "../node_modules/.bin/tsrs-lint");
+
+function shellQuote(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * Runs `tsrs-lint` through the active Bun binary so type-aware Oxlint works in
+ * minimal staging environments where `node` is not on `PATH`.
+ */
+function tsgolintLauncher(scratch: string) {
+  if (process.env["OXLINT_TSGOLINT_PATH"] || !existsSync(tsrsLint)) {
+    return;
+  }
+
+  const launcher = join(scratch, "tsrs-lint");
+
+  if (!existsSync(launcher)) {
+    writeFileSync(
+      launcher,
+      `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(tsrsLint)} "$@"\n`,
+      { mode: 0o700 },
+    );
+  }
+
+  return launcher;
+}
 
 const categories = Object.fromEntries(
   [
@@ -165,6 +192,7 @@ function lint(run: Run, rules: Record<string, unknown>, files: string[]) {
   // Is cut short. A file receives all of it.
   const outputPath = `${path}.out`;
   const sink = openSync(outputPath, "w");
+  const tsgolint = run.typeAware ? tsgolintLauncher(run.scratch) : undefined;
 
   const result = spawnSync(
     process.execPath,
@@ -178,7 +206,13 @@ function lint(run: Run, rules: Record<string, unknown>, files: string[]) {
       "json",
       ...files,
     ],
-    { encoding: "utf8", stdio: ["ignore", sink, "pipe"] },
+    {
+      encoding: "utf8",
+      stdio: ["ignore", sink, "pipe"],
+      ...(tsgolint && {
+        env: { ...process.env, OXLINT_TSGOLINT_PATH: tsgolint },
+      }),
+    },
   );
 
   closeSync(sink);

@@ -522,7 +522,12 @@ const next: Inventory = {
 
 if (flags.has("--write")) {
   const formatter = Bun.spawn(
-    [join(root, "node_modules/.bin/oxfmt"), "--stdin-filepath", baselinePath],
+    [
+      process.execPath,
+      join(root, "node_modules/.bin/oxfmt"),
+      "--stdin-filepath",
+      baselinePath,
+    ],
     {
       cwd: root,
       stdin: new Blob([JSON.stringify(next, null, 2) + "\n"]),

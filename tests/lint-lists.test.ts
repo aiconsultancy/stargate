@@ -87,10 +87,17 @@ const promiseList = {
   rules: { "typescript/promise-function-async": "off" },
 };
 
-function run(overrides: unknown[], checker = script) {
+function run(
+  overrides: unknown[],
+  checker = script,
+  env?: Record<string, string | undefined>,
+) {
   writeFileSync(join(cwd, ".oxlintrc.json"), JSON.stringify({ overrides }));
 
-  const result = Bun.spawnSync([process.execPath, checker], { cwd });
+  const result = Bun.spawnSync([process.execPath, checker], {
+    cwd,
+    ...(env && { env }),
+  });
 
   return { code: result.exitCode, message: result.stderr.toString() };
 }
@@ -99,6 +106,15 @@ const valid = [general, paramsList, callsList, loopList, promiseList, tests];
 
 test("a configuration with valid lists of both kinds passes", () => {
   expect(run(valid)).toEqual({ code: 0, message: "" });
+});
+
+test("type-aware exception lists work without node on PATH", () => {
+  const { OXLINT_TSGOLINT_PATH: _, ...env } = process.env;
+
+  expect(run(valid, script, { ...env, PATH: "" })).toEqual({
+    code: 0,
+    message: "",
+  });
 });
 
 test("one rule can have different measured ceilings for different files", () => {

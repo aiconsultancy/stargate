@@ -164,8 +164,8 @@ async function fixture() {
 
   // Use the refresh tool's own layout, so two writers merge as they do on main.
   const format = spawnSync(
-    join(root, "node_modules/.bin/oxfmt"),
-    ["--write", BASELINE],
+    process.execPath,
+    [join(root, "node_modules/.bin/oxfmt"), "--write", BASELINE],
     { cwd: root, encoding: "utf8", timeout: 30_000 },
   );
 
@@ -679,5 +679,31 @@ describe("architecture baseline check against the first parent", () => {
     git(root, "switch", "-q", "--orphan", "root");
     commit(root, "root commit");
     expect(run(root).stderr).toContain("event:no-parent");
+  });
+
+  test("writes a formatted baseline without node on PATH", async () => {
+    const { root, base } = await fixture();
+    const bin = await mkdtemp(join(tmpdir(), "stargate-no-node-bin-"));
+    temporary.push(bin);
+    const gitPath = Bun.which("git");
+
+    if (!gitPath) {
+      throw new Error("git executable not found");
+    }
+
+    await symlink(gitPath, join(bin, "git"));
+
+    const write = spawnSync(
+      process.execPath,
+      [REFRESH, "--root", root, "--base", base, "--write"],
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { ...process.env, PATH: bin },
+      },
+    );
+
+    expect(write.status, write.stderr).toBe(0);
   });
 });
