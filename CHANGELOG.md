@@ -111,6 +111,10 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   that takes one family over the budget no longer evicts an older one that
   fits.
 
+- OpenCode child activity keeps a durable replay fence after evicted session
+  history is compacted, so a replayed execution cannot spend a new subagent
+  call's proof or take the place of its fresh transcript.
+
 - Teams sends pasted screenshots to the model. The gateway accepts PNG, JPEG, GIF
   and WebP sources up to 10 MiB and prepares inline image previews for replies.
 - Officers can prepare issue attachments, existing chat uploads, staged files

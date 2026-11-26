@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { SessionLogItem } from "@opencode/client";
-import { setImmediate } from "node:timers/promises";
+import { setImmediate, setTimeout as wait } from "node:timers/promises";
+import { Schema } from "effect";
 import type { TurnActivityLog } from "../src/backends/backend";
 import { ChildExecutions } from "../src/backends/opencode/activity-child-executions";
 import {
@@ -9,7 +10,15 @@ import {
   OpenCodeActivityFamilies,
   isActivityEvent,
 } from "../src/backends/opencode/activity-family";
-import { createActivityHub } from "../src/observability/dashboard/api/v1/activity";
+import { configSchema } from "../src/config";
+import {
+  activityFlushMs,
+  createActivityHub,
+  readActivity,
+  readCrewActivity,
+  subscribeActivity,
+} from "../src/observability/dashboard/api/v1/activity";
+import { bot } from "./fixtures";
 
 const main = "ses_root";
 const child = "ses_child";
@@ -21,6 +30,7 @@ function fixture(
   pending?: number,
   globalTurns?: number,
   readParent?: ActivityFamilyReads["parent"],
+  worker?: "crew",
 ) {
   const stop = new AbortController();
 
@@ -30,6 +40,8 @@ function fixture(
   });
 
   const recorder = hub.recorder("officer");
+  const crew = worker && hub.crewRecorder("officer");
+  crew?.roster?.(["worker"]);
   const parents = new Map<string, string>();
   const reads: string[] = [];
   const active = new Set<string>();
@@ -59,7 +71,15 @@ function fixture(
   );
 
   const root = (scope?: { active: boolean }, id = main) => {
-    const log = recorder.begin(undefined, id);
+    const log = crew
+      ? crew.begin({
+          member: "worker",
+          project: null,
+          session: { id, parent: null },
+          task: { id: "task_fixture", inputId: "input_fixture", project: null },
+        })
+      : recorder.begin(undefined, id);
+
     families.track(id, log, scope);
     emit(
       "session.text.delta",
@@ -106,6 +126,7 @@ function fixture(
 
   return {
     stop,
+    hub,
     families,
     reads,
     active,
@@ -117,7 +138,7 @@ function fixture(
     advance: (ms: number) => {
       now += ms;
     },
-    turns: () => hub.turns("officer")?.turns ?? [],
+    turns: () => hub.turns(worker ? "officer/worker" : "officer")?.turns ?? [],
     settleRoot(log: TurnActivityLog) {
       families.settled(main, log);
       log.end("completed");
@@ -163,6 +184,17 @@ function fixture(
         "session.tool.progress",
         parent,
         { assistantMessageID: "answer", id, metadata: { sessionID } },
+        owner,
+      ),
+    called: (
+      owner: TurnActivityLog,
+      id: string,
+      input: Record<string, unknown>,
+    ) =>
+      emit(
+        "session.tool.called",
+        main,
+        { assistantMessageID: "answer", id, input, executed: true },
         owner,
       ),
   };
@@ -1373,22 +1405,226 @@ test.each([512, 513])(
       f.emit("session.execution.succeeded", id, {}, undefined, undefined, 3);
       const afterReplay = f.turns().slice(1);
 
-      f.start(id);
-      f.ended(id, "new transcript", "new-id");
-      f.end(id);
+      // Native sequence numbers are per session, not system-wide.
+      f.emit("session.execution.started", id, {}, undefined, undefined, 4);
+      f.emit("session.execution.succeeded", id, {}, undefined, undefined, 3);
+      f.emit(
+        "session.text.started",
+        id,
+        { assistantMessageID: "new-id", ordinal: 0 },
+        undefined,
+        undefined,
+        5,
+      );
+      f.delta(id, "new transcript", "new-id");
+      const live = f.turns().at(-1)?.items;
+      f.emit("session.execution.succeeded", id, {}, undefined, undefined, 6);
       await setImmediate();
 
-      expect({ afterReplay, children: f.turns().slice(1) }).toMatchObject({
-        afterReplay: [],
-        children: [
-          {
-            session: { id, parent: { turnId: parent, callId: "new" } },
-            status: "completed",
-            items: [{ text: "new transcript" }],
-          },
-        ],
-      });
+      expect({ afterReplay, live, children: f.turns().slice(1) }).toMatchObject(
+        {
+          afterReplay: [],
+          live: [{ text: "new transcript" }],
+          children: [
+            {
+              session: { id, parent: { turnId: parent, callId: "new" } },
+              status: "completed",
+              items: [{ text: "new transcript" }],
+            },
+          ],
+        },
+      );
     } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+function evictChildren(f: ReturnType<typeof fixture>, count: number) {
+  const root = f.root();
+
+  for (let index = 0; index < count; index += 1) {
+    const id = `ses_old_${index}`;
+    f.create(id, main);
+    f.start(id);
+    f.ended(id, `old-${index}`, `old-id-${index}`);
+    f.end(id);
+  }
+
+  f.settleRoot(root);
+  expect(f.turns()).toHaveLength(0);
+}
+
+test("brand-new child sessions can still start at 1 after 5,000 evictions", async () => {
+  const f = fixture();
+
+  try {
+    evictChildren(f, 5000);
+    const root = f.root();
+    const named = "ses_named_new";
+    const created = "ses_created_new";
+    f.parents.set(named, main);
+    f.call(root, "brand-new");
+    f.called(root, "brand-new", { agent: "explore", prompt: "fixture" });
+    f.names(root, "brand-new", named);
+    f.create(created, main);
+
+    for (const id of [created, named]) {
+      f.emit("session.execution.started", id, {}, undefined, undefined, 1);
+      f.delta(id, `new ${id}`);
+      f.emit("session.execution.succeeded", id, {}, undefined, undefined, 2);
+    }
+
+    await setImmediate();
+    expect(f.logReads).toEqual([]);
+    expect(f.turns().slice(1)).toMatchObject([
+      {
+        session: { id: created },
+        status: "completed",
+        items: [{ text: `new ${created}` }],
+      },
+      {
+        session: { id: named, parent: { callId: "brand-new" } },
+        status: "completed",
+        items: [{ text: `new ${named}` }],
+      },
+    ]);
+  } finally {
+    f.stop.abort();
+  }
+});
+
+test.each(["officer", "crew"] as const)(
+  "%s Fleet activity shows unproven frames detached until a native checkpoint proves a later start",
+  async (subject) => {
+    const f = fixture(
+      undefined,
+      undefined,
+      1,
+      1,
+      undefined,
+      subject === "crew" ? "crew" : undefined,
+    );
+
+    const config = Schema.decodeUnknownSync(configSchema)({
+      bots: [bot("officer")],
+    });
+
+    const query = new URLSearchParams(
+      subject === "crew" ? "crew=officer/worker" : "agent=officer",
+    );
+
+    const read = () =>
+      subject === "crew"
+        ? readCrewActivity(
+            f.hub,
+            config,
+            "officer",
+            "worker",
+            new URLSearchParams(),
+          )
+        : readActivity(f.hub, config, "officer", new URLSearchParams());
+
+    const readTurns = () => {
+      const result = read();
+
+      if (result.status !== 200 || !("turns" in result.body)) {
+        throw new Error(`Unexpected activity status ${result.status}`);
+      }
+
+      return result.body.turns;
+    };
+
+    // With one pending slot, four exact retired entries and 32 compacted positions fit.
+    evictChildren(f, 37);
+    const subscription = subscribeActivity(f.hub, config, query);
+
+    if (subscription.status !== 200) {
+      throw new Error(`Unexpected subscription status ${subscription.status}`);
+    }
+
+    const decoder = new TextDecoder();
+    let stream = "";
+
+    const unwatch = subscription.watch((bytes) => {
+      stream += decoder.decode(bytes);
+    });
+
+    try {
+      const id = "ses_old_0";
+      const root = f.root({ active: true });
+      const parent = f.turns()[0]?.id;
+      f.parents.set(id, main);
+      f.logFrames.set(id, [{ type: "log.synced", aggregateID: id, seq: 3 }]);
+      f.call(root, "resume");
+      f.called(root, "resume", { agent: "explore", sessionID: id });
+      f.names(root, "resume", id);
+      await setImmediate();
+
+      f.emit("session.execution.started", id, {}, undefined, undefined, 1);
+      f.emit(
+        "session.text.ended",
+        id,
+        { assistantMessageID: "old-id-0", ordinal: 0, text: "old-0" },
+        undefined,
+        undefined,
+        2,
+      );
+      f.emit("session.execution.succeeded", id, {}, undefined, undefined, 3);
+      await setImmediate();
+
+      const [marked, uncertain] = readTurns();
+      expect({ marked, logReads: f.logReads }).toMatchObject({
+        marked: {
+          items: [
+            { callId: "resume", unavailable: ["activity.child-attribution"] },
+          ],
+        },
+        logReads: [[id, Number.MAX_SAFE_INTEGER]],
+      });
+      expect(uncertain).toMatchObject({
+        session: { id, parent: null },
+        requests: [],
+        ...(subject === "crew" && { task: null }),
+        status: "cancelled",
+        lost: true,
+        items: [{ text: "old-0" }],
+      });
+      await wait(activityFlushMs * 2);
+      expect(stream).toContain('"unavailable":["activity.child-attribution"]');
+      expect(stream).toContain('"text":"old-0"');
+      expect(stream).toContain('"lost":true');
+      stream = "";
+
+      f.emit("session.execution.started", id, {}, undefined, undefined, 4);
+      f.emit(
+        "session.text.ended",
+        id,
+        { assistantMessageID: "fresh", ordinal: 0, text: "new transcript" },
+        undefined,
+        undefined,
+        5,
+      );
+      f.emit("session.execution.succeeded", id, {}, undefined, undefined, 6);
+
+      const [cleared, detached, fresh] = readTurns();
+      expect(cleared?.items[0]).toMatchObject({ callId: "resume" });
+      expect(cleared?.items[0]).not.toHaveProperty("unavailable");
+      expect(detached?.id).toBe(uncertain?.id);
+      expect(fresh).toMatchObject({
+        session: { id, parent: { turnId: parent, callId: "resume" } },
+        status: "completed",
+        items: [{ text: "new transcript" }],
+      });
+      await wait(activityFlushMs * 2);
+      expect(stream).toContain('"callId":"resume"');
+      expect(stream).toContain('"text":"new transcript"');
+      expect(stream).not.toContain(
+        '"unavailable":["activity.child-attribution"]',
+      );
+      expect(stream).not.toContain("old-0");
+    } finally {
+      unwatch();
       f.stop.abort();
     }
   },

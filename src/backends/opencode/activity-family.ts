@@ -12,23 +12,29 @@ import {
   type ActivityEvent,
   ActivityProjector,
   activityEvents,
+  childAttributionMarker,
 } from "./activity-projector";
 import {
   ActivityRecoveryQueues,
+  type NamingProof,
   type PendingActivity,
   type QueuedPacket,
   activityQueueDefaults as defaults,
 } from "./activity-recovery-queue";
 import {
+  ActivityFreshness,
   type Boundary,
+  type NativeActivityObservation,
   activityOutcome,
   beforeActivityBoundary,
   markActivityGap,
-  readActivityBoundary,
+  activityMaxReads as maxReads,
+  activityReadMs as readMs,
+  reconcileActivity,
 } from "./activity-replay-gap";
 import { boundarySeq } from "./crew-executions";
 
-export { activityOutcome } from "./activity-replay-gap";
+export { activityOutcome, nativeActivityReads } from "./activity-replay-gap";
 
 export type { ActivityIncarnation } from "./activity-call-evidence";
 
@@ -72,6 +78,7 @@ type Child = ChildReplayState & {
   lower?: number;
   reused?: true;
   uncertainHistory?: true;
+  unproven?: true;
   callId: string | null;
   ambiguousCall?: true;
   callFloor: number;
@@ -87,20 +94,11 @@ type Ancestry = {
 
 type Root = { uniqueSince: number; observed?: number };
 
-export type ActivityFamilyReads = {
+export type ActivityFamilyReads = NativeActivityObservation & {
   parent(sessionID: string, signal: AbortSignal): Promise<string | undefined>;
-  active(signal: AbortSignal): Promise<Readonly<Record<string, unknown>>>;
-  log(
-    sessionID: string,
-    after: number,
-    signal: AbortSignal,
-  ): AsyncIterable<SessionLogItem>;
 };
 
 type Source = ActivityFamilyReads & { signal: AbortSignal };
-
-const readMs = 2000;
-const maxReads = 8;
 
 type ObservedRoot = {
   id: string;
@@ -124,71 +122,6 @@ export const isActivityEvent = (
 const sessionID = (value: unknown): value is string =>
   typeof value === "string" && /^ses[A-Za-z0-9_-]{1,253}$/.test(value);
 
-export function nativeActivityReads(
-  client: OpenCodeClient,
-): ActivityFamilyReads {
-  return {
-    parent: async (id, signal) =>
-      (await client.session.get({ sessionID: id }, { signal })).parentID,
-    active: (signal) => client.session.active({ signal }),
-    log: (sessionID, after, signal) =>
-      client.experimental.session.log(
-        { sessionID, after, follow: false },
-        { signal },
-      ),
-  };
-}
-
-async function reconcileActivity(
-  source: ActivityFamilyReads,
-  sessions: readonly { id: string; cursor: number | undefined }[],
-  lifetime: AbortSignal,
-) {
-  // Sample activity first. A later log read checks whether that sample is stale.
-  const active: Readonly<Record<string, unknown>> = await source
-    .active(AbortSignal.any([lifetime, AbortSignal.timeout(readMs)]))
-    .catch(() => ({}));
-
-  const boundaries: Awaited<ReturnType<typeof readActivityBoundary>>[] = [];
-
-  // Page across all tracked sessions, limiting concurrent reads per page.
-  for (let at = 0; at < sessions.length && !lifetime.aborted; at += maxReads) {
-    const signal = AbortSignal.any([lifetime, AbortSignal.timeout(readMs)]);
-
-    const page = await Promise.all(
-      sessions
-        .slice(at, at + maxReads)
-        .map((session) =>
-          readActivityBoundary(
-            (...args) => source.log(...args),
-            session,
-            signal,
-          ),
-        ),
-    );
-
-    boundaries.push(...page);
-  }
-
-  return boundaries.map((result, index) => {
-    if (result !== "synced") {
-      return result;
-    }
-
-    const id = sessions[index]?.id;
-
-    const status =
-      id !== undefined && Object.hasOwn(active, id) ? active[id] : undefined;
-
-    return typeof status === "object" &&
-      status !== null &&
-      "type" in status &&
-      status.type === "running"
-      ? ("running" as const)
-      : undefined;
-  });
-}
-
 /** Correlates native ancestry with collector-owned turns, never wall-clock proximity. */
 export class OpenCodeActivityFamilies {
   private readonly roots = new Map<string, Map<TurnActivityLog, Root>>();
@@ -204,6 +137,7 @@ export class OpenCodeActivityFamilies {
   private readonly ancestry = new WeakMap<Pending, Ancestry>();
   private readonly calls: ActivityCallEvidence;
   private readonly reads = new Map<string, Pending>();
+  private readonly freshness = new ActivityFreshness<Pending>(maxReads);
   private order = 0;
   private reconciliation = 0;
   private proofFloor = 0;
@@ -224,13 +158,22 @@ export class OpenCodeActivityFamilies {
       (id) => {
         this.admit(id);
       },
-      (id, through) => {
-        const latest = this.executions.get(id)?.latest;
+      {
+        start: (id, through) => {
+          const latest = this.executions.get(id)?.latest;
 
-        // A retained execution may still accept a late name for its start.
-        if (latest?.callId !== null || latest.ambiguousCall) {
-          this.calls.discardStart(id, through);
-        }
+          // A retained execution may still accept a late name for its start.
+          if (latest?.callId !== null || latest.ambiguousCall) {
+            this.calls.discardStart(id, through);
+          }
+        },
+        candidate: (id) => {
+          const child = this.children.get(id);
+
+          if (child?.unproven) {
+            this.finish(id, child, "cancelled", true);
+          }
+        },
       },
     );
     source.signal.addEventListener(
@@ -412,6 +355,17 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
+    if (event.type === "session.tool.called") {
+      this.calls.input(
+        scope,
+        log,
+        `${assistantMessageID}:${event.data.id}`,
+        event.data.input,
+      );
+
+      return;
+    }
+
     if (
       event.type !== "session.tool.progress" &&
       event.type !== "session.tool.success" &&
@@ -481,13 +435,22 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
-    this.queue.offerProof(queued, {
+    const proof: NamingProof = {
       session,
       log,
       callId,
       order: callOrder,
+      markAttribution: childAttributionMarker(log, assistantMessageID, callId),
+      ...(this.calls.freshSession(
+        scope,
+        log,
+        `${assistantMessageID}:${callId}`,
+      ) && { freshSession: true }),
       ...(scope && { scope }),
-    });
+    };
+
+    this.queue.offerProof(queued, proof);
+    this.checkFreshness(id, queued, pending, proof);
     this.queue.schedule(id);
 
     if (pending.parent === undefined && this.reads.get(id) !== queued) {
@@ -538,6 +501,7 @@ export class OpenCodeActivityFamilies {
       ambiguous,
       detached: naming.detached || competing,
       callId: ambiguous ? null : (proof?.callId ?? null),
+      proof,
     };
   }
 
@@ -555,6 +519,11 @@ export class OpenCodeActivityFamilies {
     }
   }
 
+  private ignoreChildFrame(id: string, seq: number | undefined) {
+    // Possible replay must not reserve a segment or bind a name.
+    return this.peers.has(id) || this.executions.possiblyReplayed(id, seq);
+  }
+
   /** Observe the shared V2 stream once; return its arrival order for ownership callbacks. */
   public receive(
     event: ActivityFamilyEvent,
@@ -569,6 +538,11 @@ export class OpenCodeActivityFamilies {
 
     this.queue.expire();
     const id = event.data.sessionID;
+    const seq = boundarySeq(event);
+
+    if (this.ignoreChildFrame(id, seq)) {
+      return order;
+    }
 
     const reused =
       event.type === "session.execution.started" &&
@@ -580,10 +554,6 @@ export class OpenCodeActivityFamilies {
       order,
       ...(reused && { reused: true }),
     };
-
-    if (this.peers.has(id)) {
-      return order;
-    }
 
     if (event.type === "session.created") {
       const parent = event.data.parentID;
@@ -622,7 +592,7 @@ export class OpenCodeActivityFamilies {
           root &&
           root[1].uniqueSince <= earliest
             ? root[0]
-            : ancestor && ancestor.start <= earliest
+            : ancestor && !ancestor.unproven && ancestor.start <= earliest
               ? ancestor.log
               : undefined;
 
@@ -653,7 +623,7 @@ export class OpenCodeActivityFamilies {
 
     if (
       event.type === "session.execution.started" &&
-      this.executions.staleStart(id, boundarySeq(event), order)
+      this.executions.staleStart(id, seq, order)
     ) {
       return order;
     }
@@ -724,11 +694,11 @@ export class OpenCodeActivityFamilies {
 
       const result = boundaries[index];
 
-      if (result === "running") {
+      if (child.unproven) {
+        this.finish(id, child, "cancelled", true);
+      } else if (result === "running") {
         continue;
-      }
-
-      if (result?.kind === "settled") {
+      } else if (result?.kind === "settled") {
         this.executions.advance(id, child, result.seq);
         this.finish(id, child, result.outcome);
       } else {
@@ -868,7 +838,7 @@ export class OpenCodeActivityFamilies {
     const { first } = segment;
     const previous = this.executions.get(id);
 
-    if (first.seq !== undefined && first.seq <= (previous?.cursor ?? -1)) {
+    if (this.executions.possiblyReplayed(id, first.seq, previous?.cursor)) {
       this.queue.skip(id, queued, true);
 
       return;
@@ -880,7 +850,7 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
-    const { owner, callId, ambiguous, detached } = attribution;
+    const { owner, callId, ambiguous, proof } = attribution;
     const scope = owner && this.lineage.get(owner);
 
     // Reuse requires a new start; late output cannot prove a new busy period.
@@ -892,10 +862,15 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
-    const log =
-      owner && !this.fenced(owner)
-        ? owner.child?.(callId, id, first.at, detached || undefined)
-        : undefined;
+    const freshness = owner && this.checkFreshness(id, queued, pending, proof);
+
+    if (freshness === "waiting") {
+      return;
+    }
+
+    const unproven = freshness === "uncertain";
+
+    const log = this.openChild(attribution, id, first.at, unproven);
 
     if (!owner || !log) {
       this.queue.skip(id, queued);
@@ -912,36 +887,44 @@ export class OpenCodeActivityFamilies {
       callId,
       callFloor: segment.floor,
       ...(ambiguous && { ambiguousCall: true }),
+      ...(unproven && { unproven: true }),
       projector: new ActivityProjector(),
       start: first.order,
       latest: first.order,
       ...(startSeq !== undefined && { lower: startSeq }),
       ...((previous?.admitted ?? first.reused) && { reused: true }),
-      ...(pending.created === undefined &&
-        this.executions.mayHaveCompacted(id) && { uncertainHistory: true }),
+      ...this.compactedHistory(id, pending, proof),
     };
 
     this.children.set(id, child);
-    this.executions.admitted(id, child);
-
-    if (first.type === "session.execution.started") {
-      // A child still awaiting a late name needs its own attribution window.
-      this.calls.retire(
-        pending.parent,
-        scope,
-        id,
-        callId !== null || ambiguous ? first.order : segment.floor,
-      );
-    }
 
     if (scope) {
       this.lineage.set(log, scope);
     }
 
-    this.inferDescendants(id, child, first.order, segment.boundaryOrder);
+    this.markAttribution(proof, child, first.at);
+
+    if (!unproven) {
+      this.executions.admitted(id, child);
+      this.executions.advance(id, child, startSeq);
+
+      if (first.type === "session.execution.started") {
+        // A child still awaiting a late name needs its own attribution window.
+        this.calls.retire(
+          pending.parent,
+          scope,
+          id,
+          callId !== null || ambiguous ? first.order : segment.floor,
+        );
+      }
+
+      this.inferDescendants(id, child, first.order, segment.boundaryOrder);
+    }
+
     const signal = this.readSignal();
     this.queue.drain(id, queued, {
       signal,
+      ...(unproven && { preserveProofs: true }),
       read: (after, readSignal) => this.source.log(id, after, readSignal),
       accepts: isFamilyLogItem,
       owned: () =>
@@ -963,6 +946,82 @@ export class OpenCodeActivityFamilies {
         }
       },
     });
+  }
+
+  private checkFreshness(
+    id: string,
+    queued: Pending,
+    pending: Ancestry,
+    proof: NamingProof | undefined,
+  ) {
+    if (
+      !this.executions.needsFreshness(id) ||
+      proof?.freshSession ||
+      (pending.created !== undefined && !proof)
+    ) {
+      return "fresh";
+    }
+
+    const first = queued.segments[0]?.first;
+
+    const seq =
+      first?.type === "session.execution.started" ? first.seq : undefined;
+
+    return this.freshness.check(
+      queued,
+      id,
+      seq,
+      (after, signal) => this.source.log(id, after, signal),
+      this.readSignal(),
+      () => {
+        if (this.queue.peek(id) === queued && !this.source.signal.aborted) {
+          this.queue.expire();
+          this.queue.schedule(id);
+        }
+      },
+    );
+  }
+
+  private openChild(
+    {
+      owner,
+      detached,
+      callId,
+    }: NonNullable<ReturnType<OpenCodeActivityFamilies["attribution"]>>,
+    id: string,
+    at: number,
+    unproven: boolean,
+  ) {
+    return owner && !this.fenced(owner)
+      ? owner.child?.(
+          unproven ? null : callId,
+          id,
+          at,
+          unproven || detached || undefined,
+        )
+      : undefined;
+  }
+
+  private compactedHistory(
+    id: string,
+    pending: Ancestry,
+    proof: NamingProof | undefined,
+  ) {
+    return pending.created === undefined &&
+      !proof?.freshSession &&
+      this.executions.mayHaveCompacted(id)
+      ? { uncertainHistory: true as const }
+      : {};
+  }
+
+  private markAttribution(
+    proof: NamingProof | undefined,
+    child: Child,
+    at: number,
+  ) {
+    if (child.unproven || child.callId !== null) {
+      proof?.markAttribution?.(at, child.unproven === true);
+    }
   }
 
   private loseBoundary(id: string, child: Child) {
@@ -1033,6 +1092,7 @@ export class OpenCodeActivityFamilies {
         : this.children.get(pending.parent);
 
     return ancestor &&
+      !ancestor.unproven &&
       pending.created !== undefined &&
       ancestor.start <= earliest
       ? ancestor.log
@@ -1045,7 +1105,9 @@ export class OpenCodeActivityFamilies {
     const outcome = activityOutcome(event.type);
     child.latest = order;
 
-    if (outcome !== undefined) {
+    if (child.unproven && outcome !== undefined) {
+      this.finish(id, child, "cancelled", true);
+    } else if (outcome !== undefined) {
       this.executions.advance(id, child, seq);
       this.executions.settled(id, child, seq);
       this.finish(id, child, outcome);
@@ -1077,6 +1139,7 @@ export class OpenCodeActivityFamilies {
     if (!known) {
       return (
         seq === undefined &&
+        !active?.unproven &&
         (active?.uncertainHistory === true ||
           (active?.reused === true && event.type.endsWith(".delta")))
       );
@@ -1104,7 +1167,10 @@ export class OpenCodeActivityFamilies {
     if (result !== "duplicate") {
       this.executions.remember(id, child, event.data.assistantMessageID);
       child.projector.apply(child.log, event, packet.at);
-      this.owned(child.log, event, packet.order);
+
+      if (!child.unproven) {
+        this.owned(child.log, event, packet.order);
+      }
     }
 
     if (result === "untracked") {

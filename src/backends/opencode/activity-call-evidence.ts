@@ -2,7 +2,7 @@ import type { TurnActivityLog } from "../backend";
 
 export type ActivityIncarnation = { active: boolean };
 
-type Call = { order: number; named?: true };
+type Call = { order: number; named?: true; freshSession?: true };
 
 type OwnerCalls = { session: string; calls: Map<string, Call> };
 
@@ -318,6 +318,31 @@ export class ActivityCallEvidence {
     index.identify(session, child, call.order);
 
     return call.order;
+  }
+
+  public input(
+    scope: ActivityIncarnation | undefined,
+    owner: TurnActivityLog,
+    key: string,
+    input: Readonly<Record<string, unknown>>,
+  ) {
+    const call = this.scope(scope)?.owners.get(owner)?.calls.get(key);
+
+    if (
+      call &&
+      !Object.hasOwn(input, "sessionID") &&
+      !Object.hasOwn(input, "task_id")
+    ) {
+      call.freshSession = true;
+    }
+  }
+
+  public freshSession(
+    scope: ActivityIncarnation | undefined,
+    owner: TurnActivityLog,
+    key: string,
+  ) {
+    return this.scope(scope)?.owners.get(owner)?.calls.get(key)?.freshSession;
   }
 
   public competing(

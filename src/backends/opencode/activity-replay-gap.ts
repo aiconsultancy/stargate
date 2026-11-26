@@ -1,10 +1,12 @@
-import type { SessionLogItem } from "@opencode/client";
+import type { OpenCodeClient, SessionLogItem } from "@opencode/client";
 import type { ActivityOutcome, TurnActivityLog } from "../backend";
 import { boundarySeq } from "./crew-executions";
 
 export type GapSlot = { order: number; at: number; type: string; seq: number };
 
 export const maxActivityGapSlots = 256;
+export const activityReadMs = 2000;
+export const activityMaxReads = 8;
 const maxLogFrames = 4096;
 const maxLifecycleFrames = 64;
 
@@ -38,6 +40,85 @@ export const activityOutcome = (type: string) =>
 export type Boundary =
   | { kind: "start"; seq: number }
   | { kind: "settled"; seq: number; outcome: ActivityOutcome };
+
+type Freshness = { cursor?: number; reading?: true; attempted?: number | null };
+
+/** Read a native checkpoint; a start observed above it can establish a new period. */
+export class ActivityFreshness<Candidate extends object> {
+  private readonly checks = new WeakMap<Candidate, Freshness>();
+  private active = 0;
+
+  public constructor(private readonly limit: number) {}
+
+  public check(
+    candidate: Candidate,
+    id: string,
+    seq: number | undefined,
+    read: (after: number, signal: AbortSignal) => AsyncIterable<SessionLogItem>,
+    signal: AbortSignal,
+    ready: () => void,
+  ) {
+    const state = this.checks.get(candidate) ?? {};
+
+    if (state.reading) {
+      return "waiting";
+    }
+
+    if (state.cursor !== undefined) {
+      return seq !== undefined && seq > state.cursor ? "fresh" : "uncertain";
+    }
+
+    if ((seq ?? null) === state.attempted || this.active >= this.limit) {
+      return "uncertain";
+    }
+
+    state.attempted = seq ?? null;
+    state.reading = true;
+    this.checks.set(candidate, state);
+    this.active += 1;
+    void this.checkpoint(id, seq, read, signal).then((cursor) => {
+      if (cursor !== undefined) {
+        state.cursor = cursor;
+      }
+
+      delete state.reading;
+      this.active -= 1;
+      ready();
+    });
+
+    return "waiting";
+  }
+
+  private async checkpoint(
+    id: string,
+    observed: number | undefined,
+    read: (after: number, signal: AbortSignal) => AsyncIterable<SessionLogItem>,
+    signal: AbortSignal,
+  ): Promise<number | undefined> {
+    let count = 0;
+
+    try {
+      // OpenCode still emits its actual watermark if `after` is beyond the log.
+      for await (const frame of read(Number.MAX_SAFE_INTEGER, signal)) {
+        if (signal.aborted || ++count > maxActivityGapSlots) {
+          break;
+        }
+
+        if (frame.type === "log.synced") {
+          return frame.aggregateID === id &&
+            frame.seq !== undefined &&
+            frame.seq >= (observed ?? 0)
+            ? frame.seq
+            : undefined;
+        }
+      }
+    } catch {
+      // A failed read cannot prove freshness.
+    }
+
+    return;
+  }
+}
 
 /** Reconnect only inspects lifecycle; it does not replay gaps in the stream. */
 export async function readActivityBoundary(
@@ -92,6 +173,88 @@ export async function readActivityBoundary(
   }
 
   return;
+}
+
+export type NativeActivityObservation = {
+  parent(sessionID: string, signal: AbortSignal): Promise<string | undefined>;
+  active(signal: AbortSignal): Promise<Readonly<Record<string, unknown>>>;
+  log(
+    sessionID: string,
+    after: number,
+    signal: AbortSignal,
+  ): AsyncIterable<SessionLogItem>;
+};
+
+export function nativeActivityReads(
+  client: OpenCodeClient,
+): NativeActivityObservation {
+  return {
+    parent: async (id, signal) =>
+      (await client.session.get({ sessionID: id }, { signal })).parentID,
+    active: (signal) => client.session.active({ signal }),
+    log: (sessionID, after, signal) =>
+      client.experimental.session.log(
+        { sessionID, after, follow: false },
+        { signal },
+      ),
+  };
+}
+
+export async function reconcileActivity(
+  source: NativeActivityObservation,
+  sessions: readonly { id: string; cursor: number | undefined }[],
+  lifetime: AbortSignal,
+) {
+  // Sample activity first. A later log read checks whether that sample is stale.
+  const active: Readonly<Record<string, unknown>> = await source
+    .active(AbortSignal.any([lifetime, AbortSignal.timeout(activityReadMs)]))
+    .catch(() => ({}));
+
+  const boundaries: Awaited<ReturnType<typeof readActivityBoundary>>[] = [];
+
+  // Page across all tracked sessions, limiting concurrent reads per page.
+  for (
+    let at = 0;
+    at < sessions.length && !lifetime.aborted;
+    at += activityMaxReads
+  ) {
+    const signal = AbortSignal.any([
+      lifetime,
+      AbortSignal.timeout(activityReadMs),
+    ]);
+
+    const page = await Promise.all(
+      sessions
+        .slice(at, at + activityMaxReads)
+        .map((session) =>
+          readActivityBoundary(
+            (...args) => source.log(...args),
+            session,
+            signal,
+          ),
+        ),
+    );
+
+    boundaries.push(...page);
+  }
+
+  return boundaries.map((result, index) => {
+    if (result !== "synced") {
+      return result;
+    }
+
+    const id = sessions[index]?.id;
+
+    const status =
+      id !== undefined && Object.hasOwn(active, id) ? active[id] : undefined;
+
+    return typeof status === "object" &&
+      status !== null &&
+      "type" in status &&
+      status.type === "running"
+      ? ("running" as const)
+      : undefined;
+  });
 }
 
 /** Only keep enough metadata to recover omitted durable frames, never their payloads. */

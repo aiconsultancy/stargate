@@ -38,6 +38,8 @@ export type NamingProof = {
   callId: string;
   order: number;
   scope?: ActivityIncarnation;
+  markAttribution?: (at: number, uncertain: boolean) => void;
+  freshSession?: true;
 };
 
 type Segment<E extends Event> = {
@@ -85,12 +87,18 @@ type Drain<E extends Event> = {
   gap(): void;
   lost(): void;
   superseded(): void;
+  preserveProofs?: true;
 };
 
 export const activityQueueDefaults = {
   pending: 128,
   bytes: 256 * 1024,
   ttl: 2000,
+};
+
+type Removal = {
+  start(id: string, order: number): void;
+  candidate(id: string): void;
 };
 
 export class ActivityRecoveryQueues<E extends Event> {
@@ -113,7 +121,7 @@ export class ActivityRecoveryQueues<E extends Event> {
     private readonly maxReads: number,
     private readonly needsStart: (id: string) => boolean,
     private readonly admit: (id: string) => void,
-    private readonly discardStart?: (id: string, order: number) => void,
+    private readonly removed?: Removal,
   ) {}
 
   public entries() {
@@ -290,6 +298,7 @@ export class ActivityRecoveryQueues<E extends Event> {
 
       this.queues.delete(id);
       pending.read?.abort();
+      this.removed?.candidate(id);
 
       for (const segment of pending.segments) {
         this.bytes -= segment.bytes;
@@ -305,7 +314,7 @@ export class ActivityRecoveryQueues<E extends Event> {
         )?.first;
 
         if (start) {
-          this.discardStart?.(id, start.order);
+          this.removed?.start(id, start.order);
         }
       }
     }
@@ -534,7 +543,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       const first = pending.segments[0]?.first;
 
       if (!stale && first?.type === startType && first.seq !== undefined) {
-        this.discardStart?.(id, first.order);
+        this.removed?.start(id, first.order);
       }
 
       this.advance(id, pending);
@@ -589,7 +598,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       hooks.superseded();
     }
 
-    this.advance(id, pending);
+    this.advance(id, pending, hooks.preserveProofs);
   }
 
   private releaseSlots(pending: PendingActivity<E>, segment: Segment<E>) {
@@ -597,14 +606,16 @@ export class ActivityRecoveryQueues<E extends Event> {
     segment.slots = 0;
   }
 
-  private advance(id: string, pending: PendingActivity<E>) {
+  private advance(id: string, pending: PendingActivity<E>, preserve?: true) {
     const segment = pending.segments.shift();
 
     if (segment) {
       this.bytes -= segment.bytes;
       this.releaseSlots(pending, segment);
 
-      if (segment.first.type === startType) {
+      if (preserve) {
+        this.preserveNames(pending, segment);
+      } else if (segment.first.type === startType) {
         pending.floor = segment.first.order;
       }
     }
@@ -619,6 +630,43 @@ export class ActivityRecoveryQueues<E extends Event> {
       pending.expires = this.now() + this.limits.ttl;
       this.armExpiry();
       this.schedule(id);
+    }
+  }
+
+  private preserveNames(pending: PendingActivity<E>, old: Segment<E>) {
+    const next = pending.segments[0];
+
+    if (next) {
+      next.floor = old.floor;
+
+      if (old.proofOverflow) {
+        next.proofOverflow = true;
+      }
+
+      for (const scope of old.droppedProofScopes ?? []) {
+        (next.droppedProofScopes ??= new Set()).add(scope);
+      }
+    } else {
+      for (const scope of old.droppedProofScopes ?? []) {
+        pending.droppedProofs ??= new Map();
+        pending.droppedProofs.set(
+          scope,
+          span(pending.droppedProofs.get(scope), {
+            first: old.floor + 1,
+            last: old.first.order,
+          }),
+        );
+      }
+
+      if (old.proofOverflow) {
+        for (const proof of old.proofs) {
+          this.recordDrop(pending, proof);
+        }
+      }
+    }
+
+    for (const proof of old.proofs) {
+      this.offerProof(pending, proof);
     }
   }
 

@@ -39,7 +39,9 @@ export class ChildExecutions<Child extends Execution> {
   private readonly sessions = new Map<string, History<Child>>();
   private readonly retired = new Map<string, History<Child>>();
   private readonly waitingStarts = new Map<string, Start>();
+  private readonly compactedBoundaries = new Map<string, number>();
   private compacted = false;
+  private lostBoundaries = false;
 
   public constructor(private readonly limit: number) {}
 
@@ -50,6 +52,18 @@ export class ChildExecutions<Child extends Execution> {
   public mayHaveCompacted(id: string) {
     // A missing entry no longer proves that the collector has never seen this ID.
     return this.compacted && !this.get(id);
+  }
+
+  public needsFreshness(id: string) {
+    return (
+      this.lostBoundaries && !this.get(id) && !this.compactedBoundaries.has(id)
+    );
+  }
+
+  public possiblyReplayed(id: string, seq: number | undefined, cursor = -1) {
+    const bound = Math.max(cursor, this.compactedBoundaries.get(id) ?? -1);
+
+    return seq !== undefined && seq <= bound;
   }
 
   private start(id: string) {
@@ -66,7 +80,8 @@ export class ChildExecutions<Child extends Execution> {
     return (
       history?.admitted === true ||
       history?.observedStart !== undefined ||
-      this.waitingStarts.has(id)
+      this.waitingStarts.has(id) ||
+      this.compactedBoundaries.has(id)
     );
   }
 
@@ -92,6 +107,12 @@ export class ChildExecutions<Child extends Execution> {
       intervals: [],
     };
 
+    const compacted = this.compactedBoundaries.get(id);
+
+    if (compacted !== undefined) {
+      history.cursor = Math.max(compacted, history.cursor ?? -1);
+    }
+
     this.retired.delete(id);
     const observedStart = this.waitingStarts.get(id);
 
@@ -101,6 +122,7 @@ export class ChildExecutions<Child extends Execution> {
     }
 
     this.sessions.set(id, history);
+    this.compactedBoundaries.delete(id);
 
     return history;
   }
@@ -231,7 +253,33 @@ export class ChildExecutions<Child extends Execution> {
     this.sessions.clear();
     this.retired.clear();
     this.waitingStarts.clear();
+    this.compactedBoundaries.clear();
     this.compacted = false;
+    this.lostBoundaries = false;
+  }
+
+  private rememberBoundary(
+    id: string,
+    { cursor, observedStart }: History<Child>,
+  ) {
+    const bound = Math.max(cursor ?? -1, observedStart?.seq ?? -1);
+
+    if (bound < 0) {
+      this.lostBoundaries = true;
+
+      return;
+    }
+
+    this.compactedBoundaries.set(id, bound);
+
+    if (this.compactedBoundaries.size > this.limit * 8) {
+      const oldest = this.compactedBoundaries.keys().next().value;
+
+      if (oldest !== undefined) {
+        this.compactedBoundaries.delete(oldest);
+        this.lostBoundaries = true;
+      }
+    }
   }
 
   /** Release the writer and its payload immediately when the hub evicts it. */
@@ -271,10 +319,12 @@ export class ChildExecutions<Child extends Execution> {
       this.retired.set(id, history);
 
       if (this.retired.size > this.limit) {
-        const oldest = this.retired.keys().next().value;
+        const oldest = this.retired.entries().next().value;
 
-        if (oldest !== undefined) {
-          this.retired.delete(oldest);
+        if (oldest) {
+          const [session, dropped] = oldest;
+          this.rememberBoundary(session, dropped);
+          this.retired.delete(session);
           this.compacted = true;
         }
       }

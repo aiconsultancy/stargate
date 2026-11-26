@@ -66,6 +66,43 @@ const tool = (callId: string): ActivityItem => ({
   error: null,
 });
 
+const childAttribution = "activity.child-attribution";
+
+export function childAttributionMarker(
+  log: TurnActivityLog,
+  assistant: string,
+  callId: string,
+) {
+  let marked = false;
+
+  return (at: number, uncertain: boolean) => {
+    if (marked === uncertain) {
+      return;
+    }
+
+    marked = uncertain;
+    log.update(
+      `tool:${assistant}:${callId}`,
+      at,
+      () => tool(callId),
+      (item) => {
+        const other =
+          item.unavailable?.filter((entry) => entry !== childAttribution) ?? [];
+
+        if (uncertain) {
+          other.push(childAttribution);
+        }
+
+        if (other.length > 0) {
+          item.unavailable = other;
+        } else {
+          delete item.unavailable;
+        }
+      },
+    );
+  };
+}
+
 const step = (): ActivityItem => ({
   kind: "step",
   status: "running",

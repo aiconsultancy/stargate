@@ -688,9 +688,16 @@ After a child session starts a new execution, an unsequenced delta for an
 unknown assistant message is withheld; the final text can still arrive in
 the durable message-end frame. Writer associations are released when the
 hub evicts the turn. The collector retains routing markers for up to 512
-evicted child sessions. Once those markers roll over, a child with no
-record of native creation needs a durable frame to establish a previously
-unknown assistant message; late unsequenced frames cannot establish it.
+evicted child sessions and only an exact durable position for up to 4,096
+older sessions. Replayed positions at or below that fence cannot spend a
+new call's proof. If a reused session's position has expired, a start above
+a sampled native log checkpoint can prove a new execution. Until then,
+the call shows `unavailable: ["activity.child-attribution"]`. Its unproven
+frames appear in an unscoped activity snapshot or stream as a separate turn
+with no parent, request or crew task, and no claimed native outcome. A
+proven start for the same waiting call clears the marker. New sessions do
+not need this checkpoint. The durable fence does not reject unsequenced
+frames associated with an admitted execution's known assistant messages.
 
 After a stream reconnect, the collector uses bounded reads of native
 execution boundaries to check whether a child is still in the same busy
