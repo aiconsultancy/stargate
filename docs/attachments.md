@@ -85,6 +85,48 @@ it reports an unavailable or unconfirmed attachment rather than completing again
 or posting a replacement. This is not exactly-once delivery. Text and file
 delivery are separate; a visible text reply is not proof its files were shared.
 
+## Giving officers a file tool
+
+A captain or another officer can prepare files without a shell using the optional
+Python 3 stdio MCP server on Unix. Register it in each officer's agent profile and grant
+that officer the `prepare_file` tool. Give each officer their own staging and
+export directories. The gateway needs read access to the export directory.
+For example, use this command array in an OpenCode local MCP registration:
+
+```json
+[
+  "python3",
+  "-I",
+  "/srv/stargate/scripts/officer_files.py",
+  "--staging",
+  "/srv/officers/captain/outbox",
+  "--exports",
+  "/srv/exports/captain",
+  "--socket",
+  "/run/stargate/subspace/captain/api.sock"
+]
+```
+
+The socket supplies the officer's own Subspace identity. Installations with an
+authenticated loopback MCP relay can use `--port PORT --actor OFFICER` instead.
+Use a plain filename and an allowed extension. Each file must contain 1 byte to 10 MiB. New text accepts up to 65,536 UTF-8 bytes. A staged file must be owned by the officer, have one hard link and be writable only by its owner. Both directories must be canonical absolute paths. Create the export directory
+setgid and grant its group to the intended gateway. Apply a retention policy to
+prepared exports after the outbox has completed delivery.
+
+| Source                    | Tool arguments                        | Result                                                                                                    |
+| ------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Issue image or document   | `source: "issue"`, `issue`, `mediaId` | Verifies the listed attachment belongs to this issue and retrieves its bytes with the officer's identity. |
+| Local image or document   | `source: "staged"`, `fileName`        | Reads one regular file by name from the officer's staging directory.                                      |
+| New text, Markdown or CSV | `source: "text"`, `fileName`, `text`  | Writes the supplied UTF-8 text. Use only the file name and text for this source.                          |
+
+To send a file another officer has already shared, use `source: "upload"` with its `reference`. The tool retrieves the original through the receiving officer's existing access and checks its size and SHA-256.
+
+Use the returned marker in the intended reply for Slack, IRC FILEHOST or an inline
+image preview in Teams (PNG, JPEG, WebP or GIF input up to 10 MiB). To share a supported document or image with Subspace desktop
+users over IRC, pass a fresh `chatUploadId` UUID and post the returned reference.
+This creates a 30-day copy readable by active Subspace members. Reuse the UUID
+if delivery is uncertain. To share both ways, prepare a marker for Teams and call again with the upload UUID for IRC. CSV and PPTX can be staged locally. The IRC chat upload accepts neither type.
+
 ## Setup and existing requests
 
 The generated manifest includes `files:read` and `files:write`. Existing apps

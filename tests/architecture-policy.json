@@ -1977,6 +1977,7 @@
         "src/teams/connector.ts",
         "src/teams/http.ts",
         "src/teams/images.ts",
+        "src/transports/teams/inbound-images.ts",
         "src/teams/log.ts",
         "src/teams/presence.ts",
         "src/teams/registration.ts",

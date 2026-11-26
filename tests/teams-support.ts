@@ -112,7 +112,7 @@ export function registrationFixture(
 
   const config = Schema.decodeUnknownSync(teamsSchema)({
     id: "test-admiral",
-    livePresence: options.presence === true,
+    ...(options.presence !== undefined && { livePresence: options.presence }),
     botClientId: APP_ID,
     tenantId: TENANT_ID,
     socketPath: join(directory, "bridge.sock"),

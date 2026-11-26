@@ -7,6 +7,7 @@
 // It cannot forge inbound traffic: inbound tokens must be issued and signed by Bot
 // Framework (iss https://api.botframework.com), and an Entra token from IMDS fails
 // That check.
+import { imageView } from "./inbound-images";
 import { serviceUrlBase } from "./service-url";
 
 export const IMDS_TOKEN_ENDPOINT =
@@ -287,6 +288,22 @@ export class ConnectorClient {
     this.#tokens = options.tokenProvider;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#sleep = options.sleep ?? defaultSleep;
+  }
+
+  public async fetchImage(
+    service: string,
+    url: string,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    const target = imageView(service, url);
+    signal.throwIfAborted();
+    const token = await untilAborted(this.#tokens.getToken(), signal);
+
+    return this.#fetch(target, {
+      headers: { authorization: `Bearer ${token}` },
+      redirect: "error",
+      signal,
+    });
   }
 
   // Options.signal bounds the whole send, token and retry included.

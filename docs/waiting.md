@@ -26,7 +26,7 @@ tool output or claim that a particular check has completed.
 - Slack shows them in the reply placeholder until text arrives.
 - IRC sets them as the nick's `status` metadata while a turn runs. See
   [IRC](irc.md).
-- Teams, with `livePresence: true`, shows them in place of the generic
+- Teams, with live presence enabled, shows them in place of the generic
   “Thinking” and “Working” progress labels. Specific labels are unchanged.
   See [Teams](teams.md#typing-and-progress).
 

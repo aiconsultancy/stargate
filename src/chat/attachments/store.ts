@@ -29,7 +29,7 @@ const decodeInputFiles = Schema.decodeUnknownSync(
         Schema.isMaxCodePoints(2048),
         settingsPattern(
           new RegExp(
-            String.raw`^(?:F[A-Z0-9]+|https?://\S+|${chatUploadReferenceSource})$`,
+            String.raw`^(?:teams:image-unavailable|F[A-Z0-9]+|https?://\S+|${chatUploadReferenceSource})$`,
             "u",
           ),
         ),
