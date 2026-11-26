@@ -449,6 +449,55 @@ test("name saturation does not charge standalone root quota for unattributed chi
   }
 });
 
+test("discarded witnessed starts free the exact names of expired launch hints", () => {
+  const f = fixture();
+  const bucket = Bun.hash(child, 0n) % 512n;
+
+  try {
+    const scope = { active: true };
+    const root = f.root(scope);
+    const spent: string[] = [];
+
+    for (let i = 0; spent.length < 512; i += 1) {
+      const id = `ses_spent_${i}`;
+
+      if (Bun.hash(id, 0n) % 512n !== bucket) {
+        spent.push(id);
+        f.call(root, id);
+        f.names(root, id, id);
+      }
+    }
+
+    f.settleRoot(root);
+    f.advance(2001);
+
+    for (const id of spent) {
+      // We saw the start, but never learned the parent; no turn was admitted.
+      f.start(id);
+    }
+
+    f.advance(2001);
+    const next = f.root(scope);
+    f.call(next, "fresh");
+    f.names(next, "fresh", child);
+    // A second distinct name exposes saturation even though a proof does
+    // Not compete with its own order.
+    f.call(next, "unrelated");
+    f.names(next, "unrelated", "ses_unrelated");
+    f.create(child, main);
+    f.start(child);
+    f.ended(child, "next transcript", "answer");
+
+    const [, parent, result] = f.turns();
+    expect(result).toMatchObject({
+      session: { id: child, parent: { turnId: parent?.id, callId: "fresh" } },
+      items: [{ text: "next transcript" }],
+    });
+  } finally {
+    f.stop.abort();
+  }
+});
+
 test.each(["expiry", "eviction"] as const)(
   "an unnamed call still competes after %s with only one naming hint left",
   async (loss) => {

@@ -222,6 +222,14 @@ export class OpenCodeActivityFamilies {
       (id) => {
         this.admit(id);
       },
+      (id, through) => {
+        const latest = this.executions.get(id)?.latest;
+
+        // A retained execution may still accept a late name for its start.
+        if (latest?.callId !== null || latest.ambiguousCall) {
+          this.calls.discardStart(id, through);
+        }
+      },
     );
     source.signal.addEventListener(
       "abort",

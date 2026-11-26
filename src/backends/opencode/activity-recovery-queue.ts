@@ -103,6 +103,7 @@ export class ActivityRecoveryQueues<E extends Event> {
     private readonly maxReads: number,
     private readonly needsStart: (id: string) => boolean,
     private readonly admit: (id: string) => void,
+    private readonly discardStart?: (id: string, order: number) => void,
   ) {}
 
   public entries() {
@@ -268,6 +269,19 @@ export class ActivityRecoveryQueues<E extends Event> {
       for (const segment of pending.segments) {
         this.bytes -= segment.bytes;
         this.releaseSlots(pending, segment);
+      }
+
+      if (keepAmbiguity) {
+        const start = pending.segments.findLast(
+          ({ first }, index) =>
+            (!pending.draining || index > 0) &&
+            first.type === startType &&
+            first.seq !== undefined,
+        )?.first;
+
+        if (start) {
+          this.discardStart?.(id, start.order);
+        }
       }
     }
   }
@@ -465,6 +479,12 @@ export class ActivityRecoveryQueues<E extends Event> {
 
   public skip(id: string, pending: PendingActivity<E>, stale = false) {
     if ((stale || pending.segments.length > 1) && !pending.draining) {
+      const first = pending.segments[0]?.first;
+
+      if (!stale && first?.type === startType && first.seq !== undefined) {
+        this.discardStart?.(id, first.order);
+      }
+
       this.advance(id, pending);
     }
   }

@@ -37,15 +37,13 @@ function inWindow(order: number, { after, through, except }: Window) {
   return after < order && order <= through && order !== except;
 }
 
-const namedKey = (session: string, child: string) =>
-  JSON.stringify([session, child]);
-
 class ScopeEvidence {
   public readonly owners = new WeakMap<TurnActivityLog, OwnerCalls>();
   private readonly pending = new Map<string, Set<number>>();
   private readonly ranges = new Map<string, Range>();
   private readonly overflow = new Map<bigint, Range>();
-  private readonly named = new Map<string, NamedCalls>();
+  private readonly named = new Map<string, Map<string, NamedCalls>>();
+  private namedCount = 0;
   private saturated: Range | undefined;
   private readonly capacity: number;
 
@@ -125,10 +123,10 @@ class ScopeEvidence {
       this.overflow.delete(bucket);
     }
 
-    const key = namedKey(session, child);
-    const named = this.named.get(key);
+    const parents = this.named.get(child) ?? new Map<string, NamedCalls>();
+    const named = parents.get(session);
 
-    if (!named && this.named.size >= this.capacity) {
+    if (!named && this.namedCount >= this.capacity) {
       // Do not evict exact child identities into hash buckets. At the hard
       // Bound, withhold certainty for this scope's untracked order window.
       this.saturated = extend(this.saturated, { first: order, last: order });
@@ -148,17 +146,37 @@ class ScopeEvidence {
     }
 
     calls.orders.add(order);
-    this.named.set(key, calls);
+
+    if (!named) {
+      this.namedCount += 1;
+      parents.set(session, calls);
+      this.named.set(child, parents);
+    }
   }
 
-  public retire(session: string, child: string, through: number) {
-    const key = namedKey(session, child);
-    const calls = this.named.get(key);
+  public retire(child: string, through: number, session?: string) {
+    const parents = this.named.get(child);
 
-    if (!calls) {
+    if (!parents) {
       return;
     }
 
+    for (const [parent, calls] of parents) {
+      if (
+        (session === undefined || parent === session) &&
+        this.trim(calls, through)
+      ) {
+        parents.delete(parent);
+        this.namedCount -= 1;
+      }
+    }
+
+    if (parents.size === 0) {
+      this.named.delete(child);
+    }
+  }
+
+  private trim(calls: NamedCalls, through: number) {
     for (const order of calls.orders) {
       if (order <= through) {
         calls.orders.delete(order);
@@ -171,13 +189,11 @@ class ScopeEvidence {
       calls.dropped.first = through + 1;
     }
 
-    if (!calls.dropped && calls.orders.size === 0) {
-      this.named.delete(key);
-    }
+    return !calls.dropped && calls.orders.size === 0;
   }
 
   public competing(session: string, child: string, window: Window) {
-    const named = this.named.get(namedKey(session, child));
+    const named = this.named.get(child)?.get(session);
 
     return (
       overlaps(this.ranges.get(session), window) ||
@@ -196,7 +212,8 @@ class ScopeEvidence {
 
 /** Exact naming follows its log; bounded ambiguity follows the native incarnation. */
 export class ActivityCallEvidence {
-  private incarnations = new WeakMap<ActivityIncarnation, ScopeEvidence>();
+  // Active scopes only. The crew collector fences each retired incarnation.
+  private readonly incarnations = new Map<ActivityIncarnation, ScopeEvidence>();
   private unscoped: ScopeEvidence;
 
   public constructor(private readonly callsPerLog: number) {
@@ -296,7 +313,16 @@ export class ActivityCallEvidence {
     child: string,
     through: number,
   ) {
-    this.scope(scope)?.retire(session, child, through);
+    this.scope(scope)?.retire(child, through, session);
+  }
+
+  /** A discarded start cannot establish a parent, so retire across scopes. */
+  public discardStart(child: string, through: number) {
+    this.unscoped.retire(child, through);
+
+    for (const index of this.incarnations.values()) {
+      index.retire(child, through);
+    }
   }
 
   public fence(scope: ActivityIncarnation) {
@@ -304,7 +330,7 @@ export class ActivityCallEvidence {
   }
 
   public clear() {
-    this.incarnations = new WeakMap();
+    this.incarnations.clear();
     this.unscoped = new ScopeEvidence(this.callsPerLog);
   }
 }
