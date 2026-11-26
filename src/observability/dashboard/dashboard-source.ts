@@ -123,6 +123,7 @@ const crewPollIntervalMs = 3000;
 type CrewRead = {
   status: CrewStatus | null;
   error?: string;
+  taskText?: FleetCrewStatusInput["taskText"];
   metadata?: FleetCrewStatus["metadata"];
   observedAt?: number;
 };
@@ -288,25 +289,31 @@ export function dashboardSource(
     signal: AbortSignal,
     fleetInput?: FleetCrewStatusInput,
   ): Promise<CrewRead> {
-    if (!ship.backend.crewStatus) {
+    const { backend } = ship;
+
+    if (!backend.crewStatus) {
       return { status: null };
     }
 
     try {
-      if (fleetInput && ship.backend.fleetCrewStatus) {
-        const result = await ship.backend.fleetCrewStatus(fleetInput, signal);
+      if (fleetInput && backend.fleetCrewStatus) {
+        const result = await backend.fleetCrewStatus(fleetInput, signal);
         signal.throwIfAborted();
 
-        if (result) {
-          return result;
+        if (result.kind !== "unavailable" && result.answer) {
+          return result.answer;
+        }
+
+        if (fleetInput.taskText && result.kind !== "unsupported") {
+          return { status: null, error: crewUnavailable };
         }
       }
 
-      // Ordinary status never carries raw task text.
+      // Legacy plugins without fleet status still serve ordinary status.
       const member = fleetInput?.member;
 
       return {
-        status: await ship.backend.crewStatus(
+        status: await backend.crewStatus(
           member === undefined ? {} : { member },
           signal,
         ),
@@ -339,11 +346,16 @@ export function dashboardSource(
 
     fleetCrew.set(backend, slot);
 
-    const unavailable = (): CrewRead => ({
-      ...slot.latest,
-      status: slot.latest?.status ?? null,
-      error: crewUnavailable,
-    });
+    const unavailable = (): CrewRead => {
+      const latest =
+        slot.latest?.taskText === "unredacted" ? slot.latest : undefined;
+
+      return {
+        ...latest,
+        status: latest?.status ?? null,
+        error: crewUnavailable,
+      };
+    };
 
     const current = slot.read.pending;
 
@@ -356,7 +368,7 @@ export function dashboardSource(
       // A recent sample stays usable throughout this refresh. A cold caller
       // Needs the shared result to establish availability.
       const fallback =
-        last &&
+        last?.sample.taskText === "unredacted" &&
         performance.now() - last.at < fleetCrewDeadlineMs + crewPollIntervalMs
           ? last.sample
           : undefined;
@@ -393,6 +405,12 @@ export function dashboardSource(
     const pending = slot.pending;
     const hasFallback = pending.fallback !== undefined;
 
+    const fallback = () =>
+      pending.fallback &&
+      (slot.last?.sample.taskText === "unredacted"
+        ? slot.last.sample
+        : pending.fallback);
+
     const wait = AbortSignal.any([
       signal,
       fleetSignal,
@@ -411,8 +429,10 @@ export function dashboardSource(
           throw error;
         }
 
-        if (pending.fallback) {
-          return slot.last?.sample ?? pending.fallback;
+        const sample = fallback();
+
+        if (sample) {
+          return sample;
         }
 
         return readWithDeadline(wait, undefined, () => pending.result).result;
@@ -422,9 +442,7 @@ export function dashboardSource(
       fleetSignal.throwIfAborted();
 
       if (crewDeadline?.aborted && error === crewDeadline.reason) {
-        return pending.fallback
-          ? (slot.last?.sample ?? pending.fallback)
-          : unavailable();
+        return fallback() ?? unavailable();
       }
 
       throw error;
@@ -715,11 +733,24 @@ export function dashboardSource(
 
     const { bot } = ship;
 
+    const crewRead = async () => {
+      if (!fleetInput?.taskText) {
+        return crew(ship, signal, fleetInput);
+      }
+
+      try {
+        return await readWithDeadline(signal, fleetCrewDeadlineMs, (reading) =>
+          crew(ship, reading, fleetInput),
+        ).result;
+      } catch {
+        signal.throwIfAborted();
+
+        return { status: null, error: crewUnavailable };
+      }
+    };
+
     const [{ status, error, metadata, observedAt }, sessions] =
-      await Promise.all([
-        sample ?? crew(ship, signal, fleetInput),
-        roots(ship, signal),
-      ]);
+      await Promise.all([sample ?? crewRead(), roots(ship, signal)]);
 
     const named = agent(ship);
 

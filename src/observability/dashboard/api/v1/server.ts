@@ -31,13 +31,14 @@ import {
   shipRoute,
 } from "./officers";
 import { apiToken } from "./token";
-import type {
-  ApiV1Source,
-  V1ActivityItemPage,
-  V1AgentActivity,
-  V1Fleet,
-  V1Gateway,
-  V1Snapshot,
+import {
+  type ApiV1Source,
+  CrewStatusUnavailable,
+  type V1ActivityItemPage,
+  type V1AgentActivity,
+  type V1Fleet,
+  type V1Gateway,
+  type V1Snapshot,
 } from "./types";
 
 type Options = {
@@ -398,12 +399,25 @@ async function answer(
       return empty(detail ?? 503);
     }
 
-    const result = await detail;
-    read.throwIfAborted();
+    const result = await detail.catch((error: unknown) => {
+      if (
+        error instanceof CrewStatusUnavailable ||
+        (!signal.aborted &&
+          read.aborted &&
+          error === read.reason &&
+          shipRoute.test(pathname))
+      ) {
+        return 503;
+      }
+
+      throw error;
+    });
 
     if (typeof result === "number") {
       return empty(result);
     }
+
+    read.throwIfAborted();
 
     return method === "HEAD" ? empty(200) : Response.json(result, { headers });
   } catch {

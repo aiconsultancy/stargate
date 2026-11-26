@@ -362,11 +362,12 @@ test("stored task text is cut at 64,000 code points without splitting a surrogat
 
     f.engine.state.running(task.id);
     f.engine.state.activity.progress(task.id, `${astral}y`);
+    const progress = `${"😀".repeat(crewTaskTextLimit - 1)}y`;
 
     const read = (taskText: "unredacted" | "full") =>
       f.engine.status({ member: "twiki" }, { taskText }).members[0]?.current;
 
-    expect(read("full")).toMatchObject({ summary: cut, progress: cut });
+    expect(read("full")).toMatchObject({ summary: cut, progress });
 
     const fleet = {
       status: f.engine.status({ member: "twiki" }, { taskText: "full" }),
@@ -387,8 +388,11 @@ test("stored task text is cut at 64,000 code points without splitting a surrogat
     // Unredacted keeps the summary's start and the progress tail, whole pairs.
     expect(read("unredacted")).toMatchObject({
       summary: `x${"😀".repeat(179)}`,
-      progress: "😀".repeat(400),
+      progress: `${"😀".repeat(399)}y`,
     });
+    expect(
+      f.engine.status({ member: "twiki" }).members[0]?.current?.progress,
+    ).toBe(`\uFFFD${"😀".repeat(199)}y`);
   } finally {
     await f.close();
   }

@@ -36,6 +36,7 @@ import type {
   V1Task,
 } from "../src/observability/dashboard/api/v1/types";
 import type { AgentBackend } from "../src/backends/backend";
+import { OpenCodeCrewStatus } from "../src/backends/opencode/crew-status";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema, configSchema } from "../src/config";
 import type { CrewStatus, CrewStatusInput } from "../src/shared/crew-status";
@@ -97,6 +98,67 @@ function session(
   extra: Partial<HistorySession> = {},
 ): HistorySession {
   return { id, harness: "opencode", kind: "subagent", ...extra };
+}
+
+function fleetTextFixture(
+  reply: (mode: string) => Response | Promise<Response>,
+  options?: Parameters<typeof dashboardSource>[4],
+) {
+  const asked: string[] = [];
+
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      if (!new URL(request.url).pathname.endsWith("/fleetStatus")) {
+        asked.push("status");
+
+        return Response.json({ output: statusText("redacted status") });
+      }
+
+      const mode =
+        /"taskText":"(\w+)"/.exec(await request.text())?.[1] ?? "ordinary";
+
+      asked.push(mode);
+
+      return reply(mode);
+    },
+  });
+
+  const f = fixture(options);
+
+  const crew = new OpenCodeCrewStatus(
+    OpenCode.make({ baseUrl: server.url.href }),
+    () => "/fixture",
+  );
+
+  f.useCrewReader(crew);
+
+  return { ...f, crew, asked, stop: () => server.stop(true) };
+}
+
+function statusText(summary: string) {
+  return {
+    members: [
+      context("pilot", {
+        current: task("fixture-task", "running", { summary }),
+      }),
+    ],
+    total: 1,
+    truncated: false,
+  };
+}
+
+function fleetTextAnswer(mode: string) {
+  const summary = mode === "full" ? `full ${"a".repeat(200)}` : mode;
+
+  return Response.json({
+    output: {
+      status: statusText(summary),
+      metadata: { projectDirectory: "/fixture", contexts: [] },
+      ...(mode !== "ordinary" && { taskText: mode }),
+    },
+  });
 }
 
 function fixture(
@@ -258,19 +320,23 @@ function fixture(
               const scoped = await status(id, input);
 
               return {
-                status: scoped,
-                metadata: {
-                  projectDirectory: privateProject,
-                  contexts: scoped.members.map((context) => ({
-                    member: context.id,
-                    project:
-                      context.project === "default"
-                        ? null
-                        : (context.project ?? null),
-                    directory: `${privateProject}-${context.id}-${context.project ?? "default"}`,
-                    role: "Flight testing",
-                    model: "test/custom",
-                  })),
+                kind: "answer",
+                answer: {
+                  status: scoped,
+                  metadata: {
+                    projectDirectory: privateProject,
+                    contexts: scoped.members.map((context) => ({
+                      member: context.id,
+                      project:
+                        context.project === "default"
+                          ? null
+                          : (context.project ?? null),
+                      directory: `${privateProject}-${context.id}-${context.project ?? "default"}`,
+                      role: "Flight testing",
+                      model: "test/custom",
+                    })),
+                  },
+                  ...(input.taskText && { taskText: input.taskText }),
                 },
               };
             },
@@ -371,6 +437,16 @@ function fixture(
     statuses,
     crewSignals,
     advance: () => ++at,
+    useCrewReader(reader: OpenCodeCrewStatus) {
+      const backend = dashboard.fleetBackend("captain");
+
+      if (!backend) {
+        throw new Error("Missing fixture captain");
+      }
+
+      backend.fleetCrewStatus = reader.fleetCrewStatus.bind(reader);
+      backend.crewStatus = reader.crewStatus.bind(reader);
+    },
     replaceBackend: (id: string) => {
       const ship = ships.find((entry) => entry.bot.id === id);
 
@@ -589,12 +665,17 @@ describe("Fleet API projection", () => {
 
     try {
       expect(await backend.fleetCrewStatus({}, signal)).toMatchObject({
-        status: { members: [{ id: "pilot", project: "ops" }] },
-        metadata,
+        kind: "answer",
+        answer: {
+          status: { members: [{ id: "pilot", project: "ops" }] },
+          metadata,
+        },
       });
       stall = true;
       const reading = AbortSignal.timeout(1000);
-      expect(await backend.fleetCrewStatus({}, reading)).toBeUndefined();
+      expect(await backend.fleetCrewStatus({}, reading)).toEqual({
+        kind: "unavailable",
+      });
       expect(await backend.crewStatus({}, reading)).toMatchObject({
         members: [{ id: "pilot", project: "ops", name: "Reprovisioned pilot" }],
       });
@@ -634,19 +715,26 @@ describe("Fleet API projection", () => {
     const backend = new OpenCodeBackend(config);
 
     try {
-      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
-      let recovered: Awaited<ReturnType<typeof backend.fleetCrewStatus>>;
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        kind: "unavailable",
+      });
 
-      for (let i = 0; i < 20 && !recovered; i++) {
+      let recovered:
+        | Awaited<ReturnType<typeof backend.fleetCrewStatus>>
+        | undefined;
+
+      for (let i = 0; i < 20 && recovered?.kind !== "answer"; i++) {
         await Bun.sleep(5); // Fetch may still be aborting after the deadline.
         recovered = await backend.fleetCrewStatus({}, signal);
       }
 
       expect(recovered).toMatchObject({
-        metadata: { projectDirectory: "/fixture" },
+        kind: "answer",
+        answer: { metadata: { projectDirectory: "/fixture" } },
       });
       expect(await backend.fleetCrewStatus({}, signal)).toMatchObject({
-        metadata: { projectDirectory: "/fixture" },
+        kind: "answer",
+        answer: { metadata: { projectDirectory: "/fixture" } },
       });
     } finally {
       await backend.close();
@@ -700,8 +788,14 @@ describe("Fleet API projection", () => {
       await expect(first).rejects.toMatchObject({ name: "AbortError" });
       expect(fetchProbe).toHaveBeenCalledTimes(1);
       held.resolve();
-      expect(await second).toEqual({ status, metadata });
-      expect(await different).toEqual({ status, metadata: filtered });
+      expect(await second).toEqual({
+        kind: "answer",
+        answer: { status, metadata },
+      });
+      expect(await different).toEqual({
+        kind: "answer",
+        answer: { status, metadata: filtered },
+      });
       expect(fetchProbe).toHaveBeenCalledTimes(2);
     } finally {
       held.resolve();
@@ -759,15 +853,17 @@ describe("Fleet API projection", () => {
       const first = backend.fleetCrewStatus({}, signal);
       await started.promise;
       deadline.abort(new DOMException("Fixture deadline", "TimeoutError"));
-      expect(await first).toBeUndefined();
-      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(await first).toEqual({ kind: "unavailable" });
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        kind: "unavailable",
+      });
       expect(await backend.crewStatus({}, signal)).toEqual(status);
       expect(probes).toBe(1);
       held.resolve();
       await Bun.sleep(0);
       expect(await backend.fleetCrewStatus({}, signal)).toEqual({
-        status,
-        metadata,
+        kind: "answer",
+        answer: { status, metadata },
       });
       expect(probes).toBe(2);
     } finally {
@@ -827,33 +923,45 @@ describe("Fleet API projection", () => {
       await Bun.sleep(0);
       expect(fetchProbe).toHaveBeenCalledTimes(count);
       deadline.abort(new DOMException("Fixture deadline", "TimeoutError"));
-      expect(await read).toBeUndefined();
+      expect(await read).toEqual({ kind: "unavailable" });
     };
 
     try {
-      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
-      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        kind: "unavailable",
+      });
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        kind: "unavailable",
+      });
       await startAndTimeOut(3);
 
       clock.mockReturnValue(hardCap - 1);
-      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        kind: "unavailable",
+      });
       clock.mockReturnValue(hardCap);
-      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        kind: "unavailable",
+      });
       clock.mockReturnValue(hardCap + 59_999);
-      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        kind: "unavailable",
+      });
       expect(fetchProbe).toHaveBeenCalledTimes(3);
 
       clock.mockReturnValue(hardCap + 60_000);
       await startAndTimeOut(4);
       clock.mockReturnValue(2 * hardCap + 60_000);
-      expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+      expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+        kind: "unavailable",
+      });
       expect(fetchProbe).toHaveBeenCalledTimes(4);
 
       first.resolve();
       await Bun.sleep(0);
       expect(await backend.fleetCrewStatus({}, signal)).toEqual({
-        status,
-        metadata,
+        kind: "answer",
+        answer: { status, metadata },
       });
       expect(fetchProbe).toHaveBeenCalledTimes(5);
     } finally {
@@ -1138,10 +1246,16 @@ describe("Fleet API projection", () => {
       const backend = new OpenCodeBackend(config);
 
       try {
-        expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+        expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+          kind: "unavailable",
+        });
         missing = true;
-        expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
-        expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+        expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+          kind: "unsupported",
+        });
+        expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+          kind: "unsupported",
+        });
         expect(await backend.crewStatus({}, signal)).toMatchObject({
           members: [],
         });
@@ -1205,23 +1319,25 @@ describe("Fleet API projection", () => {
 
       try {
         expect(await backend.fleetCrewStatus(full, signal)).toMatchObject({
-          taskText: "full",
+          kind: "answer",
+          answer: { taskText: "full" },
         });
         expect(
           await backend.fleetCrewStatus({ member: "pilot" }, signal),
-        ).not.toHaveProperty("taskText");
+        ).not.toHaveProperty("answer.taskText");
         expect(await backend.fleetCrewStatus(unredacted, signal)).toMatchObject(
-          { taskText: "unredacted" },
+          { kind: "answer", answer: { taskText: "unredacted" } },
         );
         expect(asked).toEqual(["full", "ordinary", "unredacted"]);
 
         old = true;
         const masked = await backend.fleetCrewStatus(unredacted, signal);
-        expect(masked).toMatchObject({ metadata: { contexts: [] } });
-        expect(masked).not.toHaveProperty("taskText");
-        expect(await backend.fleetCrewStatus(full, signal)).not.toHaveProperty(
-          "taskText",
-        );
+        expect(masked).toMatchObject({
+          kind: "unsupported",
+          answer: { metadata: { contexts: [] } },
+        });
+        expect(masked).not.toHaveProperty("answer.taskText");
+        expect(await backend.fleetCrewStatus(full, signal)).toEqual(masked);
         expect(asked.slice(3)).toEqual(["unredacted", "ordinary", "ordinary"]);
       } finally {
         await backend.close();
@@ -1230,6 +1346,215 @@ describe("Fleet API projection", () => {
       await server.stop(true);
     }
   });
+
+  test.each(["crew", "ship", "sample"] as const)(
+    "slow current plugin: %s waits past the ordinary probe for task text",
+    async (route) => {
+      const f = fleetTextFixture(async (mode) => {
+        await Bun.sleep(500);
+
+        return fleetTextAnswer(mode);
+      });
+
+      try {
+        if (route === "crew") {
+          const detail = await f.source.crew("captain", "pilot", signal);
+          expect(detail?.member.contexts[0]?.current?.summary).toBe(
+            `full ${"a".repeat(200)}`,
+          );
+        } else if (route === "ship") {
+          const detail = await f.source.ship("captain", signal);
+          expect(detail?.crewMembers[0]?.contexts[0]?.current?.summary).toBe(
+            "unredacted",
+          );
+        } else {
+          const sample = await f.dashboard.fleetWithCrew(
+            signal,
+            new Set(["captain"]),
+          );
+
+          const captain = sample.ships.find(
+            ({ summary }) => summary.id === "captain",
+          );
+
+          expect(captain?.members?.[0]?.contexts[0]?.current?.summary).toBe(
+            "unredacted",
+          );
+        }
+
+        expect(f.asked).toEqual([route === "crew" ? "full" : "unredacted"]);
+      } finally {
+        await f.stop();
+      }
+    },
+  );
+
+  test.each(["full", "ordinary"] as const)(
+    "task text request rejects a %s reply to an unredacted request",
+    async (wrongMode) => {
+      const f = fleetTextFixture(() => fleetTextAnswer(wrongMode));
+
+      try {
+        expect(await f.source.ship("captain", signal)).toMatchObject({
+          available: false,
+          error: "Crew status unavailable.",
+          crewMembers: [],
+        });
+        expect(f.asked).toEqual(["unredacted"]);
+      } finally {
+        await f.stop();
+      }
+    },
+  );
+
+  test("task text backoff is unavailable, not unsupported or an ordinary read", async () => {
+    const f = fleetTextFixture(() =>
+      Response.json(
+        {
+          _tag: "RpcInternalError",
+          type: "rpc.internal",
+          message: "Fixture RPC failure",
+        },
+        { status: 500 },
+      ),
+    );
+
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await f.crew.fleetCrewStatus({}, signal);
+      }
+
+      await expect(f.source.crew("captain", "pilot", signal)).rejects.toThrow(
+        "Crew status unavailable.",
+      );
+      expect(f.asked).toEqual(["ordinary", "ordinary", "ordinary"]);
+    } finally {
+      await f.stop();
+    }
+  });
+
+  test("HTTP crew detail returns 503 when the current plugin misses its deadline", async () => {
+    const held = Promise.withResolvers<Response>();
+
+    const f = fleetTextFixture(() => held.promise, {
+      fleetCrewDeadlineMs: 700,
+    });
+
+    const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-"));
+    const shutdown = new AbortController();
+
+    const reservation = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response(null),
+    });
+
+    const listen = `127.0.0.1:${reservation.port}`;
+    await reservation.stop(true);
+    let server: Awaited<ReturnType<typeof startApiV1Server>> | undefined;
+
+    try {
+      server = await startApiV1Server({
+        config: { listen },
+        dataDirectory,
+        source: f.source,
+        diff: diffEvents,
+        gateway: {
+          version: "1.0.0",
+          startedAt: 1,
+          opencodeVersion: async () => null,
+        },
+        signal: shutdown.signal,
+        timing: { requestMs: 1500 },
+      });
+
+      const response = await fetch(
+        new URL("/api/v1/ships/captain/crew/pilot", server.url),
+        {
+          headers: { Authorization: `Bearer ${await apiToken(dataDirectory)}` },
+          signal: AbortSignal.timeout(2500),
+        },
+      );
+
+      expect(response.status).toBe(503);
+      expect(await response.text()).toBe("");
+      expect(f.asked).toEqual(["full"]);
+    } finally {
+      held.resolve(fleetTextAnswer("full"));
+      shutdown.abort();
+      await server?.stop();
+      await f.stop();
+      await rm(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test("an unavailable Fleet sample cannot reuse ordinary text from a legacy read", async () => {
+    let now = performance.now();
+    const clock = spyOn(performance, "now").mockImplementation(() => now);
+
+    const f = fleetTextFixture((mode) => {
+      if (mode === "ordinary" || now >= upgradedAt) {
+        return fleetTextAnswer("ordinary");
+      }
+
+      return Response.json(
+        {
+          _tag: "RpcError",
+          type: "rpc.invalid_input",
+          message: "Legacy fixture",
+        },
+        { status: 400 },
+      );
+    });
+
+    const upgradedAt = now + 60_001;
+
+    const sample = async () =>
+      (await f.dashboard.fleetWithCrew(signal, new Set(["captain"]))).ships[0];
+
+    try {
+      expect(
+        (await sample())?.members?.[0]?.contexts[0]?.current?.summary,
+      ).toBe("ordinary");
+      now = upgradedAt;
+      const unavailable = await sample();
+      expect(unavailable?.error).toBe("Crew status unavailable.");
+      expect(unavailable?.members).toBeUndefined();
+      expect(f.asked).toEqual(["unredacted", "ordinary", "unredacted"]);
+    } finally {
+      clock.mockRestore();
+      await f.stop();
+    }
+  });
+
+  test.each(["rpc.method_not_found", "rpc.invalid_input"] as const)(
+    "only explicit legacy failure %s gives the plugin's ordinary text",
+    async (legacy) => {
+      const f = fleetTextFixture((mode) =>
+        mode === "ordinary"
+          ? fleetTextAnswer(mode)
+          : Response.json(
+              { _tag: "RpcError", type: legacy, message: "Legacy fixture" },
+              { status: 400 },
+            ),
+      );
+
+      try {
+        const first = await f.source.crew("captain", "pilot", signal);
+        const second = await f.source.crew("captain", "pilot", signal);
+
+        const status =
+          legacy === "rpc.method_not_found" ? "status" : "ordinary";
+
+        const expected = status === "status" ? "redacted status" : "ordinary";
+        expect(first?.member.contexts[0]?.current?.summary).toBe(expected);
+        expect(second?.member.contexts[0]?.current?.summary).toBe(expected);
+        expect(f.asked).toEqual(["full", status, status]);
+      } finally {
+        await f.stop();
+      }
+    },
+  );
 
   test("an older OpenCode plugin without crewGit is skipped for a minute", async () => {
     const methods: string[] = [];
@@ -1325,7 +1650,9 @@ describe("Fleet API projection", () => {
 
     try {
       for (let i = 0; i < 4; i++) {
-        expect(await backend.fleetCrewStatus({}, signal)).toBeUndefined();
+        expect(await backend.fleetCrewStatus({}, signal)).toEqual({
+          kind: "unavailable",
+        });
       }
 
       expect(await backend.crewStatus({}, signal)).toMatchObject({

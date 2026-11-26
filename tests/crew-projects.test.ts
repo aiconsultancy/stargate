@@ -502,6 +502,43 @@ test("dispatch selects only protected paths; worker omission binds native contex
   }
 });
 
+test("a project preamble does not consume the assignment's 64,000-code-point limit", async () => {
+  const f = await fixture();
+  const projects = await CrewProjects.open(f.options, f.factory);
+
+  try {
+    const assignment = `x${"😀".repeat(63_998)}y`;
+
+    const result = await projects.run(
+      {
+        op: "dispatch",
+        crew: "worker",
+        project: "stargate",
+        text: assignment,
+      },
+      f.captain(),
+    );
+
+    expect(result.status).toBe("running");
+    expect(f.prompts[0]?.text).toContain(
+      `Configured Stargate project: stargate.`,
+    );
+    expect(f.prompts[0]?.text).toContain(`\n\n${assignment}\n\n`);
+
+    const full = Schema.decodeUnknownSync(fleetCrewFullStatusSchema)(
+      projects.fleetStatus({ member: "worker", taskText: "full" }),
+    );
+
+    expect(
+      full.status.members.find(({ project }) => project === "stargate")?.current
+        ?.summary,
+    ).toBe(assignment);
+  } finally {
+    await projects.close();
+    await f.close();
+  }
+});
+
 test("project validation rejects path/repository aliases and foreign worktrees before state/native admission", async () => {
   const f = await fixture();
 

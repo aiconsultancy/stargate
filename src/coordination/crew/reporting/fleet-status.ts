@@ -86,6 +86,12 @@ export const fleetCrewStatusOutputSchema = Schema.Union([
 
 export type FleetCrewStatus = typeof fleetCrewStatusOutputSchema.Type;
 
+/** Local read result, not part of the plugin's RPC protocol. */
+export type FleetCrewStatusRead =
+  | { kind: "answer"; answer: FleetCrewStatus }
+  | { kind: "unsupported"; answer?: FleetCrewStatus }
+  | { kind: "unavailable" };
+
 const index = Schema.Finite.check(
   Schema.isInt(),
   Schema.isGreaterThanOrEqualTo(0),

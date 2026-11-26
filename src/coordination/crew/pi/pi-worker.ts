@@ -22,7 +22,7 @@ import {
   type Peer,
 } from "../execution/state";
 import type { CrewMember } from "../team";
-import { activityText } from "../reporting/member-activity";
+import { activityProgress } from "../reporting/member-activity";
 
 type PiConfig = typeof piDurableBackendSchema.Type;
 
@@ -715,7 +715,7 @@ export class PiCrewWorkers {
         }
 
         // Bound before buffering; crew status readers redact on read.
-        pendingProgress = activityText(text);
+        pendingProgress = activityProgress(text);
 
         if (cancelProgress) {
           return;

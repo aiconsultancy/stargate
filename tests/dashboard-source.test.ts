@@ -195,8 +195,12 @@ describe("dashboard source", () => {
         : [member("pilot", true), member("other", false)];
 
       return {
-        status: { members, total: members.length, truncated: false },
-        metadata: { projectDirectory: "/fixture", contexts: [] },
+        kind: "answer",
+        answer: {
+          status: { members, total: members.length, truncated: false },
+          metadata: { projectDirectory: "/fixture", contexts: [] },
+          ...(input.taskText && { taskText: input.taskText }),
+        },
       };
     };
 

@@ -38,20 +38,22 @@ function tail(text: string, limit: number) {
         .join("");
 }
 
-/** `text` cut to the stored task text limit. */
+/** The start of a summary, cut to the stored task text limit. */
 export function activityText(text: string) {
   return head(text, crewTaskTextLimit);
 }
 
+/** The newest progress, cut to the stored task text limit. */
+export function activityProgress(text: string) {
+  return tail(text, crewTaskTextLimit);
+}
+
 function maskTaskText(text: string, limit: number, keep: "head" | "tail") {
   // Control stripping can expose a credential the first pass did not see.
-  const stripped = redactCredentials(text, crewTaskTextLimit);
-  const window = keep === "tail" ? stripped.slice(-limit) : stripped;
-  const masked = redactCredentials(window, crewTaskTextLimit);
+  const scanLimit = keep === "tail" ? 2 * crewTaskTextLimit : crewTaskTextLimit;
+  const stripped = redactCredentials(text, scanLimit, keep);
 
-  return (
-    keep === "tail" ? masked.slice(-limit) : masked.slice(0, limit)
-  ).toWellFormed();
+  return redactCredentials(stripped, limit, keep).toWellFormed();
 }
 
 /**
@@ -173,7 +175,7 @@ export class MemberActivityStore {
   }
 
   public progress(taskID: string, text: string) {
-    const raw = activityText(text);
+    const raw = activityProgress(text);
     this.db
       .query(`UPDATE member_activity SET progress=?,updatedAt=?
       WHERE taskID=? AND progress<>?`)

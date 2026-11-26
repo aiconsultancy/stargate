@@ -45,7 +45,9 @@ export function readWithDeadline<T>(
 export function createReadSlot<T>(timeout: number, onIdle?: () => void) {
   type Attempt = {
     result: Promise<T>;
+    settled: Promise<void>;
     abandonAt: number;
+    waitForAbort: AbortSignal | undefined;
     onAbandon: (() => void) | undefined;
   };
 
@@ -65,7 +67,11 @@ export function createReadSlot<T>(timeout: number, onIdle?: () => void) {
   return {
     get pending() {
       // Check on demand so stopped pollers do not leave recovery timers behind.
-      if (pending && performance.now() >= pending.abandonAt) {
+      if (
+        pending &&
+        pending.waitForAbort?.aborted !== false &&
+        performance.now() >= pending.abandonAt
+      ) {
         abandonPending();
       }
 
@@ -83,17 +89,19 @@ export function createReadSlot<T>(timeout: number, onIdle?: () => void) {
     start(
       parent: AbortSignal,
       read: (signal: AbortSignal) => Promise<T>,
-      options?: { timeout?: number; onAbandon?: () => void },
+      options?: { timeout?: number | false; onAbandon?: () => void },
     ) {
       const { result, settled } = readWithDeadline(
         parent,
-        options?.timeout ?? timeout,
+        options?.timeout === false ? undefined : (options?.timeout ?? timeout),
         read,
       );
 
       const attempt = {
         result,
+        settled,
         abandonAt: performance.now() + 3 * timeout,
+        waitForAbort: options?.timeout === false ? parent : undefined,
         onAbandon: options?.onAbandon,
       };
 

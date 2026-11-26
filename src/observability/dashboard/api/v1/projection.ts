@@ -37,6 +37,7 @@ import { createPullReader } from "./pulls";
 import {
   API_V1_VERSION,
   type ApiV1Source,
+  CrewStatusUnavailable,
   type V1Activity,
   type V1Captain,
   type V1CrewContext,
@@ -970,18 +971,17 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         return;
       }
 
-      const result = await detail(
-        registration,
-        // Only this route asks for full task text.
-        // An older crew plugin answers redacted; the route shows that as is.
-        await dashboard.shipWithCrew(ship, signal, {
-          member,
-          taskText: "full",
-        }),
-        signal,
+      // Only this route asks for full task text.
+      const snapshot = await dashboard.shipWithCrew(ship, signal, {
         member,
-      );
+        taskText: "full",
+      });
 
+      if (snapshot?.view.crewError) {
+        throw new CrewStatusUnavailable(snapshot.view.crewError);
+      }
+
+      const result = await detail(registration, snapshot, signal, member);
       const person = result?.crewMembers[0];
 
       return person ? { ship, member: person } : undefined;

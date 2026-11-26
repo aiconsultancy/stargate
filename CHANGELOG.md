@@ -157,9 +157,14 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   member filter) or `taskText: "full"` (raw up to 64,000, one member) and
   echoes the mode in its answer. The Fleet API asks for `unredacted` for ship
   detail and events and `full` for the crew member route; nothing else asks.
-  An older plugin answers redacted, and the gateway falls back. Fleet API text
-  fields keep control and bidirectional formatting characters; clients that
-  print them must escape them.
+  Only a plugin that lacks fleet status or rejects `taskText` answers with
+  redacted text. A current plugin that misses the crew deadline reports crew
+  status as unavailable. Fleet API text fields keep control and bidirectional
+  formatting characters; clients that print them must escape them.
+- Crew activity keeps the first 64,000 code points of the assignment summary
+  and the last 64,000 of progress. For multi-project dispatches the assignment
+  is validated on its own before Stargate adds the project preamble; the
+  full task view contains the assignment without that preamble.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`

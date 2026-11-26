@@ -5,8 +5,8 @@ import type {
   CheckoutDiffInput,
   CrewGit,
   CrewGitInput,
-  FleetCrewStatus,
   FleetCrewStatusInput,
+  FleetCrewStatusRead,
 } from "../coordination/crew/reporting/fleet-status";
 import type { CrewStatus, CrewStatusInput } from "../shared/crew-status";
 import type { CronAdvanced, CronEvaluation } from "../automation/cron/advanced";
@@ -294,12 +294,12 @@ export interface AgentBackend {
   crewStatus?(input: CrewStatusInput, signal: AbortSignal): Promise<CrewStatus>;
   /**
    * Private fleet metadata from the same location-scoped crew status read.
-   * `taskText` asks for unredacted task text; older plugins answer redacted.
+   * A `taskText` read may use ordinary status only for unsupported plugins.
    */
   fleetCrewStatus?(
     input: FleetCrewStatusInput,
     signal: AbortSignal,
-  ): Promise<FleetCrewStatus | undefined>;
+  ): Promise<FleetCrewStatusRead>;
   /**
    * Git state of the captain's project and crew checkouts, read by the crew
    * plugin as the captain. Undefined when the plugin cannot answer.

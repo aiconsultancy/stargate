@@ -198,17 +198,20 @@ Crew task text (`summary`, `phase` and `progress`) and Git branch and base
 names appear exactly as the crew wrote them: the API neither redacts
 credential-shaped text nor replaces checkout paths, in every route and
 event. Ship detail and the `ship` event show task text unredacted, within at
-most 180, 80 and 400 characters (the start of the summary and phase, the end
+most 180, 80 and 400 code points (the start of the summary and phase, the end
 of the progress); the fleet overview carries no task text. The crew member
 route applies no limit of its own: it returns the task text the crew plugin
-stores, up to 64,000 characters each. The plugin stores task text raw and
+stores, up to 64,000 code points each. The plugin stores task text raw and
 redacts and bounds it on read for every other reader (the Slack crew
-command, health, the operator dashboard and the crew status tool), so their
-output is unchanged. A crew plugin older than the gateway answers ship and
-crew detail with that redacted, 180/80/400 text. Subagent titles and pull
-request titles are also shown as written, cut to 180 characters. Activity
-events quote task text and branch names unredacted, with whitespace
-collapsed.
+command, health, the operator dashboard and the crew status tool). Only a
+plugin that lacks the fleet status method or rejects `taskText` answers ship
+and crew detail with redacted 180/80/400 text. When a current plugin cannot
+answer by the crew deadline, crew status is unavailable; the member route
+returns `503` rather than redacted text. Ship and member routes both return
+`503` if the whole HTTP read times out.
+Subagent titles and pull request titles are also shown as written, cut to
+180 characters. Activity events quote task text and branch names unredacted,
+with whitespace collapsed.
 
 These text fields (task text, branch and base names, subagent titles and
 pull request titles) can hold any Unicode character, including control

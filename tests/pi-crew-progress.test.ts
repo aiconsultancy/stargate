@@ -439,6 +439,23 @@ test("Pi progress flushes latest burst tail while still busy; stored raw, redact
   }
 });
 
+test("Pi progress keeps the end beyond the 64,000-code-point buffer", async () => {
+  const f = await fixture();
+
+  try {
+    await f.start();
+    await f.emit("First update");
+    f.clock.advance(100);
+    await f.emit(`${"😀".repeat(65_000)}y`);
+    f.clock.advance(900);
+    expect(f.rawProgress()).toBe(`${"😀".repeat(63_999)}y`);
+    expect(f.unredactedProgress()).toBe(`${"😀".repeat(399)}y`);
+    expect(f.progress()).toBe(`\uFFFD${"😀".repeat(199)}y`);
+  } finally {
+    await f.close();
+  }
+});
+
 for (const outcome of ["success", "failure", "cancel", "close"] as const) {
   test(`Pi progress flushes pending tail on ${outcome}, clears timers and ignores late callbacks`, async () => {
     const f = await fixture();
