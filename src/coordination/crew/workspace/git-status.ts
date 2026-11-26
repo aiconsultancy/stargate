@@ -119,7 +119,7 @@ export async function guardFleetHead<T>(
 
 class UnsafeStatusTemp extends Error {}
 
-async function trustedStatusRoot(path: string, serviceOwned = false) {
+export async function trustedStatusRoot(path: string, serviceOwned = false) {
   const canonical = await realpath(path).catch(() => {});
 
   if (!canonical) {
@@ -286,7 +286,7 @@ export type StatusStorage = {
 
 const liveStorage: StatusStorage = {
   async parent(root) {
-    return (await statusParent(root)).path;
+    return statusParent(root);
   },
   install(gitDir, metadata) {
     return Promise.resolve({
@@ -618,82 +618,35 @@ export function liveFleetGit(
   };
 }
 
-const statusDirectoryName = "stargate-git-status";
+export const statusDirectoryName = "stargate-git-status";
 export const statusDirectoryPrefix = `${statusDirectoryName}-`;
 
 function fileError(error: unknown) {
   return error instanceof Error && "code" in error ? error.code : undefined;
 }
 
-export async function statusDataDirectory(dataDirectory: string) {
-  const canonical = await trustedStatusRoot(dataDirectory, true);
-
-  return canonical && join(canonical, statusDirectoryName);
-}
-
+/**
+ * The trusted temporary directory, or a private folder already made in it,
+ * that holds status repositories. It must resolve outside the checkout, so
+ * status never runs inside it.
+ */
 export async function statusParent(
   root: string,
   {
-    dataDirectory,
     temporaryDirectory = tmpdir,
-    retainedTemporary,
+    retained,
   }: {
-    dataDirectory?: string | undefined;
-    temporaryDirectory?: () => string;
-    retainedTemporary?: (() => Promise<string | undefined>) | undefined;
+    temporaryDirectory?: (() => string) | undefined;
+    retained?: string | undefined;
   } = {},
 ) {
-  if (dataDirectory) {
-    try {
-      const parent = await statusDataDirectory(dataDirectory);
-
-      if (parent && outsideCheckout(root, parent)) {
-        await mkdir(parent, { mode: 0o700 }).catch((error: unknown) => {
-          if (fileError(error) !== "EEXIST") {
-            throw error;
-          }
-        });
-
-        if (await privateStatusDirectory(parent)) {
-          return { path: parent, kind: "ready" as const };
-        }
-      }
-    } catch (error) {
-      if (
-        !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
-          String(fileError(error)),
-        )
-      ) {
-        throw error;
-      }
-    }
-  }
-
-  const retained = await retainedTemporary?.();
   const temporary = retained ?? (await trustedStatusRoot(temporaryDirectory()));
 
   if (!temporary || !outsideCheckout(root, temporary)) {
     throw new UnsafeStatusTemp();
   }
 
-  return {
-    path: temporary,
-    kind: retained === undefined ? ("lease" as const) : ("ready" as const),
-  };
-}
-
-export async function privateStatusDirectory(path: string) {
-  const metadata = await lstat(path).catch(() => {});
-
-  if (
-    metadata?.isDirectory() &&
-    (metadata.mode & 0o777) === 0o700 &&
-    metadata.uid === process.getuid?.()
-  ) {
-    return metadata;
-  }
-
-  return;
+  return temporary;
 }
 
 /** Repository-relative, inside the worktree and outside any `.git`. */
