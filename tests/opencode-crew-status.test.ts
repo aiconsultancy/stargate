@@ -500,7 +500,7 @@ test("a missing method on re-ask does not block the next full probe", async () =
   }
 });
 
-test("three missing-method re-asks reach the plugin before ordinary backoff", async () => {
+test("three missing-method re-asks reach the plugin before task-text backoff", async () => {
   const f = pluginFixture();
   const signal = new AbortController().signal;
   const full = { member: "pilot", taskText: "full" } as const;
