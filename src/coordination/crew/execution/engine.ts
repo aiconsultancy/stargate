@@ -102,6 +102,7 @@ import {
 } from "./reconciliation";
 import { CrewReporter } from "../reporting/reporting";
 import { MissingTaskResult, type ResultAPI, readTaskResult } from "./result";
+import { assignmentPrompt } from "./task-records";
 import {
   type AbandonableStatus,
   CrewError,
@@ -3256,17 +3257,16 @@ export class CrewEngine {
     const messageID = caller.messageID;
     const originInputID = await this.dispatchOrigin(caller, messageID);
     const held = this.drain();
-    const text = assignmentPreamble + input.text;
-    const assignmentStart = assignmentPreamble.length;
+    const parts = { preamble: assignmentPreamble, assignment: input.text };
 
     const enqueue = (peer: Peer, drainRunID?: string) =>
       this.state.enqueue(
         peer,
         caller.sessionID,
-        text,
+        parts,
         undefined,
         originInputID,
-        { ...(drainRunID && { drainRunID }), assignmentStart },
+        { ...(drainRunID && { drainRunID }) },
       );
 
     if (held) {
@@ -3366,9 +3366,8 @@ export class CrewEngine {
           task: this.state.reserveTask(
             peer,
             caller.sessionID,
-            text,
+            parts,
             originInputID,
-            assignmentStart,
           ),
         };
       },
@@ -3394,7 +3393,7 @@ export class CrewEngine {
         : { status: "busy" };
     }
 
-    return this.admit(task, text, caller);
+    return this.admit(task, assignmentPrompt(parts), caller);
   }
 
   private async dispatchOrigin(

@@ -12,6 +12,7 @@ import type { MesijClient, MesijMessage } from "./mesij";
 import { CrewError } from "../pending";
 import type { JournalEntry } from "../reporting/journal";
 import type { CrewMember } from "../team";
+import { crewTaskTextLimit } from "../../../shared/crew-status";
 
 type MessagingTask = {
   id: string;
@@ -116,7 +117,7 @@ const send = settingsStruct({
   to: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
   text: Schema.Trim.check(
     Schema.isMinCodePoints(1),
-    Schema.isMaxCodePoints(64_000),
+    Schema.isMaxCodePoints(crewTaskTextLimit),
   ),
   taskID: Schema.optional(taskID),
   key: Schema.optional(

@@ -166,8 +166,8 @@ an existing upload, an outbox file, or new text. The file must be Markdown or
 plain text. The returned marker points to a labelled PNG preview. Include it
 and the original file name in the Teams reply. The renderer accepts up to 32,000 UTF-8 bytes,
 produces an indexed PNG up to 22,000 bytes and supports pages 1 through 100.
-If the tool reports several
-pages, set `page` on subsequent calls. Do not supply a chat upload ID for a
+Tables with up to eight columns reserve space for their labels. Longer values can use the remaining width and wrap across lines.
+If the tool reports several pages, set `page` on subsequent calls. Do not supply a chat upload ID for a
 preview.
 
 To enable this tool, pass `--playwright` with the absolute path to the
