@@ -13,6 +13,7 @@ import {
   activityPageBytes,
   createActivityHub,
   readActivity,
+  settledBytes,
   subscribeActivity,
 } from "../src/observability/dashboard/api/v1/activity";
 import { createEventStreams } from "../src/observability/dashboard/api/v1/events";
@@ -939,6 +940,7 @@ test("a root's scoped watch follows a child admitted unlinked after its eviction
       ["child", "item"],
       ["child", "turn-ended"],
     ]);
+    expect(viewer.text()).not.toContain('"audience"');
     // A new watch of the evicted parent answers as before.
     expect(
       subscribeActivity(
@@ -992,6 +994,64 @@ test("a root's scoped watch follows nested children of an unlinked child", async
     ]);
   } finally {
     viewer.stop();
+  }
+});
+
+test("a further split keeps live root watches but not a closed inherited watch", async () => {
+  let measured: Parameters<typeof settledBytes>[0] | undefined;
+
+  const hub = createActivityHub({
+    bytes: 1000,
+    measure(turn) {
+      measured = turn;
+
+      return settledBytes(turn);
+    },
+  });
+
+  const parent = hub.recorder("claude").begin(undefined, "parent");
+  const parentId = snapshot(hub, "claude").turns[0]?.id ?? "";
+  const ancestor = watch(hub, `agent=claude&turn=${parentId}`);
+  const closing = watch(hub, `agent=claude&turn=${parentId}`);
+
+  try {
+    const oversize = "x".repeat(5000);
+    parent.end("completed");
+    parent.update("late", 1, () => text(oversize));
+    const child = parent.child?.("call", "child");
+    const childId = snapshot(hub, "claude").turns[0]?.id ?? "";
+    const current = watch(hub, `agent=claude&turn=${childId}`);
+
+    try {
+      await flushed();
+      expect(sessionEvents(closing.events())).toContainEqual([
+        "child",
+        "turn-started",
+      ]);
+      closing.stop();
+      const received = closing.text();
+
+      child?.end("completed");
+      child?.update("late", 2, () => text(oversize));
+      child?.child?.("call", "grandchild").end("completed");
+      await flushed();
+
+      for (const viewer of [ancestor, current]) {
+        expect(sessionEvents(viewer.events()).slice(-2)).toEqual([
+          ["grandchild", "turn-started"],
+          ["grandchild", "turn-ended"],
+        ]);
+      }
+
+      expect(closing.text()).toBe(received);
+      expect(measured?.session).toEqual({ id: "grandchild", parent: null });
+      expect(measured?.audience?.size).toBe(2);
+    } finally {
+      current.stop();
+    }
+  } finally {
+    closing.stop();
+    ancestor.stop();
   }
 });
 

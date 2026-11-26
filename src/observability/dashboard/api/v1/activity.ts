@@ -21,7 +21,6 @@ import { remeasurer } from "./remeasure";
 import type { ApiV1Config } from "./features";
 import type {
   V1ActivityItemPage,
-  V1ActivityTurn,
   V1AgentActivity,
   V1AgentActivityChange,
   V1AgentActivityEvent,
@@ -53,13 +52,13 @@ type Limits = typeof defaults;
 export type ActivityFrame = {
   turnId: string;
   root: string;
-  /** Never served: the turn's `unlinkedFrom`. */
-  unlinkedFrom: readonly string[];
   seq: number;
   bytes: Uint8Array;
 };
 
 type ActivityWatcher = (frames: readonly ActivityFrame[]) => void;
+
+type Watcher = { turn: string | undefined; notify: ActivityWatcher };
 
 type Lifecycle = Exclude<V1AgentActivityChange, { type: "item" }>;
 
@@ -77,7 +76,7 @@ type Pending = {
 
 /** Only while someone watches the agent; otherwise changes cost nothing. */
 type Feed = {
-  watchers: Set<ActivityWatcher>;
+  watchers: Map<symbol, Watcher>;
   pending: Map<string, Pending>;
   timer: ReturnType<typeof setTimeout> | undefined;
 };
@@ -155,6 +154,7 @@ function flush(generation: string, owner: Agent) {
   const due = [...feed.pending.values()].toSorted((a, b) => a.seq - b.seq);
   feed.pending.clear();
   const frames: ActivityFrame[] = [];
+  let audiences: Map<string, ReadonlySet<symbol>> | undefined;
 
   // An evicted turn still gets the changes marked before, such as its end.
   // Eviction is never announced, so viewers keep their own cap.
@@ -173,24 +173,59 @@ function flush(generation: string, owner: Agent) {
       frames.push({
         turnId: pending.turn.id,
         root: pending.turn.root,
-        unlinkedFrom: pending.turn.unlinkedFrom ?? [],
         seq: pending.seq,
         bytes: encoder.encode(
           `event: agent-activity\ndata: ${JSON.stringify(data)}\n\n`,
         ),
       });
+
+      if (pending.turn.audience) {
+        (audiences ??= new Map()).set(pending.turn.id, pending.turn.audience);
+      }
     } catch {
       /* An unserializable value never stops the stream. */
     }
   }
 
-  for (const watcher of feed.watchers) {
+  for (const [id, { turn, notify }] of feed.watchers) {
     try {
-      watcher(frames);
+      notify(
+        turn === undefined
+          ? frames
+          : frames.filter(
+              (frame) =>
+                frame.turnId === turn ||
+                frame.root === turn ||
+                audiences?.get(frame.turnId)?.has(id),
+            ),
+      );
     } catch {
       /* A viewer never affects the agent or other viewers. */
     }
   }
+}
+
+/** Register a watch with the agent's live feed until it closes. */
+function watchAgent(owner: Agent, watcher: Watcher, idle: () => void) {
+  owner.feed ??= {
+    watchers: new Map(),
+    pending: new Map(),
+    timer: undefined,
+  };
+  const feed = owner.feed;
+  // An inherited audience never keeps the viewer or its send closure alive.
+  const id = Symbol("activity watch");
+  feed.watchers.set(id, watcher);
+
+  return () => {
+    feed.watchers.delete(id);
+
+    if (feed.watchers.size === 0 && owner.feed === feed) {
+      clearTimeout(feed.timer);
+      owner.feed = undefined;
+      idle();
+    }
+  };
 }
 
 /** Note a change for the next flush; nothing at all when unwatched. */
@@ -319,54 +354,80 @@ function evict(
   }
 }
 
-/** A child's parent, spawning call and session, and its family's requests. */
-type ChildLink = {
-  parent: StoredTurn;
-  callId: string | null;
-  sessionId: string;
-  requests: readonly ActivityRequest[];
-};
+type TurnStart =
+  | {
+      kind: "root";
+      requests: readonly ActivityRequest[];
+      sessionId: string | undefined;
+    }
+  | {
+      kind: "crew";
+      session: CrewTurnStart["session"];
+      task: CrewTurnStart["task"];
+      startedAt: number | undefined;
+      evicted: (() => void) | undefined;
+    }
+  | {
+      kind: "child";
+      parent: StoredTurn;
+      callId: string | null;
+      sessionId: string;
+      requests: readonly ActivityRequest[];
+    };
+
+/** Keep only live inherited watches and the parent root's current watches. */
+function unlinkedAudience(owner: Agent, parent: StoredTurn) {
+  if (!owner.feed) {
+    return;
+  }
+
+  const audience = new Set<symbol>();
+
+  for (const [id, { turn }] of owner.feed.watchers) {
+    if (turn === parent.root || parent.audience?.has(id)) {
+      audience.add(id);
+    }
+  }
+
+  return audience.size > 0 ? audience : undefined;
+}
 
 /**
  * How a turn begins: a child under its parent, or, if the drain before it
- * evicted that parent, unlinked: a root of its own that copies its family's requests and
- * records the family it came from. A linked child shares its parent's record.
+ * evicted that parent, unlinked: a root of its own that copies its family's
+ * requests and keeps its live audience. A linked child shares the audience.
  */
-function turnStart(
-  retained: readonly StoredTurn[],
-  own: {
-    requests: readonly ActivityRequest[];
-    session: V1ActivityTurn["session"] | undefined;
-    root: string | undefined;
-  },
-  link?: ChildLink,
-) {
-  if (!link) {
-    return { ...own, unlinkedFrom: undefined };
+function turnStart(owner: Agent, id: string, source: TurnStart) {
+  if (source.kind === "root") {
+    return {
+      requests: source.requests,
+      session: source.sessionId
+        ? { id: source.sessionId, parent: null }
+        : undefined,
+      root: id,
+    };
   }
 
-  const { parent, callId, sessionId } = link;
+  if (source.kind === "crew") {
+    return { requests: [], session: source.session, root: id };
+  }
 
-  return retained.includes(parent)
+  const { parent, callId, sessionId } = source;
+
+  return owner.turns.includes(parent)
     ? {
         requests: [],
         session: { id: sessionId, parent: { turnId: parent.id, callId } },
         root: parent.root,
-        unlinkedFrom: parent.unlinkedFrom,
+        audience: parent.audience,
       }
     : {
-        requests: link.requests,
+        requests: source.requests,
         session: { id: sessionId, parent: null },
-        root: undefined,
-        unlinkedFrom: [parent.root, ...(parent.unlinkedFrom ?? [])],
+        root: id,
+        audience: unlinkedAudience(owner, parent),
       };
 }
-
-type CrewTurn = {
-  task: CrewTurnStart["task"];
-  startedAt: number | undefined;
-  evicted: (() => void) | undefined;
-};
 
 /** A settled turn's size, measured when it ends and after later changes. */
 export function settledBytes(turn: StoredTurn) {
@@ -491,48 +552,20 @@ export function createActivityHub(
 
   const remeasure = remeasurer(retain, activityFlushMs);
 
-  function watch(agentId: string, watcher: ActivityWatcher) {
-    const owner = agent(agentId);
-
-    owner.feed ??= {
-      watchers: new Set(),
-      pending: new Map(),
-      timer: undefined,
-    };
-    const feed = owner.feed;
-    feed.watchers.add(watcher);
-
-    return () => {
-      feed.watchers.delete(watcher);
-
-      if (feed.watchers.size === 0 && owner.feed === feed) {
-        clearTimeout(feed.timer);
-        owner.feed = undefined;
-        reclaim();
-      }
-    };
-  }
-
-  function begin(
-    agentId: string,
-    requests: readonly ActivityRequest[] = [],
-    session?: V1ActivityTurn["session"],
-    root?: string,
-    crew?: CrewTurn,
-    link?: ChildLink,
-  ): CrewTurnActivityLog {
+  function begin(agentId: string, source: TurnStart): CrewTurnActivityLog {
     remeasure.drain();
     const owner = agent(agentId);
-    const start = turnStart(owner.turns, { requests, session, root }, link);
-    const family = link?.requests ?? requests;
+    const id = `${generation}-${(++turnIds).toString(36)}`;
+    const start = turnStart(owner, id, source);
+    const crew = source.kind === "crew" ? source : undefined;
+    const family = source.kind === "crew" ? [] : source.requests;
     const startedAt = Math.min(crew?.startedAt ?? Infinity, now());
 
     owner.seq += 1;
-    const id = `${generation}-${(++turnIds).toString(36)}`;
 
     const turn: StoredTurn = {
       id,
-      root: start.root ?? id,
+      root: start.root,
       agent: agentId,
       seq: owner.seq,
       status: "running",
@@ -548,7 +581,7 @@ export function createActivityHub(
       ...(crew && { task: structuredClone(crew.task) }),
       items: new Map(),
       ...(crew?.evicted && { evicted: crew.evicted }),
-      ...(start.unlinkedFrom && { unlinkedFrom: start.unlinkedFrom }),
+      ...(start.audience && { audience: start.audience }),
     };
 
     owner.turns.push(turn);
@@ -642,9 +675,13 @@ export function createActivityHub(
         resize();
       }),
       child(callId, sessionId) {
-        const link = { parent: turn, callId, sessionId, requests: family };
-
-        return begin(agentId, [], undefined, undefined, undefined, link);
+        return begin(agentId, {
+          kind: "child",
+          parent: turn,
+          callId,
+          sessionId,
+          requests: family,
+        });
       },
       attribute(task) {
         // Crew turns only, and once: a late task lookup succeeded.
@@ -693,11 +730,13 @@ export function createActivityHub(
      * Coalesced changes for one agent, flushed by a timer: writers never
      * wait for a watcher. Returns the call that stops watching.
      */
-    watch,
+    watch(agentId: string, notify: ActivityWatcher, turn?: string) {
+      return watchAgent(agent(agentId), { turn, notify }, reclaim);
+    },
     recorder(agentId: string): TurnActivityRecorder {
       return {
-        begin: (requests, id) =>
-          begin(agentId, requests, id ? { id, parent: null } : undefined),
+        begin: (requests, sessionId) =>
+          begin(agentId, { kind: "root", requests: requests ?? [], sessionId }),
       };
     },
     /** One captain registration's crew turns, each under its member. */
@@ -707,7 +746,9 @@ export function createActivityHub(
         ++recorders,
         { owners, crews, uncollected },
         (start, startedAt, evicted) =>
-          begin(crewSubject(ship, start.member), [], start.session, undefined, {
+          begin(crewSubject(ship, start.member), {
+            kind: "crew",
+            session: start.session,
             task: start.task,
             startedAt,
             evicted,
@@ -984,8 +1025,8 @@ export type ActivitySubscribe =
  * and `crew` values (at most eight together) and one `turn` with exactly one
  * subject is 400; an agent that is not a registration, a crew member the
  * route would not serve, or a turn its subject no longer has, is 404. A
- * scoped watch follows the turn, its family if it is a root, and families
- * admitted unlinked from that family after its eviction.
+ * scoped watch follows the turn, its family if it is a root, and children
+ * admitted unlinked from that family while the watch stays open.
  */
 export function subscribeActivity(
   hub: ActivityHub,
@@ -1045,22 +1086,16 @@ export function subscribeActivity(
     status: 200,
     watch(send) {
       const stops = agents.map((id) =>
-        hub.watch(id, (frames) => {
-          const chosen =
-            turn === undefined
-              ? frames
-              : frames.filter(
-                  (frame) =>
-                    frame.root === turn ||
-                    frame.turnId === turn ||
-                    frame.unlinkedFrom.includes(turn),
-                );
-
-          // One frame at a time, each within the viewer's queue.
-          for (const frame of chosen) {
-            send(frame.bytes);
-          }
-        }),
+        hub.watch(
+          id,
+          (frames) => {
+            // One frame at a time, each within the viewer's queue.
+            for (const frame of frames) {
+              send(frame.bytes);
+            }
+          },
+          turn,
+        ),
       );
 
       return () => {

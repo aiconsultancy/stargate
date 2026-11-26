@@ -14,6 +14,7 @@ import {
   activityPageBytes,
   createActivityHub,
   readActivity,
+  settledBytes,
 } from "../src/observability/dashboard/api/v1/activity";
 import type { ApiV1Config } from "../src/observability/dashboard/api/v1/features";
 import { startApiV1Server } from "../src/observability/dashboard/api/v1/server";
@@ -641,6 +642,41 @@ test("a child whose parent the begin drain evicts is admitted unlinked", () => {
       new URLSearchParams({ request: "parent-request", channel: "#Bridge" }),
     ),
   ).toMatchObject({ status: 200, body: { turns } });
+});
+
+test("unwatched splits leave no routing state on the one retained turn", () => {
+  let measured: Parameters<typeof settledBytes>[0] | undefined;
+
+  const hub = createActivityHub({
+    bytes: 1000,
+    measure(turn) {
+      measured = turn;
+
+      return settledBytes(turn);
+    },
+  });
+
+  const recorder = hub.recorder("claude");
+  let parent = recorder.begin(undefined, "parent");
+  parent.end("completed");
+  const keys = Object.keys(measured ?? {}).toSorted();
+  const late = "x".repeat(5000);
+
+  for (let index = 0; index < 4096; index++) {
+    parent.update("late", 1, () => text(late));
+    const child = parent.child?.("call", `child-${index}`);
+
+    if (!child) {
+      throw new Error("Missing child log");
+    }
+
+    child.end("completed");
+    parent = child;
+  }
+
+  expect(sessions(hub, "claude")).toEqual(["child-4095"]);
+  expect(measured?.session).toEqual({ id: "child-4095", parent: null });
+  expect(Object.keys(measured ?? {}).toSorted()).toEqual(keys);
 });
 
 test("an end drains a pending late write before its turn counts", () => {
