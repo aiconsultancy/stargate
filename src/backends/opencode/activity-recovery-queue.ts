@@ -1,12 +1,19 @@
 import type { SessionLogItem } from "@opencode/client";
-import type { TurnActivityLog } from "../backend";
 import {
   type ActivityIncarnation,
-  type CallTiming,
   type EarlierCallRange,
   callPrecedesStart,
   openedInWindow,
 } from "./activity-call-evidence";
+import {
+  ActivityNamingEvidence,
+  type HeldNames,
+  type NamingProof,
+  type NamingSegment,
+  type TimedProof,
+  bindName,
+  rememberDrop,
+} from "./activity-naming-evidence";
 import {
   ActivityLifecycleBuffer,
   ActivityReplayGap,
@@ -17,20 +24,11 @@ import {
 } from "./activity-replay-gap";
 import { boundarySeq } from "./crew-executions";
 
+export type { NamingProof } from "./activity-naming-evidence";
+
 type Event = { type: string; data: { sessionID: string }; created?: unknown };
 
 const startType = "session.execution.started";
-
-type CallRange = { first: number; last: number };
-
-type ProofScope = ActivityIncarnation | undefined;
-
-function span(current: CallRange | undefined, next: CallRange): CallRange {
-  return {
-    first: Math.min(current?.first ?? next.first, next.first),
-    last: Math.max(current?.last ?? next.last, next.last),
-  };
-}
 
 export type QueuedPacket<E extends Event> = {
   event: E;
@@ -39,19 +37,7 @@ export type QueuedPacket<E extends Event> = {
   reused?: true;
 };
 
-export type NamingProof = {
-  session: string;
-  log: TurnActivityLog;
-  callId: string;
-  order: number;
-  scope?: ActivityIncarnation;
-  markAttribution?: (at: number, uncertain: boolean) => void;
-  timing: CallTiming;
-};
-
-type TimedProof = NamingProof & { seenAt: number };
-
-type Segment<E extends Event> = {
+type Segment<E extends Event> = NamingSegment & {
   frames: QueuedPacket<E>[];
   first: {
     type: E["type"];
@@ -70,13 +56,9 @@ type Segment<E extends Event> = {
   // Recovery consumes gap entries in place; keep their reserved count.
   slots: number;
   bytes: number;
-  proofs: TimedProof[];
-  witness?: TimedProof;
-  proofOverflow?: true;
-  droppedProofScopes?: Set<ProofScope>;
 };
 
-export type PendingActivity<E extends Event> = {
+export type PendingActivity<E extends Event> = HeldNames & {
   segments: Segment<E>[];
   lifecycle: ActivityLifecycleBuffer;
   lifecycleSeq?: number;
@@ -84,8 +66,6 @@ export type PendingActivity<E extends Event> = {
   earlier?: readonly EarlierCallRange[];
   expires: number;
   needsStart: boolean;
-  provisional: TimedProof[];
-  droppedProofs?: Map<ProofScope, CallRange>;
   slots: number;
   advanced?: true;
   draining?: true;
@@ -121,12 +101,7 @@ type Removal<E extends Event> = {
 
 export class ActivityRecoveryQueues<E extends Event> {
   private readonly queues = new Map<string, PendingActivity<E>>();
-  // Defaults allow 512 discarded ranges per scope, separate from call evidence.
-  // One collector's 50 crew contexts can hold up to 25,600 such ranges.
-  private readonly discardedProofs = new Map<
-    ProofScope,
-    Map<bigint, CallRange>
-  >();
+  private readonly evidence: ActivityNamingEvidence;
   private activeReads = 0;
   private readonly ready = new Set<string>();
   private bytes = 0;
@@ -140,7 +115,9 @@ export class ActivityRecoveryQueues<E extends Event> {
     private readonly needsStart: (id: string) => boolean,
     private readonly admit: (id: string) => void,
     private readonly removed?: Removal<E>,
-  ) {}
+  ) {
+    this.evidence = new ActivityNamingEvidence(limits.pending);
+  }
 
   public entries() {
     return this.queues.entries();
@@ -219,7 +196,7 @@ export class ActivityRecoveryQueues<E extends Event> {
           !callPrecedesStart(proof.timing.created, segment.first.created))
       ) {
         // The successor may be eligible even when the published head is not.
-        this.hold(pending, proof);
+        this.evidence.hold(pending, proof);
       } else {
         this.offerSegment(segment, proof);
       }
@@ -234,7 +211,7 @@ export class ActivityRecoveryQueues<E extends Event> {
           ...(pending.earlier && { earlier: pending.earlier }),
         }))
     ) {
-      this.hold(pending, proof);
+      this.evidence.hold(pending, proof);
     }
   }
 
@@ -248,38 +225,11 @@ export class ActivityRecoveryQueues<E extends Event> {
     }
 
     if (callPrecedesStart(proof.timing.created, segment.first.created)) {
-      this.bind(segment, proof);
+      bindName(segment, proof);
     } else {
       // An in-time name can expose detached output without ever proving a link.
       segment.witness ??= proof;
     }
-  }
-
-  private hold(pending: PendingActivity<E>, proof: TimedProof) {
-    if (pending.provisional.length >= this.limits.pending) {
-      const evicted = pending.provisional.shift();
-
-      if (evicted) {
-        this.recordDrop(pending, evicted);
-      }
-    }
-
-    pending.provisional.push(proof);
-  }
-
-  private recordDrop(
-    pending: PendingActivity<E>,
-    { scope, order }: NamingProof,
-  ) {
-    pending.droppedProofs ??= new Map();
-    const dropped = pending.droppedProofs;
-    dropped.set(
-      scope,
-      span(dropped.get(scope), {
-        first: order,
-        last: order,
-      }),
-    );
   }
 
   public hasProofFrom(pending: PendingActivity<E>, session: string) {
@@ -316,34 +266,12 @@ export class ActivityRecoveryQueues<E extends Event> {
     };
   }
 
-  private bind(segment: Segment<E>, proof: TimedProof) {
-    // Never turn ambiguity into certainty by evicting a bound competitor.
-    if (segment.proofs.length < 2) {
-      segment.proofs.push(proof);
-      segment.proofs.sort((left, right) => left.order - right.order);
-    } else {
-      segment.proofOverflow = true;
-    }
-  }
-
   public discard(id: string, keepAmbiguity = false) {
     const pending = this.peek(id);
 
     if (pending) {
       if (keepAmbiguity) {
-        for (const proof of pending.provisional) {
-          this.recordDrop(pending, proof);
-        }
-
-        const key = this.proofBucket(id);
-
-        for (const [scope, range] of pending.droppedProofs ?? []) {
-          const buckets =
-            this.discardedProofs.get(scope) ?? new Map<bigint, CallRange>();
-
-          buckets.set(key, span(buckets.get(key), range));
-          this.discardedProofs.set(scope, buckets);
-        }
+        this.evidence.discard(id, pending);
       }
 
       this.queues.delete(id);
@@ -371,11 +299,11 @@ export class ActivityRecoveryQueues<E extends Event> {
   }
 
   public resetDiscardedProofs() {
-    this.discardedProofs.clear();
+    this.evidence.reset();
   }
 
   public fence(scope: ActivityIncarnation) {
-    this.discardedProofs.delete(scope);
+    this.evidence.fence(scope);
 
     for (const pending of this.queues.values()) {
       pending.droppedProofs?.delete(scope);
@@ -384,11 +312,6 @@ export class ActivityRecoveryQueues<E extends Event> {
         segment.droppedProofScopes?.delete(scope);
       }
     }
-  }
-
-  private proofBucket(id: string) {
-    // A collision adds uncertainty; it cannot turn it into a definite match.
-    return Bun.hash(id, 0n) % BigInt(Math.max(1, this.limits.pending * 4));
   }
 
   public expire() {
@@ -512,34 +435,6 @@ export class ActivityRecoveryQueues<E extends Event> {
     return pending.lifecycle.retain();
   }
 
-  private bindDrops(
-    id: string,
-    pending: PendingActivity<E>,
-    segment: Segment<E>,
-  ) {
-    const { floor, first } = segment;
-    const bucket = this.proofBucket(id);
-
-    const mark = (scope: ProofScope, range: CallRange | undefined) => {
-      if (range && floor < range.last && range.first <= first.order) {
-        (segment.droppedProofScopes ??= new Set()).add(scope);
-      }
-    };
-
-    // Dropping a provisional hint may remove a competitor, not prove a match.
-    for (const [scope, range] of pending.droppedProofs ?? []) {
-      mark(scope, range);
-
-      if (range.last <= first.order) {
-        pending.droppedProofs?.delete(scope);
-      }
-    }
-
-    for (const [scope, buckets] of this.discardedProofs) {
-      mark(scope, buckets.get(bucket));
-    }
-  }
-
   public enqueue(
     id: string,
     packet: QueuedPacket<E>,
@@ -612,7 +507,7 @@ export class ActivityRecoveryQueues<E extends Event> {
 
       if (start) {
         const opened = segment;
-        this.bindDrops(id, pending, opened);
+        this.evidence.bindDrops(id, pending, opened, floor, order);
 
         pending.provisional = pending.provisional.filter((proof) => {
           if (
@@ -857,19 +752,15 @@ export class ActivityRecoveryQueues<E extends Event> {
       }
 
       for (const scope of old.droppedProofScopes ?? []) {
-        pending.droppedProofs ??= new Map();
-        pending.droppedProofs.set(
-          scope,
-          span(pending.droppedProofs.get(scope), {
-            first: old.floor + 1,
-            last: old.first.order,
-          }),
-        );
+        rememberDrop(pending, scope, {
+          first: old.floor + 1,
+          last: old.first.order,
+        });
       }
 
       if (retiredAt === undefined && old.proofOverflow) {
-        for (const proof of old.proofs) {
-          this.recordDrop(pending, proof);
+        for (const { scope, order } of old.proofs) {
+          rememberDrop(pending, scope, { first: order, last: order });
         }
       }
     }
