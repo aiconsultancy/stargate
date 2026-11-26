@@ -326,7 +326,8 @@ export class OpenCodeCrewStatus {
       }
 
       // Only a successful re-ask establishes that the field is unsupported.
-      // A failed re-ask is ordinary, even if it reports a missing method.
+      // A failed re-ask counts as a failure in that lane.
+      // This also applies if the re-ask reports a missing method.
       const answer = await read(ordinary).catch(() => {
         throw new Error("Fleet crew status re-ask failed.");
       });

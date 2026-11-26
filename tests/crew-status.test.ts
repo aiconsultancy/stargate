@@ -300,6 +300,52 @@ test("ordinary task text masks credentials revealed by stripping controls", asyn
   }
 });
 
+test("Fleet task text keeps a clipped preamble as stored, for both retained and modern assignments", async () => {
+  const f = await fixture();
+
+  try {
+    const state = f.engine.state;
+    const peer = state.reservePeer("twiki");
+    state.readyPeer(peer.crewID);
+    const scaffold = `Configured Stargate project: sample.\nUse only your permanent worktree: "/${"x".repeat(180)}"`;
+
+    // Pre-#76 stored the first 180 characters of the prefixed input.
+    const summary = scaffold.slice(0, 180);
+    const current = state.reserveTask(peer, "captain", summary);
+
+    if (!current) {
+      throw new Error("Missing modern assignment");
+    }
+
+    state.running(current.id);
+    const retained = state.enqueue(peer, "captain", "Retained assignment");
+    const db = new Database(state.path);
+
+    try {
+      db.run("UPDATE member_activity SET summary=? WHERE taskID=?", [
+        summary,
+        retained.id,
+      ]);
+    } finally {
+      db.close();
+    }
+
+    for (const taskText of ["unredacted", "full"] as const) {
+      const { members } = f.engine.status(
+        { member: peer.crewID },
+        { taskText },
+      );
+
+      expect(members[0]?.current).toMatchObject({ id: current.id, summary });
+      expect(members[0]?.queued).toEqual([
+        expect.objectContaining({ id: retained.id, summary }),
+      ]);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test("ordinary task summary and progress replace a surrogate split at the display cut", async () => {
   const f = await fixture();
 

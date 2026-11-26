@@ -46,6 +46,10 @@ jobs:
         uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
       - name: Install locked dependencies
         run: mise run deps
+      - name: Verify Markdown preview layout in Chromium
+        run: |
+          browser=$(command -v google-chrome)
+          STARGATE_TEST_CHROMIUM="$browser" mise exec -- bun test tests/markdown-preview.test.ts
       - name: Prepare private per-run test directories
         shell: bash
         run: |
