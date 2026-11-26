@@ -381,7 +381,7 @@ test.each(["success", "failure"])(
 test.each([
   ["is not private", "shared"],
   ["is inside the checkout", "inside"],
-  ["cannot be made", "read-only"],
+  ["cannot be made", "denied"],
 ] as const)(
   "uses the temporary snapshot root when the data directory's folder %s",
   async (_, kind) => {
@@ -394,18 +394,36 @@ test.each([
     const dataDirectory =
       kind === "inside" ? join(directory, "data") : join(root, "data");
 
+    const snapshots = join(dataDirectory, "stargate-git-status");
+    const original = fs.mkdir;
+    let denied: { mockRestore(): void } | undefined;
+
     try {
       await mkdir(directory);
       git(directory, "init", "-b", "main");
       await mkdir(dataDirectory, { mode: 0o700 });
 
       if (kind === "shared") {
-        const snapshots = join(dataDirectory, "stargate-git-status");
         await mkdir(snapshots);
         await chmod(snapshots, 0o750);
-      } else if (kind === "read-only") {
-        // Making the status folder fails with EACCES.
-        await chmod(dataDirectory, 0o500);
+      } else if (kind === "denied") {
+        // Making the status folder fails with EACCES. A stub, not a mode, so
+        // A runner that bypasses file permissions still takes this path.
+        denied = spyOn(fs, "mkdir").mockImplementation(
+          async (path, options) => {
+            if (String(path) === snapshots) {
+              throw Object.assign(new Error("EACCES: permission denied"), {
+                code: "EACCES",
+              });
+            }
+
+            // Every mkdir overload must accept the stub. No caller here
+            // Reads the created path, so the stub resolves to undefined.
+            await original(path, options);
+
+            return undefined;
+          },
+        );
       }
 
       let parent: string | undefined;
@@ -430,7 +448,7 @@ test.each([
       expect(parent && dirname(parent)).toBe(await realpath(tmpdir()));
       expect(parent && basename(parent)).toStartWith("stargate-git-status-");
     } finally {
-      await chmod(dataDirectory, 0o700).catch(() => {});
+      denied?.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
   },
