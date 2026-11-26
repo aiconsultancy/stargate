@@ -283,6 +283,22 @@ test("an after-turn background child is lost even after a launch acknowledgement
   ]);
 });
 
+test("a Claude child can receive its first frame after its task outcome", () => {
+  const f = fixture();
+  f.finish("001", "failed");
+  expect(f.children()).toEqual([]);
+
+  f.output("001");
+  expect(f.children()).toMatchObject([{ status: "running" }]);
+  f.end();
+
+  expect(f.children()).toMatchObject([{ status: "failed" }]);
+  expect(f.children()[0]).not.toHaveProperty("lost");
+  expect(f.children()[0]?.items).toContainEqual(
+    expect.objectContaining({ kind: "text", text: "Output 001" }),
+  );
+});
+
 test.each([
   ["with", "completed"],
   ["without", "cancelled"],
