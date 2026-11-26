@@ -12,7 +12,8 @@ type Call = { order: number; named?: true; timing: CallTiming };
 type OwnerCalls = {
   session: string;
   calls: Map<string, Call>;
-  fallback: Map<string, Call | false>;
+  launches: Map<string, Call>;
+  nonSubagent: Set<string>;
 };
 
 const resumes = (value: unknown) =>
@@ -268,7 +269,7 @@ class ScopeEvidence {
 
 /**
  * Exact naming follows its log: at default limits, 128 known subagent calls
- * and 128 fallback records for calls without a known subagent start.
+ * plus 128 fallback launches and 128 non-subagent markers.
  * Ambiguity follows the incarnation. With default limits, a scope holds up
  * to 512 × 128 unnamed orders, plus 512 exact and 512 hashed unnamed ranges.
  * Each evidence-bearing native parent within that scope holds up to 512 ×
@@ -326,7 +327,7 @@ export class ActivityCallEvidence {
     const owned = this.owner(index, owner, session);
 
     if (!subagent) {
-      this.keep(owned.fallback, key, false);
+      this.excludeLaunch(owned, key);
 
       return;
     }
@@ -338,7 +339,8 @@ export class ActivityCallEvidence {
     }
 
     this.keep(calls, key, { order, timing: { created, launch: "unknown" } });
-    owned.fallback.delete(key);
+    owned.launches.delete(key);
+    owned.nonSubagent.delete(key);
     index.unnamed(session, order);
   }
 
@@ -352,13 +354,27 @@ export class ActivityCallEvidence {
     const owned = {
       session,
       calls: new Map<string, Call>(),
-      fallback: new Map<string, Call | false>(),
+      launches: new Map<string, Call>(),
+      nonSubagent: new Set<string>(),
     };
 
     index.owners.set(log, owned);
     index.retainWriter(session, log);
 
     return owned;
+  }
+
+  private excludeLaunch({ launches, nonSubagent }: OwnerCalls, key: string) {
+    if (!nonSubagent.has(key) && nonSubagent.size >= this.callsPerLog) {
+      const oldest = nonSubagent.values().next().value;
+
+      if (oldest !== undefined) {
+        nonSubagent.delete(oldest);
+      }
+    }
+
+    nonSubagent.add(key);
+    launches.delete(key);
   }
 
   private keep<Value>(entries: Map<string, Value>, key: string, value: Value) {
@@ -381,16 +397,15 @@ export class ActivityCallEvidence {
     child: string,
   ) {
     const index = this.scope(scope);
-    const owned = index?.owners.get(owner);
-    const call = owned && (owned.calls.get(key) ?? owned.fallback.get(key));
 
-    if (
-      !index ||
-      owned?.session !== session ||
-      call === undefined ||
-      call === false ||
-      call.named
-    ) {
+    if (!index) {
+      return null;
+    }
+
+    const owned = index.owners.get(owner);
+    const call = owned?.calls.get(key) ?? owned?.launches.get(key);
+
+    if (owned?.session !== session || !call || call.named) {
       return null;
     }
 
@@ -433,10 +448,13 @@ export class ActivityCallEvidence {
 
     if (call) {
       call.timing.launch = launch;
-    } else if (mayLaunch && !owned.fallback.has(key)) {
-      // A called frame without input.started can only name a child after
-      // Subsequent metadata supplies the native child session ID.
-      this.keep(owned.fallback, key, { order, timing: { created, launch } });
+    } else if (
+      mayLaunch &&
+      !owned.nonSubagent.has(key) &&
+      !owned.launches.has(key)
+    ) {
+      // Without input.started, naming still requires metadata with the child ID.
+      this.keep(owned.launches, key, { order, timing: { created, launch } });
     }
   }
 
@@ -446,9 +464,9 @@ export class ActivityCallEvidence {
     key: string,
   ) {
     const owned = this.scope(scope)?.owners.get(owner);
-    const call = owned && (owned.calls.get(key) ?? owned.fallback.get(key));
+    const call = owned?.calls.get(key) ?? owned?.launches.get(key);
 
-    return call === false ? undefined : call?.timing;
+    return call?.timing;
   }
 
   public competing(

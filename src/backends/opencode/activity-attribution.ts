@@ -137,6 +137,7 @@ export function freshChild(
     return !needsProof;
   }
 
+  // Only durable frames must carry a native time; transient live frames need not.
   if (first.seq !== undefined && first.created === undefined) {
     return false;
   }

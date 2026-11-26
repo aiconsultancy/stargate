@@ -21,7 +21,7 @@ type Execution = ChildReplayState & {
 
 type Start = { seq: number | undefined; order: number };
 
-type CompactedBoundary = { seq: number; created: number };
+type CompactedBoundary = { seq: number; latestTime: number | undefined };
 
 type History<Child> = {
   writers: number;
@@ -47,6 +47,8 @@ export class ChildExecutions<Child extends Execution> {
   private readonly compactedBoundaries = new Map<string, CompactedBoundary>();
   private compacted = false;
   private highWater: number | undefined;
+  private latestTime: number | undefined;
+  private awaitingNativeTime = false;
 
   public constructor(private readonly limit: number) {}
 
@@ -61,11 +63,25 @@ export class ChildExecutions<Child extends Execution> {
 
   public needsFreshness(id: string, created: number | undefined) {
     return (
-      this.highWater !== undefined &&
-      (created === undefined || created <= this.highWater) &&
+      (this.awaitingNativeTime ||
+        (this.highWater !== undefined &&
+          (created === undefined || created <= this.highWater))) &&
       !this.get(id) &&
       !this.compactedBoundaries.has(id)
     );
+  }
+
+  public observeNativeTime(time: number | undefined) {
+    if (time === undefined) {
+      return;
+    }
+
+    this.latestTime = Math.max(this.latestTime ?? time, time);
+
+    if (this.awaitingNativeTime) {
+      this.raiseHighWater(this.latestTime);
+      this.awaitingNativeTime = false;
+    }
   }
 
   public possiblyReplayed(id: string, seq: number | undefined, cursor = -1) {
@@ -119,7 +135,13 @@ export class ChildExecutions<Child extends Execution> {
 
     if (compacted !== undefined) {
       history.cursor = Math.max(compacted.seq, history.cursor ?? -1);
-      history.latestTime = Math.max(compacted.created, history.latestTime ?? 0);
+
+      if (compacted.latestTime !== undefined) {
+        history.latestTime = Math.max(
+          compacted.latestTime,
+          history.latestTime ?? compacted.latestTime,
+        );
+      }
     }
 
     this.retired.delete(id);
@@ -188,10 +210,11 @@ export class ChildExecutions<Child extends Execution> {
     seq: number | undefined,
     created?: number,
   ) {
+    this.observeNativeTime(created);
     const history = this.get(id);
 
     if (history && created !== undefined) {
-      history.latestTime = Math.max(history.latestTime ?? 0, created);
+      history.latestTime = Math.max(history.latestTime ?? created, created);
     }
 
     if (history && seq !== undefined) {
@@ -296,11 +319,13 @@ export class ChildExecutions<Child extends Execution> {
     this.compactedBoundaries.clear();
     this.compacted = false;
     this.highWater = undefined;
+    this.latestTime = undefined;
+    this.awaitingNativeTime = false;
   }
 
   private rememberBoundary(
     id: string,
-    { cursor, observedStart, latestTime = 0 }: History<Child>,
+    { cursor, observedStart, latestTime }: History<Child>,
   ) {
     const bound = Math.max(cursor ?? -1, observedStart?.seq ?? -1);
 
@@ -310,7 +335,7 @@ export class ChildExecutions<Child extends Execution> {
       return;
     }
 
-    this.compactedBoundaries.set(id, { seq: bound, created: latestTime });
+    this.compactedBoundaries.set(id, { seq: bound, latestTime });
 
     if (this.compactedBoundaries.size > this.limit * 8) {
       const oldest = this.compactedBoundaries.entries().next().value;
@@ -318,13 +343,19 @@ export class ChildExecutions<Child extends Execution> {
       if (oldest) {
         const [id, dropped] = oldest;
         this.compactedBoundaries.delete(id);
-        this.raiseHighWater(dropped.created);
+        this.raiseHighWater(dropped.latestTime);
       }
     }
   }
 
-  private raiseHighWater(created: number) {
-    this.highWater = Math.max(this.highWater ?? 0, created);
+  private raiseHighWater(latestTime: number | undefined) {
+    const mark = latestTime ?? this.latestTime;
+
+    if (mark === undefined) {
+      this.awaitingNativeTime = true;
+    } else {
+      this.highWater = Math.max(this.highWater ?? mark, mark);
+    }
   }
 
   /** Release the writer and its payload immediately when the hub evicts it. */

@@ -674,8 +674,11 @@ cap. Retention applies to the settled family, with oversized families
 removed before older fitting families. When the buffer fills before admission,
 the collector reads missing durable frames from the native log; if any
 frames cannot be recovered, the child shows `unavailable: ["activity.frames"]`.
-A failed content read does not discard held frames or change a witnessed
-outcome. It marks missing content, not an unknown outcome.
+Live frames for a published child bypass the candidate byte limit and are
+merged in order with recovered frames, without duplicating durable items.
+Transient output is kept and oversized items are paged. A failed content
+read does not discard held frames or change a witnessed outcome. It marks
+missing content, not an unknown outcome.
 OpenCode children have their own session and turn IDs. Their `callId` may
 start as `null` and fill once in a `turn-updated`. Each busy period of a
 reused child is a separate turn; a follow-up that joins an already-running
@@ -686,6 +689,8 @@ and incarnation prevent proving ownership,
 an admitted child's `session.parent` stays `null`. It does not count as a
 standalone root against the 16-root limit, but it still counts toward the
 global settled turn and byte limits.
+A parent with no remaining exact names keeps its saturation record only
+while its activity writer is retained.
 
 Known child assistant messages and frames strictly inside a witnessed child
 execution's durable bounds stay with their original execution; frames
@@ -702,7 +707,8 @@ hub evicts the turn. The collector retains routing markers for up to 512
 evicted child sessions and only an exact durable position for up to 4,096
 older sessions. Replayed positions at or below that fence cannot spend a
 new call's proof. When an exact position is lost, the collector retains the
-highest native event time from the discarded boundaries. An unrecognized
+highest native event time from the discarded boundaries, using the latest
+observed native time when a discarded boundary is undated. An unrecognized
 session created after that time does not need to prove freshness; a replayed
 creation at or before it does not exempt the session. For a start that needs
 proof, the child's native `created` must be at least the parent's
@@ -710,24 +716,38 @@ proof, the child's native `created` must be at least the parent's
 start was not seen. No gateway timestamp or log read is used for this check.
 A non-empty string `sessionID` or `task_id` means the call resumes a session.
 
-A named child can still appear after the pending window. If its start is
-older than the call, has an unknown timestamp (missing, non-finite or
-non-positive), or cannot be proven fresh, the call shows
+A named child can still appear after the pending window. OpenCode 2.3.2
+can return from the naming call while the child runs in the background,
+so a waiting name has no time-based expiry; the bounded candidate queue,
+reconnect and crew fencing can still clear it. Native time establishes order,
+not causation. If a start is older than the call or cannot be proven fresh,
+the call shows
 `unavailable: ["activity.child-attribution"]`. The unproven frames appear in
 an unscoped activity snapshot or stream as a separate turn with no parent,
 request or crew task, and no claimed native outcome. A proven start for the
-same waiting call clears the marker. On deployments that retain no native
+same waiting call clears the marker. A sequenced start with a missing,
+non-finite or non-positive timestamp stays uncertain even for a brand-new
+child; unsequenced live frames do not have that durable timestamp requirement.
+On deployments that retain no native
 events, bounded transcript recovery still shows a visible gap rather than
 reconstructing missing frames. The durable fence does not reject unsequenced
 frames associated with an admitted execution's known assistant messages.
 
 After a stream reconnect, the collector uses bounded reads of native
 execution boundaries to check whether a child is still in the same busy
-period or a native outcome is known. It does not reconstruct the transcript.
-If neither continuity nor the outcome is proven, the child ends
-`cancelled` with `lost: true`, meaning observation was lost, not that the
-native session was interrupted. The same marker appears if a new native
-start reveals a missed settlement or crew ownership of a child is lost.
+period or a native outcome is known. The stream can pause for the active
+sample and up to `ceil(children / 8) × 2 seconds` of paged log reads. A
+running sample proves continuity only if the log covers every durable
+position up to its watermark, or the watermark equals the cursor, and no
+new lifecycle boundary is seen. Reconnect does not reconstruct the
+transcript. If neither continuity nor an outcome is proven, the old turn
+ends `cancelled` with `lost: true`, meaning observation was lost, not that
+the native session was interrupted. A newer start seen by the log may
+establish that loss but can still be admitted once from the live stream.
+Later live output beyond the old cursor, without a newly attributable
+start, appears in a separate detached turn with no parent, request, crew
+task or claimed native outcome. The lost marker also appears if a new
+native start reveals a missed settlement or crew ownership is lost.
 
 Claude recording starts at query submission, after stopping orphans,
 probing the CLI version, and creating the private temporary directory with
@@ -871,9 +891,10 @@ open turns `cancelled` with `lost: true`, including turns whose messages were
 still waiting to be placed. Starts and settlements apply in their session's
 durable order: a replayed or late one, of any age, changes nothing. One
 without a durable sequence for its session is applied as it comes.
-After reconnect, newer stream frames wait
-while bounded reads check the durable boundary of the current execution.
-Being active is not proof that it is the same execution. If the log proves
+After reconnect, newer stream frames wait while bounded reads check the
+durable boundary of the current execution. Being active is not proof that
+it is the same execution: the log's watermark must equal the cursor or be
+covered by durable frames with no intervening boundary. If the log proves
 a settlement, its old crew root turns get that outcome. If neither a
 settlement nor continuation can be proven, those turns end `cancelled`
 with `lost: true` before the new execution's output is placed.

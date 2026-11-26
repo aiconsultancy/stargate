@@ -1476,8 +1476,7 @@ function evictChildren(f: ReturnType<typeof fixture>, count: number) {
   expect(f.turns()).toHaveLength(0);
 }
 
-// Parent call envelopes captured from OpenCode 2.3.2 /api/event. Only the
-// Event IDs, timestamps and per-session positions are from the capture.
+// IDs, timestamps and positions come from OpenCode 2.3.2 /api/event.
 const nativeCall = {
   input: {
     id: "evt_219442341001DNGAJvvcSrL3k3",
@@ -1590,8 +1589,7 @@ test.each([true, false])(
       capturedCall(f, root, { agent: "explore", sessionID: id }, sawInput);
       f.names(root, "launch", id);
       await setImmediate();
-      // Equality is valid, and seeing input.started makes it the reference,
-      // Even when tool.called carries a later timestamp.
+      // Equality with input.started is valid despite a later tool.called.
       nativeChild(
         f,
         id,
@@ -1734,6 +1732,89 @@ test("a background launch can start 30 s after its naming call succeeds", async 
   }
 });
 
+test("a late start retries ancestry but stays detached without a dated call", async () => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    capturedCall(f, root, { agent: "explore" }, true, {
+      input: null,
+      called: null,
+    });
+    f.names(root, "launch", child);
+    await setImmediate();
+    expect(f.reads).toEqual([child]);
+
+    f.advance(2500);
+    f.parents.set(child, main);
+    nativeChild(f, child, 1, nativeCall.called.at, "late work");
+    await setImmediate();
+    expect(f.reads).toEqual([child, child]);
+    expect(f.turns()[1]).toMatchObject({
+      session: { id: child, parent: null },
+      lost: true,
+      items: [{ text: "late work" }],
+    });
+  } finally {
+    f.stop.abort();
+  }
+});
+
+test("an undated resume call cannot prove a retained child's next start", async () => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    f.create(child, main);
+    f.start(child);
+    f.end(child);
+    f.parents.set(child, main);
+    capturedCall(f, root, { agent: "explore", sessionID: child }, true, {
+      input: null,
+      called: null,
+    });
+    f.names(root, "launch", child);
+    await setImmediate();
+    nativeChild(f, child, 3, nativeCall.called.at, "undated resume");
+    expect(f.turns()[2]).toMatchObject({
+      session: { id: child, parent: null },
+      lost: true,
+      items: [{ text: "undated resume" }],
+    });
+  } finally {
+    f.stop.abort();
+  }
+});
+
+test("a late name cannot link an open child that started before the native call", () => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    capturedCall(f, root, { agent: "explore" });
+    f.create(child, main);
+    f.emit(
+      "session.execution.started",
+      child,
+      {},
+      undefined,
+      undefined,
+      1,
+      nativeCall.input.at - 1,
+    );
+    f.names(root, "launch", child);
+    f.ended(child, "already running", "existing-answer");
+    f.end(child);
+    expect(f.turns()[1]).toMatchObject({
+      session: { id: child, parent: { callId: null } },
+      status: "completed",
+      items: [{ text: "already running" }],
+    });
+  } finally {
+    f.stop.abort();
+  }
+});
+
 test("replayed creation and start past the exact fence never attach to the current root", () => {
   const f = fixture();
 
@@ -1809,8 +1890,7 @@ test.each([nativeCall.input.at - 1, 0, null, NaN, Infinity, -1])(
       const root = f.root();
       const id = "ses_old_0";
       f.parents.set(id, main);
-      // Even a call claiming to launch a new session must not spend its proof
-      // On an old or undated start from a compacted ID.
+      // An old or undated start cannot spend even a new-launch proof.
       capturedCall(f, root, { agent: "explore" });
       f.names(root, "launch", id);
       await setImmediate();
@@ -2556,11 +2636,12 @@ test.each(["active", "log", "unproven", "no retention"] as const)(
         2,
       );
       f.delta(child, "transient continuation", "next-answer");
+      f.advance(2500);
       f.emit(
         "session.text.ended",
         child,
         {
-          assistantMessageID: "next-answer",
+          assistantMessageID: "first-answer",
           ordinal: 1,
           text: "after reconnect",
         },

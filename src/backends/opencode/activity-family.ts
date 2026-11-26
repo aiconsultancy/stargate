@@ -176,7 +176,7 @@ export class OpenCodeActivityFamilies {
         candidate: (id) => {
           const child = this.children.get(id);
 
-          if (child?.unproven) {
+          if (child?.unproven && !child.continuation) {
             this.finish(id, child, "cancelled", true);
           }
         },
@@ -519,6 +519,7 @@ export class OpenCodeActivityFamilies {
       return order;
     }
 
+    this.executions.observeNativeTime(nativeActivityTime(event));
     this.queue.expire();
     const id = event.data.sessionID;
     const seq = boundarySeq(event);
