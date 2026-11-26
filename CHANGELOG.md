@@ -109,6 +109,9 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   possible move. They report `Git state unavailable.` without caching it, so
   the next read tries again instead of repeating the failure for 15 seconds.
 
+- Claude Fleet activity shows a stopped reply preview only once when the
+  query result repeats it exactly.
+
 - The crew plugin now refuses, at load and with a message naming both
   counts, a team whose configured crew members times project contexts (the
   default plus each project) exceed 50, also with no projects configured;
