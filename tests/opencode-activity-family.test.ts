@@ -3169,6 +3169,110 @@ test.each([false, true])(
   },
 );
 
+test.each([
+  { mode: "m between A1 and A2", opened: 150, expected: null },
+  { mode: "m after A2", opened: 250, expected: "m" },
+  { mode: "c3 only", opened: undefined, expected: "c3" },
+] as const)(
+  "successive post-loss expiries stack the native cutoff: $mode",
+  async (row) => {
+    const f = fixture();
+
+    try {
+      const root = f.root();
+      f.create(child, main);
+      f.start(child);
+      f.ended(child, "first period", "first");
+      f.failedReads.add("active");
+      await f.families.reconnected();
+      f.failedReads.delete("active");
+
+      const call = (id: string, created: number) => {
+        f.emit(
+          "session.tool.input.started",
+          main,
+          { assistantMessageID: "answer", id, name: "subagent" },
+          root,
+          undefined,
+          undefined,
+          created,
+        );
+        f.called(root, id, { agent: "explore", sessionID: child });
+      };
+
+      const start = (index: number, created: number) => {
+        f.emit(
+          "session.execution.started",
+          child,
+          {},
+          undefined,
+          undefined,
+          undefined,
+          created,
+        );
+        f.ended(child, `A${index} output`, `a${index}`);
+      };
+
+      call("c1", 101);
+
+      // The stream places m before A1, even if native time places it after A2.
+      if (row.opened !== undefined) {
+        call("m", row.opened);
+      }
+
+      start(1, 105);
+      f.end(child);
+      f.advance(1900);
+      call("c2", 201);
+      start(2, 203);
+      f.end(child);
+      f.advance(100);
+      f.delta(main, "A1 deadline");
+      await setImmediate();
+
+      f.advance(1800);
+
+      if (row.opened === undefined) {
+        call("c3", 300);
+      }
+
+      start(3, 301);
+      f.advance(100);
+      f.delta(main, "A2 deadline");
+      await setImmediate();
+      f.advance(200);
+      f.names(root, row.opened === undefined ? "c3" : "m", child);
+      f.end(child);
+      f.advance(2100);
+      f.delta(main, "A3 deadline");
+      await setImmediate();
+
+      expect(f.turns().slice(2)).toMatchObject([
+        {
+          session: { parent: null },
+          status: "cancelled",
+          lost: true,
+          items: [{ text: "A1 output" }],
+        },
+        {
+          session: { parent: null },
+          status: "cancelled",
+          lost: true,
+          items: [{ text: "A2 output" }],
+        },
+        {
+          session: { parent: row.expected ? { callId: row.expected } : null },
+          status: row.expected ? "completed" : "cancelled",
+          ...(!row.expected && { lost: true }),
+          items: [{ text: "A3 output" }],
+        },
+      ]);
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
 test("a non-loss timeout skips only the unnamed predecessor", async () => {
   const f = fixture();
 
