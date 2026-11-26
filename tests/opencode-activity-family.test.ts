@@ -2674,7 +2674,7 @@ async function postLossStart(
   return { f, root };
 }
 
-test.each(["before name", "after name", "after successor deadline"] as const)(
+test.each(["before name", "after name", "late name", "late release"] as const)(
   "a name for the newer native start survives predecessor recovery: %s",
   async (release) => {
     const gate = Promise.withResolvers<void>();
@@ -2758,7 +2758,7 @@ test.each(["before name", "after name", "after successor deadline"] as const)(
         await setImmediate();
       }
 
-      const late = release === "after successor deadline";
+      const late = release === "late name";
       f.advance(late ? 2001 : 200);
       f.names(root, "retry", child);
       f.emit(
@@ -2770,10 +2770,16 @@ test.each(["before name", "after name", "after successor deadline"] as const)(
         9,
         44,
       );
+
+      if (release === "late release") {
+        f.advance(2000);
+        f.delta(main, "successor deadline passed while recovering");
+      }
+
       gate.resolve();
       await setImmediate();
 
-      if (!late) {
+      if (!late && release !== "late release") {
         f.advance(1801);
         f.delta(main, "tick");
       }
@@ -2801,6 +2807,78 @@ test.each(["before name", "after name", "after successor deadline"] as const)(
     }
   },
 );
+
+test("native expiry frees a named slot without saturating a later child's window", async () => {
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, gate.promise, 1);
+
+  try {
+    const root = f.root();
+    f.create(child, main);
+    f.start(child);
+    f.failedReads.add("log");
+    await f.families.reconnected();
+    f.failedReads.delete("log");
+
+    // Fill three exact slots. Avoid unrelated ambiguity from hash collisions.
+    const bucket = Bun.hash(grandchild, 0n) % 4n;
+
+    for (let index = 0, used = 0; used < 3; index += 1) {
+      const id = `ses_capacity_${index}`;
+
+      if (Bun.hash(id, 0n) % 4n !== bucket) {
+        f.call(root, id);
+        f.names(root, id, id);
+        used += 1;
+      }
+    }
+
+    f.emit(
+      "session.tool.input.started",
+      main,
+      { assistantMessageID: "answer", id: "old", name: "subagent" },
+      root,
+      undefined,
+      undefined,
+      null,
+    );
+    f.called(root, "old", { agent: "explore", sessionID: child });
+    f.start(child);
+    f.ended(child, "x".repeat(256 * 1024), "old-answer");
+    f.names(root, "old", child);
+    f.end(child);
+    expect(f.logReads).toHaveLength(1);
+
+    f.advance(2001);
+    gate.resolve();
+    await setImmediate();
+    expect(f.turns().at(-1)).toMatchObject({
+      session: { id: child, parent: null },
+      status: "cancelled",
+      lost: true,
+    });
+
+    // The unrelated name fills the recovered exact slot.
+    // The new name spills but does not compete with itself.
+    f.call(root, "unrelated");
+    expect(Bun.hash("ses_unrelated", 0n) % 4n).not.toBe(bucket);
+    f.names(root, "unrelated", "ses_unrelated");
+    f.call(root, "retry");
+    f.names(root, "retry", grandchild);
+    f.create(grandchild, main);
+    f.start(grandchild);
+    f.ended(grandchild, "new transcript", "new-answer");
+    f.end(grandchild);
+    expect(f.turns().at(-1)).toMatchObject({
+      session: { id: grandchild, parent: { callId: "retry" } },
+      status: "completed",
+      items: [{ text: "new transcript" }],
+    });
+  } finally {
+    gate.resolve();
+    f.stop.abort();
+  }
+});
 
 test.each([
   {

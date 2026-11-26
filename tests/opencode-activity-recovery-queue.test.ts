@@ -127,6 +127,7 @@ function namingHandoffFixture(limit = 2) {
   let now = 0;
   let admit = () => {};
   const id = "ses_child";
+  const retired: [number, number | undefined][] = [];
 
   const queue = new ActivityRecoveryQueues<{
     type: string;
@@ -139,6 +140,12 @@ function namingHandoffFixture(limit = 2) {
     1,
     () => true,
     () => admit(),
+    {
+      start(_id, order, nativeStart) {
+        retired.push([order, nativeStart]);
+      },
+      candidate() {},
+    },
   );
 
   const pending = queue.candidate(id);
@@ -146,7 +153,10 @@ function namingHandoffFixture(limit = 2) {
   const log: TurnActivityLog = { update() {}, reconnected() {}, end() {} };
 
   const fixture = {
+    id,
+    pending,
     queue,
+    retired,
     start(order: number, created: number, at: number) {
       now = at;
       queue.enqueue(id, {
@@ -207,6 +217,17 @@ function namingHandoffFixture(limit = 2) {
         }
       };
     },
+    closeByBudget(at: number, observe: () => void) {
+      now = at;
+      admit = () => {
+        observe();
+        fixture.drain(now);
+      };
+
+      for (let index = 0; index < limit; index += 1) {
+        queue.candidate(`ses_budget_${index}`);
+      }
+    },
   };
 
   return fixture;
@@ -265,6 +286,50 @@ test("the held-name ceiling leaves ambiguity in a successor's earlier band", asy
   } finally {
     gate.resolve();
     await f.queue.settleReads();
+    f.queue.close();
+  }
+});
+
+test("budget closure of an expired post-loss head does not retire its calls", () => {
+  const f = namingHandoffFixture();
+
+  try {
+    f.start(10, 10, 0);
+    f.start(20, 20, 500);
+    const windows: ReturnType<typeof f.queue.window>[] = [];
+
+    f.closeByBudget(2100, () => {
+      const head = f.pending.segments[0];
+
+      if (head) {
+        windows.push(f.queue.window(head));
+      }
+    });
+
+    expect(f.queue.peek(f.id)).toBeUndefined();
+    expect(f.retired).toEqual([]);
+    expect(windows).toEqual([
+      { after: -Infinity, through: 10 },
+      { after: -Infinity, through: 20 },
+    ]);
+  } finally {
+    f.queue.close();
+  }
+});
+
+test("only the matching native parent can supply a detached witness", () => {
+  const f = namingHandoffFixture();
+
+  try {
+    f.start(10, 10, 0);
+    f.name(1, 20, 300, "ses_other_parent");
+    expect(f.naming().witness).toBeUndefined();
+    f.name(2, 21, 300);
+    expect(f.naming()).toMatchObject({
+      first: undefined,
+      witness: { callId: "2", session: "ses_parent" },
+    });
+  } finally {
     f.queue.close();
   }
 });
