@@ -267,7 +267,8 @@ test("shared root reconciliation rejects an uncovered watermark for an officer w
     });
 
     expect(f.logReads).toEqual([[main, 1]]);
-    expect(lost).toEqual([undefined]);
+    expect(lost).toHaveLength(1);
+    expect(lost[0]).toBeUndefined();
     expect(f.turns()).toMatchObject([
       {
         session: { id: main, parent: null },
@@ -2906,6 +2907,59 @@ test.each(["timeout", "capacity", "bytes", "lifecycle"] as const)(
     }
   },
 );
+
+test("a post-loss lifecycle overflow detaches even a named successor without starting gap recovery", async () => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    f.create(child, main);
+    f.start(child);
+    f.failedReads.add("log");
+    await f.families.reconnected();
+    f.failedReads.delete("log");
+
+    f.start(child);
+    f.ended(child, "unnamed predecessor", "early-answer");
+    f.end(child);
+    f.call(root, "retry");
+    f.called(root, "retry", { agent: "explore", sessionID: child });
+    f.start(child);
+    f.names(root, "retry", child);
+    f.ended(child, "named successor", "later-answer");
+    f.ended(child, "x".repeat(256 * 1024), "omitted-answer");
+    f.end(child);
+    expect(f.turns()).toHaveLength(2);
+
+    // Four start/end boundaries are already buffered. The 65th forces closure.
+    for (let boundary = 4; boundary <= 64; boundary += 1) {
+      f.end(child);
+    }
+
+    await setImmediate();
+
+    expect(f.logReads).toEqual([]);
+    expect(f.turns().slice(2)).toMatchObject([
+      {
+        session: { id: child, parent: null },
+        status: "cancelled",
+        lost: true,
+        items: [{ text: "unnamed predecessor" }],
+      },
+      {
+        session: { id: child, parent: null },
+        status: "cancelled",
+        lost: true,
+        items: expect.arrayContaining([
+          expect.objectContaining({ text: "named successor" }),
+          expect.objectContaining({ unavailable: ["activity.frames"] }),
+        ]),
+      },
+    ]);
+  } finally {
+    f.stop.abort();
+  }
+});
 
 test.each(["lost", "settled", "name first"] as const)(
   "a relaunch takes its late name after a %s reconnect with an active read failure",
