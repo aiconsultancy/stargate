@@ -189,13 +189,16 @@ export class ActivityRecoveryQueues<E extends Event> {
     );
 
     if (segment) {
+      const expired = proof.seenAt >= segment.expires;
+
       if (
-        segment === pending.segments[0] &&
-        pending.unprovenDrain &&
-        (proof.seenAt >= segment.expires ||
-          !callPrecedesStart(proof.timing.created, segment.first.created))
+        (expired && pending.postLoss && !pending.closing) ||
+        (segment === pending.segments[0] &&
+          pending.unprovenDrain &&
+          (expired ||
+            !callPrecedesStart(proof.timing.created, segment.first.created)))
       ) {
-        // The successor may be eligible even when the published head is not.
+        // A successor may be eligible even if a queued predecessor rejects it.
         this.evidence.hold(pending, proof);
       } else {
         this.offerSegment(segment, proof);
