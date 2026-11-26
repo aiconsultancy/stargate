@@ -1,5 +1,10 @@
 import type { TurnActivityLog } from "../backend";
-import type { ActivityIncarnation, CallTiming } from "./activity-call-evidence";
+import {
+  type ActivityIncarnation,
+  type CallTiming,
+  type CallWindow,
+  callRangeMightOverlap,
+} from "./activity-call-evidence";
 
 export type NamingProof = {
   session: string;
@@ -119,13 +124,13 @@ export class ActivityNamingEvidence {
     id: string,
     held: HeldNames,
     segment: NamingSegment,
-    after: number,
-    through: number,
+    window: CallWindow,
+    preserve: boolean,
   ) {
     const bucket = this.bucket(id);
 
     const mark = (scope: ProofScope, range: CallRange | undefined) => {
-      if (range && after < range.last && range.first <= through) {
+      if (callRangeMightOverlap(range, window)) {
         (segment.droppedProofScopes ??= new Set()).add(scope);
       }
     };
@@ -134,7 +139,8 @@ export class ActivityNamingEvidence {
     for (const [scope, range] of held.droppedProofs ?? []) {
       mark(scope, range);
 
-      if (range.last <= through) {
+      // A post-loss handoff can bring an earlier opening into the next window.
+      if (!preserve && range.last <= window.through) {
         held.droppedProofs?.delete(scope);
       }
     }

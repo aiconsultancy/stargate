@@ -49,7 +49,8 @@ type Window = CallWindow & { except: number };
 
 function overlaps(
   range: Range | undefined,
-  { after, through, except }: Window,
+  { after, through }: CallWindow,
+  except: number | undefined,
 ) {
   if (!range) {
     return false;
@@ -61,12 +62,14 @@ function overlaps(
   return first <= last && (first !== last || first !== except);
 }
 
-function mightOverlap(range: Range | undefined, window: Window) {
+export function callRangeMightOverlap(
+  range: Range | undefined,
+  window: CallWindow,
+  except?: number,
+) {
   return (
-    overlaps(range, window) ||
-    window.earlier?.some((band) =>
-      overlaps(range, { ...band, except: window.except }),
-    ) === true
+    overlaps(range, window, except) ||
+    window.earlier?.some((band) => overlaps(range, band, except)) === true
   );
 }
 
@@ -318,10 +321,18 @@ class ScopeEvidence {
         ) === true);
 
     return (
-      mightOverlap(this.ranges.get(session), window) ||
-      mightOverlap(this.overflow.get(this.bucket(session)), window) ||
-      mightOverlap(named?.dropped, window) ||
-      mightOverlap(this.namedCapacity.get(session)?.saturated, window) ||
+      callRangeMightOverlap(this.ranges.get(session), window, window.except) ||
+      callRangeMightOverlap(
+        this.overflow.get(this.bucket(session)),
+        window,
+        window.except,
+      ) ||
+      callRangeMightOverlap(named?.dropped, window, window.except) ||
+      callRangeMightOverlap(
+        this.namedCapacity.get(session)?.saturated,
+        window,
+        window.except,
+      ) ||
       named?.orders.entries().some((entry) => inWindow(entry)) === true ||
       this.pending
         .get(session)

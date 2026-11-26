@@ -513,7 +513,13 @@ export class ActivityRecoveryQueues<E extends Event> {
 
       if (start) {
         const opened = segment;
-        this.evidence.bindDrops(id, pending, opened, floor, order);
+        this.evidence.bindDrops(
+          id,
+          pending,
+          opened,
+          this.window(opened),
+          pending.postLoss === true,
+        );
 
         pending.provisional = pending.provisional.filter((proof) => {
           if (
@@ -787,6 +793,16 @@ export class ActivityRecoveryQueues<E extends Event> {
     for (const proof of [...old.proofs, ...(old.witnesses ?? []), ...held]) {
       // Moving a witnessed name to a successor is not a new proof arrival.
       this.routeProof(pending, proof);
+    }
+
+    if (next) {
+      this.evidence.bindDrops(
+        id,
+        pending,
+        next,
+        this.window(next),
+        pending.postLoss === true,
+      );
     }
   }
 
