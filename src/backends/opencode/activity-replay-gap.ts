@@ -50,6 +50,22 @@ export function nativeActivityTime(event: { created?: unknown }) {
     : undefined;
 }
 
+function coversWatermark(cursor: number, seq: number, seen: Set<number>) {
+  const length = seq - cursor;
+
+  if (!Number.isSafeInteger(seq) || length < 0 || length > seen.size) {
+    return false;
+  }
+
+  for (let offset = 1; offset <= length; offset += 1) {
+    if (!seen.has(cursor + offset)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 /** Reconnect only inspects lifecycle; it does not replay gaps in the stream. */
 export async function readActivityBoundary(
   log: (
@@ -65,6 +81,7 @@ export async function readActivityBoundary(
   }
 
   let frames = 0;
+  const seen = new Set<number>();
 
   try {
     for await (const frame of log(id, cursor, signal)) {
@@ -75,7 +92,7 @@ export async function readActivityBoundary(
       if (frame.type === "log.synced") {
         return frame.aggregateID === id &&
           frame.seq !== undefined &&
-          frame.seq >= cursor
+          coversWatermark(cursor, frame.seq, seen)
           ? "synced"
           : undefined;
       }
@@ -97,6 +114,8 @@ export async function readActivityBoundary(
       if (isSettled(frame.type)) {
         return { kind: "settled", seq, outcome: outcomes[frame.type] };
       }
+
+      seen.add(seq);
     }
   } catch {
     // No verified terminal outcome or continuation across the gap.
