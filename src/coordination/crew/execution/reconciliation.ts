@@ -15,7 +15,7 @@ import {
   settingsStruct,
 } from "../../../config/settings-schema";
 import { isNativeInstructionContext } from "../../../backends/opencode/instruction-context";
-import { crewTaskTextLimit } from "../../../shared/crew-status";
+import { isCrewTaskTextWithinLimit } from "../../../shared/crew-status";
 import {
   crewMessageMetadataKey,
   isTaskResume,
@@ -607,7 +607,7 @@ export async function verifyResult(
           final.time.completed < final.time.created ||
           final.time.completed > (execution.time?.idle ?? 0) ||
           !result.trim() ||
-          result.length > crewTaskTextLimit ||
+          !isCrewTaskTextWithinLimit(result) ||
           sha256(result) !== input.resultSha256
         ) {
           throw new CrewError(

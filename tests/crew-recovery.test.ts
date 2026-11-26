@@ -13,6 +13,7 @@ import type {
   ResultMessage,
 } from "../src/coordination/crew/execution/result";
 import type { CrewTask } from "../src/coordination/crew/execution/state";
+import { crewTaskTextLimit } from "../src/shared/crew-status";
 import { tmpdir } from "node:os";
 import { fixtureRoot } from "./fixture-root";
 
@@ -228,6 +229,7 @@ async function fixture(root = fixtureRoot()) {
   const finish = (
     task: CrewTask,
     outcome: "succeeded" | "interrupted" = "succeeded",
+    text = "Implemented and tested.",
   ) => {
     const session = sessions.get(task.workerSessionID);
 
@@ -242,7 +244,7 @@ async function fixture(root = fixtureRoot()) {
       type: "assistant",
       agent: "worker",
       finish: "stop",
-      content: [{ type: "text", text: "Implemented and tested." }],
+      content: [{ type: "text", text }],
       time: { created: 2, completed: 3 },
     });
   };
@@ -818,6 +820,27 @@ test("recovery survives reopening and traverses native instruction context and s
     expect(f.counts().prompts).toBe(1);
   } finally {
     await reopened.close();
+    await f.close();
+  }
+});
+
+test("OpenCode result recovery clips by code points without splitting a surrogate pair", async () => {
+  const f = await fixture();
+
+  try {
+    const task = await f.dispatch();
+    const expected = `x${"😀".repeat(crewTaskTextLimit - 1)}`;
+    f.finish(task, "succeeded", ` ${expected} overflow `);
+
+    const result = await f.engine.run(
+      { op: "status", taskID: task.id },
+      f.captain,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.task?.result?.length).toBe(expected.length);
+    expect(result.task?.result).toBe(expected);
+  } finally {
     await f.close();
   }
 });

@@ -10,7 +10,7 @@ import {
   settingsStruct,
 } from "../../../config/settings-schema";
 import { isNativeInstructionContext } from "../../../backends/opencode/instruction-context";
-import { crewTaskTextLimit } from "../../../shared/crew-status";
+import { truncateCrewTaskText } from "../../../shared/crew-status";
 import {
   crewMessageMetadataKey,
   isTaskResume,
@@ -185,7 +185,7 @@ export async function readTaskResult(
           );
         }
 
-        return result.slice(0, crewTaskTextLimit);
+        return truncateCrewTaskText(result);
       }
 
       const shellCandidate = shellContext.track(message);

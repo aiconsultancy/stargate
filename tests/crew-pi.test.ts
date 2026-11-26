@@ -29,6 +29,7 @@ import {
   teamSchema,
 } from "../src/coordination/crew/team";
 import { fixtureRoot } from "./fixture-root";
+import { crewTaskTextLimit } from "../src/shared/crew-status";
 
 function twikiTeam(): Team {
   return Schema.decodeUnknownSync(teamSchema)({
@@ -979,6 +980,80 @@ test("Pi shutdown retains uncertain task and unconfirmed creation is not repeate
     await running.close();
   }
 });
+
+test.each(["live", "recovered"] as const)(
+  "Pi clips a %s answer by code points without splitting a surrogate pair",
+  async (source) => {
+    const f = await fixture();
+    const state = f.engine.state;
+    const expected = `x${"😀".repeat(crewTaskTextLimit - 1)}`;
+    const answer = ` ${expected} overflow `;
+
+    const owner = new PiCrewWorkers(
+      state,
+      f.directory,
+      Object.assign(
+        async () => {
+          throw new Error("Receipt recovery must not open a runtime");
+        },
+        { recover: async () => answer },
+      ),
+    );
+
+    try {
+      const member = f.options.team?.crew.find(({ id }) => id === "twiki");
+
+      if (!member) {
+        throw new Error("Missing Pi worker");
+      }
+
+      if (source === "live") {
+        const started = f.started();
+
+        const { task } = await f.engine.run(
+          { op: "dispatch", crew: member.id, text: "Report" },
+          f.caller(),
+        );
+
+        await started;
+        f.turns[0]?.resolve(answer);
+
+        const result = await f.engine.run(
+          { op: "wait", taskID: task?.id },
+          f.caller(),
+        );
+
+        expect(result.status).toBe("completed");
+        expect(result.task?.result?.length).toBe(expected.length);
+        expect(result.task?.result).toBe(expected);
+      } else {
+        const peer = state.reservePeer(member.id);
+        state.readyPeer(member.id);
+        const task = state.reserveTask(peer, "captain-a", "Inspect receipt");
+
+        if (!task) {
+          throw new Error("Missing Pi task");
+        }
+
+        state.savePiTaskConversation(task.id, "17");
+
+        const result = await owner.recover(
+          task,
+          member,
+          f.directory,
+          new AbortController().signal,
+        );
+
+        expect(result.status).toBe("completed");
+        expect(result.result?.length).toBe(expected.length);
+        expect(result.result).toBe(expected);
+      }
+    } finally {
+      await owner.close();
+      await f.close();
+    }
+  },
+);
 
 test("Pi owner shutdown aborts and drains read-only recovery before state closes", async () => {
   const f = await fixture();

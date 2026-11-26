@@ -4,6 +4,35 @@ import { exactStruct } from "./session-history";
 /** Raw dispatch and stored task text bound, in code points. */
 export const crewTaskTextLimit = 64_000;
 
+/** UTF-16 offset of the code-point cap, without scanning beyond it. */
+function crewTaskTextEnd(text: string) {
+  if (text.length <= crewTaskTextLimit) {
+    return text.length;
+  }
+
+  let end = 0;
+  let points = 0;
+
+  for (const point of text) {
+    end += point.length;
+    points += 1;
+
+    if (points === crewTaskTextLimit) {
+      break;
+    }
+  }
+
+  return end;
+}
+
+export function truncateCrewTaskText(text: string) {
+  return text.slice(0, crewTaskTextEnd(text));
+}
+
+export function isCrewTaskTextWithinLimit(text: string) {
+  return crewTaskTextEnd(text) === text.length;
+}
+
 /** The ordinary display bounds; the unredacted view counts code points. */
 export const crewTaskTextLimits = {
   summary: 180,
