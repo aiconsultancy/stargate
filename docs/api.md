@@ -291,6 +291,15 @@ or can no longer be read.
 The captain reads the configured `core.excludesFile` as live ignore data,
 like the live repository's other ignore files. The gateway can run as a
 different Linux user, so it copies that file under the snapshot limits below.
+Only the repository's own configuration counts: both readers skip Git's
+global and system configuration (`GIT_CONFIG_GLOBAL=/dev/null`). A
+`core.excludesFile` set in `~/.gitconfig` or the XDG Git config and the
+default `$XDG_CONFIG_HOME/git/ignore` (`~/.config/git/ignore`) do not apply,
+so files ignored only there count in `changedFiles`, although `git status`
+in a terminal hides them. This is deliberate: the read stays isolated from
+the user's configuration. To have the count honour such a file, set
+`core.excludesFile` in the repository's configuration or use `.gitignore` or
+`.git/info/exclude`.
 Git versions that support
 `GIT_ATTR_SOURCE` also ignore worktree `.gitattributes`. The captain caches
 each checkout's result for 15 seconds, with a five-second read limit.
