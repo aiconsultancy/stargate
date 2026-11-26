@@ -487,11 +487,15 @@ export class ActivityRecoveryQueues<E extends Event> {
       }
     }
 
-    const bytes = lifecycle
-      ? 0
-      : Buffer.byteLength(JSON.stringify(packet.event.data));
+    // Only the published segment bypasses the candidate byte budget.
+    const published = pending.draining && pending.segments[0] === segment;
 
-    if (lifecycle || this.bytes + bytes <= this.limits.bytes) {
+    const bytes =
+      lifecycle || published
+        ? 0
+        : Buffer.byteLength(JSON.stringify(packet.event.data));
+
+    if (lifecycle || published || this.bytes + bytes <= this.limits.bytes) {
       segment.frames.push(packet);
       segment.bytes += bytes;
       this.bytes += bytes;
