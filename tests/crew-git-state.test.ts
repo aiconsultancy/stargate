@@ -398,8 +398,11 @@ test.each(["sha1", "sha256"])(
   "Fleet status uses the %s empty tree for attributes",
   async (format) => {
     const directory = await repository(format);
+    // Git stores LF but records the CRLF file's size.
+    // A new mtime alone then makes status compare contents.
+    // They match only when worktree attributes apply.
     await writeFile(join(directory, ".gitattributes"), "tracked text eol=lf\n");
-    await writeFile(join(directory, "tracked"), "original\n");
+    await writeFile(join(directory, "tracked"), "original\r\n");
     await git(directory, "add", ".");
     await git(directory, "commit", "-m", "track LF text");
 
@@ -417,7 +420,7 @@ test.each(["sha1", "sha256"])(
         { cwd: directory },
       ).exitCode === 0;
 
-    await writeFile(join(directory, "tracked"), "original\r\n");
+    await utimes(join(directory, "tracked"), 1_000_000_000, 1_000_000_000);
 
     expect(await createCrewGitReader()(directory, signal)).toMatchObject({
       changedFiles: supportsAttributeSource ? 1 : 0,
@@ -508,6 +511,28 @@ test("Fleet Git explains why a non-sticky, group-writable TMPDIR is rejected", a
   const temporary = await mkdtemp(join(root, "unsafe-temp-"));
   const previous = process.env["TMPDIR"];
   await chmod(temporary, 0o775);
+  process.env["TMPDIR"] = temporary;
+
+  try {
+    expect(await createCrewGitReader()(directory, signal)).toMatchObject({
+      branch: null,
+      changedFiles: null,
+      error: "Git status requires a safe temporary directory.",
+    });
+  } finally {
+    if (previous === undefined) {
+      delete process.env["TMPDIR"];
+    } else {
+      process.env["TMPDIR"] = previous;
+    }
+  }
+});
+
+test("Fleet Git rejects a private TMPDIR inside the checkout", async () => {
+  const directory = await repository();
+  const temporary = join(directory, "private-temp");
+  const previous = process.env["TMPDIR"];
+  await mkdir(temporary, { mode: 0o700 });
   process.env["TMPDIR"] = temporary;
 
   try {

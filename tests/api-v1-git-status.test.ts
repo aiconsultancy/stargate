@@ -1354,6 +1354,33 @@ test("isolated status detects same-size edits with a racy index timestamp", asyn
   }
 });
 
+test("status rejects a private temporary directory inside the checkout", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+
+  try {
+    git(directory, "init", "-b", "main");
+    git(directory, "commit", "--allow-empty", "-m", "Initial");
+    const temporary = join(directory, "private-temp");
+    await mkdir(temporary, { mode: 0o700 });
+
+    const read = createGitReader(
+      Date.now,
+      readCommand,
+      undefined,
+      () => temporary,
+    );
+
+    expect(await read(directory, new AbortController().signal)).toMatchObject({
+      branch: null,
+      changedFiles: null,
+      error: "Git state unavailable.",
+    });
+    expect(await readdir(temporary)).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("status ignores worktree and info attributes", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
 
@@ -1368,8 +1395,11 @@ test("status ignores worktree and info attributes", async () => {
       "other.txt text eol=lf\n",
     );
 
+    // Git stores LF but records the CRLF files' size.
+    // A new mtime alone then makes status compare contents.
+    // They match only when the attributes apply.
     for (const name of ["tracked.txt", "other.txt"]) {
-      await writeFile(join(directory, name), "original\n");
+      await writeFile(join(directory, name), "original\r\n");
     }
 
     git(directory, "add", ".");
@@ -1382,7 +1412,7 @@ test("status ignores worktree and info attributes", async () => {
       ).exitCode === 0;
 
     for (const name of ["tracked.txt", "other.txt"]) {
-      await writeFile(join(directory, name), "original\r\n");
+      await utimes(join(directory, name), 1_000_000_000, 1_000_000_000);
     }
 
     expect(
