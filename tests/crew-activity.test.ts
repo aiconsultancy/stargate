@@ -147,9 +147,12 @@ type RecordedTurn = {
 
 function fakeRecorder() {
   const turns: RecordedTurn[] = [];
+  /** Evicts a turn as the recorder would: no longer retained. */
+  const evictions = new Map<RecordedTurn, () => void>();
+  const gone = new Set<RecordedTurn>();
 
   const recorder: CrewTurnRecorder = {
-    begin(start, startedAt) {
+    begin(start, startedAt, evicted) {
       const turn: RecordedTurn = {
         start: structuredClone(start),
         items: new Map(),
@@ -161,7 +164,13 @@ function fakeRecorder() {
 
       turns.push(turn);
 
+      evictions.set(turn, () => {
+        gone.add(turn);
+        evicted?.();
+      });
+
       return {
+        retained: () => !gone.has(turn),
         update(key, _at, create, change) {
           let item = turn.items.get(key);
 
@@ -190,7 +199,13 @@ function fakeRecorder() {
       .map((item) => ("text" in item ? item.text : ""))
       .join("|");
 
-  return { turns, recorder, text };
+  const evict = (turn: RecordedTurn | undefined) => {
+    if (turn) {
+      evictions.get(turn)?.();
+    }
+  };
+
+  return { turns, recorder, text, evict };
 }
 
 const peer = (member: string, workerSessionID: string) => ({
@@ -1952,36 +1967,186 @@ test("a placed message stays known past the waiting messages' bound", async () =
   expect(text(turns[1])).toBe(bs.join("|"));
 });
 
-test("past the placed messages' bound, only a native opening frame opens one", async () => {
-  const count = 1025;
-  const { turns, stream, delta, text } = ordered({ m0: "in-1" }, []);
-
-  await until(() => stream.subscribers() === 1);
-
-  for (let index = 0; index < count; index++) {
-    delta("ses_mario", `m${index}`, `m${index}`);
-  }
-
-  await until(() => text(turns[0]).split("|").length === count);
-  // The bound forgot m0 while its execution runs: a delta could be its.
-  delta("ses_mario", "m0", "-forgotten");
-  delta("ses_mario", "x1", "unproven");
-  // A native step start proves a new message.
+/** A native step start: OpenCode repeats it for each retry attempt. */
+const stepStarted = (
+  stream: ReturnType<typeof eventStream>,
+  assistant: string,
+  seq: number,
+) => {
   stream.emit(
     "session.step.started",
     {
       sessionID: "ses_mario",
-      assistantMessageID: "x2",
+      assistantMessageID: assistant,
       agent: "build",
       model: { providerID: "p", id: "m" },
       started: 0,
     },
-    { durable: { aggregateID: "ses_mario", seq: 1, version: 1 } },
+    { durable: { aggregateID: "ses_mario", seq, version: 1 } },
   );
-  delta("ses_mario", "x2", "new");
-  await until(() => text(turns[0]).endsWith("new"));
+};
+
+const ids = (prefix: string, count: number) =>
+  Array.from({ length: count }, (_, index) => `${prefix}${index}`);
+
+const owning = (assistants: readonly string[], input: string) =>
+  Object.fromEntries(assistants.map((assistant) => [assistant, input]));
+
+/** Text items only: a step item reads as an empty string. */
+const texts = (text: string) => text.split("|").filter(Boolean);
+
+test("past 1,024 placed messages, a retried message joins its original turn", async () => {
+  const bs = ids("b", 1024);
+  let lookups = 0;
+
+  const { turns, stream, delta, text } = fixture({
+    turns: {
+      peers: [peer("mario", "ses_mario")],
+      tasks: [
+        task("task_1", "ses_mario", ["in-1"]),
+        task("task_2", "ses_mario", ["in-2"]),
+      ],
+    },
+    owners: { a0: "in-1", ...owning(bs, "in-2") },
+    // Only its first owner lookup answers: a reopened retry joins the
+    // Latest turn, unproven.
+    hold: (assistant) =>
+      assistant === "a0" && ++lookups > 1 ? new Promise(() => {}) : undefined,
+    collector: { bufferMs: 50 },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  stepStarted(stream, "a0", 1);
+  delta("ses_mario", "a0", "prefix");
+  await until(() => turns.length === 1);
+
+  for (const id of bs) {
+    delta("ses_mario", id, id);
+  }
+
+  await until(() => text(turns[1]).split("|").length === bs.length);
+  // The retry repeats the step start of a message still running.
+  stepStarted(stream, "a0", 2);
+  delta("ses_mario", "a0", "-retry");
+  await until(() => text(turns[0]).includes("retry"));
   await wait(50);
 
+  expect(turns).toHaveLength(2);
+  expect(texts(text(turns[0]))).toEqual(["prefix-retry"]);
+  expect(text(turns[1])).toBe(bs.join("|"));
+});
+
+test("a message whose step start fell in a reconnect gap keeps its text", async () => {
+  const ms = ids("m", 1025);
+  const { turns, stream, delta, text } = ordered(owning(ms, "in-1"), []);
+
+  await until(() => stream.subscribers() === 1);
+
+  for (const id of ms) {
+    delta("ses_mario", id, id);
+  }
+
+  await until(() => text(turns[0]).split("|").length === ms.length);
+  stream.disconnect();
+  await until(() => stream.subscriptions() === 2 && stream.subscribers() === 1);
+  // Its step start was lost in the gap: its first frame is a delta.
+  delta("ses_mario", "x1", "new");
+  stream.emit("session.text.ended", {
+    sessionID: "ses_mario",
+    assistantMessageID: "x1",
+    ordinal: 0,
+    text: "new message",
+  });
+  await until(() => text(turns[0]).endsWith("new message"));
+
   expect(turns).toHaveLength(1);
-  expect(text(turns[0]).match(/forgotten|unproven/g)).toBeNull();
+});
+
+test("a late delta of a retained turn joins it after more than 1,024 placements", async () => {
+  const bs = ids("b", 1025);
+
+  const { turns, stream, delta, settle, text } = ordered(
+    { a0: "in-1", ...owning(bs, "in-2") },
+    [],
+  );
+
+  await until(() => stream.subscribers() === 1);
+  delta("ses_mario", "a0", "a");
+  await until(() => turns.length === 1);
+  settle("ses_mario");
+  await until(() => turns[0]?.ended !== undefined);
+
+  for (const id of bs) {
+    delta("ses_mario", id, id);
+  }
+
+  await until(() => text(turns[1]).split("|").length === bs.length);
+  delta("ses_mario", "a0", "-late");
+  await until(() => text(turns[0]).includes("late"));
+  await wait(50);
+
+  expect(turns).toHaveLength(2);
+  expect(text(turns[0])).toBe("a-late");
+  expect(turns[0]?.ended).toBe("completed");
+});
+
+test("the 1,024 bound forgets evicted messages, oldest first, before known ones", async () => {
+  const bs = ids("b", 1100);
+
+  const { turns, stream, delta, settle, text, evict } = ordered(
+    { a0: "in-1", ...owning(bs, "in-2") },
+    [],
+  );
+
+  await until(() => stream.subscribers() === 1);
+  delta("ses_mario", "a0", "a");
+  await until(() => turns.length === 1);
+  settle("ses_mario");
+  await until(() => turns[0]?.ended !== undefined);
+
+  for (const id of bs) {
+    delta("ses_mario", id, id);
+  }
+
+  await until(() => text(turns[1]).split("|").length === bs.length);
+  settle("ses_mario");
+  await until(() => turns[1]?.ended !== undefined);
+  // 1,100 messages of an evicted turn: the oldest 76 are forgotten.
+  evict(turns[1]);
+
+  delta("ses_mario", "a0", "-late");
+  delta("ses_mario", "b1099", "-dropped");
+  delta("ses_mario", "b0", "reopened");
+  await until(() => turns.length === 3 && text(turns[0]).includes("late"));
+  await wait(50);
+
+  expect(text(turns[0])).toBe("a-late");
+  expect(text(turns[2])).toBe("reopened");
+  expect(turns.some((turn) => text(turn).includes("dropped"))).toBe(false);
+});
+
+test("past the known messages' ceiling, the oldest is counted and opens again", async () => {
+  // One past the per-session ceiling of 16,384 known messages.
+  const ms = ids("m", 16_385);
+
+  const { turns, stream, delta, text, collector } = ordered(
+    owning(ms, "in-1"),
+    [],
+  );
+
+  await until(() => stream.subscribers() === 1);
+
+  for (const id of ms) {
+    delta("ses_mario", id, id);
+  }
+
+  await until(() => turns[0]?.items.size === ms.length, 15_000);
+  expect(collector.load.forgotten).toBe(1);
+  // M0 is no longer known: its later output opens rather than drops.
+  delta("ses_mario", "m0", "-again");
+  await until(() => text(turns[0]).includes("again"));
+
+  expect(turns).toHaveLength(1);
+  // Known again, it puts the next oldest past the ceiling.
+  expect(collector.load.forgotten).toBe(2);
 });

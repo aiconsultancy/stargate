@@ -91,36 +91,42 @@ export const isPending = (entry: Entry | undefined): entry is Pending =>
 export const kept = (turn: Turn) =>
   !turn.ended || (turn.log.retained?.() ?? true);
 
-/** Per worker session: waiting messages, which hold frames, and placed ones. */
+/** Per worker session: waiting messages, which hold frames. */
 const maxMessages = 64;
-const maxPlaced = 1024;
 
-/** The frame that opens a native assistant message. */
-const opening = "session.step.started";
+/** Per worker session: messages no longer known, whose frames are dropped. */
+const maxEvicted = 1024;
+
+/** Per worker session: a safety ceiling on messages still known. */
+const maxKnown = 16_384;
 
 /**
  * One worker session's assistant messages, and the only writer of their
  * placement: each waits with its frames held, has joined a turn, or was
- * dropped with its evicted turn. Placed messages are remembered apart from
- * the waiting ones' frames, so that the bound on frames never forgets one
- * whose execution is current or whose turn is retained: its later frames
- * never open another message.
+ * dropped with its evicted turn. A message whose turn is running or
+ * retained stays known, so its later frames continue it; only messages no
+ * longer known count against their bound. An unknown message's first
+ * frame always opens it.
  */
 export class SessionMessages {
   /** Waiting messages in arrival order, bounded by `maxMessages`. */
   private readonly pending = new Map<string, Pending>();
-  /** Placed messages in placement order, bounded by `maxPlaced`. */
-  private readonly placed = new Map<string, Placed>();
-  /** The execution in which the bound forgot a message still known. */
-  private overflowed: number | undefined;
+  /** Messages whose turn is kept, in placement order, up to `maxKnown`. */
+  private readonly known = new Map<string, Turn>();
+  /** Messages no longer known, oldest first, bounded by `maxEvicted`. */
+  private readonly evicted = new Map<string, Evicted>();
 
   public constructor(
-    /** The session's current execution. */
-    private readonly execution: () => number,
+    /** Counts a still-known message forgotten past `maxKnown`. */
+    private readonly forget: () => void,
   ) {}
 
   public get(assistant: string): Entry | undefined {
-    return this.pending.get(assistant) ?? this.placed.get(assistant);
+    return (
+      this.pending.get(assistant) ??
+      this.known.get(assistant) ??
+      this.evicted.get(assistant)
+    );
   }
 
   /** Waiting messages in arrival order. */
@@ -137,20 +143,7 @@ export class SessionMessages {
 
   /** Turns that placed messages joined. */
   public *turns() {
-    for (const entry of this.placed.values()) {
-      if ("log" in entry) {
-        yield entry;
-      }
-    }
-  }
-
-  /**
-   * Whether an unknown message may open: in an execution where the bound
-   * forgot a message still known, only its native opening frame proves it
-   * new rather than forgotten.
-   */
-  public admits(type: string) {
-    return type === opening || this.overflowed !== this.execution();
+    yield* this.known.values();
   }
 
   /** Remember a waiting message; past the bound, the oldest is forced. */
@@ -169,43 +162,58 @@ export class SessionMessages {
   }
 
   public place(assistant: string, turn: Turn) {
-    this.remember(assistant, turn);
+    this.unset(assistant);
+    this.known.set(assistant, turn);
+
+    if (this.known.size <= maxKnown) {
+      return;
+    }
+
+    // Before the ceiling forgets a known message, drop those gone since.
+    this.prune((entry) => !kept(entry));
+
+    for (const oldest of this.known.keys()) {
+      if (this.known.size <= maxKnown) {
+        break;
+      }
+
+      // Its later output opens a new message.
+      this.known.delete(oldest);
+      this.forget();
+    }
   }
 
   /** Its later frames are dropped. */
   public evict(pending: Pending) {
-    this.remember(pending.assistant, {
-      evicted: true,
-      position: pending.position,
-    });
+    this.remove(pending.assistant, pending.position);
   }
 
   /** Forget turns the recorder evicted: their messages' frames are dropped. */
   public prune(gone: (turn: Turn) => boolean) {
-    for (const [key, entry] of this.placed) {
-      if ("log" in entry && gone(entry)) {
-        this.placed.set(key, { evicted: true, position: entry.position });
+    for (const [key, entry] of this.known) {
+      if (gone(entry)) {
+        this.remove(key, entry.position);
       }
     }
   }
 
-  private remember(assistant: string, entry: Placed) {
+  private unset(assistant: string) {
     this.pending.delete(assistant);
-    this.placed.delete(assistant);
-    this.placed.set(assistant, entry);
+    this.known.delete(assistant);
+    this.evicted.delete(assistant);
+  }
 
-    for (const [key, oldest] of this.placed) {
-      if (this.placed.size <= maxPlaced) {
+  /** No longer known: past the bound, the oldest such is forgotten. */
+  private remove(assistant: string, position: number) {
+    this.unset(assistant);
+    this.evicted.set(assistant, { evicted: true, position });
+
+    for (const oldest of this.evicted.keys()) {
+      if (this.evicted.size <= maxEvicted) {
         break;
       }
 
-      this.placed.delete(key);
-      const current = this.execution();
-
-      // Still known: its execution is current or its turn retained.
-      if (oldest.position === current || ("log" in oldest && kept(oldest))) {
-        this.overflowed = current;
-      }
+      this.evicted.delete(oldest);
     }
   }
 }

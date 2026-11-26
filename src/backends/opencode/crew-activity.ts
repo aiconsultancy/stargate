@@ -194,6 +194,7 @@ export class CrewActivityCollector {
   /** Frames of waiting messages, across sessions. */
   private readonly held: HeldFrames;
   private resolving = 0;
+  private forgotten = 0;
   private readonly deferred: Pending[] = [];
   private readonly resolutions = new Set<Pending>();
 
@@ -221,6 +222,8 @@ export class CrewActivityCollector {
       heldBytes: this.held.bytes,
       /** Forced messages the bound let go unplaced; always 0 unless a bug. */
       unplaced: this.held.unplaced,
+      /** Known messages the per-session ceiling forgot; 0 unless a flood. */
+      forgotten: this.forgotten,
       resolving: this.resolving,
       deferred: this.deferred.length,
       /** Frames still held by running or deferred resolutions. */
@@ -436,7 +439,9 @@ export class CrewActivityCollector {
           id,
           peer,
           open: new Set(),
-          messages: new SessionMessages(() => session.execution),
+          messages: new SessionMessages(() => {
+            this.forgotten += 1;
+          }),
           execution: 0,
           boundary: -1,
           history: new ExecutionHistory(),
@@ -565,8 +570,8 @@ export class CrewActivityCollector {
       return;
     }
 
-    // Its turn was evicted, or a bound forgot it with no proof it is new.
-    if (entry || !session.messages.admits(event.type)) {
+    // Its turn was evicted or let go: its later frames are dropped.
+    if (entry) {
       return;
     }
 
