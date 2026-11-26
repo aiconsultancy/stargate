@@ -64,7 +64,8 @@
   apart from the 64 waiting ones while its turn is running or retained, so
   that its later output, a retry included, never opens another message.
   Only messages no longer known count against a bound of 1,024 per worker
-  session; a safety ceiling of 16,384 known messages forgets the oldest
+  session, and their later output is dropped while that bound retains
+  them; a safety ceiling of 16,384 known messages forgets the oldest
   and counts it. An unknown message's first frame always opens it. An
   evicted turn is forgotten on any eviction path, and changes to a settled
   turn are measured once per 150 ms batch, and before any turn begins or

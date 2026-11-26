@@ -640,14 +640,17 @@ beyond either, it is placed at once without waiting for its owner. A turn
 it opens is attributed once its owner is proven; a turn it joins keeps its
 own task. Once placed, its frames are released, even while its owner is
 still being resolved. A crew turn evicted by the global limits, on any
-path, is forgotten at once, and later output of its messages is dropped.
+path, is forgotten at once, and later output of its messages is dropped
+while an eviction marker for each message is retained.
 At most 64 messages per worker session wait for placement; past that, the
 oldest is placed at once. A placed message is remembered apart from them
 for as long as it is still known, that is while its execution runs or its
 turn is retained, so its later output, including a retry's repeated step
 start, continues in its turn. Only messages no longer known, those of an
-evicted turn or let go by a hold limit, count against a bound of 1,024 per
-worker session, which forgets the oldest of them first. As a safety
+evicted turn or let go by a hold limit, keep such a marker and count
+against a bound of 1,024 per worker session, which forgets the oldest of
+them first; a message whose marker is forgotten opens again, as an unknown
+one, if more of its output arrives. As a safety
 ceiling, a worker session keeps at most 16,384 known messages; past that,
 the oldest is forgotten and counted in the collector's `forgotten`
 diagnostic, and its later output opens a new message. An unknown message's
