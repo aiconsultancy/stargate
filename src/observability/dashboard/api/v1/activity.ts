@@ -317,6 +317,38 @@ function evict(
 }
 
 /** A crew turn's task, first observed frame and eviction listener. */
+/** A child's parent, spawning call and session, and its family's requests. */
+type ChildLink = {
+  parent: StoredTurn;
+  callId: string | null;
+  sessionId: string;
+  requests: readonly ActivityRequest[];
+};
+
+/**
+ * A child begins under its parent, or, if the drain before it evicted that
+ * parent, unlinked: a root of its own that copies its family's requests.
+ */
+function childStart(retained: readonly StoredTurn[], link?: ChildLink) {
+  if (!link) {
+    return;
+  }
+
+  const { parent, callId, sessionId } = link;
+
+  return retained.includes(parent)
+    ? {
+        requests: [],
+        session: { id: sessionId, parent: { turnId: parent.id, callId } },
+        root: parent.root,
+      }
+    : {
+        requests: link.requests,
+        session: { id: sessionId, parent: null },
+        root: undefined,
+      };
+}
+
 type CrewTurn = {
   task: CrewTurnStart["task"];
   startedAt: number | undefined;
@@ -474,9 +506,12 @@ export function createActivityHub(
     session?: V1ActivityTurn["session"],
     root?: string,
     crew?: CrewTurn,
+    link?: ChildLink,
   ): CrewTurnActivityLog {
     remeasure.drain();
     const owner = agent(agentId);
+    const start = childStart(owner.turns, link) ?? { requests, session, root };
+    const family = link?.requests ?? requests;
     const startedAt = Math.min(crew?.startedAt ?? Infinity, now());
 
     owner.seq += 1;
@@ -484,7 +519,7 @@ export function createActivityHub(
 
     const turn: StoredTurn = {
       id,
-      root: root ?? id,
+      root: start.root ?? id,
       agent: agentId,
       seq: owner.seq,
       status: "running",
@@ -492,8 +527,11 @@ export function createActivityHub(
       updatedAt: startedAt,
       endedAt: null,
       reconnects: 0,
-      requests: requests.map(({ channel, msgid }) => ({ channel, msgid })),
-      ...(session && { session: structuredClone(session) }),
+      requests: start.requests.map(({ channel, msgid }) => ({
+        channel,
+        msgid,
+      })),
+      ...(start.session && { session: structuredClone(start.session) }),
       ...(crew && { task: structuredClone(crew.task) }),
       items: new Map(),
       ...(crew?.evicted && { evicted: crew.evicted }),
@@ -590,12 +628,9 @@ export function createActivityHub(
         resize();
       }),
       child(callId, sessionId) {
-        return begin(
-          agentId,
-          [],
-          { id: sessionId, parent: { turnId: turn.id, callId } },
-          turn.root,
-        );
+        const link = { parent: turn, callId, sessionId, requests: family };
+
+        return begin(agentId, [], undefined, undefined, undefined, link);
       },
       attribute(task) {
         // Crew turns only, and once: a late task lookup succeeded.

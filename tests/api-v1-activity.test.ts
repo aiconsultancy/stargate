@@ -612,6 +612,37 @@ test("a begin drains a pending late write before its turn counts", () => {
   expect(sessions(hub, "captain")).toEqual(["A", "C"]);
 });
 
+test("a child whose parent the begin drain evicts is admitted unlinked", () => {
+  const hub = createActivityHub({ bytes: 1000 });
+  const requests = [{ channel: "#Bridge", msgid: "parent-request" }];
+  const parent = hub.recorder("claude").begin(requests, "parent");
+  parent.end("completed");
+  // The parent outgrows the budget; the batch window has not measured it.
+  parent.update("late", 1, () => text("x".repeat(5000)));
+  expect(sessions(hub, "claude")).toEqual(["parent"]);
+
+  const child = parent.child?.("call", "child");
+  child?.update("k", 2, () => text("child"));
+  const { turns } = snapshot(hub, "claude");
+
+  // Drained first, the parent goes; the child is its own root, which the
+  // Request-filtered route finds.
+  expect(turns).toHaveLength(1);
+  expect(turns[0]).toMatchObject({
+    session: { id: "child", parent: null },
+    requests,
+    items: [{ text: "child" }],
+  });
+  expect(
+    readActivity(
+      hub,
+      config,
+      "claude",
+      new URLSearchParams({ request: "parent-request", channel: "#Bridge" }),
+    ),
+  ).toMatchObject({ status: 200, body: { turns } });
+});
+
 test("an end drains a pending late write before its turn counts", () => {
   // One millisecond: the ending turn sorts with the settled ones.
   const hub = createActivityHub({ bytes: 1700, now: () => 1000 });
