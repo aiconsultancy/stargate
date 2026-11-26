@@ -35,7 +35,8 @@ type NamedCapacity = { count: number; saturated?: Range };
 export type EarlierCallRange = {
   after: number;
   through: number;
-  nativeStart: number;
+  // An untimed expiry keeps this band for competition, never for binding.
+  nativeStart: number | undefined;
 };
 
 export type CallWindow = {
@@ -88,6 +89,7 @@ export function openedInWindow(
         ({ after, through, nativeStart }) =>
           after < order &&
           order <= through &&
+          nativeStart !== undefined &&
           !callPrecedesStart(created, nativeStart),
       ) === true)
   );
@@ -308,7 +310,12 @@ class ScopeEvidence {
     const named = this.named.get(child)?.get(session);
 
     const inWindow = ([order, created]: [number, number | undefined]) =>
-      order !== window.except && openedInWindow(order, created, window);
+      order !== window.except &&
+      (openedInWindow(order, created, window) ||
+        window.earlier?.some(
+          ({ after, through, nativeStart }) =>
+            nativeStart === undefined && after < order && order <= through,
+        ) === true);
 
     return (
       mightOverlap(this.ranges.get(session), window) ||

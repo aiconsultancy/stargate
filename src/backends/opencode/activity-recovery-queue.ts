@@ -707,31 +707,36 @@ export class ActivityRecoveryQueues<E extends Event> {
     const { first } = old;
     const next = pending.segments[0];
 
-    const retiredAt =
+    const expired =
       pending.postLoss &&
       !pending.closing &&
       first.type === startType &&
-      this.now() >= old.expires
-        ? first.created
-        : undefined;
+      this.now() >= old.expires;
+
+    const retiredAt = expired ? first.created : undefined;
 
     let earlier = old.earlier;
 
     if (retiredAt !== undefined) {
       this.removed?.start(id, first.order, retiredAt);
+    }
 
+    if (expired) {
       // Native time must exclude a held call from every range it overlapped.
-      // The normal floor stays at the released start.
+      // An untimed expiry leaves earlier openings as competition only.
       earlier = [
         ...(earlier?.map((band) => ({
           ...band,
-          nativeStart: Math.max(band.nativeStart, retiredAt),
+          nativeStart:
+            band.nativeStart === undefined || retiredAt === undefined
+              ? undefined
+              : Math.max(band.nativeStart, retiredAt),
         })) ?? []),
         { after: old.floor, through: first.order, nativeStart: retiredAt },
       ];
     }
 
-    const floor = retiredAt === undefined ? old.floor : first.order;
+    const floor = expired ? first.order : old.floor;
 
     if (next) {
       next.floor = floor;
