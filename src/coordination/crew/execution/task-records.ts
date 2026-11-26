@@ -11,6 +11,12 @@ export type Peer = {
   status: "pending" | "ready";
 };
 
+/** The generated native instructions are not part of the crew's task text. */
+export type TaskAssignment = { preamble: string; assignment: string };
+
+export const assignmentPrompt = ({ preamble, assignment }: TaskAssignment) =>
+  preamble + assignment;
+
 export type TaskReconciliation = {
   taskID: string;
   workerSessionID: string;
@@ -119,9 +125,8 @@ export class CrewTaskRecords {
   public reserveTask(
     peer: Peer,
     captainID: string,
-    text = "",
-    originInputID: string | null = null,
-    assignmentStart = 0,
+    input: TaskAssignment,
+    originInputID: string | null,
   ): CrewTask | null {
     return this.db
       .transaction(() => {
@@ -145,8 +150,8 @@ export class CrewTaskRecords {
         const task = this.task(id);
 
         if (task) {
-          this.reporting.assignment(task, text);
-          this.activity.assignment(task, text, false, assignmentStart);
+          this.reporting.assignment(task, assignmentPrompt(input));
+          this.activity.assignment(task, input.assignment);
         }
 
         return task;

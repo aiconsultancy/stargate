@@ -6,6 +6,7 @@ import {
 } from "../../../config/settings-schema";
 import { messagePortableSchema } from "./message-tool-input";
 import { effectProjectKeySchema } from "../protocol/project-key";
+import { crewTaskTextLimit } from "../../../shared/crew-status";
 
 const sessionID = Schema.String.check(
   Schema.isMaxCodePoints(256),
@@ -36,7 +37,7 @@ export const outboxPageSchema = settingsStruct({
         to: member,
         text: Schema.String.check(
           Schema.isMinCodePoints(1),
-          Schema.isMaxCodePoints(64_000),
+          Schema.isMaxCodePoints(crewTaskTextLimit),
         ),
         /** Time the stargate_dm was stored (ms). */
         created: sequence,

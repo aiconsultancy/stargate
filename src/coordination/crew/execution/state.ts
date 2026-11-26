@@ -27,7 +27,9 @@ import {
   type StatusRequest,
   type StopPhase,
   type TaskAbandonment,
+  type TaskAssignment,
   type TaskReconciliation,
+  assignmentPrompt,
 } from "./task-records";
 
 export { type CrewID, CrewError, type CrewTask } from "../pending";
@@ -63,6 +65,10 @@ export type CrewQuestionOffer = {
 export const pendingTaskLimit = 100;
 
 type QueuedTask = CrewTask & { text: string };
+
+/** Bare assignments and report prompts have no generated preamble. */
+const assignmentParts = (input: string | TaskAssignment): TaskAssignment =>
+  typeof input === "string" ? { preamble: "", assignment: input } : input;
 
 const tasksTable = (name: string) => `${name} (
           id TEXT PRIMARY KEY,
@@ -661,14 +667,16 @@ export class CrewState {
   public enqueue(
     peer: Peer,
     captainID: string,
-    text: string,
+    input: string | TaskAssignment,
     reportCaptureID?: string,
     originInputID: string | null = null,
-    {
-      drainRunID,
-      assignmentStart = 0,
-    }: { drainRunID?: string; assignmentStart?: number } = {},
+    { drainRunID }: { drainRunID?: string } = {},
   ): CrewTask {
+    const parts = assignmentParts(input);
+    // The queue's text column holds the ready-to-send prompt, as in old rows.
+    // The activity row takes the assignment separately below.
+    const prompt = assignmentPrompt(parts);
+
     return this.db
       .transaction(() => {
         if (reportCaptureID) {
@@ -731,7 +739,7 @@ export class CrewState {
             captainID,
             originInputID,
             `msg_${randomUUID()}`,
-            text,
+            prompt,
           );
         const task = this.task(id);
 
@@ -746,15 +754,10 @@ export class CrewState {
         if (reportCaptureID) {
           this.reporting.markReport(id, reportCaptureID);
         } else {
-          this.reporting.assignment(task, text);
+          this.reporting.assignment(task, prompt);
         }
 
-        this.activity.assignment(
-          task,
-          text,
-          !!reportCaptureID,
-          assignmentStart,
-        );
+        this.activity.assignment(task, parts.assignment, !!reportCaptureID);
 
         return task;
       })
@@ -910,16 +913,14 @@ export class CrewState {
   public reserveTask(
     peer: Peer,
     captainID: string,
-    text = "",
+    input: string | TaskAssignment = "",
     originInputID: string | null = null,
-    assignmentStart = 0,
   ): CrewTask | null {
     return this.taskRecords.reserveTask(
       peer,
       captainID,
-      text,
+      assignmentParts(input),
       originInputID,
-      assignmentStart,
     );
   }
 
