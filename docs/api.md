@@ -313,9 +313,10 @@ status runs with `-c core.excludesFile=/dev/null`, so Git's default
 `$XDG_CONFIG_HOME/git/ignore` (`~/.config/git/ignore`) does not apply either.
 Files ignored only there count in `changedFiles`, although `git status` in a
 terminal hides them. This is deliberate: the read stays isolated from
-the user's configuration. To have the count honour such a file, set
-`core.excludesFile` in the repository's configuration or use `.gitignore` or
-`.git/info/exclude`.
+the user's configuration. To have both readers honour such patterns, put them
+in `.gitignore` or `.git/info/exclude`. A repository `core.excludesFile`
+reaches the gateway's fallback read only under the copy rule above: a file
+elsewhere, such as `~/.config/git/ignore`, is skipped there.
 Git versions that support
 `GIT_ATTR_SOURCE` also ignore worktree `.gitattributes`. The captain caches
 each checkout's result for 15 seconds, with a five-second read limit.
