@@ -1874,6 +1874,7 @@
         "src/crew/waiting.ts",
         "src/crew/workspace.ts",
         "src/coordination/crew/workspace/checkout-diff.ts",
+        "src/coordination/crew/workspace/diff-output.ts",
         "src/coordination/crew/workspace/git-runner.ts",
         "src/coordination/crew/workspace/git-state.ts",
         "src/coordination/crew/workspace/git-status.ts"

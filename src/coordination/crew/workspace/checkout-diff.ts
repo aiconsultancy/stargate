@@ -5,13 +5,11 @@ import {
   type CheckoutDiff,
   type CheckoutDiffFile,
   type CheckoutDiffInput,
-  type DiffEntry,
-  DiffOutputParser,
-  type DiffPlan,
   type DiffSide,
   diffLimits,
   utf8Prefix,
 } from "../reporting/fleet-status";
+import { type DiffEntry, DiffOutputParser, type DiffPlan } from "./diff-output";
 import {
   type CheckoutGit,
   type Git,

@@ -17,12 +17,12 @@ import { join } from "node:path";
 import {
   type CheckoutDiff,
   type CheckoutDiffInput,
-  DiffOutputParser,
   diffLimits,
   statusEntries,
   utf8Prefix,
 } from "../src/coordination/crew/reporting/fleet-status";
 import { createCheckoutDiffReader } from "../src/coordination/crew/workspace/checkout-diff";
+import { DiffOutputParser } from "../src/coordination/crew/workspace/diff-output";
 import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
 import {
   spawnGit,

@@ -1,4 +1,4 @@
 {
-  "baselineSha256": "a3f2e25774fe8d0c6f6c0ce55f0ae9b9c9438f0e2e55d3eb412bb6745454b872",
-  "closureAdditions": ["src/coordination/crew/workspace/checkout-diff.ts"]
+  "baselineSha256": "779a632e1d6b73c30fad9ed98fb0e2c623e7cfde64e152c28286790c564f62eb",
+  "closureAdditions": ["src/coordination/crew/workspace/diff-output.ts"]
 }
