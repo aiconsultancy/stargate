@@ -10,6 +10,15 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 - `agentDispatch.decisionOutcomeDms` enables decision-outcome DMs to recording
   captains when Subspace serves the outcome feed. The default is off.
+
+- New off-by-default Teams options: `attachmentFileHosts` enables document
+  receipt from exact tenant SharePoint hosts in personal chats.
+  `access.allowUnmentionedConversations` allows messages without a bot mention in explicitly
+  listed conversations.
+- Default change: channel and group-chat messages require this bot's @mention.
+  Incoming activities must identify this registration's Teams bot recipient.
+  Teams quoted previews provide untrusted context for admitted requests.
+
 - Default change: Teams registrations enable `livePresence` by default. Set it to
   `false` to disable typing and work-in-progress updates.
 - Teams registrations accept incoming screenshots by default. Set

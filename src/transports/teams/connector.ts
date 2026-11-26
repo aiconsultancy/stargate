@@ -30,7 +30,7 @@ const defaultSleep: Sleep = (ms) =>
 
 // Settles with the promise, or rejects as soon as the signal aborts. The underlying
 // Work (a shared token request, say) carries on, but this caller stops waiting.
-function untilAborted<T>(
+export function untilAborted<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
 ): Promise<T> {
@@ -160,6 +160,7 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
   readonly #now: () => number;
   readonly #sleep: Sleep;
   readonly #endpoint: string;
+  readonly #resource: string;
   #cached: { token: string; expiresAt: number } | undefined;
   #inflight: Promise<string> | undefined;
 
@@ -169,12 +170,14 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
     now?: () => number;
     sleep?: Sleep;
     endpoint?: string;
+    resource?: string;
   }) {
     this.#clientId = options.clientId;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#now = options.now ?? Date.now;
     this.#sleep = options.sleep ?? defaultSleep;
     this.#endpoint = options.endpoint ?? IMDS_TOKEN_ENDPOINT;
+    this.#resource = options.resource ?? BOT_FRAMEWORK_RESOURCE;
   }
 
   public async getToken(): Promise<string> {
@@ -198,7 +201,7 @@ export class ManagedIdentityTokenProvider implements TokenProvider {
   async #request(): Promise<string> {
     const url = new URL(this.#endpoint);
     url.searchParams.set("api-version", "2018-02-01");
-    url.searchParams.set("resource", BOT_FRAMEWORK_RESOURCE);
+    url.searchParams.set("resource", this.#resource);
     url.searchParams.set("client_id", this.#clientId);
     let lastError = new Error("IMDS token request was not attempted");
 
