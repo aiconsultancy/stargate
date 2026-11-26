@@ -370,7 +370,9 @@ test("a newer Claude task run rebinds and ignores an explicitly linked stale com
   expect(tool).not.toHaveProperty("metadata.task.status");
   expect(tool).not.toHaveProperty("metadata.task.summary");
   expect(
-    live?.turns.find((turn) => turn.session?.parent?.callId === "tool_resumed"),
+    live?.turns.findLast(
+      (turn) => turn.session?.parent?.callId === "tool_resumed",
+    ),
   ).toMatchObject({ status: "running" });
 });
 

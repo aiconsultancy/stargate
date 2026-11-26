@@ -427,6 +427,8 @@ export type V1ActivityTurnSummary = {
   /** The agent change sequence of the turn's latest change. */
   seq: number;
   status: "running" | "completed" | "failed" | "cancelled";
+  /** Observation ended without a proven native outcome. Only on cancelled turns. */
+  lost?: true;
   startedAt: number;
   updatedAt: number;
   endedAt: number | null;

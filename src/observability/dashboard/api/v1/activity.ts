@@ -57,6 +57,7 @@ type StoredTurn = {
   agent: string;
   seq: number;
   status: V1ActivityTurn["status"];
+  lost?: true;
   startedAt: number;
   updatedAt: number;
   endedAt: number | null;
@@ -207,6 +208,7 @@ function turnSummary(turn: StoredTurn): V1ActivityTurnSummary {
     id: turn.id,
     seq: turn.seq,
     status: turn.status,
+    ...(turn.lost && { lost: turn.lost }),
     startedAt: turn.startedAt,
     updatedAt: turn.updatedAt,
     endedAt: turn.endedAt,
@@ -579,13 +581,18 @@ export function createActivityHub(
           turn.root,
         );
       },
-      end(outcome: ActivityOutcome) {
+      end(outcome: ActivityOutcome, lost?: true) {
         if (turn.endedAt !== null) {
           return;
         }
 
         const at = now();
         turn.status = outcome;
+
+        if (outcome === "cancelled" && lost) {
+          turn.lost = true;
+        }
+
         turn.endedAt = at;
         changed(at);
 

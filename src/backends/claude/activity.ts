@@ -92,8 +92,6 @@ class Thread {
   private readonly messages = new Map<string, Message>();
   private streaming: Message | undefined;
   public ended = false;
-  public background = false;
-  public observedOutcome: ActivityOutcome | undefined;
 
   public constructor(
     public readonly log: TurnActivityLog,
@@ -444,12 +442,18 @@ class Thread {
     message.finalIndex = Math.max(message.finalIndex, start + blocks.length);
   }
 
-  public end(outcome: ActivityOutcome, at: number) {
+  public end(outcome: ActivityOutcome, at: number, lost?: true) {
     if (this.ended) {
       return;
     }
 
     this.ended = true;
+
+    if (lost) {
+      this.log.end(outcome, lost);
+
+      return;
+    }
 
     try {
       for (const message of this.messages.values()) {
@@ -482,18 +486,27 @@ type Call = {
   owner: Thread;
   canParent: boolean;
   taskType?: string;
+  run: TaskRun;
+};
+
+type TaskRun = {
+  child?: Thread;
   background?: boolean;
   taskOutcome?: ActivityOutcome;
+  observedOutcome?: ActivityOutcome;
+};
+
+type TaskBinding = {
+  call: Call;
+  runId: string | undefined;
+  description: string | undefined;
+  prompt: string | undefined;
 };
 
 /** One SDK query; never write SDK data to logs or change the reply pipeline. */
 export class ClaudeActivity {
   private readonly calls = new Map<string, Call>();
-  private readonly children = new Map<string, Thread>();
-  private readonly tasks = new Map<
-    string,
-    { call: Call; runId: string | undefined }
-  >();
+  private readonly tasks = new Map<string, TaskBinding>();
   private readonly root: Thread;
 
   private constructor(
@@ -531,7 +544,7 @@ export class ClaudeActivity {
   private thread(log: TurnActivityLog) {
     return new Thread(log, (id, owner, canParent) => {
       if (!this.calls.has(id)) {
-        this.calls.set(id, { id, owner, canParent });
+        this.calls.set(id, { id, owner, canParent, run: {} });
       }
     });
   }
@@ -544,19 +557,17 @@ export class ClaudeActivity {
       return;
     }
 
-    let child = this.children.get(call.id);
+    const run = call.run;
 
-    if (!child) {
+    if (!run.child) {
       const log = call.owner.log.child?.(call.id, sessionId);
 
       if (log) {
-        child = this.thread(log);
-        child.background = call.background ?? false;
-        this.children.set(call.id, child);
+        run.child = this.thread(log);
       }
     }
 
-    return child;
+    return run.child;
   }
 
   private denial(id: string, at: number, name: string, message: string) {
@@ -578,11 +589,11 @@ export class ClaudeActivity {
     const results = blocks.filter((block) => block.type === "tool_result");
 
     for (const block of results) {
-      if (this.calls.get(block.tool_use_id)?.owner === thread) {
-        const child = this.children.get(block.tool_use_id);
+      const call = this.calls.get(block.tool_use_id);
 
-        if (child) {
-          child.observedOutcome =
+      if (call?.owner === thread) {
+        if (call.run.child) {
+          call.run.observedOutcome =
             block.is_error === true ? "failed" : "completed";
         }
 
@@ -599,46 +610,44 @@ export class ClaudeActivity {
 
   private task(frame: Task, at: number) {
     const known = this.tasks.get(frame.task_id);
+    const previousId = known?.runId;
+    const incomingId = frame.run_id;
 
     // The SDK orders a task's run IDs by plain string comparison.
     if (
-      known?.runId !== undefined &&
-      frame.run_id !== undefined &&
-      frame.run_id < known.runId
+      previousId !== undefined &&
+      incomingId !== undefined &&
+      incomingId < previousId
     ) {
+      return;
+    }
+
+    const newer =
+      previousId !== undefined &&
+      incomingId !== undefined &&
+      incomingId > previousId;
+
+    // Without a start, a different run's frames do not belong to this child.
+    if (newer && frame.subtype !== "task_started") {
       return;
     }
 
     const explicit = "tool_use_id" in frame ? frame.tool_use_id : undefined;
 
-    const sameRun =
-      known &&
-      (frame.run_id === undefined ||
-        known.runId === undefined ||
-        known.runId === frame.run_id);
-
     const call =
-      explicit === undefined
-        ? sameRun
-          ? known.call
-          : undefined
-        : this.calls.get(explicit);
+      explicit === undefined ? known?.call : this.calls.get(explicit);
 
     if (!call) {
       return;
     }
 
-    // A newer start on this call owns a fresh child only after the old one ends.
-    if (
-      frame.subtype === "task_started" &&
-      known?.call === call &&
-      !sameRun &&
-      this.children.get(call.id)?.ended
-    ) {
-      this.children.delete(call.id);
-      delete call.taskOutcome;
+    if (newer && known?.call === call) {
+      const previous = call.run;
+      call.run = {};
+      previous.child?.end("cancelled", at, true);
     }
 
+    const run = call.run;
     const type = frame.subtype === "task_started" ? frame.task_type : undefined;
 
     if (type !== undefined) {
@@ -650,45 +659,46 @@ export class ClaudeActivity {
       call.taskType === "local_agent"
         ? this.child(call, frame.session_id)
         : call.taskType === undefined
-          ? this.children.get(call.id)
+          ? run.child
           : undefined;
 
-    const runId = frame.run_id ?? known?.runId;
-    this.tasks.set(frame.task_id, { call, runId });
-
-    const task = {
-      subtype: frame.subtype,
-      task_id: frame.task_id,
-      run_id: runId,
-    };
-
     const details = frame.subtype === "task_updated" ? frame.patch : frame;
+    const runId = incomingId ?? previousId;
+
+    const description =
+      ("description" in details ? details.description : undefined) ??
+      known?.description;
+
+    const prompt =
+      ("prompt" in details ? details.prompt : undefined) ?? known?.prompt;
+
+    this.tasks.set(frame.task_id, { call, runId, description, prompt });
 
     const background =
       "is_backgrounded" in details ? details.is_backgrounded : undefined;
 
     if (background !== undefined) {
-      call.background = background;
-
-      if (child) {
-        child.background = background;
-      }
+      run.background = background;
     }
 
     call.owner.tool(call.id, at, (tool) => {
       const previous = tool.metadata?.["task"];
 
       const prior =
-        Predicate.isObject(previous) && previous["run_id"] === runId
+        !newer &&
+        Predicate.isObject(previous) &&
+        previous["task_id"] === frame.task_id
           ? previous
           : undefined;
 
       const data = {
         ...prior,
-        ...task,
+        subtype: frame.subtype,
+        task_id: frame.task_id,
+        run_id: runId,
         ...(call.taskType !== undefined && { task_type: call.taskType }),
-        ...("description" in details && { description: details.description }),
-        ...("prompt" in details && { prompt: details.prompt }),
+        ...(description !== undefined && { description }),
+        ...(prompt !== undefined && { prompt }),
         ...("summary" in details && { summary: details.summary }),
         ...("usage" in details && { usage: details.usage }),
         ...("status" in details && { status: details.status }),
@@ -709,7 +719,7 @@ export class ClaudeActivity {
           : undefined;
 
     if (outcome) {
-      call.taskOutcome = outcome;
+      run.taskOutcome = outcome;
       child?.end(outcome, at);
     }
   }
@@ -799,6 +809,7 @@ export class ClaudeActivity {
         }
       } else if ("parent_tool_use_id" in frame) {
         const parent = frame.parent_tool_use_id;
+        const call = parent === null ? undefined : this.calls.get(parent);
 
         const thread =
           parent === null
@@ -806,8 +817,8 @@ export class ClaudeActivity {
             : frame.type === "assistant" ||
                 frame.type === "user" ||
                 frame.type === "stream_event"
-              ? this.child(this.calls.get(parent), frame.session_id)
-              : this.children.get(parent);
+              ? this.child(call, frame.session_id)
+              : call?.run.child;
 
         if (thread && !thread.ended) {
           switch (frame.type) {
@@ -848,43 +859,25 @@ export class ClaudeActivity {
   public end(outcome: ActivityOutcome) {
     const at = Date.now();
 
-    if (outcome !== "cancelled") {
-      for (const call of this.calls.values()) {
-        if (
-          call.background &&
-          !call.taskOutcome &&
-          !this.children.has(call.id)
-        ) {
-          try {
-            call.owner.tool(call.id, at, (tool) => {
-              tool.unavailable = ["after-turn"];
-            });
-          } catch {
-            // One unavailable recorder must not stop the rest settling.
-          }
-        }
-      }
-    }
+    for (const call of this.calls.values()) {
+      const { child, background, taskOutcome, observedOutcome } = call.run;
 
-    for (const [id, child] of this.children) {
       try {
-        const call = this.calls.get(id);
-
         if (
-          !child.ended &&
-          child.background &&
+          !child?.ended &&
+          background &&
           outcome !== "cancelled" &&
-          !call?.taskOutcome
+          !taskOutcome
         ) {
-          call?.owner.tool(id, at, (tool) => {
+          call.owner.tool(call.id, at, (tool) => {
             tool.unavailable = ["after-turn"];
           });
-          child.end("cancelled", at);
+          child?.end("cancelled", at);
         } else {
-          child.end(
+          child?.end(
             outcome === "cancelled"
               ? outcome
-              : (call?.taskOutcome ?? child.observedOutcome ?? outcome),
+              : (taskOutcome ?? observedOutcome ?? outcome),
             at,
           );
         }

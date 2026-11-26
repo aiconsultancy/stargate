@@ -406,7 +406,8 @@ export type TurnActivityLog = {
   setUsage?(usage: ActivityUsage): void;
   /** Begin a child owned by a tool call observed in this turn. */
   child?(callId: string, sessionId: string): TurnActivityLog;
-  end(outcome: ActivityOutcome): void;
+  /** End without claiming a native outcome when observation was lost. */
+  end(outcome: ActivityOutcome, lost?: true): void;
 };
 
 /** Collects officer turns for operator views; one per registration. */

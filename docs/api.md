@@ -387,13 +387,16 @@ received its plaintext. `session.id` is the session ID in the SDK envelope,
 which may be shared with the root. Child turns carry `session.parent` with
 the spawning `turnId` and `callId`, and are linked only when the call was
 observed during the same query. The SDK can send complete blocks instead of
-partial deltas for children. Task status and progress are on the spawning
-tool's `metadata.task`. Only subagents become child turns; background shells,
-monitors and workflows stay on the tool. If a background task outlives the
-query, the spawning tool has `unavailable: ["after-turn"]`. The child turn's
-`cancelled` status in that case means observation ended, not that the SDK
-confirmed a cancellation. This route does not follow task output files or
-reconstruct missed frames.
+partial deltas for children. A resumed subagent run gets its own child turn.
+If the previous run did not have a known outcome, its child ends as
+`cancelled` with `lost: true`: observation ended, but the SDK did not confirm
+a stop. Task status and progress are on the spawning tool's `metadata.task`;
+the prompt and description carry forward unless replaced. Only subagents
+become child turns; background shells, monitors and workflows stay on the
+tool. If a background task outlives the query, the spawning tool has
+`unavailable: ["after-turn"]`. In that case, the child's `cancelled` status
+also means observation ended, not that the SDK confirmed a cancellation.
+This route does not follow task output files or reconstruct missed frames.
 
 | Query parameter | Meaning                                             |
 | --------------- | --------------------------------------------------- |
