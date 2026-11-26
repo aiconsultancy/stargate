@@ -750,9 +750,13 @@ transcript. If neither continuity nor an outcome is proven, the old turn
 ends `cancelled` with `lost: true`, meaning observation was lost, not that
 the native session was interrupted. A newer start seen by the log may
 establish that loss but can still be admitted once from the live stream.
-Later live output beyond the old cursor, without a newly attributable
-start, appears in a separate detached turn with no parent, request, crew
-task or claimed native outcome. The lost marker also appears if a new
+A live start after a loss gets the usual naming window: a valid call name
+can arrive after the start and still attach that turn and its witnessed
+outcome. Output beyond the old cursor without a new start, or buffered
+output from a start whose window or candidate budget closes without
+proof, appears in a separate detached turn with no parent, request, crew
+task or claimed native outcome. Frames that cannot be kept or recovered
+are marked `activity.frames`. The lost marker also appears if a new
 native start reveals a missed settlement or crew ownership is lost.
 
 Claude recording starts at query submission, after stopping orphans,
