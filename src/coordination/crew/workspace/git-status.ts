@@ -214,13 +214,21 @@ const statusArgs = [
 ];
 
 /** Run in a private Git directory with no info/attributes or filter config. */
-function isolatedGit(
-  directory: string,
-  gitDir: string,
-  format: "sha1" | "sha256",
-  config: string,
-  excludes: string,
-) {
+function isolatedGit({
+  directory,
+  gitDir,
+  format,
+  config,
+  excludes,
+}: {
+  directory: string;
+  gitDir: string;
+  format: "sha1" | "sha256";
+  /** The checkout's status settings, as `git config -z` output. */
+  config: string;
+  /** The ignore file to use as `core.excludesFile`. */
+  excludes: string;
+}) {
   const settings: string[] = [];
 
   for (const entry of config.split("\0")) {
@@ -447,13 +455,13 @@ export class FleetStatusRead {
 
     signal.throwIfAborted();
 
-    const isolated = isolatedGit(
+    const isolated = isolatedGit({
       directory,
       gitDir,
       format,
-      settings.kind === "value" ? settings.value : "",
-      configured ? join(gitDir, configuredTarget) : "/dev/null",
-    );
+      config: settings.kind === "value" ? settings.value : "",
+      excludes: configured ? join(gitDir, configuredTarget) : "/dev/null",
+    });
 
     return {
       index,

@@ -332,13 +332,14 @@ test.each(["branch switch", "branch update", "switch during comparison"])(
 );
 
 test.each([
-  ["status", true],
-  ["rev-list", true],
-  ["status", false],
-  ["rev-list", false],
+  ["status", "HEAD moved"],
+  ["rev-list", "HEAD moved"],
+  ["status", "HEAD unchanged"],
+  ["rev-list", "HEAD unchanged"],
 ] as const)(
   "gateway Git %s failure only bypasses cache on a HEAD move (%s)",
-  async (phase, move) => {
+  async (phase, head) => {
+    const move = head === "HEAD moved";
     const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
 
     try {

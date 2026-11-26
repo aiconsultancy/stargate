@@ -250,13 +250,14 @@ esac`,
 });
 
 test.each([
-  ["status", true],
-  ["rev-list", true],
-  ["status", false],
-  ["rev-list", false],
+  ["status", "HEAD moved"],
+  ["rev-list", "HEAD moved"],
+  ["status", "HEAD unchanged"],
+  ["rev-list", "HEAD unchanged"],
 ] as const)(
   "Fleet %s failure only bypasses cache on a HEAD move (%s)",
-  async (phase, move) => {
+  async (phase, head) => {
+    const move = head === "HEAD moved";
     const directory = await repository();
     await git(directory, "branch", "other");
     await git(directory, "update-ref", "refs/remotes/origin/main", "HEAD");

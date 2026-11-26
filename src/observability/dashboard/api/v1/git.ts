@@ -544,7 +544,7 @@ async function inspect(
   signal: AbortSignal,
   command: typeof readCommand,
   checkout: FleetStatusRead,
-  statusParent: StatusStorage["parent"],
+  snapshotParent: StatusStorage["parent"],
 ): Promise<V1Git | null | "head-moved"> {
   const state = emptyState(now());
   let deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
@@ -645,7 +645,7 @@ async function inspect(
           signal: deadline,
           run: runCommand,
           storage: {
-            parent: statusParent,
+            parent: snapshotParent,
             install: snapshotMetadata(directory, deadline, command),
           },
           status: (args, env) => {
