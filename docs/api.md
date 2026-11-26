@@ -471,7 +471,8 @@ untracked nested repository, with or without commits, is listed as a
 content. It is never indexed and Git never runs inside it, on every Git
 version. An untracked path that Git will not index, such as a file under
 `.GIT/`, or an untracked file that the captain's user may not read, such as
-one with mode 000, is listed the same way, without `kind` or `size`.
+one with mode 000 or one in a directory that user may not search, is listed
+the same way, without `kind` or `size`.
 
 `path` is decoded as UTF-8, with U+FFFD for each byte that is not valid
 UTF-8. Such a file is still read, sized and fingerprinted by the bytes of

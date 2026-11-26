@@ -798,6 +798,57 @@ test.skipIf(process.getuid?.() === 0)(
   },
 );
 
+// Root searches a directory of any mode.
+test.skipIf(process.getuid?.() === 0)(
+  "an untracked file in a directory this user may not search is listed without bytes",
+  async () => {
+    const directory = await checkout();
+    const hidden = join(directory, "hidden");
+    await mkdir(hidden);
+    await writeFile(join(hidden, "file"), "secret\n");
+    await writeFile(join(directory, "other"), "ok\n");
+    // Its names can be listed, so status shows the file, but not reached.
+    await chmod(hidden, 0o600);
+
+    try {
+      for (const mode of ["branch", "working"] as const) {
+        const result = await listed(directory, { mode });
+
+        expect(result.files).toEqual([
+          {
+            path: "hidden/file",
+            previousPath: null,
+            status: "added",
+            additions: 0,
+            deletions: 0,
+            untracked: true,
+            patch: null,
+          },
+          expect.objectContaining({
+            path: "other",
+            patch: "@@ -0,0 +1 @@\n+ok\n",
+          }),
+        ]);
+
+        const rest = { mode, at: result.fingerprint };
+
+        expect(
+          await readDiff(
+            directory,
+            input({ kind: "patch", path: "hidden/file", offset: 0 }, rest),
+            signal,
+          ),
+        ).toMatchObject({ kind: "patch", file: { patch: null } });
+        expect(
+          (await content(directory, "hidden/file", "new", 0, rest)).kind,
+        ).toBe("absent");
+      }
+    } finally {
+      await chmod(hidden, 0o700);
+    }
+  },
+);
+
 test("binary and empty files answer with bytes; each side exists only where the file does", async () => {
   const directory = await checkout({ "old.bin": "\0old" });
   await unlink(join(directory, "old.bin"));

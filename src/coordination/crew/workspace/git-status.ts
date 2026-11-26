@@ -710,6 +710,17 @@ const absentPath = (error: unknown): undefined => {
   }
 };
 
+/** Null for a path this user may not reach; others as `absentPath`. */
+const deniedPath = (error: unknown) => {
+  if (fileError(error) === "EACCES") {
+    return null;
+  }
+
+  absentPath(error);
+
+  return;
+};
+
 /** A worktree file changed while it was read: the answer is stale. */
 export class WorktreeChanged extends Error {
   public constructor() {
@@ -830,26 +841,25 @@ export const worktreeSize = (root: string, path: Buffer) =>
 
 /**
  * False for a worktree file this user may not open, which Git could not
- * read either; true for anything else, never through a linked directory.
+ * read either, or that sits in a directory this user may not search; true
+ * for anything else, never through a linked directory.
  */
 export async function openable(root: string, path: Buffer) {
   const denied = await inWorktree(root, path, async (target) => {
-    if (!(await lstat(target).catch(absentPath))?.isFile()) {
+    const info = await lstat(target).catch(deniedPath);
+
+    if (info === null) {
+      return true;
+    }
+
+    if (!info?.isFile()) {
       return false;
     }
 
     const file = await open(
       target,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    ).catch((error: unknown) => {
-      if (fileError(error) === "EACCES") {
-        return null;
-      }
-
-      absentPath(error);
-
-      return;
-    });
+    ).catch(deniedPath);
 
     await file?.close();
 
