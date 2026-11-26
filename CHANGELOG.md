@@ -93,6 +93,11 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 ### Changes
 
+- Fleet API Git state: when `HEAD` cannot be read again after a good status
+  read, both the captain's and the gateway's readers now treat it as a
+  possible move. They report `Git state unavailable.` without caching it, so
+  the next read tries again instead of repeating the failure for 15 seconds.
+
 - The crew plugin now refuses, at load and with a message naming both
   counts, a team whose configured crew members times project contexts (the
   default plus each project) exceed 50, also with no projects configured;

@@ -2,6 +2,7 @@ import { constants, createWriteStream } from "node:fs";
 import {
   type FileHandle,
   copyFile,
+  lstat,
   mkdir,
   mkdtemp,
   open,
@@ -28,11 +29,11 @@ import {
   fleetGitOptions,
   guardFleetHead,
   outsideCheckout,
-  privateStatusDirectory,
   removeStatusDirectory,
-  statusDataDirectory,
+  statusDirectoryName,
   statusDirectoryPrefix,
   statusParent,
+  trustedStatusRoot,
 } from "../../../../coordination/crew/workspace/git-status";
 import { abortable, runAbortable } from "../../../../lib/effect";
 import { readWithDeadline } from "../../../../lib/read-deadline";
@@ -241,6 +242,55 @@ async function copyStatusFile(
   }
 }
 
+async function statusDataDirectory(dataDirectory: string) {
+  const canonical = await trustedStatusRoot(dataDirectory, true);
+
+  return canonical && join(canonical, statusDirectoryName);
+}
+
+async function privateStatusDirectory(path: string) {
+  const metadata = await lstat(path).catch(() => {});
+
+  if (
+    metadata?.isDirectory() &&
+    (metadata.mode & 0o777) === 0o700 &&
+    metadata.uid === process.getuid?.()
+  ) {
+    return metadata;
+  }
+
+  return;
+}
+
+/** The data directory's private status folder, when this checkout may use it. */
+async function dataStatusParent(root: string, dataDirectory: string) {
+  try {
+    const parent = await statusDataDirectory(dataDirectory);
+
+    if (parent && outsideCheckout(root, parent)) {
+      await mkdir(parent, { mode: 0o700 }).catch((error: unknown) => {
+        if (fileError(error) !== "EEXIST") {
+          throw error;
+        }
+      });
+
+      if (await privateStatusDirectory(parent)) {
+        return parent;
+      }
+    }
+  } catch (error) {
+    if (
+      !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
+        String(fileError(error)),
+      )
+    ) {
+      throw error;
+    }
+  }
+
+  return;
+}
+
 const temporaryStatusRoots = new Map<
   string,
   { path: Promise<string>; readers: number }
@@ -308,17 +358,26 @@ function snapshotStatusDirectories(
 
   return {
     async parent(this: void, root: string) {
-      const selected = await statusParent(root, {
-        dataDirectory,
-        temporaryDirectory,
-        retainedTemporary,
-      });
+      const ready =
+        dataDirectory && (await dataStatusParent(root, dataDirectory));
 
-      if (selected.kind === "ready") {
-        return selected.path;
+      if (ready) {
+        return ready;
       }
 
-      temporaryRoot ??= retainTemporaryStatusRoot(selected.path);
+      // Else one private temporary folder, kept until the reader stops.
+      const retained = await retainedTemporary();
+
+      const temporary = await statusParent(root, {
+        temporaryDirectory,
+        retained,
+      });
+
+      if (retained !== undefined) {
+        return retained;
+      }
+
+      temporaryRoot ??= retainTemporaryStatusRoot(temporary);
       const parent = await retainedTemporary();
 
       if (!parent || !outsideCheckout(root, parent)) {
@@ -485,7 +544,7 @@ async function inspect(
   signal: AbortSignal,
   command: typeof readCommand,
   checkout: FleetStatusRead,
-  statusParent: StatusStorage["parent"],
+  snapshotParent: StatusStorage["parent"],
 ): Promise<V1Git | null | "head-moved"> {
   const state = emptyState(now());
   let deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
@@ -586,7 +645,7 @@ async function inspect(
           signal: deadline,
           run: runCommand,
           storage: {
-            parent: statusParent,
+            parent: snapshotParent,
             install: snapshotMetadata(directory, deadline, command),
           },
           status: (args, env) => {
