@@ -92,6 +92,7 @@ const ship: V1ShipDetail = {
 };
 
 const { crewMembers: _crew, ...summary } = ship;
+const crewDetail = { ship: ship.id, member, taskText: "preview" as const };
 
 // Two ships: an officer of one reads the other's too.
 const reads: Pick<ApiV1Source, "fleet" | "ship" | "crew"> = {
@@ -105,7 +106,7 @@ const reads: Pick<ApiV1Source, "fleet" | "ship" | "crew"> = {
   }),
   ship: async (id) => (id === ship.id ? ship : undefined),
   crew: async (id, name) =>
-    id === ship.id && name === member.id ? { ship: id, member } : undefined,
+    id === ship.id && name === member.id ? crewDetail : undefined,
 };
 
 const source: ApiV1Source = {
@@ -194,7 +195,7 @@ test("officers: each reads the whole fleet on its own socket, with no token", as
           "/api/v1/ships/explorer/crew/engineer",
         ),
       ),
-    ).toEqual({ ship: "explorer", member });
+    ).toEqual(crewDetail);
 
     const head = await overSocket(socketPath, "HEAD", "/api/v1/ships/explorer");
 
@@ -527,7 +528,7 @@ test("request command: a read through the officer's socket; exit 1 unless 2xx, 2
       (await fleetRequest(socketPath, "/api/v1/ships/explorer/crew/engineer"))
         .output,
     ),
-  ).toEqual({ ship: "explorer", member });
+  ).toEqual(crewDetail);
   expect(await fleetRequest(socketPath, "/api/v1/ships/missing")).toEqual({
     code: 1,
     output: "",

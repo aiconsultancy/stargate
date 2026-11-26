@@ -112,6 +112,9 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   possible move. They report `Git state unavailable.` without caching it, so
   the next read tries again instead of repeating the failure for 15 seconds.
 
+- Claude Fleet activity shows a stopped reply preview only once when the
+  query result repeats it exactly.
+
 - The crew plugin now refuses, at load and with a message naming both
   counts, a team whose configured crew members times project contexts (the
   default plus each project) exceed 50, also with no projects configured;
@@ -180,6 +183,9 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   deadline reports crew status as unavailable. Fleet API text fields keep
   control and bidirectional formatting characters; clients that print them
   must escape them.
+- Fleet API v1 crew detail includes `taskText: "full"` when it returns the
+  complete stored task text, or `"preview"` on officer sockets and after a
+  legacy plugin fallback. Only `"full"` confirms completeness to a client.
 - Crew activity keeps the first 64,000 code points of the assignment summary
   and the last 64,000 of progress. For multi-project dispatches the assignment
   is validated on its own before Stargate adds the project preamble; the

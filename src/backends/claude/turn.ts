@@ -108,7 +108,6 @@ const isToolFrame = Schema.is(toolFrame);
 /** Decoder's decision for this SDK frame, independent of any recorder. */
 export type ClaudeFrameDecision = {
   changed: boolean;
-  toolEvidence: boolean;
   resultFallback: string;
 };
 
@@ -192,14 +191,12 @@ export class ClaudeTurn {
     raw: unknown,
     stage?: (stage: TurnStage) => void,
   ): ClaudeFrameDecision {
-    const toolEvidence = isToolFrame(raw);
-    this.worked ||= toolEvidence;
+    this.worked ||= isToolFrame(raw);
     const prior = this.result;
     const changed = this.decode(raw, stage);
 
     return {
       changed,
-      toolEvidence,
       resultFallback: prior !== this.result ? this.resultFallback() : "",
     };
   }

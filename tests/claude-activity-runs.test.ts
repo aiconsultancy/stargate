@@ -7,6 +7,7 @@ import type {
   SDKTaskStartedMessage,
   SDKTaskUpdatedMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { ActivityOutcome } from "../src/backends/backend";
 import { ClaudeActivity } from "../src/backends/claude/activity";
 import { createActivityHub } from "../src/observability/dashboard/api/v1/activity";
 
@@ -26,7 +27,6 @@ function fixture() {
   const add = (frame: SDKMessage) =>
     activity.add(frame, {
       changed: false,
-      toolEvidence: false,
       resultFallback: "",
     });
 
@@ -142,7 +142,7 @@ function fixture() {
         summary: `Run ${runId} ${status}`,
       });
     },
-    end: () => activity.end("completed"),
+    end: (outcome: ActivityOutcome = "completed") => activity.end(outcome),
     children: () =>
       hub.turns("officer")?.turns.filter((turn) => turn.session?.parent) ?? [],
     tool: () =>
@@ -282,6 +282,46 @@ test("an after-turn background child is lost even after a launch acknowledgement
     { status: "cancelled", lost: true, endedAt: expect.any(Number) },
   ]);
 });
+
+test("a Claude child can receive its first frame after its task outcome", () => {
+  const f = fixture();
+  f.finish("001", "failed");
+  expect(f.children()).toEqual([]);
+
+  f.output("001");
+  expect(f.children()).toMatchObject([{ status: "running" }]);
+  f.end();
+
+  expect(f.children()).toMatchObject([{ status: "failed" }]);
+  expect(f.children()[0]).not.toHaveProperty("lost");
+  expect(f.children()[0]?.items).toContainEqual(
+    expect.objectContaining({ kind: "text", text: "Output 001" }),
+  );
+});
+
+test.each([
+  ["with", "completed"],
+  ["without", "cancelled"],
+] as const)(
+  "a foreground child %s a tool result keeps its own outcome on cancellation",
+  (result, expected) => {
+    const f = fixture();
+    f.start("001");
+    f.output("001");
+
+    if (result === "with") {
+      f.toolResult();
+    }
+
+    expect(f.children()).toMatchObject([{ status: "running" }]);
+    f.end("cancelled");
+
+    expect(f.children()).toMatchObject([
+      { status: expected, endedAt: expect.any(Number) },
+    ]);
+    expect(f.children()[0]).not.toHaveProperty("lost");
+  },
+);
 
 test("unsettled steps keep their last observed status after the background child ends", () => {
   const f = fixture();

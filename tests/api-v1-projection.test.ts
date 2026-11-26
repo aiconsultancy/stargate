@@ -1583,6 +1583,34 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("operator crew detail does not confirm completeness for a bounded backend answer", async () => {
+    const f = fixture();
+    const backend = f.dashboard.fleetBackend("captain");
+
+    if (!backend) {
+      throw new Error("Missing fixture captain");
+    }
+
+    const summary = "Bounded task summary";
+
+    backend.fleetCrewStatus = async (input) => {
+      expect(input).toEqual({ member: "pilot", taskText: "full" });
+
+      return {
+        kind: "answer",
+        answer: {
+          status: statusText(summary),
+          metadata: { projectDirectory: privateProject, contexts: [] },
+          taskText: "unredacted",
+        },
+      };
+    };
+
+    const detail = await f.source.crew("captain", "pilot", signal);
+    expect(detail?.member.contexts[0]?.current?.summary).toBe(summary);
+    expect(detail?.taskText).toBe("preview");
+  });
+
   test.each(["rpc.method_not_found", "rpc.invalid_input"] as const)(
     "only explicit legacy failure %s gives the plugin's ordinary text",
     async (legacy) => {
@@ -1606,6 +1634,8 @@ describe("Fleet API projection", () => {
         expect(first?.member.contexts[0]?.current?.summary).toBe(expected);
         expect(second?.member.contexts[0]?.current?.summary).toBe(expected);
         expect(f.asked).toEqual(["full", status, status]);
+        expect(first).toHaveProperty("taskText", "preview");
+        expect(second).toHaveProperty("taskText", "preview");
       } finally {
         await f.stop();
       }
