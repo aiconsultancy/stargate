@@ -24,6 +24,7 @@ import { createApiV1Source } from "../src/observability/dashboard/api/v1/project
 import { startApiV1Server } from "../src/observability/dashboard/api/v1/server";
 import { apiToken } from "../src/observability/dashboard/api/v1/token";
 import type {
+  V1ActivityEvent,
   V1CrewDetail,
   V1ShipDetail,
   V1Task,
@@ -68,7 +69,7 @@ const assignment = `Deploy with token=fixture-value \u0007 now ${"é".repeat(200
 const progress = `${"p".repeat(500)} Check to\u0007ken=fixture-value \u001b[2J done`;
 
 /** The crew plugin's store, read through the engine as its RPC reads it. */
-async function crewPlugin() {
+async function crewPlugin(initialAssignment = assignment) {
   const directory = await mkdtemp(join(fixtureRoot(), "stargate-officer-"));
 
   const team = Schema.decodeUnknownSync(teamSchema)({
@@ -121,7 +122,7 @@ async function crewPlugin() {
 
   const peer = engine.state.reservePeer("twiki");
   engine.state.readyPeer("twiki");
-  const task = engine.state.reserveTask(peer, "captain", assignment);
+  const task = engine.state.reserveTask(peer, "captain", initialAssignment);
 
   if (!task) {
     throw new Error("Missing task");
@@ -150,7 +151,24 @@ async function crewPlugin() {
         ?.current,
     );
 
-  return { fleetStatus, asked, view };
+  const finish = () => {
+    engine.state.complete(task.id, peer.sessionID, "Fixture answer");
+    engine.state.release(task.id);
+  };
+
+  function dispatch(summary: string) {
+    const next = engine.state.reserveTask(peer, "captain", summary);
+
+    if (!next) {
+      throw new Error("Missing next task");
+    }
+
+    engine.state.running(next.id);
+
+    return (text: string) => engine.state.activity.progress(next.id, text);
+  }
+
+  return { fleetStatus, asked, view, finish, dispatch };
 }
 
 /** The task text a reader is shown. */
@@ -160,8 +178,8 @@ function current(
   return task && { summary: task.summary, progress: task.progress };
 }
 
-async function start() {
-  const plugin = await crewPlugin();
+async function start(initialAssignment?: string) {
+  const plugin = await crewPlugin(initialAssignment);
 
   const backend: AgentBackend = {
     async createSession() {
@@ -419,3 +437,88 @@ test("an officer's ship events carry the plugin's ordinary view; the operator's 
   expect(twiki(shipEvent(operatorFrames))).toEqual(plugin.view("unredacted"));
   expect(plugin.asked).toContain("unredacted");
 });
+
+function activityTrace(next: () => Promise<string | undefined>) {
+  let frames = "";
+
+  return {
+    async until(marker: string) {
+      frames += await framesUntil(next, marker);
+    },
+    taskEvents() {
+      return [...frames.matchAll(/^event: activity\ndata: (.*)\n\n/gm)]
+        .map((match) => JSON.parse(match[1] ?? "") as V1ActivityEvent)
+        .filter(({ member }) => member === "twiki")
+        .map(({ kind, text }) => ({ kind, text }));
+    },
+  };
+}
+
+test("activity events quote each listener's own view exactly once per task transition", async () => {
+  const first = "Review token=fixture-first   safely";
+  const second = "Deploy token=fixture-second   safely";
+  const { plugin, operator, socketPath } = await start(first);
+  const socket = await officerStream(socketPath);
+  cleanup.push(() => socket.destroy());
+  expect(socket.statusCode).toBe(200);
+  const response = await operator("/api/v1/events");
+  expect(response.status).toBe(200);
+  const reader = response.body?.getReader();
+
+  if (!reader) {
+    throw new Error("Missing operator stream");
+  }
+
+  cleanup.push(() => reader.cancel());
+  const chunks = socket.setEncoding("utf8")[Symbol.asyncIterator]();
+
+  const officer = activityTrace(async () => {
+    const chunk: unknown = (await chunks.next()).value;
+
+    return typeof chunk === "string" ? chunk : undefined;
+  });
+
+  const decoder = new TextDecoder();
+
+  const people = activityTrace(async () => {
+    const chunk = await reader.read();
+
+    return chunk.done
+      ? undefined
+      : decoder.decode(chunk.value, { stream: true });
+  });
+
+  const bothSee = (marker: string) =>
+    Promise.all([officer.until(marker), people.until(marker)]);
+
+  await bothSee("event: ship\n");
+  plugin.finish();
+  await bothSee('"member":"twiki","kind":"outcome"');
+  const setProgress = plugin.dispatch(second);
+  await bothSee('"member":"twiki","kind":"dispatch"');
+
+  // Read through a later snapshot so extra events in the dispatch batch count.
+  setProgress("Observed both transitions");
+  await bothSee('"progress":"Observed both transitions"');
+
+  expect(officer.taskEvents()).toEqual([
+    {
+      kind: "outcome",
+      text: "Twiki reported “Review token=[REDACTED] safely” as completed.",
+    },
+    {
+      kind: "dispatch",
+      text: "Twiki started “Deploy token=[REDACTED] safely”.",
+    },
+  ]);
+  expect(people.taskEvents()).toEqual([
+    {
+      kind: "outcome",
+      text: "Twiki reported “Review token=fixture-first safely” as completed.",
+    },
+    {
+      kind: "dispatch",
+      text: "Twiki started “Deploy token=fixture-second safely”.",
+    },
+  ]);
+}, 20_000);

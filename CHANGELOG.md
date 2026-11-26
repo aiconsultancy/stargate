@@ -93,6 +93,11 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 ### Changes
 
+- Fleet API Git state: when `HEAD` cannot be read again after a good status
+  read, both the captain's and the gateway's readers now treat it as a
+  possible move. They report `Git state unavailable.` without caching it, so
+  the next read tries again instead of repeating the failure for 15 seconds.
+
 - Claude Fleet activity shows a stopped reply preview only once when the
   query result repeats it exactly.
 
@@ -171,7 +176,7 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 - Only the initial fleet status request can establish that a plugin lacks
   the method. Stargate treats `taskText` as unsupported, for a minute, only
   when the re-ask without it succeeds. A failed re-ask makes the read
-  unavailable and counts as one ordinary failure, as does a task text read
+  unavailable and counts as one task text failure, as does a task text read
   ended by its crew deadline. A disconnect counts nothing, even if the plugin
   ignores the abort and Stargate later abandons the probe. A re-ask answered
   after the deadline caches nothing. A member ID the plugin's schema rejects

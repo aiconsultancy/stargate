@@ -288,3 +288,60 @@ test.each([
     expect(f.asked).toEqual([first]);
   },
 );
+
+test("a missing method clears both lanes' failure counts", async () => {
+  const f = laneFixture();
+  const signal = new AbortController().signal;
+  const lanes = ["ordinary", "unredacted"] as const;
+  const clock = spyOn(performance, "now").mockReturnValue(0);
+
+  async function failBothTwice() {
+    for (const lane of lanes) {
+      f.plugin.fail.add(lane);
+
+      for (let i = 0; i < 2; i++) {
+        expect(await f.crew.fleetCrewStatus(inputs[lane], signal)).toEqual({
+          kind: "unavailable",
+        });
+      }
+    }
+  }
+
+  try {
+    await failBothTwice();
+    f.plugin.missing = true;
+    expect(await f.crew.fleetCrewStatus(inputs.ordinary, signal)).toEqual({
+      kind: "unsupported",
+    });
+    expect(f.asked).toEqual([
+      "ordinary",
+      "ordinary",
+      "unredacted",
+      "unredacted",
+      "ordinary",
+    ]);
+
+    f.plugin.missing = false;
+    clock.mockReturnValue(60_000);
+    f.asked.length = 0;
+    await failBothTwice();
+    f.plugin.fail.clear();
+
+    for (const lane of lanes) {
+      expect(await f.crew.fleetCrewStatus(inputs[lane], signal)).toEqual(
+        f[lane],
+      );
+    }
+
+    expect(f.asked).toEqual([
+      "ordinary",
+      "ordinary",
+      "unredacted",
+      "unredacted",
+      "ordinary",
+      "unredacted",
+    ]);
+  } finally {
+    clock.mockRestore();
+  }
+});

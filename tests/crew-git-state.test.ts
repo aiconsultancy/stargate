@@ -250,13 +250,14 @@ esac`,
 });
 
 test.each([
-  ["status", true],
-  ["rev-list", true],
-  ["status", false],
-  ["rev-list", false],
+  ["status", "HEAD moved"],
+  ["rev-list", "HEAD moved"],
+  ["status", "HEAD unchanged"],
+  ["rev-list", "HEAD unchanged"],
 ] as const)(
   "Fleet %s failure only bypasses cache on a HEAD move (%s)",
-  async (phase, move) => {
+  async (phase, head) => {
+    const move = head === "HEAD moved";
     const directory = await repository();
     await git(directory, "branch", "other");
     await git(directory, "update-ref", "refs/remotes/origin/main", "HEAD");
@@ -303,6 +304,34 @@ esac`,
     );
   },
 );
+
+test("an unreadable final Fleet HEAD after a good read is not cached", async () => {
+  const directory = await repository();
+  const read = createCrewGitReader(Date.now, () => 0);
+
+  // The second HEAD read is the recheck after status.
+  await withGitWrapper(
+    `case " $* " in
+  *' symbolic-ref -q HEAD '*)
+    counter="\${0%/*}/heads"
+    heads=$(($(cat "$counter" 2>/dev/null || echo 0) + 1))
+    echo "$heads" > "$counter" || exit 3
+    test "$heads" -ne 2 || exit 128
+    ;;
+esac`,
+    async () => {
+      expect(await read(directory, signal)).toMatchObject({
+        branch: null,
+        changedFiles: null,
+        error: "Git state unavailable.",
+      });
+      expect(await read(directory, signal)).toMatchObject({
+        branch: "main",
+        changedFiles: 0,
+      });
+    },
+  );
+});
 
 test("a Fleet status config output limit fails closed instead of returning a count", async () => {
   const directory = await repository();
@@ -370,8 +399,11 @@ test.each(["sha1", "sha256"])(
   "Fleet status uses the %s empty tree for attributes",
   async (format) => {
     const directory = await repository(format);
+    // Git stores LF but records the CRLF file's size.
+    // A new mtime alone then makes status compare contents.
+    // They match only when worktree attributes apply.
     await writeFile(join(directory, ".gitattributes"), "tracked text eol=lf\n");
-    await writeFile(join(directory, "tracked"), "original\n");
+    await writeFile(join(directory, "tracked"), "original\r\n");
     await git(directory, "add", ".");
     await git(directory, "commit", "-m", "track LF text");
 
@@ -389,7 +421,7 @@ test.each(["sha1", "sha256"])(
         { cwd: directory },
       ).exitCode === 0;
 
-    await writeFile(join(directory, "tracked"), "original\r\n");
+    await utimes(join(directory, "tracked"), 1_000_000_000, 1_000_000_000);
 
     expect(await createCrewGitReader()(directory, signal)).toMatchObject({
       changedFiles: supportsAttributeSource ? 1 : 0,
@@ -480,6 +512,28 @@ test("Fleet Git explains why a non-sticky, group-writable TMPDIR is rejected", a
   const temporary = await mkdtemp(join(root, "unsafe-temp-"));
   const previous = process.env["TMPDIR"];
   await chmod(temporary, 0o775);
+  process.env["TMPDIR"] = temporary;
+
+  try {
+    expect(await createCrewGitReader()(directory, signal)).toMatchObject({
+      branch: null,
+      changedFiles: null,
+      error: "Git status requires a safe temporary directory.",
+    });
+  } finally {
+    if (previous === undefined) {
+      delete process.env["TMPDIR"];
+    } else {
+      process.env["TMPDIR"] = previous;
+    }
+  }
+});
+
+test("Fleet Git rejects a private TMPDIR inside the checkout", async () => {
+  const directory = await repository();
+  const temporary = join(directory, "private-temp");
+  const previous = process.env["TMPDIR"];
+  await mkdir(temporary, { mode: 0o700 });
   process.env["TMPDIR"] = temporary;
 
   try {
