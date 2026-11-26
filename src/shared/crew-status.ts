@@ -1,6 +1,15 @@
 import { Schema } from "effect";
-import { crewTaskTextLimits } from "./crew-task-text";
 import { exactStruct } from "./session-history";
+
+/** Raw dispatch and stored task text bound, in code points. */
+export const crewTaskTextLimit = 64_000;
+
+/** The ordinary display bounds; the unredacted view counts code points. */
+export const crewTaskTextLimits = {
+  summary: 180,
+  phase: 80,
+  progress: 400,
+} as const;
 
 // Zod's string bounds counted code points; keep that unit at this boundary.
 const maxCodePoints = (maximum: number) =>

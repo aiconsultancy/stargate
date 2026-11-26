@@ -3,8 +3,8 @@ import { Schema } from "effect";
 import {
   crewStatusSchema,
   crewStatusSchemaWith,
+  crewTaskTextLimit,
 } from "../../../shared/crew-status";
-import { crewTaskTextLimit } from "../../../shared/crew-task-text";
 import {
   HISTORY_PAGE,
   MAX_CREW_CONTEXTS,

@@ -8,14 +8,12 @@ import {
   maxTaskInputs,
   settledTasksPerMember,
 } from "./fleet-status";
-import type {
-  CrewStatusTask,
-  CrewTaskTextMode,
-} from "../../../shared/crew-status";
 import {
+  type CrewStatusTask,
+  type CrewTaskTextMode,
   crewTaskTextLimit,
   crewTaskTextLimits,
-} from "../../../shared/crew-task-text";
+} from "../../../shared/crew-status";
 
 type Activity = Omit<CrewStatusTask, "id" | "status">;
 

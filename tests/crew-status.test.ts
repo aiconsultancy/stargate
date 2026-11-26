@@ -20,8 +20,7 @@ import {
   dashboardCrewMembers,
   dashboardCrewSummary,
 } from "../src/observability/dashboard/dashboard-projection";
-import { crewStatusSchema } from "../src/shared/crew-status";
-import { crewTaskTextLimit } from "../src/shared/crew-task-text";
+import { crewStatusSchema, crewTaskTextLimit } from "../src/shared/crew-status";
 import { CrewUI, crewStatusView } from "../src/transports/slack/crew-ui";
 import type { CronView, SlackAck } from "../src/automation/cron/ui";
 import { bot, identity } from "./fixtures";

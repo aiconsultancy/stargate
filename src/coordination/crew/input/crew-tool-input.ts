@@ -24,7 +24,7 @@ import {
   resumeInputSchema,
 } from "../execution/reconciliation";
 import { quotaInputSchema } from "../../../backends/quota/quota";
-import { crewTaskTextLimit } from "../../../shared/crew-task-text";
+import { crewTaskTextLimit } from "../../../shared/crew-status";
 import { agentIDSchema } from "../team";
 import { workspaceInputSchemas } from "../workspace/workspace";
 
