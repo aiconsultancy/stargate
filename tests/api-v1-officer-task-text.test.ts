@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { type IncomingMessage, request } from "node:http";
 import { join } from "node:path";
@@ -18,6 +18,7 @@ import {
   flockCommand,
   setDefaultLockCommandForTests,
 } from "../src/lib/unix-socket";
+import * as httpTransport from "../src/observability/dashboard/api/server";
 import { diffEvents } from "../src/observability/dashboard/api/v1/diff";
 import type { ApiV1Config } from "../src/observability/dashboard/api/v1/features";
 import { createApiV1Source } from "../src/observability/dashboard/api/v1/projection";
@@ -349,6 +350,21 @@ function officerStream(socketPath: string) {
     outgoing.end();
   });
 }
+
+test("both listeners pass only HTTP deadlines to the transport", async () => {
+  const startListener = spyOn(httpTransport, "startApiServer");
+
+  try {
+    const deadlines = { headersMs: 800, requestMs: 900 };
+    await start(undefined, { ...deadlines, streams: { pollMs: 25 } });
+    expect(startListener.mock.calls.map(([{ timing }]) => timing)).toEqual([
+      deadlines,
+      deadlines,
+    ]);
+  } finally {
+    startListener.mockRestore();
+  }
+});
 
 test("an officer's crew route carries the plugin's ordinary view; the operator's carries full text", async () => {
   const { plugin, operator, officer } = await start();
