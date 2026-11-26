@@ -11,16 +11,21 @@ import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
 import { createReadSlot } from "../../lib/read-deadline";
 import type {
   ActivityOutcome,
-  CrewTurnActivityLog,
   CrewTurnRecorder,
   CrewTurnTask,
 } from "../backend";
-import {
-  type ActivityEvent,
-  ActivityProjector,
-  activityEvents,
-} from "./activity-projector";
+import { ActivityProjector, activityEvents } from "./activity-projector";
 import { ExecutionHistory } from "./crew-executions";
+import {
+  HeldFrames,
+  type Peer,
+  type Pending,
+  type Session,
+  SessionMessages,
+  type Turn,
+  isPending,
+  kept,
+} from "./crew-messages";
 import { owningInput } from "./input-origin";
 import type { OpenCodeCrewActivity } from "./opencode";
 
@@ -117,8 +122,7 @@ const defaults: CrewActivityOptions = {
   unsupportedRetryMs: 60_000,
 };
 
-/** Retained per worker session: recent assistant messages and lookups. */
-const maxMessages = 64;
+/** Retained per collector: lookups, misses and fenced sessions. */
 const maxRemembered = 256;
 const ownershipAttempts = 6;
 const ownershipReadMs = 10_000;
@@ -133,79 +137,6 @@ export type CrewActivitySource = {
     assistantID: string,
     signal: AbortSignal,
   ): Promise<{ input: string | undefined } | undefined>;
-};
-
-/** A worker session's identity; a change fences the session for good. */
-type Peer = { member: string; project: string | null; namespace: string };
-
-type Turn = {
-  session: Session;
-  log: CrewTurnActivityLog;
-  projector: ActivityProjector;
-  input: string | undefined;
-  /** The assistant message that opened it: only its input names the turn. */
-  opener: string;
-  task: CrewTurnTask | null;
-  ended: boolean;
-  /** Its opener's owner and task are still being resolved. */
-  resolving: boolean;
-  /** The execution and arrival of the message that opened it. */
-  position: number;
-  arrival: number;
-};
-
-/** Frames of one assistant message, waiting for ownership and attribution. */
-type Pending = {
-  session: Session;
-  assistant: string;
-  frames: { event: ActivityEvent; at: number }[];
-  /** UTF-8 bytes of the held frames' serialized `data`. */
-  bytes: number;
-  /** Its owner is known. */
-  resolved: boolean;
-  input: string | undefined;
-  /** Its task once owner and task are known; null when it answers none. */
-  task: CrewTurnTask | null | undefined;
-  /** It may be placed: resolved, past `bufferMs` or forced by a bound. */
-  ready: boolean;
-  /** Forced by a bound: placed at once, never held. */
-  forced: boolean;
-  /** When a hold behind a resolving opener ends. */
-  deadline: number | undefined;
-  /** The execution settled while this message waited. */
-  settled: ActivityOutcome | undefined;
-  /** The session's execution when the message's first frame arrived. */
-  position: number;
-  arrival: number;
-  timer: ReturnType<typeof setTimeout>;
-};
-
-/** A message whose turn the recorder evicted: its later frames are dropped. */
-const evicted = { evicted: true } as const;
-
-type Entry = Turn | Pending | typeof evicted;
-
-const isPending = (entry: Entry | undefined): entry is Pending =>
-  entry !== undefined && "frames" in entry;
-
-/** Running turns are never evicted; an older recorder keeps every turn. */
-const kept = (turn: Turn) => !turn.ended || (turn.log.retained?.() ?? true);
-
-type Session = {
-  id: string;
-  peer: Peer;
-  /** Turns of the running execution; its settlement ends them all. */
-  open: Set<Turn>;
-  messages: Map<string, Entry>;
-  /** Bumped by each settlement. */
-  execution: number;
-  /** The durable sequence of the latest native boundary applied. */
-  boundary: number;
-  /** Recently settled executions with both durable bounds witnessed. */
-  history: ExecutionHistory;
-  arrivals: number;
-  /** No longer a peer: late resolutions change nothing. */
-  dropped: boolean;
 };
 
 type TaskRecord = Pick<
@@ -251,7 +182,6 @@ export class CrewActivityCollector {
   private signal: AbortSignal | undefined;
   /** Aborted: nothing late begins, attributes or writes a turn. */
   private closed = false;
-  private unplaced = 0;
 
   private readonly sessions = new Map<string, Session>();
   /** Sessions whose identity changed: never admitted again. */
@@ -261,9 +191,8 @@ export class CrewActivityCollector {
   private readonly lookups = new Map<string, Promise<void>>();
   /** Unattributed turns by input, for a task a later refresh learns. */
   private readonly unattributed = new Map<string, Turn[]>();
-  /** Waiting messages in arrival order, across sessions. */
-  private readonly pendings = new Set<Pending>();
-  private held = 0;
+  /** Frames of waiting messages, across sessions. */
+  private readonly held: HeldFrames;
   private resolving = 0;
   private readonly deferred: Pending[] = [];
   private readonly resolutions = new Set<Pending>();
@@ -276,6 +205,9 @@ export class CrewActivityCollector {
     this.options = { ...defaults, ...options };
     this.reads = createReadSlot<unknown>(this.options.readMs);
     this.refreshes = createReadSlot<unknown>(this.options.readMs);
+    this.held = new HeldFrames(this.options, (pending) => {
+      this.force(pending);
+    });
   }
 
   /** False until the crew plugin answers `crewTurns`, and for older plugins. */
@@ -286,9 +218,9 @@ export class CrewActivityCollector {
   /** Held frame bytes and outstanding resolutions. */
   public get load() {
     return {
-      heldBytes: this.held,
+      heldBytes: this.held.bytes,
       /** Forced messages the bound let go unplaced; always 0 unless a bug. */
-      unplaced: this.unplaced,
+      unplaced: this.held.unplaced,
       resolving: this.resolving,
       deferred: this.deferred.length,
       /** Frames still held by running or deferred resolutions. */
@@ -306,10 +238,8 @@ export class CrewActivityCollector {
     const turns = new Set<Turn>();
 
     for (const session of this.sessions.values()) {
-      for (const entry of [...session.open, ...session.messages.values()]) {
-        if ("log" in entry) {
-          turns.add(entry);
-        }
+      for (const turn of [...session.open, ...session.messages.turns()]) {
+        turns.add(turn);
       }
     }
 
@@ -357,10 +287,7 @@ export class CrewActivityCollector {
       this.drop(session);
     }
 
-    for (const pending of this.pendings) {
-      this.release(pending);
-    }
-
+    this.held.releaseAll();
     this.deferred.length = 0;
     this.unattributed.clear();
     this.tasks.clear();
@@ -374,11 +301,7 @@ export class CrewActivityCollector {
     gone = (turn: Turn) => !kept(turn),
   ) {
     for (const session of sessions) {
-      for (const [key, entry] of session.messages) {
-        if ("log" in entry && gone(entry)) {
-          session.messages.set(key, evicted);
-        }
-      }
+      session.messages.prune(gone);
     }
 
     for (const [input, waiting] of this.unattributed) {
@@ -513,7 +436,7 @@ export class CrewActivityCollector {
           id,
           peer,
           open: new Set(),
-          messages: new Map(),
+          messages: new SessionMessages(),
           execution: 0,
           boundary: -1,
           history: new ExecutionHistory(),
@@ -528,10 +451,8 @@ export class CrewActivityCollector {
     session.dropped = true;
     this.sessions.delete(session.id);
 
-    for (const entry of session.messages.values()) {
-      if (isPending(entry)) {
-        this.release(entry);
-      }
+    for (const pending of session.messages.waiting()) {
+      this.held.release(pending);
     }
 
     this.endOpen(session, "cancelled");
@@ -637,7 +558,7 @@ export class CrewActivityCollector {
     }
 
     if (isPending(entry)) {
-      this.hold(entry, event, at);
+      this.held.hold(entry, event, at);
 
       return;
     }
@@ -670,9 +591,11 @@ export class CrewActivityCollector {
     };
 
     pending.timer.unref?.();
-    this.pendings.add(pending);
-    this.track(session, assistant, pending);
-    this.hold(pending, event, at);
+    this.held.add(pending);
+    session.messages.track(pending, (oldest) => {
+      this.force(oldest);
+    });
+    this.held.hold(pending, event, at);
 
     if (this.resolving < this.options.resolving) {
       void this.resolve(pending);
@@ -687,33 +610,13 @@ export class CrewActivityCollector {
     }
   }
 
-  /** Remember a message; one evicted while waiting opens first. */
-  private track(session: Session, assistant: string, entry: Entry) {
-    session.messages.delete(assistant);
-    session.messages.set(assistant, entry);
-
-    for (const [key, oldest] of session.messages) {
-      if (session.messages.size <= maxMessages) {
-        break;
-      }
-
-      if (isPending(oldest)) {
-        this.force(oldest);
-      }
-
-      session.messages.delete(key);
-    }
-  }
-
   private settle(session: Session, outcome: ActivityOutcome, seq?: number) {
     session.history.settled(session.execution, seq, outcome);
     session.execution += 1;
     this.endOpen(session, outcome);
 
-    for (const entry of session.messages.values()) {
-      if (isPending(entry)) {
-        entry.settled ??= outcome;
-      }
+    for (const pending of session.messages.waiting()) {
+      pending.settled ??= outcome;
     }
 
     this.prune();
@@ -747,11 +650,7 @@ export class CrewActivityCollector {
    * is tracked.
    */
   private started(session: Session, seq: number | undefined) {
-    const waiting = [...session.messages.values()].some(
-      (entry) => isPending(entry) && entry.position === session.execution,
-    );
-
-    if (session.open.size > 0 || waiting) {
+    if (session.open.size > 0 || session.messages.waits(session.execution)) {
       this.settle(session, "cancelled", seq);
     }
 
@@ -769,51 +668,6 @@ export class CrewActivityCollector {
         turn.log.end(outcome);
       }
     }
-  }
-
-  private hold(pending: Pending, event: ActivityEvent, at: number) {
-    const bytes = Buffer.byteLength(JSON.stringify(event.data));
-    pending.frames.push({ event, at });
-    pending.bytes += bytes;
-
-    if (this.pendings.has(pending)) {
-      this.held += bytes;
-    }
-
-    // The bound: the turn starts unattributed, and a late lookup updates it.
-    if (pending.bytes > this.options.bufferBytes) {
-      this.force(pending);
-    }
-
-    while (this.held > this.options.pendingBytes) {
-      const [oldest] = this.pendings;
-
-      if (!oldest) {
-        break;
-      }
-
-      this.force(oldest);
-
-      // Placement owns the count; one still counted is let go and counted.
-      if (this.pendings.has(oldest)) {
-        this.unplaced += 1;
-        this.release(oldest);
-        // Its later frames are dropped rather than held uncounted.
-        oldest.session.messages.set(oldest.assistant, evicted);
-      }
-    }
-  }
-
-  /** Placed or dropped: uncounted, and its frames go; attribution needs none. */
-  private release(pending: Pending) {
-    clearTimeout(pending.timer);
-
-    if (this.pendings.delete(pending)) {
-      this.held -= pending.bytes;
-    }
-
-    pending.frames = [];
-    pending.bytes = 0;
   }
 
   private async resolve(pending: Pending) {
@@ -1036,9 +890,9 @@ export class CrewActivityCollector {
   private turnsOf(session: Session, position: number) {
     const turns = new Set<Turn>();
 
-    for (const entry of [...session.open, ...session.messages.values()]) {
-      if ("log" in entry && entry.position === position && kept(entry)) {
-        turns.add(entry);
+    for (const turn of [...session.open, ...session.messages.turns()]) {
+      if (turn.position === position && kept(turn)) {
+        turns.add(turn);
       }
     }
 
@@ -1053,8 +907,8 @@ export class CrewActivityCollector {
 
   /** A bound places the message now, and every earlier one of its execution. */
   private force(pending: Pending) {
-    for (const entry of pending.session.messages.values()) {
-      if (isPending(entry) && entry.position === pending.position) {
+    for (const entry of pending.session.messages.waiting()) {
+      if (entry.position === pending.position) {
         entry.ready = true;
         entry.forced = true;
       }
@@ -1074,9 +928,8 @@ export class CrewActivityCollector {
   private flush(session: Session) {
     const blocked = new Set<number>();
 
-    for (const entry of session.messages.values()) {
+    for (const entry of session.messages.waiting()) {
       if (
-        isPending(entry) &&
         !blocked.has(entry.position) &&
         (!entry.ready || !this.place(entry))
       ) {
@@ -1126,7 +979,7 @@ export class CrewActivityCollector {
     const { session, assistant } = pending;
 
     if (session.dropped || session.messages.get(assistant) !== pending) {
-      this.release(pending);
+      this.held.release(pending);
 
       return true;
     }
@@ -1153,13 +1006,13 @@ export class CrewActivityCollector {
       session.open.add(turn);
     }
 
-    session.messages.set(assistant, turn);
+    session.messages.place(assistant, turn);
 
     for (const { event, at } of pending.frames) {
       turn.projector.apply(turn.log, event, at);
     }
 
-    this.release(pending);
+    this.held.release(pending);
 
     if (task && turn.input === input) {
       this.attributeTurn(turn, task);

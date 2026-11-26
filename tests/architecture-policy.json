@@ -1770,6 +1770,7 @@
         "src/backends/opencode/activity-projector.ts",
         "src/backends/opencode/crew-activity.ts",
         "src/backends/opencode/crew-executions.ts",
+        "src/backends/opencode/crew-messages.ts",
         "src/backends/opencode/notices.ts",
         "src/backends/opencode/questions.ts",
         "src/backends/opencode/reviews.ts",
