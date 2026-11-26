@@ -2940,6 +2940,157 @@ test.each([
   },
 );
 
+test.each([20, null])(
+  "a sole untimed old call cannot claim a successor after expiry (A time %p)",
+  async (nativeStart) => {
+    const f = fixture();
+
+    try {
+      const root = f.root();
+      f.parents.set(child, main);
+      f.create(child, main);
+      f.start(child);
+      f.failedReads.add("log");
+      await f.families.reconnected();
+      f.failedReads.delete("log");
+
+      f.emit(
+        "session.tool.input.started",
+        main,
+        { assistantMessageID: "answer", id: "old-call", name: "subagent" },
+        root,
+        undefined,
+        undefined,
+        null,
+      );
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        undefined,
+        undefined,
+        nativeStart,
+      );
+      f.ended(child, "A transcript", "earlier-answer");
+      f.end(child);
+      f.advance(1900);
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        undefined,
+        undefined,
+        40,
+      );
+      f.ended(child, "B transcript", "new-answer");
+      f.advance(200);
+      f.names(root, "old-call", child);
+      f.end(child);
+      f.advance(1801);
+      f.delta(main, "B deadline");
+      await setImmediate();
+
+      expect(f.turns().slice(2)).toMatchObject(
+        ["A transcript", "B transcript"].map((text) => ({
+          session: { parent: null },
+          status: "cancelled",
+          lost: true,
+          items: [{ text }],
+        })),
+      );
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+test.each([false, true])(
+  "a foreign witness cannot mask detached transcript visibility (foreign first %p)",
+  async (foreignFirst) => {
+    const parent = Promise.withResolvers<string>();
+
+    const f = fixture(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => parent.promise,
+    );
+
+    try {
+      const root = f.root();
+      const other = "ses_other_root";
+      const foreign = f.root(undefined, other);
+
+      const call = (
+        owner: TurnActivityLog,
+        session: string,
+        id: string,
+        created: number,
+      ) =>
+        f.emit(
+          "session.tool.input.started",
+          session,
+          { assistantMessageID: "answer", id, name: "subagent" },
+          owner,
+          undefined,
+          undefined,
+          created,
+        );
+
+      call(root, main, "real", 50);
+      call(foreign, other, "foreign", 51);
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        undefined,
+        undefined,
+        40,
+      );
+      f.ended(child, "Observed child text", "child-answer");
+      f.advance(300);
+
+      if (foreignFirst) {
+        f.names(foreign, "foreign", child, other);
+      }
+
+      f.names(root, "real", child);
+
+      if (!foreignFirst) {
+        f.names(foreign, "foreign", child, other);
+      }
+
+      f.end(child);
+      expect(f.reads).toEqual([child]);
+      parent.resolve(main);
+      await setImmediate();
+
+      const observed = () =>
+        f.turns().filter((turn) => turn.session?.id === child);
+
+      expect(observed()).toMatchObject([
+        {
+          session: { parent: null },
+          requests: [],
+          status: "cancelled",
+          lost: true,
+          items: [{ text: "Observed child text" }],
+        },
+      ]);
+      f.advance(1701);
+      f.delta(main, "expiry");
+      expect(observed()).toHaveLength(1);
+    } finally {
+      parent.resolve(main);
+      f.stop.abort();
+    }
+  },
+);
+
 test("a non-loss timeout skips only the unnamed predecessor", async () => {
   const f = fixture();
 

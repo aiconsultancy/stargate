@@ -123,6 +123,152 @@ test("late uses the head's deadline, not the earlier candidate deadline", () => 
   }
 });
 
+function namingHandoffFixture(limit = 2) {
+  let now = 0;
+  let admit = () => {};
+  const id = "ses_child";
+
+  const queue = new ActivityRecoveryQueues<{
+    type: string;
+    created?: number;
+    data: { sessionID: string };
+    durable?: { aggregateID: string; seq: number };
+  }>(
+    { ...activityQueueDefaults, pending: limit, bytes: 0 },
+    () => now,
+    1,
+    () => true,
+    () => admit(),
+  );
+
+  const pending = queue.candidate(id);
+  pending.postLoss = true;
+  const log: TurnActivityLog = { update() {}, reconnected() {}, end() {} };
+
+  const fixture = {
+    queue,
+    start(order: number, created: number, at: number) {
+      now = at;
+      queue.enqueue(id, {
+        event: {
+          type: "session.execution.started",
+          data: { sessionID: id },
+          created,
+        },
+        at,
+        order,
+      });
+    },
+    name(order: number, created: number, at: number, session = "ses_parent") {
+      now = at;
+      queue.offerProof(pending, {
+        session,
+        log,
+        callId: String(order),
+        order,
+        timing: { created, launch: "resumes" },
+      });
+    },
+    omit() {
+      queue.enqueue(id, {
+        event: {
+          type: "session.text.ended",
+          data: { sessionID: id },
+          durable: { aggregateID: id, seq: 1 },
+        },
+        at: now,
+        order: 11,
+      });
+    },
+    drain(at: number, gate?: Promise<void>) {
+      now = at;
+      queue.drain(id, pending, {
+        signal: new AbortController().signal,
+        async *read() {
+          await gate;
+          yield* [];
+        },
+        accepts: (_event): _event is never => false,
+        owned: () => true,
+        replay() {},
+        gap() {},
+        lost() {},
+        superseded() {},
+        preserveProofs: true,
+      });
+    },
+    naming() {
+      return queue.naming(pending, (proof) => proof.session === "ses_parent");
+    },
+    drainExpired() {
+      admit = () => {
+        if (queue.deadline(pending) <= now) {
+          fixture.drain(now);
+        }
+      };
+    },
+  };
+
+  return fixture;
+}
+
+test.each([false, true])(
+  "a queued expired predecessor cannot swallow an on-time successor name (held %p)",
+  (held) => {
+    const f = namingHandoffFixture();
+
+    try {
+      f.start(10, 10, 0);
+      f.start(20, 20, 100);
+      f.start(30, 40, 200);
+      f.drainExpired();
+
+      if (!held) {
+        f.drain(2150);
+      }
+
+      f.name(15, 30, 2150);
+
+      if (held) {
+        expect(f.naming().first).toBeUndefined();
+        f.drain(2190);
+      }
+
+      expect(f.naming()).toMatchObject({
+        first: { callId: "15", seenAt: 2150 },
+        ambiguous: false,
+      });
+    } finally {
+      f.queue.close();
+    }
+  },
+);
+
+test("the held-name ceiling leaves ambiguity in a successor's earlier band", async () => {
+  const f = namingHandoffFixture();
+  const gate = Promise.withResolvers<void>();
+
+  try {
+    f.start(10, 10, 0);
+    f.omit();
+    f.drain(0, gate.promise);
+    f.name(1, 20, 2001);
+    f.name(2, 20, 2001, "ses_other_parent");
+    f.name(3, 20, 2001);
+    f.start(20, 30, 2001);
+    gate.resolve();
+    await f.queue.settleReads();
+    expect(f.naming()).toMatchObject({
+      first: { callId: "3" },
+      ambiguous: true,
+    });
+  } finally {
+    gate.resolve();
+    await f.queue.settleReads();
+    f.queue.close();
+  }
+});
+
 function recoveryFixture() {
   const id = "ses_child";
 
