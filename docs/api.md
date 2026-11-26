@@ -216,8 +216,10 @@ instead, in every route and event, from a crew sample of their own: the
 fleet overview and the `ship` event read one fleet status sample per backend
 for the operator listener and another for officers. While only one listener
 has clients, each poll reads fleet status once per backend; while both do,
-twice. An officer's sample never falls back to the operator's, and the
-operator's never to an officer's, even when the other is fresher. Git
+twice. The two reads never queue behind each other: a slow or draining read
+for one listener never delays the other's or leaves it unavailable. An
+officer's sample never falls back to the operator's, and the operator's never
+to an officer's, even when the other is fresher. Git
 branch and base names, subagent titles and pull request titles are the same
 on both.
 
@@ -236,8 +238,9 @@ unavailable; the member route returns `503` rather than redacted text. Ship
 and member routes both return `503` if the whole HTTP read times out.
 
 Subagent titles and pull request titles are also shown as written, cut to
-180 characters. Activity events quote task text and branch names unredacted,
-with whitespace collapsed.
+180 characters. Each stream's activity events quote its own task text view,
+with whitespace collapsed: officers' sockets the ordinary view, the operator
+listener the unredacted one. Branch names are unredacted on both.
 
 These text fields (task text on the operator listener, branch and base
 names, subagent titles and pull request titles) can hold any Unicode
@@ -942,10 +945,13 @@ Ordinary OpenCode `fleetStatus` probes, which ask for no task text, start
 with a 400 ms budget that doubles after a timeout, up to 6.4 seconds, leaving
 time for ordinary crew status. Timeouts count toward the pause below at the
 maximum budget. Task text reads have no probe budget, and their timeouts
-never double it: they wait for the caller's crew deadline. Concurrent callers
-with the same filter share one probe. An explicit missing-method response to
-the initial request or three consecutive failures pause probes for one minute.
-A failed re-ask counts as one ordinary failure, and so does a task text probe
+never double it: they wait for the caller's crew deadline. Ordinary and task
+text probes run separately, each with its own drain bound and pause, and
+neither waits behind the other. Concurrent callers with the same filter share
+one probe. Three consecutive failures of one kind pause that kind of probe
+for one minute; an explicit missing-method response to the initial request
+pauses both.
+A failed re-ask counts as one task text failure, and so does a task text probe
 ended by its last caller's crew deadline, in either request. A disconnect
 counts nothing, even if the plugin ignores the abort and Stargate later
 abandons the probe. A caller leaving while another waits does not end the

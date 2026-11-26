@@ -185,8 +185,9 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   180/80/400 in ship detail, the `ship` event and the crew member route.
   Only the operator listener asks for `unredacted` or `full`. Officers have
   their own crew sample, so the fleet status RPC is read once per backend
-  per poll while one listener has clients and twice while both do; neither
-  listener's sample falls back to the other's.
+  per poll while one listener has clients and twice while both do. The two
+  reads never queue behind each other, and neither listener's sample falls
+  back to the other's.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`
