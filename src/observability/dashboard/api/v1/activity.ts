@@ -1,20 +1,24 @@
 import { randomBytes } from "node:crypto";
 import type {
-  ActivityItem,
   ActivityOutcome,
   ActivityRequest,
-  ActivityUsage,
   TurnActivityLog,
   TurnActivityRecorder,
 } from "../../../../backends/backend";
+import {
+  type StoredItem,
+  type StoredTurn,
+  itemJson,
+  itemView,
+  pages,
+  turnJson,
+  turnSummary,
+  usage,
+} from "./activity-view";
 import type { ApiV1Config } from "./features";
 import type {
-  V1ActivityItem,
   V1ActivityItemPage,
-  V1ActivityPagedItem,
   V1ActivityTurn,
-  V1ActivityTurnSummary,
-  V1ActivityUsage,
   V1AgentActivity,
   V1AgentActivityChange,
   V1AgentActivityEvent,
@@ -24,8 +28,7 @@ import type {
 const foldActivityChannel = (value: string) =>
   value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 
-/** Items whose JSON is larger are served in pages of at most this size. */
-export const activityPageBytes = 64 * 1024;
+export { activityPageBytes } from "./activity-view";
 
 /**
  * Streamed changes are coalesced per agent over this window, keeping each
@@ -42,33 +45,6 @@ const defaults = {
 };
 
 type Limits = typeof defaults;
-
-type StoredItem = {
-  id: string;
-  seq: number;
-  startedAt: number;
-  updatedAt: number;
-  value: ActivityItem;
-};
-
-type StoredTurn = {
-  id: string;
-  root: string;
-  agent: string;
-  seq: number;
-  status: V1ActivityTurn["status"];
-  lost?: true;
-  startedAt: number;
-  updatedAt: number;
-  endedAt: number | null;
-  reconnects: number;
-  requests: ActivityRequest[];
-  session?: V1ActivityTurn["session"];
-  usage?: ActivityUsage;
-  items: Map<string, StoredItem>;
-  /** Cached serialized size; a write invalidates it. */
-  bytes?: number;
-};
 
 /** One coalesced change, encoded once for every viewer of its agent. */
 export type ActivityFrame = {
@@ -104,127 +80,6 @@ type Feed = {
 type Agent = { seq: number; turns: StoredTurn[]; feed?: Feed | undefined };
 
 const encoder = new TextEncoder();
-
-function itemJson(item: StoredItem): V1ActivityItem {
-  return {
-    id: item.id,
-    seq: item.seq,
-    startedAt: item.startedAt,
-    updatedAt: item.updatedAt,
-    ...structuredClone(item.value),
-  };
-}
-
-function usage(turn: StoredTurn): V1ActivityUsage | null {
-  if (turn.usage) {
-    return structuredClone(turn.usage);
-  }
-
-  let result: V1ActivityUsage | null = null;
-
-  for (const { value } of turn.items.values()) {
-    if (value.kind !== "step" || !value.tokens) {
-      continue;
-    }
-
-    result ??= {
-      steps: 0,
-      tokens: {
-        input: 0,
-        output: 0,
-        reasoning: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-      },
-      cost: 0,
-    };
-    result.steps += 1;
-    result.cost += value.cost ?? 0;
-
-    for (const key of Object.keys(
-      result.tokens,
-    ) as (keyof typeof value.tokens)[]) {
-      result.tokens[key] += value.tokens[key];
-    }
-  }
-
-  return result;
-}
-
-/** Splits at code points so every page is valid text of at most `limit` bytes. */
-function pages(json: string, limit = activityPageBytes) {
-  const result: string[] = [];
-  let start = 0;
-  let bytes = 0;
-
-  for (let index = 0; index < json.length;) {
-    const code = json.codePointAt(index) ?? 0;
-
-    const width =
-      code < 0x80 ? 1 : code < 0x8_00 ? 2 : code < 0x1_00_00 ? 3 : 4;
-
-    const units = code > 0xff_ff ? 2 : 1;
-
-    if (bytes + width > limit) {
-      result.push(json.slice(start, index));
-      start = index;
-      bytes = 0;
-    }
-
-    bytes += width;
-    index += units;
-  }
-
-  result.push(json.slice(start));
-
-  return result;
-}
-
-/** The item, or its identity and page count when its JSON is over 64 KiB. */
-function itemView(stored: StoredItem): V1ActivityItem | V1ActivityPagedItem {
-  const item = itemJson(stored);
-  const json = JSON.stringify(item);
-  const bytes = Buffer.byteLength(json);
-
-  if (bytes <= activityPageBytes) {
-    return item;
-  }
-
-  return {
-    id: item.id,
-    seq: item.seq,
-    startedAt: item.startedAt,
-    updatedAt: item.updatedAt,
-    kind: item.kind,
-    status: item.status,
-    ...(item.unavailable && { unavailable: item.unavailable }),
-    ...(item.kind === "tool" && { callId: item.callId, name: item.name }),
-    paged: { pages: pages(json).length, bytes },
-  };
-}
-
-function turnSummary(turn: StoredTurn): V1ActivityTurnSummary {
-  return {
-    id: turn.id,
-    seq: turn.seq,
-    status: turn.status,
-    ...(turn.lost && { lost: turn.lost }),
-    startedAt: turn.startedAt,
-    updatedAt: turn.updatedAt,
-    endedAt: turn.endedAt,
-    reconnects: turn.reconnects,
-    requests: turn.requests.map((request) => ({ ...request })),
-    ...(turn.session && { session: structuredClone(turn.session) }),
-    usage: usage(turn),
-  };
-}
-
-function turnJson(turn: StoredTurn): V1ActivityTurn {
-  return {
-    ...turnSummary(turn),
-    items: [...turn.items.values()].map((stored) => itemView(stored)),
-  };
-}
 
 function changeOf({ change }: Pending): V1AgentActivityChange {
   return "type" in change ? change : { type: "item", item: itemView(change) };
