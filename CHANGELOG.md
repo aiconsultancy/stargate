@@ -93,6 +93,9 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 ### Changes
 
+- Claude Fleet activity shows a stopped reply preview only once when the
+  query result repeats it exactly.
+
 - The crew plugin now refuses, at load and with a message naming both
   counts, a team whose configured crew members times project contexts (the
   default plus each project) exceed 50, also with no projects configured;

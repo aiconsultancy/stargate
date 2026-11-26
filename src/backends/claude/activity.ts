@@ -82,6 +82,7 @@ type Message = {
   blocks: Map<number, Block["type"]>;
   tools: Map<number, string>;
   finalizedText: Map<number, string>;
+  stoppedText: Map<number, string>;
   /** The CLI commonly emits one final assistant envelope per block. */
   finalIndex: number;
   settled: boolean;
@@ -91,6 +92,7 @@ type Message = {
 class Thread {
   private readonly messages = new Map<string, Message>();
   private streaming: Message | undefined;
+  private latest: Message | undefined;
   public ended = false;
 
   public constructor(
@@ -112,10 +114,12 @@ class Thread {
         blocks: new Map(),
         tools: new Map(),
         finalizedText: new Map(),
+        stoppedText: new Map(),
         finalIndex: 0,
         settled: false,
       };
       this.messages.set(id, message);
+      this.latest = message;
     }
 
     return message;
@@ -198,10 +202,41 @@ class Thread {
           item.text = text;
         }
 
+        if (kind === "text") {
+          if (mode === "stop" && item.status === "streaming") {
+            message.stoppedText.set(index, item.text);
+          } else if (mode === "start" || mode === "final") {
+            message.stoppedText.delete(index);
+          }
+        }
+
         if (mode === "final" || mode === "stop" || mode === "redacted") {
           item.status = "completed";
         }
       },
+    );
+  }
+
+  public hasStoppedPreview(text: string) {
+    const message = this.latest;
+
+    if (!message?.stoppedText.size) {
+      return false;
+    }
+
+    const indices = [...message.blocks].flatMap(([index, kind]) =>
+      kind === "text" ? [index] : [],
+    );
+
+    return (
+      indices.every((index) => message.stoppedText.has(index)) &&
+      indices
+        .toSorted((a, b) => a - b)
+        .values()
+        .map((index) => message.stoppedText.get(index))
+        .filter(Boolean)
+        .toArray()
+        .join("\n") === text
     );
   }
 
@@ -394,6 +429,8 @@ class Thread {
 
     // An SDK synthetic error message is not assistant output sent to the model.
     if (frame.error) {
+      message.stoppedText.clear();
+
       return;
     }
 
@@ -761,7 +798,7 @@ export class ClaudeActivity {
 
     const root = this.root;
 
-    if (fallback) {
+    if (fallback && !root.hasStoppedPreview(fallback)) {
       root.log.update("result:text", at, () => ({
         kind: "text",
         status: "completed",

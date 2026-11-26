@@ -601,9 +601,12 @@ async function answer(text: string) {
     return result("success", false, "fallback after error");
   }
 
-  if (text === "streamed partial reply") {
-    // The preview stops at "hel"; no assistant message completes it.
-    stream({ type: "message_start", message: { id: "msg_partial" } });
+  if (text.startsWith("streamed partial reply ")) {
+    const preview = text.endsWith("prefix") ? "hel" : "hello";
+    stream({
+      type: "message_start",
+      message: { id: "msg_partial", model: "fixture" },
+    });
     stream({
       type: "content_block_start",
       index: 0,
@@ -612,9 +615,12 @@ async function answer(text: string) {
     stream({
       type: "content_block_delta",
       index: 0,
-      delta: { type: "text_delta", text: "hel" },
+      delta: { type: "text_delta", text: preview },
     });
-    stream({ type: "content_block_stop", index: 0 });
+
+    if (!text.endsWith("unfinished")) {
+      stream({ type: "content_block_stop", index: 0 });
+    }
 
     return result("success", false, "hello");
   }

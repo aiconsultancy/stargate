@@ -603,15 +603,7 @@ test("Claude result text and errors reach activity, without repeating a reply", 
     ),
   ).toBe("second");
 
-  expect(
-    await backend.prompt(
-      await session(backend),
-      "streamed partial reply",
-      signal(),
-    ),
-  ).toBe("hello");
-
-  const [reply, errors, normal, partial] = hub.turns("officer")?.turns ?? [];
+  const [reply, errors, normal] = hub.turns("officer")?.turns ?? [];
   expect(reply).toMatchObject({
     status: "completed",
     items: [{ kind: "text", status: "completed", text: "result-only reply" }],
@@ -636,15 +628,48 @@ test("Claude result text and errors reach activity, without repeating a reply", 
       .filter((item) => item.kind === "text")
       .map((item) => ("text" in item ? item.text : undefined)),
   ).toEqual(["second"]);
-  // A preview that no assistant message completed is not the reply.
-  expect(partial?.items).toContainEqual(
-    expect.objectContaining({
-      kind: "text",
-      status: "completed",
-      text: "hello",
-    }),
-  );
 });
+
+test.each([
+  [
+    "prefix",
+    [
+      ["completed", "hel"],
+      ["completed", "hello"],
+    ],
+  ],
+  ["identical", [["completed", "hello"]]],
+  [
+    "unfinished",
+    [
+      ["streaming", "hello"],
+      ["completed", "hello"],
+    ],
+  ],
+] as const)(
+  "Claude records the %s preview and result without duplicating completed text",
+  async (kind, expected) => {
+    const hub = createActivityHub();
+    const { backend } = await open({}, undefined, {}, hub.recorder("officer"));
+
+    expect(
+      await backend.prompt(
+        await session(backend),
+        `streamed partial reply ${kind}`,
+        signal(),
+      ),
+    ).toBe("hello");
+    expect(
+      hub
+        .turns("officer")
+        ?.turns[0]?.items.flatMap((item) =>
+          item.kind === "text" && "text" in item
+            ? [[item.status, item.text]]
+            : [],
+        ),
+    ).toEqual(expected.map(([status, text]) => [status, text]));
+  },
+);
 
 test("a Claude success result marked as an error is an unredacted failed step", async () => {
   const hub = createActivityHub();
