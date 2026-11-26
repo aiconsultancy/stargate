@@ -49,7 +49,7 @@ type Segment<E extends Event> = NamingSegment & {
     reused?: true;
   };
   floor: number;
-  earlier?: readonly EarlierCallRange[];
+  earlier?: EarlierCallRange;
   expires: number;
   boundaryOrder?: number;
   gap?: ActivityReplayGap;
@@ -63,7 +63,7 @@ export type PendingActivity<E extends Event> = HeldNames & {
   lifecycle: ActivityLifecycleBuffer;
   lifecycleSeq?: number;
   floor: number;
-  earlier?: readonly EarlierCallRange[];
+  earlier?: EarlierCallRange;
   expires: number;
   needsStart: boolean;
   slots: number;
@@ -722,27 +722,26 @@ export class ActivityRecoveryQueues<E extends Event> {
       first.type === startType &&
       this.now() >= old.expires;
 
-    const retiredAt = expired ? first.created : undefined;
+    const retiredStart = expired ? first.created : undefined;
 
     let earlier = old.earlier;
 
-    if (retiredAt !== undefined) {
-      this.removed?.start(id, first.order, retiredAt);
+    if (retiredStart !== undefined) {
+      this.removed?.start(id, first.order, retiredStart);
     }
 
     if (expired) {
-      // Native time must exclude a held call from every range it overlapped.
-      // An untimed expiry leaves earlier openings as competition only.
-      earlier = [
-        ...(earlier?.map((band) => ({
-          ...band,
-          nativeStart:
-            band.nativeStart === undefined || retiredAt === undefined
-              ? undefined
-              : Math.max(band.nativeStart, retiredAt),
-        })) ?? []),
-        { after: old.floor, through: first.order, nativeStart: retiredAt },
-      ];
+      // Extend the contiguous band with a conservative native cutoff.
+      // Any untimed expiry leaves earlier openings as competition only.
+      earlier = {
+        after: earlier?.after ?? old.floor,
+        through: first.order,
+        nativeStart:
+          retiredStart === undefined ||
+          (earlier !== undefined && earlier.nativeStart === undefined)
+            ? undefined
+            : Math.max(earlier?.nativeStart ?? retiredStart, retiredStart),
+      };
     }
 
     const floor = expired ? first.order : old.floor;
@@ -754,7 +753,7 @@ export class ActivityRecoveryQueues<E extends Event> {
         next.earlier = earlier;
       }
 
-      if (retiredAt === undefined && old.proofOverflow) {
+      if (retiredStart === undefined && old.proofOverflow) {
         next.proofOverflow = true;
       }
 
@@ -775,7 +774,7 @@ export class ActivityRecoveryQueues<E extends Event> {
         });
       }
 
-      if (retiredAt === undefined && old.proofOverflow) {
+      if (retiredStart === undefined && old.proofOverflow) {
         for (const { scope, order } of old.proofs) {
           rememberDrop(pending, scope, { first: order, last: order });
         }

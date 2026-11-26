@@ -42,7 +42,7 @@ export type EarlierCallRange = {
 export type CallWindow = {
   after: number;
   through: number;
-  earlier?: readonly EarlierCallRange[];
+  earlier?: EarlierCallRange;
 };
 
 type Window = CallWindow & { except: number };
@@ -69,7 +69,7 @@ export function callRangeMightOverlap(
 ) {
   return (
     overlaps(range, window, except) ||
-    window.earlier?.some((band) => overlaps(range, band, except)) === true
+    (window.earlier !== undefined && overlaps(range, window.earlier, except))
   );
 }
 
@@ -85,16 +85,16 @@ export function openedInWindow(
   created: number | undefined,
   window: CallWindow,
 ) {
+  const { earlier } = window;
+
   return (
     order <= window.through &&
     (order > window.after ||
-      window.earlier?.some(
-        ({ after, through, nativeStart }) =>
-          after < order &&
-          order <= through &&
-          nativeStart !== undefined &&
-          !callPrecedesStart(created, nativeStart),
-      ) === true)
+      (earlier !== undefined &&
+        earlier.after < order &&
+        order <= earlier.through &&
+        earlier.nativeStart !== undefined &&
+        !callPrecedesStart(created, earlier.nativeStart)))
   );
 }
 
@@ -311,14 +311,15 @@ class ScopeEvidence {
 
   public competing(session: string, child: string, window: Window) {
     const named = this.named.get(child)?.get(session);
+    const { earlier } = window;
 
     const inWindow = ([order, created]: [number, number | undefined]) =>
       order !== window.except &&
       (openedInWindow(order, created, window) ||
-        window.earlier?.some(
-          ({ after, through, nativeStart }) =>
-            nativeStart === undefined && after < order && order <= through,
-        ) === true);
+        (earlier !== undefined &&
+          earlier.nativeStart === undefined &&
+          earlier.after < order &&
+          order <= earlier.through));
 
     return (
       callRangeMightOverlap(this.ranges.get(session), window, window.except) ||
