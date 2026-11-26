@@ -2580,6 +2580,195 @@ test("reconnect can recover a proven native child outcome without replaying item
   f.stop.abort();
 });
 
+async function postLossStart(
+  boundary: "started" | "succeeded",
+  pending?: number,
+) {
+  const f = fixture(undefined, undefined, pending);
+  const root = f.root();
+  f.parents.set(child, main);
+  f.create(child, main);
+  f.emit("session.execution.started", child, {}, undefined, undefined, 1, 10);
+  const replacement = boundary === "started";
+  f.logFrames.set(child, [
+    {
+      id: replacement ? "replacement" : "terminal",
+      type: `session.execution.${boundary}`,
+      created: replacement ? 23 : 18,
+      data: { sessionID: child },
+      durable: { aggregateID: child, seq: replacement ? 3 : 2, version: 1 },
+    },
+  ]);
+  await f.families.reconnected();
+  f.call(root, "retry");
+  f.called(root, "retry", { agent: "explore", sessionID: child });
+
+  return { f, root };
+}
+
+test.each(["started", "succeeded"] as const)(
+  "reconnect log %s still lets a resume name arrive after the live start",
+  async (boundary) => {
+    const { f, root } = await postLossStart(boundary);
+
+    try {
+      expect(f.turns()[1]).toMatchObject(
+        boundary === "started"
+          ? { status: "cancelled", lost: true }
+          : { status: "completed" },
+      );
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        "replacement",
+        3,
+        23,
+      );
+      f.names(root, "retry", child);
+      await setImmediate();
+      f.ended(child, "new transcript", "new-answer");
+      f.end(child);
+      expect(f.turns().slice(2)).toMatchObject([
+        {
+          session: { id: child, parent: { callId: "retry" } },
+          status: "completed",
+          items: [{ text: "new transcript" }],
+        },
+      ]);
+      expect(f.turns()[2]?.lost).toBeUndefined();
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+test.each(["timeout", "capacity", "bytes", "lifecycle"] as const)(
+  "a post-loss start with no name publishes one detached turn when the %s budget ends",
+  async (limit) => {
+    const { f, root } = await postLossStart("started", 1);
+
+    try {
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        "replacement",
+        3,
+        23,
+      );
+      f.delta(child, "held output", "answer");
+      expect(f.turns()).toHaveLength(2);
+
+      if (limit === "lifecycle") {
+        for (let boundary = 0; boundary < 64; boundary += 1) {
+          f.end(child);
+        }
+      } else if (limit === "bytes") {
+        f.delta(child, "x".repeat(256 * 1024), "oversized");
+      } else {
+        f.end(child);
+        expect(f.turns()).toHaveLength(2);
+
+        if (limit === "timeout") {
+          f.advance(2000);
+          f.delta(main, "tick");
+        } else {
+          f.delta(grandchild, "new candidate");
+        }
+      }
+
+      if (limit === "bytes") {
+        f.end(child);
+      }
+
+      f.names(root, "retry", child);
+      await setImmediate();
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        "replacement",
+        3,
+        23,
+      );
+      expect(f.turns().slice(2)).toMatchObject([
+        {
+          session: { id: child, parent: null },
+          requests: [],
+          status: "cancelled",
+          lost: true,
+        },
+      ]);
+      expect(f.turns()[2]?.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ text: "held output" }),
+          ...(limit === "bytes" || limit === "lifecycle"
+            ? [expect.objectContaining({ unavailable: ["activity.frames"] })]
+            : []),
+        ]),
+      );
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+test.each(["lost", "settled", "name first"] as const)(
+  "a relaunch takes its late name after a %s reconnect with an active read failure",
+  async (mode) => {
+    const f = fixture();
+
+    try {
+      const root = f.root();
+      f.parents.set(child, main);
+      f.create(child, main);
+      f.start(child);
+      f.ended(child, "first period", "first");
+
+      if (mode === "settled") {
+        f.end(child);
+      }
+
+      f.failedReads.add("active");
+      await f.families.reconnected();
+      f.call(root, "retry");
+      f.called(root, "retry", { agent: "explore", sessionID: child });
+
+      if (mode === "name first") {
+        f.names(root, "retry", child);
+      }
+
+      f.start(child);
+
+      if (mode !== "name first") {
+        f.names(root, "retry", child);
+      }
+
+      await setImmediate();
+      f.ended(child, "relaunch output", "second");
+      f.end(child);
+      expect(f.turns().slice(1)).toMatchObject([
+        {
+          status: mode === "settled" ? "completed" : "cancelled",
+          items: [{ text: "first period" }],
+        },
+        {
+          status: "completed",
+          session: { parent: { callId: "retry" } },
+          items: [{ text: "relaunch output" }],
+        },
+      ]);
+      expect(f.turns()[2]?.lost).toBeUndefined();
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
 test.each(["active", "log", "unproven", "no retention"] as const)(
   "%s reconnect loss leaves later live output visible without attribution",
   async (reason) => {
