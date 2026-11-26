@@ -59,6 +59,9 @@ A fleet's own officers (its rear admiral and captains) and their crew read
 the same Fleet API, the whole fleet and read-only, without the token. Agents
 never hold the token. Each officer reads through a Unix socket that only its
 own processes can reach: the socket's file permissions are its identity.
+Officers get crew task text as the crew plugin shows ordinary readers:
+redacted and bounded, never the [raw task text](#routes) the operator
+listener serves.
 
 The socket is `fleet-api.sock` in the officer's Subspace socket directory,
 beside its signing proxy socket (see [Subspace API agent identity](subspace-agents.md)).
@@ -100,8 +103,11 @@ On the socket:
   parameter gets 404: officers never receive `agent-activity`;
 - no token is needed and an `Authorization` header is ignored; no browser
   origin is granted CORS;
-- answers are the same JSON and event frames as on the operator listener,
-  without officer turn activity.
+- answers have the same shape as on the operator listener, without officer
+  turn activity. Crew task text is the crew plugin's ordinary view:
+  credentials redacted, control characters stripped and progress masked
+  before the cut, within 180, 80 and 400 code points in ship detail, the
+  `ship` event and the crew member route alike.
 
 Officers' reads and event streams have their own eight HTTP read slots and
 eight stream slots, shared by all officers, so officers can never use up the
@@ -194,16 +200,56 @@ and `Last-Event-ID` without a token.
 has that `id`, its configured `name` (which may differ from the ID; the ID
 when no name is set), `role` and `model`.
 
-Crew task text (`summary`, `phase` and `progress`) and Git branch and base
-names appear exactly as the crew wrote them: the API neither redacts
-credential-shaped text nor replaces checkout paths. Ship detail and the
-`ship` event keep task text to at most 180, 80 and 400 characters (the fleet
-overview carries no task text); the crew member route applies no limit of
-its own. The crew plugin currently still stores task text bounded to 180, 80
-and 400 characters and redacted, so the API cannot show more than that yet;
-a follow-up removes that. Subagent titles and pull request titles are also
-shown as written, cut to 180 characters. Activity events quote task text and
-branch names unredacted, with whitespace collapsed.
+On the operator listener, crew task text (`summary`, `phase` and
+`progress`) and Git branch and base names appear exactly as the crew wrote
+them: the API neither redacts credential-shaped text nor replaces checkout
+paths, in every route and event. Ship detail and the sample that feeds the
+`ship` event request task text without a member filter. They show it
+unredacted, up to 180, 80 and 400 code points (the start of the summary and
+phase, the end of the progress); the fleet overview carries no task text.
+The crew member route applies no limit of its own: it returns the task text
+the crew plugin stores, up to 64,000 code points per field. The
+`unredacted` and `full` views are for the operator listener only.
+
+[Officers' sockets](#officers) ask the crew plugin for its ordinary view
+instead, in every route and event, from a crew sample of their own: the
+fleet overview and the `ship` event read one fleet status sample per backend
+for the operator listener and another for officers. While only one listener
+has clients, each poll reads fleet status once per backend; while both do,
+twice. The two lanes never queue behind each other. Each allows one current
+probe plus at most one abandoned read that ignores abort and is still
+draining: two RPCs in flight per backend in steady state, four at worst.
+If another probe times out while its lane's abandoned read is still draining,
+that lane starts nothing until the abandoned read drains. Neither listener's
+sample falls back to the other's, even when the other is fresher. Git branch
+and base names, subagent titles and pull request titles are the same on both.
+
+The store makes the final storage cut for progress; Pi members buffer up to
+twice that limit first. For over-limit progress, the store saves the raw
+tail and masks the ordinary view from the uncut text before storage. Short
+progress and legacy rows are masked on read. Ordinary readers (the Slack
+crew command, health, the operator dashboard and the crew status tool) get
+masked and bounded text.
+
+Ship and crew detail fall back to redacted 180/80/400 text only when the
+initial request reports the fleet status method missing, or when the plugin
+rejects `taskText` and the re-ask without it succeeds. A failed re-ask or a
+current plugin that cannot answer by the crew deadline leaves crew status
+unavailable; the member route returns `503` rather than redacted text. Ship
+and member routes both return `503` if the whole HTTP read times out.
+
+Subagent titles and pull request titles are also shown as written, cut to
+180 characters. Each stream's activity events quote its own task text view,
+with whitespace collapsed: officers' sockets the ordinary view, the operator
+listener the unredacted one. Branch names are unredacted on both.
+
+These text fields (task text on the operator listener, branch and base
+names, subagent titles and pull request titles) can hold any Unicode
+character, including control characters such as ESC and BEL, C1 controls,
+and bidirectional formatting characters such as U+202E. The API does not
+strip them; only the length limits above apply. A client that prints them,
+to a terminal or a page, must escape them, for example by showing each as a
+visible marker.
 
 `HEAD` returns headers without a body. Unknown ships, members, and routes
 return 404. Missing or invalid tokens receive 401 (officers' sockets need
@@ -896,11 +942,23 @@ Unchanged backends keep their in-flight reads, including reads shared with
 HTTP requests.
 After a shared read fails or reaches its deadline, the overview marks the
 ship unavailable and retains its last successful crew counts if available.
-OpenCode `fleetStatus` probes start with a 400 ms budget that doubles after
-a timeout, up to 6.4 seconds, leaving time for ordinary crew status.
-Concurrent callers with the same filter share one probe.
-An explicit missing-method response or three consecutive failures pause
-probes for one minute. Timeouts count toward that pause at the maximum budget.
+Ordinary OpenCode `fleetStatus` probes, which ask for no task text, start
+with a 400 ms budget that doubles after a timeout, up to 6.4 seconds, leaving
+time for ordinary crew status. Timeouts count toward the pause below at the
+maximum budget. Task text reads have no probe budget, and their timeouts
+never double it: they wait for the caller's crew deadline. Ordinary and task
+text probes run separately, each with its own drain bound and pause, and
+neither waits behind the other. Concurrent callers with the same filter share
+one probe. Three consecutive failures of one kind pause that kind of probe
+for one minute; an explicit missing-method response to the initial request
+pauses both.
+A failed re-ask counts as one task text failure, and so does a task text probe
+ended by its last caller's crew deadline, in either request. A disconnect
+counts nothing, even if the plugin ignores the abort and Stargate later
+abandons the probe. A caller leaving while another waits does not end the
+probe. A re-ask answered after the deadline caches nothing. A member ID the
+crew plugin would reject is never sent to it: the crew member route answers
+`404` when admitted, or `503` when every HTTP read slot is busy.
 
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git

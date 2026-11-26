@@ -80,11 +80,16 @@ const features = [
   { key: "api", label: "Fleet API", enabled: true, defaultEnabled: false },
 ];
 
-const source: ApiV1Source = {
+const reads: Pick<ApiV1Source, "fleet" | "ship" | "crew"> = {
   fleet: async () => overview,
   ship: async (id) => (id === ship.id ? ship : undefined),
   crew: async (id, name) =>
     id === ship.id && name === member.id ? { ship: id, member } : undefined,
+};
+
+const source: ApiV1Source = {
+  ...reads,
+  officer: reads,
   gatewayFeatures: () => features,
 };
 
@@ -555,7 +560,7 @@ test("HTTP detail deadlines release the handlers but retain capacity for uncoope
       ),
     );
 
-    expect(results.map(({ status }) => status)).toEqual(Array(8).fill(500));
+    expect(results.map(({ status }) => status)).toEqual(Array(8).fill(503));
     expect((await get(shipPath)).status).toBe(503);
     expect((await get(crewPath)).status).toBe(503);
     expect((await get("/api/v1/agents/captain/activity")).status).toBe(503);
@@ -592,7 +597,7 @@ test.each([
   ],
 ] as const)(
   "HTTP %s reads bound active and abandoned work",
-  async (_kind, paths) => {
+  async (kind, paths) => {
     const held = Promise.withResolvers<void>();
     const retry = Promise.withResolvers<void>();
     let gate: Promise<void> | undefined = held.promise;
@@ -616,6 +621,7 @@ test.each([
     });
 
     const clock = spyOn(performance, "now").mockReturnValue(0);
+    const expired = kind === "detail" ? 503 : 500;
 
     try {
       const batch = () =>
@@ -626,7 +632,7 @@ test.each([
         );
 
       expect((await batch()).map(({ status }) => status)).toEqual(
-        Array(8).fill(500),
+        Array(8).fill(expired),
       );
       // A 160 ms host deadline leaves 144 ms for the HTTP read.
       clock.mockReturnValue(431);
@@ -634,7 +640,7 @@ test.each([
       clock.mockReturnValue(432);
       gate = retry.promise;
       expect((await batch()).map(({ status }) => status)).toEqual(
-        Array(8).fill(500),
+        Array(8).fill(expired),
       );
       gate = undefined;
 

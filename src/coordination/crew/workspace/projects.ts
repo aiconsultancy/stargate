@@ -1,7 +1,11 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Predicate, Result, Schema } from "effect";
-import type { CrewStatus, CrewStatusInput } from "../../../shared/crew-status";
+import type {
+  CrewStatus,
+  CrewStatusInput,
+  CrewTaskTextMode,
+} from "../../../shared/crew-status";
 import {
   HISTORY_PAGE,
   type HistoryChildrenInput,
@@ -23,6 +27,7 @@ import type {
   CrewTurns,
   CrewTurnsInput,
   FleetCrewStatus,
+  FleetCrewStatusInput,
 } from "../reporting/fleet-status";
 import { crewTurns } from "../reporting/member-activity";
 import type { CheckoutDiffReader } from "./checkout-diff";
@@ -287,6 +292,7 @@ export class CrewProjects {
   public async run(raw: unknown, caller: CrewCaller) {
     const selected = await this.select(raw, caller);
     const input = selected.input;
+    let assignmentPreamble = "";
 
     if (
       selected.project !== "default" &&
@@ -302,29 +308,33 @@ export class CrewProjects {
         throw new CrewError("Unknown configured crew member.");
       }
 
-      input["text"] = [
+      assignmentPreamble = [
         `Configured Stargate project: ${selected.project}.`,
         `Use only your permanent worktree: ${JSON.stringify(selected.engine.options.worktrees[member])}.`,
         "Read this repository's AGENTS.md and applicable delivery/security instructions. Project selection is not human approval.",
         "Omitted project arguments are bound to your actual native worker session. Never select another project's state or move this session.",
         "",
-        input["text"],
+        "",
       ].join("\n");
     }
 
-    const result = await selected.engine.run(input, caller);
+    const result = await selected.engine.run(input, caller, assignmentPreamble);
 
     return this.enabled ? { ...result, project: selected.project } : result;
   }
 
-  public status(input: CrewStatusInput = {}): CrewStatus {
+  /** Only the Fleet API asks for a `taskText` mode other than `ordinary`. */
+  public status(
+    input: CrewStatusInput = {},
+    taskText: CrewTaskTextMode = "ordinary",
+  ): CrewStatus {
     if (!this.enabled) {
-      return this.default.status(input);
+      return this.default.status(input, { taskText });
     }
 
     const pages = [...this.contexts].map(([project, engine]) => ({
       project,
-      status: engine.status(input, { aggregate: true }),
+      status: engine.status(input, { aggregate: true, taskText }),
     }));
 
     const members = pages.flatMap(({ project, status }) =>
@@ -339,8 +349,9 @@ export class CrewProjects {
     };
   }
 
-  public fleetStatus(input: CrewStatusInput): FleetCrewStatus {
-    const status = this.status(input);
+  public fleetStatus(input: FleetCrewStatusInput): FleetCrewStatus {
+    const { taskText, ...filter } = input;
+    const status = this.status(filter, taskText ?? "ordinary");
 
     const contexts = status.members.flatMap(({ id, project }) => {
       const { options } = this.get(project ?? "default");
@@ -364,13 +375,14 @@ export class CrewProjects {
       ];
     });
 
-    return {
-      status,
-      metadata: {
-        projectDirectory: this.default.options.projectDirectory,
-        contexts,
-      },
+    const metadata = {
+      projectDirectory: this.default.options.projectDirectory,
+      contexts,
     };
+
+    // The answer names the mode, so a caller can tell an older plugin's
+    // Ordinary answer apart.
+    return taskText ? { status, metadata, taskText } : { status, metadata };
   }
 
   /** Peer sessions and recent task inputs, to attribute crew turns. */

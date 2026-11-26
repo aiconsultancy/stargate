@@ -353,6 +353,10 @@ async function fixture(report = false) {
     },
     settled: settled.promise,
     progress: () => state.activity.task(state.task(task.id) ?? task).progress,
+    unredactedProgress: () =>
+      state.activity.task(state.task(task.id) ?? task, "unredacted").progress,
+    rawProgress: () =>
+      state.activity.task(state.task(task.id) ?? task, "full").progress,
     async close() {
       await workers.close();
       state.close();
@@ -408,7 +412,7 @@ test("ordinary Pi Slack prompt retains cumulative visible return and live callba
   }
 });
 
-test("Pi progress flushes latest burst tail while still busy and redacts before storage", async () => {
+test("Pi progress flushes latest burst tail while still busy; stored raw, redacted on read", async () => {
   const f = await fixture();
 
   try {
@@ -417,16 +421,59 @@ test("Pi progress flushes latest burst tail while still busy and redacts before 
     f.clock.advance(100);
     await f.emit("Second update");
     f.clock.advance(100);
-    await f.emit("Latest update token=private-secret");
+    const raw = "Latest update s\u0007k-split-fixture";
+    await f.emit(raw);
     expect(f.progress()).toBe("First update");
     f.clock.advance(800);
-    expect(f.progress()).toBe("Latest update token=[REDACTED]");
+    expect(f.progress()).toBe("Latest update [REDACTED]");
+    expect(f.unredactedProgress()).toBe(raw);
+    expect(f.rawProgress()).toBe(raw);
     expect(f.state.task(f.task.id)?.status).toBe("running");
     f.clock.advance(1000);
     expect(f.clock.timers.size).toBe(0);
     f.succeed();
     await f.settled;
     expect(f.progress()).not.toContain("PRIVATE REASONING");
+  } finally {
+    await f.close();
+  }
+});
+
+test("Pi progress keeps the end beyond the 64,000-code-point buffer", async () => {
+  const f = await fixture();
+
+  try {
+    await f.start();
+    await f.emit("First update");
+    f.clock.advance(100);
+    await f.emit(`${"😀".repeat(65_000)}y`);
+    f.clock.advance(900);
+    expect(f.rawProgress()).toBe(`${"😀".repeat(63_999)}y`);
+    expect(f.unredactedProgress()).toBe(`${"😀".repeat(399)}y`);
+    expect(f.progress()).toBe(`\uFFFD${"😀".repeat(199)}y`);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Pi progress keeps the masker's window: a credential the store's cut splits stays masked", async () => {
+  const f = await fixture();
+
+  try {
+    await f.start();
+    await f.emit("First update");
+    f.clock.advance(100);
+
+    // The key's header falls just before the stored 64,000 code points.
+    const header = `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\n`;
+    const body = "Zm9v".repeat(16_000);
+    await f.emit(`${"x".repeat(70_000)}Key: ${header}${body}`);
+    f.clock.advance(900);
+    expect(f.rawProgress()).toBe(body);
+    expect(f.unredactedProgress()).toBe(body.slice(-400));
+    expect(f.progress()).toBe(
+      `${"x".repeat(400 - 27)}Key: [REDACTED PRIVATE KEY]`,
+    );
   } finally {
     await f.close();
   }

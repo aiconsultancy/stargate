@@ -501,12 +501,17 @@ test("a computation past its budget answers 503 and stops; a failure throws", as
   );
 });
 
-const source: ApiV1Source = {
+const reads: Pick<ApiV1Source, "fleet" | "ship" | "crew"> = {
   fleet: async () => {
     throw new Error("unused");
   },
   ship: async () => undefined,
   crew: async () => undefined,
+};
+
+const source: ApiV1Source = {
+  ...reads,
+  officer: reads,
   gatewayFeatures: () => [],
 };
 

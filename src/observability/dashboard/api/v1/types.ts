@@ -3,8 +3,10 @@
  * reads. Additive changes only; never remove or retype a field.
  *
  * Times are epoch milliseconds. Byte counts are integers. The API neither
- * redacts nor rewrites crew task text or branch names; the crew route adds no
- * length limit. The crew plugin still stores task text bounded and redacted.
+ * redacts nor rewrites crew task text or branch names, in any route or event.
+ * Ship detail and events bound task text to 180/80/400; the crew route adds
+ * no limit beyond the plugin's 64,000 code points. Only unsupported plugins
+ * answer redacted; a failed current plugin read reports unavailability.
  * The agent activity route serves tool input and output, errors, reply and
  * reasoning text complete and unredacted, and pages large items instead of
  * cutting them. The crew diff routes serve every changed path's patch and
@@ -319,6 +321,9 @@ export type V1CrewDetail = {
   ship: string;
   member: V1CrewMember;
 };
+
+/** A crew read failed; it did not establish whether the member exists. */
+export class CrewStatusUnavailable extends Error {}
 
 export type V1Host = {
   hostname: string;
@@ -640,6 +645,11 @@ export interface ApiV1Source {
   ): Promise<V1CrewDetail | undefined>;
   /** Gateway-wide switches from the loaded configuration. */
   gatewayFeatures(): V1Feature[];
+  /**
+   * The same reads for officers' sockets, with the crew plugin's ordinary
+   * task text: redacted and bounded, never `unredacted` or `full`.
+   */
+  officer: Pick<ApiV1Source, "fleet" | "ship" | "crew">;
 }
 
 /** One poll's view, compared with the previous one to emit events. */

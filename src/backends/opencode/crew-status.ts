@@ -3,10 +3,12 @@ import { Schema } from "effect";
 import {
   type CheckoutDiffInput,
   type CrewGitInput,
-  type FleetCrewStatus,
+  type FleetCrewStatusInput,
+  type FleetCrewStatusRead,
   checkoutDiffSchema,
   crewGitSchema,
-  fleetCrewStatusSchema,
+  fleetCrewStatusInputSchema,
+  fleetCrewStatusOutputSchema,
 } from "../../coordination/crew/reporting/fleet-status";
 import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
 import { createReadSlot, readWithDeadline } from "../../lib/read-deadline";
@@ -25,23 +27,62 @@ const isMethodNotFound = (error: unknown) =>
   "type" in error &&
   error.type === "rpc.method_not_found";
 
+/** An older crew plugin that rejects an input field it does not know. */
+const isInvalidInput = (error: unknown) =>
+  error !== null &&
+  typeof error === "object" &&
+  "type" in error &&
+  error.type === "rpc.invalid_input";
+
+/** A deadline, as opposed to a caller that went away. */
+const isTimeout = (reason: unknown) =>
+  reason instanceof DOMException && reason.name === "TimeoutError";
+
+/** The plugin's own input check, made before anything is asked of it. */
+const validFleetInput = Schema.is(fleetCrewStatusInputSchema);
+
+type FleetStatusProbe = {
+  member: CrewStatusInput["member"];
+  taskText: FleetCrewStatusInput["taskText"];
+  result: Promise<FleetCrewStatusRead>;
+  controller: AbortController;
+  waiters: number;
+};
+
+/**
+ * Ordinary or task-text fleet status reads: one current probe plus at most
+ * one abandoned, abort-ignoring read still draining. A further timeout starts
+ * nothing in this lane until its abandoned read drains. Failure counts and
+ * backoff are also per lane.
+ */
+type FleetStatusLane = {
+  read: ReturnType<typeof createReadSlot<FleetCrewStatusRead>>;
+  probe?: FleetStatusProbe;
+  failures: number;
+  backoff?: {
+    until: number;
+    kind: "unavailable" | "unsupported";
+  };
+};
+
+const fleetStatusLane = (): FleetStatusLane => ({
+  read: createReadSlot<FleetCrewStatusRead>(maxFleetStatusProbeMs),
+  failures: 0,
+});
+
 /** Reads location-scoped crew status and coalesced fleet status probes. */
 export class OpenCodeCrewStatus {
-  private fleetStatusRetryAt = 0;
-  private fleetStatusFailures = 0;
-  private fleetStatusProbeMs = 400;
-  private readonly fleetStatusRead = createReadSlot<unknown>(
-    maxFleetStatusProbeMs,
-  );
-  private fleetStatusProbe?: {
-    member: CrewStatusInput["member"];
-    result: Promise<FleetCrewStatus | undefined>;
-    controller: AbortController;
-    waiters: number;
+  /** The two lanes never wait for, or read unavailable behind, each other. */
+  private readonly lanes = {
+    ordinary: fleetStatusLane(),
+    taskText: fleetStatusLane(),
   };
+  /** The ordinary lane's adaptive deadline. */
+  private fleetStatusProbeMs = 400;
 
   private crewGitRetryAt = 0;
   private checkoutDiffRetryAt = 0;
+  private taskTextRetryAt = 0;
 
   public constructor(
     private readonly client: OpenCodeClient,
@@ -138,26 +179,82 @@ export class OpenCodeCrewStatus {
     }
   }
 
-  private recordFleetStatusFailure(unsupported = false) {
-    if (++this.fleetStatusFailures >= 3 || unsupported) {
-      this.fleetStatusRetryAt = performance.now() + 60_000;
-      this.fleetStatusFailures = 0;
+  private recordFleetStatusFailure(lane: FleetStatusLane, unsupported = false) {
+    const until = performance.now() + 60_000;
+
+    // A missing method is the plugin's own, so it pauses both lanes.
+    if (unsupported) {
+      for (const each of Object.values(this.lanes)) {
+        each.backoff = { until, kind: "unsupported" };
+        each.failures = 0;
+      }
+
+      return;
+    }
+
+    if (++lane.failures >= 3) {
+      lane.backoff = { until, kind: "unavailable" };
+      lane.failures = 0;
     }
   }
 
-  public async fleetCrewStatus(input: CrewStatusInput, signal: AbortSignal) {
+  /**
+   * `taskText` asks for unredacted task text. Only an unsupported RPC or
+   * input field allows callers to show ordinary status instead. Ordinary
+   * and task-text reads have no shared limiter: neither lane waits behind
+   * the other. A backend has at most two RPCs in flight in steady state and
+   * four at worst, when each lane has a current probe and a draining read.
+   */
+  public async fleetCrewStatus(
+    input: FleetCrewStatusInput,
+    signal: AbortSignal,
+  ): Promise<FleetCrewStatusRead> {
+    // A member the plugin would reject is never sent: nothing to probe.
+    if (!validFleetInput(input)) {
+      signal.throwIfAborted();
+
+      return { kind: "unavailable" };
+    }
+
+    const lane = input.taskText ? this.lanes.taskText : this.lanes.ordinary;
+
     for (;;) {
       signal.throwIfAborted();
-      const pending = this.fleetStatusRead.pending;
-      let probe = pending ? this.fleetStatusProbe : undefined;
+      const pending = lane.read.pending;
+      let probe = pending ? lane.probe : undefined;
 
       if (!probe) {
-        if (performance.now() < this.fleetStatusRetryAt) {
-          return;
+        const backoff = lane.backoff;
+
+        if (backoff && performance.now() < backoff.until) {
+          return { kind: backoff.kind };
         }
 
-        probe = this.startFleetStatusProbe(input);
-        this.fleetStatusProbe = probe;
+        probe = this.startFleetStatusProbe(lane, input);
+        lane.probe = probe;
+      }
+
+      const sameView =
+        probe.member === input.member && probe.taskText === input.taskText;
+
+      // A timed-out request may still occupy the slot. Task-text readers
+      // Wait for the actual read to settle, not for its expired result.
+      if (
+        pending &&
+        input.taskText &&
+        (!sameView || probe.controller.signal.aborted)
+      ) {
+        try {
+          await readWithDeadline(signal, undefined, () =>
+            Promise.all([pending.settled, probe.result]),
+          ).result;
+        } catch {
+          signal.throwIfAborted();
+
+          return { kind: "unavailable" };
+        }
+
+        continue;
       }
 
       probe.waiters++;
@@ -169,82 +266,163 @@ export class OpenCodeCrewStatus {
           () => probe.result,
         ).result;
 
-        if (probe.member === input.member) {
+        if (sameView) {
           return result;
         }
 
         // A different filter needs its own probe once the slot is free.
         // A timed-out RPC can still hold the slot while it drains.
-        if (this.fleetStatusRead.pending === pending) {
-          return;
+        if (lane.read.pending === pending) {
+          return { kind: "unavailable" };
         }
       } finally {
+        // The last waiter's reason tells a deadline from a disconnect.
         if (--probe.waiters === 0) {
-          probe.controller.abort();
+          probe.controller.abort(signal.aborted ? signal.reason : undefined);
         }
       }
     }
   }
 
-  private startFleetStatusProbe(input: CrewStatusInput) {
-    // Start with a short probe and leave time for ordinary crew status.
+  private async fleetStatusRpc(
+    input: FleetCrewStatusInput,
+    signal: AbortSignal,
+  ): Promise<FleetCrewStatusRead> {
+    const rpc = this.client.rpc(CrewReporting);
+    const options = { location: { directory: this.directory() }, signal };
+    const ordinary = input.member === undefined ? {} : { member: input.member };
+
+    const read = async (requested: FleetCrewStatusInput) => {
+      const result = Schema.decodeUnknownSync(fleetCrewStatusOutputSchema)(
+        await rpc.fleetStatus(requested, options),
+      );
+
+      const mode = "taskText" in result ? result.taskText : undefined;
+
+      if (mode !== requested.taskText) {
+        throw new Error(
+          "Fleet crew status answered with the wrong task text view.",
+        );
+      }
+
+      return result;
+    };
+
+    if (!input.taskText) {
+      return { kind: "answer", answer: await read(ordinary) };
+    }
+
+    if (performance.now() < this.taskTextRetryAt) {
+      return { kind: "unsupported", answer: await read(ordinary) };
+    }
+
+    try {
+      return { kind: "answer", answer: await read(input) };
+    } catch (error) {
+      signal.throwIfAborted();
+
+      if (!isInvalidInput(error)) {
+        throw error;
+      }
+
+      // Only a successful re-ask establishes that the field is unsupported.
+      // A failed re-ask is ordinary, even if it reports a missing method.
+      const answer = await read(ordinary).catch(() => {
+        throw new Error("Fleet crew status re-ask failed.");
+      });
+
+      // A reply after the probe ended reaches no caller: cache nothing.
+      signal.throwIfAborted();
+      this.taskTextRetryAt = performance.now() + 60_000;
+
+      return { kind: "unsupported", answer };
+    }
+  }
+
+  private startFleetStatusProbe(
+    lane: FleetStatusLane,
+    input: FleetCrewStatusInput,
+  ): FleetStatusProbe {
+    // Ordinary reads leave time for fallback. Task-text readers own the
+    // Deadline and cancel the shared attempt only when the last one leaves.
     const probeMs = this.fleetStatusProbeMs;
     const controller = new AbortController();
     let failureCounted = false;
 
-    const { result: probe } = this.fleetStatusRead.start(
+    const { result: probe } = lane.read.start(
       controller.signal,
-      (reading) =>
-        this.client.rpc(CrewReporting).fleetStatus(input, {
-          location: { directory: this.directory() },
-          signal: reading,
-        }),
+      (reading) => this.fleetStatusRpc(input, reading),
       {
-        timeout: probeMs,
+        timeout: input.taskText ? false : probeMs,
         onAbandon: () => {
-          if (!failureCounted) {
-            this.recordFleetStatusFailure();
+          if (
+            !failureCounted &&
+            (!input.taskText || isTimeout(controller.signal.reason))
+          ) {
+            this.recordFleetStatusFailure(lane);
+            failureCounted = true;
           }
-
-          failureCounted = true;
         },
       },
     );
 
+    // A task text probe ended by its last waiter's deadline is one ordinary
+    // Failure, in either phase. A caller that went away counts nothing.
+    const ended = (): FleetCrewStatusRead => {
+      if (
+        input.taskText &&
+        !failureCounted &&
+        isTimeout(controller.signal.reason)
+      ) {
+        this.recordFleetStatusFailure(lane);
+        failureCounted = true;
+      }
+
+      return { kind: "unavailable" };
+    };
+
     const result = probe
-      .then((status): FleetCrewStatus | undefined => {
+      .then((status): FleetCrewStatusRead => {
         if (controller.signal.aborted || failureCounted) {
-          return;
+          return ended();
         }
 
-        const result = Schema.decodeUnknownSync(fleetCrewStatusSchema)(status);
-        this.fleetStatusFailures = 0;
+        lane.failures = 0;
 
-        return result;
+        return status;
       })
-      .catch((error: unknown): undefined => {
+      .catch((error: unknown): FleetCrewStatusRead => {
         if (controller.signal.aborted || failureCounted) {
-          return;
+          return ended();
         }
 
-        const timedOut =
-          error instanceof DOMException && error.name === "TimeoutError";
+        const timedOut = isTimeout(error);
 
-        if (timedOut && probeMs < maxFleetStatusProbeMs) {
+        if (!input.taskText && timedOut && probeMs < maxFleetStatusProbeMs) {
           this.fleetStatusProbeMs = Math.max(
             this.fleetStatusProbeMs,
             Math.min(probeMs * 2, maxFleetStatusProbeMs),
           );
         } else {
-          // Older plugins still serve ordinary status. Probe again after an upgrade.
-          this.recordFleetStatusFailure(isMethodNotFound(error));
+          const unsupported = isMethodNotFound(error);
+          this.recordFleetStatusFailure(lane, unsupported);
           failureCounted = true;
+
+          if (unsupported) {
+            return { kind: "unsupported" };
+          }
         }
 
         // Ordinary status cannot verify which checkout is provisioned.
-        return;
+        return { kind: "unavailable" };
       });
 
-    return { member: input.member, result, controller, waiters: 0 };
+    return {
+      member: input.member,
+      taskText: input.taskText,
+      result,
+      controller,
+      waiters: 0,
+    };
   }
 }

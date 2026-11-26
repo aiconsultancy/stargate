@@ -31,13 +31,14 @@ import {
   shipRoute,
 } from "./officers";
 import { apiToken } from "./token";
-import type {
-  ApiV1Source,
-  V1ActivityItemPage,
-  V1AgentActivity,
-  V1Fleet,
-  V1Gateway,
-  V1Snapshot,
+import {
+  type ApiV1Source,
+  CrewStatusUnavailable,
+  type V1ActivityItemPage,
+  type V1AgentActivity,
+  type V1Fleet,
+  type V1Gateway,
+  type V1Snapshot,
 } from "./types";
 
 type Options = {
@@ -209,7 +210,10 @@ function readDetail(
   );
 }
 
-/** What every Fleet API read needs, the same for operators and officers. */
+/**
+ * What every Fleet API read needs. Operators and officers each have one:
+ * officers' reads carry the crew plugin's ordinary task text.
+ */
 type FleetCore = Pick<ApiV1Source, "crew" | "ship" | "shipIdentities"> & {
   diff: ApiV1Diff;
   activity?: Options["activity"];
@@ -398,12 +402,25 @@ async function answer(
       return empty(detail ?? 503);
     }
 
-    const result = await detail;
-    read.throwIfAborted();
+    const result = await detail.catch((error: unknown) => {
+      if (
+        error instanceof CrewStatusUnavailable ||
+        (!signal.aborted &&
+          read.aborted &&
+          error === read.reason &&
+          shipRoute.test(pathname))
+      ) {
+        return 503;
+      }
+
+      throw error;
+    });
 
     if (typeof result === "number") {
       return empty(result);
     }
+
+    read.throwIfAborted();
 
     return method === "HEAD" ? empty(200) : Response.json(result, { headers });
   } catch {
@@ -553,8 +570,21 @@ export async function startApiV1Server(options: Options) {
     ),
   };
 
+  // Officers read the crew plugin's ordinary task text through their own
+  // Shared sample and slots, and never turn activity.
+  const officerCore: FleetCore = {
+    ...core,
+    activity: undefined,
+    crew: (id, member, signal) => source.officer.crew(id, member, signal),
+    ship: (id, signal) => source.officer.ship(id, signal),
+    readFleet: async (signal, captureShipRead, crewDeadline) => ({
+      ...(await source.officer.fleet(signal, captureShipRead, crewDeadline)),
+      name: fleetName,
+    }),
+  };
+
   const operatorReaders = fleetReaders(core);
-  const officerReaders = fleetReaders(core);
+  const officerReaders = fleetReaders(officerCore);
 
   /** People: a private network peer, browser origin rules and the fleet token. */
   async function operatorRequest(
@@ -646,7 +676,7 @@ export async function startApiV1Server(options: Options) {
         ...(options.timing && { timing: options.timing }),
         signal: AbortSignal.any([lifetime.signal, options.signal]),
         fleet: (request, _address, target) =>
-          officerRequest(core, officerReaders, request, target),
+          officerRequest(officerCore, officerReaders, request, target),
       }).catch(() => {
         throw new OfficerSocketError(
           `Cannot open ${officer.officer}'s Fleet API socket. Check its directory, and that no other gateway serves it.`,

@@ -1,5 +1,15 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterEach,
+  describe,
+  expect,
+  expectTypeOf,
+  mock,
+  test,
+} from "bun:test";
+import { OpenCode } from "@opencode/client";
 import type { AgentBackend } from "../src/backends/backend";
+import { OpenCodeCrewStatus } from "../src/backends/opencode/crew-status";
+import type { FleetCrewStatusInput } from "../src/coordination/crew/reporting/fleet-status";
 import type { CrewStatus } from "../src/shared/crew-status";
 import { CronStore } from "../src/automation/cron/store";
 import {
@@ -176,6 +186,221 @@ function member(id: string, busy: boolean) {
 }
 
 describe("dashboard source", () => {
+  test("Fleet sampling is unfiltered, and unredacted unless asked for the ordinary view", async () => {
+    const { ship, store, cronStore } = fixture();
+    const calls: FleetCrewStatusInput[] = [];
+    ship.backend.fleetCrewStatus = async (input) => {
+      calls.push(input);
+
+      const members = input.member
+        ? [member(input.member, true)]
+        : [member("pilot", true), member("other", false)];
+
+      return {
+        kind: "answer",
+        answer: {
+          status: { members, total: members.length, truncated: false },
+          metadata: { projectDirectory: "/fixture", contexts: [] },
+          ...(input.taskText && { taskText: input.taskText }),
+        },
+      };
+    };
+
+    const source = dashboardSource([ship], store, cronStore);
+    expectTypeOf<
+      Parameters<typeof source.fleetWithCrew>["length"]
+    >().toEqualTypeOf<2 | 3 | 4>();
+
+    await source.shipWithCrew(ship.bot.id, signal, {
+      member: "pilot",
+      taskText: "full",
+    });
+    const sample = await source.fleetWithCrew(signal, new Set([ship.bot.id]));
+    expect(sample.ships[0]?.members?.map(({ id }) => id)).toEqual([
+      "pilot",
+      "other",
+    ]);
+    expect(calls).toEqual([
+      { member: "pilot", taskText: "full" },
+      { taskText: "unredacted" },
+    ]);
+
+    await source.fleetWithCrew(
+      signal,
+      new Set([ship.bot.id]),
+      undefined,
+      "ordinary",
+    );
+    expect(calls.at(-1)).toEqual({});
+  });
+
+  test("an officer sample keeps role and model while an operator read is pending", async () => {
+    const { ship, store, cronStore } = fixture();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const asked: string[] = [];
+
+    const metadata = {
+      projectDirectory: "/fixture",
+      contexts: [
+        {
+          member: "pilot",
+          project: null,
+          directory: "/fixture/pilot",
+          role: "Navigator",
+          model: "provider/model",
+        },
+      ],
+    };
+
+    // The plugin holds the operator's task-text ask, ignoring abort.
+    const transport = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const taskText = (await new Request(input, init).text()).includes(
+          '"taskText"',
+        );
+
+        asked.push(taskText ? "unredacted" : "ordinary");
+
+        if (taskText) {
+          entered.resolve();
+          await release.promise;
+        }
+
+        const members = [member("pilot", true)];
+
+        return Response.json({
+          output: {
+            status: { members, total: 1, truncated: false },
+            metadata,
+            ...(taskText && { taskText: "unredacted" }),
+          },
+        });
+      },
+      { preconnect: fetch.preconnect },
+    );
+
+    const crew = new OpenCodeCrewStatus(
+      OpenCode.make({ baseUrl: "http://127.0.0.1:1", fetch: transport }),
+      () => "/fixture",
+    );
+
+    ship.backend.fleetCrewStatus = (input, reading) =>
+      crew.fleetCrewStatus(input, reading);
+    const source = dashboardSource([ship], store, cronStore);
+    const selected = new Set([ship.bot.id]);
+
+    try {
+      const operator = source.fleetWithCrew(signal, selected);
+      await entered.promise;
+
+      const officer = await source.fleetWithCrew(
+        signal,
+        selected,
+        undefined,
+        "ordinary",
+      );
+
+      // Its own fleet status answer, not the crew status fallback.
+      expect(officer.ships[0]?.metadata).toEqual(metadata);
+      expect(asked).toEqual(["unredacted", "ordinary"]);
+      release.resolve();
+      expect((await operator).ships[0]?.metadata).toEqual(metadata);
+    } finally {
+      release.resolve();
+    }
+  });
+
+  test.each([
+    ["an officer never gets unredacted text", "ordinary", "unredacted"],
+    ["an operator never gets ordinary text", "unredacted", "ordinary"],
+  ] as const)(
+    "each Fleet sample view keeps its own slot: %s",
+    async (_name, failing, fresh) => {
+      const { ship, store, cronStore } = fixture();
+      const failed = new Set<string>();
+      let answers = 0;
+
+      const status = (mode: string): CrewStatus => {
+        const pilot = member("pilot", true);
+
+        return {
+          total: 1,
+          truncated: false,
+          members: [
+            {
+              ...pilot,
+              current: pilot.current && {
+                ...pilot.current,
+                summary: `${mode}-${++answers}`,
+              },
+            },
+          ],
+        };
+      };
+
+      ship.backend.fleetCrewStatus = async (input) => {
+        const mode = input.taskText ?? "ordinary";
+
+        if (failed.has(mode)) {
+          return { kind: "unavailable" };
+        }
+
+        return {
+          kind: "answer",
+          answer: {
+            status: status(mode),
+            metadata: { projectDirectory: "/fixture", contexts: [] },
+            ...(input.taskText && { taskText: input.taskText }),
+          },
+        };
+      };
+
+      // A legacy ordinary read is ordinary too; it fails with the view.
+      ship.backend.crewStatus = async () => {
+        if (failed.has("ordinary")) {
+          throw new Error("Crew status unavailable");
+        }
+
+        return status("ordinary");
+      };
+
+      const source = dashboardSource([ship], store, cronStore);
+      const selected = new Set([ship.bot.id]);
+
+      const read = async (view: typeof failing) => {
+        const [row] = (
+          await source.fleetWithCrew(signal, selected, undefined, view)
+        ).ships;
+
+        const members = row?.members;
+
+        return {
+          error: row?.error,
+          shown: members === undefined ? undefined : JSON.stringify(members),
+        };
+      };
+
+      // Cold: the other view's fresh sample is never this view's answer.
+      failed.add(failing);
+      expect((await read(fresh)).shown).toContain(`${fresh}-1`);
+      expect(await read(failing)).toEqual({
+        error: "Crew status unavailable.",
+        shown: undefined,
+      });
+
+      // Warm: a failed read falls back to its own view's last sample only.
+      failed.clear();
+      expect((await read(failing)).shown).toContain(`${failing}-2`);
+      expect((await read(fresh)).shown).toContain(`${fresh}-3`);
+      failed.add(failing);
+      const fallback = await read(failing);
+      expect(fallback.error).toBe("Crew status unavailable.");
+      expect(fallback.shown).toContain(`${failing}-2`);
+      expect(fallback.shown).not.toContain(fresh);
+    },
+  );
+
   test.each([true, false])(
     "retiring an unused alias leaves the primary crew read running (healthy: %s)",
     async (healthy) => {

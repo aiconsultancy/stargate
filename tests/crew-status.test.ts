@@ -10,9 +10,17 @@ import {
   type CrewOptions,
   type CrewSessions,
 } from "../src/coordination/crew/execution/engine";
+import { crewInputSchema } from "../src/coordination/crew/input/crew-tool-input";
+import { fleetCrewFullStatusSchema } from "../src/coordination/crew/reporting/fleet-status";
 import { MemberActivityStore } from "../src/coordination/crew/reporting/member-activity";
 import { teamSchema } from "../src/coordination/crew/team";
-import { crewStatusSchema } from "../src/shared/crew-status";
+import { redactCredentials } from "../src/lib/credentials";
+import { activityText } from "../src/coordination/crew/reporting/member-activity";
+import {
+  dashboardCrewMembers,
+  dashboardCrewSummary,
+} from "../src/observability/dashboard/dashboard-projection";
+import { crewStatusSchema, crewTaskTextLimit } from "../src/shared/crew-status";
 import { CrewUI, crewStatusView } from "../src/transports/slack/crew-ui";
 import type { CronView, SlackAck } from "../src/automation/cron/ui";
 import { bot, identity } from "./fixtures";
@@ -184,6 +192,300 @@ test("read-only roster shows Pi/OpenCode/unprovisioned, stale running and bounde
     } finally {
       db.close();
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test("crew status readers show raw stored task text exactly as before: redacted and bounded on read", async () => {
+  const f = await fixture();
+
+  try {
+    const twiki = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const assignment = `Deploy with token=fixture-value ${"é".repeat(300)} end`;
+    const progress = `${"p".repeat(500)} password=fixture-value tail`;
+    const task = f.engine.state.reserveTask(twiki, "captain", assignment);
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+    f.engine.state.activity.progress(task.id, progress);
+    f.engine.state.enqueue(twiki, "captain", assignment);
+
+    // What the store held before it kept raw text.
+    const summary = redactCredentials(assignment, 180);
+    const tail = redactCredentials(progress, 64_000).slice(-400);
+    expect(summary).toContain("token=[REDACTED]");
+    expect(tail).toContain("password=[REDACTED]");
+
+    // Crew status RPC and tool: the engine's ordinary status.
+    const status = f.engine.status({ member: "twiki" });
+    const member = status.members[0];
+    expect(member?.current).toMatchObject({ summary, progress: tail });
+    expect(member?.queued.map((queued) => queued.summary)).toEqual([summary]);
+
+    // Health parses with the shared CrewStatus caps, which raw text exceeds.
+    expect(Schema.decodeUnknownSync(crewStatusSchema)(status)).toEqual(status);
+
+    // Slack crew UI and the operator dashboard render only that status.
+    for (const shown of [
+      crewStatusView(status, true),
+      crewStatusView(f.engine.status(), false),
+      dashboardCrewMembers(status),
+      dashboardCrewSummary(status),
+    ]) {
+      expect(JSON.stringify(shown)).not.toContain("fixture-value");
+    }
+
+    expect(JSON.stringify(crewStatusView(status, true))).toContain(
+      "token=[REDACTED]",
+    );
+
+    // Only an explicit full-text read sees the stored text.
+    const full = f.engine.status({ member: "twiki" }, { taskText: "full" });
+    expect(full.members[0]?.current).toMatchObject({
+      summary: assignment,
+      progress,
+    });
+    expect(full.members[0]?.queued[0]?.summary).toBe(assignment);
+
+    // Raw text keeps control and bidi characters; ordinary readers still
+    // Strip C0/C1 controls on read, as before.
+    const controls = "Run \u001b[2J \u0007 \u009b1m \u202edone";
+    f.engine.state.activity.progress(task.id, controls);
+    expect(
+      f.engine.status({ member: "twiki" }, { taskText: "full" }).members[0]
+        ?.current?.progress,
+    ).toBe(controls);
+    expect(
+      f.engine.status({ member: "twiki" }).members[0]?.current?.progress,
+    ).toBe(redactCredentials(controls, 64_000).slice(-400));
+  } finally {
+    await f.close();
+  }
+});
+
+test("ordinary task text masks credentials revealed by stripping controls", async () => {
+  const f = await fixture();
+
+  try {
+    const peer = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const text = "Check to\u0007ken=fixture-value before deployment";
+    const task = f.engine.state.reserveTask(peer, "captain", text);
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+    f.engine.state.activity.progress(task.id, text);
+    const masked = "Check token=[REDACTED] before deployment";
+    expect(
+      f.engine.status({ member: "twiki" }).members[0]?.current,
+    ).toMatchObject({ summary: masked, progress: masked });
+
+    for (const taskText of ["unredacted", "full"] as const) {
+      const status = f.engine.status({ member: "twiki" }, { taskText });
+      expect(status.members[0]?.current).toMatchObject({
+        summary: text,
+        progress: text,
+      });
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("ordinary task summary and progress replace a surrogate split at the display cut", async () => {
+  const f = await fixture();
+
+  try {
+    const peer = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+
+    const task = f.engine.state.reserveTask(
+      peer,
+      "captain",
+      `x${"😀".repeat(90)}`,
+    );
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+    f.engine.state.activity.progress(task.id, `${"😀".repeat(200)}y`);
+    const current = f.engine.status({ member: "twiki" }).members[0]?.current;
+    expect(current).toMatchObject({
+      summary: `x${"😀".repeat(89)}\uFFFD`,
+      progress: `\uFFFD${"😀".repeat(199)}y`,
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test("stored task text is cut at 64,000 code points without splitting a surrogate pair", async () => {
+  const f = await fixture();
+
+  try {
+    expect(activityText("short")).toBe("short");
+
+    // One unit, then pairs: the cut lands mid-pair in UTF-16 units.
+    const astral = `x${"😀".repeat(70_000)}`;
+    const cut = activityText(astral);
+    expect(Array.from(cut)).toHaveLength(crewTaskTextLimit);
+    expect(cut).toBe(`x${"😀".repeat(crewTaskTextLimit - 1)}`);
+    expect(cut.isWellFormed()).toBe(true);
+
+    const dispatch = Schema.decodeUnknownSync(crewInputSchema);
+    const input = { op: "dispatch", crew: "twiki", text: cut };
+    expect(dispatch(input)).toMatchObject({ text: cut });
+    expect(() => dispatch({ ...input, text: `${cut}😀` })).toThrow();
+
+    // Only the head is scanned, however long the input is.
+    expect(activityText("a".repeat(10_000_000))).toBe(
+      "a".repeat(crewTaskTextLimit),
+    );
+
+    const twiki = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const task = f.engine.state.reserveTask(twiki, "captain", astral);
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+    f.engine.state.activity.progress(task.id, `${astral}y`);
+    const progress = `${"😀".repeat(crewTaskTextLimit - 1)}y`;
+
+    const read = (taskText: "unredacted" | "full") =>
+      f.engine.status({ member: "twiki" }, { taskText }).members[0]?.current;
+
+    expect(read("full")).toMatchObject({ summary: cut, progress });
+
+    const fleet = {
+      status: f.engine.status({ member: "twiki" }, { taskText: "full" }),
+      metadata: { projectDirectory: "/fixture", contexts: [] },
+      taskText: "full" as const,
+    };
+
+    const decodeFleet = Schema.decodeUnknownSync(fleetCrewFullStatusSchema);
+    expect(decodeFleet(fleet)).toEqual(fleet);
+    const stored = fleet.status.members[0]?.current;
+
+    if (!stored) {
+      throw new Error("Missing current task");
+    }
+
+    stored.progress = `${cut}😀`;
+    expect(() => decodeFleet(fleet)).toThrow();
+    // Unredacted keeps the summary's start and the progress tail, whole pairs.
+    expect(read("unredacted")).toMatchObject({
+      summary: `x${"😀".repeat(179)}`,
+      progress: `${"😀".repeat(399)}y`,
+    });
+    expect(
+      f.engine.status({ member: "twiki" }).members[0]?.current?.progress,
+    ).toBe(`\uFFFD${"😀".repeat(199)}y`);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a credential the progress cut splits stays masked for ordinary readers and whole in the full view", async () => {
+  const f = await fixture();
+
+  try {
+    const twiki = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const task = f.engine.state.reserveTask(twiki, "captain", "Rotate keys");
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+
+    // The key's header falls just before the last 64,000 code points.
+    const header = `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\n`;
+    const body = "Zm9v".repeat(crewTaskTextLimit / 4);
+    f.engine.state.activity.progress(task.id, `Key: ${header}${body}`);
+
+    const read = (taskText?: "unredacted" | "full") =>
+      f.engine.status({ member: "twiki" }, taskText && { taskText }).members[0]
+        ?.current?.progress;
+
+    expect(read()).toBe("Key: [REDACTED PRIVATE KEY]");
+    expect(read("full")).toBe(body);
+    expect(read("unredacted")).toBe(body.slice(-400));
+
+    // Progress that fits is masked on read, as before.
+    f.engine.state.activity.progress(task.id, `Key: ${header}Zm9v`);
+    expect(read()).toBe("Key: [REDACTED PRIVATE KEY]");
+    expect(read("full")).toBe(`Key: ${header}Zm9v`);
+
+    // Rows from before the column are masked on read; opening only adds it.
+    const legacy = new Database(":memory:");
+    legacy.run(`
+      CREATE TABLE tasks (id TEXT PRIMARY KEY, crewID TEXT);
+      CREATE TABLE member_activity (
+        taskID TEXT PRIMARY KEY, crewID TEXT NOT NULL,
+        kind TEXT NOT NULL, summary TEXT NOT NULL,
+        phase TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '',
+        createdAt INTEGER, startedAt INTEGER, updatedAt INTEGER,
+        finishedAt INTEGER
+      );
+      INSERT INTO member_activity (taskID,crewID,kind,summary,phase,progress)
+        VALUES ('old','twiki','assignment','Old','running','token=old-value');
+    `);
+    const store = new MemberActivityStore(legacy);
+    new MemberActivityStore(legacy);
+    expect(store.task({ id: "old", status: "running" }).progress).toBe(
+      "token=[REDACTED]",
+    );
+    expect(store.task({ id: "old", status: "running" }, "full").progress).toBe(
+      "token=old-value",
+    );
+    legacy.close();
+  } finally {
+    await f.close();
+  }
+});
+
+test("the same stored tail, stored again with a key header before the cut, updates the ordinary copy", async () => {
+  const f = await fixture();
+
+  try {
+    const twiki = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const task = f.engine.state.reserveTask(twiki, "captain", "Rotate keys");
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+
+    const read = (taskText?: "full") =>
+      f.engine.status({ member: "twiki" }, taskText && { taskText }).members[0]
+        ?.current?.progress;
+
+    // Exactly the stored limit: nothing is cut, so no masked copy is kept.
+    const header = `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\n`;
+    const body = "Zm9v".repeat(crewTaskTextLimit / 4);
+    f.engine.state.activity.progress(task.id, body);
+    expect(read()).toBe(body.slice(-400));
+
+    // The raw tail is unchanged; only the copy masked before the cut is new.
+    f.engine.state.activity.progress(task.id, `Key: ${header}${body}`);
+    expect(read("full")).toBe(body);
+    expect(read()).toBe("Key: [REDACTED PRIVATE KEY]");
   } finally {
     await f.close();
   }

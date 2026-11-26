@@ -1,6 +1,10 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
-import { crewStatusSchema } from "../../../shared/crew-status";
+import {
+  crewStatusSchema,
+  crewStatusSchemaWith,
+  crewTaskTextLimit,
+} from "../../../shared/crew-status";
 import {
   HISTORY_PAGE,
   MAX_CREW_CONTEXTS,
@@ -27,17 +31,69 @@ const metadata = exactStruct({
   ).check(Schema.isMaxLength(20)),
 });
 
-/** Internal, location-scoped RPC. The Fleet API also shows checkout paths that crew task text contains. */
+/**
+ * Internal, location-scoped RPC. The Fleet API also shows checkout paths that
+ * crew task text contains. `taskText` asks for task text without redaction:
+ * `unredacted` within the ordinary 180/80/400 limits, for any filter, or
+ * `full`, up to 64,000 code points, for one member. Without it the answer is
+ * ordinary, redacted status. Plugins older than the field reject it, and the
+ * caller asks again without it.
+ */
 export const fleetCrewStatusInputSchema = exactStruct({
   member: Schema.optional(agentIDSchema),
-});
+  taskText: Schema.optional(Schema.Literals(["unredacted", "full"])),
+}).check(
+  Schema.makeFilter((input) =>
+    input.taskText === "full" && input.member === undefined
+      ? { path: ["member"], issue: "Full task text needs one member." }
+      : undefined,
+  ),
+);
 
+export type FleetCrewStatusInput = typeof fleetCrewStatusInputSchema.Type;
+
+/** A member ID the plugin accepts; any other is never sent to it. */
+export const isFleetMember = Schema.is(agentIDSchema);
+
+const fullTextStatus = crewStatusSchemaWith({
+  summary: crewTaskTextLimit,
+  phase: crewTaskTextLimit,
+  progress: crewTaskTextLimit,
+}).status;
+
+/** Ordinary status, as every caller that does not ask for full text gets it. */
 export const fleetCrewStatusSchema = exactStruct({
   status: crewStatusSchema,
   metadata,
 });
 
-export type FleetCrewStatus = typeof fleetCrewStatusSchema.Type;
+/** Unredacted task text within the ordinary limits. */
+export const fleetCrewUnredactedStatusSchema = exactStruct({
+  status: crewStatusSchema,
+  metadata,
+  taskText: Schema.Literal("unredacted"),
+});
+
+/** Raw task text; `taskText` tells the caller it is not redacted. */
+export const fleetCrewFullStatusSchema = exactStruct({
+  status: fullTextStatus,
+  metadata,
+  taskText: Schema.Literal("full"),
+});
+
+export const fleetCrewStatusOutputSchema = Schema.Union([
+  fleetCrewStatusSchema,
+  fleetCrewUnredactedStatusSchema,
+  fleetCrewFullStatusSchema,
+]);
+
+export type FleetCrewStatus = typeof fleetCrewStatusOutputSchema.Type;
+
+/** Local read result, not part of the plugin's RPC protocol. */
+export type FleetCrewStatusRead =
+  | { kind: "answer"; answer: FleetCrewStatus }
+  | { kind: "unsupported"; answer?: FleetCrewStatus }
+  | { kind: "unavailable" };
 
 const index = Schema.Finite.check(
   Schema.isInt(),

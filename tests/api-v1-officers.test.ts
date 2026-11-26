@@ -94,7 +94,7 @@ const ship: V1ShipDetail = {
 const { crewMembers: _crew, ...summary } = ship;
 
 // Two ships: an officer of one reads the other's too.
-const source: ApiV1Source = {
+const reads: Pick<ApiV1Source, "fleet" | "ship" | "crew"> = {
   fleet: async () => ({
     apiVersion: 1,
     generatedAt: 123_456_789,
@@ -106,6 +106,11 @@ const source: ApiV1Source = {
   ship: async (id) => (id === ship.id ? ship : undefined),
   crew: async (id, name) =>
     id === ship.id && name === member.id ? { ship: id, member } : undefined,
+};
+
+const source: ApiV1Source = {
+  ...reads,
+  officer: reads,
   gatewayFeatures: () => [],
 };
 

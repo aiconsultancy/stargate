@@ -10,10 +10,103 @@ import {
 } from "./fleet-status";
 import {
   type CrewStatusTask,
-  crewAssignmentText,
+  type CrewTaskTextMode,
+  crewTaskTextLimit,
+  crewTaskTextLimits,
 } from "../../../shared/crew-status";
 
 type Activity = Omit<CrewStatusTask, "id" | "status">;
+
+/**
+ * A stored row. `maskedProgress` is the ordinary view of progress that was
+ * longer than the store keeps, masked from the uncut text; null otherwise.
+ */
+type StoredActivity = Activity & { maskedProgress: string | null };
+
+/**
+ * The first `limit` code points. Only twice that many UTF-16 units are
+ * scanned, and the cut never splits a surrogate pair.
+ */
+function head(text: string, limit: number) {
+  return text.length <= limit
+    ? text
+    : Array.from(text.slice(0, 2 * limit))
+        .slice(0, limit)
+        .join("");
+}
+
+/** The last `limit` code points, scanning at most twice that many units. */
+function tail(text: string, limit: number) {
+  return text.length <= limit
+    ? text
+    : Array.from(text.slice(-2 * limit))
+        .slice(-limit)
+        .join("");
+}
+
+/** The start of a summary, cut to the stored task text limit. */
+export function activityText(text: string) {
+  return head(text, crewTaskTextLimit);
+}
+
+/**
+ * The newest progress as a producer may buffer it before the store: twice
+ * the stored limit, so the store still masks with the masker's whole
+ * window before it makes the final cut.
+ */
+export function activityProgressBuffer(text: string) {
+  return tail(text, 2 * crewTaskTextLimit);
+}
+
+function maskTaskText(text: string, limit: number, keep: "head" | "tail") {
+  // Control stripping can expose a credential the first pass did not see.
+  const scanLimit = keep === "tail" ? 2 * crewTaskTextLimit : crewTaskTextLimit;
+  const stripped = redactCredentials(text, scanLimit, keep);
+
+  return redactCredentials(stripped, limit, keep).toWellFormed();
+}
+
+/** Ordinary progress, masked and bounded: from uncut text when it is cut. */
+const maskProgress = (text: string) =>
+  maskTaskText(text, crewTaskTextLimits.progress, "tail");
+
+/**
+ * How ordinary crew status shows stored text: redacted and bounded, exactly
+ * as the store held it before it kept raw text. Rows written then are
+ * already redacted, and redacting them again leaves them unchanged. Cut
+ * progress shows its copy masked before the cut.
+ */
+function maskedActivity({
+  maskedProgress,
+  ...activity
+}: StoredActivity): Activity {
+  return {
+    ...activity,
+    summary: maskTaskText(activity.summary, crewTaskTextLimits.summary, "head"),
+    progress: maskedProgress ?? maskProgress(activity.progress),
+  };
+}
+
+/**
+ * The ordinary bounds and ends (the summary's start, the progress tail)
+ * without redaction or control stripping.
+ */
+function unredactedActivity({
+  maskedProgress: _,
+  ...activity
+}: StoredActivity): Activity {
+  return {
+    ...activity,
+    summary: head(activity.summary, crewTaskTextLimits.summary),
+    progress: tail(activity.progress, crewTaskTextLimits.progress),
+  };
+}
+
+const shown = {
+  ordinary: maskedActivity,
+  unredacted: unredactedActivity,
+  full: ({ maskedProgress: _, ...activity }: StoredActivity) => activity,
+} satisfies Record<CrewTaskTextMode, (stored: StoredActivity) => Activity>;
 
 type ActivityTask = {
   id: string;
@@ -38,12 +131,23 @@ export class MemberActivityStore {
         ON member_activity(crewID,updatedAt);
       CREATE INDEX IF NOT EXISTS member_task_history ON tasks(crewID);
     `);
+
+    const columns = db
+      .query<{ name: string }, []>("PRAGMA table_info(member_activity)")
+      .all();
+
+    // Only added: rows written before keep masking on read.
+    if (!columns.some((column) => column.name === "maskedProgress")) {
+      db.run("ALTER TABLE member_activity ADD COLUMN maskedProgress TEXT");
+    }
   }
 
   public assignment<T extends ActivityTask>(
     task: T,
     text: string,
     report = false,
+    /** Only the dispatcher's own prefix is excluded, never matching user text. */
+    assignmentStart = 0,
   ) {
     const now = Date.now();
     this.db
@@ -56,7 +160,7 @@ export class MemberActivityStore {
         report ? "report" : "assignment",
         report
           ? "Prepare crew activity report"
-          : redactCredentials(crewAssignmentText(text), 180),
+          : activityText(text.slice(assignmentStart)),
         task.status,
         now,
         now,
@@ -98,20 +202,32 @@ export class MemberActivityStore {
     this.trim(task.crewID);
   }
 
+  /**
+   * The store makes the only cut: the last 64,000 code points, raw, for the
+   * full view. Progress that is cut keeps its ordinary view masked from the
+   * uncut text, so a credential the cut splits is still masked there.
+   */
   public progress(taskID: string, text: string) {
-    const safe = redactCredentials(text, 64_000).slice(-400);
+    const raw = tail(text, crewTaskTextLimit);
+    const masked = raw === text ? null : maskProgress(text);
     this.db
-      .query(`UPDATE member_activity SET progress=?,updatedAt=?
-      WHERE taskID=? AND progress<>?`)
-      .run(safe, Date.now(), taskID, safe);
+      .query(`UPDATE member_activity SET progress=?,maskedProgress=?,updatedAt=?
+      WHERE taskID=? AND (progress<>? OR maskedProgress IS NOT ?)`)
+      .run(raw, masked, Date.now(), taskID, raw, masked);
   }
 
-  public task(task: Pick<ActivityTask, "id" | "status">): CrewStatusTask {
-    const activity = this.db
-      .query<Activity, [string]>(`SELECT kind,summary,phase,
-      progress,createdAt,startedAt,updatedAt,finishedAt
+  /** Task text as `mode` shows it; ordinary status redacts and bounds it. */
+  public task(
+    task: Pick<ActivityTask, "id" | "status">,
+    mode: CrewTaskTextMode = "ordinary",
+  ): CrewStatusTask {
+    const stored = this.db
+      .query<StoredActivity, [string]>(`SELECT kind,summary,phase,
+      progress,maskedProgress,createdAt,startedAt,updatedAt,finishedAt
       FROM member_activity WHERE taskID=?`)
       .get(task.id);
+
+    const activity = stored && shown[mode](stored);
 
     // Known local decision; the external native stop is reported separately.
     const stop =
@@ -122,6 +238,16 @@ export class MemberActivityStore {
             )
             .get(task.id)?.stop
         : undefined;
+
+    // Expiry can cancel queued reports directly. Durable task state wins over
+    // An older lifecycle label; reading must not write a repair event.
+    const phase =
+      activity?.phase === "Execution failed; outcome uncertain" &&
+      task.status === "uncertain"
+        ? activity.phase
+        : stop && stop !== "confirmed"
+          ? `abandoned; native stop ${stop}`
+          : task.status;
 
     return {
       id: task.id,
@@ -136,19 +262,14 @@ export class MemberActivityStore {
         updatedAt: null,
         finishedAt: null,
       }),
-      // Expiry can cancel queued reports directly. Durable task state wins over
-      // An older lifecycle label; reading must not write a repair event.
-      phase:
-        activity?.phase === "Execution failed; outcome uncertain" &&
-        task.status === "uncertain"
-          ? activity.phase
-          : stop && stop !== "confirmed"
-            ? `abandoned; native stop ${stop}`
-            : task.status,
+      phase: head(
+        phase,
+        mode === "full" ? crewTaskTextLimit : crewTaskTextLimits.phase,
+      ),
     };
   }
 
-  public read(crewID: string) {
+  public read(crewID: string, mode: CrewTaskTextMode = "ordinary") {
     const queued = this.db
       .query<Pick<ActivityTask, "id" | "status">, [string]>(
         `SELECT id,status FROM pending_tasks WHERE crewID=? AND status='queued'
@@ -175,7 +296,7 @@ export class MemberActivityStore {
         `SELECT id,status FROM (${terminal}) ORDER BY time DESC,sequence DESC LIMIT 8`,
       )
       .all(crewID, crewID)
-      .map((task) => this.task(task));
+      .map((task) => this.task(task, mode));
 
     const recentCount =
       this.db
@@ -185,7 +306,7 @@ export class MemberActivityStore {
         .get(crewID, crewID)?.count ?? 0;
 
     return {
-      queued: queued.map((task) => this.task(task)),
+      queued: queued.map((task) => this.task(task, mode)),
       queuedCount,
       lastOutcome: recent[0] ?? null,
       recent,

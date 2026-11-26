@@ -505,7 +505,7 @@ test("crew activity is on whenever the Fleet API is", () => {
   ).toMatchObject({ enabled: true });
 });
 
-const source: ApiV1Source = {
+const reads: Pick<ApiV1Source, "fleet" | "ship" | "crew"> = {
   fleet: async () => ({
     apiVersion: 1,
     generatedAt: 1,
@@ -516,6 +516,11 @@ const source: ApiV1Source = {
   }),
   ship: async () => undefined,
   crew: async () => undefined,
+};
+
+const source: ApiV1Source = {
+  ...reads,
+  officer: reads,
   gatewayFeatures: () => [],
 };
 

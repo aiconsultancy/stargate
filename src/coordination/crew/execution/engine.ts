@@ -24,7 +24,11 @@ import type {
   SessionSyntheticInput,
 } from "@opencode/client";
 import { Predicate, Result, Schema } from "effect";
-import type { CrewStatus, CrewStatusInput } from "../../../shared/crew-status";
+import type {
+  CrewStatus,
+  CrewStatusInput,
+  CrewTaskTextMode,
+} from "../../../shared/crew-status";
 import {
   type MaintenanceDrain,
   drainNoticeID,
@@ -513,13 +517,19 @@ export class CrewEngine {
    */
   public status(
     input: CrewStatusInput,
-    options: { aggregate: true },
+    options: { aggregate: true; taskText?: CrewTaskTextMode },
   ): CrewStatus & { busy: number };
-  public status(input?: CrewStatusInput): CrewStatus;
+  public status(
+    input?: CrewStatusInput,
+    options?: { taskText?: CrewTaskTextMode },
+  ): CrewStatus;
+  /** `taskText` other than `ordinary` returns task text unredacted. */
   public status(
     input: CrewStatusInput = {},
-    options?: { aggregate: true },
+    options?: { aggregate?: true; taskText?: CrewTaskTextMode },
   ): CrewStatus {
+    const taskText = options?.taskText ?? "ordinary";
+
     const members = this.options.team.crew.filter(
       ({ id }) => !input.member || input.member === id,
     );
@@ -544,8 +554,8 @@ export class CrewEngine {
           backend: member.backend ? "pi-durable" : "opencode",
           provisioned: peer?.status ?? "unprovisioned",
           observed: !!current && !!member.backend && this.pi.observed(current),
-          current: current ? this.state.activity.task(current) : null,
-          ...this.state.activity.read(member.id),
+          current: current ? this.state.activity.task(current, taskText) : null,
+          ...this.state.activity.read(member.id, taskText),
         };
       }),
       total: members.length,
@@ -1545,7 +1555,11 @@ export class CrewEngine {
     }
   }
 
-  public async run(raw: unknown, callerInput: CrewCaller): Promise<CrewResult> {
+  public async run(
+    raw: unknown,
+    callerInput: CrewCaller,
+    assignmentPreamble = "",
+  ): Promise<CrewResult> {
     const caller = this.logicalCaller(callerInput);
     const parsed = Schema.decodeUnknownResult(crewInputSchema)(raw);
 
@@ -1649,7 +1663,7 @@ export class CrewEngine {
       }
 
       if (input.op === "dispatch") {
-        return await this.dispatch(input, caller);
+        return await this.dispatch(input, caller, assignmentPreamble);
       }
 
       if (input.op === "compact") {
@@ -3237,10 +3251,23 @@ export class CrewEngine {
   private async dispatch(
     input: Extract<CrewInput, { op: "dispatch" }>,
     caller: CrewCaller,
+    assignmentPreamble: string,
   ): Promise<CrewResult> {
     const messageID = caller.messageID;
     const originInputID = await this.dispatchOrigin(caller, messageID);
     const held = this.drain();
+    const text = assignmentPreamble + input.text;
+    const assignmentStart = assignmentPreamble.length;
+
+    const enqueue = (peer: Peer, drainRunID?: string) =>
+      this.state.enqueue(
+        peer,
+        caller.sessionID,
+        text,
+        undefined,
+        originInputID,
+        { ...(drainRunID && { drainRunID }), assignmentStart },
+      );
 
     if (held) {
       // Queue durably, regardless of `queue`: never reserve or prompt a worker.
@@ -3251,29 +3278,13 @@ export class CrewEngine {
 
       return {
         status: "queued",
-        task: this.state.enqueue(
-          reserved,
-          caller.sessionID,
-          input.text,
-          undefined,
-          originInputID,
-          held.runID,
-        ),
+        task: enqueue(reserved, held.runID),
         diagnostic:
           "Maintenance drain active: the assignment is queued durably and starts automatically under this captain after maintenance completes. Do not resubmit it.",
       };
     }
 
     const peer = await this.ensure(input.crew, caller.signal);
-
-    const enqueue = () =>
-      this.state.enqueue(
-        peer,
-        caller.sessionID,
-        input.text,
-        undefined,
-        originInputID,
-      );
 
     let active = this.state.activeTask(input.crew);
 
@@ -3305,7 +3316,7 @@ export class CrewEngine {
         return input.queue
           ? {
               status: "queued",
-              task: enqueue(),
+              task: enqueue(peer),
             }
           : busy;
       }
@@ -3314,7 +3325,7 @@ export class CrewEngine {
         return input.queue
           ? {
               status: "queued",
-              task: enqueue(),
+              task: enqueue(peer),
             }
           : busy;
       }
@@ -3326,7 +3337,7 @@ export class CrewEngine {
       return input.queue
         ? {
             status: "queued",
-            task: enqueue(),
+            task: enqueue(peer),
           }
         : busy;
     }
@@ -3342,14 +3353,7 @@ export class CrewEngine {
         if (drain) {
           return {
             held: true,
-            task: this.state.enqueue(
-              peer,
-              caller.sessionID,
-              input.text,
-              undefined,
-              originInputID,
-              drain.runID,
-            ),
+            task: enqueue(peer, drain.runID),
           };
         }
 
@@ -3362,8 +3366,9 @@ export class CrewEngine {
           task: this.state.reserveTask(
             peer,
             caller.sessionID,
-            input.text,
+            text,
             originInputID,
+            assignmentStart,
           ),
         };
       },
@@ -3384,12 +3389,12 @@ export class CrewEngine {
       return input.queue
         ? {
             status: "queued",
-            task: enqueue(),
+            task: enqueue(peer),
           }
         : { status: "busy" };
     }
 
-    return this.admit(task, input.text, caller);
+    return this.admit(task, text, caller);
   }
 
   private async dispatchOrigin(

@@ -4,22 +4,25 @@ import type { AgentBackend } from "../../../../backends/backend";
 import { ircFeedbackDefaults } from "../../../../config";
 import { truncateCodePoints } from "../../../../lib/code-points";
 import { redactCredentials } from "../../../../lib/credentials";
-import type {
-  CheckoutDiff,
-  CheckoutDiffInput,
-  CrewGit,
-  CrewGitInput,
-  CrewGitState,
-  FleetCrewStatus,
-} from "../../../../coordination/crew/reporting/fleet-status";
 import {
-  type CrewStatus,
-  type CrewStatusTask,
-  crewAssignmentText,
+  type CheckoutDiff,
+  type CheckoutDiffInput,
+  type CrewGit,
+  type CrewGitInput,
+  type CrewGitState,
+  type FleetCrewStatus,
+  isFleetMember,
+} from "../../../../coordination/crew/reporting/fleet-status";
+import type {
+  CrewStatus,
+  CrewStatusTask,
 } from "../../../../shared/crew-status";
 import type { DashboardCrewMember, ShipSummary } from "../../dashboard-model";
 import { dashboardCrewSummary } from "../../dashboard-projection";
-import type { DashboardFleetSource } from "../../dashboard-source";
+import type {
+  DashboardFleetSource,
+  FleetSampleView,
+} from "../../dashboard-source";
 import { abortable, runAbortable } from "../../../../lib/effect";
 import { isLoopbackHost } from "../../../../lib/loopback";
 import { backendFingerprint } from "../../../../shared/registration";
@@ -38,6 +41,7 @@ import { createPullReader } from "./pulls";
 import {
   API_V1_VERSION,
   type ApiV1Source,
+  CrewStatusUnavailable,
   type V1Activity,
   type V1Captain,
   type V1CrewContext,
@@ -262,19 +266,14 @@ function checkoutText(metadata?: Metadata) {
 
 type CrewText = ReturnType<typeof checkoutText>;
 
-/** Crew output is shown as written; only its length may be bounded. */
-type TaskText = (text: string, limit: number) => string;
-
-const fullText: TaskText = (text) => text;
-
-function v1Task(task: CrewStatusTask, text: TaskText): V1Task {
+function v1Task(task: CrewStatusTask): V1Task {
   return {
     id: task.id,
     status: task.status,
     kind: task.kind,
-    summary: text(crewAssignmentText(task.summary), 180),
-    phase: text(task.phase, 80),
-    progress: text(task.progress, 400),
+    summary: task.summary,
+    phase: task.phase,
+    progress: task.progress,
     createdAt: task.createdAt,
     startedAt: task.startedAt,
     updatedAt: task.updatedAt,
@@ -282,19 +281,17 @@ function v1Task(task: CrewStatusTask, text: TaskText): V1Task {
   };
 }
 
-function projectContext(context: Context, text: TaskText): V1CrewContext {
-  const task = (value: CrewStatusTask) => v1Task(value, text);
-
+function projectContext(context: Context): V1CrewContext {
   return {
     project: context.project === "default" ? null : (context.project ?? null),
     activity: contextActivity(context),
     provisioned: context.provisioned,
     observed: context.observed,
-    current: context.current && task(context.current),
+    current: context.current && v1Task(context.current),
     queuedCount: context.queuedCount,
-    queued: context.queued.slice(0, 5).map((item) => task(item)),
-    lastOutcome: context.lastOutcome && task(context.lastOutcome),
-    recent: context.recent.slice(0, 8).map((item) => task(item)),
+    queued: context.queued.map(v1Task),
+    lastOutcome: context.lastOutcome && v1Task(context.lastOutcome),
+    recent: context.recent.map(v1Task),
     recentCount: context.recentCount,
     git: null,
     pullRequest: null,
@@ -538,7 +535,6 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     person: DashboardCrewMember,
     at: number,
     { configured: configuredText }: CrewText,
-    taskText: TaskText,
     metadata?: Metadata,
     sessions?: HistorySession[],
   ): V1CrewMember[] {
@@ -552,9 +548,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       (entry) => entry.member === person.id,
     );
 
-    const contexts = person.contexts.map((context) =>
-      projectContext(context, taskText),
-    );
+    const contexts = person.contexts.map(projectContext);
 
     const activity =
       activityOrder.find((state) =>
@@ -740,15 +734,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     );
 
     const crewMembers = people.flatMap((person) =>
-      crewMember(
-        id,
-        person,
-        at,
-        text,
-        only ? fullText : truncateCodePoints,
-        metadata,
-        view.sessions,
-      ),
+      crewMember(id, person, at, text, metadata, view.sessions),
     );
 
     if (only && crewMembers.length === 0) {
@@ -837,6 +823,159 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     };
   }
 
+  /**
+   * Fleet, ship and crew reads for one listener. The operator listener gets
+   * task text unredacted (`full` for one member); officers' sockets get the
+   * crew plugin's ordinary view, redacted and bounded by the plugin itself.
+   */
+  function taskTextReads(
+    listener: "operator" | "officer",
+  ): Pick<ApiV1Source, "fleet" | "ship" | "crew"> {
+    const operator = listener === "operator";
+    const view: FleetSampleView = operator ? "unredacted" : "ordinary";
+
+    return {
+      async fleet(signal, captureShipRead, crewDeadline) {
+        signal.throwIfAborted();
+        const config = deps.config();
+        const configured = registrations(config);
+
+        // The sample also feeds each ship's `ship` event, in this listener's
+        // View, within the ordinary limits.
+        const fleet = await dashboard.fleetWithCrew(
+          signal,
+          new Set(configured.keys()),
+          crewDeadline,
+          view,
+        );
+
+        signal.throwIfAborted();
+        let admiral: V1Captain | null = null;
+        let longestIdle: V1Fleet["longestIdle"] = null;
+        const pending: Promise<V1Ship>[] = [];
+
+        for (const row of [...fleet.ships].toSorted((a, b) =>
+          a.summary.id.localeCompare(b.summary.id),
+        )) {
+          const { summary, metadata, error } = row;
+          const registration = configured.get(summary.id);
+
+          if (!registration) {
+            continue;
+          }
+
+          const officer = captain(
+            registration,
+            summary.name,
+            summary.queue,
+            fleet.generatedAt,
+          );
+
+          if (officer.role === "rear_admiral") {
+            admiral ??= officer;
+            continue;
+          }
+
+          const { readDetail } = row;
+
+          if (captureShipRead && readDetail) {
+            captureShipRead(summary.id, async (reading) =>
+              shipDetail(registration, await readDetail(reading), reading),
+            );
+          }
+
+          const text = checkoutText(metadata);
+
+          const people = (row.members ?? []).flatMap((person) =>
+            crewMember(summary.id, person, fleet.generatedAt, text, metadata),
+          );
+
+          for (const member of people) {
+            if (
+              member.idleSince !== null &&
+              (!longestIdle ||
+                member.idleSince < longestIdle.since ||
+                (member.idleSince === longestIdle.since &&
+                  summary.id === longestIdle.ship &&
+                  member.id < longestIdle.member))
+            ) {
+              longestIdle = {
+                ship: summary.id,
+                member: member.id,
+                since: member.idleSince,
+              };
+            }
+          }
+
+          pending.push(
+            shipSummary(
+              registration,
+              officer,
+              summary.crew,
+              people,
+              signal,
+              error,
+              metadata,
+            ),
+          );
+        }
+
+        return {
+          apiVersion: API_V1_VERSION,
+          generatedAt: fleet.generatedAt,
+          name: redactCredentials(config.api?.fleetName ?? hostname(), 100),
+          admiral,
+          ships: await Promise.all(pending),
+          longestIdle,
+        };
+      },
+      async ship(id, signal) {
+        const registration = configuredShip(id, signal);
+
+        if (!registration) {
+          return;
+        }
+
+        return shipDetail(
+          registration,
+          await dashboard.shipWithCrew(
+            id,
+            signal,
+            operator ? { taskText: "unredacted" } : {},
+          ),
+          signal,
+        );
+      },
+      async crew(ship, member, signal) {
+        // The plugin's member schema: a member it rejects is never asked for.
+        if (!isFleetMember(member)) {
+          return;
+        }
+
+        const registration = configuredShip(ship, signal);
+
+        if (!registration) {
+          return;
+        }
+
+        // Only this route asks for full task text, for operators.
+        const snapshot = await dashboard.shipWithCrew(ship, signal, {
+          member,
+          ...(operator && { taskText: "full" }),
+        });
+
+        if (snapshot?.view.crewError) {
+          throw new CrewStatusUnavailable(snapshot.view.crewError);
+        }
+
+        const result = await detail(registration, snapshot, signal, member);
+        const person = result?.crewMembers[0];
+
+        return person ? { ship, member: person } : undefined;
+      },
+    };
+  }
+
   return {
     async stop() {
       await git.stop?.();
@@ -871,139 +1010,8 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
 
       return identities;
     },
-    async fleet(signal, captureShipRead, crewDeadline) {
-      signal.throwIfAborted();
-      const config = deps.config();
-      const configured = registrations(config);
-
-      const fleet = await dashboard.fleetWithCrew(
-        signal,
-        new Set(configured.keys()),
-        crewDeadline,
-      );
-
-      signal.throwIfAborted();
-      let admiral: V1Captain | null = null;
-      let longestIdle: V1Fleet["longestIdle"] = null;
-      const pending: Promise<V1Ship>[] = [];
-
-      for (const row of [...fleet.ships].toSorted((a, b) =>
-        a.summary.id.localeCompare(b.summary.id),
-      )) {
-        const { summary, metadata, error } = row;
-        const registration = configured.get(summary.id);
-
-        if (!registration) {
-          continue;
-        }
-
-        const officer = captain(
-          registration,
-          summary.name,
-          summary.queue,
-          fleet.generatedAt,
-        );
-
-        if (officer.role === "rear_admiral") {
-          admiral ??= officer;
-          continue;
-        }
-
-        const { readDetail } = row;
-
-        if (captureShipRead && readDetail) {
-          captureShipRead(summary.id, async (reading) =>
-            shipDetail(registration, await readDetail(reading), reading),
-          );
-        }
-
-        const text = checkoutText(metadata);
-
-        const people = (row.members ?? []).flatMap((person) =>
-          crewMember(
-            summary.id,
-            person,
-            fleet.generatedAt,
-            text,
-            truncateCodePoints,
-            metadata,
-          ),
-        );
-
-        for (const member of people) {
-          if (
-            member.idleSince !== null &&
-            (!longestIdle ||
-              member.idleSince < longestIdle.since ||
-              (member.idleSince === longestIdle.since &&
-                summary.id === longestIdle.ship &&
-                member.id < longestIdle.member))
-          ) {
-            longestIdle = {
-              ship: summary.id,
-              member: member.id,
-              since: member.idleSince,
-            };
-          }
-        }
-
-        pending.push(
-          shipSummary(
-            registration,
-            officer,
-            summary.crew,
-            people,
-            signal,
-            error,
-            metadata,
-          ),
-        );
-      }
-
-      return {
-        apiVersion: API_V1_VERSION,
-        generatedAt: fleet.generatedAt,
-        name: redactCredentials(config.api?.fleetName ?? hostname(), 100),
-        admiral,
-        ships: await Promise.all(pending),
-        longestIdle,
-      };
-    },
-    async ship(id, signal) {
-      const registration = configuredShip(id, signal);
-
-      if (!registration) {
-        return;
-      }
-
-      return shipDetail(
-        registration,
-        await dashboard.shipWithCrew(id, signal),
-        signal,
-      );
-    },
-    async crew(ship, member, signal) {
-      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(member)) {
-        return;
-      }
-
-      const registration = configuredShip(ship, signal);
-
-      if (!registration) {
-        return;
-      }
-
-      const result = await detail(
-        registration,
-        await dashboard.shipWithCrew(ship, signal, { member }),
-        signal,
-        member,
-      );
-
-      const person = result?.crewMembers[0];
-
-      return person ? { ship, member: person } : undefined;
-    },
+    ...taskTextReads("operator"),
+    officer: taskTextReads("officer"),
     gatewayFeatures: () => gatewayFeatures(deps.config()),
   };
 }

@@ -29,20 +29,25 @@ export function containsCredential(text: string) {
 /**
  * `text` without credentials and control characters (newline, carriage
  * return and tab stay), cut to `limit`. Apply it before persistence,
- * truncation, inference and publication. At most 64,000 characters are read.
+ * truncation, inference and publication. Tail mode reads at most 128,000
+ * UTF-16 units to cover bounded 64,000-code-point crew progress.
  */
-export function redactCredentials(text: string, limit = 1500): string {
-  let redacted = text.slice(0, 64_000);
+export function redactCredentials(
+  text: string,
+  limit = 1500,
+  keep: "head" | "tail" = "head",
+): string {
+  let redacted = keep === "tail" ? text.slice(-128_000) : text.slice(0, 64_000);
 
   for (const [pattern, replacement] of credentialRules) {
     redacted = redacted.replace(pattern, replacement);
   }
 
-  return redacted
-    .replace(/\p{Cc}/gu, (character) =>
-      ["\n", "\r", "\t"].includes(character) ? character : "",
-    )
-    .slice(0, limit);
+  const cleaned = redacted.replace(/\p{Cc}/gu, (character) =>
+    ["\n", "\r", "\t"].includes(character) ? character : "",
+  );
+
+  return keep === "tail" ? cleaned.slice(-limit) : cleaned.slice(0, limit);
 }
 
 export function secret(

@@ -24,7 +24,10 @@ import {
 import {
   crewGitSchema,
   crewTurnsSchema,
+  fleetCrewFullStatusSchema,
+  fleetCrewStatusInputSchema,
   fleetCrewStatusSchema,
+  fleetCrewUnredactedStatusSchema,
   settledTasksPerMember,
 } from "../src/coordination/crew/reporting/fleet-status";
 import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
@@ -43,8 +46,11 @@ import {
 import { effectProjectKeySchema } from "../src/coordination/crew/protocol/project-key";
 import { CrewProjects } from "../src/coordination/crew/workspace/projects";
 import { teamSchema } from "../src/coordination/crew/team";
-import { crewStatusSchema } from "../src/shared/crew-status";
+import { type CrewStatus, crewStatusSchema } from "../src/shared/crew-status";
 import { MAX_CREW_CONTEXTS } from "../src/shared/session-history";
+import { redactCredentials } from "../src/lib/credentials";
+import { dashboardCrewMembers } from "../src/observability/dashboard/dashboard-projection";
+import { crewStatusView } from "../src/transports/slack/crew-ui";
 import { CronStore } from "../src/automation/cron/store";
 import { dashboardSource } from "../src/observability/dashboard/dashboard-source";
 import { openStore } from "../src/app/open-store";
@@ -387,11 +393,14 @@ test("dispatch selects only protected paths; worker omission binds native contex
   const projects = await CrewProjects.open(f.options, f.factory);
 
   try {
+    const assignment =
+      'Configured Stargate project: sample.\nUse only your permanent worktree: "/fixture".\n\nRead the assigned repository';
+
     const result = await projects.run(
       {
         op: "dispatch",
         crew: "worker",
-        text: "Read the assigned repository",
+        text: assignment,
         project: "stargate",
       },
       f.captain(),
@@ -415,12 +424,33 @@ test("dispatch selects only protected paths; worker omission binds native contex
       f.options.projects?.["stargate"]?.worktrees["worker"] ?? "missing",
     );
     expect(f.prompts[0]?.text).toContain("not human approval");
-    expect(
-      projects
-        .status({ member: "worker" })
-        .members.find((member) => member.project === "stargate")?.current
-        ?.summary,
-    ).toBe("Read the assigned repository");
+    expect(f.prompts[0]?.text).toContain(`\n\n${assignment}\n\n`);
+
+    const queued = await projects.run(
+      {
+        op: "dispatch",
+        crew: "worker",
+        project: "stargate",
+        text: assignment,
+        queue: true,
+      },
+      f.captain(),
+    );
+
+    expect(queued.status).toBe("queued");
+
+    for (const input of [
+      { member: "worker" },
+      { member: "worker", taskText: "unredacted" },
+      { member: "worker", taskText: "full" },
+    ] as const) {
+      const member = projects
+        .fleetStatus(input)
+        .status.members.find((member) => member.project === "stargate");
+
+      expect(member?.current?.summary).toBe(assignment);
+      expect(member?.queued[0]?.summary).toBe(assignment);
+    }
 
     for (const mail of [false, true]) {
       await expect(
@@ -466,6 +496,43 @@ test("dispatch selects only protected paths; worker omission binds native contex
     await expect(projects.select({}, worker)).rejects.toThrow(
       "identity changed",
     );
+  } finally {
+    await projects.close();
+    await f.close();
+  }
+});
+
+test("a project preamble does not consume the assignment's 64,000-code-point limit", async () => {
+  const f = await fixture();
+  const projects = await CrewProjects.open(f.options, f.factory);
+
+  try {
+    const assignment = `x${"😀".repeat(63_998)}y`;
+
+    const result = await projects.run(
+      {
+        op: "dispatch",
+        crew: "worker",
+        project: "stargate",
+        text: assignment,
+      },
+      f.captain(),
+    );
+
+    expect(result.status).toBe("running");
+    expect(f.prompts[0]?.text).toContain(
+      `Configured Stargate project: stargate.`,
+    );
+    expect(f.prompts[0]?.text).toContain(`\n\n${assignment}\n\n`);
+
+    const full = Schema.decodeUnknownSync(fleetCrewFullStatusSchema)(
+      projects.fleetStatus({ member: "worker", taskText: "full" }),
+    );
+
+    expect(
+      full.status.members.find(({ project }) => project === "stargate")?.current
+        ?.summary,
+    ).toBe(assignment);
   } finally {
     await projects.close();
     await f.close();
@@ -704,6 +771,100 @@ test("status and history identify all project contexts while legacy output stays
       ],
     });
     expect(JSON.stringify(status)).not.toContain(f.base.projectDirectory);
+
+    // Fleet status shows task text in three modes. ESC, BEL, a C1 control
+    // (CSI) and RIGHT-TO-LEFT OVERRIDE ride along with credential-shaped text.
+    const controls = "\u001b[31m \u0007 \u009b2J \u202e";
+    const splitCredential = "s\u0007k-split-fixture";
+    const engine = projects.get("stargate");
+    const peer = engine.state.peer("worker");
+    const text = `Fix token=fixture-value ${controls} ${"é".repeat(300)} end`;
+    const progress = `start ${"p".repeat(500)} ${splitCredential} Bearer fixture-value ${controls} tail`;
+    const task = peer && engine.state.reserveTask(peer, "captain", text);
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    engine.state.running(task.id);
+    engine.state.activity.progress(task.id, progress);
+
+    // JSON escapes C0 controls; C1 controls stay raw.
+    const controlChars = /\\u00(?:07|1b)|\u009b/;
+
+    const current = (answer: { status: CrewStatus }) =>
+      answer.status.members.find((m) => m.current)?.current;
+
+    // Ordinary: redacted, controls stripped, 180/80/400, as before.
+    const ordinary = Schema.decodeUnknownSync(fleetCrewStatusSchema)(
+      projects.fleetStatus({ member: "worker" }),
+    );
+
+    expect(current(ordinary)).toMatchObject({
+      summary: redactCredentials(text, 180),
+    });
+    expect(current(ordinary)?.progress).toEndWith(
+      ` [REDACTED] [REDACTED AUTHORIZATION] ${redactCredentials(controls)} tail`,
+    );
+    expect(JSON.stringify(ordinary)).not.toContain("fixture-value");
+    expect(JSON.stringify(ordinary)).not.toContain("sk-split-fixture");
+    expect(JSON.stringify(ordinary)).not.toMatch(controlChars);
+    expect(ordinary).not.toHaveProperty("taskText");
+
+    // Unredacted: raw within 180/80/400; progress keeps its tail.
+    for (const input of [
+      { taskText: "unredacted" },
+      { member: "worker", taskText: "unredacted" },
+    ] as const) {
+      const unredacted = Schema.decodeUnknownSync(
+        fleetCrewUnredactedStatusSchema,
+      )(projects.fleetStatus(input));
+
+      expect(unredacted.taskText).toBe("unredacted");
+      expect(unredacted.metadata).toEqual(ordinary.metadata);
+      expect(current(unredacted)).toMatchObject({
+        summary: Array.from(text).slice(0, 180).join(""),
+        progress: Array.from(progress).slice(-400).join(""),
+      });
+      expect(current(unredacted)?.summary).toContain(
+        `token=fixture-value ${controls}`,
+      );
+      expect(current(unredacted)?.progress).toEndWith(
+        `${splitCredential} Bearer fixture-value ${controls} tail`,
+      );
+    }
+
+    // Full: raw up to 64,000 code points, for one member.
+    const full = Schema.decodeUnknownSync(fleetCrewFullStatusSchema)(
+      projects.fleetStatus({ member: "worker", taskText: "full" }),
+    );
+
+    expect(full.taskText).toBe("full");
+    expect(full.metadata).toEqual(ordinary.metadata);
+    expect(JSON.stringify(full)).toMatch(controlChars);
+    expect(current(full)).toMatchObject({ summary: text, progress });
+
+    // The operator dashboard and Slack read ordinary status, unchanged.
+    const shown = projects.status({ member: "worker" });
+    expect(current({ status: shown })).toEqual(current(ordinary));
+
+    for (const view of [
+      dashboardCrewMembers(shown),
+      crewStatusView(shown, true),
+    ]) {
+      expect(JSON.stringify(view)).not.toContain("fixture-value");
+      expect(JSON.stringify(view)).not.toMatch(controlChars);
+    }
+
+    // Full text names one member, and old callers' input stays valid.
+    const input = Schema.decodeUnknownSync(fleetCrewStatusInputSchema);
+    expect(() => input({ taskText: "full" })).toThrow();
+    expect(() => input({ member: "worker", taskText: "ordinary" })).toThrow();
+    expect(input({ taskText: "unredacted" })).toEqual({
+      taskText: "unredacted",
+    });
+    expect(input({ member: "worker" })).toEqual({ member: "worker" });
+
     const roots = await projects.historyRoots(new AbortController().signal);
     expect(roots.sessions).toHaveLength(2);
     expect(new Set(roots.sessions.map((s) => s.id)).size).toBe(2);
