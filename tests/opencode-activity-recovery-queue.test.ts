@@ -48,6 +48,81 @@ test("the provisional count cap evicts old hints without proving the surviving c
   queue.close();
 });
 
+test("a start arms expiry after the names-only candidate's timer has fired", async () => {
+  const queue = new ActivityRecoveryQueues(
+    { ...activityQueueDefaults, ttl: 20 },
+    Date.now,
+    1,
+    () => false,
+    () => {},
+  );
+
+  try {
+    const id = "ses_child";
+    const pending = queue.candidate(id);
+    const parent: TurnActivityLog = { update() {}, reconnected() {}, end() {} };
+
+    queue.offerProof(pending, {
+      session: "ses_parent",
+      log: parent,
+      callId: "call-1",
+      order: 1,
+      timing: { created: 1, launch: "unknown" },
+    });
+    await Bun.sleep(40);
+    expect(queue.peek(id)).toBe(pending);
+
+    queue.enqueue(id, {
+      event: { type: "session.execution.started", data: { sessionID: id } },
+      at: Date.now(),
+      order: 2,
+    });
+    await Bun.sleep(60);
+    expect(queue.peek(id)).toBeUndefined();
+  } finally {
+    queue.close();
+  }
+});
+
+test("late uses the head's deadline, not the earlier candidate deadline", () => {
+  let now = 0;
+
+  const queue = new ActivityRecoveryQueues(
+    activityQueueDefaults,
+    () => now,
+    1,
+    () => false,
+    () => {},
+  );
+
+  try {
+    const id = "ses_child";
+    const pending = queue.candidate(id);
+
+    const start = (order: number, at: number) => {
+      now = at;
+      queue.enqueue(id, {
+        event: { type: "session.execution.started", data: { sessionID: id } },
+        at,
+        order,
+      });
+    };
+
+    start(1, 1000);
+    start(2, 2500);
+    expect(pending.segments[1]?.first).toMatchObject({ order: 2 });
+    expect(pending.segments[1]?.first.late).toBeUndefined();
+
+    start(3, 3000);
+    expect(pending.segments.at(-1)?.first).toMatchObject({
+      order: 3,
+      late: true,
+    });
+  } finally {
+    queue.close();
+  }
+});
+
 function recoveryFixture() {
   const id = "ses_child";
 

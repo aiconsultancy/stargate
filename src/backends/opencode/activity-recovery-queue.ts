@@ -594,6 +594,7 @@ export class ActivityRecoveryQueues<E extends Event> {
           order,
           seq: boundarySeq(packet.event),
           created: nativeActivityTime(packet.event),
+          // This only removes the untimed shortcut to freshness.
           ...(start && this.deadline(pending) <= this.now() && { late: true }),
           ...(packet.reused && { reused: true }),
         },

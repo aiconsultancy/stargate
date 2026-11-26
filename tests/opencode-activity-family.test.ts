@@ -2940,6 +2940,81 @@ test.each([
   },
 );
 
+test("a non-loss timeout skips only the unnamed predecessor", async () => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    f.parents.set(child, main);
+    f.start(child);
+    f.ended(child, "A output", "earlier-answer");
+    f.advance(1500);
+    f.call(root, "retry");
+    f.called(root, "retry", { agent: "explore" });
+    f.start(child);
+    f.ended(child, "B output", "new-answer");
+    f.advance(1000);
+    f.names(root, "retry", child);
+    f.end(child);
+    await setImmediate();
+
+    const turns = f.turns().filter(({ session }) => session?.id === child);
+    expect(turns).toMatchObject([
+      {
+        session: { parent: { callId: "retry" } },
+        status: "completed",
+        items: [{ text: "B output" }],
+      },
+    ]);
+    expect(turns[0]?.lost).toBeUndefined();
+  } finally {
+    f.stop.abort();
+  }
+});
+
+test("an overflowing successor keeps its output after both recovery windows close", async () => {
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, gate.promise);
+
+  try {
+    f.root();
+    f.create(child, main);
+    f.start(child);
+    f.failedReads.add("log");
+    await f.families.reconnected();
+    f.failedReads.delete("log");
+
+    f.start(child);
+    f.ended(child, "A output", "earlier-answer");
+    f.ended(child, "x".repeat(256 * 1024), "earlier-big");
+    expect(f.logReads).toHaveLength(1);
+    f.advance(500);
+    f.start(child);
+    f.ended(child, "B output", "new-answer");
+    f.ended(child, "y".repeat(256 * 1024), "new-big");
+    f.end(child);
+    f.advance(2700);
+    f.delta(main, "both deadlines passed");
+    gate.resolve();
+    await setImmediate();
+
+    expect(f.turns().slice(2)).toMatchObject(
+      ["A output", "B output"].map((text) => ({
+        session: { parent: null },
+        status: "cancelled",
+        lost: true,
+        items: expect.arrayContaining([
+          expect.objectContaining({ text }),
+          expect.objectContaining({ unavailable: ["activity.frames"] }),
+        ]),
+      })),
+    );
+  } finally {
+    gate.resolve();
+    f.stop.abort();
+  }
+});
+
 test.each([
   { earlier: "none", nameAt: 2100 },
   { earlier: "queued", nameAt: 2100 },
