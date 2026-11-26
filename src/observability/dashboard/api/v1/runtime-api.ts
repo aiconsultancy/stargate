@@ -8,7 +8,12 @@ import {
   OfficerSocketError,
   checkOfficerSocketPaths,
 } from "./officers";
-import { type ApiV1Deps, createApiV1Source } from "./projection";
+import { crewDiffApi } from "./crew-diff";
+import {
+  type ApiV1Deps,
+  createApiV1Source,
+  crewDiffSource,
+} from "./projection";
 import { startApiV1Server } from "./server";
 
 type RuntimeApiOptions = Pick<
@@ -72,6 +77,8 @@ export async function startRuntimeApi({
       ...(activity && {
         activity: activityApi(activity, () => projection.config()),
       }),
+      // Only the token listener serves it: officers' sockets never do.
+      ...(config.api && { crewDiff: crewDiffApi(crewDiffSource(projection)) }),
       source: createApiV1Source(projection),
       diff: diffEvents,
       gateway: {

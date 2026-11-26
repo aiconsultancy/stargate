@@ -1,8 +1,10 @@
 import type { OpenCodeClient } from "@opencode/client";
 import { Schema } from "effect";
 import {
+  type CheckoutDiffInput,
   type CrewGitInput,
   type FleetCrewStatus,
+  checkoutDiffSchema,
   crewGitSchema,
   fleetCrewStatusSchema,
 } from "../../coordination/crew/reporting/fleet-status";
@@ -39,6 +41,7 @@ export class OpenCodeCrewStatus {
   };
 
   private crewGitRetryAt = 0;
+  private checkoutDiffRetryAt = 0;
 
   public constructor(
     private readonly client: OpenCodeClient,
@@ -98,6 +101,40 @@ export class OpenCodeCrewStatus {
       }
 
       return;
+    }
+  }
+
+  /**
+   * A crew diff computed by the crew plugin as the captain. Undefined when
+   * the plugin is older; any other failure throws. The caller bounds time.
+   */
+  public async checkoutDiff(input: CheckoutDiffInput, signal: AbortSignal) {
+    signal.throwIfAborted();
+
+    if (performance.now() < this.checkoutDiffRetryAt) {
+      return;
+    }
+
+    try {
+      const result = await this.client.rpc(CrewReporting).checkoutDiff(input, {
+        location: { directory: this.directory() },
+        signal,
+      });
+
+      signal.throwIfAborted();
+
+      return Schema.decodeUnknownSync(checkoutDiffSchema)(result);
+    } catch (error) {
+      signal.throwIfAborted();
+
+      // Older plugins lack the method. Probe again after an upgrade.
+      if (isMethodNotFound(error)) {
+        this.checkoutDiffRetryAt = performance.now() + 60_000;
+
+        return;
+      }
+
+      throw new Error("Crew diff unavailable; raw details withheld.");
     }
   }
 

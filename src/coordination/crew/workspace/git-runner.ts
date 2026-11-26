@@ -21,7 +21,13 @@ export function spawnGit(
     signal?: AbortSignal | undefined;
     write?: boolean;
   },
-): Promise<{ stdout: string; code: number | null; truncated: boolean }> {
+): Promise<{
+  stdout: string;
+  /** Stdout as Git wrote it: a path need not be valid UTF-8. */
+  bytes: Buffer;
+  code: number | null;
+  truncated: boolean;
+}> {
   const limit = options.limit ?? 1024 * 1024;
 
   return new Promise((resolve) => {
@@ -56,11 +62,73 @@ export function spawnGit(
       failed = true;
     });
     child.on("close", (code) => {
+      const bytes = Buffer.concat(chunks);
+
       resolve({
-        stdout: Buffer.concat(chunks).toString("utf8"),
+        stdout: bytes.toString("utf8"),
+        bytes,
         code: failed ? null : code,
         truncated,
       });
+    });
+  });
+}
+
+/**
+ * A bounded read whose output goes to `onData` as it arrives, with optional
+ * standard input. `onData` returning false stops Git; the code is then null.
+ */
+export function streamGit(
+  directory: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  options: {
+    signal: AbortSignal;
+    onData: (chunk: Buffer) => boolean;
+    input?: string | Buffer | undefined;
+  },
+): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", ["-C", directory, ...args], {
+      cwd: directory,
+      env,
+      stdio: ["pipe", "pipe", "ignore"],
+      ...gitProcessOptions(false, options.signal),
+    });
+
+    let failed = false;
+    let thrown: { error: unknown } | undefined;
+
+    // A reader that stops early closes the pipe: ignore the broken write.
+    child.stdin.on("error", () => {});
+    child.stdin.end(options.input);
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (failed) {
+        return;
+      }
+
+      let more = false;
+
+      try {
+        more = options.onData(chunk);
+      } catch (error) {
+        thrown = { error };
+      }
+
+      if (!more) {
+        failed = true;
+        child.kill("SIGKILL");
+      }
+    });
+    child.on("error", () => {
+      failed = true;
+    });
+    child.on("close", (code) => {
+      if (thrown) {
+        reject(thrown.error);
+      } else {
+        resolve(failed ? null : code);
+      }
     });
   });
 }

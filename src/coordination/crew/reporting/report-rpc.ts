@@ -32,6 +32,8 @@ import {
 } from "../../../config/settings-schema";
 import { updateSnapshotSchema } from "../../../automation/maintenance/update-notice";
 import {
+  checkoutDiffInputSchema,
+  checkoutDiffSchema,
   crewGitInputSchema,
   crewGitSchema,
   crewTurnsInputSchema,
@@ -180,6 +182,11 @@ export const CrewReporting = Rpc.define({
     crewTurns: {
       input: portable(crewTurnsInputSchema),
       output: portable(crewTurnsSchema),
+    },
+    // Read-only crew diff of one configured worktree, read as the captain.
+    checkoutDiff: {
+      input: portable(checkoutDiffInputSchema),
+      output: portable(checkoutDiffSchema),
     },
     // Read-only operator history. Roots list every provisioned crew member.
     // Describe, children and entries serve only this team's `pi:` sessions;

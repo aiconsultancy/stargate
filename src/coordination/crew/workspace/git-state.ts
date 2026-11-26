@@ -1,21 +1,24 @@
-import { stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, stat } from "node:fs/promises";
 import { Semaphore } from "effect";
 import { abortable, runAbortable } from "../../../lib/effect";
 import { readWithDeadline } from "../../../lib/read-deadline";
 import {
   type CrewGitState,
-  countChangedPaths,
+  type StatusEntry,
   parseAheadBehind,
+  statusEntries,
 } from "../reporting/fleet-status";
+import type { IsolatedCheckout, IsolatedStream } from "./git-status";
 
 // Read-only checkout state for the Fleet API, read as the captain.
 const gitStateTTL = 15_000;
 const gitStateTimeout = 5000;
-const gitUnavailable = "Git state unavailable.";
+export const gitUnavailable = "Git state unavailable.";
 
-type Head = { ref: string | null; oid: string | null };
+export type Head = { ref: string | null; oid: string | null };
 
-type CheckoutGit = (
+export type CheckoutGit = (
   directory: string,
   signal: AbortSignal,
 ) => {
@@ -26,9 +29,148 @@ type CheckoutGit = (
   status(
     oid: string | null,
   ): Promise<
-    { kind: "value"; stdout: string } | { kind: "unavailable" | "unsafe-temp" }
+    | { kind: "value"; stdout: string; raw: Buffer; index: string }
+    | { kind: "unavailable" | "unsafe-temp" }
   >;
+  isolated<T>(
+    head: string | null,
+    use: (checkout: IsolatedCheckout, stream: IsolatedStream) => Promise<T>,
+  ): Promise<T>;
 };
+
+export type Git = ReturnType<CheckoutGit>;
+
+/** Stdout of a successful command, else null: absent refs are normal. */
+export async function output(git: Git, args: string[]) {
+  const result = await git.command(args);
+
+  return result?.code === 0 ? result.stdout : null;
+}
+
+export type Origin = { ref: string; commit: string };
+
+/** A path's size and modification time, or `-` when it is gone. */
+async function stamp(path: string | Buffer, follow = false) {
+  const info = await (
+    follow ? stat(path, { bigint: true }) : lstat(path, { bigint: true })
+  ).catch((): undefined => {});
+
+  return info ? `${info.size}:${info.mtimeNs}` : "-";
+}
+
+/** A status entry with the bytes Git wrote for its paths. */
+export type StatusPaths = StatusEntry & { bytes: Buffer; fromBytes?: Buffer };
+
+/**
+ * Each entry's paths as raw bytes, which need not be valid UTF-8. A NUL byte
+ * splits the raw and the decoded status alike, so the records align.
+ */
+function withBytes(entries: StatusEntry[], raw: Buffer): StatusPaths[] {
+  const records: Buffer[] = [];
+  let start = 0;
+
+  for (let nul = raw.indexOf(0); nul >= 0; nul = raw.indexOf(0, start)) {
+    records.push(raw.subarray(start, nul));
+    start = nul + 1;
+  }
+
+  let record = 0;
+
+  const paths = entries.map((entry) => {
+    const bytes = records[record++]?.subarray(3) ?? Buffer.alloc(0);
+
+    return entry.from === undefined
+      ? { ...entry, bytes }
+      : { ...entry, bytes, fromBytes: records[record++] ?? Buffer.alloc(0) };
+  });
+
+  if (start !== raw.length || record !== records.length) {
+    throw new Error(gitUnavailable);
+  }
+
+  return paths;
+}
+
+/**
+ * The checkout's status and fingerprint for `head`. The fingerprint hashes
+ * HEAD, `origin/HEAD`, the index file's size and mtime, the status output,
+ * and the size and mtime of every path it names. It is the same in every
+ * diff mode, and the same here and in crew Git state.
+ */
+export async function fingerprintOf(git: Git, directory: string, head: Head) {
+  const [status, originRef, originCommit] = await Promise.all([
+    git.status(head.oid),
+    output(git, ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"]),
+    output(git, [
+      "rev-parse",
+      "--verify",
+      "-q",
+      "--end-of-options",
+      "refs/remotes/origin/HEAD^{commit}",
+    ]),
+  ]);
+
+  if (status.kind !== "value") {
+    return { status };
+  }
+
+  const decoded = statusEntries(status.stdout);
+
+  if (!decoded) {
+    throw new Error(gitUnavailable);
+  }
+
+  const entries = withBytes(decoded, status.raw);
+  const root = Buffer.from(`${directory}/`);
+
+  // By the bytes Git wrote: a decoded name that is not UTF-8 names no file.
+  const paths = entries.flatMap(({ bytes, fromBytes }) =>
+    (fromBytes ? [bytes, fromBytes] : [bytes]).map((path) =>
+      Buffer.concat([root, path]),
+    ),
+  );
+
+  const stamps: string[] = [];
+
+  // Bounded batches keep a large untracked tree from flooding the pool.
+  for (let start = 0; start < paths.length; start += 64) {
+    stamps.push(
+      ...(await Promise.all(
+        paths.slice(start, start + 64).map((path) => stamp(path)),
+      )),
+    );
+  }
+
+  const commit = originCommit?.trim() ?? "";
+  const ref = originRef?.trim() ?? "";
+
+  const origin: Origin | null = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)
+    ? {
+        ref:
+          ref.startsWith("refs/remotes/") && ref.length <= 268
+            ? ref.slice("refs/remotes/".length)
+            : "origin/HEAD",
+        commit,
+      }
+    : null;
+
+  const fingerprint = createHash("sha256")
+    .update(
+      JSON.stringify([
+        head.ref,
+        head.oid,
+        ref,
+        commit,
+        status.index && (await stamp(status.index, true)),
+        status.stdout,
+        stamps,
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 32);
+
+  return { status, entries, fingerprint, origin };
+}
 
 /** The remote URL without user information, which can hold a credential. */
 export function remoteWithoutUser(remote: string): string | null {
@@ -50,7 +192,7 @@ export function remoteWithoutUser(remote: string): string | null {
   return url.href;
 }
 
-const name = (value: string | null | undefined) => {
+export const name = (value: string | null | undefined) => {
   const text = value?.trim();
 
   return text && text.length <= 255 && !/[\0\n\r]/.test(text) ? text : null;
@@ -146,7 +288,7 @@ async function inspect(
 
       // A failed comparison must not make the guard check HEAD before status ends.
       const [statusRead, remoteRead, comparison] = await Promise.allSettled([
-        git.status(commit),
+        fingerprintOf(git, directory, head),
         optional(["remote", "get-url", "origin"]),
         base && commit
           ? run([
@@ -168,7 +310,7 @@ async function inspect(
         throw new Error(gitUnavailable);
       }
 
-      const { value: status } = statusRead;
+      const { status, entries, fingerprint } = statusRead.value;
       const { value: remote } = remoteRead;
       const { value: counts } = comparison;
 
@@ -179,8 +321,7 @@ async function inspect(
         };
       }
 
-      const changedFiles =
-        status.kind === "value" ? countChangedPaths(status.stdout) : null;
+      const changedFiles = entries?.length ?? null;
 
       const divergence = counts === null ? null : parseAheadBehind(counts);
 
@@ -197,6 +338,7 @@ async function inspect(
         changedFiles,
         remote: remote === null ? null : remoteWithoutUser(remote),
         checkedAt: now(),
+        ...(fingerprint && { fingerprint }),
       };
     });
 

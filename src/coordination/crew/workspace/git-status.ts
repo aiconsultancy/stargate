@@ -1,15 +1,19 @@
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import {
+  type FileHandle,
   lstat,
   mkdir,
   mkdtemp,
+  open,
+  readlink,
   realpath,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type FleetGitCommand = (
   args: string[],
@@ -191,8 +195,17 @@ export const fleetGitOptions = [
   "submodule.recurse=false",
 ];
 
+const statusArgs = [
+  "status",
+  "--porcelain=v1",
+  "-z",
+  "--untracked-files=all",
+  // Count changed gitlinks without reading submodule worktrees.
+  "--ignore-submodules=dirty",
+];
+
 /** Run in a private Git directory with no info/attributes or filter config. */
-function isolatedGitStatus(
+function isolatedGit(
   directory: string,
   gitDir: string,
   format: "sha1" | "sha256",
@@ -221,21 +234,25 @@ function isolatedGitStatus(
       GIT_ATTR_NOSYSTEM: "1",
       GIT_ATTR_SOURCE: createHash(format).update("tree 0\0").digest("hex"),
     },
-    args: [
+    options: [
       ...settings,
       "-c",
       `core.excludesFile=${excludes}`,
       "-c",
       "core.attributesFile=/dev/null",
-      "status",
-      "--porcelain=v1",
-      "-z",
-      "--untracked-files=all",
-      // Count changed gitlinks without reading submodule worktrees.
-      "--ignore-submodules=dirty",
     ],
   };
 }
+
+/** A command's arguments and environment in the private Git directory. */
+export type IsolatedCheckout = {
+  /** The checkout's own index, for the fingerprint. */
+  index: string;
+  objects: string;
+  gitDir: string;
+  format: "sha1" | "sha256";
+  command(args: string[]): { args: string[]; env: NodeJS.ProcessEnv };
+};
 
 type StatusMetadata = {
   format: "sha1" | "sha256";
@@ -274,6 +291,14 @@ const liveStorage: StatusStorage = {
   },
 };
 
+type StatusOpenOptions = {
+  directory: string;
+  head: string | null;
+  signal: AbortSignal;
+  run: FleetGitCommand;
+  storage?: StatusStorage | undefined;
+};
+
 /** Own the private repository until the reader has handed off its result. */
 export class FleetStatusRead {
   private directory?: Promise<string>;
@@ -287,20 +312,23 @@ export class FleetStatusRead {
   }
 
   public async read({
+    status,
+    ...options
+  }: StatusOpenOptions & { status?: FleetGitCommand }) {
+    const isolated = await this.open(options);
+    const { args, env } = isolated.command(statusArgs);
+
+    return (status ?? options.run)(args, env);
+  }
+
+  /** Set up the private repository, which lives until disposal. */
+  public async open({
     directory,
     head,
     signal,
     run,
-    status = run,
     storage = liveStorage,
-  }: {
-    directory: string;
-    head: string | null;
-    signal: AbortSignal;
-    run: FleetGitCommand;
-    status?: FleetGitCommand;
-    storage?: StatusStorage;
-  }) {
+  }: StatusOpenOptions): Promise<IsolatedCheckout> {
     const [paths, settings, excludes] = await Promise.all([
       run([
         "rev-parse",
@@ -410,7 +438,7 @@ export class FleetStatusRead {
 
     signal.throwIfAborted();
 
-    const isolated = isolatedGitStatus(
+    const isolated = isolatedGit(
       directory,
       gitDir,
       format,
@@ -418,7 +446,16 @@ export class FleetStatusRead {
       configured ? join(gitDir, configuredTarget) : "/dev/null",
     );
 
-    return status(isolated.args, { ...isolated.env, ...env });
+    return {
+      index,
+      objects,
+      gitDir,
+      format,
+      command: (args) => ({
+        args: [...isolated.options, ...args],
+        env: { ...isolated.env, ...env },
+      }),
+    };
   }
 }
 
@@ -427,12 +464,46 @@ type FleetGitProcess = (
   args: string[],
   env: NodeJS.ProcessEnv,
   options: { signal: AbortSignal; limit?: number | undefined },
-) => Promise<{ stdout: string; code: number | null; truncated: boolean }>;
+) => Promise<{
+  stdout: string;
+  bytes: Buffer;
+  code: number | null;
+  truncated: boolean;
+}>;
+
+type FleetGitStream = (
+  directory: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  options: {
+    signal: AbortSignal;
+    onData: (chunk: Buffer) => boolean;
+    input?: string | Buffer | undefined;
+  },
+) => Promise<number | null>;
+
+/** Streams a command's output; null when stopped or killed. */
+export type IsolatedStream = (
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  onData: (chunk: Buffer) => boolean,
+  input?: string | Buffer,
+) => Promise<number | null>;
+
+const environment = (overrides?: NodeJS.ProcessEnv) => ({
+  PATH: process.env["PATH"],
+  LC_ALL: "C",
+  ...fleetGitEnv,
+  ...overrides,
+});
 
 /** Bind all live checkout reads to the captain's directory and cancellation. */
-export function liveFleetGit(spawnGit: FleetGitProcess) {
+export function liveFleetGit(
+  spawnGit: FleetGitProcess,
+  streamGit?: FleetGitStream,
+) {
   return (directory: string, signal: AbortSignal) => {
-    const command = async (
+    const run = async (
       args: string[],
       overrides?: NodeJS.ProcessEnv,
       limit?: number,
@@ -440,12 +511,7 @@ export function liveFleetGit(spawnGit: FleetGitProcess) {
       const result = await spawnGit(
         directory,
         [...fleetGitOptions, ...args],
-        {
-          PATH: process.env["PATH"],
-          LC_ALL: "C",
-          ...fleetGitEnv,
-          ...overrides,
-        },
+        environment(overrides),
         { signal, limit },
       );
 
@@ -453,27 +519,80 @@ export function liveFleetGit(spawnGit: FleetGitProcess) {
 
       return result.truncated || result.code === null
         ? null
-        : { code: result.code, stdout: result.stdout };
+        : { code: result.code, stdout: result.stdout, bytes: result.bytes };
+    };
+
+    const command = async (
+      args: string[],
+      overrides?: NodeJS.ProcessEnv,
+      limit?: number,
+    ) => {
+      const result = await run(args, overrides, limit);
+
+      return result && { code: result.code, stdout: result.stdout };
+    };
+
+    const stream: IsolatedStream = async (args, env, onData, input) => {
+      if (!streamGit) {
+        throw new Error("Git streaming unavailable");
+      }
+
+      const code = await streamGit(
+        directory,
+        [...fleetGitOptions, ...args],
+        environment(env),
+        { signal, onData, input },
+      );
+
+      signal.throwIfAborted();
+
+      return code;
     };
 
     return {
       command,
       guard: <T>(sample: (head: FleetHead) => Promise<T>) =>
         guardFleetHead(command, () => signal, sample),
+      /** Run `use` in a private repository for `head`, removed afterwards. */
+      async isolated<T>(
+        head: string | null,
+        use: (checkout: IsolatedCheckout, stream: IsolatedStream) => Promise<T>,
+      ) {
+        await using checkout = new FleetStatusRead();
+
+        const isolated = await checkout.open({
+          directory,
+          head,
+          signal,
+          run: command,
+        });
+
+        return await use(isolated, stream);
+      },
       async status(head: string | null) {
         await using checkout = new FleetStatusRead();
 
         try {
+          let index = "";
+          let raw: Buffer | undefined;
+
           const status = await checkout.read({
             directory,
             head,
             signal,
             run: command,
-            status: (args, env) => command(args, env, 16 * 1024 * 1024),
+            status: async (args, env) => {
+              index = env?.["GIT_INDEX_FILE"] ?? "";
+              const result = await run(args, env, 16 * 1024 * 1024);
+              raw = result?.bytes;
+
+              return result;
+            },
           });
 
-          return status?.code === 0
-            ? { kind: "value" as const, stdout: status.stdout }
+          // The raw output keeps paths that are not valid UTF-8 apart.
+          return status?.code === 0 && raw
+            ? { kind: "value" as const, stdout: status.stdout, raw, index }
             : { kind: "unavailable" as const };
         } catch (error) {
           signal.throwIfAborted();
@@ -566,4 +685,210 @@ export async function privateStatusDirectory(path: string) {
   }
 
   return;
+}
+
+/** Repository-relative, inside the worktree and outside any `.git`. */
+export function validDiffPath(path: string) {
+  const parts = path.split("/");
+
+  return (
+    !/[\p{Cc}\\]/u.test(path) &&
+    parts.every(
+      (part) =>
+        part !== "" &&
+        part !== "." &&
+        part !== ".." &&
+        part.toLowerCase() !== ".git",
+    )
+  );
+}
+
+/** A refused or vanished path is absent, not a failure. */
+const absentPath = (error: unknown): undefined => {
+  if (!["ENOENT", "ENOTDIR", "ELOOP"].includes(String(fileError(error)))) {
+    throw error;
+  }
+};
+
+/** A worktree file changed while it was read: the answer is stale. */
+export class WorktreeChanged extends Error {
+  public constructor() {
+    super("File shrank while read");
+  }
+}
+
+/** Read up to a page at `offset`, or undefined when it starts past the end. */
+async function readPage(
+  file: FileHandle,
+  size: number,
+  offset: number,
+  limit: number,
+) {
+  if (offset > size) {
+    return;
+  }
+
+  const data = Buffer.alloc(Math.min(limit, size - offset));
+  let filled = 0;
+
+  while (filled < data.length) {
+    const { bytesRead } = await file.read(
+      data,
+      filled,
+      data.length - filled,
+      offset + filled,
+    );
+
+    if (bytesRead === 0) {
+      throw new WorktreeChanged();
+    }
+
+    filled += bytesRead;
+  }
+
+  return { size, data };
+}
+
+/** `base` and the path parts below it, as bytes that need not be UTF-8. */
+const below = (base: string, parts: Buffer[]) =>
+  Buffer.concat([
+    Buffer.from(base),
+    ...parts.flatMap((part) => [Buffer.from("/"), part]),
+  ]);
+
+/** A path's parts, split at each `/` byte. */
+function pathParts(path: Buffer) {
+  const parts: Buffer[] = [];
+  let start = 0;
+
+  for (let slash = path.indexOf(0x2f); slash >= 0;) {
+    parts.push(path.subarray(start, slash));
+    start = slash + 1;
+    slash = path.indexOf(0x2f, start);
+  }
+
+  return [...parts, path.subarray(start)];
+}
+
+/**
+ * Run `use` on a worktree path, given by the bytes Git wrote, whose
+ * directories were each opened relative to their parent without following
+ * links, so the path cannot leave the worktree. Undefined for an invalid
+ * path or a missing or linked directory.
+ */
+async function inWorktree<T>(
+  root: string,
+  path: Buffer,
+  use: (target: Buffer, real: string) => Promise<T | undefined>,
+) {
+  // Checked decoded: an invalid byte decodes to U+FFFD, never `/` or `.`.
+  if (!validDiffPath(path.toString("utf8"))) {
+    return;
+  }
+
+  const real = await realpath(root);
+  const parts = pathParts(path);
+  const name = parts.pop() ?? Buffer.alloc(0);
+  const linux = process.platform === "linux";
+  let parent = await open(real, constants.O_RDONLY | constants.O_DIRECTORY);
+
+  try {
+    for (const [index, part] of parts.entries()) {
+      const next = await open(
+        linux
+          ? below(`/proc/self/fd/${parent.fd}`, [part])
+          : below(real, parts.slice(0, index + 1)),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY,
+      ).catch(absentPath);
+
+      if (!next) {
+        return;
+      }
+
+      await parent.close();
+      parent = next;
+    }
+
+    return await use(
+      linux
+        ? below(`/proc/self/fd/${parent.fd}`, [name])
+        : below(real, [...parts, name]),
+      real,
+    );
+  } finally {
+    await parent.close();
+  }
+}
+
+/** A worktree path's own size, never through a linked directory. */
+export const worktreeSize = (root: string, path: Buffer) =>
+  inWorktree(
+    root,
+    path,
+    async (target) => (await lstat(target).catch(absentPath))?.size,
+  );
+
+/**
+ * A worktree file's bytes, or a symbolic link's own text, never through a
+ * linked directory; the opened file's real path is checked as well.
+ */
+export function readWorktree(
+  root: string,
+  path: Buffer,
+  offset: number,
+  limit: number,
+) {
+  const linux = process.platform === "linux";
+
+  return inWorktree(root, path, async (target, real) => {
+    const info = await lstat(target).catch(absentPath);
+
+    if (info?.isSymbolicLink()) {
+      const text = await readlink(target, { encoding: "buffer" }).catch(
+        absentPath,
+      );
+
+      if (!text || offset > text.length) {
+        return;
+      }
+
+      return {
+        size: text.length,
+        data: text.subarray(offset, offset + limit),
+      };
+    }
+
+    if (!info?.isFile()) {
+      return;
+    }
+
+    const file = await open(
+      target,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    ).catch(absentPath);
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const opened = await file.stat();
+
+      const where = linux
+        ? await readlink(`/proc/self/fd/${file.fd}`)
+        : await realpath(target);
+
+      if (
+        !opened.isFile() ||
+        dirname(where) === where ||
+        !where.startsWith(`${real}${sep}`)
+      ) {
+        return;
+      }
+
+      return await readPage(file, opened.size, offset, limit);
+    } finally {
+      await file.close();
+    }
+  });
 }

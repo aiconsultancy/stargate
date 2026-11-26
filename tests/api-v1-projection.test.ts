@@ -17,6 +17,7 @@ import type { ApiV1Config } from "../src/observability/dashboard/api/v1/features
 import { createGitReader } from "../src/observability/dashboard/api/v1/git";
 import {
   createApiV1Source,
+  crewDiffSource,
   reportedGit,
 } from "../src/observability/dashboard/api/v1/projection";
 import type { CrewGitInput } from "../src/coordination/crew/reporting/fleet-status";
@@ -164,6 +165,7 @@ function fixture(
     status: [] as string[],
     children: [] as string[],
     git: [] as string[],
+    diffs: [] as { ship: string; member: string }[],
   };
 
   const roots = [
@@ -234,6 +236,11 @@ function fixture(
       async close() {},
       async crewStatus(input) {
         return status(id, input);
+      },
+      async checkoutDiff(input) {
+        calls.diffs.push({ ship: id, member: input.member });
+
+        return { kind: "missing" };
       },
       ...(id === "captain" && captainGit && { crewGit: captainGit }),
       ...(id === "captain"
@@ -351,6 +358,7 @@ function fixture(
   return {
     dashboard,
     source,
+    diffs: crewDiffSource({ config: () => config, dashboard }),
     calls,
     statuses,
     crewSignals,
@@ -1475,7 +1483,10 @@ describe("Fleet API projection", () => {
         worktree,
         dirty: true,
         source: "captain",
+        // The crew diff's state, for a crew member's checkout only.
+        fingerprint: captainState?.fingerprint ?? "missing",
       });
+      expect(captainState?.fingerprint).toMatch(/^[a-f0-9]{32}$/);
       expect(detail?.member.contexts[0]).toMatchObject({
         pullRequest: null,
         pullRequestKnown: true,
@@ -1523,6 +1534,43 @@ describe("Fleet API projection", () => {
       "Bearer fixture-value token=fixture-value",
     );
     expect(current?.phase).toContain(`${privateProject}-pilot-default`);
+  });
+
+  test("crew diffs go to a captain's backend, never a rear admiral's", async () => {
+    const f = fixture();
+
+    const input = {
+      member: "pilot",
+      project: null,
+      mode: "branch" as const,
+      request: { kind: "list" as const, start: 0 },
+    };
+
+    expect(await f.diffs("captain", input, signal)).toEqual({
+      kind: "missing",
+    });
+    expect(await f.diffs("admiral", input, signal)).toBeUndefined();
+    expect(await f.diffs("nobody", input, signal)).toBeUndefined();
+    expect(f.calls.diffs).toEqual([{ ship: "captain", member: "pilot" }]);
+  });
+
+  test("only a crew checkout's Git state carries the diff fingerprint", () => {
+    const state = {
+      branch: "feature",
+      commit: "a".repeat(40),
+      base: null,
+      ahead: null,
+      behind: null,
+      changedFiles: 0,
+      remote: null,
+      checkedAt: 1,
+      fingerprint: "b".repeat(32),
+    };
+
+    expect(reportedGit(state, "/fixture")).not.toHaveProperty("fingerprint");
+    expect(reportedGit(state, "/fixture", true)).toMatchObject({
+      fingerprint: "b".repeat(32),
+    });
   });
 
   test("credential-shaped branch and base names from the plugin are reported as written", () => {

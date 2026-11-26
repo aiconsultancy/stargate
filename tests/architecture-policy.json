@@ -1681,6 +1681,7 @@
         "src/observability/dashboard/api/v1/activity-view.ts",
         "src/observability/dashboard/api/v1/crew-recorder.ts",
         "src/observability/dashboard/api/v1/remeasure.ts",
+        "src/observability/dashboard/api/v1/crew-diff.ts",
         "src/observability/dashboard/api/v1/runtime-api.ts",
         "src/api/v1/server.ts",
         "src/api/v1/token.ts",
@@ -1872,6 +1873,7 @@
         "src/crew/tool-input.ts",
         "src/crew/waiting.ts",
         "src/crew/workspace.ts",
+        "src/coordination/crew/workspace/checkout-diff.ts",
         "src/coordination/crew/workspace/git-runner.ts",
         "src/coordination/crew/workspace/git-state.ts",
         "src/coordination/crew/workspace/git-status.ts"

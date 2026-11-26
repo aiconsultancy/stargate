@@ -179,6 +179,20 @@ test("fleet summary changes emit a full fleet and ship detail changes emit only 
   ]);
 });
 
+test("a crew diff fingerprint change emits the ship, without activity", () => {
+  const git = context().git;
+
+  if (!git) {
+    throw new Error("Missing Git fixture");
+  }
+
+  const before = snapshot([context({ git: { ...git, fingerprint: "a" } })]);
+  const after = snapshot([context({ git: { ...git, fingerprint: "b" } })]);
+  expect(diffEvents(before, after, at)).toEqual([
+    { type: "ship", data: after.ships.ship },
+  ]);
+});
+
 test("added ship details appear in stable ID order without fabricated transitions", () => {
   const before = snapshot();
   const after = snapshot();
