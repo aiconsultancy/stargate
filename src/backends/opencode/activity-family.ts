@@ -9,6 +9,7 @@ import {
   markDiscardedContinuation,
   openChild,
   recordChildName,
+  resolveAttribution,
 } from "./activity-attribution";
 import {
   ActivityCallEvidence,
@@ -476,25 +477,14 @@ export class OpenCodeActivityFamilies {
       inferred && this.lineage.get(inferred),
     );
 
-    const proof = naming.first ?? naming.witness;
-
-    const competing =
-      proof !== undefined &&
-      this.calls.competing(parent, this.lineage.get(proof.log), id, {
-        except: proof.order,
-        after: segment.floor,
-        through: first.order,
-      });
-
-    const ambiguous = naming.ambiguous || competing;
-
-    return {
-      owner: proof?.log ?? inferred,
-      ambiguous,
-      detached: naming.detached || competing,
-      callId: ambiguous ? null : (naming.first?.callId ?? null),
-      proof,
-    };
+    return resolveAttribution(
+      this.calls,
+      { id, parent },
+      inferred,
+      naming,
+      { after: segment.floor, through: first.order },
+      this.lineage,
+    );
   }
 
   private observeRoot(log: TurnActivityLog, order: number) {

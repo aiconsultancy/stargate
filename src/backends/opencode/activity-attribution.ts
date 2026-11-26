@@ -5,7 +5,11 @@ import type {
   CallTiming,
 } from "./activity-call-evidence";
 import { childAttributionMarker } from "./activity-projector";
-import type { NamingProof, PendingActivity } from "./activity-recovery-queue";
+import type {
+  ActivityRecoveryQueues,
+  NamingProof,
+  PendingActivity,
+} from "./activity-recovery-queue";
 import { markActivityGap } from "./activity-replay-gap";
 
 type History = {
@@ -38,6 +42,34 @@ export function detachedAttribution(owner: TurnActivityLog) {
     callId: null,
     ambiguous: false,
     proof: undefined,
+  };
+}
+
+export function resolveAttribution(
+  calls: ActivityCallEvidence,
+  { id, parent }: { id: string; parent: string },
+  inferred: TurnActivityLog | undefined,
+  naming: ReturnType<ActivityRecoveryQueues<never>["naming"]>,
+  window: { after: number; through: number },
+  lineage: WeakMap<TurnActivityLog, ActivityIncarnation>,
+) {
+  const proof = naming.first ?? naming.witness;
+
+  const competing =
+    proof !== undefined &&
+    calls.competing(parent, lineage.get(proof.log), id, {
+      ...window,
+      except: proof.order,
+    });
+
+  const ambiguous = naming.ambiguous || competing;
+
+  return {
+    owner: proof?.log ?? inferred,
+    ambiguous,
+    detached: naming.detached || competing,
+    callId: ambiguous ? null : (naming.first?.callId ?? null),
+    proof,
   };
 }
 
