@@ -82,7 +82,11 @@ export type V1Git = {
   branch: string | null;
   /** Abbreviated commit of HEAD. */
   head: string | null;
-  /** The upstream or default branch compared against, such as `origin/main`. */
+  /**
+   * The upstream or default branch compared against, such as `origin/main`.
+   * Null, with null counts and no error, when the branch has no upstream and
+   * `origin/HEAD` is absent, not a symbolic ref or points to a missing ref.
+   */
   base: string | null;
   ahead: number | null;
   behind: number | null;

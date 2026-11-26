@@ -96,6 +96,13 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 ### Changes
 
+- With no upstream and an `origin/HEAD` that is absent, not a symbolic ref or
+  points to a missing ref, a Fleet API `git` object reports a null `base`,
+  `ahead` and `behind` without an error, from the captain's crew plugin and
+  the gateway's own reader alike. Before, an `origin/HEAD` pointing to a
+  missing ref made the whole Git state `Git state unavailable.`
+  ([docs](docs/api.md#routes)).
+
 - The crew plugin now refuses, at load and with a message naming both
   counts, a team whose configured crew members times project contexts (the
   default plus each project) exceed 50, also with no projects configured;

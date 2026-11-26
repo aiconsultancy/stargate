@@ -309,6 +309,11 @@ existing ones:
 | `source`      | `captain` (the crew plugin) or `gateway` (the Fleet API process itself)     |
 | `fingerprint` | Crew members only: the [crew diff](#crew-diffs) `fingerprint` of this state |
 
+`base` is the branch's upstream or, without one, the branch `origin/HEAD`
+points to. When the branch has no upstream and `origin/HEAD` is absent, not a
+symbolic ref or points to a missing ref, `base`, `ahead` and `behind` are null
+and `error` is absent; both readers agree on this.
+
 Without a captain report, the gateway's own reader below applies.
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
 submodules. Status runs in a private Git directory with snapshots of the
@@ -391,8 +396,8 @@ A crew member's `git` also carries `fingerprint`, the checkout state its
 diff's `fingerprint` for the same state in every mode, and the `ship` event
 carries each new value. The captain computes it in the poll that reads the
 rest of the crew member's Git state. That poll reads `origin/HEAD` with one
-`git for-each-ref`, which also names the base when the branch has no
-upstream, so the fingerprint costs one Git process for a branch with an
+`git for-each-ref`, which also names the base, if any, when the branch has
+no upstream, so the fingerprint costs one Git process for a branch with an
 upstream and none without. It also reads the size and modification time of
 the index and of each path status names.
 

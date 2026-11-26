@@ -193,6 +193,48 @@ test("a detached checkout without upstream has no branch or base", async () => {
   });
 });
 
+test.each([
+  ["points to origin/main", "origin/main"],
+  ["is absent", null],
+  ["dangles", null],
+  ["is not a symref", null],
+] as const)(
+  "with no upstream and an origin/HEAD that %s, both readers agree on the base, without an error",
+  async (kind, base) => {
+    const directory = await repository();
+    await git(directory, "update-ref", "refs/remotes/origin/main", "HEAD");
+
+    const target = new Map<string, string>([
+      ["points to origin/main", "refs/remotes/origin/main"],
+      ["dangles", "refs/remotes/origin/gone"],
+    ]).get(kind);
+
+    if (target) {
+      await git(directory, "symbolic-ref", "refs/remotes/origin/HEAD", target);
+    }
+
+    if (kind === "is not a symref") {
+      await git(directory, "update-ref", "refs/remotes/origin/HEAD", "HEAD");
+    }
+
+    const counts = base ? 0 : null;
+    const expected = { branch: "main", base, ahead: counts, behind: counts };
+    const crew = await createCrewGitReader()(directory, signal);
+    expect(crew).toMatchObject({ ...expected, changedFiles: 0 });
+    expect(crew).not.toHaveProperty("error");
+
+    const gateway = createGitReader();
+
+    try {
+      const state = await gateway(directory, signal);
+      expect(state).toMatchObject({ ...expected, changedFiles: 0 });
+      expect(state).not.toHaveProperty("error");
+    } finally {
+      await gateway.stop();
+    }
+  },
+);
+
 test("Fleet status starts before the remote read completes", async () => {
   const directory = await repository();
 

@@ -479,6 +479,31 @@ function emptyState(checkedAt: number): V1Git {
   };
 }
 
+const originHead = "refs/remotes/origin/HEAD";
+
+/**
+ * The branch `origin/HEAD` names, as the crew plugin's reader finds it, or
+ * null. for-each-ref skips an `origin/HEAD` that points to a missing ref, so
+ * that case has no base rather than a failed comparison.
+ */
+async function defaultBranch(
+  run: (...args: string[]) => Promise<{ code: number; stdout: string }>,
+) {
+  const result = await run(
+    "for-each-ref",
+    "--format=%(refname)%00%(symref:short)",
+    originHead,
+  );
+
+  // The pattern matches refs below it as well: only origin/HEAD counts.
+  const short = result.stdout
+    .split("\n")
+    .map((line) => line.split("\0"))
+    .find(([ref, , extra]) => ref === originHead && extra === undefined)?.[1];
+
+  return result.code === 0 && short ? short : null;
+}
+
 async function inspect(
   directory: string,
   now: () => number,
@@ -567,17 +592,11 @@ async function inspect(
             )
           : undefined;
 
-        const base =
+        const baseRef =
           upstream?.code === 0
-            ? upstream
-            : await run(
-                "symbolic-ref",
-                "--short",
-                "-q",
-                "refs/remotes/origin/HEAD",
-              );
+            ? upstream.stdout.trim()
+            : await defaultBranch(run);
 
-        const baseRef = base.code === 0 ? base.stdout.trim() : null;
         deadline = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
 
         const changed = await checkout.read({
