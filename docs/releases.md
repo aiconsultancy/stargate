@@ -98,10 +98,12 @@ gh workflow run release.yml --repo aiconsultancy/stargate --ref main -f dry_run=
 The publish job uses the `release` GitHub environment (restricted to protected
 branches only; there is no separate reviewer approval gate). Before tagging, the
 workflow checks again that the dispatched SHA still matches `main` and that
-**Quality checks** passed on that exact commit; if `main` is red or has
-advanced, it fails without publishing. Release runs use `cancel-in-progress:
-false` so an in-progress run is not cancelled, though GitHub keeps only the
-newest pending dispatch in the concurrency queue.
+**Quality checks** passed on that exact commit; if `main` is red or already
+advanced, it fails without publishing. This pre-tag check is not an atomic
+branch lock, so avoid pushing to `main` during the short window while the
+archive is built and tagged. Release runs use `cancel-in-progress: false` so an
+in-progress run is not cancelled, though GitHub keeps only the newest pending
+dispatch in the concurrency queue.
 
 `scripts/release-version.ts` selects the largest Conventional Commit bump
 since the latest `vX.Y.Z` tag:

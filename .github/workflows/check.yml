@@ -135,8 +135,7 @@ jobs:
           if [ -n "$author_login" ]; then
             author="@$author_login"
           else
-            raw_author=$(printf '%s' "$commit_json" | jq -r '.commit.author.name // "unknown"' | tr '\r\n`' '   ')
-            author="\`$raw_author\`"
+            author="unlinked git author"
           fi
 
           pulls_json=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/pulls" 2>/dev/null || printf '[]')
