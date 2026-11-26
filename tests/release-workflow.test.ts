@@ -14,9 +14,14 @@ test("main checks do not invoke a release or run a second full suite", async () 
   expect(check).toMatch(
     /^\s+run: mise exec -- bun test tests\/mesij\.test\.ts$/m,
   );
+  expect(check).toContain("flag-red-main:");
+  expect(check).toContain("github.event_name == 'push'");
+  expect(check).toContain("github.ref == 'refs/heads/main'");
+  expect(check).toContain("repos/$GH_REPO/commits/main");
+  expect(check).toContain("--label red-main");
 });
 
-test("only explicit manual publication crosses the release environment approval gate", async () => {
+test("only explicit manual publication publishes from green main", async () => {
   const release = await readFile(
     new URL("../.github/workflows/release.yml", import.meta.url),
     "utf8",

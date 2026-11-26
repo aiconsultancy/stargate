@@ -5,32 +5,49 @@ sequence starts at `v0.20.3`. Merging to `main` does **not** publish a release.
 Checks run on each merge. They test the self-update environment and run the
 Mesij integration tests separately with pinned tools.
 The updater reads published GitHub releases, not commits on `main`; merged
-changes wait until a person approves a release.
+changes wait until a manual release run publishes them.
 
 ## Merge policy
 
 Use short-lived branches and ready PRs. Before merging any PR:
 
-1. Run the [thermo-nuclear code quality review](../.agents/skills/thermo-nuclear-code-quality-review/SKILL.md)
-   on the final diff. The author may run it. Record the reviewed commit,
-   findings, and how the PR resolves them in the PR discussion.
-2. Have a reviewer other than the author or latest pusher check the diff and
-   findings. In their GitHub approval, state that they confirm the
-   thermo-nuclear review for the latest commit. A generic approval does not
-   meet this policy.
-3. Require successful **Quality checks** and the approving review. Only then
-   enable `gh pr merge --auto --squash`. GitHub deletes the remote branch
+1. Run an independent [thermo-nuclear code quality review](../.agents/skills/thermo-nuclear-code-quality-review/SKILL.md)
+   on the final diff. The independent reviewer may be a different GitHub
+   identity, or a fresh ephemeral sub-session or separate agent session running
+   under the same GitHub identity.
+2. Record an explicit review attestation in the PR discussion naming the
+   reviewed head commit, the independent reviewer or ephemeral session
+   (including agent/model when applicable), the findings, and how the PR
+   resolved them. A bare approval or unattributed self-attestation does not meet
+   this policy.
+3. Require successful **Quality checks** and the recorded review attestation.
+   Then enable `gh pr merge --auto --squash`. GitHub deletes the remote branch
    after merge.
 
-GitHub enforces the approval and the Quality checks, including for admins.
-The reviewer confirms that the approval covers the thermo-nuclear review.
-The pre-push hook requires every branch push to contain the freshly fetched
-`origin/main`. If `main` moves, rebase and run checks again. A changed diff
-requires a new quality review. Ask for fresh approval after a rebase even if
-the reviewer can reuse the previous findings.
+GitHub's `main` ruleset enforces linear history, no force-push, no deletion,
+and **Quality checks**, with no `pull_request` approval rule. Reviews (including
+`CHANGES_REQUESTED`) from other agents or reviewers are advisory and never block
+a merge. The pre-push hook requires every branch push to contain the freshly
+fetched `origin/main`. If `main` moves, rebase and run checks again. A changed
+diff requires a new independent quality review and attestation for the new head.
+If the diff did not change, post a short confirmation that the prior attestation
+still applies to the new head.
 
-The release workflow publishes only the current
-`main` commit, and only after **Quality checks** have passed on that commit.
+### If `main` goes red
+
+Pushes to `main` run the full **Quality checks** suite (GitHub Actions
+concurrency runs one `main` check at a time and keeps the latest queued push).
+Breaking `main` is undesirable but not an emergency: fix it in a separate
+follow-up PR rather than rewriting history. When **Quality checks** fails on the
+current `main` commit, the workflow flags it by opening (or updating) a
+`red-main` GitHub issue that links the commit and names the merged PR, author,
+pusher, and failing run URL. Once `main` is green again, the workflow closes
+open `red-main` issues automatically (stale reruns of older commits do not
+modify issues).
+
+The release workflow checks that the dispatched SHA is current `main` and has
+passed **Quality checks** before tagging. Never cut a release from a red commit
+on `main`.
 
 ## Prepare release notes
 
@@ -60,7 +77,7 @@ sections. Published notes include commit subjects since the last tag and
 this flag section. Default changes require their own code/configuration
 change; approving a release does not toggle a host's settings.
 
-## Preview and approve a release
+## Preview and publish a release
 
 Only the **Release** workflow (`.github/workflows/release.yml`) publishes.
 It accepts manual dispatch on `main` only. Preview is the default:
@@ -72,22 +89,21 @@ gh workflow run release.yml --repo aiconsultancy/stargate --ref main -f dry_run=
 The read-only prepare job verifies current main and its successful **Quality
 checks**, computes the next version and writes the candidate commit and notes
 to the run summary. It does not create tags, assets, releases or deployments.
-Review the flag decisions in that summary. To request publication:
+Review the flag decisions in that summary. To publish:
 
 ```sh
 gh workflow run release.yml --repo aiconsultancy/stargate --ref main -f dry_run=false
 ```
 
-The publish job waits for the **release** GitHub environment's required
-reviewer, **withakay (Jack)**. The environment permits protected branches;
-the workflow additionally restricts dispatch to main. A person approves in
-GitHub Actions. Agents must not approve on the owner's behalf. The owner
-may dispatch and approve their own run (`prevent_self_review=false`).
-
-After approval the job checks main and Quality checks again. If main advanced,
-it fails without publishing: preview and approve a new run. It recomputes the
-version and requires the prepared candidate version to match. Release runs
-are serialised; neither preview nor merge cancels an existing release run.
+The publish job uses the `release` GitHub environment (restricted to protected
+branches only; there is no separate reviewer approval gate). Before tagging, the
+workflow checks again that the dispatched SHA still matches `main` and that
+**Quality checks** passed on that exact commit; if `main` is red or already
+advanced, it fails without publishing. This pre-tag check is not an atomic
+branch lock, so avoid pushing to `main` during the short window while the
+archive is built and tagged. Release runs use `cancel-in-progress: false` so an
+in-progress run is not cancelled, though GitHub keeps only the newest pending
+dispatch in the concurrency queue.
 
 `scripts/release-version.ts` selects the largest Conventional Commit bump
 since the latest `vX.Y.Z` tag:

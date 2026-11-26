@@ -682,8 +682,9 @@ security updates bypass it. CI checks that all three Pi runtime packages stay
 pinned to one release and that Effect matches the OpenCode SDK's version.
 
 The [merge policy](releases.md#merge-policy) also applies to Dependabot PRs,
-including major updates. A reviewer must run or confirm the thermo-nuclear
-review before a maintainer enables auto-merge. **Quality checks** still apply.
+including major updates. Record an independent thermo-nuclear review attestation
+(from a different reviewer or a fresh ephemeral review session) before enabling
+auto-merge. **Quality checks** still apply.
 
 The required quality gate checks every commit and page against signed Dependabot
 authorship, the full commit count, and the current PR head. This also blocks
