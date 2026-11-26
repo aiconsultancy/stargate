@@ -264,14 +264,20 @@ async function sizes(
 }
 
 /**
- * Index a copy of the checkout's index with untracked paths as intent-to-add.
- * `moved` tells whether the checkout changed since its snapshot.
+ * Git failed the intent-to-add step outright. A path may have gone since the
+ * snapshot, so the next snapshot decides whether this is a change.
  */
+class IntentFailed extends Error {
+  public constructor() {
+    super("Untracked files unavailable");
+  }
+}
+
+/** Index a copy of the checkout's index with untracked paths as intent-to-add. */
 async function intentIndex(
   checkout: IsolatedCheckout,
   stream: IsolatedStream,
   untracked: Snapshot["untracked"],
-  moved: () => Promise<boolean>,
 ) {
   const index = join(checkout.gitDir, "index");
   const objects = join(checkout.gitDir, "objects");
@@ -346,10 +352,9 @@ async function intentIndex(
     return { env, unindexed: [] };
   }
 
-  // 128 with nothing indexed: a path may have gone since the snapshot,
-  // Which is a change like any other, computed again.
-  if (code === 128 && (await moved())) {
-    throw new WorktreeChanged();
+  // 128 indexed nothing; the caller's next snapshot tells whether it moved.
+  if (code === 128) {
+    throw new IntentFailed();
   }
 
   // 1 means Git refused some paths, such as an empty nested repository or
@@ -464,13 +469,7 @@ async function diffPass<T>(
     const old = mode === "working" ? (head ?? empty) : (base?.commit ?? empty);
 
     const { env, unindexed } = worktree
-      ? await intentIndex(
-          checkout,
-          stream,
-          state.untracked,
-          async () =>
-            (await snapshot(git, directory)).fingerprint !== state.fingerprint,
-        )
+      ? await intentIndex(checkout, stream, state.untracked)
       : { env: {}, unindexed: [] };
 
     // Git's entries, then any untracked path it would not index.
@@ -842,11 +841,15 @@ export function createCheckoutDiffReader(
         return { kind: "stale", fingerprint: state.fingerprint };
       }
 
-      // A file that shrank while read is a change like any other.
+      // A file that shrank while read, or one gone before the intent-to-add
+      // Step, is a change like any other: the next snapshot shows it.
       const result = await computeDiff(git, directory, input, state).catch(
         (error: unknown) => {
-          if (error instanceof WorktreeChanged) {
-            return;
+          if (
+            error instanceof WorktreeChanged ||
+            error instanceof IntentFailed
+          ) {
+            return error;
           }
 
           throw error;
@@ -855,12 +858,20 @@ export function createCheckoutDiffReader(
 
       const after = await snapshot(git, directory);
 
-      if (result && after.fingerprint === state.fingerprint) {
-        return result;
+      if (after.fingerprint === state.fingerprint) {
+        if (result instanceof IntentFailed) {
+          throw result;
+        }
+
+        if (!(result instanceof WorktreeChanged)) {
+          return result;
+        }
       }
 
       if (attempt > 0) {
-        return result?.kind === "list" && input.at === undefined
+        return !(result instanceof Error) &&
+          result.kind === "list" &&
+          input.at === undefined
           ? { ...result, unstable: true }
           : { kind: "stale", fingerprint: after.fingerprint };
       }
