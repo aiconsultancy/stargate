@@ -290,11 +290,12 @@ export class OpenCodeCrewStatus {
         throw error;
       }
 
-      // An older plugin rejects the field: ask again without it. Only when
-      // That succeeds is the field unsupported, and neither mode is asked
-      // For again until an upgrade may have happened. A failed re-ask means
-      // The input was bad, not the field: it caches nothing.
-      const answer = await read(ordinary);
+      // Only a successful re-ask establishes that the field is unsupported.
+      // A failed re-ask is ordinary, even if it reports a missing method.
+      const answer = await read(ordinary).catch(() => {
+        throw new Error("Fleet crew status re-ask failed.");
+      });
+
       this.taskTextRetryAt = performance.now() + 60_000;
 
       return { kind: "unsupported", answer };

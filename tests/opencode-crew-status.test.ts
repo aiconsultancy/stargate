@@ -172,7 +172,7 @@ test.each(["busy", "draining"] as const)(
  */
 function pluginFixture() {
   const asked: string[] = [];
-  const plugin = { old: false, reject: false };
+  const plugin = { old: false, reject: false, ordinaryMissing: false };
 
   const output = {
     status: { members: [], total: 0, truncated: false },
@@ -200,6 +200,17 @@ function pluginFixture() {
         (plugin.old && mode)
       ) {
         return invalid();
+      }
+
+      if (plugin.ordinaryMissing && !mode) {
+        return Response.json(
+          {
+            _tag: "RpcError",
+            type: "rpc.method_not_found",
+            message: "Fixture",
+          },
+          { status: 404 },
+        );
       }
 
       return Response.json({
@@ -295,6 +306,61 @@ test("a genuine old plugin still falls back, and its fallback is cached", async 
       });
       expect(f.asked).toEqual(asked);
     }
+  } finally {
+    await f.stop();
+  }
+});
+
+test("a missing method on re-ask does not block the next full probe", async () => {
+  const f = pluginFixture();
+  const signal = new AbortController().signal;
+  const full = { member: "pilot", taskText: "full" } as const;
+  f.plugin.old = true;
+  f.plugin.ordinaryMissing = true;
+
+  try {
+    const failed = await f.crew.fleetCrewStatus(full, signal);
+    f.plugin.old = false;
+    f.plugin.ordinaryMissing = false;
+    const recovered = await f.crew.fleetCrewStatus(full, signal);
+
+    expect({ failed, recovered, asked: f.asked }).toEqual({
+      failed: { kind: "unavailable" },
+      recovered: { kind: "answer", answer: { ...f.output, taskText: "full" } },
+      asked: ["pilot:full", "pilot:ordinary", "pilot:full"],
+    });
+  } finally {
+    await f.stop();
+  }
+});
+
+test("three missing-method re-asks reach the plugin before ordinary backoff", async () => {
+  const f = pluginFixture();
+  const signal = new AbortController().signal;
+  const full = { member: "pilot", taskText: "full" } as const;
+  f.plugin.old = true;
+  f.plugin.ordinaryMissing = true;
+
+  try {
+    const failures = [];
+
+    for (let i = 0; i < 3; i++) {
+      failures.push(await f.crew.fleetCrewStatus(full, signal));
+    }
+
+    f.plugin.old = false;
+    f.plugin.ordinaryMissing = false;
+    const backedOff = await f.crew.fleetCrewStatus(full, signal);
+    const unavailable = { kind: "unavailable" } as const;
+
+    expect({ failures, backedOff, asked: f.asked }).toEqual({
+      failures: [unavailable, unavailable, unavailable],
+      backedOff: unavailable,
+      asked: Array.from({ length: 3 }, () => [
+        "pilot:full",
+        "pilot:ordinary",
+      ]).flat(),
+    });
   } finally {
     await f.stop();
   }

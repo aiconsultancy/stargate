@@ -150,32 +150,33 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   within the 180/80/400 character limits; the crew member route adds no limit.
   Subagent titles and pull request titles are also shown as written, cut to
   180 characters.
-- The crew plugin stores crew task text raw, up to 64,000 characters, and
-  redacts and bounds it on read, so the Slack crew command, health, the
-  operator dashboard and the crew status tool show exactly what they did. The
-  fleet status RPC takes `taskText: "unredacted"` (raw within 180/80/400, any
-  member filter) or `taskText: "full"` (raw up to 64,000, one member) and
+- The crew plugin stores crew task text raw, up to 64,000 code points per
+  field. The Slack crew command, health, the operator dashboard and the crew
+  status tool still show masked and bounded text. The fleet status RPC takes
+  `taskText: "unredacted"` (raw within 180/80/400, optional member filter)
+  or `taskText: "full"` (raw up to 64,000, one member) and
   echoes the mode in its answer. The Fleet API asks for `unredacted` for ship
-  detail and events and `full` for the crew member route; nothing else asks.
-  Only a plugin that lacks fleet status or rejects `taskText` answers with
-  redacted text. A current plugin that misses the crew deadline reports crew
-  status as unavailable. Fleet API text fields keep control and bidirectional
-  formatting characters; clients that print them must escape them.
+  detail and event sampling without a member filter, and `full` for the crew
+  member route; nothing else asks. A current plugin that misses the crew
+  deadline reports crew status as unavailable. Fleet API text fields keep
+  control and bidirectional formatting characters; clients that print them
+  must escape them.
 - Crew activity keeps the first 64,000 code points of the assignment summary
   and the last 64,000 of progress. For multi-project dispatches the assignment
   is validated on its own before Stargate adds the project preamble; the
   full task view contains the assignment without that preamble.
-- A failed fleet status re-ask no longer marks the crew plugin as lacking
-  `taskText`: Stargate treats the field as unsupported, for a minute, only
-  after the re-ask without it succeeds. A failed re-ask makes the read
-  unavailable. A member ID the plugin's schema rejects is never sent to it,
-  and the crew member route answers 404 for it.
+- Only the initial fleet status request can establish that a plugin lacks
+  the method. Stargate treats `taskText` as unsupported, for a minute, only
+  when the re-ask without it succeeds. A failed re-ask makes the read
+  unavailable and counts as one ordinary failure. A member ID the plugin's
+  schema rejects is never sent to it. The crew member route answers 404 when
+  admitted, or 503 when every HTTP read slot is busy.
 - Progress longer than the stored 64,000 code points keeps its ordinary
   (redacted) view masked from the uncut text, in a new nullable
   `member_activity.maskedProgress` column, so a credential the cut splits stays
   masked. The full view still shows the raw last 64,000 code points. Pi crew
-  members buffer up to twice that before the store's cut. Shorter progress and
-  older rows are still masked on read.
+  members buffer up to twice that before the final storage cut. Shorter
+  progress and legacy rows are still masked on read.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`

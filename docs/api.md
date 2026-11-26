@@ -197,18 +197,27 @@ when no name is set), `role` and `model`.
 Crew task text (`summary`, `phase` and `progress`) and Git branch and base
 names appear exactly as the crew wrote them: the API neither redacts
 credential-shaped text nor replaces checkout paths, in every route and
-event. Ship detail and the `ship` event show task text unredacted, within at
-most 180, 80 and 400 code points (the start of the summary and phase, the end
-of the progress); the fleet overview carries no task text. The crew member
-route applies no limit of its own: it returns the task text the crew plugin
-stores, up to 64,000 code points each. The plugin stores task text raw and
-redacts and bounds it on read for every other reader (the Slack crew
-command, health, the operator dashboard and the crew status tool). Only a
-plugin that lacks the fleet status method or rejects `taskText` answers ship
-and crew detail with redacted 180/80/400 text. When a current plugin cannot
-answer by the crew deadline, crew status is unavailable; the member route
-returns `503` rather than redacted text. Ship and member routes both return
-`503` if the whole HTTP read times out.
+event. Ship detail and the sample that feeds the `ship` event request task
+text without a member filter. They show it unredacted, up to 180, 80 and 400
+code points (the start of the summary and phase, the end of the progress);
+the fleet overview carries no task text. The crew member route applies no
+limit of its own: it returns the task text the crew plugin stores, up to
+64,000 code points per field.
+
+The store makes the final storage cut for progress; Pi members buffer up to
+twice that limit first. For over-limit progress, the store saves the raw
+tail and masks the ordinary view from the uncut text before storage. Short
+progress and legacy rows are masked on read. Ordinary readers (the Slack
+crew command, health, the operator dashboard and the crew status tool) get
+masked and bounded text.
+
+Ship and crew detail fall back to redacted 180/80/400 text only when the
+initial request reports the fleet status method missing, or when the plugin
+rejects `taskText` and the re-ask without it succeeds. A failed re-ask or a
+current plugin that cannot answer by the crew deadline leaves crew status
+unavailable; the member route returns `503` rather than redacted text. Ship
+and member routes both return `503` if the whole HTTP read times out.
+
 Subagent titles and pull request titles are also shown as written, cut to
 180 characters. Activity events quote task text and branch names unredacted,
 with whitespace collapsed.
@@ -916,9 +925,11 @@ with a 400 ms budget that doubles after a timeout, up to 6.4 seconds, leaving
 time for ordinary crew status. Timeouts count toward the pause below at the
 maximum budget. Task text reads have no probe budget, and their timeouts
 never double it: they wait for the caller's crew deadline. Concurrent callers
-with the same filter share one probe. An explicit missing-method response or
-three consecutive failures pause probes for one minute. A member ID the crew
-plugin would reject is never sent to it: the crew member route answers 404.
+with the same filter share one probe. An explicit missing-method response to
+the initial request or three consecutive failures pause probes for one minute.
+A failed re-ask counts as one ordinary failure. A member ID the crew plugin
+would reject is never sent to it: the crew member route answers `404` when
+admitted, or `503` when every HTTP read slot is busy.
 
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git
