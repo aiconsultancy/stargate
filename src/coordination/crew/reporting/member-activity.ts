@@ -102,6 +102,8 @@ function unredactedActivity({
   };
 }
 
+// Retained rows carry no provenance marker for the summary.
+// Keep the stored text even if it looks like a clipped generated preamble.
 const shown = {
   ordinary: maskedActivity,
   unredacted: unredactedActivity,
