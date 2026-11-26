@@ -21,7 +21,7 @@ type Dropped = Map<ProofScope, CallRange>;
 
 export type NamingSegment = {
   proofs: TimedProof[];
-  witness?: TimedProof;
+  witnesses?: TimedProof[];
   proofOverflow?: true;
   droppedProofScopes?: Set<ProofScope>;
 };
@@ -77,6 +77,27 @@ export class ActivityNamingEvidence {
     }
 
     held.provisional.push(proof);
+  }
+
+  public witness(segment: NamingSegment, proof: TimedProof) {
+    segment.witnesses ??= [];
+    const witnesses = segment.witnesses;
+
+    // The native parent may not be known yet. Keep one hint per writer.
+    // Cap the segment's witness pool at the configured pending-name limit.
+    if (
+      witnesses.some(
+        ({ session, log }) => session === proof.session && log === proof.log,
+      )
+    ) {
+      return;
+    }
+
+    if (witnesses.length >= this.limit) {
+      witnesses.shift();
+    }
+
+    witnesses.push(proof);
   }
 
   public discard(id: string, held: HeldNames) {

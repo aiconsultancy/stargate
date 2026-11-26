@@ -309,7 +309,7 @@ export class OpenCodeActivityFamilies {
 
       if (
         pending.parent === session ||
-        this.queue.hasProofFrom(queued, session) ||
+        (!pending.parent && this.queue.hasProofFrom(queued, session)) ||
         (pending.inferred && this.lineage.get(pending.inferred) === scope)
       ) {
         return true;
@@ -992,6 +992,7 @@ export class OpenCodeActivityFamilies {
 
     const unproven =
       fallback ||
+      attribution.witnessOnly ||
       !freshChild(this.executions, id, first, pending, proof?.timing);
 
     const log = openChild(attribution, id, first.at, unproven, (writer) =>

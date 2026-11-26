@@ -231,7 +231,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       bindName(segment, proof);
     } else {
       // An in-time name can expose detached output without ever proving a link.
-      segment.witness ??= proof;
+      this.evidence.witness(segment, proof);
     }
   }
 
@@ -239,8 +239,8 @@ export class ActivityRecoveryQueues<E extends Event> {
     return (
       pending.provisional.some((proof) => proof.session === session) ||
       pending.segments.some(
-        ({ proofs, witness }) =>
-          witness?.session === session ||
+        ({ proofs, witnesses }) =>
+          witnesses?.some((proof) => proof.session === session) === true ||
           proofs.some((proof) => proof.session === session),
       )
     );
@@ -254,7 +254,7 @@ export class ActivityRecoveryQueues<E extends Event> {
     const segment = pending.segments[0];
     const proofs = segment?.proofs.filter(accepts) ?? [];
     const first = proofs[0];
-    const witness = segment?.witness;
+    const witness = segment?.witnesses?.find(accepts);
     const scope = first ? first.scope : inferredScope;
 
     const overflow =
@@ -263,7 +263,7 @@ export class ActivityRecoveryQueues<E extends Event> {
 
     return {
       first,
-      witness: witness && accepts(witness) ? witness : undefined,
+      witness,
       ambiguous: overflow || proofs.length > 1,
       detached: overflow || proofs.some(({ log }) => log !== first?.log),
     };
@@ -339,7 +339,10 @@ export class ActivityRecoveryQueues<E extends Event> {
     const head = pending.segments[0];
 
     // Publish known names and post-loss output before releasing an expired head.
-    if (head && (pending.postLoss || head.proofs.length > 0 || head.witness)) {
+    if (
+      head &&
+      (pending.postLoss || head.proofs.length > 0 || head.witnesses?.length)
+    ) {
       this.admit(id);
 
       if (this.peek(id) !== pending || pending.draining) {
@@ -781,11 +784,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       ({ order }) => order > old.first.order,
     );
 
-    for (const proof of [
-      ...old.proofs,
-      ...(old.witness ? [old.witness] : []),
-      ...held,
-    ]) {
+    for (const proof of [...old.proofs, ...(old.witnesses ?? []), ...held]) {
       // Moving a witnessed name to a successor is not a new proof arrival.
       this.routeProof(pending, proof);
     }

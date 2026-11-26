@@ -44,6 +44,7 @@ export function detachedAttribution(owner: TurnActivityLog) {
     detached: true,
     callId: null,
     ambiguous: false,
+    witnessOnly: false,
     proof: undefined,
   };
 }
@@ -72,6 +73,7 @@ export function resolveAttribution(
     ambiguous,
     detached: naming.detached || competing,
     callId: ambiguous ? null : (naming.first?.callId ?? null),
+    witnessOnly: !naming.first && naming.witness !== undefined,
     proof,
   };
 }
