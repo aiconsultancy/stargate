@@ -176,15 +176,16 @@ export class OpenCodeActivityFamilies {
             this.calls.discardStart(id, through);
           }
         },
-        candidate: (id, queued) => {
+        candidate: (id, queued, headOnly) => {
           markDiscardedContinuation(
             this.facts(queued).continuation?.log,
             queued,
             isActivityEvent,
+            headOnly,
           );
           const child = this.children.get(id);
 
-          if (child?.unproven && !child.continuation) {
+          if (!headOnly && child?.unproven && !child.continuation) {
             this.finish(id, child, "cancelled", true);
           }
         },
@@ -796,7 +797,7 @@ export class OpenCodeActivityFamilies {
       if (
         (ancestry.lookup ?? -Infinity) <= this.proofFloor ||
         ancestry.parent !== undefined ||
-        queued.expires <= now ||
+        this.queue.deadline(queued) <= now ||
         this.reads.has(id)
       ) {
         continue;
@@ -819,7 +820,7 @@ export class OpenCodeActivityFamilies {
       if (
         !this.source.signal.aborted &&
         this.queue.peek(id) === pending &&
-        pending.expires > this.now() &&
+        this.queue.deadline(pending) > this.now() &&
         parent &&
         parent !== id
       ) {
@@ -976,7 +977,7 @@ export class OpenCodeActivityFamilies {
 
     const fallback = anchor !== undefined && !normal?.owner;
 
-    if (fallback && started && !queued.closing && !segment.gap) {
+    if (fallback && started && !this.queue.closed(queued) && !segment.gap) {
       return;
     }
 

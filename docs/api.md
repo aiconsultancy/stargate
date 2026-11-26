@@ -750,8 +750,9 @@ transcript. If neither continuity nor an outcome is proven, the old turn
 ends `cancelled` with `lost: true`, meaning observation was lost, not that
 the native session was interrupted. A newer start seen by the log may
 establish that loss but can still be admitted once from the live stream.
-A live start after a loss gets the usual naming window: a valid call name
-can arrive after the start and still attach that turn and its witnessed
+A live start after a loss gets its own two-second naming window, even if
+an earlier start for the same session is still waiting. A valid name can
+arrive within that window and still attach the turn and its witnessed
 outcome. Output beyond the old cursor without a new start, or buffered
 output from a start whose window or candidate budget closes without
 proof, appears in a separate detached turn with no parent, request, crew

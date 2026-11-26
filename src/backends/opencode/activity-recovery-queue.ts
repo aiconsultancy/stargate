@@ -55,6 +55,7 @@ type Segment<E extends Event> = {
     reused?: true;
   };
   floor: number;
+  expires: number;
   boundaryOrder?: number;
   gap?: ActivityReplayGap;
   // Recovery consumes gap entries in place; keep their reserved count.
@@ -103,7 +104,7 @@ export const activityQueueDefaults = {
 
 type Removal<E extends Event> = {
   start(id: string, order: number): void;
-  candidate(id: string, pending: PendingActivity<E>): void;
+  candidate(id: string, pending: PendingActivity<E>, headOnly?: true): void;
 };
 
 export class ActivityRecoveryQueues<E extends Event> {
@@ -164,7 +165,7 @@ export class ActivityRecoveryQueues<E extends Event> {
           break;
         }
 
-        this.closeWindow(...oldest);
+        this.closeCandidate(...oldest);
       }
 
       pending = {
@@ -184,6 +185,14 @@ export class ActivityRecoveryQueues<E extends Event> {
   }
 
   public offerProof(pending: PendingActivity<E>, proof: NamingProof) {
+    this.routeProof(pending, proof, this.now());
+  }
+
+  private routeProof(
+    pending: PendingActivity<E>,
+    proof: NamingProof,
+    seenAt?: number,
+  ) {
     const segment = pending.segments.find(
       ({ floor, first }) =>
         first.type === startType &&
@@ -192,7 +201,9 @@ export class ActivityRecoveryQueues<E extends Event> {
     );
 
     if (segment) {
-      this.bind(segment, proof);
+      if (seenAt === undefined || seenAt < segment.expires) {
+        this.bind(segment, proof);
+      }
     } else if (
       proof.order >
       (pending.segments.findLast(({ first }) => first.type === startType)?.first
@@ -335,12 +346,49 @@ export class ActivityRecoveryQueues<E extends Event> {
 
     for (const [id, pending] of this.queues) {
       if (this.expires(pending) <= now) {
-        this.closeWindow(id, pending);
+        this.schedule(id);
       }
     }
   }
 
-  private closeWindow(id: string, pending: PendingActivity<E>) {
+  private admitReady(id: string) {
+    const pending = this.peek(id);
+
+    if (!pending || this.expires(pending) > this.now()) {
+      this.admit(id);
+
+      return;
+    }
+
+    const head = pending.segments[0];
+
+    // Publish known names and post-loss output before releasing an expired head.
+    if (head && (pending.postLoss || head.proofs.length > 0)) {
+      this.admit(id);
+
+      if (this.peek(id) !== pending || pending.draining) {
+        return;
+      }
+
+      if (pending.segments[0] !== head) {
+        if (pending.segments.length === 0 && pending.provisional.length === 0) {
+          this.discard(id, true);
+        }
+
+        return;
+      }
+    }
+
+    // Timeouts release the oldest segment only; explicit budgets close the candidate.
+    if (pending.segments.length > 1) {
+      this.removed?.candidate(id, pending, true);
+      this.skip(id, pending);
+    } else {
+      this.discard(id, true);
+    }
+  }
+
+  private closeCandidate(id: string, pending: PendingActivity<E>) {
     if (pending.postLoss && !pending.closing) {
       pending.closing = true;
 
@@ -360,13 +408,24 @@ export class ActivityRecoveryQueues<E extends Event> {
     }
   }
 
+  public deadline(pending: PendingActivity<E>) {
+    return pending.segments[0]?.expires ?? pending.expires;
+  }
+
+  public closed(pending: PendingActivity<E>) {
+    return (
+      pending.closing === true ||
+      (pending.postLoss && this.deadline(pending) <= this.now())
+    );
+  }
+
   private expires(pending: PendingActivity<E>) {
     // Keep bounded names and ancestry while awaiting a start.
     // Buffered transcripts still expire as before.
     return pending.draining ||
       (pending.segments.length === 0 && pending.provisional.length > 0)
       ? Infinity
-      : pending.expires;
+      : this.deadline(pending);
   }
 
   private armExpiry() {
@@ -460,7 +519,7 @@ export class ActivityRecoveryQueues<E extends Event> {
         (segment.gap ??= new ActivityReplayGap()).incomplete = true;
 
         if (!pending.draining) {
-          this.closeWindow(id, pending);
+          this.closeCandidate(id, pending);
         }
       }
 
@@ -485,10 +544,11 @@ export class ActivityRecoveryQueues<E extends Event> {
           order,
           seq: boundarySeq(packet.event),
           created: nativeActivityTime(packet.event),
-          ...(start && pending.expires <= this.now() && { late: true }),
+          ...(start && this.deadline(pending) <= this.now() && { late: true }),
           ...(packet.reused && { reused: true }),
         },
         floor,
+        expires: start ? at + this.limits.ttl : pending.expires,
         frames: [],
         proofs: [],
         bytes: 0,
@@ -511,10 +571,7 @@ export class ActivityRecoveryQueues<E extends Event> {
         );
       }
 
-      if (segment.first.late) {
-        pending.expires = this.now() + this.limits.ttl;
-        this.armExpiry();
-      }
+      this.armExpiry();
     }
 
     // Only the published segment bypasses the candidate byte budget.
@@ -561,7 +618,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       // Iterative, including nested admissions during replay.
       for (const next of this.ready) {
         this.ready.delete(next);
-        this.admit(next);
+        this.admitReady(next);
       }
     } finally {
       this.draining = false;
@@ -665,7 +722,10 @@ export class ActivityRecoveryQueues<E extends Event> {
     ) {
       this.discard(id, true);
     } else if (!pending.closing) {
-      pending.expires = this.now() + this.limits.ttl;
+      if (pending.segments.length === 0) {
+        pending.expires = this.now() + this.limits.ttl;
+      }
+
       this.armExpiry();
       this.schedule(id);
     }
@@ -704,7 +764,8 @@ export class ActivityRecoveryQueues<E extends Event> {
     }
 
     for (const proof of old.proofs) {
-      this.offerProof(pending, proof);
+      // Moving a witnessed name to a successor is not a new proof arrival.
+      this.routeProof(pending, proof);
     }
   }
 
