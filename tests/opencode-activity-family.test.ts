@@ -2674,6 +2674,272 @@ async function postLossStart(
   return { f, root };
 }
 
+test.each(["before name", "after name", "after successor deadline"] as const)(
+  "a name for the newer native start survives predecessor recovery: %s",
+  async (release) => {
+    const gate = Promise.withResolvers<void>();
+    const f = fixture(undefined, gate.promise);
+
+    try {
+      const root = f.root();
+      f.create(child, main);
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        undefined,
+        1,
+        10,
+      );
+      f.failedReads.add("log");
+      await f.families.reconnected();
+      f.failedReads.delete("log");
+
+      // The call arrived before A, but native time can only place it after A.
+      f.emit(
+        "session.tool.input.started",
+        main,
+        { assistantMessageID: "answer", id: "retry", name: "subagent" },
+        root,
+        undefined,
+        undefined,
+        30,
+      );
+      f.called(root, "retry", { agent: "explore", sessionID: child });
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        undefined,
+        3,
+        23,
+      );
+
+      const endText = (text: string, assistantMessageID: string, seq: number) =>
+        f.emit(
+          "session.text.ended",
+          child,
+          { text, assistantMessageID, ordinal: 0 },
+          undefined,
+          undefined,
+          seq,
+        );
+
+      endText("earlier transcript", "earlier-answer", 4);
+      f.advance(1800);
+      endText("x".repeat(256 * 1024), "omitted-answer", 5);
+      f.emit(
+        "session.execution.succeeded",
+        child,
+        {},
+        undefined,
+        undefined,
+        6,
+        35,
+      );
+      expect(f.logReads).toEqual([[child, 4]]);
+
+      f.advance(100);
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        undefined,
+        7,
+        41,
+      );
+      endText("new transcript", "new-answer", 8);
+
+      if (release === "before name") {
+        gate.resolve();
+        await setImmediate();
+      }
+
+      const late = release === "after successor deadline";
+      f.advance(late ? 2001 : 200);
+      f.names(root, "retry", child);
+      f.emit(
+        "session.execution.succeeded",
+        child,
+        {},
+        undefined,
+        undefined,
+        9,
+        44,
+      );
+      gate.resolve();
+      await setImmediate();
+
+      if (!late) {
+        f.advance(1801);
+        f.delta(main, "tick");
+      }
+
+      expect(f.turns().slice(2)).toMatchObject([
+        {
+          session: { parent: null },
+          status: "cancelled",
+          lost: true,
+          items: expect.arrayContaining([
+            expect.objectContaining({ text: "earlier transcript" }),
+            expect.objectContaining({ unavailable: ["activity.frames"] }),
+          ]),
+        },
+        {
+          session: { parent: late ? null : { callId: "retry" } },
+          status: late ? "cancelled" : "completed",
+          items: [{ text: "new transcript" }],
+        },
+      ]);
+      expect(f.turns().at(-1)?.lost).toBe(late ? true : undefined);
+    } finally {
+      gate.resolve();
+      f.stop.abort();
+    }
+  },
+);
+
+test.each([
+  {
+    mode: "old name late, with B",
+    old: "late",
+    output: true,
+    successorAt: 1900,
+    native: true,
+  },
+  {
+    mode: "old call, no old name",
+    old: "never",
+    output: true,
+    successorAt: 1900,
+    native: true,
+  },
+  {
+    mode: "old name late",
+    old: "late",
+    output: true,
+    successorAt: 1900,
+    native: true,
+  },
+  {
+    mode: "old name late, no A output",
+    old: "late",
+    output: false,
+    successorAt: 1900,
+    native: true,
+  },
+  {
+    mode: "loss, B waits",
+    old: "never",
+    output: false,
+    successorAt: 1900,
+    native: true,
+  },
+  {
+    mode: "old name in time",
+    old: "early",
+    output: true,
+    successorAt: 1900,
+    native: true,
+  },
+  {
+    mode: "after A closed",
+    old: "never",
+    output: true,
+    successorAt: 2100,
+    native: true,
+  },
+  {
+    mode: "untimed A, old call still competes",
+    old: "never",
+    output: true,
+    successorAt: 1900,
+    native: false,
+  },
+] as const)(
+  "an expired post-loss start limits its successor's naming range: $mode",
+  async (row) => {
+    const f = fixture();
+
+    try {
+      const root = f.root();
+      f.parents.set(child, main);
+      f.create(child, main);
+      f.start(child);
+      f.failedReads.add("log");
+      await f.families.reconnected();
+      f.failedReads.delete("log");
+      f.call(root, "old");
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        undefined,
+        undefined,
+        row.native ? 20 : null,
+      );
+
+      if (row.output) {
+        f.ended(child, "A output", "earlier-answer");
+      }
+
+      if (row.old === "early") {
+        f.names(root, "old", child);
+      }
+
+      f.end(child);
+      f.advance(Math.min(row.successorAt, 2000));
+
+      if (row.successorAt > 2000) {
+        f.delta(main, "A deadline");
+        f.advance(row.successorAt - 2000);
+      }
+
+      f.call(root, "retry");
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        undefined,
+        undefined,
+        40,
+      );
+      f.ended(child, "B output", "new-answer");
+      f.advance(2100 - row.successorAt);
+      f.delta(main, "A expired");
+
+      if (row.old === "late") {
+        f.names(root, "old", child);
+      }
+
+      f.advance(row.mode === "old name late, with B" ? 200 : 100);
+      f.names(root, "retry", child);
+      f.end(child);
+      await setImmediate();
+
+      const turns = f.turns().slice(2);
+      expect(turns).toHaveLength(2);
+      expect(turns[0]).toMatchObject({
+        session: { parent: row.old === "early" ? { callId: "old" } : null },
+        status: row.old === "early" ? "completed" : "cancelled",
+        items: row.output ? [{ text: "A output" }] : [],
+      });
+      expect(turns[1]).toMatchObject({
+        session: { parent: row.native ? { callId: "retry" } : null },
+        items: [{ text: "B output" }],
+        ...(row.native && { status: "completed" }),
+      });
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
 test.each([
   { earlier: "none", nameAt: 2100 },
   { earlier: "queued", nameAt: 2100 },
