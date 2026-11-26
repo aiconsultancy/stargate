@@ -31,6 +31,38 @@ under `src/coordination/fleet/dispatch/`.
 Both behaviours are visible to everyone in the command channel: the request,
 the answer and the outcome.
 
+## Decision outcomes by direct message
+
+Set `agentDispatch.decisionOutcomeDms` to `true` when the Subspace API
+serves the decision outcome feed. The default is off. It works without
+`agentDispatch.enabled`, which switches on issue dispatch. The dispatcher sends
+each accepted or rejected proposal to the active captain who recorded it.
+It checks that the fleet roster's `ircNick` matches the operator's configured
+captain account and confirms who holds that account before sending. For fleets
+where an agent name differs from its IRC account, set `captainAccounts`.
+The DM contains only the decision reference and outcome, for example
+`D-00042-NAV was accepted.`
+
+The captain must admit the sender as a fleet peer and have capacity under
+`access.peerTurnsPerHour`. With `dmPolicy: "redirect"`, set the captain's
+`decisionOutcomeSender` to the rear admiral's IRC account. The captain will
+admit only marked decision DMs from that authenticated account as the
+exception to redirect. Normal captain DM intake
+starts the turn. The server echo confirms the IRC send. The captain's
+gateway can still decline the turn under its admission policy. Unreachable
+captains remain pending. The dispatcher acknowledges delivery to the API
+after a server echo and retains a local receipt if the API is unavailable.
+A loss of the IRC confirmation can cause a retry. Captains use the decision
+reference to read the authoritative outcome.
+
+The API feed is `GET /api/v1/fleets/{fleetId}/decision-outcomes` with
+`limit` and optional `cursor`. It returns an `items` page with `id`,
+`identifier`, `recordedByUserId` and `status` for each pending outcome.
+After delivery, the dispatcher calls
+`POST /api/v1/fleets/{fleetId}/decision-outcomes/{id}/delivered`. The API
+must scope both routes to the authenticated fleet dispatcher and return an
+empty 204 on every successful receipt, including repeated calls.
+
 ## How it fits
 
 - **Rear admiral only.** It runs on the IRC registration named by

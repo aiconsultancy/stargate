@@ -50,17 +50,29 @@ An example with tools and approval controls left at their defaults:
 Replace the IDs and paths with your deployment's values. Teams configuration
 uses exact Entra object IDs, rather than display names or email addresses.
 `access.users` must contain at least one UUID. An allowed human can send a
-personal message; a channel or group chat must also match `access.channels`.
+personal message. A channel or group chat must also match `access.channels`
+and include a Teams @mention of this bot in the current message. By default,
+text-only mentions and mentions of another bot do not select this registration.
+On a dedicated conversation, set `access.allowUnmentionedConversations: true`
+to accept messages without a bot mention from the explicitly listed conversations.
 For channel messages, the channel ID in `channelData.channel.id` is the access
 scope even when the activity's conversation ID is different. Denied users and
 channels override the allow lists. Wildcards are not supported for Teams.
 Registration IDs and socket paths must be unique within the gateway.
 
-The activity must identify the configured tenant. If it carries tenant IDs in
+The activity must identify the configured bot and tenant. If it carries tenant IDs in
 both conversation and channel data, both must agree. Bot senders, self messages,
 missing human object IDs and unsupported activity types are refused. Access is
 checked again before work and delivery; removing a permitted channel also
 blocks replies to its previously stored conversation references.
+
+### Quoted messages
+
+Stargate uses up to three quoted-message references as untrusted context for
+the current request. A validated Teams preview contributes up to 512 characters.
+Missing, deleted, unvalidated, or ambiguous previews contribute only the
+message ID. Quoting a message does not supply an @mention, change the sender,
+approve an action, or select the reply destination.
 
 ## Authentication and durable replies
 
@@ -161,7 +173,7 @@ including its caption and reply metadata, against the Teams 80 KB budget.
 The gateway can reduce the longest edge to 256 pixels to fit the preview byte limit. Up to two native decoders run at once. GIF previews show the first frame. Animated PNG and animated WebP are refused. JPEG previews flatten transparency. A busy decoder can retry before publication.
 Images are never truncated or
 silently replaced by their captions. No arbitrary image URLs are fetched, and
-no extra public file endpoint is needed. Paste a screenshot into a Teams message for the officer to inspect. The registration option `incomingImages: false` disables incoming screenshot downloads. In groups and channels, mention the bot. Stargate downloads only inline image attachments from the authenticated Bot Connector for the admitted turn. PNG, JPEG, WebP and GIF can be up to 10 MiB each, 25 MiB total, and 4096 pixels per edge. HTML image sources and links to files in Microsoft 365 are separate from inline images.
+no extra public file endpoint is needed. Paste a screenshot into a Teams message for the officer to inspect. The registration option `incomingImages: false` disables incoming screenshot downloads. In groups and channels, mention the bot unless the conversation has opted into messages without a mention. Stargate downloads inline images from the authenticated Bot Connector for the admitted turn. PNG, JPEG, WebP and GIF can be up to 10 MiB each, 25 MiB total, and 4096 pixels per edge. HTML image sources and links to files in Microsoft 365 are separate from inline images.
 
 The local encoded receipt stays in private delivery state. Publication uses the
 original authenticated conversation and reply activity with a fresh access
@@ -170,6 +182,37 @@ uncertain or the process stops before recording success, a retry marks the image
 unavailable and reports it once instead of publishing it again. Check the
 conversation before choosing to publish a new image; an unavailable outcome
 does not prove the earlier image never arrived.
+
+### Receive documents in personal chats
+
+To enable document receipt, set `attachmentFileHosts` on the Teams registration
+to up to four exact, lowercase SharePoint hosts owned by its configured tenant,
+for example `["contoso-my.sharepoint.com"]`. Omit the setting or use an empty
+list to keep document receipt off. Use the actual host in the Teams download
+URL. The Teams manifest needs a personal bot scope and `supportsFiles: true`.
+Installers can require the `teamsAttachmentFiles: 1` officer-tools contract
+marker when the host list is nonempty to detect releases that can read it.
+
+Attach a PDF, UTF-8 plain text, Markdown, CSV or JSON file to a personal message.
+The limit is 10 MiB per file and 25 MiB total across all attachments in the
+message. Stargate passes the file bytes to the backend with a generated name.
+Use a backend that accepts the selected file type. Pasted inline screenshots
+continue to use the Bot Connector.
+
+Stargate uses the registration's managed identity to request a file token
+for the exact configured download host. It checks the file tenant against the
+authenticated activity's tenant, sends the supplied URL verbatim, and declines
+redirects. The operator must verify that each listed host belongs to the configured
+tenant. Download URLs stay in memory and are valid for at most two minutes
+from receipt. Queued requests can outlive that window. A gateway restart
+also clears the download references. While document receipt is enabled,
+Stargate reports attachments that exceed a limit, cannot be retrieved, or
+arrive in a shared conversation as unavailable and asks the user to retry.
+
+Microsoft makes the read-only `File.ReadSelected.User` resource-specific
+consent permission available on 15 January 2027. Include that permission in
+the Teams manifest by 1 March 2027 for continued document receipt. See
+[Microsoft's bot file authentication guidance](https://learn.microsoft.com/en-us/microsoftteams/platform/bots/how-to/bots-filesv4#authenticate-bot-file-requests).
 
 ## Fleet roles and commissioning
 

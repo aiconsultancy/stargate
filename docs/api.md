@@ -231,12 +231,13 @@ progress and legacy rows are masked on read. Ordinary readers (the Slack
 crew command, health, the operator dashboard and the crew status tool) get
 masked and bounded text.
 
-Ship and crew detail fall back to redacted 180/80/400 text only when the
-initial request reports the fleet status method missing, or when the plugin
-rejects `taskText` and the re-ask without it succeeds. A failed re-ask or a
-current plugin that cannot answer by the crew deadline leaves crew status
-unavailable; the member route returns `503` rather than redacted text. Ship
-and member routes both return `503` if the whole HTTP read times out.
+On the operator listener, ship and crew detail fall back to redacted
+180/80/400 text only when the initial request reports the fleet status method
+missing, or when the plugin rejects `taskText` and the re-ask without it
+succeeds. A failed re-ask or a current plugin that cannot answer by the crew
+deadline leaves crew status unavailable; the member route returns `503`
+rather than redacted text. Ship and member routes both return `503` if the
+whole HTTP read times out.
 
 Subagent titles and pull request titles are also shown as written, cut to
 180 characters. Each stream's activity events quote its own task text view,
@@ -286,10 +287,20 @@ private Git directory without checkout filter configuration or
 `info/attributes`. Both readers use the same status configuration allow-list
 and discard multiline values. A failed configuration read, including an
 output limit, makes the Git state unavailable. Both readers recheck the
-branch and commit after status and do not cache a result if either changed.
+branch and commit after status and do not cache a result if either changed
+or can no longer be read.
 The captain reads the configured `core.excludesFile` as live ignore data,
 like the live repository's other ignore files. The gateway can run as a
 different Linux user, so it copies that file under the snapshot limits below.
+Only the repository's own configuration counts: both readers skip Git's
+global and system configuration (`GIT_CONFIG_GLOBAL=/dev/null`). A
+`core.excludesFile` set in `~/.gitconfig` or the XDG Git config and the
+default `$XDG_CONFIG_HOME/git/ignore` (`~/.config/git/ignore`) do not apply,
+so files ignored only there count in `changedFiles`, although `git status`
+in a terminal hides them. This is deliberate: the read stays isolated from
+the user's configuration. To have the count honour such a file, set
+`core.excludesFile` in the repository's configuration or use `.gitignore` or
+`.git/info/exclude`.
 Git versions that support
 `GIT_ATTR_SOURCE` also ignore worktree `.gitattributes`. The captain caches
 each checkout's result for 15 seconds, with a five-second read limit.

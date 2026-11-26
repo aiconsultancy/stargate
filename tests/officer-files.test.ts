@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  chownSync,
   linkSync,
   mkdtempSync,
   mkdirSync,
@@ -26,6 +27,15 @@ test("officer file tools prepare requested local and written documents without s
   try {
     mkdirSync(staging);
     mkdirSync(exports);
+
+    const sharedGroup = process
+      .getgroups?.()
+      .find((gid) => gid !== process.getgid?.());
+
+    if (sharedGroup !== undefined) {
+      chownSync(exports, -1, sharedGroup);
+    }
+
     chmodSync(exports, 0o2750);
     writeFileSync(join(staging, "output.pdf"), "sample-pdf", { mode: 0o600 });
     symlinkSync(join(staging, "output.pdf"), join(staging, "linked.pdf"));
@@ -128,8 +138,11 @@ prototype.chmod = function (mode) {
 
       expect(statSync(path).mode & 0o777).toBe(0o640);
       expect(statSync(join(path, "..")).mode & 0o7777).toBe(0o750);
-      expect(statSync(path).gid).toBe(statSync(exports).gid);
-      expect(statSync(join(path, "..")).gid).toBe(statSync(exports).gid);
+
+      if (sharedGroup !== undefined) {
+        expect(statSync(path).gid).toBe(sharedGroup);
+        expect(statSync(join(path, "..")).gid).toBe(sharedGroup);
+      }
 
       return readFileSync(path, "utf8");
     });
