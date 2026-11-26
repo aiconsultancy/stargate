@@ -169,6 +169,107 @@ test.each(["busy", "draining"] as const)(
   },
 );
 
+/** A transport whose first fleet status ask waits for `release`. */
+function heldTransport() {
+  const asked: string[] = [];
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+
+  const output = {
+    status: { members: [], total: 0, truncated: false },
+    metadata: { projectDirectory: "/fixture", contexts: [] },
+  };
+
+  const transport = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = await new Request(input, init).text();
+      const member = /"member":"([^"]*)"/.exec(body)?.[1];
+      const mode = /"taskText":"(\w+)"/.exec(body)?.[1];
+      asked.push(`${member}:${mode ?? "ordinary"}`);
+
+      if (asked.length === 1) {
+        entered.resolve();
+        await release.promise;
+      }
+
+      return Response.json({
+        output: { ...output, ...(mode && { taskText: mode }) },
+      });
+    },
+    { preconnect: fetch.preconnect },
+  );
+
+  const crew = new OpenCodeCrewStatus(
+    OpenCode.make({ baseUrl: "http://127.0.0.1:1", fetch: transport }),
+    () => "/fixture",
+  );
+
+  return { asked, entered, release, output, crew };
+}
+
+test("concurrent readers of one member in different modes each get their own mode", async () => {
+  const f = heldTransport();
+  const signal = new AbortController().signal;
+
+  const unredacted = f.crew.fleetCrewStatus(
+    { member: "pilot", taskText: "unredacted" },
+    signal,
+  );
+
+  await f.entered.promise;
+
+  const full = f.crew.fleetCrewStatus(
+    { member: "pilot", taskText: "full" },
+    signal,
+  );
+
+  f.release.resolve();
+
+  expect(await unredacted).toEqual({
+    kind: "answer",
+    answer: { ...f.output, taskText: "unredacted" },
+  });
+  expect(await full).toEqual({
+    kind: "answer",
+    answer: { ...f.output, taskText: "full" },
+  });
+  expect(f.asked).toEqual(["pilot:unredacted", "pilot:full"]);
+});
+
+test("a task text read answering after 19.2 seconds is neither abandoned nor counted", async () => {
+  const f = heldTransport();
+  const signal = new AbortController().signal;
+  const full = { member: "pilot", taskText: "full" } as const;
+
+  const answer = {
+    kind: "answer" as const,
+    answer: { ...f.output, taskText: "full" as const },
+  };
+
+  const started = performance.now();
+  const first = f.crew.fleetCrewStatus(full, signal);
+
+  await f.entered.promise;
+
+  // Past three times the longest probe: an ordinary read would be given up.
+  const clock = spyOn(performance, "now").mockReturnValue(started + 19_300);
+
+  try {
+    // A second reader joins the running read instead of starting another.
+    const second = f.crew.fleetCrewStatus(full, signal);
+    await Bun.sleep(5);
+    f.release.resolve();
+
+    expect(await first).toEqual(answer);
+    expect(await second).toEqual(answer);
+    expect(f.asked).toEqual(["pilot:full"]);
+    expect(Reflect.get(f.crew, "fleetStatusFailures")).toBe(0);
+  } finally {
+    clock.mockRestore();
+    f.release.resolve();
+  }
+});
+
 /**
  * A crew plugin that checks input as the real one does: an invalid member
  * fails either ask, and an old plugin also refuses `taskText` itself.

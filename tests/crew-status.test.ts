@@ -458,6 +458,39 @@ test("a credential the progress cut splits stays masked for ordinary readers and
   }
 });
 
+test("the same stored tail, stored again with a key header before the cut, updates the ordinary copy", async () => {
+  const f = await fixture();
+
+  try {
+    const twiki = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const task = f.engine.state.reserveTask(twiki, "captain", "Rotate keys");
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+
+    const read = (taskText?: "full") =>
+      f.engine.status({ member: "twiki" }, taskText && { taskText }).members[0]
+        ?.current?.progress;
+
+    // Exactly the stored limit: nothing is cut, so no masked copy is kept.
+    const header = `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\n`;
+    const body = "Zm9v".repeat(crewTaskTextLimit / 4);
+    f.engine.state.activity.progress(task.id, body);
+    expect(read()).toBe(body.slice(-400));
+
+    // The raw tail is unchanged; only the copy masked before the cut is new.
+    f.engine.state.activity.progress(task.id, `Key: ${header}${body}`);
+    expect(read("full")).toBe(body);
+    expect(read()).toBe("Key: [REDACTED PRIVATE KEY]");
+  } finally {
+    await f.close();
+  }
+});
+
 test("legacy uncertain task stays uncertain with unknown times and no raw result or session IDs", async () => {
   const f = await fixture();
 
