@@ -27,11 +27,9 @@ export class ExecutionHistory {
   private lower: number | undefined;
   private readonly settledExecutions: WitnessedExecution[] = [];
 
-  /** The running execution began at this sequence, when it has one. */
+  /** The running execution began at this sequence; unknown without one. */
   public started(seq: number | undefined) {
-    if (seq !== undefined) {
-      this.lower = seq;
-    }
+    this.lower = seq;
   }
 
   /** The running execution, at `position`, settled at `seq`. */

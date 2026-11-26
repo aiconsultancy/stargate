@@ -1863,3 +1863,61 @@ test("a reconnect leaves no interval spanning the gap, and keeps those before it
   expect(text(turns[2])).toBe("late-b");
   expect(turns[2]?.ended).toBeUndefined();
 });
+
+test("a start after a missed settle proves no interval for a late message", async () => {
+  const { turns, stream, delta, text } = ordered(
+    { a1: "in-1", b1: "dm-b", a2: "dm-a" },
+    [],
+  );
+
+  await until(() => stream.subscribers() === 1);
+  started(stream, 10);
+  delta("ses_mario", "a1", "a");
+  await until(() => turns.length === 1);
+  // A's settle never arrives; B's start at 20 ends A cancelled.
+  started(stream, 20);
+  await until(() => turns[0]?.ended !== undefined);
+  delta("ses_mario", "b1", "b");
+  await until(() => turns.length === 2);
+
+  // First seen at 15: unseen executions may lie between 10 and 20.
+  // It joins the running execution and inherits no cancellation.
+  lateText(stream, "a2", 15);
+  delta("ses_mario", "a2", "late");
+  await until(() => text(turns.at(-1)).includes("late"));
+  await wait(50);
+
+  expect(turns).toHaveLength(2);
+  expect(text(turns[0])).toBe("a");
+  expect(turns[0]?.ended).toBe("cancelled");
+  expect(text(turns[1])).toBe("b|late");
+  expect(turns[1]?.ended).toBeUndefined();
+});
+
+test("an unsequenced start forgets the previous start's bound", async () => {
+  const { turns, stream, delta, text } = ordered(
+    { b1: "dm-b", a1: "dm-a" },
+    [],
+  );
+
+  await until(() => stream.subscribers() === 1);
+  // A starts at 5 and its settle is missed before any of its frames.
+  started(stream, 5);
+  // B's start carries no sequence: B's lower bound is unknown.
+  stream.emit("session.execution.started", { sessionID: "ses_mario" });
+  delta("ses_mario", "b1", "b");
+  await until(() => turns.length === 1);
+  boundary(stream, "session.execution.failed", 30);
+  await until(() => turns[0]?.ended !== undefined);
+
+  // A's message, first seen at 7, is not proven to be B's.
+  lateText(stream, "a1", 7);
+  delta("ses_mario", "a1", "late-a");
+  await until(() => turns.length === 2);
+  await wait(50);
+
+  expect(text(turns[0])).toBe("b");
+  expect(turns[0]?.ended).toBe("failed");
+  expect(text(turns[1])).toBe("late-a");
+  expect(turns[1]?.ended).toBeUndefined();
+});

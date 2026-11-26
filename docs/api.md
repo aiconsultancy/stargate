@@ -613,15 +613,16 @@ if it later proves to answer another task, it stays in that turn, whose
 `task` does not change: a shown message never moves. A message first seen
 after its execution settled joins that execution, with its outcome, only
 when its first frame's durable sequence (a step, or the start of text,
-reasoning or a tool input) lies between that execution's start (its own
-start, or the previous settlement) and its settlement, within the session's
-last 16 settled executions whose start and settlement both carried a
-durable sequence. Otherwise it is placed with the current execution and
-takes no earlier outcome: when it is first seen through a delta, when its
-execution is older than those 16, or when either bound of its execution,
-the start (or the previous settlement) or the settlement, was not seen with
-a durable sequence, for example after a reconnect or when the session
-became a peer mid-execution. A turn opened by a message whose owner cannot
+reasoning or a tool input) lies between that execution's start and its
+settlement, within the session's last 16 settled executions whose start
+and settlement both carried a durable sequence; when no start of its own
+was seen, the previous settlement stands for it. Otherwise it is placed
+with the current execution and takes no earlier outcome: when it is first
+seen through a delta, when its execution is older than those 16, or when
+either bound of its execution was not seen with a durable sequence, for
+example a start without one, after a reconnect or when the session became
+a peer mid-execution. A settle missed and inferred from the next start
+bounds nothing either, since unseen executions may lie between. A turn opened by a message whose owner cannot
 be proven keeps `task: null`, and a later task message of the execution
 opens its own turn.
 

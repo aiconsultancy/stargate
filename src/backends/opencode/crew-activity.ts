@@ -647,11 +647,12 @@ export class CrewActivityCollector {
    * A native start while the current execution still has open turns or
    * waiting messages: its settle was missed. It ends cancelled, its waiting
    * messages are stamped so, and the execution advances before the new one
-   * is tracked.
+   * is tracked. The settlement is inferred, not witnessed, so it passes no
+   * sequence and records no interval: unseen executions may lie between.
    */
   private started(session: Session, seq: number | undefined) {
     if (session.open.size > 0 || session.messages.waits(session.execution)) {
-      this.settle(session, "cancelled", seq);
+      this.settle(session, "cancelled");
     }
 
     session.history.started(seq);

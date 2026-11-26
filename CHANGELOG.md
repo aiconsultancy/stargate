@@ -57,7 +57,9 @@
   proven to answer a task before it is placed never appears under another
   task; a message placed before its owner is proven stays where it joined,
   and a message first seen after its execution settled joins it only when
-  its durable sequence proves it ([residuals](docs/api.md#crew-activity)).
+  its durable sequence falls between that execution's witnessed start and
+  settlement, never a missed settle's inferred end
+  ([residuals](docs/api.md#crew-activity)).
   Placed frames are released at once, an evicted turn is forgotten on any
   eviction path, and changes to a settled turn are measured once per 150 ms
   batch.
