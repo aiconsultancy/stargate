@@ -464,7 +464,12 @@ type FleetGitProcess = (
   args: string[],
   env: NodeJS.ProcessEnv,
   options: { signal: AbortSignal; limit?: number | undefined },
-) => Promise<{ stdout: string; code: number | null; truncated: boolean }>;
+) => Promise<{
+  stdout: string;
+  bytes: Buffer;
+  code: number | null;
+  truncated: boolean;
+}>;
 
 type FleetGitStream = (
   directory: string,
@@ -473,7 +478,7 @@ type FleetGitStream = (
   options: {
     signal: AbortSignal;
     onData: (chunk: Buffer) => boolean;
-    input?: string | undefined;
+    input?: string | Buffer | undefined;
   },
 ) => Promise<number | null>;
 
@@ -482,7 +487,7 @@ export type IsolatedStream = (
   args: string[],
   env: NodeJS.ProcessEnv,
   onData: (chunk: Buffer) => boolean,
-  input?: string,
+  input?: string | Buffer,
 ) => Promise<number | null>;
 
 const environment = (overrides?: NodeJS.ProcessEnv) => ({
@@ -498,7 +503,7 @@ export function liveFleetGit(
   streamGit?: FleetGitStream,
 ) {
   return (directory: string, signal: AbortSignal) => {
-    const command = async (
+    const run = async (
       args: string[],
       overrides?: NodeJS.ProcessEnv,
       limit?: number,
@@ -514,7 +519,17 @@ export function liveFleetGit(
 
       return result.truncated || result.code === null
         ? null
-        : { code: result.code, stdout: result.stdout };
+        : { code: result.code, stdout: result.stdout, bytes: result.bytes };
+    };
+
+    const command = async (
+      args: string[],
+      overrides?: NodeJS.ProcessEnv,
+      limit?: number,
+    ) => {
+      const result = await run(args, overrides, limit);
+
+      return result && { code: result.code, stdout: result.stdout };
     };
 
     const stream: IsolatedStream = async (args, env, onData, input) => {
@@ -559,21 +574,25 @@ export function liveFleetGit(
 
         try {
           let index = "";
+          let raw: Buffer | undefined;
 
           const status = await checkout.read({
             directory,
             head,
             signal,
             run: command,
-            status: (args, env) => {
+            status: async (args, env) => {
               index = env?.["GIT_INDEX_FILE"] ?? "";
+              const result = await run(args, env, 16 * 1024 * 1024);
+              raw = result?.bytes;
 
-              return command(args, env, 16 * 1024 * 1024);
+              return result;
             },
           });
 
-          return status?.code === 0
-            ? { kind: "value" as const, stdout: status.stdout, index }
+          // The raw output keeps paths that are not valid UTF-8 apart.
+          return status?.code === 0 && raw
+            ? { kind: "value" as const, stdout: status.stdout, raw, index }
             : { kind: "unavailable" as const };
         } catch (error) {
           signal.throwIfAborted();

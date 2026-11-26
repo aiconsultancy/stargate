@@ -21,7 +21,13 @@ export function spawnGit(
     signal?: AbortSignal | undefined;
     write?: boolean;
   },
-): Promise<{ stdout: string; code: number | null; truncated: boolean }> {
+): Promise<{
+  stdout: string;
+  /** Stdout as Git wrote it: a path need not be valid UTF-8. */
+  bytes: Buffer;
+  code: number | null;
+  truncated: boolean;
+}> {
   const limit = options.limit ?? 1024 * 1024;
 
   return new Promise((resolve) => {
@@ -56,8 +62,11 @@ export function spawnGit(
       failed = true;
     });
     child.on("close", (code) => {
+      const bytes = Buffer.concat(chunks);
+
       resolve({
-        stdout: Buffer.concat(chunks).toString("utf8"),
+        stdout: bytes.toString("utf8"),
+        bytes,
         code: failed ? null : code,
         truncated,
       });
@@ -76,7 +85,7 @@ export function streamGit(
   options: {
     signal: AbortSignal;
     onData: (chunk: Buffer) => boolean;
-    input?: string | undefined;
+    input?: string | Buffer | undefined;
   },
 ): Promise<number | null> {
   return new Promise((resolve, reject) => {

@@ -29,7 +29,7 @@ export type CheckoutGit = (
   status(
     oid: string | null,
   ): Promise<
-    | { kind: "value"; stdout: string; index: string }
+    | { kind: "value"; stdout: string; raw: Buffer; index: string }
     | { kind: "unavailable" | "unsafe-temp" }
   >;
   isolated<T>(

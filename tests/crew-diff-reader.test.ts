@@ -889,3 +889,114 @@ test("a size is never read through a linked directory", async () => {
     ["gone", 5],
   ]);
 });
+
+test("untracked names that are not UTF-8 are each listed with a patch", async () => {
+  const directory = await checkout();
+  await writeFile(join(directory, "ok"), "ok\n");
+
+  // Two names that decode alike, as `f\uFFFDe`; Git keeps them apart.
+  for (const [byte, text] of [
+    [0xe8, "grave"],
+    [0xe9, "acute"],
+  ] as const) {
+    const name = Buffer.from([0x66, byte, 0x65]);
+    await writeFile(Buffer.concat([Buffer.from(`${directory}/`), name]), text);
+  }
+
+  const result = await listed(directory);
+
+  const added = (text: string) =>
+    `@@ -0,0 +1 @@\n+${text}\n\\ No newline at end of file\n`;
+
+  expect(result.total).toBe(3);
+  expect(
+    result.files.map(({ path, untracked, patch }) => [path, untracked, patch]),
+  ).toEqual([
+    ["f\uFFFDe", true, added("grave")],
+    ["f\uFFFDe", true, added("acute")],
+    ["ok", true, "@@ -0,0 +1 @@\n+ok\n"],
+  ]);
+});
+
+/** A reader whose `git add` first runs `before`, and may answer `code`. */
+function beforeAdd(before: () => Promise<void>, code?: number) {
+  return createCheckoutDiffReader((at, reading) => {
+    const live = checkoutGit(at, reading);
+
+    return {
+      ...live,
+      isolated: <T>(
+        head: string | null,
+        use: (checkout: IsolatedCheckout, stream: IsolatedStream) => Promise<T>,
+      ) =>
+        live.isolated(head, (isolated, stream) =>
+          use(isolated, async (args, env, onData, input) => {
+            if (!args.includes("--intent-to-add")) {
+              return stream(args, env, onData, input);
+            }
+
+            await before();
+
+            return code ?? stream(args, env, onData, input);
+          }),
+        ),
+    };
+  });
+}
+
+test("an untracked path deleted just before git add is computed again", async () => {
+  const directory = await checkout();
+  await writeFile(join(directory, "kept"), "kept\n");
+  await writeFile(join(directory, "gone"), "gone\n");
+  let deleted = false;
+
+  const reader = beforeAdd(async () => {
+    if (!deleted) {
+      deleted = true;
+      await unlink(join(directory, "gone"));
+    }
+  });
+
+  const result = await reader(
+    directory,
+    input({ kind: "list", start: 0 }),
+    signal,
+  );
+
+  expect(deleted).toBe(true);
+  expect(result).toMatchObject({
+    kind: "list",
+    unstable: false,
+    total: 1,
+    files: [{ path: "kept", untracked: true, patch: "@@ -0,0 +1 @@\n+kept\n" }],
+  });
+
+  // Deleted before every add: the second change is stale, never a failure.
+  const again = await checkout();
+  let left = 2;
+
+  for (const name of ["a", "b"]) {
+    await writeFile(join(again, name), `${name}\n`);
+  }
+
+  const stale = await beforeAdd(async () => {
+    if (left > 0) {
+      await unlink(join(again, left-- === 2 ? "a" : "b"));
+    }
+  })(again, input({ kind: "patch", path: "b", offset: 0 }), signal);
+
+  expect(stale).toEqual({ kind: "stale", fingerprint: expect.any(String) });
+});
+
+test("git add failing on an unchanged checkout is still a failure", async () => {
+  const directory = await checkout();
+  await writeFile(join(directory, "new"), "new\n");
+
+  await expect(
+    beforeAdd(async () => {}, 128)(
+      directory,
+      input({ kind: "list", start: 0 }),
+      signal,
+    ),
+  ).rejects.toThrow("Untracked files unavailable");
+});

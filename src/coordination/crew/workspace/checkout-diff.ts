@@ -9,6 +9,7 @@ import {
   DiffOutputParser,
   type DiffPlan,
   type DiffSide,
+  type StatusEntry,
   diffLimits,
   utf8Prefix,
 } from "../reporting/fleet-status";
@@ -44,12 +45,48 @@ type Snapshot = {
   fingerprint: string;
   head: Head;
   origin: Origin | null;
-  /** Untracked paths; true for a nested repository, shown as `dir/`. */
-  untracked: Map<string, boolean>;
+  /**
+   * Untracked paths keyed by the bytes Git wrote, one latin1 character per
+   * byte, so two names that decode alike stay two. Each keeps the decoded
+   * path readers see; `nested` marks a nested repository, shown as `dir/`.
+   */
+  untracked: Map<string, { path: string; nested: boolean }>;
+  /** The decoded untracked paths, which mark diff entries as untracked. */
+  untrackedPaths: Set<string>;
 };
 
 /** A Git diff entry, or an untracked path Git would not index. */
 type PassEntry = DiffEntry & { unindexed?: true };
+
+/**
+ * Each `??` entry with its path's raw bytes. A NUL byte splits the raw and
+ * the decoded status alike, so the raw records align with the entries.
+ */
+function untrackedOf(entries: StatusEntry[], raw: Buffer) {
+  const records = raw.toString("latin1").split("\0");
+  const untracked: Snapshot["untracked"] = new Map();
+  let record = 0;
+
+  for (const { code, path, from } of entries) {
+    const bytes = records[record]?.slice(3) ?? "";
+    record += from === undefined ? 1 : 2;
+
+    if (code === "??") {
+      const nested = path.endsWith("/");
+
+      untracked.set(nested ? bytes.slice(0, -1) : bytes, {
+        path: nested ? path.slice(0, -1) : path,
+        nested,
+      });
+    }
+  }
+
+  if (record !== records.length - 1) {
+    throw new Error(gitUnavailable);
+  }
+
+  return untracked;
+}
 
 /** HEAD, the fingerprint and untracked paths, sampled while HEAD stays put. */
 async function snapshot(git: Git, directory: string): Promise<Snapshot> {
@@ -61,14 +98,15 @@ async function snapshot(git: Git, directory: string): Promise<Snapshot> {
         throw new Error(gitUnavailable);
       }
 
+      const untracked = untrackedOf(read.entries, read.status.raw);
+
       return {
         fingerprint: read.fingerprint,
         head,
         origin: read.origin,
-        untracked: new Map(
-          read.entries
-            .filter(({ code }) => code === "??")
-            .map(({ path }) => [path.replace(/\/$/, ""), path.endsWith("/")]),
+        untracked,
+        untrackedPaths: new Set(
+          [...untracked.values()].map(({ path }) => path),
         ),
       };
     });
@@ -92,7 +130,7 @@ const diffStatus = (entry: DiffEntry) => statuses[entry.status] ?? "modified";
 
 function describe(
   entry: DiffEntry,
-  untracked: Map<string, boolean>,
+  untracked: Set<string>,
   size: number | undefined,
 ): CheckoutDiffFile {
   const mode = entry.status === "D" ? entry.oldMode : entry.newMode;
@@ -225,11 +263,15 @@ async function sizes(
   return result;
 }
 
-/** Index a copy of the checkout's index with untracked paths as intent-to-add. */
+/**
+ * Index a copy of the checkout's index with untracked paths as intent-to-add.
+ * `moved` tells whether the checkout changed since its snapshot.
+ */
 async function intentIndex(
   checkout: IsolatedCheckout,
   stream: IsolatedStream,
   untracked: Snapshot["untracked"],
+  moved: () => Promise<boolean>,
 ) {
   const index = join(checkout.gitDir, "index");
   const objects = join(checkout.gitDir, "objects");
@@ -272,9 +314,13 @@ async function intentIndex(
     GIT_ALTERNATE_OBJECT_DIRECTORIES: checkout.objects,
   };
 
-  const paths = [...untracked.keys()].map((path) => `${path}\0`).join("");
+  // Status's own bytes: a path need not be valid UTF-8.
+  const paths = Buffer.from(
+    [...untracked.keys()].map((path) => `${path}\0`).join(""),
+    "latin1",
+  );
 
-  if (!paths) {
+  if (paths.length === 0) {
     return { env, unindexed: [] };
   }
 
@@ -300,6 +346,12 @@ async function intentIndex(
     return { env, unindexed: [] };
   }
 
+  // 128 with nothing indexed: a path may have gone since the snapshot,
+  // Which is a change like any other, computed again.
+  if (code === 128 && (await moved())) {
+    throw new WorktreeChanged();
+  }
+
   // 1 means Git refused some paths, such as an empty nested repository or
   // `.GIT/…`, and indexed the rest; anything else indexed nothing.
   if (code !== 1) {
@@ -315,7 +367,8 @@ async function intentIndex(
     rest = Buffer.concat([rest, chunk]);
 
     for (let nul = rest.indexOf(0); nul >= 0; nul = rest.indexOf(0)) {
-      const path = rest.subarray(0, nul).toString("utf8");
+      // Matched by bytes, as the untracked paths are keyed.
+      const path = rest.subarray(0, nul).toString("latin1");
       rest = rest.subarray(nul + 1);
 
       if (untracked.has(path)) {
@@ -344,8 +397,8 @@ function refused(
 ): PassEntry[] {
   const none = "0".repeat(format === "sha256" ? 64 : 40);
 
-  return [...untracked].flatMap(([path, nested]): PassEntry[] =>
-    indexed.has(path)
+  return [...untracked].flatMap(([bytes, { path, nested }]): PassEntry[] =>
+    indexed.has(bytes)
       ? []
       : [
           {
@@ -411,7 +464,13 @@ async function diffPass<T>(
     const old = mode === "working" ? (head ?? empty) : (base?.commit ?? empty);
 
     const { env, unindexed } = worktree
-      ? await intentIndex(checkout, stream, state.untracked)
+      ? await intentIndex(
+          checkout,
+          stream,
+          state.untracked,
+          async () =>
+            (await snapshot(git, directory)).fingerprint !== state.fingerprint,
+        )
       : { env: {}, unindexed: [] };
 
     // Git's entries, then any untracked path it would not index.
@@ -504,7 +563,7 @@ async function listPage(
     used += bytes;
     files.push({
       entry,
-      file: { ...describe(entry, state.untracked, undefined), ...patch },
+      file: { ...describe(entry, state.untrackedPaths, undefined), ...patch },
     });
   }
 
@@ -619,7 +678,7 @@ async function contentPage(
   return {
     kind: "content",
     fingerprint: state.fingerprint,
-    file: describe(entry, state.untracked, size),
+    file: describe(entry, state.untrackedPaths, size),
     side,
     offset,
     size: page.size,
@@ -689,7 +748,7 @@ function computeDiff(
           entry,
         ]);
 
-        const file = describe(entry, state.untracked, size);
+        const file = describe(entry, state.untrackedPaths, size);
 
         return {
           kind: "patch",

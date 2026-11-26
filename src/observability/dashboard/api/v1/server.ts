@@ -437,13 +437,9 @@ async function officerRequest(
     return new Response(null, { status: 404, headers });
   }
 
-  // Nor turn activity; and its core holds no crew diffs either.
-  return answer(
-    { ...core, activity: undefined, crewDiff: undefined },
-    readers,
-    request,
-    headers,
-  );
+  // Nor turn activity. The core keeps crew diffs: the route check above is
+  // What refuses them, and its test proves it.
+  return answer({ ...core, activity: undefined }, readers, request, headers);
 }
 
 export async function startApiV1Server(options: Options) {
