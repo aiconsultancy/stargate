@@ -77,7 +77,11 @@ p,pre,ul,ol,table { margin:0.35em 0 0.65em }
 pre { white-space:pre-wrap; border:1px solid #aaa; padding:7px }
 .plain { padding:0; border:0; margin:0 }
 a { color:inherit; text-decoration:underline } img { display:none }
-td,th { padding:3px 7px; border:1px solid #999 } table { border-collapse:collapse }
+table { width:100%; border-collapse:collapse }
+main,blockquote,li { container-type:inline-size }
+table:not(:has(th:nth-child(5))) th { min-width:min(8em, max(0px, calc(25cqi - 16px))) }
+table:has(th:nth-child(5)):not(:has(th:nth-child(9))) th { min-width:min(3.5em, max(0px, calc(12.5cqi - 16px))) }
+td,th { padding:3px 7px; border:1px solid #999 }
 </style>
 <header><strong>${escaped(name)}</strong><span>Document preview · page ${page}</span></header>
 <section><main>${content}</main></section></html>`;
