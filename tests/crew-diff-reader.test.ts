@@ -1,4 +1,5 @@
 import { afterAll, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs/promises";
 import {
   appendFile,
   chmod,
@@ -27,6 +28,7 @@ import { DiffOutputParser } from "../src/coordination/crew/workspace/diff-output
 import {
   type CheckoutGit,
   createCrewGitReader,
+  readOriginHead,
 } from "../src/coordination/crew/workspace/git-state";
 import {
   spawnGit,
@@ -36,6 +38,7 @@ import {
   type IsolatedCheckout,
   type IsolatedStream,
   liveFleetGit,
+  openable,
   readWorktree,
 } from "../src/coordination/crew/workspace/git-status";
 
@@ -1095,6 +1098,149 @@ test("a list keeps patch bytes only up to its 4 MiB page, then stops Git", async
   } finally {
     spy.mockRestore();
   }
+});
+
+test("a list page ends before a file Git never reached, and the next page starts there", async () => {
+  const directory = await checkout();
+  const big = `${"y".repeat(99)}\n`.repeat(700);
+  const perPage = Math.floor(diffLimits.listPatches / diffLimits.inlinePatch);
+
+  const names = Array.from(
+    { length: perPage + 6 },
+    (_, index) => `c${String(index).padStart(3, "0")}`,
+  );
+
+  await writeFile(join(directory, "a"), "a\n");
+  await writeFile(join(directory, "b"), "b\n");
+
+  for (const name of names) {
+    await writeFile(join(directory, name), big);
+  }
+
+  // Git writes `b` last, after the files that fill the page's budget: the
+  // Order Git would use if it ever differed from byte order.
+  const order = join(root, `order-${count++}`);
+  await writeFile(order, "a\nc*\n");
+
+  const reordered = createCheckoutDiffReader((at, reading) => {
+    const live = checkoutGit(at, reading);
+
+    return {
+      ...live,
+      isolated: <T>(
+        head: string | null,
+        use: (checkout: IsolatedCheckout, stream: IsolatedStream) => Promise<T>,
+      ) =>
+        live.isolated(head, (isolated, stream) =>
+          use(isolated, (args, env, onData, input) => {
+            const at = args.indexOf("diff");
+
+            return stream(
+              at < 0 ? args : args.toSpliced(at + 1, 0, `-O${order}`),
+              env,
+              onData,
+              input,
+            );
+          }),
+        ),
+    };
+  });
+
+  const page = async (start: number) => {
+    const result = await reordered(
+      directory,
+      input({ kind: "list", start }),
+      signal,
+    );
+
+    if (result.kind !== "list") {
+      throw new Error(result.kind);
+    }
+
+    return result;
+  };
+
+  // Git stopped before `b`, which has hunks: never listed without them.
+  const first = await page(0);
+  expect(first.files.map(({ path }) => path)).toEqual(["a"]);
+  expect(first.next).toBe(1);
+
+  const second = await page(1);
+  expect(second.files[0]).toMatchObject({
+    path: "b",
+    patch: "@@ -0,0 +1 @@\n+b\n",
+  });
+  expect(second.files.map(({ path }) => path)).toEqual([
+    "b",
+    ...names.slice(0, perPage - 1),
+  ]);
+  expect(second.next).toBe(perPage + 1);
+});
+
+test("origin/HEAD as a tag of a tag is read as its commit", async () => {
+  const directory = await checkout();
+  const main = await git(directory, "rev-parse", "origin/main");
+  await git(directory, "tag", "-a", "-m", "one", "one", "origin/main");
+  await git(directory, "tag", "-a", "-m", "two", "two", "one");
+
+  // Git 2.43 peels `%(*objectname)` one level, to the tag `one`.
+  for (const tag of ["one", "two"]) {
+    await git(
+      directory,
+      "update-ref",
+      "--no-deref",
+      "refs/remotes/origin/HEAD",
+      `refs/tags/${tag}`,
+    );
+
+    expect(await readOriginHead(checkoutGit(directory, signal))).toEqual({
+      target: "",
+      short: "",
+      commit: main,
+    });
+  }
+});
+
+test("only a permission error makes a worktree file unreadable", async () => {
+  const directory = await checkout();
+  await writeFile(join(directory, "file"), "file\n");
+  const path = Buffer.from("file");
+  const real = fs.open;
+
+  // Each error as open raises it after lstat found a file.
+  const failing = (code: string) =>
+    spyOn(fs, "open").mockImplementation((async (target, flags, mode) => {
+      if (String(target).endsWith("/file")) {
+        throw Object.assign(new Error(code), { code });
+      }
+
+      return real(target, flags, mode);
+    }) as typeof fs.open);
+
+  for (const [code, expected] of [
+    ["EACCES", false],
+    ["ENOENT", true],
+    ["ELOOP", true],
+  ] as const) {
+    const spy = failing(code);
+
+    try {
+      expect(await openable(directory, path)).toBe(expected);
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  const spy = failing("EMFILE");
+
+  try {
+    await expect(openable(directory, path)).rejects.toThrow("EMFILE");
+  } finally {
+    spy.mockRestore();
+  }
+
+  expect(await openable(directory, path)).toBe(true);
+  expect(await openable(directory, Buffer.from("missing"))).toBe(true);
 });
 
 test("an unborn branch has no head; without origin there is no base", async () => {
