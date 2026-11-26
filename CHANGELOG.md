@@ -169,10 +169,11 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   the method. Stargate treats `taskText` as unsupported, for a minute, only
   when the re-ask without it succeeds. A failed re-ask makes the read
   unavailable and counts as one ordinary failure, as does a task text read
-  ended by its crew deadline; a disconnected caller counts nothing, and a
-  re-ask answered after the deadline caches nothing. A member ID the plugin's
-  schema rejects is never sent to it. The crew member route answers 404 when
-  admitted, or 503 when every HTTP read slot is busy.
+  ended by its crew deadline. A disconnect counts nothing, even if the plugin
+  ignores the abort and Stargate later abandons the probe. A re-ask answered
+  after the deadline caches nothing. A member ID the plugin's schema rejects
+  is never sent to it. The crew member route answers 404 when admitted, or 503
+  when every HTTP read slot is busy.
 - Progress longer than the stored 64,000 code points keeps its ordinary
   (redacted) view masked from the uncut text, in a new nullable
   `member_activity.maskedProgress` column, so a credential the cut splits stays

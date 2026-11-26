@@ -322,11 +322,13 @@ export class OpenCodeCrewStatus {
       {
         timeout: input.taskText ? false : probeMs,
         onAbandon: () => {
-          if (!failureCounted) {
+          if (
+            !failureCounted &&
+            (!input.taskText || isTimeout(controller.signal.reason))
+          ) {
             this.recordFleetStatusFailure();
+            failureCounted = true;
           }
-
-          failureCounted = true;
         },
       },
     );

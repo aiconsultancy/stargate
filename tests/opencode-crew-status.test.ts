@@ -1,7 +1,10 @@
 import { expect, spyOn, test } from "bun:test";
 import { OpenCode } from "@opencode/client";
 import { OpenCodeCrewStatus } from "../src/backends/opencode/crew-status";
-import type { FleetCrewStatusInput } from "../src/coordination/crew/reporting/fleet-status";
+import type {
+  FleetCrewStatus,
+  FleetCrewStatusInput,
+} from "../src/coordination/crew/reporting/fleet-status";
 
 type View = FleetCrewStatusInput["taskText"];
 
@@ -589,3 +592,179 @@ test("a re-ask answered after the deadline caches nothing", async () => {
   ).toEqual({ kind: "answer", answer: { ...output, taskText: "full" } });
   expect(asked).toEqual(["full", "ordinary", "full"]);
 });
+
+test.each([
+  ["a disconnected task-text re-ask counts nothing", "disconnect"],
+  ["a deadline-ended task-text re-ask counts once", "crew deadline"],
+  ["an ordinary probe counts once", "ordinary timeout"],
+] as const)(
+  "after abandonment, %s",
+  async (_description, end) => {
+    const asked: string[] = [];
+    const entered = Promise.withResolvers<AbortSignal>();
+    const release = Promise.withResolvers<void>();
+    let reply: "fail" | "hold" | "healthy" = "fail";
+
+    const output = {
+      status: { members: [], total: 0, truncated: false },
+      metadata: { projectDirectory: "/fixture", contexts: [] },
+    };
+
+    const fullAnswer: FleetCrewStatus = {
+      ...output,
+      taskText: "full",
+      status: {
+        ...output.status,
+        total: 1,
+        members: [
+          {
+            id: "pilot",
+            name: "Pilot",
+            backend: "opencode",
+            provisioned: "ready",
+            observed: true,
+            current: {
+              id: "task_fixture",
+              status: "running",
+              kind: "assignment",
+              summary: "Fixture task",
+              phase: "working",
+              progress: "Progress beyond the ordinary limit. ".repeat(20),
+              createdAt: null,
+              startedAt: null,
+              updatedAt: null,
+              finishedAt: null,
+            },
+            queuedCount: 0,
+            queued: [],
+            lastOutcome: null,
+            recent: [],
+            recentCount: 0,
+          },
+        ],
+      },
+    };
+
+    const transport = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        const full = (await request.text()).includes('"taskText":"full"');
+
+        asked.push(full ? "full" : "ordinary");
+
+        if (reply === "fail" || (reply === "hold" && full)) {
+          return Response.json(
+            { _tag: "RpcError", type: "rpc.invalid_input", message: "Fixture" },
+            { status: 400 },
+          );
+        }
+
+        if (reply === "hold") {
+          entered.resolve(request.signal);
+          // Intentionally ignore abort: the next probe must abandon this one.
+          await release.promise;
+        }
+
+        return Response.json({ output: full ? fullAnswer : output });
+      },
+      { preconnect: fetch.preconnect },
+    );
+
+    const crew = new OpenCodeCrewStatus(
+      OpenCode.make({ baseUrl: "http://127.0.0.1:1", fetch: transport }),
+      () => "/fixture",
+    );
+
+    const ordinary = { member: "pilot" };
+    const full = { ...ordinary, taskText: "full" } as const;
+    const signal = new AbortController().signal;
+    const caller = new AbortController();
+    const probeDeadline = new AbortController();
+    const unavailable = { kind: "unavailable" } as const;
+
+    const failTwice = async () => {
+      for (let i = 0; i < 2; i++) {
+        expect(await crew.fleetCrewStatus(ordinary, signal)).toEqual(
+          unavailable,
+        );
+      }
+    };
+
+    const clock = spyOn(performance, "now").mockReturnValue(0);
+
+    const timeout =
+      end === "ordinary timeout"
+        ? spyOn(AbortSignal, "timeout").mockReturnValueOnce(
+            probeDeadline.signal,
+          )
+        : undefined;
+
+    try {
+      if (end === "disconnect") {
+        await failTwice();
+        expect(asked.splice(0)).toEqual(["ordinary", "ordinary"]);
+      }
+
+      reply = "hold";
+
+      const read = crew
+        .fleetCrewStatus(
+          end === "ordinary timeout" ? ordinary : full,
+          caller.signal,
+        )
+        .catch((error: unknown) => error);
+
+      const transportSignal = await entered.promise;
+
+      if (end === "ordinary timeout") {
+        expect(timeout).toHaveBeenCalledWith(400);
+        timeout?.mockRestore();
+        probeDeadline.abort(deadline());
+        expect(await read).toEqual(unavailable);
+      } else {
+        caller.abort(end === "crew deadline" ? deadline() : undefined);
+        expect(await read).toBe(caller.signal.reason);
+      }
+
+      expect(transportSignal.aborted).toBe(true);
+      expect(transportSignal.reason).toBe(
+        end === "ordinary timeout"
+          ? probeDeadline.signal.reason
+          : caller.signal.reason,
+      );
+      expect(asked.splice(0)).toEqual(
+        end === "ordinary timeout" ? ["ordinary"] : ["full", "ordinary"],
+      );
+
+      // Let the rejection reach ended() while the transport is still held.
+      await Bun.sleep(0);
+      // Advance past three times the slot's 6.4 s timeout.
+      clock.mockReturnValue(20_000);
+
+      if (end === "disconnect") {
+        reply = "healthy";
+
+        const recovered = await crew.fleetCrewStatus(full, signal);
+
+        expect(asked).toEqual(["full"]);
+        expect(recovered).toEqual({
+          kind: "answer",
+          answer: fullAnswer,
+        });
+      } else {
+        // Exactly two more failures reach the plugin before the 3-failure pause.
+        reply = "fail";
+        await failTwice();
+        reply = "healthy";
+        expect(await crew.fleetCrewStatus(full, signal)).toEqual(unavailable);
+        expect(asked).toEqual(["ordinary", "ordinary"]);
+      }
+    } finally {
+      caller.abort();
+      release.resolve();
+      timeout?.mockRestore();
+      clock.mockRestore();
+    }
+  },
+  4000,
+);
