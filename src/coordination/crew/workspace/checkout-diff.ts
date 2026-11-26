@@ -162,6 +162,22 @@ function patchPage(entry: DiffEntry, offset: number, limit: number) {
 const inlinePatch = (entry: DiffEntry) =>
   entry.size > 0 ? patchPage(entry, 0, diffLimits.inlinePatch) : undefined;
 
+/**
+ * A list page's patch budget: each call spends an entry's inline patch and
+ * says whether the patches spent so far still fit. Git writes files in byte
+ * order, the page's order, so the parser stopping Git and the page listed
+ * from what it read spend the budget alike.
+ */
+function pageBudget() {
+  let used = 0;
+
+  return (entry: DiffEntry) => {
+    used += Buffer.byteLength(inlinePatch(entry)?.patch ?? "");
+
+    return used <= diffLimits.listPatches;
+  };
+}
+
 /** Byte order, as Git sorts paths. */
 const byPath = (entries: DiffEntry[]) =>
   entries
@@ -601,7 +617,7 @@ async function listPage(
   const { entries, snapshot: state } = pass;
   const page = order.slice(start, start + diffLimits.files);
   const files: { entry: DiffEntry; file: CheckoutDiffFile }[] = [];
-  let used = 0;
+  const spend = pageBudget();
 
   for (const index of page) {
     const entry = entries[index];
@@ -615,19 +631,17 @@ async function listPage(
       break;
     }
 
-    const patch = inlinePatch(entry);
-
-    const bytes = Buffer.byteLength(patch?.patch ?? "");
-
     // End the page before the file that would pass its budget.
-    if (files.length > 0 && used + bytes > diffLimits.listPatches) {
+    if (!spend(entry) && files.length > 0) {
       break;
     }
 
-    used += bytes;
     files.push({
       entry,
-      file: { ...describe(entry, state.untracked, undefined), ...patch },
+      file: {
+        ...describe(entry, state.untracked, undefined),
+        ...inlinePatch(entry),
+      },
     });
   }
 
@@ -762,9 +776,9 @@ function computeDiff(
 
   if (request.kind === "list") {
     const window = { from: 0, to: diffLimits.inlinePatch + 4 };
+    const spend = pageBudget();
     let first: number | undefined;
     let firstRead = false;
-    let used = 0;
 
     return diffPass(
       git,
@@ -787,15 +801,13 @@ function computeDiff(
           return new Map(page.map((index) => [index, window]));
         },
         /*
-         * Git writes files in byte order, the page's order. Once the page's
-         * first file is read and the patches read pass its budget, no later
-         * file is on this page: Git stops, and the next page starts there.
+         * Once the page's first file is read and its budget is spent, no
+         * later file is on it: Git stops, and the next page starts there.
          */
         settle: (index, entry) => {
           firstRead ||= index === first;
-          used += Buffer.byteLength(inlinePatch(entry)?.patch ?? "");
 
-          return !firstRead || used <= diffLimits.listPatches;
+          return spend(entry) || !firstRead;
         },
       },
     );

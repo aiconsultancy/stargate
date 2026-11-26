@@ -479,9 +479,9 @@ UTF-8. Such a file is still read, sized and fingerprinted by the bytes of
 its name. Two names that decode alike are listed as two entries, but the
 file route's `path` reaches only one of them: an entry with a Git diff
 before an untracked path outside Git's index (a nested repository, a
-file Git refused or a file it could not read), then the first in byte order. So with a nested
-repository `n\xE8` and a file `n\xE9`, a request for `n\uFFFD` returns the
-file.
+file Git refused or a file it could not read), then the first in byte
+order. So with a nested repository `n\xE8` and a file `n\xE9`, a request
+for `n\uFFFD` returns the file.
 
 Paging limits:
 

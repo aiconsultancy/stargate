@@ -90,20 +90,31 @@ export async function readOriginHead(git: Git): Promise<OriginHead> {
           fields[0] === originHead && fields.length === originFields.length,
       ) ?? [];
 
-  const commit =
-    type === "commit"
-      ? oid
-      : type === "tag" && inner === "commit"
-        ? peeled
-        : type === "tag"
-          ? ((await output(git, [
+  let commit = "";
+
+  switch (type) {
+    case "commit": {
+      commit = oid;
+      break;
+    }
+
+    case "tag": {
+      // Git 2.43 peels `%(*objectname)` one level only.
+      commit =
+        inner === "commit"
+          ? peeled
+          : ((await output(git, [
               "rev-parse",
               "--verify",
               "-q",
               "--end-of-options",
               `${originHead}^{commit}`,
-            ])) ?? "")
-          : "";
+            ])) ?? "");
+      break;
+    }
+
+    default:
+  }
 
   return {
     target,
