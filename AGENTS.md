@@ -2,11 +2,12 @@
 
 ## Project
 
-Stargate is a Bun/TypeScript Slack gateway. One process hosts multiple Slack app
-registrations. Built-in backends connect to OpenCode V2, embed Pi Durable,
-run Claude Code through the Claude Agent SDK (`docs/claude.md`), or run the
-Codex CLI through the Codex SDK (`docs/codex.md`); trusted local modules can
-implement the same adapter interface.
+Stargate is a Bun/TypeScript gateway for Slack, Teams, and IRC. One process
+hosts multiple app registrations. Built-in backends connect to OpenCode V2,
+embed Pi Durable, run Claude Code through the Claude Agent SDK
+(`docs/claude.md`), or run the Codex CLI through the Codex SDK
+(`docs/codex.md`); trusted local modules can implement the same adapter
+interface.
 
 Read `README.md` for setup, `docs/operations.md` for limits, and
 `docs/design.md` for architecture. Use `docs/cliproxyapi.md` when configuring
@@ -31,13 +32,15 @@ make stargate ARGS='--help'
 make config-check ARGS='--config stargate.example.json --schema-only'
 ```
 
-`make check` runs TypeScript, Oxlint, and the full Bun test suite on demand.
+`make check` runs `tsrs --noEmit`, Oxlint, Oxfmt check, and the full Bun test
+suite on demand.
 Run the smallest relevant test while changing behavior. Commits run strict
 typecheck, lint, and affected tests. Untrusted paths defer to hosted checks by
 default; selection errors still run the full suite. Set
 `STARGATE_UNTRUSTED_TESTS=full` to opt in to full tests for untrusted paths.
-Hosted **Quality checks** runs typecheck, lint, the suite in the self-update
-environment, and separate Mesij integration tests with pinned tools.
+Hosted **Quality checks** runs pre-commit hooks, the architecture baseline
+comparison, the full suite in the self-update environment, and separate Mesij
+integration tests with pinned tools.
 For repeated failure measurements and load reporting, see [Repeated test comparisons](docs/development.md#repeated-test-comparisons).
 The affected-test limit defaults to 20 files. Larger selected sets are named
 and deferred to hosted Quality; typecheck and lint still run locally.
@@ -51,9 +54,9 @@ Use `make format` for the supported safe lint fixes and Oxfmt. The gated
 `anti-slop/require-readable-spacing` rule owns blank lines between statements;
 Oxfmt owns the rest of formatting. The anti-slop rules not selected by the root gate stay advisory
 under `make oxlint`. Do not suppress or weaken type-safety rules to pass the
-gate. Index-signature properties require bracket access. Oxlint's conflicting
-`useLiteralKeys` rule is
-intentionally disabled. Dependency declaration checks remain excluded because
+gate. Index-signature properties require bracket access; Oxlint's
+`typescript/dot-notation` rule sets `allowIndexSignaturePropertyAccess: true`
+to match. Dependency declaration checks remain excluded because
 installed SDK declarations have upstream type errors; first-party code and tests
 must pass every configured check.
 `make init` requires a real terminal and collects tokens without echoing them.
@@ -63,9 +66,11 @@ Use `mise run architecture-refresh -- --base "$(git merge-base origin/main HEAD)
 to preview the working-tree architecture inventory. Add `--write` to save it.
 The tool cannot approve new exceptions or increase base caps. See
 [development](docs/development.md#architecture-inventory-refresh).
-Guarded inventories must be current. Refresh and commit a lowered baseline
-in the same PR as the structural change. Module/edge totals and provenance
-are informational. Do not raise limits or add exceptions to pass a regression.
+Guarded inventories must be current. Refresh and commit the baseline in the
+same PR as any structural change that changes measured counts or lowers caps.
+Module and edge totals are not permission caps, but hosted comparison requires
+their current measured values. Do not raise limits or add exceptions to pass a
+regression.
 
 ## Code boundaries
 
@@ -77,24 +82,19 @@ Keep backend adapters independent of Slack and preserve session isolation.
 retains the fixed public exports.
 
 Source modules have a limit of 1,000 non-blank lines, except exact identities in
-the architecture baseline's `largeFiles` and the temporary, measured
-`braceMigrationFileLimits` in `tests/architecture-policy.json` from PR #336.
-Lower a brace cap when its file shrinks. Remove it at 1,000 lines or fewer.
-The measure is textual: ignore
+the architecture baseline's `largeFiles`. The measure is textual: ignore
 empty and whitespace-only lines, including inside template literals; count
 comments. LF and CRLF count equally, and a final newline adds no line. See
 [the size measure](docs/development.md#architecture-inventory-refresh).
 
 ## Engineering
 
-- Use strict TypeScript and Effect Schema at new or migrated input boundaries.
-  Migrate existing Zod schemas in component batches, preserving validation and
-  wire formats. Keep coupled schemas, direct consumers and parity tests together.
-  Follow the PR budget and batch order in `docs/effect-schema-migration.md`.
-  Do not import `zod` or its subpaths in first-party code or tests. The
-  `no-restricted-imports` lint rule enforces this for imports and re-exports.
-  Keep SDK-owned transitive dependencies. Store legacy parity expectations
-  as data, not as a runtime validation dependency.
+- Use strict TypeScript and Effect Schema at input boundaries. The Zod
+  migration is complete (`docs/effect-schema-migration.md`); do not import `zod`
+  or its subpaths in first-party code or tests. The `no-restricted-imports` lint
+  rule enforces this across `src`, `tests`, `scripts`, `perf`, and
+  `tools/oxlint`. Keep SDK-owned transitive dependencies. Store legacy parity
+  expectations as data, not as a runtime validation dependency.
 - Prefer the installed Effect capability over another dependency when required
   behavior and security properties are equivalent. Do not remove SDK-required
   dependencies or change public behavior merely to reduce dependency count.
@@ -120,9 +120,8 @@ source in `node_modules/effect/src`. Keep the existing SDK-aligned version;
 installing or loading a skill is not permission to upgrade Effect.
 
 Repository choices take precedence over greenfield examples: use Effect Schema,
-Bun SQLite, `bun:test`, and the existing Promise adapter contract. Follow
-`docs/effect-schema-migration.md` for the incremental Zod migration; do not rewrite
-unrelated Promise code or upgrade Effect as part of a schema change.
+Bun SQLite, `bun:test`, and the existing Promise adapter contract. Do not
+rewrite unrelated Promise code or upgrade Effect as part of a schema change.
 
 ## Safety and credentials
 
@@ -166,12 +165,17 @@ unrelated Promise code or upgrade Effect as part of a schema change.
 
 Use trunk-based development. Never commit directly to `main`. Branch from the
 latest `main` and keep branches short-lived. Keep each PR to one small change.
-Run the [thermo-nuclear code quality review](.agents/skills/thermo-nuclear-code-quality-review/SKILL.md)
-on each PR's final diff and record the findings in the PR discussion.
-The author may run it, but a different reviewer must
-confirm the result in an approving GitHub review on the latest push. Enable
-`gh pr merge --auto --squash` only after that confirmation. Required **Quality
-checks** and the [release gate](docs/releases.md) still apply.
+Run an independent [thermo-nuclear code quality review](.agents/skills/thermo-nuclear-code-quality-review/SKILL.md)
+on each PR's final diff before merging. The independent reviewer may be a
+different GitHub identity, or a fresh ephemeral sub-session or separate agent
+session operating under the same GitHub identity. Record an explicit review
+attestation in the PR discussion that names the reviewed head commit, the
+independent reviewer or ephemeral session (including agent/model when applicable),
+the findings, and how the PR resolved them. Reviews (including
+`CHANGES_REQUESTED`) from other agents or reviewers are advisory and never block
+merging on GitHub. Enable `gh pr merge --auto --squash` after recording the
+attestation. Required **Quality checks** and the [release rules](docs/releases.md)
+still apply.
 Do not stack PRs or keep long-lived branches;
 split a large feature into several PRs that each leave `main` working.
 Pre-commit tests union HEAD and index import graphs, including deletions,
@@ -184,28 +188,34 @@ Computation errors still run the full suite in either untrusted-path mode.
 The pre-push hook only enforces the rebase-before-push policy: every branch
 push must contain the freshly fetched `origin/main`, so a PR's head is
 always current before review. If `main` moves, `git fetch origin && git
-rebase origin/main`, then re-run checks. If the diff changed, rerun the quality
-review before requesting approval on the new head. If it did not change, the
-reviewer can confirm the prior review still applies and approve the new head.
+rebase origin/main`, then re-run checks. If the diff changed, rerun the
+independent quality review and post a fresh attestation for the new head before
+enabling auto-merge. If the diff did not change, record a short confirmation on
+the PR that the prior attestation still applies to the new head.
 Preserve unrelated user changes. Use Conventional Commits, for example
 `feat: add backend endpoint configuration` or
 `fix: preserve reply progress after delivery failure`. Stage only intended
 project files and inspect the staged diff for credentials before committing.
 
-PRs use squash merge. The PR title becomes the commit subject and must be a
-Conventional Commit. Merge to `main` does not mean release-ready. Cut a release
-only through an explicit, human-approved release step. Do not edit the version
-in `package.json` or create tags by hand. See `docs/releases.md`.
+PRs use squash merge. Keep both the PR title and single-commit subjects as
+Conventional Commits (GitHub uses `COMMIT_OR_PR_TITLE`). Every merge to `main`
+runs the full **Quality checks** suite. If `main` goes red, it is undesirable
+but not an emergency: `.github/workflows/check.yml` opens or updates a
+`red-main` issue naming the breaking commit, PR, author, and merger/pusher, and
+closes it once `main` is green again. Fix red `main` in a separate follow-up PR.
+Never cut a release from a red commit on `main`. Merge to `main` does
+not cut a release; do not edit the version in `package.json` or create tags by
+hand. See `docs/releases.md`.
 
 Design large features with a configuration enable flag from the start. The
-default is off. Release approval includes a decision on which flags become on
+default is off. Release preparation includes a decision on which flags become on
 by default. The changelog lists new flags, their defaults, and each flag that
 the release turns on by default.
 
 Main pushes run Checks only; they never publish a release. The manual Release
-workflow defaults to a read-only preview. Publication requires `dry_run=false`
-and a person's approval through the `release` environment (reviewer: withakay).
-Before requesting approval, update `CHANGELOG.md`'s Unreleased Feature flags
-section: new flags with defaults, default changes, and flags enabled by default.
-Use explicit `none` entries when no flags change. Do not approve a deployment
-on the owner's behalf or bypass the environment gate.
+workflow defaults to a read-only preview (`dry_run=true`). Publication requires
+`dry_run=false` on a `main` commit whose **Quality checks** passed; there is no
+separate release approval gate. Before dispatching a release, update
+`CHANGELOG.md`'s Unreleased Feature flags section: new flags with defaults,
+default changes, and flags enabled by default. Use explicit `none` entries when
+no flags change.

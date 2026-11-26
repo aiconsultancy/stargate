@@ -1,11 +1,11 @@
 name: Release
 
-# Manual only. Preview is read-only; publication needs release-environment approval.
+# Manual only. Preview is read-only; publication requires dry_run=false on green main.
 on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Preview version and notes without publishing (false requires release approval)
+        description: Preview version and notes without publishing (false publishes from green main)
         type: boolean
         default: true
 
@@ -56,7 +56,7 @@ jobs:
         env:
           FORCE_RELEASE: "true"
         run: bun scripts/release-version.ts >> "$GITHUB_OUTPUT"
-      - name: Summarise candidate for approval
+      - name: Summarise candidate
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -89,10 +89,10 @@ jobs:
         with:
           # A restored cache could reach the published archive.
           cache: false
-      - name: Require current main after approval
+      - name: Require current main before publishing
         run: |
           current=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
-          [ "$current" = "$HEAD_SHA" ] || { echo "Candidate is no longer main; dispatch and approve a new run"; exit 1; }
+          [ "$current" = "$HEAD_SHA" ] || { echo "Candidate is no longer main; dispatch a new run"; exit 1; }
       - name: Require passed Quality checks
         run: |
           passed=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/check-runs?check_name=Quality%20checks&app_id=15368" \

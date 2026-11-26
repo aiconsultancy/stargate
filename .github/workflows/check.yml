@@ -79,3 +79,81 @@ jobs:
         run: mise exec -- bun test tests/mesij.test.ts
       - name: Run test suite in the self-update environment
         run: mise run test-release-env
+
+  flag-red-main:
+    name: Flag red main
+    needs: quality
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.quality.result == 'failure' || needs.quality.result == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Flag broken main or close recovery issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+          PUSH_ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+        run: |
+          set -euo pipefail
+          short_sha="${HEAD_SHA:0:8}"
+          run_url="https://github.com/$GH_REPO/actions/runs/$RUN_ID"
+          open_issues=$(gh issue list --repo "$GH_REPO" --state open --label red-main --json number --jq '.[].number')
+
+          if [ "$QUALITY_RESULT" = "success" ]; then
+            while IFS= read -r num; do
+              [ -n "$num" ] || continue
+              gh issue close "$num" --repo "$GH_REPO" --comment "main is green again on \`$short_sha\` ([Quality checks]($run_url))."
+            done <<< "$open_issues"
+            exit 0
+          fi
+
+          gh label create red-main --repo "$GH_REPO" --color b60205 \
+            --description "main broke Quality checks; fix in a follow-up PR before releasing" \
+            --force >/dev/null 2>&1 || true
+
+          commit_json=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA")
+          subject=$(printf '%s' "$commit_json" | jq -r '.commit.message | split("\n")[0]')
+          subject=${subject//|/\\|}
+          author=$(printf '%s' "$commit_json" | jq -r 'if .author.login then "@" + .author.login else (.commit.author.name // "unknown") end')
+
+          pulls_json=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/pulls" 2>/dev/null || printf '[]')
+          pr_line=$(printf '%s' "$pulls_json" | jq -r '.[0] // empty | "#\(.number) by @\(.user.login)"')
+          merger=$(printf '%s' "$pulls_json" | jq -r '.[0].merged_by.login // empty')
+          if [ -n "$merger" ]; then
+            pushed_by="@$merger"
+          else
+            pushed_by="@$PUSH_ACTOR"
+          fi
+
+          body=$(cat <<EOF
+          \`main\` went red on commit \`$short_sha\`. No release can be cut until \`Quality checks\` is green on \`main\`. Open a follow-up PR to fix it.
+
+          | Field | Value |
+          | --- | --- |
+          | Commit | \`$HEAD_SHA\` ($subject) |
+          | PR | ${pr_line:-none} |
+          | Author | $author |
+          | Merged / pushed by | $pushed_by |
+          | Failing run | [Quality checks]($run_url) |
+          EOF
+          )
+
+          first_open=$(printf '%s\n' "$open_issues" | head -n 1)
+          if [ -n "$first_open" ]; then
+            gh issue comment "$first_open" --repo "$GH_REPO" --body "$body"
+          else
+            gh issue create --repo "$GH_REPO" --label red-main \
+              --title "Red main: $short_sha broke Quality checks" \
+              --body "$body"
+          fi
