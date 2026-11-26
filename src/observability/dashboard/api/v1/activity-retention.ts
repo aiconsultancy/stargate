@@ -32,6 +32,7 @@ export function evict(
     turns: StoredTurn[];
     endedAt: number | null;
     bytes: number;
+    quotaRoot: boolean;
   };
 
   const ended: Family[] = [];
@@ -53,9 +54,15 @@ export function evict(
         turns: [],
         endedAt: 0,
         bytes: 0,
+        quotaRoot: true,
       };
 
       family.turns.push(turn);
+
+      if (turn.unattributedChild) {
+        family.quotaRoot = false;
+      }
+
       family.endedAt =
         family.endedAt === null || turn.endedAt === null
           ? null
@@ -63,14 +70,17 @@ export function evict(
       families.set(turn.root, family);
     }
 
-    let excess = families.size - limits.turnsPerAgent;
+    let excess =
+      [...families.values()].filter((family) => family.quotaRoot).length -
+      limits.turnsPerAgent;
 
     for (const family of families.values()) {
       if (family.endedAt === null) {
         continue;
       }
 
-      if (excess <= 0) {
+      // Ambiguous children still spend the global turn and byte budget.
+      if (excess <= 0 || !family.quotaRoot) {
         family.bytes = family.turns.reduce(
           (bytes, turn) => bytes + measuredBytes(turn, measure),
           0,

@@ -327,6 +327,7 @@ function turnStart(owner: Agent, id: string, source: TurnStart) {
       session: { id: sessionId, parent: null },
       root: id,
       task: parent.task === undefined ? undefined : null,
+      unattributedChild: true as const,
     };
   }
 
@@ -524,6 +525,7 @@ export function createActivityHub(
       items: new Map(),
       ...(crew?.evicted && { evicted: crew.evicted }),
       ...(start.audience && { audience: start.audience }),
+      ...(start.unattributedChild && { unattributedChild: true }),
     };
 
     owner.turns.push(turn);

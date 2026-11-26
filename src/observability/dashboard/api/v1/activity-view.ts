@@ -45,6 +45,8 @@ export type StoredTurn = {
   evicted?: () => void;
   /** Never served: live scoped watches inherited on unlinked admission. */
   audience?: ReadonlySet<symbol>;
+  /** A child with ambiguous ownership is not a standalone quota root. */
+  unattributedChild?: true;
 };
 
 export function itemJson(item: StoredItem): V1ActivityItem {

@@ -17,12 +17,14 @@ function fixture(
   turnsPerAgent?: number,
   logGate?: Promise<void>,
   pending?: number,
+  globalTurns?: number,
 ) {
   const stop = new AbortController();
 
-  const hub = createActivityHub(
-    turnsPerAgent === undefined ? {} : { turnsPerAgent },
-  );
+  const hub = createActivityHub({
+    ...(turnsPerAgent !== undefined && { turnsPerAgent }),
+    ...(globalTurns !== undefined && { turns: globalTurns }),
+  });
 
   const recorder = hub.recorder("officer");
   const parents = new Map<string, string>();
@@ -378,6 +380,73 @@ test("an expired naming proof still makes an overlapping relaunch ambiguous", as
     items: [{ text: "new execution" }],
   });
   f.stop.abort();
+});
+
+test("name saturation does not charge standalone root quota for unattributed children", () => {
+  const ids = Array.from({ length: 17 }, (_, index) => `ses_result_${index}`);
+  const buckets = new Set(ids.map((id) => Bun.hash(id, 0n) % 512n));
+
+  for (const globalTurns of [256, 18]) {
+    for (const saturated of [false, true]) {
+      const f = fixture(16, undefined, undefined, globalTurns);
+
+      try {
+        const sentinel = f.root(undefined, "ses_sentinel");
+        sentinel.end("completed");
+        const root = f.root({ active: true });
+
+        if (saturated) {
+          // Keep dropped queue proofs out of the result IDs' buckets: this
+          // Exercises the full exact-name index and its saturation range.
+          for (let i = 0, names = 0; names <= 512; i += 1) {
+            const id = `ses_fill_${i}`;
+
+            if (!buckets.has(Bun.hash(id, 0n) % 512n)) {
+              names += 1;
+              f.call(root, id);
+              f.names(root, id, id);
+            }
+          }
+        }
+
+        for (const id of ids) {
+          f.call(root, id);
+          f.names(root, id, id);
+          f.create(id, main);
+          f.start(id);
+          f.ended(id, `answer from ${id}`, "child-answer");
+          f.end(id);
+        }
+
+        f.settleRoot(root);
+
+        const turns = f.turns();
+        const sessionIds = turns.map((turn) => turn.session?.id);
+
+        if (globalTurns === 256) {
+          expect(sessionIds).toEqual(["ses_sentinel", main, ...ids]);
+        } else {
+          expect(sessionIds).not.toContain("ses_sentinel");
+          expect(turns).toHaveLength(18);
+        }
+
+        const rootId = turns.find(({ session }) => session?.id === main)?.id;
+
+        for (const id of ids) {
+          expect(turns.find(({ session }) => session?.id === id)).toMatchObject(
+            {
+              items: [{ text: `answer from ${id}` }],
+              session: {
+                parent: saturated ? null : { turnId: rootId, callId: id },
+              },
+            },
+          );
+        }
+      } finally {
+        f.stop.abort();
+      }
+    }
+  }
 });
 
 test.each(["expiry", "eviction"] as const)(
