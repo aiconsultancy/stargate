@@ -413,6 +413,11 @@ content. It is never indexed and Git never runs inside it, on every Git
 version. An untracked path that Git will not index, such as a file under
 `.GIT/`, is listed the same way, without `kind`.
 
+`path` is decoded as UTF-8, with U+FFFD for each byte that is not valid
+UTF-8. Such a file is still read, sized and fingerprinted by the bytes of
+its name. Two names that decode alike are listed as two entries, but the
+file route's `path` reaches only the first of them in byte order.
+
 Paging limits:
 
 - A list page holds at most 1,000 files and at most 4 MiB of inline patch

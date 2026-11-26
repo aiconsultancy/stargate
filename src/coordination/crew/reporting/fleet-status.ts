@@ -468,6 +468,8 @@ export type DiffEntry = {
   oldOid: string;
   newOid: string;
   path: string;
+  /** The bytes Git wrote for `path`, which need not be valid UTF-8. */
+  pathBytes: Buffer;
   previousPath: string | null;
   additions: number | null;
   deletions: number | null;
@@ -630,6 +632,7 @@ export class DiffOutputParser {
         entry.previousPath = text;
       } else {
         entry.path = text;
+        entry.pathBytes = Buffer.from(token);
       }
 
       if (left === 0) {
@@ -674,6 +677,7 @@ export class DiffOutputParser {
         oldOid,
         newOid,
         path: "",
+        pathBytes: Buffer.alloc(0),
         previousPath: null,
         additions: null,
         deletions: null,

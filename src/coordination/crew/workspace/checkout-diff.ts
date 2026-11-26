@@ -9,7 +9,6 @@ import {
   DiffOutputParser,
   type DiffPlan,
   type DiffSide,
-  type StatusEntry,
   diffLimits,
   utf8Prefix,
 } from "../reporting/fleet-status";
@@ -18,6 +17,7 @@ import {
   type Git,
   type Head,
   type Origin,
+  type StatusPaths,
   fingerprintOf,
   gitUnavailable,
   name,
@@ -51,38 +51,27 @@ type Snapshot = {
    * path readers see; `nested` marks a nested repository, shown as `dir/`.
    */
   untracked: Map<string, { path: string; nested: boolean }>;
-  /** The decoded untracked paths, which mark diff entries as untracked. */
-  untrackedPaths: Set<string>;
 };
+
+/** A path's raw bytes as a key, one latin1 character per byte. */
+const byteKey = (bytes: Buffer) => bytes.toString("latin1");
 
 /** A Git diff entry, or an untracked path Git is not asked to index. */
 type PassEntry = DiffEntry & { unindexed?: true };
 
-/**
- * Each `??` entry with its path's raw bytes. A NUL byte splits the raw and
- * the decoded status alike, so the raw records align with the entries.
- */
-function untrackedOf(entries: StatusEntry[], raw: Buffer) {
-  const records = raw.toString("latin1").split("\0");
+/** Each `??` entry, keyed by its path's raw bytes. */
+function untrackedOf(entries: StatusPaths[]) {
   const untracked: Snapshot["untracked"] = new Map();
-  let record = 0;
 
-  for (const { code, path, from } of entries) {
-    const bytes = records[record]?.slice(3) ?? "";
-    record += from === undefined ? 1 : 2;
-
+  for (const { code, path, bytes } of entries) {
     if (code === "??") {
       const nested = path.endsWith("/");
 
-      untracked.set(nested ? bytes.slice(0, -1) : bytes, {
+      untracked.set(byteKey(nested ? bytes.subarray(0, -1) : bytes), {
         path: nested ? path.slice(0, -1) : path,
         nested,
       });
     }
-  }
-
-  if (record !== records.length - 1) {
-    throw new Error(gitUnavailable);
   }
 
   return untracked;
@@ -98,16 +87,11 @@ async function snapshot(git: Git, directory: string): Promise<Snapshot> {
         throw new Error(gitUnavailable);
       }
 
-      const untracked = untrackedOf(read.entries, read.status.raw);
-
       return {
         fingerprint: read.fingerprint,
         head,
         origin: read.origin,
-        untracked,
-        untrackedPaths: new Set(
-          [...untracked.values()].map(({ path }) => path),
-        ),
+        untracked: untrackedOf(read.entries),
       };
     });
 
@@ -130,7 +114,7 @@ const diffStatus = (entry: DiffEntry) => statuses[entry.status] ?? "modified";
 
 function describe(
   entry: DiffEntry,
-  untracked: Set<string>,
+  untracked: Snapshot["untracked"],
   size: number | undefined,
 ): CheckoutDiffFile {
   const mode = entry.status === "D" ? entry.oldMode : entry.newMode;
@@ -148,7 +132,9 @@ function describe(
     status: diffStatus(entry),
     additions: entry.additions,
     deletions: entry.deletions,
-    ...(untracked.has(entry.path) && { untracked: true as const }),
+    ...(untracked.has(byteKey(entry.pathBytes)) && {
+      untracked: true as const,
+    }),
     ...(entry.additions === null && { binary: true as const }),
     ...(size !== undefined && { size }),
     patch: null,
@@ -171,7 +157,7 @@ function patchPage(entry: DiffEntry, offset: number, limit: number) {
 /** Byte order, as Git sorts paths. */
 const byPath = (entries: DiffEntry[]) =>
   entries
-    .map((entry, index) => ({ key: Buffer.from(entry.path), index }))
+    .map((entry, index) => ({ key: entry.pathBytes, index }))
     .toSorted((a, b) => Buffer.compare(a.key, b.key))
     .map(({ index }) => index);
 
@@ -226,7 +212,7 @@ async function sizes(
 
     if (worktree && !removed) {
       // Never through a linked directory, which may lead out of the checkout.
-      result[index] = await worktreeSize(directory, entry.path).catch(
+      result[index] = await worktreeSize(directory, entry.pathBytes).catch(
         (): undefined => {},
       );
     } else {
@@ -428,6 +414,7 @@ function refused(
             oldOid: none,
             newOid: none,
             path,
+            pathBytes: Buffer.from(bytes, "latin1"),
             previousPath: null,
             additions: 0,
             deletions: 0,
@@ -576,7 +563,7 @@ async function listPage(
     used += bytes;
     files.push({
       entry,
-      file: { ...describe(entry, state.untrackedPaths, undefined), ...patch },
+      file: { ...describe(entry, state.untracked, undefined), ...patch },
     });
   }
 
@@ -673,7 +660,7 @@ async function contentPage(
 
   const page =
     side === "new" && pass.worktree
-      ? await readWorktree(directory, entry.path, offset, diffLimits.page)
+      ? await readWorktree(directory, entry.pathBytes, offset, diffLimits.page)
       : await readBlob(
           git,
           pass.stream,
@@ -691,7 +678,7 @@ async function contentPage(
   return {
     kind: "content",
     fingerprint: state.fingerprint,
-    file: describe(entry, state.untrackedPaths, size),
+    file: describe(entry, state.untracked, size),
     side,
     offset,
     size: page.size,
@@ -761,7 +748,7 @@ function computeDiff(
           entry,
         ]);
 
-        const file = describe(entry, state.untrackedPaths, size);
+        const file = describe(entry, state.untracked, size);
 
         return {
           kind: "patch",

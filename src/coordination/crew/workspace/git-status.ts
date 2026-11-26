@@ -749,23 +749,46 @@ async function readPage(
   return { size, data };
 }
 
+/** `base` and the path parts below it, as bytes that need not be UTF-8. */
+const below = (base: string, parts: Buffer[]) =>
+  Buffer.concat([
+    Buffer.from(base),
+    ...parts.flatMap((part) => [Buffer.from("/"), part]),
+  ]);
+
+/** A path's parts, split at each `/` byte. */
+function pathParts(path: Buffer) {
+  const parts: Buffer[] = [];
+  let start = 0;
+
+  for (let slash = path.indexOf(0x2f); slash >= 0;) {
+    parts.push(path.subarray(start, slash));
+    start = slash + 1;
+    slash = path.indexOf(0x2f, start);
+  }
+
+  return [...parts, path.subarray(start)];
+}
+
 /**
- * Run `use` on a worktree path whose directories were each opened relative
- * to their parent without following links, so the path cannot leave the
- * worktree. Undefined for an invalid path or a missing or linked directory.
+ * Run `use` on a worktree path, given by the bytes Git wrote, whose
+ * directories were each opened relative to their parent without following
+ * links, so the path cannot leave the worktree. Undefined for an invalid
+ * path or a missing or linked directory.
  */
 async function inWorktree<T>(
   root: string,
-  path: string,
-  use: (target: string, real: string) => Promise<T | undefined>,
+  path: Buffer,
+  use: (target: Buffer, real: string) => Promise<T | undefined>,
 ) {
-  if (!validDiffPath(path)) {
+  // Checked decoded: an invalid byte decodes to U+FFFD, never `/` or `.`.
+  if (!validDiffPath(path.toString("utf8"))) {
     return;
   }
 
   const real = await realpath(root);
-  const parts = path.split("/");
-  const name = parts.pop() ?? "";
+  const parts = pathParts(path);
+  const name = parts.pop() ?? Buffer.alloc(0);
   const linux = process.platform === "linux";
   let parent = await open(real, constants.O_RDONLY | constants.O_DIRECTORY);
 
@@ -773,8 +796,8 @@ async function inWorktree<T>(
     for (const [index, part] of parts.entries()) {
       const next = await open(
         linux
-          ? `/proc/self/fd/${parent.fd}/${part}`
-          : join(real, ...parts.slice(0, index + 1)),
+          ? below(`/proc/self/fd/${parent.fd}`, [part])
+          : below(real, parts.slice(0, index + 1)),
         constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY,
       ).catch(absentPath);
 
@@ -787,7 +810,9 @@ async function inWorktree<T>(
     }
 
     return await use(
-      linux ? `/proc/self/fd/${parent.fd}/${name}` : join(real, path),
+      linux
+        ? below(`/proc/self/fd/${parent.fd}`, [name])
+        : below(real, [...parts, name]),
       real,
     );
   } finally {
@@ -796,7 +821,7 @@ async function inWorktree<T>(
 }
 
 /** A worktree path's own size, never through a linked directory. */
-export const worktreeSize = (root: string, path: string) =>
+export const worktreeSize = (root: string, path: Buffer) =>
   inWorktree(
     root,
     path,
@@ -809,7 +834,7 @@ export const worktreeSize = (root: string, path: string) =>
  */
 export function readWorktree(
   root: string,
-  path: string,
+  path: Buffer,
   offset: number,
   limit: number,
 ) {
@@ -851,7 +876,7 @@ export function readWorktree(
 
       const where = linux
         ? await readlink(`/proc/self/fd/${file.fd}`)
-        : await realpath(join(real, path));
+        : await realpath(target);
 
       if (
         !opened.isFile() ||

@@ -476,11 +476,11 @@ test("symbolic links serve their own text, never their target", async () => {
   });
 
   // A path through a linked directory is refused at every step.
-  expect(
-    await readWorktree(directory, "dirlink/repo-0/base", 0, 10),
-  ).toBeUndefined();
-  expect(await readWorktree(directory, ".git/config", 0, 10)).toBeUndefined();
-  expect(await readWorktree(directory, "../escape", 0, 10)).toBeUndefined();
+  for (const path of ["dirlink/repo-0/base", ".git/config", "../escape"]) {
+    expect(
+      await readWorktree(directory, Buffer.from(path), 0, 10),
+    ).toBeUndefined();
+  }
 });
 
 test("a type change is one modified entry", async () => {
@@ -923,6 +923,9 @@ test("a size is never read through a linked directory", async () => {
 test("untracked names that are not UTF-8 are each listed with a patch", async () => {
   const directory = await checkout();
   await writeFile(join(directory, "ok"), "ok\n");
+  // Refused by Git, so the indexed paths are matched by their bytes too.
+  await mkdir(join(directory, ".GIT"));
+  await writeFile(join(directory, ".GIT", "config"), "x\n");
 
   // Two names that decode alike, as `f\uFFFDe`; Git keeps them apart.
   for (const [byte, text] of [
@@ -938,15 +941,55 @@ test("untracked names that are not UTF-8 are each listed with a patch", async ()
   const added = (text: string) =>
     `@@ -0,0 +1 @@\n+${text}\n\\ No newline at end of file\n`;
 
-  expect(result.total).toBe(3);
+  expect(result.total).toBe(4);
   expect(
     result.files.map(({ path, untracked, patch }) => [path, untracked, patch]),
   ).toEqual([
+    [".GIT/config", true, null],
     ["f\uFFFDe", true, added("grave")],
     ["f\uFFFDe", true, added("acute")],
     ["ok", true, "@@ -0,0 +1 @@\n+ok\n"],
   ]);
+
+  // The decoded path reaches the first of the two (docs/api.md).
+  expect(await patch(directory, "f\uFFFDe")).toMatchObject({
+    file: { patch: added("grave") },
+  });
 });
+
+test.skipIf(process.platform !== "linux")(
+  "a name that is not UTF-8 is read, sized and stamped by its bytes",
+  async () => {
+    const directory = await checkout();
+    const file = Buffer.from(`${directory}/f\u00E9e`, "latin1");
+    const bytes = Buffer.from([0, 1, 2, 3]);
+    await writeFile(file, bytes);
+
+    const first = await listed(directory);
+    expect(first.files).toEqual([
+      {
+        path: "f\uFFFDe",
+        previousPath: null,
+        status: "added",
+        additions: null,
+        deletions: null,
+        untracked: true,
+        binary: true,
+        size: 4,
+        patch: null,
+      },
+    ]);
+
+    // Binary, so the patch route answers with the bytes, as content does.
+    expect(bytesOf(await patch(directory, "f\uFFFDe"))).toEqual(bytes);
+    expect(bytesOf(await content(directory, "f\uFFFDe"))).toEqual(bytes);
+
+    await writeFile(file, Buffer.alloc(14));
+    const second = await listed(directory);
+    expect(second.fingerprint).not.toBe(first.fingerprint);
+    expect(second.files[0]?.size).toBe(14);
+  },
+);
 
 /**
  * A reader whose intent-to-add step first runs `before` with its pathspec,
