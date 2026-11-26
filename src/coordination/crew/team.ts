@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { piCrewBackendSchema } from "../../backends/pi/config";
 import { isLocalhost } from "../../lib/loopback";
 import { decodeSettings } from "../../config/settings-errors";
+import { crewTaskTextLimit } from "../../shared/crew-status";
 import {
   settingsCheck,
   settingsPattern,
@@ -39,7 +40,7 @@ const agentFields = {
   instructions: Schema.optional(
     Schema.Trim.check(
       Schema.isMinCodePoints(1),
-      Schema.isMaxCodePoints(64_000),
+      Schema.isMaxCodePoints(crewTaskTextLimit),
     ),
   ),
 };

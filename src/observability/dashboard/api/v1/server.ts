@@ -67,7 +67,12 @@ type Options = {
   routes?: readonly ApiRoute[];
   /** Compose trusted producer policies against the exact loaded operator token. */
   composeRoutes?: (operatorToken: string) => readonly ApiRoute[];
-  timing?: { headersMs?: number; requestMs?: number };
+  timing?: {
+    headersMs?: number;
+    requestMs?: number;
+    /** Test-only SSE timing; not part of the runtime API configuration. */
+    streams?: Parameters<typeof createEventStreams>[1];
+  };
 };
 
 const failureWindowMs = 60_000;
@@ -234,17 +239,23 @@ type FleetCore = Pick<ApiV1Source, "crew" | "ship" | "shipIdentities"> & {
  * Event streams and HTTP read slots. Operators and officers each get their
  * own, so officers' reads can never use up the slots people's consoles need.
  */
-function fleetReaders(core: FleetCore) {
-  const events = createEventStreams({
-    fleet: core.readFleet,
-    ...(core.shipIdentities && { shipIdentities: core.shipIdentities }),
-    ship: (id, signal) => core.ship(id, signal),
-    diff: core.diff,
-    completeFleet: core.completeFleet,
-    fallbackFleet: core.fallbackFleet,
-    readHost: core.host.read,
-    snapshotHost: core.host.snapshot,
-  });
+function fleetReaders(
+  core: FleetCore,
+  timing?: Parameters<typeof createEventStreams>[1],
+) {
+  const events = createEventStreams(
+    {
+      fleet: core.readFleet,
+      ...(core.shipIdentities && { shipIdentities: core.shipIdentities }),
+      ship: (id, signal) => core.ship(id, signal),
+      diff: core.diff,
+      completeFleet: core.completeFleet,
+      fallbackFleet: core.fallbackFleet,
+      readHost: core.host.read,
+      snapshotHost: core.host.snapshot,
+    },
+    timing,
+  );
 
   const httpReads = new Map<Promise<void>, number>();
   const abandonedReads = new Set<Promise<void>>();
@@ -583,8 +594,8 @@ export async function startApiV1Server(options: Options) {
     }),
   };
 
-  const operatorReaders = fleetReaders(core);
-  const officerReaders = fleetReaders(officerCore);
+  const operatorReaders = fleetReaders(core, options.timing?.streams);
+  const officerReaders = fleetReaders(officerCore, options.timing?.streams);
 
   /** People: a private network peer, browser origin rules and the fleet token. */
   async function operatorRequest(

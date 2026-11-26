@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import {
   contentHeight,
@@ -23,6 +24,125 @@ test("Markdown previews label the source and isolate rendered content", () => {
   expect(body).toContain("default-src 'none'");
   expect(body).not.toContain("<script>");
 });
+
+const testChromium = process.env["STARGATE_TEST_CHROMIUM"];
+
+test.skipIf(!testChromium)(
+  "Markdown table labels stay legible and dense values remain reachable",
+  async () => {
+    if (!testChromium) {
+      throw new Error("Chromium is required for this test");
+    }
+
+    const { chromium } = await import("playwright-core");
+
+    const browser = await chromium.launch({
+      executablePath: testChromium,
+      chromiumSandbox: true,
+    });
+
+    try {
+      const page = await browser.newPage({
+        viewport: { width: 880, height: 680 },
+        javaScriptEnabled: false,
+        offline: true,
+      });
+
+      const nested = [
+        "> > > > | A | B | C | D |",
+        "> > > > | --- | --- | --- | --- |",
+        "> > > > | one | two | three | four |",
+      ].join("\n");
+
+      await page.setContent(previewHtml(nested, "nested.md", 1));
+
+      const nestedFits = await page.evaluate(() => {
+        const table = document.querySelector("blockquote table");
+        const bounds = table?.parentElement?.getBoundingClientRect();
+
+        return (
+          !!bounds &&
+          !!table &&
+          table.getBoundingClientRect().right <= bounds.right + 1
+        );
+      });
+
+      expect(nestedFits).toBe(true);
+
+      // Long values in wider tables must fit within the 100-page limit.
+      for (const columns of [4, 8, 12]) {
+        const labels = [
+          "Selector",
+          "Property",
+          ...Array<string>(columns - 2).fill("Value"),
+        ];
+
+        const row = [
+          "code",
+          "--accent",
+          ...Array<string>(columns - 3).fill("x"),
+          "W".repeat(30_000),
+        ];
+
+        const source = [
+          labels,
+          labels.map(() => "---"),
+          row,
+          labels.map(() => "last"),
+        ]
+          .map((cells) => `| ${cells.join(" | ")} |`)
+          .join("\n");
+
+        await page.setContent(previewHtml(source, "changes.md", 1));
+
+        const layout = await page.evaluate(() => {
+          const main = document.querySelector("main");
+          const lastRow = document.querySelector("tbody tr:last-child");
+          const headers = Array.from(document.querySelectorAll("th"));
+
+          if (!main || !lastRow) {
+            throw new Error("Missing table");
+          }
+
+          return {
+            widths: headers.map((cell) => cell.getBoundingClientRect().width),
+            fitsPage: main.scrollWidth === main.clientWidth,
+            lastBottom:
+              lastRow.getBoundingClientRect().bottom -
+              main.getBoundingClientRect().top,
+          };
+        });
+
+        expect(layout.fitsPage).toBe(true);
+        expect(layout.widths).toHaveLength(columns);
+
+        if (columns === 4) {
+          expect(Math.min(...layout.widths)).toBeGreaterThan(140);
+        }
+
+        const lastPage = Math.ceil(layout.lastBottom / contentHeight);
+        expect(lastPage).toBeGreaterThan(1);
+        expect(lastPage).toBeLessThanOrEqual(100);
+
+        const result = await renderMarkdownPreview(
+          source,
+          "changes.md",
+          lastPage,
+          {
+            playwright: fileURLToPath(import.meta.resolve("playwright-core")),
+            chromium: testChromium,
+          },
+        );
+
+        expect(result.pages).toBe(lastPage);
+        expect(result.preview.length).toBeLessThanOrEqual(22_000);
+      }
+    } finally {
+      await browser.close();
+    }
+  },
+  30_000,
+);
 
 test("bounded Teams previews use indexed PNG output", async () => {
   const stub = Buffer.from(

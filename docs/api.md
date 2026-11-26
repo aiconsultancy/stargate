@@ -236,8 +236,10 @@ On the operator listener, ship and crew detail fall back to redacted
 missing, or when the plugin rejects `taskText` and the re-ask without it
 succeeds. A failed re-ask or a current plugin that cannot answer by the crew
 deadline leaves crew status unavailable; the member route returns `503`
-rather than redacted text. Ship and member routes both return `503` if the
-whole HTTP read times out.
+rather than redacted text.
+
+On both listeners, ship and member routes return `503` if the whole HTTP
+read times out.
 
 Subagent titles and pull request titles are also shown as written, cut to
 180 characters. Each stream's activity events quote its own task text view,
