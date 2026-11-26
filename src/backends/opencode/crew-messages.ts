@@ -113,6 +113,9 @@ export class SessionMessages {
   private readonly pending = new Map<string, Pending>();
   /** Messages whose turn is kept, in placement order, up to `maxKnown`. */
   private readonly known = new Map<string, Turn>();
+  /** The known map's index: its messages by turn, and turns by execution. */
+  private readonly byTurn = new Map<Turn, Set<string>>();
+  private readonly byPosition = new Map<number, Set<Turn>>();
   /** Messages no longer known, oldest first, bounded by `maxEvicted`. */
   private readonly evicted = new Map<string, Evicted>();
 
@@ -143,7 +146,24 @@ export class SessionMessages {
 
   /** Turns that placed messages joined. */
   public *turns() {
-    yield* this.known.values();
+    yield* this.byTurn.keys();
+  }
+
+  /** Turns of execution `position` that placed messages joined. */
+  public *turnsAt(position: number) {
+    yield* this.byPosition.get(position) ?? [];
+  }
+
+  /** A copy of the index, for consistency checks. */
+  public index() {
+    return {
+      turns: new Map(
+        [...this.byTurn].map(([turn, messages]) => [turn, [...messages]]),
+      ),
+      positions: new Map(
+        [...this.byPosition].map(([position, turns]) => [position, [...turns]]),
+      ),
+    };
   }
 
   /** Remember a waiting message; past the bound, the oldest is forced. */
@@ -164,12 +184,27 @@ export class SessionMessages {
   public place(assistant: string, turn: Turn) {
     this.unset(assistant);
     this.known.set(assistant, turn);
+    const messages = this.byTurn.get(turn);
+
+    if (messages) {
+      messages.add(assistant);
+    } else {
+      this.byTurn.set(turn, new Set([assistant]));
+      const turns = this.byPosition.get(turn.position);
+
+      if (turns) {
+        turns.add(turn);
+      } else {
+        this.byPosition.set(turn.position, new Set([turn]));
+      }
+    }
 
     if (this.known.size <= maxKnown) {
       return;
     }
 
     // Before the ceiling forgets a known message, drop those gone since.
+    // The pass visits turns, not their messages.
     this.prune((entry) => !kept(entry));
 
     for (const oldest of this.known.keys()) {
@@ -178,7 +213,7 @@ export class SessionMessages {
       }
 
       // Its later output opens a new message.
-      this.known.delete(oldest);
+      this.unknow(oldest);
       this.forget();
     }
   }
@@ -190,17 +225,45 @@ export class SessionMessages {
 
   /** Forget turns the recorder evicted: their messages' frames are dropped. */
   public prune(gone: (turn: Turn) => boolean) {
-    for (const [key, entry] of this.known) {
-      if (gone(entry)) {
-        this.remove(key, entry.position);
+    for (const [turn, messages] of this.byTurn) {
+      if (gone(turn)) {
+        // Removing the current message leaves the iteration intact.
+        for (const assistant of messages) {
+          this.remove(assistant, turn.position);
+        }
       }
     }
   }
 
   private unset(assistant: string) {
     this.pending.delete(assistant);
-    this.known.delete(assistant);
+    this.unknow(assistant);
     this.evicted.delete(assistant);
+  }
+
+  /** Forget a known message, and its turn's index entries once it has none. */
+  private unknow(assistant: string) {
+    const turn = this.known.get(assistant);
+
+    if (!turn) {
+      return;
+    }
+
+    this.known.delete(assistant);
+    const messages = this.byTurn.get(turn);
+    messages?.delete(assistant);
+
+    if (messages?.size !== 0) {
+      return;
+    }
+
+    this.byTurn.delete(turn);
+    const turns = this.byPosition.get(turn.position);
+    turns?.delete(turn);
+
+    if (turns?.size === 0) {
+      this.byPosition.delete(turn.position);
+    }
   }
 
   /** No longer known: past the bound, the oldest such is forgotten. */

@@ -894,17 +894,22 @@ export class CrewActivityCollector {
     return turn;
   }
 
-  /** An execution's turns, in the order their first messages arrived. */
+  /**
+   * An execution's turns, in the order their first messages arrived: the
+   * running execution's open turns, and those its placed messages joined.
+   */
   private turnsOf(session: Session, position: number) {
-    const turns = new Set<Turn>();
+    const turns = new Set<Turn>(
+      position === session.execution ? session.open : [],
+    );
 
-    for (const turn of [...session.open, ...session.messages.turns()]) {
-      if (turn.position === position && kept(turn)) {
-        turns.add(turn);
-      }
+    for (const turn of session.messages.turnsAt(position)) {
+      turns.add(turn);
     }
 
-    return [...turns].toSorted((a, b) => a.arrival - b.arrival);
+    return [...turns]
+      .filter((turn) => turn.position === position && kept(turn))
+      .toSorted((a, b) => a.arrival - b.arrival);
   }
 
   /** Placeable now: resolved, or past its buffer time. */
