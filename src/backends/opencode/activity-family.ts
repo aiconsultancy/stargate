@@ -77,6 +77,7 @@ type Pending = PendingActivity<ActivityFamilyEvent>;
 
 type Child = ChildReplayState & {
   parent: TurnActivityLog;
+  parentSession: string;
   log: TurnActivityLog;
   projector: ActivityProjector;
   start: number;
@@ -86,6 +87,7 @@ type Child = ChildReplayState & {
   reused?: true;
   uncertainHistory?: true;
   unproven?: true;
+  continuation?: true;
   callId: string | null;
   ambiguousCall?: true;
   callFloor: number;
@@ -593,7 +595,7 @@ export class OpenCodeActivityFamilies {
 
     const recovering = this.queue.active(id);
 
-    if (!recovering && !history?.blocked && this.lateItem(id, child, packet)) {
+    if (!recovering && this.lateItem(id, child, packet)) {
       return order;
     }
 
@@ -628,8 +630,15 @@ export class OpenCodeActivityFamilies {
 
   private enqueueChild(id: string, packet: Packet, previousStart?: number) {
     const queued = this.queue.candidate(id, previousStart);
-    this.queue.enqueue(id, packet, queued);
     const ancestry = this.facts(queued);
+    const continuation = this.executions.get(id)?.continuation;
+
+    if (continuation) {
+      ancestry.parent = continuation.parentSession;
+      queued.needsStart = false;
+    }
+
+    this.queue.enqueue(id, packet, queued);
 
     if (
       queued.segments[0]?.first.late &&
@@ -648,11 +657,18 @@ export class OpenCodeActivityFamilies {
 
     await this.queue.settleReads();
 
-    const observed = [...this.children].map(([id, child]) => ({
-      id,
-      child,
-      latest: child.latest,
-    }));
+    const observed: { id: string; child: Child; latest: number }[] = [];
+
+    for (const [id, child] of this.children) {
+      child.log.reconnected();
+      delete child.lower;
+
+      if (child.unproven) {
+        this.loseAcrossReconnect(id, child);
+      } else {
+        observed.push({ id, child, latest: child.latest });
+      }
+    }
 
     // Unadmitted frames and launch candidates cannot cross a gap in execution order.
     for (const [id, queued] of this.queue.entries()) {
@@ -667,11 +683,6 @@ export class OpenCodeActivityFamilies {
 
     if (observed.length === 0) {
       return;
-    }
-
-    for (const { child } of observed) {
-      child.log.reconnected();
-      delete child.lower;
     }
 
     const boundaries = await reconcileActivity(
@@ -691,18 +702,23 @@ export class OpenCodeActivityFamilies {
 
       const result = boundaries[index];
 
-      if (child.unproven) {
-        this.finish(id, child, "cancelled", true);
-      } else if (result === "running") {
+      if (result === "running") {
         continue;
-      } else if (result?.kind === "settled") {
+      }
+
+      if (result?.kind === "settled") {
         this.executions.advance(id, child, result.seq);
         this.finish(id, child, result.outcome);
       } else {
         // A log-only start proves loss of the old period, not live admission.
-        this.finish(id, child, "cancelled", true);
+        this.loseAcrossReconnect(id, child);
       }
     }
+  }
+
+  private loseAcrossReconnect(id: string, child: Child) {
+    this.executions.lostAcrossReconnect(id, child);
+    this.finish(id, child, "cancelled", true);
   }
 
   /** Reconcile roots and descendants before consuming the new connection's frames. */
@@ -841,48 +857,27 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
-    const attribution = this.attribution(id, queued, pending, pending.parent);
+    const anchor = previous?.continuation;
+    const opened = this.openTurn(id, queued, pending, pending.parent, anchor);
 
-    if (!attribution) {
+    if (!opened) {
       return;
     }
 
-    const { owner, callId, ambiguous, proof } = attribution;
-    const scope = owner && this.lineage.get(owner);
-    const started = first.type === "session.execution.started";
-
-    // Reuse requires a new start; late output cannot prove a new busy period.
-    if (scope && pending.created === undefined && !started) {
-      return;
-    }
-
-    const unproven = !freshChild(
-      this.executions,
-      id,
-      first,
-      pending,
-      proof?.timing,
-    );
-
-    const log = openChild(attribution, id, first.at, unproven, (parent) =>
-      this.fenced(parent),
-    );
-
-    if (!owner || !log) {
-      this.queue.skip(id, queued);
-
-      return;
-    }
+    const { owner, log, callId, ambiguous, proof, scope, unproven, started } =
+      opened;
 
     const startSeq = started ? first.seq : undefined;
 
     const child: Child = {
       parent: owner,
+      parentSession: pending.parent,
       log,
       callId,
       callFloor: segment.floor,
       ...(ambiguous && { ambiguousCall: true }),
       ...(unproven && { unproven: true }),
+      ...(anchor && unproven && { continuation: true }),
       projector: new ActivityProjector(),
       start: first.order,
       nativeStart: started ? first.created : undefined,
@@ -893,6 +888,10 @@ export class OpenCodeActivityFamilies {
     };
 
     this.children.set(id, child);
+
+    if (previous) {
+      delete previous.continuation;
+    }
 
     if (scope) {
       this.lineage.set(log, scope);
@@ -944,6 +943,73 @@ export class OpenCodeActivityFamilies {
         }
       },
     });
+  }
+
+  private openTurn(
+    id: string,
+    queued: Pending,
+    pending: Ancestry,
+    parent: string,
+    anchor: Child | undefined,
+  ) {
+    const segment = queued.segments[0];
+
+    if (!segment) {
+      return;
+    }
+
+    const { first } = segment;
+    const started = first.type === "session.execution.started";
+    const normal = this.attribution(id, queued, pending, parent);
+
+    const fallback =
+      anchor && (!started || !normal?.owner)
+        ? {
+            owner: anchor.parent,
+            detached: true,
+            callId: null,
+            ambiguous: false,
+            proof: undefined,
+          }
+        : undefined;
+
+    const attribution = fallback ?? normal;
+
+    if (!attribution) {
+      return;
+    }
+
+    const { owner, callId, ambiguous, proof } = attribution;
+    const scope = owner && this.lineage.get(owner);
+
+    // Reuse requires a start for attribution, but not for detached output.
+    if (!fallback && scope && pending.created === undefined && !started) {
+      return;
+    }
+
+    const unproven =
+      fallback !== undefined ||
+      !freshChild(this.executions, id, first, pending, proof?.timing);
+
+    const log = openChild(attribution, id, first.at, unproven, (writer) =>
+      this.fenced(writer),
+    );
+
+    if (owner && log) {
+      return { owner, log, callId, ambiguous, proof, scope, unproven, started };
+    }
+
+    if (
+      anchor &&
+      (segment.gap ||
+        segment.frames.some(({ event }) => isActivityEvent(event)))
+    ) {
+      markActivityGap(anchor.log, first.at);
+    }
+
+    this.queue.skip(id, queued);
+
+    return;
   }
 
   private loseBoundary(id: string, child: Child) {
@@ -1028,6 +1094,10 @@ export class OpenCodeActivityFamilies {
     child.latest = order;
 
     if (child.unproven && outcome !== undefined) {
+      if (child.continuation) {
+        this.executions.advance(id, child, seq, nativeActivityTime(event));
+      }
+
       this.finish(id, child, "cancelled", true);
     } else if (outcome !== undefined) {
       this.executions.advance(id, child, seq, nativeActivityTime(event));
@@ -1046,8 +1116,14 @@ export class OpenCodeActivityFamilies {
 
   private lateItem(id: string, active: Child | undefined, packet: Packet) {
     const { event } = packet;
+    const history = this.executions.get(id);
 
-    if (!isActivityEvent(event)) {
+    if (
+      !isActivityEvent(event) ||
+      history?.blocked ||
+      history?.continuation ||
+      active?.continuation
+    ) {
       return false;
     }
 
@@ -1071,7 +1147,11 @@ export class OpenCodeActivityFamilies {
       return false;
     }
 
-    if (known.log.retained?.() !== false && !this.fenced(known.log)) {
+    if (
+      !known.reconnectLost &&
+      known.log.retained?.() !== false &&
+      !this.fenced(known.log)
+    ) {
       this.project(id, known, event, packet);
     }
 

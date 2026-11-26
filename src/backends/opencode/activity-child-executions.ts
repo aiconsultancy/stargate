@@ -11,6 +11,7 @@ export type ChildReplayState = {
   sequences?: ActivitySequenceWindow;
   deltaIDs?: ActivityDeltaWindow;
   finished?: true;
+  reconnectLost?: true;
 };
 
 type Execution = ChildReplayState & {
@@ -25,6 +26,7 @@ type CompactedBoundary = { seq: number; created: number };
 type History<Child> = {
   writers: number;
   latest?: Child;
+  continuation?: Child;
   admitted?: true;
   cursor?: number;
   latestTime?: number;
@@ -200,10 +202,32 @@ export class ChildExecutions<Child extends Execution> {
 
   public admitted(id: string, child: Child) {
     const history = this.track(id);
-    history.writers += 1;
     history.latest = child;
     history.admitted = true;
     delete history.blocked;
+    this.retain(id, history, child);
+  }
+
+  /** Keep the presentation anchor only while its writer is retained. */
+  public lostAcrossReconnect(id: string, child: Child) {
+    child.reconnectLost = true;
+
+    if (child.log.retained?.() === false) {
+      return;
+    }
+
+    const history = this.track(id);
+
+    if (history.latest !== child) {
+      this.retain(id, history, child);
+    }
+
+    history.continuation = child;
+    this.advance(id, child, child.cursor);
+  }
+
+  private retain(id: string, history: History<Child>, child: Child) {
+    history.writers += 1;
     child.log.onEvicted?.(() => {
       this.evict(id, history, child);
     });
@@ -307,6 +331,10 @@ export class ChildExecutions<Child extends Execution> {
   private evict(id: string, history: History<Child>, child: Child) {
     if (history.latest === child) {
       delete history.latest;
+    }
+
+    if (history.continuation === child) {
+      delete history.continuation;
     }
 
     for (const [message, owner] of history.messages) {
