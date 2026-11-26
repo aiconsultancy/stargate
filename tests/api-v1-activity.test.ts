@@ -467,18 +467,6 @@ test("running child pins an ended root under family pressure", () => {
   expect(snapshot(hub, "captain").turns).toEqual([]);
 });
 
-test("a stale parent handle cannot create an orphan after eviction", () => {
-  const hub = createActivityHub({ turnsPerAgent: 1 });
-  const recorder = hub.recorder("captain");
-  const root = recorder.begin(undefined, "old root");
-  root.end("completed");
-  recorder.begin(undefined, "new root");
-  expect(root.child?.(null, "orphan")).toBeUndefined();
-  expect(snapshot(hub, "captain").turns).toMatchObject([
-    { session: { id: "new root" } },
-  ]);
-});
-
 test("a late child call link counts toward settled family bytes", () => {
   const hub = createActivityHub({ bytes: 500 });
   const root = hub.recorder("captain").begin(undefined, "parent-session");

@@ -295,8 +295,8 @@ function unlinkedAudience(owner: Agent, parent: StoredTurn) {
 }
 
 /**
- * How a turn begins: a child under its parent, or, if the drain before it
- * evicted that parent, unlinked: a root of its own that copies its family's
+ * How a turn begins: a child under its parent, or, if the parent was
+ * evicted, unlinked: a root of its own that copies its family's
  * requests and keeps its live audience. A linked child shares the audience.
  */
 function turnStart(owner: Agent, id: string, source: TurnStart) {
@@ -605,7 +605,7 @@ export function createActivityHub(
         resize();
       }),
       child(callId, sessionId, startedAt, detached) {
-        if (gone() || maySpawn?.() === false) {
+        if (maySpawn?.() === false) {
           return;
         }
 

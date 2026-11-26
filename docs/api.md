@@ -639,9 +639,9 @@ are measured once per 150 ms batch, and before any turn begins or ends, so
 eviction never uses a stale size: a turn they push over the budget is
 evicted at the end of that batch, or sooner. A pending batch is evicted
 against the turns as they were before the turn began or ended, and only then
-does that turn count. If that drain evicts the parent of a child about to
-begin, the child is admitted unlinked: it is a root of its own, keeps its
-`session.id`, has `session.parent: null` and copies its family's
+does that turn count. If the parent of a proven child was already evicted,
+including by that drain, the child is admitted unlinked: it is a root of its
+own, keeps its `session.id`, has `session.parent: null` and copies its family's
 `requests`, so the snapshot and the request lookup still show it. A child
 of a retained parent links to it as usual. A family is evicted together;
 running families do not count toward those global limits. A settled family
