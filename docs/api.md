@@ -690,13 +690,24 @@ the durable message-end frame. Writer associations are released when the
 hub evicts the turn. The collector retains routing markers for up to 512
 evicted child sessions and only an exact durable position for up to 4,096
 older sessions. Replayed positions at or below that fence cannot spend a
-new call's proof. If a reused session's position has expired, a start above
-a sampled native log checkpoint can prove a new execution. Until then,
-the call shows `unavailable: ["activity.child-attribution"]`. Its unproven
-frames appear in an unscoped activity snapshot or stream as a separate turn
-with no parent, request or crew task, and no claimed native outcome. A
-proven start for the same waiting call clears the marker. New sessions do
-not need this checkpoint. The durable fence does not reject unsequenced
+new call's proof. When an exact position is lost, the collector retains the
+highest native event time from the discarded boundaries. An unrecognized
+session created after that time does not need to prove freshness; a replayed
+creation at or before it does not exempt the session. For a start that needs
+proof, the child's native `created` must be at least the parent's
+`session.tool.input.started` time, or `session.tool.called` time if the input
+start was not seen. No gateway timestamp or log read is used for this check.
+A non-empty string `sessionID` or `task_id` means the call resumes a session.
+
+A named child can still appear after the pending window. If its start is
+older than the call, has an unknown timestamp (missing, non-finite or
+non-positive), or cannot be proven fresh, the call shows
+`unavailable: ["activity.child-attribution"]`. The unproven frames appear in
+an unscoped activity snapshot or stream as a separate turn with no parent,
+request or crew task, and no claimed native outcome. A proven start for the
+same waiting call clears the marker. On deployments that retain no native
+events, bounded transcript recovery still shows a visible gap rather than
+reconstructing missing frames. The durable fence does not reject unsequenced
 frames associated with an admitted execution's known assistant messages.
 
 After a stream reconnect, the collector uses bounded reads of native

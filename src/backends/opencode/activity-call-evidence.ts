@@ -2,9 +2,21 @@ import type { TurnActivityLog } from "../backend";
 
 export type ActivityIncarnation = { active: boolean };
 
-type Call = { order: number; named?: true; freshSession?: true };
+export type CallTiming = {
+  created: number | undefined;
+  launch: "resumes" | "new" | "unknown";
+};
 
-type OwnerCalls = { session: string; calls: Map<string, Call> };
+type Call = { order: number; named?: true; timing: CallTiming };
+
+type OwnerCalls = {
+  session: string;
+  calls: Map<string, Call>;
+  fallback: Map<string, Call | false>;
+};
+
+const resumes = (value: unknown) =>
+  typeof value === "string" && value.length > 0;
 
 type Range = { first: number; last: number };
 
@@ -225,7 +237,8 @@ class ScopeEvidence {
 }
 
 /**
- * Exact naming follows its log (128 call records per live log at the default).
+ * Exact naming follows its log: at default limits, 128 known subagent calls
+ * and 128 fallback records for calls without a known subagent start.
  * Ambiguity follows the incarnation. With default limits, a scope holds up
  * to 512 × 128 unnamed orders, plus 512 exact and 512 hashed unnamed ranges.
  * Each evidence-bearing native parent within that scope holds up to 512 ×
@@ -268,6 +281,10 @@ export class ActivityCallEvidence {
     owner: TurnActivityLog,
     key: string,
     order: number,
+    {
+      created,
+      subagent = true,
+    }: { created?: number | undefined; subagent?: boolean } = {},
   ) {
     const index = this.scope(scope, true);
 
@@ -275,10 +292,13 @@ export class ActivityCallEvidence {
       return;
     }
 
-    const owned = index.owners.get(owner) ?? {
-      session,
-      calls: new Map<string, Call>(),
-    };
+    const owned = this.owner(index, owner, session);
+
+    if (!subagent) {
+      this.keep(owned.fallback, key, false);
+
+      return;
+    }
 
     const { calls } = owned;
 
@@ -286,17 +306,33 @@ export class ActivityCallEvidence {
       return;
     }
 
-    if (calls.size >= this.callsPerLog) {
-      const oldest = calls.keys().next().value;
+    this.keep(calls, key, { order, timing: { created, launch: "unknown" } });
+    owned.fallback.delete(key);
+    index.unnamed(session, order);
+  }
+
+  private owner(index: ScopeEvidence, log: TurnActivityLog, session: string) {
+    const owned = index.owners.get(log) ?? {
+      session,
+      calls: new Map<string, Call>(),
+      fallback: new Map<string, Call | false>(),
+    };
+
+    index.owners.set(log, owned);
+
+    return owned;
+  }
+
+  private keep<Value>(entries: Map<string, Value>, key: string, value: Value) {
+    if (!entries.has(key) && entries.size >= this.callsPerLog) {
+      const oldest = entries.keys().next().value;
 
       if (oldest !== undefined) {
-        calls.delete(oldest);
+        entries.delete(oldest);
       }
     }
 
-    calls.set(key, { order });
-    index.owners.set(owner, owned);
-    index.unnamed(session, order);
+    entries.set(key, value);
   }
 
   public name(
@@ -308,9 +344,15 @@ export class ActivityCallEvidence {
   ) {
     const index = this.scope(scope);
     const owned = index?.owners.get(owner);
-    const call = owned?.calls.get(key);
+    const call = owned && (owned.calls.get(key) ?? owned.fallback.get(key));
 
-    if (!index || owned?.session !== session || !call || call.named) {
+    if (
+      !index ||
+      owned?.session !== session ||
+      call === undefined ||
+      call === false ||
+      call.named
+    ) {
       return null;
     }
 
@@ -321,28 +363,54 @@ export class ActivityCallEvidence {
   }
 
   public input(
+    session: string,
     scope: ActivityIncarnation | undefined,
     owner: TurnActivityLog,
     key: string,
-    input: Readonly<Record<string, unknown>>,
+    {
+      order,
+      created,
+      input,
+      mayLaunch,
+    }: {
+      order: number;
+      created: number | undefined;
+      input: Readonly<Record<string, unknown>>;
+      mayLaunch: boolean;
+    },
   ) {
-    const call = this.scope(scope)?.owners.get(owner)?.calls.get(key);
+    const index = this.scope(scope, true);
 
-    if (
-      call &&
-      !Object.hasOwn(input, "sessionID") &&
-      !Object.hasOwn(input, "task_id")
-    ) {
-      call.freshSession = true;
+    if (!index) {
+      return;
+    }
+
+    const owned = this.owner(index, owner, session);
+    const call = owned.calls.get(key);
+
+    const launch =
+      resumes(input["sessionID"]) || resumes(input["task_id"])
+        ? "resumes"
+        : "new";
+
+    if (call) {
+      call.timing.launch = launch;
+    } else if (mayLaunch && !owned.fallback.has(key)) {
+      // A called frame without input.started can only name a child after
+      // Subsequent metadata supplies the native child session ID.
+      this.keep(owned.fallback, key, { order, timing: { created, launch } });
     }
   }
 
-  public freshSession(
+  public timing(
     scope: ActivityIncarnation | undefined,
     owner: TurnActivityLog,
     key: string,
   ) {
-    return this.scope(scope)?.owners.get(owner)?.calls.get(key)?.freshSession;
+    const owned = this.scope(scope)?.owners.get(owner);
+    const call = owned && (owned.calls.get(key) ?? owned.fallback.get(key));
+
+    return call === false ? undefined : call?.timing;
   }
 
   public competing(

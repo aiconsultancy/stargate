@@ -118,6 +118,8 @@ function eventStream() {
     },
   });
 
+  let nativeTime = 0;
+
   return {
     events: { subscribe } as unknown as OpenCodeClient["event"],
     emit(
@@ -125,8 +127,10 @@ function eventStream() {
       data: Record<string, unknown>,
       extra: Record<string, unknown> = {},
     ) {
+      const frame = { type, data, created: ++nativeTime, ...extra };
+
       for (const push of subscribers) {
-        push({ type, data, ...extra });
+        push(frame);
       }
     },
     subscribers: () => subscribers.size,

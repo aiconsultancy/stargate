@@ -30,10 +30,11 @@ test("the provisional count cap evicts old hints without proving the surviving c
       log: parent,
       callId: `call-${order}`,
       order,
+      timing: { created: order, launch: "unknown" },
     });
   }
 
-  expect(pending.provisional.map(({ proof }) => proof.callId)).toEqual([
+  expect(pending.provisional.map(({ callId }) => callId)).toEqual([
     "call-2",
     "call-3",
   ]);

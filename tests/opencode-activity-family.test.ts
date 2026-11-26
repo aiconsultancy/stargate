@@ -1775,7 +1775,7 @@ test("brand-new child sessions can still start at 1 after 5,000 evictions", asyn
 });
 
 test.each(["officer", "crew"] as const)(
-  "%s Fleet activity shows unproven frames detached until a native checkpoint proves a later start",
+  "%s Fleet activity shows unproven frames detached until native time proves a later start",
   async (subject) => {
     const f = fixture(
       undefined,
@@ -1841,7 +1841,7 @@ test.each(["officer", "crew"] as const)(
       f.names(root, "resume", id);
       await setImmediate();
 
-      f.emit("session.execution.started", id, {}, undefined, undefined, 1);
+      f.emit("session.execution.started", id, {}, undefined, undefined, 1, 2);
       f.emit(
         "session.text.ended",
         id,
@@ -1860,7 +1860,7 @@ test.each(["officer", "crew"] as const)(
             { callId: "resume", unavailable: ["activity.child-attribution"] },
           ],
         },
-        logReads: [[id, Number.MAX_SAFE_INTEGER]],
+        logReads: [],
       });
       expect(uncertain).toMatchObject({
         session: { id, parent: null },
@@ -1909,6 +1909,39 @@ test.each(["officer", "crew"] as const)(
     }
   },
 );
+
+test("a child evicted without a sequence boundary contributes its latest native time", () => {
+  const hub = createActivityHub({ turnsPerAgent: 1, turns: 1 });
+  const recorder = hub.recorder("officer");
+  const history = new ChildExecutions<{ log: TurnActivityLog }>(1);
+
+  for (const [id, times] of [
+    ["ses_unsequenced", [7, 10, 8]],
+    ["ses_other", [11]],
+  ] as const) {
+    const parent = recorder.begin();
+    const log = parent.child?.(null, id);
+
+    if (!log) {
+      throw new Error("Expected child writer");
+    }
+
+    const child = { log };
+    history.admitted(id, child);
+
+    for (const time of times) {
+      history.advance(id, child, undefined, time);
+    }
+
+    log.end("completed");
+    parent.end("completed");
+  }
+
+  expect(history.needsFreshness("ses_unsequenced", undefined)).toBe(true);
+  expect(history.needsFreshness("ses_old", 10)).toBe(true);
+  expect(history.needsFreshness("ses_new", 11)).toBe(false);
+  expect(history.possiblyReplayed("ses_unsequenced", undefined)).toBe(false);
+});
 
 test("family eviction replaces child writer associations with tombstones immediately", () => {
   const hub = createActivityHub({ turnsPerAgent: 1 });

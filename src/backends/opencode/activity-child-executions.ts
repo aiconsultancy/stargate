@@ -20,11 +20,14 @@ type Execution = ChildReplayState & {
 
 type Start = { seq: number | undefined; order: number };
 
+type CompactedBoundary = { seq: number; created: number };
+
 type History<Child> = {
   writers: number;
   latest?: Child;
   admitted?: true;
   cursor?: number;
+  latestTime?: number;
   observedStart?: Start;
   blocked?: true;
   messages: Map<string, Child>;
@@ -39,9 +42,9 @@ export class ChildExecutions<Child extends Execution> {
   private readonly sessions = new Map<string, History<Child>>();
   private readonly retired = new Map<string, History<Child>>();
   private readonly waitingStarts = new Map<string, Start>();
-  private readonly compactedBoundaries = new Map<string, number>();
+  private readonly compactedBoundaries = new Map<string, CompactedBoundary>();
   private compacted = false;
-  private lostBoundaries = false;
+  private highWater: number | undefined;
 
   public constructor(private readonly limit: number) {}
 
@@ -54,14 +57,17 @@ export class ChildExecutions<Child extends Execution> {
     return this.compacted && !this.get(id);
   }
 
-  public needsFreshness(id: string) {
+  public needsFreshness(id: string, created: number | undefined) {
     return (
-      this.lostBoundaries && !this.get(id) && !this.compactedBoundaries.has(id)
+      this.highWater !== undefined &&
+      (created === undefined || created <= this.highWater) &&
+      !this.get(id) &&
+      !this.compactedBoundaries.has(id)
     );
   }
 
   public possiblyReplayed(id: string, seq: number | undefined, cursor = -1) {
-    const bound = Math.max(cursor, this.compactedBoundaries.get(id) ?? -1);
+    const bound = Math.max(cursor, this.compactedBoundaries.get(id)?.seq ?? -1);
 
     return seq !== undefined && seq <= bound;
   }
@@ -110,7 +116,8 @@ export class ChildExecutions<Child extends Execution> {
     const compacted = this.compactedBoundaries.get(id);
 
     if (compacted !== undefined) {
-      history.cursor = Math.max(compacted, history.cursor ?? -1);
+      history.cursor = Math.max(compacted.seq, history.cursor ?? -1);
+      history.latestTime = Math.max(compacted.created, history.latestTime ?? 0);
     }
 
     this.retired.delete(id);
@@ -173,8 +180,17 @@ export class ChildExecutions<Child extends Execution> {
     }
   }
 
-  public advance(id: string, child: Child, seq: number | undefined) {
+  public advance(
+    id: string,
+    child: Child,
+    seq: number | undefined,
+    created?: number,
+  ) {
     const history = this.get(id);
+
+    if (history && created !== undefined) {
+      history.latestTime = Math.max(history.latestTime ?? 0, created);
+    }
 
     if (history && seq !== undefined) {
       history.cursor = Math.max(history.cursor ?? -1, seq);
@@ -255,31 +271,36 @@ export class ChildExecutions<Child extends Execution> {
     this.waitingStarts.clear();
     this.compactedBoundaries.clear();
     this.compacted = false;
-    this.lostBoundaries = false;
+    this.highWater = undefined;
   }
 
   private rememberBoundary(
     id: string,
-    { cursor, observedStart }: History<Child>,
+    { cursor, observedStart, latestTime = 0 }: History<Child>,
   ) {
     const bound = Math.max(cursor ?? -1, observedStart?.seq ?? -1);
 
     if (bound < 0) {
-      this.lostBoundaries = true;
+      this.raiseHighWater(latestTime);
 
       return;
     }
 
-    this.compactedBoundaries.set(id, bound);
+    this.compactedBoundaries.set(id, { seq: bound, created: latestTime });
 
     if (this.compactedBoundaries.size > this.limit * 8) {
-      const oldest = this.compactedBoundaries.keys().next().value;
+      const oldest = this.compactedBoundaries.entries().next().value;
 
-      if (oldest !== undefined) {
-        this.compactedBoundaries.delete(oldest);
-        this.lostBoundaries = true;
+      if (oldest) {
+        const [id, dropped] = oldest;
+        this.compactedBoundaries.delete(id);
+        this.raiseHighWater(dropped.created);
       }
     }
+  }
+
+  private raiseHighWater(created: number) {
+    this.highWater = Math.max(this.highWater ?? 0, created);
   }
 
   /** Release the writer and its payload immediately when the hub evicts it. */

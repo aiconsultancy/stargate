@@ -22,13 +22,13 @@ import {
   activityQueueDefaults as defaults,
 } from "./activity-recovery-queue";
 import {
-  ActivityFreshness,
   type Boundary,
   type NativeActivityObservation,
   activityOutcome,
   beforeActivityBoundary,
   markActivityGap,
   activityMaxReads as maxReads,
+  nativeActivityTime,
   activityReadMs as readMs,
   reconcileActivity,
 } from "./activity-replay-gap";
@@ -74,6 +74,7 @@ type Child = ChildReplayState & {
   log: TurnActivityLog;
   projector: ActivityProjector;
   start: number;
+  nativeStart?: number | undefined;
   latest: number;
   lower?: number;
   reused?: true;
@@ -88,6 +89,7 @@ type Ancestry = {
   parent?: string;
   lookup?: number;
   created?: number;
+  creationTime?: number | undefined;
   deferredInference?: number;
   inferred?: TurnActivityLog;
 };
@@ -137,7 +139,6 @@ export class OpenCodeActivityFamilies {
   private readonly ancestry = new WeakMap<Pending, Ancestry>();
   private readonly calls: ActivityCallEvidence;
   private readonly reads = new Map<string, Pending>();
-  private readonly freshness = new ActivityFreshness<Pending>(maxReads);
   private order = 0;
   private reconciliation = 0;
   private proofFloor = 0;
@@ -340,27 +341,37 @@ export class OpenCodeActivityFamilies {
     const { sessionID: session, assistantMessageID } = event.data;
     const scope = this.lineage.get(log);
 
-    if (
-      event.type === "session.tool.input.started" &&
-      event.data.name === "subagent"
-    ) {
+    if (event.type === "session.tool.input.started") {
       this.calls.open(
         session,
         scope,
         log,
         `${assistantMessageID}:${event.data.id}`,
         order,
+        {
+          created: nativeActivityTime(event),
+          subagent: event.data.name === "subagent",
+        },
       );
 
       return;
     }
 
     if (event.type === "session.tool.called") {
+      const { input } = event.data;
       this.calls.input(
+        session,
         scope,
         log,
         `${assistantMessageID}:${event.data.id}`,
-        event.data.input,
+        {
+          order,
+          created: nativeActivityTime(event),
+          input,
+          mayLaunch:
+            event.data.native?.["name"] === "subagent" ||
+            typeof input["agent"] === "string",
+        },
       );
 
       return;
@@ -381,15 +392,11 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
-    const callOrder = this.calls.name(
-      session,
-      scope,
-      log,
-      `${assistantMessageID}:${callId}`,
-      id,
-    );
+    const key = `${assistantMessageID}:${callId}`;
+    const timing = this.calls.timing(scope, log, key);
+    const callOrder = this.calls.name(session, scope, log, key, id);
 
-    if (callOrder === null) {
+    if (callOrder === null || !timing) {
       return;
     }
 
@@ -401,6 +408,9 @@ export class OpenCodeActivityFamilies {
       if (
         child.parent === log &&
         child.callFloor < callOrder &&
+        (timing.created === undefined ||
+          child.nativeStart === undefined ||
+          timing.created <= child.nativeStart) &&
         child.callId === null &&
         !child.ambiguousCall
       ) {
@@ -440,17 +450,12 @@ export class OpenCodeActivityFamilies {
       log,
       callId,
       order: callOrder,
+      timing,
       markAttribution: childAttributionMarker(log, assistantMessageID, callId),
-      ...(this.calls.freshSession(
-        scope,
-        log,
-        `${assistantMessageID}:${callId}`,
-      ) && { freshSession: true }),
       ...(scope && { scope }),
     };
 
     this.queue.offerProof(queued, proof);
-    this.checkFreshness(id, queued, pending, proof);
     this.queue.schedule(id);
 
     if (pending.parent === undefined && this.reads.get(id) !== queued) {
@@ -574,6 +579,7 @@ export class OpenCodeActivityFamilies {
 
         candidate.parent = parent;
         candidate.created = order;
+        candidate.creationTime = nativeActivityTime(event);
 
         if (deferredExecution !== undefined) {
           candidate.deferredInference = deferredExecution;
@@ -638,10 +644,25 @@ export class OpenCodeActivityFamilies {
         this.finish(id, child, "cancelled", true);
       }
 
-      this.queue.enqueue(id, packet, this.queue.candidate(id, previousStart));
+      this.enqueueChild(id, packet, previousStart);
     }
 
     return order;
+  }
+
+  private enqueueChild(id: string, packet: Packet, previousStart?: number) {
+    const queued = this.queue.candidate(id, previousStart);
+    this.queue.enqueue(id, packet, queued);
+    const ancestry = this.facts(queued);
+
+    if (
+      queued.segments[0]?.first.late &&
+      ancestry.parent === undefined &&
+      !this.reads.has(id)
+    ) {
+      ancestry.lookup = packet.order;
+      this.readParents();
+    }
   }
 
   public async reconnected() {
@@ -852,23 +873,14 @@ export class OpenCodeActivityFamilies {
 
     const { owner, callId, ambiguous, proof } = attribution;
     const scope = owner && this.lineage.get(owner);
+    const started = first.type === "session.execution.started";
 
     // Reuse requires a new start; late output cannot prove a new busy period.
-    if (
-      scope &&
-      pending.created === undefined &&
-      first.type !== "session.execution.started"
-    ) {
+    if (scope && pending.created === undefined && !started) {
       return;
     }
 
-    const freshness = owner && this.checkFreshness(id, queued, pending, proof);
-
-    if (freshness === "waiting") {
-      return;
-    }
-
-    const unproven = freshness === "uncertain";
+    const unproven = !this.fresh(id, first, pending, proof);
 
     const log = this.openChild(attribution, id, first.at, unproven);
 
@@ -878,8 +890,7 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
-    const startSeq =
-      first.type === "session.execution.started" ? first.seq : undefined;
+    const startSeq = started ? first.seq : undefined;
 
     const child: Child = {
       parent: owner,
@@ -890,6 +901,7 @@ export class OpenCodeActivityFamilies {
       ...(unproven && { unproven: true }),
       projector: new ActivityProjector(),
       start: first.order,
+      nativeStart: started ? first.created : undefined,
       latest: first.order,
       ...(startSeq !== undefined && { lower: startSeq }),
       ...((previous?.admitted ?? first.reused) && { reused: true }),
@@ -902,13 +914,15 @@ export class OpenCodeActivityFamilies {
       this.lineage.set(log, scope);
     }
 
-    this.markAttribution(proof, child, first.at);
+    if (unproven || callId !== null) {
+      proof?.markAttribution?.(first.at, unproven);
+    }
 
     if (!unproven) {
       this.executions.admitted(id, child);
-      this.executions.advance(id, child, startSeq);
+      this.executions.advance(id, child, startSeq, first.created);
 
-      if (first.type === "session.execution.started") {
+      if (started) {
         // A child still awaiting a late name needs its own attribution window.
         this.calls.retire(
           pending.parent,
@@ -948,40 +962,6 @@ export class OpenCodeActivityFamilies {
     });
   }
 
-  private checkFreshness(
-    id: string,
-    queued: Pending,
-    pending: Ancestry,
-    proof: NamingProof | undefined,
-  ) {
-    if (
-      !this.executions.needsFreshness(id) ||
-      proof?.freshSession ||
-      (pending.created !== undefined && !proof)
-    ) {
-      return "fresh";
-    }
-
-    const first = queued.segments[0]?.first;
-
-    const seq =
-      first?.type === "session.execution.started" ? first.seq : undefined;
-
-    return this.freshness.check(
-      queued,
-      id,
-      seq,
-      (after, signal) => this.source.log(id, after, signal),
-      this.readSignal(),
-      () => {
-        if (this.queue.peek(id) === queued && !this.source.signal.aborted) {
-          this.queue.expire();
-          this.queue.schedule(id);
-        }
-      },
-    );
-  }
-
   private openChild(
     {
       owner,
@@ -1002,26 +982,43 @@ export class OpenCodeActivityFamilies {
       : undefined;
   }
 
+  private fresh(
+    id: string,
+    first: Pending["segments"][number]["first"],
+    pending: Ancestry,
+    proof: NamingProof | undefined,
+  ) {
+    const needsProof = this.executions.needsFreshness(id, pending.creationTime);
+
+    if (first.type !== "session.execution.started") {
+      return !needsProof;
+    }
+
+    if (first.seq !== undefined && first.created === undefined) {
+      return false;
+    }
+
+    const callTime = proof?.timing.created;
+
+    if (callTime !== undefined && first.created !== undefined) {
+      return first.created >= callTime;
+    }
+
+    return !needsProof && !first.late && proof?.timing.launch !== "resumes";
+  }
+
   private compactedHistory(
     id: string,
     pending: Ancestry,
     proof: NamingProof | undefined,
   ) {
-    return pending.created === undefined &&
-      !proof?.freshSession &&
-      this.executions.mayHaveCompacted(id)
+    return this.executions.mayHaveCompacted(id) &&
+      proof?.timing.launch !== "new" &&
+      (pending.created === undefined ||
+        proof?.timing.launch === "resumes" ||
+        this.executions.needsFreshness(id, pending.creationTime))
       ? { uncertainHistory: true as const }
       : {};
-  }
-
-  private markAttribution(
-    proof: NamingProof | undefined,
-    child: Child,
-    at: number,
-  ) {
-    if (child.unproven || child.callId !== null) {
-      proof?.markAttribution?.(at, child.unproven === true);
-    }
   }
 
   private loseBoundary(id: string, child: Child) {
@@ -1108,11 +1105,11 @@ export class OpenCodeActivityFamilies {
     if (child.unproven && outcome !== undefined) {
       this.finish(id, child, "cancelled", true);
     } else if (outcome !== undefined) {
-      this.executions.advance(id, child, seq);
+      this.executions.advance(id, child, seq, nativeActivityTime(event));
       this.executions.settled(id, child, seq);
       this.finish(id, child, outcome);
-    } else if (event.type === "session.execution.started") {
-      this.executions.advance(id, child, seq);
+    } else if (event.type === "session.execution.started" && !child.unproven) {
+      this.executions.advance(id, child, seq, nativeActivityTime(event));
     } else if (isActivityEvent(event)) {
       if (seq !== undefined) {
         child.cursor = Math.max(child.cursor ?? -1, seq);
@@ -1165,10 +1162,16 @@ export class OpenCodeActivityFamilies {
     const result = this.executions.record(child, event);
 
     if (result !== "duplicate") {
-      this.executions.remember(id, child, event.data.assistantMessageID);
       child.projector.apply(child.log, event, packet.at);
 
       if (!child.unproven) {
+        this.executions.advance(
+          id,
+          child,
+          undefined,
+          nativeActivityTime(event),
+        );
+        this.executions.remember(id, child, event.data.assistantMessageID);
         this.owned(child.log, event, packet.order);
       }
     }

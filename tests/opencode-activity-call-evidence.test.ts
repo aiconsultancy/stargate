@@ -45,6 +45,7 @@ test("other native parents cannot evict a live call's name or its reused child's
     const event = {
       type,
       id: `evt_${++seq}`,
+      created: seq,
       data: { sessionID, assistantMessageID: "answer", ...data },
       durable: { aggregateID: sessionID, seq, version: 1 },
     } as unknown as ActivityFamilyEvent;

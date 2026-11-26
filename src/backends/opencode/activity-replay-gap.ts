@@ -41,83 +41,13 @@ export type Boundary =
   | { kind: "start"; seq: number }
   | { kind: "settled"; seq: number; outcome: ActivityOutcome };
 
-type Freshness = { cursor?: number; reading?: true; attempted?: number | null };
+/** A missing or invalid native timestamp never establishes freshness. */
+export function nativeActivityTime(event: { created?: unknown }) {
+  const { created } = event;
 
-/** Read a native checkpoint; a start observed above it can establish a new period. */
-export class ActivityFreshness<Candidate extends object> {
-  private readonly checks = new WeakMap<Candidate, Freshness>();
-  private active = 0;
-
-  public constructor(private readonly limit: number) {}
-
-  public check(
-    candidate: Candidate,
-    id: string,
-    seq: number | undefined,
-    read: (after: number, signal: AbortSignal) => AsyncIterable<SessionLogItem>,
-    signal: AbortSignal,
-    ready: () => void,
-  ) {
-    const state = this.checks.get(candidate) ?? {};
-
-    if (state.reading) {
-      return "waiting";
-    }
-
-    if (state.cursor !== undefined) {
-      return seq !== undefined && seq > state.cursor ? "fresh" : "uncertain";
-    }
-
-    if ((seq ?? null) === state.attempted || this.active >= this.limit) {
-      return "uncertain";
-    }
-
-    state.attempted = seq ?? null;
-    state.reading = true;
-    this.checks.set(candidate, state);
-    this.active += 1;
-    void this.checkpoint(id, seq, read, signal).then((cursor) => {
-      if (cursor !== undefined) {
-        state.cursor = cursor;
-      }
-
-      delete state.reading;
-      this.active -= 1;
-      ready();
-    });
-
-    return "waiting";
-  }
-
-  private async checkpoint(
-    id: string,
-    observed: number | undefined,
-    read: (after: number, signal: AbortSignal) => AsyncIterable<SessionLogItem>,
-    signal: AbortSignal,
-  ): Promise<number | undefined> {
-    let count = 0;
-
-    try {
-      // OpenCode still emits its actual watermark if `after` is beyond the log.
-      for await (const frame of read(Number.MAX_SAFE_INTEGER, signal)) {
-        if (signal.aborted || ++count > maxActivityGapSlots) {
-          break;
-        }
-
-        if (frame.type === "log.synced") {
-          return frame.aggregateID === id &&
-            frame.seq !== undefined &&
-            frame.seq >= (observed ?? 0)
-            ? frame.seq
-            : undefined;
-        }
-      }
-    } catch {
-      // A failed read cannot prove freshness.
-    }
-
-    return;
-  }
+  return typeof created === "number" && Number.isFinite(created) && created > 0
+    ? created
+    : undefined;
 }
 
 /** Reconnect only inspects lifecycle; it does not replay gaps in the stream. */

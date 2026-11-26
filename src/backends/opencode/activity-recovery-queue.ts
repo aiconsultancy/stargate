@@ -1,16 +1,17 @@
 import type { SessionLogItem } from "@opencode/client";
 import type { TurnActivityLog } from "../backend";
-import type { ActivityIncarnation } from "./activity-call-evidence";
+import type { ActivityIncarnation, CallTiming } from "./activity-call-evidence";
 import {
   ActivityLifecycleBuffer,
   ActivityReplayGap,
   isSettled,
   maxActivityGapSlots,
+  nativeActivityTime,
   recoverFrames,
 } from "./activity-replay-gap";
 import { boundarySeq } from "./crew-executions";
 
-type Event = { type: string; data: { sessionID: string } };
+type Event = { type: string; data: { sessionID: string }; created?: unknown };
 
 const startType = "session.execution.started";
 
@@ -39,7 +40,7 @@ export type NamingProof = {
   order: number;
   scope?: ActivityIncarnation;
   markAttribution?: (at: number, uncertain: boolean) => void;
-  freshSession?: true;
+  timing: CallTiming;
 };
 
 type Segment<E extends Event> = {
@@ -49,6 +50,8 @@ type Segment<E extends Event> = {
     at: number;
     order: number;
     seq: number | undefined;
+    created: number | undefined;
+    late?: true;
     reused?: true;
   };
   floor: number;
@@ -69,7 +72,7 @@ export type PendingActivity<E extends Event> = {
   floor: number;
   expires: number;
   needsStart: boolean;
-  provisional: { proof: NamingProof; expires: number }[];
+  provisional: NamingProof[];
   droppedProofs?: Map<ProofScope, CallRange>;
   slots: number;
   advanced?: true;
@@ -197,15 +200,11 @@ export class ActivityRecoveryQueues<E extends Event> {
         const evicted = pending.provisional.shift();
 
         if (evicted) {
-          this.recordDrop(pending, evicted.proof);
+          this.recordDrop(pending, evicted);
         }
       }
 
-      pending.provisional.push({
-        proof,
-        expires: this.now() + this.limits.ttl,
-      });
-      this.armExpiry();
+      pending.provisional.push(proof);
     }
   }
 
@@ -224,21 +223,9 @@ export class ActivityRecoveryQueues<E extends Event> {
     );
   }
 
-  private expireProofs(pending: PendingActivity<E>, now: number) {
-    pending.provisional = pending.provisional.filter(({ proof, expires }) => {
-      if (expires > now) {
-        return true;
-      }
-
-      this.recordDrop(pending, proof);
-
-      return false;
-    });
-  }
-
   public hasProofFrom(pending: PendingActivity<E>, session: string) {
     return (
-      pending.provisional.some(({ proof }) => proof.session === session) ||
+      pending.provisional.some((proof) => proof.session === session) ||
       pending.segments.some(({ proofs }) =>
         proofs.some((proof) => proof.session === session),
       )
@@ -281,7 +268,7 @@ export class ActivityRecoveryQueues<E extends Event> {
 
     if (pending) {
       if (keepAmbiguity) {
-        for (const { proof } of pending.provisional) {
+        for (const proof of pending.provisional) {
           this.recordDrop(pending, proof);
         }
 
@@ -345,23 +332,26 @@ export class ActivityRecoveryQueues<E extends Event> {
     const now = this.now();
 
     for (const [id, pending] of this.queues) {
-      this.expireProofs(pending, now);
-
-      if (!pending.draining && pending.expires <= now) {
+      if (this.expires(pending) <= now) {
         this.discard(id, true);
       }
     }
+  }
+
+  private expires(pending: PendingActivity<E>) {
+    // Keep bounded names and ancestry while awaiting a start.
+    // Buffered transcripts still expire as before.
+    return pending.draining ||
+      (pending.segments.length === 0 && pending.provisional.length > 0)
+      ? Infinity
+      : pending.expires;
   }
 
   private armExpiry() {
     let earliest = Infinity;
 
     for (const pending of this.queues.values()) {
-      earliest = Math.min(
-        earliest,
-        pending.provisional[0]?.expires ?? Infinity,
-        pending.draining ? Infinity : pending.expires,
-      );
+      earliest = Math.min(earliest, this.expires(pending));
     }
 
     if (!this.expiry && earliest < Infinity) {
@@ -464,6 +454,8 @@ export class ActivityRecoveryQueues<E extends Event> {
           at,
           order,
           seq: boundarySeq(packet.event),
+          created: nativeActivityTime(packet.event),
+          ...(start && pending.expires <= this.now() && { late: true }),
           ...(packet.reused && { reused: true }),
         },
         floor,
@@ -476,18 +468,22 @@ export class ActivityRecoveryQueues<E extends Event> {
       pending.needsStart = false;
 
       if (start) {
-        this.expireProofs(pending, this.now());
         this.bindDrops(id, pending, segment);
 
-        for (const { proof } of pending.provisional) {
+        for (const proof of pending.provisional) {
           if (floor < proof.order && proof.order <= order) {
             this.bind(segment, proof);
           }
         }
 
         pending.provisional = pending.provisional.filter(
-          ({ proof }) => proof.order > order,
+          ({ order: opened }) => opened > order,
         );
+      }
+
+      if (segment.first.late) {
+        pending.expires = this.now() + this.limits.ttl;
+        this.armExpiry();
       }
     }
 
@@ -624,7 +620,11 @@ export class ActivityRecoveryQueues<E extends Event> {
     pending.advanced = true;
     pending.needsStart = pending.segments.length === 0;
 
-    if (pending.segments.length === 0 && pending.provisional.length === 0) {
+    if (
+      !preserve &&
+      pending.segments.length === 0 &&
+      pending.provisional.length === 0
+    ) {
       this.discard(id, true);
     } else {
       pending.expires = this.now() + this.limits.ttl;
