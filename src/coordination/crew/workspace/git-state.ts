@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { copyFile, lstat, mkdir, readdir, stat } from "node:fs/promises";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  stat,
+  utimes,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Semaphore } from "effect";
 import { abortable, runAbortable } from "../../../lib/effect";
@@ -21,7 +28,9 @@ import {
 import {
   type IsolatedCheckout,
   type IsolatedStream,
+  WorktreeChanged,
   readWorktree,
+  worktreeSize,
 } from "./git-status";
 
 // Read-only checkout state for the Fleet API, read as the captain.
@@ -406,8 +415,12 @@ type Snapshot = {
   fingerprint: string;
   head: Head;
   origin: Origin | null;
-  untracked: Set<string>;
+  /** Untracked paths; true for a nested repository, shown as `dir/`. */
+  untracked: Map<string, boolean>;
 };
+
+/** A Git diff entry, or an untracked path Git would not index. */
+type PassEntry = DiffEntry & { unindexed?: true };
 
 /** HEAD, the fingerprint and untracked paths, sampled while HEAD stays put. */
 async function snapshot(git: Git, directory: string): Promise<Snapshot> {
@@ -423,10 +436,10 @@ async function snapshot(git: Git, directory: string): Promise<Snapshot> {
         fingerprint: read.fingerprint,
         head,
         origin: read.origin,
-        untracked: new Set(
+        untracked: new Map(
           read.entries
             .filter(({ code }) => code === "??")
-            .map(({ path }) => path.replace(/\/$/, "")),
+            .map(({ path }) => [path.replace(/\/$/, ""), path.endsWith("/")]),
         ),
       };
     });
@@ -450,7 +463,7 @@ const diffStatus = (entry: DiffEntry) => statuses[entry.status] ?? "modified";
 
 function describe(
   entry: DiffEntry,
-  untracked: Set<string>,
+  untracked: Map<string, boolean>,
   size: number | undefined,
 ): CheckoutDiffFile {
   const mode = entry.status === "D" ? entry.oldMode : entry.newMode;
@@ -532,7 +545,7 @@ async function sizes(
   stream: IsolatedStream,
   directory: string,
   worktree: boolean,
-  entries: DiffEntry[],
+  entries: PassEntry[],
 ) {
   const result: (number | undefined)[] = [];
   const blobs: { index: number; oid: string }[] = [];
@@ -540,13 +553,13 @@ async function sizes(
   for (const [index, entry] of entries.entries()) {
     const removed = entry.newMode === zeroMode;
 
-    if (entry.oldMode === gitlinkMode || entry.newMode === gitlinkMode) {
+    if (opaque(entry)) {
       continue;
     }
 
     if (worktree && !removed) {
-      result[index] = await lstat(join(directory, entry.path)).then(
-        (info) => info.size,
+      // Never through a linked directory, which may lead out of the checkout.
+      result[index] = await worktreeSize(directory, entry.path).catch(
         (): undefined => {},
       );
     } else {
@@ -584,18 +597,34 @@ async function sizes(
 }
 
 /** Index a copy of the checkout's index with untracked paths as intent-to-add. */
-async function intentIndex(checkout: IsolatedCheckout, stream: IsolatedStream) {
+async function intentIndex(
+  checkout: IsolatedCheckout,
+  stream: IsolatedStream,
+  untracked: Snapshot["untracked"],
+) {
   const index = join(checkout.gitDir, "index");
   const objects = join(checkout.gitDir, "objects");
   await mkdir(join(objects, "info"), { recursive: true });
   await mkdir(join(objects, "pack"));
 
-  await copyFile(checkout.index, index).catch((error: unknown) => {
-    // An unborn checkout with nothing staged has no index yet.
-    if (fileError(error) !== "ENOENT") {
-      throw error;
-    }
-  });
+  const copied = await copyFile(checkout.index, index).then(
+    () => true,
+    (error: unknown) => {
+      // An unborn checkout with nothing staged has no index yet.
+      if (fileError(error) !== "ENOENT") {
+        throw error;
+      }
+
+      return false;
+    },
+  );
+
+  // The copy keeps the index's time, so a file changed in the same tick
+  // As the index is still compared by content, never taken as clean.
+  if (copied) {
+    const { atime, mtime } = await stat(checkout.index);
+    await utimes(index, atime, mtime);
+  }
 
   // A split index names a shared index, which Git reads from its own
   // Directory: copy it there, so nothing touches the checkout's.
@@ -614,25 +643,105 @@ async function intentIndex(checkout: IsolatedCheckout, stream: IsolatedStream) {
     GIT_ALTERNATE_OBJECT_DIRECTORIES: checkout.objects,
   };
 
+  const paths = [...untracked.keys()].map((path) => `${path}\0`).join("");
+
+  if (!paths) {
+    return { env, unindexed: [] };
+  }
+
   const add = checkout.command([
     "-c",
     "core.splitIndex=false",
     "add",
     "--intent-to-add",
-    "--",
-    ".",
+    "--ignore-errors",
+    "--pathspec-from-file=-",
+    "--pathspec-file-nul",
   ]);
 
-  if ((await stream(add.args, { ...add.env, ...env }, () => true)) !== 0) {
+  // Status's own paths, literally: `*` or a leading `:` is no pattern.
+  const code = await stream(
+    add.args,
+    { ...add.env, ...env, GIT_LITERAL_PATHSPECS: "1" },
+    () => true,
+    paths,
+  );
+
+  if (code === 0) {
+    return { env, unindexed: [] };
+  }
+
+  // 1 means Git refused some paths, such as an empty nested repository or
+  // `.GIT/…`, and indexed the rest; anything else indexed nothing.
+  if (code !== 1) {
     throw new Error("Untracked files unavailable");
   }
 
-  return env;
+  // Which were refused: ls-files takes no path list, so read the index.
+  const indexed = new Set<string>();
+  const read = checkout.command(["ls-files", "-z", "--cached"]);
+  let rest = Buffer.alloc(0);
+
+  const listed = await stream(read.args, { ...read.env, ...env }, (chunk) => {
+    rest = Buffer.concat([rest, chunk]);
+
+    for (let nul = rest.indexOf(0); nul >= 0; nul = rest.indexOf(0)) {
+      const path = rest.subarray(0, nul).toString("utf8");
+      rest = rest.subarray(nul + 1);
+
+      if (untracked.has(path)) {
+        indexed.add(path);
+      }
+    }
+
+    return true;
+  });
+
+  if (listed !== 0) {
+    throw new Error("Untracked files unavailable");
+  }
+
+  return { env, unindexed: refused(untracked, indexed, checkout.format) };
+}
+
+/**
+ * Untracked paths Git refused to index, listed all the same with neither
+ * patch nor content: nothing status shows is left out (SUB-70).
+ */
+function refused(
+  untracked: Snapshot["untracked"],
+  indexed: Set<string>,
+  format: IsolatedCheckout["format"],
+): PassEntry[] {
+  const none = "0".repeat(format === "sha256" ? 64 : 40);
+
+  return [...untracked].flatMap(([path, nested]): PassEntry[] =>
+    indexed.has(path)
+      ? []
+      : [
+          {
+            status: "A",
+            oldMode: zeroMode,
+            // A nested repository is a submodule to be.
+            newMode: nested ? gitlinkMode : "100644",
+            oldOid: none,
+            newOid: none,
+            path,
+            previousPath: null,
+            additions: 0,
+            deletions: 0,
+            size: 0,
+            kept: [],
+            keptBytes: 0,
+            unindexed: true,
+          },
+        ],
+  );
 }
 
 type Pass = {
   directory: string;
-  entries: DiffEntry[];
+  entries: PassEntry[];
   snapshot: Snapshot;
   base: Origin | null;
   stream: IsolatedStream;
@@ -649,7 +758,7 @@ async function diffPass<T>(
   mode: CheckoutDiffInput["mode"],
   state: Snapshot,
   build: (pass: Pass) => Promise<T>,
-  planner?: (entries: DiffEntry[]) => DiffPlan,
+  planner?: (entries: PassEntry[]) => DiffPlan,
 ) {
   const patches = planner !== undefined;
   const head = state.head.oid;
@@ -671,8 +780,28 @@ async function diffPass<T>(
     const empty = createHash(checkout.format).update("tree 0\0").digest("hex");
     const worktree = mode !== "committed";
     const old = mode === "working" ? (head ?? empty) : (base?.commit ?? empty);
-    const env = worktree ? await intentIndex(checkout, stream) : {};
-    const parser = new DiffOutputParser(patches, planner);
+
+    const { env, unindexed } = worktree
+      ? await intentIndex(checkout, stream, state.untracked)
+      : { env: {}, unindexed: [] };
+
+    // Git's entries, then any untracked path it would not index.
+    const all = (entries: DiffEntry[]): PassEntry[] => [
+      ...entries,
+      ...unindexed,
+    ];
+
+    // Only Git's own entries have hunks to plan.
+    const parser = new DiffOutputParser(
+      patches,
+      planner &&
+        ((entries) =>
+          new Map(
+            [...planner(all(entries))].filter(
+              ([index]) => index < entries.length,
+            ),
+          )),
+    );
 
     const diff = checkout.command([
       "diff",
@@ -707,7 +836,7 @@ async function diffPass<T>(
 
     return build({
       directory,
-      entries: parser.entries,
+      entries: all(parser.entries),
       snapshot: state,
       base,
       stream,
@@ -817,11 +946,15 @@ async function readBlob(
 const isSubmodule = (entry: DiffEntry) =>
   entry.oldMode === gitlinkMode || entry.newMode === gitlinkMode;
 
+/** No bytes of its own: a submodule, or a path Git would not index. */
+const opaque = (entry: PassEntry) =>
+  entry.unindexed === true || isSubmodule(entry);
+
 /** A page of one side's bytes: a worktree file, a link's text or a blob. */
 async function contentPage(
   git: Git,
   pass: Pass,
-  entry: DiffEntry,
+  entry: PassEntry,
   requested: DiffSide | undefined,
   offset: number,
 ): Promise<CheckoutDiff> {
@@ -829,10 +962,10 @@ async function contentPage(
   const absent = { kind: "absent" as const, fingerprint: state.fingerprint };
   const side = requested ?? (entry.status === "D" ? "old" : "new");
 
-  // A submodule has no bytes of its own; an added file has no old side.
+  // An opaque entry has no bytes of its own; an added file has no old side.
   if (
     (side === "old" ? entry.oldMode : entry.newMode) === zeroMode ||
-    isSubmodule(entry)
+    opaque(entry)
   ) {
     return absent;
   }
@@ -876,7 +1009,6 @@ function computeDiff(
   const absent = { kind: "absent" as const, fingerprint: state.fingerprint };
 
   if (request.kind === "list") {
-    let order: number[] = [];
     const window = { from: 0, to: diffLimits.inlinePatch + 4 };
 
     return diffPass(
@@ -887,16 +1019,13 @@ function computeDiff(
       async (pass) =>
         request.start > 0 && request.start >= pass.entries.length
           ? absent
-          : listPage(pass, request.start, order),
-      (entries) => {
-        order = byPath(entries);
-
-        return new Map(
-          order
+          : listPage(pass, request.start, byPath(pass.entries)),
+      (entries) =>
+        new Map(
+          byPath(entries)
             .slice(request.start, request.start + diffLimits.files)
             .map((index) => [index, window]),
-        );
-      },
+        ),
     );
   }
 
@@ -923,7 +1052,7 @@ function computeDiff(
         }
 
         // Without hunks, such as a binary file, the file's bytes answer.
-        if (entry.size === 0 && !isSubmodule(entry)) {
+        if (entry.size === 0 && !opaque(entry)) {
           return contentPage(git, pass, entry, undefined, 0);
         }
 
@@ -1025,15 +1154,25 @@ export function createCheckoutDiffReader(
         return { kind: "stale", fingerprint: state.fingerprint };
       }
 
-      const result = await computeDiff(git, directory, input, state);
+      // A file that shrank while read is a change like any other.
+      const result = await computeDiff(git, directory, input, state).catch(
+        (error: unknown) => {
+          if (error instanceof WorktreeChanged) {
+            return;
+          }
+
+          throw error;
+        },
+      );
+
       const after = await snapshot(git, directory);
 
-      if (after.fingerprint === state.fingerprint) {
+      if (result && after.fingerprint === state.fingerprint) {
         return result;
       }
 
       if (attempt > 0) {
-        return result.kind === "list" && input.at === undefined
+        return result?.kind === "list" && input.at === undefined
           ? { ...result, unstable: true }
           : { kind: "stale", fingerprint: after.fingerprint };
       }

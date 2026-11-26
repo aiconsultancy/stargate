@@ -430,11 +430,14 @@ async function officerRequest(
     return new Response(null, { status: 405, headers });
   }
 
-  if (officerTarget(target) === undefined) {
+  const path = officerTarget(target);
+
+  // Crew diffs are the operator's only: refused by route, before any read.
+  if (path === undefined || crewDiffRoute.test(path)) {
     return new Response(null, { status: 404, headers });
   }
 
-  // Turn activity and crew diffs: operators only, never an officer's socket.
+  // Nor turn activity; and its core holds no crew diffs either.
   return answer(
     { ...core, activity: undefined, crewDiff: undefined },
     readers,

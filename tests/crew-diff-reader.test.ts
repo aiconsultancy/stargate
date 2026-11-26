@@ -1,9 +1,11 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
 import {
   appendFile,
   mkdir,
   mkdtemp,
+  open,
   realpath,
+  rename,
   rm,
   symlink,
   unlink,
@@ -29,6 +31,8 @@ import {
   streamGit,
 } from "../src/coordination/crew/workspace/git-runner";
 import {
+  type IsolatedCheckout,
+  type IsolatedStream,
   liveFleetGit,
   readWorktree,
 } from "../src/coordination/crew/workspace/git-status";
@@ -525,6 +529,50 @@ test("an untracked embedded repository is an added submodule with no bytes", asy
   expect(await patch(directory, "inner")).toMatchObject({ kind: "patch" });
 });
 
+test("an untracked path Git will not index is listed without bytes; the rest keep patches", async () => {
+  const directory = await checkout({ old: "old\n" });
+  await unlink(join(directory, "old"));
+  // Untracked again, but the same as on the base: no change to list.
+  await git(directory, "rm", "--quiet", "--cached", "base");
+  await mkdir(join(directory, "empty"));
+  await git(join(directory, "empty"), "init", "--quiet");
+  await mkdir(join(directory, ".GIT"));
+  await writeFile(join(directory, ".GIT", "config"), "x\n");
+  await writeFile(join(directory, "a*"), "star\n");
+  await writeFile(join(directory, ":b"), "colon\n");
+  await writeFile(join(directory, "c?"), "query\n");
+
+  const result = await listed(directory);
+  const opaque = { patch: null, additions: 0, deletions: 0, untracked: true };
+
+  const added = (text: string) => ({
+    additions: 1,
+    untracked: true,
+    patch: `@@ -0,0 +1 @@\n+${text}\n`,
+  });
+
+  expect(result.total).toBe(6);
+  expect(result.files).toMatchObject([
+    { path: ".GIT/config", ...opaque },
+    { path: ":b", ...added("colon") },
+    { path: "a*", ...added("star") },
+    { path: "c?", ...added("query") },
+    { path: "empty", ...opaque, kind: "submodule" },
+    { path: "old", status: "removed", patch: "@@ -1 +0,0 @@\n-old\n" },
+  ]);
+  expect(result.files[0]).not.toHaveProperty("kind");
+
+  for (const path of [".GIT/config", "empty"]) {
+    expect((await content(directory, path)).kind).toBe("absent");
+    expect(await patch(directory, path)).toMatchObject({
+      kind: "patch",
+      file: { path, patch: null, untracked: true },
+    });
+  }
+
+  expect(bytesOf(await content(directory, "a*")).toString()).toBe("star\n");
+});
+
 test("binary and empty files answer with bytes; each side exists only where the file does", async () => {
   const directory = await checkout({ "old.bin": "\0old" });
   await unlink(join(directory, "old.bin"));
@@ -752,5 +800,94 @@ test("a linked worktree's split index lists untracked files", async () => {
   expect(result.files.map(({ path, untracked }) => [path, untracked])).toEqual([
     ["tracked", undefined],
     ["untracked", true],
+  ]);
+});
+
+test("a file that shrinks while read is stale, not a failure", async () => {
+  const directory = await checkout();
+  await writeFile(join(directory, "shrinking"), "shrinking\n");
+  const handle = await open(join(directory, "shrinking"));
+  const prototype: { read: typeof handle.read } = Object.getPrototypeOf(handle);
+  await handle.close();
+
+  // Every read finds the end early, as if the file were cut meanwhile.
+  const read = spyOn(prototype, "read").mockImplementation(async () => ({
+    bytesRead: 0,
+    buffer: Buffer.alloc(0),
+  }));
+
+  try {
+    expect(await content(directory, "shrinking")).toEqual({
+      kind: "stale",
+      fingerprint: expect.any(String),
+    });
+  } finally {
+    read.mockRestore();
+  }
+
+  expect(bytesOf(await content(directory, "shrinking")).toString()).toBe(
+    "shrinking\n",
+  );
+});
+
+test("a size is never read through a linked directory", async () => {
+  const directory = await checkout({ "d/f": "inside\n", gone: "gone\n" });
+  await writeFile(join(directory, "d", "f"), "inside, changed\n");
+  await unlink(join(directory, "gone"));
+  const outside = join(root, `outside-${count++}`);
+  await mkdir(outside);
+  await writeFile(join(outside, "f"), "x".repeat(1234));
+  const aside = `${directory}-d`;
+  let swapped = false;
+  let restored = false;
+
+  // Between Git's diff and the sizes, `d` briefly leads out of the checkout;
+  // It is back before the blob sizes, so the fingerprint never moves.
+  const reader = createCheckoutDiffReader((at, reading) => {
+    const live = checkoutGit(at, reading);
+
+    return {
+      ...live,
+      isolated: <T>(
+        head: string | null,
+        use: (checkout: IsolatedCheckout, stream: IsolatedStream) => Promise<T>,
+      ) =>
+        live.isolated(head, (isolated, stream) =>
+          use(isolated, async (args, env, onData, input) => {
+            if (swapped && !restored && args.includes("cat-file")) {
+              restored = true;
+              await unlink(join(directory, "d"));
+              await rename(aside, join(directory, "d"));
+            }
+
+            const code = await stream(args, env, onData, input);
+
+            if (!swapped && args.includes("diff")) {
+              swapped = true;
+              await rename(join(directory, "d"), aside);
+              await symlink(outside, join(directory, "d"));
+            }
+
+            return code;
+          }),
+        ),
+    };
+  });
+
+  const result = await reader(
+    directory,
+    input({ kind: "list", start: 0 }),
+    signal,
+  );
+
+  if (result.kind !== "list") {
+    throw new Error(`Expected a list, got ${result.kind}`);
+  }
+
+  expect(restored).toBe(true);
+  expect(result.unstable).toBe(false);
+  expect(result.files.map(({ path, size }) => [path, size])).toEqual([
+    ["d/f", undefined],
+    ["gone", 5],
   ]);
 });

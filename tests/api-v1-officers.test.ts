@@ -137,6 +137,7 @@ async function start(
   officers: readonly OfficerSocket[],
   listen?: string,
   activity?: Parameters<typeof startApiV1Server>[0]["activity"],
+  crewDiff?: Parameters<typeof startApiV1Server>[0]["crewDiff"],
 ) {
   const dataDirectory = await privateDirectory();
   const shutdown = new AbortController();
@@ -144,6 +145,7 @@ async function start(
   const server = await startApiV1Server({
     ...(listen && { config: { listen, fleetName: "Example fleet" } }),
     ...(activity && { activity }),
+    ...(crewDiff && { crewDiff }),
     officers,
     dataDirectory,
     source,
@@ -694,4 +696,47 @@ test("officers: turn activity is served to the operator's token only, never on a
 
   expect(operatorStream.status).toBe(400);
   expect(subscriptions).toEqual(["agent=captain-a"]);
+});
+
+test("officers: crew diffs answer the operator's token only, never an officer's socket", async () => {
+  const officers = await officerDirectories({ "captain-a": 0o700 });
+
+  const reservation = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response(null),
+  });
+
+  const listen = `127.0.0.1:${reservation.port}`;
+  await reservation.stop(true);
+
+  const reads: string[] = [];
+
+  const { server, dataDirectory } = await start(officers, listen, undefined, {
+    read: async (route, query) => {
+      reads.push(`${route.file ? "file" : "list"}?${query.toString()}`);
+
+      return 404;
+    },
+  });
+
+  const base = "/api/v1/ships/explorer/crew/engineer/diff";
+  const token = await apiToken(dataDirectory);
+
+  for (const path of [base, `${base}/file?path=a`]) {
+    for (const method of ["GET", "HEAD"]) {
+      expect(
+        (await overSocket(officers[0]?.socketPath ?? "", method, path)).status,
+      ).toBe(404);
+    }
+  }
+
+  expect(reads).toEqual([]);
+
+  const operator = await fetch(new URL(`${base}/file?path=a`, server.url), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  expect(operator.status).toBe(404);
+  expect(reads).toEqual(["file?path=a"]);
 });

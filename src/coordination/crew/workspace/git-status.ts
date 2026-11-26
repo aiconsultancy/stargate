@@ -691,6 +691,13 @@ const absentPath = (error: unknown): undefined => {
   }
 };
 
+/** A worktree file changed while it was read: the answer is stale. */
+export class WorktreeChanged extends Error {
+  public constructor() {
+    super("File shrank while read");
+  }
+}
+
 /** Read up to a page at `offset`, or undefined when it starts past the end. */
 async function readPage(
   file: FileHandle,
@@ -714,7 +721,7 @@ async function readPage(
     );
 
     if (bytesRead === 0) {
-      throw new Error("File shrank while read");
+      throw new WorktreeChanged();
     }
 
     filled += bytesRead;
@@ -724,15 +731,14 @@ async function readPage(
 }
 
 /**
- * A worktree file's bytes, or a symbolic link's own text. Each directory is
- * opened relative to its parent without following links, so the path cannot
- * leave the worktree; the opened file's real path is checked as well.
+ * Run `use` on a worktree path whose directories were each opened relative
+ * to their parent without following links, so the path cannot leave the
+ * worktree. Undefined for an invalid path or a missing or linked directory.
  */
-export async function readWorktree(
+async function inWorktree<T>(
   root: string,
   path: string,
-  offset: number,
-  limit: number,
+  use: (target: string, real: string) => Promise<T | undefined>,
 ) {
   if (!validDiffPath(path)) {
     return;
@@ -745,11 +751,11 @@ export async function readWorktree(
   let parent = await open(real, constants.O_RDONLY | constants.O_DIRECTORY);
 
   try {
-    for (const part of parts) {
+    for (const [index, part] of parts.entries()) {
       const next = await open(
         linux
           ? `/proc/self/fd/${parent.fd}/${part}`
-          : join(real, ...parts.slice(0, parts.indexOf(part) + 1)),
+          : join(real, ...parts.slice(0, index + 1)),
         constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY,
       ).catch(absentPath);
 
@@ -761,10 +767,36 @@ export async function readWorktree(
       parent = next;
     }
 
-    const target = linux
-      ? `/proc/self/fd/${parent.fd}/${name}`
-      : join(real, path);
+    return await use(
+      linux ? `/proc/self/fd/${parent.fd}/${name}` : join(real, path),
+      real,
+    );
+  } finally {
+    await parent.close();
+  }
+}
 
+/** A worktree path's own size, never through a linked directory. */
+export const worktreeSize = (root: string, path: string) =>
+  inWorktree(
+    root,
+    path,
+    async (target) => (await lstat(target).catch(absentPath))?.size,
+  );
+
+/**
+ * A worktree file's bytes, or a symbolic link's own text, never through a
+ * linked directory; the opened file's real path is checked as well.
+ */
+export function readWorktree(
+  root: string,
+  path: string,
+  offset: number,
+  limit: number,
+) {
+  const linux = process.platform === "linux";
+
+  return inWorktree(root, path, async (target, real) => {
     const info = await lstat(target).catch(absentPath);
 
     if (info?.isSymbolicLink()) {
@@ -814,7 +846,5 @@ export async function readWorktree(
     } finally {
       await file.close();
     }
-  } finally {
-    await parent.close();
-  }
+  });
 }

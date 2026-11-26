@@ -146,7 +146,10 @@ export type V1Diff = {
   /** The checkout kept changing: this answer may mix two states. */
   unstable: boolean;
   branch: string | null;
-  /** Null when `origin/HEAD` cannot be resolved. */
+  /**
+   * The merge base with `origin/HEAD`. Null when there is none: `origin/HEAD`
+   * cannot be resolved, shares no history with HEAD, or HEAD is unborn.
+   */
   base: { ref: string; commit: string } | null;
   /** Null on an unborn branch. */
   head: string | null;

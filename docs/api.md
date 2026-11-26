@@ -406,7 +406,10 @@ starting at `@@`, as GitHub's per-file patches do; it is null for binary
 files and changes without hunks, such as a pure rename. Renames are found
 with Git's default similarity; a change of file type is one `modified`
 entry. A symbolic link is shown as its link text, never its target's
-content. A submodule shows its commit change and has no content.
+content. A submodule shows its commit change and has no content. An
+untracked path that Git will not index, such as an empty nested repository
+(listed as a `submodule`) or a file under `.GIT/`, is still listed: `added`
+and `untracked`, with zero line counts, no patch and no content.
 
 Paging limits:
 
@@ -445,14 +448,16 @@ new value. The file route serves only a path in the same mode's diff at the
 current fingerprint. With `at`, or with a cursor, a different current
 fingerprint returns 409: start again from the list. A list whose fingerprint
 moves while it is computed is computed once more; if it moves again, the
-answer carries `unstable: true`.
+answer carries `unstable: true`. A file page is computed once more too,
+including when a file shrinks while it is read, and returns 409 if the
+fingerprint moves again.
 
 | Status | Meaning                                                                        |
 | ------ | ------------------------------------------------------------------------------ |
 | 200    | The diff or file page                                                          |
 | 400    | Malformed query, mode, path or cursor                                          |
 | 404    | Unknown ship, member or project, no checkout, or a path the diff does not have |
-| 409    | `at` or the cursor's fingerprint is no longer current                          |
+| 409    | The fingerprint of `at` or the cursor moved, or the file kept changing         |
 | 503    | Both diff slots are busy, or the computation passed 10 seconds                 |
 | 500    | Git or the captain's plugin failed                                             |
 

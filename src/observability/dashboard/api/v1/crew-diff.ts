@@ -373,6 +373,7 @@ function present(
 }
 
 type Flight = {
+  key: string;
   result: Promise<Outcome>;
   controller: AbortController;
   waiters: number;
@@ -434,6 +435,13 @@ export function crewDiffApi(
     }
   }
 
+  /** Forget `flight`, unless a newer computation already took its key. */
+  function leave(flight: Flight) {
+    if (flights.get(flight.key) === flight) {
+      flights.delete(flight.key);
+    }
+  }
+
   /** Start or join the computation for `key`; undefined when slots are full. */
   function join(key: string, run: (signal: AbortSignal) => Promise<Outcome>) {
     const current = flights.get(key);
@@ -453,16 +461,22 @@ export function crewDiffApi(
       AbortSignal.timeout(budgetMs),
     ]);
 
+    // The slot stays taken until the computation, and so Git, has ended:
+    // Its flight may have left `flights` long before.
     running++;
 
-    const result = run(signal).finally(() => {
-      running--;
-      flights.delete(key);
-    });
+    const flight: Flight = {
+      key,
+      result: run(signal).finally(() => {
+        running--;
+        leave(flight);
+      }),
+      controller,
+      waiters: 0,
+    };
 
     // Waiters see the outcome; this keeps an unwatched failure handled.
-    result.catch(() => {});
-    const flight = { result, controller, waiters: 0 };
+    flight.result.catch(() => {});
     flights.set(key, flight);
 
     return flight;
@@ -486,9 +500,11 @@ export function crewDiffApi(
     } finally {
       signal.removeEventListener("abort", onAbort);
 
-      // The last waiter to leave stops the computation and Git.
+      // The last waiter to leave stops the computation and Git. While it
+      // Unwinds nobody may join it: an identical request starts afresh.
       if (--flight.waiters === 0) {
         flight.controller.abort();
+        leave(flight);
       }
     }
   }

@@ -436,6 +436,45 @@ test("identical requests share one computation; two at once at most", async () =
   await c;
 });
 
+test("an abandoned computation is never joined, but holds its slot until it ends", async () => {
+  const exits: PromiseWithResolvers<void>[] = [];
+  const answers: PromiseWithResolvers<CheckoutDiff>[] = [];
+
+  // Like Git, each computation takes a while to exit after its abort.
+  const { calls, source } = recording(async (_input, computing) => {
+    const exit = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<CheckoutDiff>();
+    exits.push(exit);
+    answers.push(answer);
+    computing.addEventListener("abort", () => {
+      void exit.promise.then(() => answer.reject(computing.reason));
+    });
+
+    return answer.promise;
+  });
+
+  const api = crewDiffApi(source);
+  const leaving = new AbortController();
+  const first = api.read(fileRoute, query("path=a"), leaving.signal);
+  leaving.abort();
+  await expect(first).rejects.toThrow();
+
+  // The same request at once starts afresh and answers.
+  const second = api.read(fileRoute, query("path=a"), signal);
+  expect(calls.length).toBe(2);
+  // The first computation has not exited, so both slots are taken.
+  expect(await api.read(fileRoute, query("path=b"), signal)).toBe(503);
+
+  // Its exit does not forget the new computation: a third request joins it.
+  exits[0]?.resolve();
+  await Bun.sleep(0);
+  const third = api.read(fileRoute, query("path=a"), signal);
+  expect(calls.length).toBe(2);
+  answers[1]?.resolve({ kind: "patch", fingerprint, file: file("a") });
+  expect(await second).toMatchObject({ fingerprint, file: { path: "a" } });
+  expect(await third).toEqual(await second);
+});
+
 test("a computation past its budget answers 503 and stops; a failure throws", async () => {
   let stopped = false;
 
