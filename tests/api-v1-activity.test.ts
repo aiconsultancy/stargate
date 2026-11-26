@@ -594,6 +594,44 @@ test.each([false, true])(
   },
 );
 
+const sessions = (hub: ReturnType<typeof createActivityHub>, agent: string) =>
+  snapshot(hub, agent).turns.map((turn) => turn.session?.id);
+
+test("a begin drains a pending late write before its turn counts", () => {
+  const hub = createActivityHub({ turnsPerAgent: 2, bytes: 1000 });
+  const recorder = hub.recorder("captain");
+  recorder.begin(undefined, "A").end("completed");
+  const b = recorder.begin(undefined, "B");
+  b.end("completed");
+  // B outgrows the budget on its own; the batch window has not measured it.
+  b.update("late", 1, () => text("x".repeat(5000)));
+  expect(sessions(hub, "captain")).toEqual(["A", "B"]);
+
+  recorder.begin(undefined, "C");
+  // Drained first, B goes alone; C then fits beside A.
+  expect(sessions(hub, "captain")).toEqual(["A", "C"]);
+});
+
+test("an end drains a pending late write before its turn counts", () => {
+  // One millisecond: the ending turn sorts with the settled ones.
+  const hub = createActivityHub({ bytes: 1700, now: () => 1000 });
+  const ending = hub.recorder("captain").begin(undefined, "X");
+  const recorder = hub.recorder("claude");
+  const a = recorder.begin(undefined, "A");
+  a.update("k", 1, () => text("a".repeat(600)));
+  a.end("completed");
+  const b = recorder.begin(undefined, "B");
+  b.end("completed");
+  // A and B now exceed the budget; the batch window has not measured B.
+  b.update("late", 1, () => text("b".repeat(1000)));
+  expect(sessions(hub, "claude")).toEqual(["A", "B"]);
+
+  ending.end("completed");
+  // Drained first, A goes as the oldest; X then fits beside B.
+  expect(sessions(hub, "claude")).toEqual(["B"]);
+  expect(sessions(hub, "captain")).toEqual(["X"]);
+});
+
 test("activity reads validate the agent and every parameter", () => {
   const hub = createActivityHub();
   const log = hub.recorder("captain").begin();

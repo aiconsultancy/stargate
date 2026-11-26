@@ -80,7 +80,10 @@
 - In Fleet API turn activity, an officer's settled family that a late change
   takes over the eviction budget is now evicted at the end of the change's
   150 ms batch, or sooner, rather than at once. Late changes are measured
-  once per batch, as for crew turns.
+  once per batch, as for crew turns. A turn that begins or ends first has
+  the pending batch evicted against the turns as they were, so a late change
+  that takes one family over the budget no longer evicts an older one that
+  fits.
 
 - Attach Subspace chat uploads to admitted IRC requests through the addressed
   officer's existing signing proxy. This uses `subspaceAgents` and adds no flag.

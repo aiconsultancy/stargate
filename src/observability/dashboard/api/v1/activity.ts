@@ -438,13 +438,13 @@ export function createActivityHub(
     }
   }
 
-  function settle() {
-    remeasure.flush();
+  /** Enforce retention against the current turns. */
+  function retain() {
     evict(agents, limits, measure);
     reclaim();
   }
 
-  const remeasure = remeasurer(settle, activityFlushMs);
+  const remeasure = remeasurer(retain, activityFlushMs);
 
   function watch(agentId: string, watcher: ActivityWatcher) {
     const owner = agent(agentId);
@@ -475,6 +475,7 @@ export function createActivityHub(
     root?: string,
     crew?: CrewTurn,
   ): CrewTurnActivityLog {
+    remeasure.drain();
     const owner = agent(agentId);
     const startedAt = Math.min(crew?.startedAt ?? Infinity, now());
 
@@ -499,7 +500,7 @@ export function createActivityHub(
     };
 
     owner.turns.push(turn);
-    settle();
+    retain();
 
     mark(generation, owner, `start:${turn.id}`, () => ({
       seq: turn.seq,
@@ -621,6 +622,7 @@ export function createActivityHub(
           return;
         }
 
+        remeasure.drain();
         const at = now();
         turn.status = outcome;
 
@@ -630,8 +632,7 @@ export function createActivityHub(
 
         turn.endedAt = at;
         changed(at);
-
-        settle();
+        retain();
       },
       retained: () => owner.turns.includes(turn),
     };

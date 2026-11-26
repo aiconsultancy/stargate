@@ -446,7 +446,9 @@ beyond 256 settled turns (including children) or 64 MiB of settled turn
 JSON, which includes changes proven after a turn ended. Such late changes
 are measured once per 150 ms batch, and before any turn begins or ends, so
 eviction never uses a stale size: a turn they push over the budget is
-evicted at the end of that batch, or sooner. A family is evicted together;
+evicted at the end of that batch, or sooner. A pending batch is evicted
+against the turns as they were before the turn began or ended, and only then
+does that turn count. A family is evicted together;
 running families do not count toward those global limits. A settled family
 that exceeds either global limit on its own is evicted first, before any
 older family. Eviction does not limit a running family's child turns: they
