@@ -231,12 +231,13 @@ progress and legacy rows are masked on read. Ordinary readers (the Slack
 crew command, health, the operator dashboard and the crew status tool) get
 masked and bounded text.
 
-Ship and crew detail fall back to redacted 180/80/400 text only when the
-initial request reports the fleet status method missing, or when the plugin
-rejects `taskText` and the re-ask without it succeeds. A failed re-ask or a
-current plugin that cannot answer by the crew deadline leaves crew status
-unavailable; the member route returns `503` rather than redacted text. Ship
-and member routes both return `503` if the whole HTTP read times out.
+On the operator listener, ship and crew detail fall back to redacted
+180/80/400 text only when the initial request reports the fleet status method
+missing, or when the plugin rejects `taskText` and the re-ask without it
+succeeds. A failed re-ask or a current plugin that cannot answer by the crew
+deadline leaves crew status unavailable; the member route returns `503`
+rather than redacted text. Ship and member routes both return `503` if the
+whole HTTP read times out.
 
 Subagent titles and pull request titles are also shown as written, cut to
 180 characters. Each stream's activity events quote its own task text view,
