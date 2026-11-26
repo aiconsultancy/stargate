@@ -168,7 +168,9 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 - Only the initial fleet status request can establish that a plugin lacks
   the method. Stargate treats `taskText` as unsupported, for a minute, only
   when the re-ask without it succeeds. A failed re-ask makes the read
-  unavailable and counts as one ordinary failure. A member ID the plugin's
+  unavailable and counts as one ordinary failure, as does a task text read
+  ended by its crew deadline; a disconnected caller counts nothing, and a
+  re-ask answered after the deadline caches nothing. A member ID the plugin's
   schema rejects is never sent to it. The crew member route answers 404 when
   admitted, or 503 when every HTTP read slot is busy.
 - Progress longer than the stored 64,000 code points keeps its ordinary

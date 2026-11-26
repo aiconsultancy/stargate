@@ -34,6 +34,10 @@ const isInvalidInput = (error: unknown) =>
   "type" in error &&
   error.type === "rpc.invalid_input";
 
+/** A deadline, as opposed to a caller that went away. */
+const isTimeout = (reason: unknown) =>
+  reason instanceof DOMException && reason.name === "TimeoutError";
+
 /** The plugin's own input check, made before anything is asked of it. */
 const validFleetInput = Schema.is(fleetCrewStatusInputSchema);
 
@@ -242,8 +246,9 @@ export class OpenCodeCrewStatus {
           return { kind: "unavailable" };
         }
       } finally {
+        // The last waiter's reason tells a deadline from a disconnect.
         if (--probe.waiters === 0) {
-          probe.controller.abort();
+          probe.controller.abort(signal.aborted ? signal.reason : undefined);
         }
       }
     }
@@ -296,6 +301,8 @@ export class OpenCodeCrewStatus {
         throw new Error("Fleet crew status re-ask failed.");
       });
 
+      // A reply after the probe ended reaches no caller: cache nothing.
+      signal.throwIfAborted();
       this.taskTextRetryAt = performance.now() + 60_000;
 
       return { kind: "unsupported", answer };
@@ -324,10 +331,25 @@ export class OpenCodeCrewStatus {
       },
     );
 
+    // A task text probe ended by its last waiter's deadline is one ordinary
+    // Failure, in either phase. A caller that went away counts nothing.
+    const ended = (): FleetCrewStatusRead => {
+      if (
+        input.taskText &&
+        !failureCounted &&
+        isTimeout(controller.signal.reason)
+      ) {
+        this.recordFleetStatusFailure();
+        failureCounted = true;
+      }
+
+      return { kind: "unavailable" };
+    };
+
     const result = probe
       .then((status): FleetCrewStatusRead => {
         if (controller.signal.aborted || failureCounted) {
-          return { kind: "unavailable" };
+          return ended();
         }
 
         this.fleetStatusFailures = 0;
@@ -336,11 +358,10 @@ export class OpenCodeCrewStatus {
       })
       .catch((error: unknown): FleetCrewStatusRead => {
         if (controller.signal.aborted || failureCounted) {
-          return { kind: "unavailable" };
+          return ended();
         }
 
-        const timedOut =
-          error instanceof DOMException && error.name === "TimeoutError";
+        const timedOut = isTimeout(error);
 
         if (!input.taskText && timedOut && probeMs < maxFleetStatusProbeMs) {
           this.fleetStatusProbeMs = Math.max(

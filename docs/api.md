@@ -927,9 +927,12 @@ maximum budget. Task text reads have no probe budget, and their timeouts
 never double it: they wait for the caller's crew deadline. Concurrent callers
 with the same filter share one probe. An explicit missing-method response to
 the initial request or three consecutive failures pause probes for one minute.
-A failed re-ask counts as one ordinary failure. A member ID the crew plugin
-would reject is never sent to it: the crew member route answers `404` when
-admitted, or `503` when every HTTP read slot is busy.
+A failed re-ask counts as one ordinary failure, and so does a task text probe
+ended by its last caller's crew deadline, in either request. A caller that
+disconnects counts nothing, and leaving while another caller waits does not
+end the probe. A re-ask answered after the deadline caches nothing. A member
+ID the crew plugin would reject is never sent to it: the crew member route
+answers `404` when admitted, or `503` when every HTTP read slot is busy.
 
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git

@@ -169,10 +169,40 @@ test.each(["busy", "draining"] as const)(
 /**
  * A crew plugin that checks input as the real one does: an invalid member
  * fails either ask, and an old plugin also refuses `taskText` itself.
+ * `hold` keeps that ask open until the client drops it.
  */
 function pluginFixture() {
   const asked: string[] = [];
-  const plugin = { old: false, reject: false, ordinaryMissing: false };
+
+  const plugin: {
+    old: boolean;
+    reject: boolean;
+    ordinaryMissing: boolean;
+    hold?: "full" | "ordinary" | undefined;
+  } = { old: false, reject: false, ordinaryMissing: false };
+
+  const counts = { held: 0, dropped: 0 };
+  const watchers = new Set<() => void>();
+
+  const notify = () => {
+    for (const watch of watchers) {
+      watch();
+    }
+  };
+
+  /** Resolves once `count` reaches `n`. */
+  const reach = (count: keyof typeof counts, n: number) =>
+    new Promise<void>((resolve) => {
+      const watch = () => {
+        if (counts[count] >= n) {
+          watchers.delete(watch);
+          resolve();
+        }
+      };
+
+      watchers.add(watch);
+      watch();
+    });
 
   const output = {
     status: { members: [], total: 0, truncated: false },
@@ -193,6 +223,16 @@ function pluginFixture() {
       const member = /"member":"([^"]*)"/.exec(body)?.[1];
       const mode = /"taskText":"(\w+)"/.exec(body)?.[1];
       asked.push(`${member}:${mode ?? "ordinary"}`);
+
+      if (plugin.hold === (mode ? "full" : "ordinary")) {
+        const dropped = Promise.withResolvers<void>();
+        request.signal.addEventListener("abort", () => dropped.resolve());
+        counts.held++;
+        notify();
+        await dropped.promise;
+        counts.dropped++;
+        notify();
+      }
 
       if (
         plugin.reject ||
@@ -224,7 +264,15 @@ function pluginFixture() {
     () => "/fixture",
   );
 
-  return { asked, plugin, output, crew, stop: () => rpc.stop(true) };
+  return {
+    asked,
+    plugin,
+    output,
+    crew,
+    counts,
+    reach,
+    stop: () => rpc.stop(true),
+  };
 }
 
 test("a member the plugin rejects is never sent, nor marks the field unsupported", async () => {
@@ -364,4 +412,180 @@ test("three missing-method re-asks reach the plugin before ordinary backoff", as
   } finally {
     await f.stop();
   }
+});
+
+const deadline = () => new DOMException("Fixture deadline", "TimeoutError");
+
+test("three deadline-ended re-asks pause probes like any failed re-ask", async () => {
+  const f = pluginFixture();
+  const full = { member: "pilot", taskText: "full" } as const;
+  f.plugin.old = true;
+  f.plugin.hold = "ordinary";
+
+  try {
+    for (let i = 1; i <= 3; i++) {
+      const caller = new AbortController();
+      const read = f.crew.fleetCrewStatus(full, caller.signal);
+      await f.reach("held", i);
+      caller.abort(deadline());
+      expect(await read.catch((error: unknown) => error)).toBe(
+        caller.signal.reason,
+      );
+      // Abort still reaches the plugin's request.
+      await f.reach("dropped", i);
+    }
+
+    expect(f.asked).toEqual(
+      Array.from({ length: 3 }, () => ["pilot:full", "pilot:ordinary"]).flat(),
+    );
+    f.asked.length = 0;
+    f.plugin.old = false;
+    f.plugin.hold = undefined;
+    expect(
+      await f.crew.fleetCrewStatus(full, new AbortController().signal),
+    ).toEqual({ kind: "unavailable" });
+    expect(f.asked).toEqual([]);
+  } finally {
+    await f.stop();
+  }
+});
+
+test("a caller that disconnects counts no failure, in either phase", async () => {
+  const f = pluginFixture();
+  const full = { member: "pilot", taskText: "full" } as const;
+
+  try {
+    for (const [i, hold] of [
+      [1, "full"],
+      [2, "ordinary"],
+      [3, "ordinary"],
+    ] as const) {
+      f.plugin.old = hold === "ordinary";
+      f.plugin.hold = hold;
+      const caller = new AbortController();
+      const read = f.crew.fleetCrewStatus(full, caller.signal);
+      await f.reach("held", i);
+      caller.abort();
+      await expect(read).rejects.toThrow();
+      await f.reach("dropped", i);
+    }
+
+    f.asked.length = 0;
+    f.plugin.old = false;
+    f.plugin.hold = undefined;
+    expect(
+      await f.crew.fleetCrewStatus(full, new AbortController().signal),
+    ).toEqual({ kind: "answer", answer: { ...f.output, taskText: "full" } });
+    expect(f.asked).toEqual(["pilot:full"]);
+  } finally {
+    await f.stop();
+  }
+});
+
+test("one deadline with two waiters aborts the probe and counts once", async () => {
+  const f = pluginFixture();
+  const full = { member: "pilot", taskText: "full" } as const;
+  const signal = new AbortController().signal;
+  f.plugin.hold = "full";
+
+  try {
+    const first = new AbortController();
+    const second = new AbortController();
+
+    const reads = [first, second].map((caller) =>
+      f.crew.fleetCrewStatus(full, caller.signal).catch((error) => error),
+    );
+
+    await f.reach("held", 1);
+
+    // One waiter leaving while another waits neither aborts nor counts.
+    first.abort(deadline());
+    expect(await reads[0]).toBe(first.signal.reason);
+    await Bun.sleep(20);
+    expect(f.counts.dropped).toBe(0);
+
+    second.abort(deadline());
+    expect(await reads[1]).toBe(second.signal.reason);
+    await f.reach("dropped", 1);
+
+    // The deadline is one failure: two more reach the plugin, then a pause.
+    f.plugin.hold = undefined;
+    f.plugin.reject = true;
+    f.asked.length = 0;
+
+    for (let i = 0; i < 2; i++) {
+      expect(await f.crew.fleetCrewStatus(full, signal)).toEqual({
+        kind: "unavailable",
+      });
+    }
+
+    f.plugin.reject = false;
+    expect(await f.crew.fleetCrewStatus(full, signal)).toEqual({
+      kind: "unavailable",
+    });
+    expect(f.asked).toEqual(
+      Array.from({ length: 2 }, () => ["pilot:full", "pilot:ordinary"]).flat(),
+    );
+  } finally {
+    await f.stop();
+  }
+});
+
+test("a re-ask answered after the deadline caches nothing", async () => {
+  const asked: string[] = [];
+  const entered = Promise.withResolvers<void>();
+  let old = true;
+
+  const output = {
+    status: { members: [], total: 0, truncated: false },
+    metadata: { projectDirectory: "/fixture", contexts: [] },
+  };
+
+  // A transport that drains: it answers the re-ask after the abort.
+  const transport = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const mode = /"taskText":"(\w+)"/.exec(await request.text())?.[1];
+      asked.push(mode ?? "ordinary");
+
+      if (old && mode) {
+        return Response.json(
+          { _tag: "RpcError", type: "rpc.invalid_input", message: "Fixture" },
+          { status: 400 },
+        );
+      }
+
+      if (old) {
+        const aborted = Promise.withResolvers<void>();
+        request.signal.addEventListener("abort", () => aborted.resolve());
+        entered.resolve();
+        await aborted.promise;
+      }
+
+      return Response.json({
+        output: { ...output, ...(mode && { taskText: mode }) },
+      });
+    },
+    { preconnect: fetch.preconnect },
+  );
+
+  const crew = new OpenCodeCrewStatus(
+    OpenCode.make({ baseUrl: "http://127.0.0.1:1", fetch: transport }),
+    () => "/fixture",
+  );
+
+  const full = { member: "pilot", taskText: "full" } as const;
+  const caller = new AbortController();
+  const read = crew.fleetCrewStatus(full, caller.signal);
+  await entered.promise;
+  caller.abort(deadline());
+  expect(await read.catch((error: unknown) => error)).toBe(
+    caller.signal.reason,
+  );
+  old = false;
+
+  expect(
+    await crew.fleetCrewStatus(full, new AbortController().signal),
+  ).toEqual({ kind: "answer", answer: { ...output, taskText: "full" } });
+  expect(asked).toEqual(["full", "ordinary", "full"]);
 });
