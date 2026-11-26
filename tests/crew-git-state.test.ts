@@ -304,6 +304,34 @@ esac`,
   },
 );
 
+test("an unreadable final Fleet HEAD after a good read is not cached", async () => {
+  const directory = await repository();
+  const read = createCrewGitReader(Date.now, () => 0);
+
+  // The second HEAD read is the recheck after status.
+  await withGitWrapper(
+    `case " $* " in
+  *' symbolic-ref -q HEAD '*)
+    counter="\${0%/*}/heads"
+    heads=$(($(cat "$counter" 2>/dev/null || echo 0) + 1))
+    echo "$heads" > "$counter" || exit 3
+    test "$heads" -ne 2 || exit 128
+    ;;
+esac`,
+    async () => {
+      expect(await read(directory, signal)).toMatchObject({
+        branch: null,
+        changedFiles: null,
+        error: "Git state unavailable.",
+      });
+      expect(await read(directory, signal)).toMatchObject({
+        branch: "main",
+        changedFiles: 0,
+      });
+    },
+  );
+});
+
 test("a Fleet status config output limit fails closed instead of returning a count", async () => {
   const directory = await repository();
   await appendFile(

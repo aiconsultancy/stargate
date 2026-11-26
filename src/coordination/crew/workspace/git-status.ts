@@ -79,7 +79,10 @@ async function captureFleetHead(run: FleetGitCommand): Promise<FleetHead> {
   throw new Error("Git HEAD unavailable");
 }
 
-/** Classify even a failed sample against the checkout it started on. */
+/**
+ * Classify even a failed sample against the checkout it started on. A good
+ * sample followed by an unreadable HEAD counts as a move, so it is not cached.
+ */
 export async function guardFleetHead<T>(
   run: FleetGitCommand,
   deadline: () => AbortSignal,
@@ -89,15 +92,21 @@ export async function guardFleetHead<T>(
   const [result] = await Promise.allSettled([sample(before)]);
   deadline().throwIfAborted();
 
-  const after = await captureFleetHead(run).catch((error: unknown) => {
+  const after = await captureFleetHead(run).catch(() => {
     deadline().throwIfAborted();
+
     // An unreadable HEAD must not erase a more specific sample failure.
-    throw result.status === "rejected" ? result.reason : error;
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
+
+    // After a good sample, HEAD may be mid-move: a move, not a stable failure.
+    return null;
   });
 
   deadline().throwIfAborted();
 
-  if (before.ref !== after.ref || before.oid !== after.oid) {
+  if (!after || before.ref !== after.ref || before.oid !== after.oid) {
     return { kind: "moved" as const };
   }
 

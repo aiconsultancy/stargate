@@ -286,7 +286,8 @@ private Git directory without checkout filter configuration or
 `info/attributes`. Both readers use the same status configuration allow-list
 and discard multiline values. A failed configuration read, including an
 output limit, makes the Git state unavailable. Both readers recheck the
-branch and commit after status and do not cache a result if either changed.
+branch and commit after status and do not cache a result if either changed
+or can no longer be read.
 The captain reads the configured `core.excludesFile` as live ignore data,
 like the live repository's other ignore files. The gateway can run as a
 different Linux user, so it copies that file under the snapshot limits below.

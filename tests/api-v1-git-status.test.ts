@@ -400,6 +400,48 @@ test.each([
   },
 );
 
+test("an unreadable final gateway HEAD after a good read is not cached", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+
+  try {
+    git(directory, "init", "-b", "main");
+    git(directory, "commit", "--allow-empty", "-m", "First");
+    let heads = 0;
+
+    const read = createGitReader(
+      Date.now,
+      (args, options) => {
+        // The second HEAD read is the recheck after status.
+        if (args.includes("symbolic-ref") && args.at(-1) === "HEAD") {
+          heads++;
+
+          if (heads === 2) {
+            return Promise.resolve({ code: 128, stdout: "" });
+          }
+        }
+
+        return readCommand(args, options);
+      },
+      undefined,
+      undefined,
+      () => 0,
+    );
+
+    expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+      branch: null,
+      changedFiles: null,
+      error: "Git state unavailable.",
+    });
+    expect(heads).toBe(2);
+    expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+      branch: "main",
+      changedFiles: 0,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test.each([{ code: 2, stdout: "" }, { code: 1, stdout: "unexpected" }, null])(
   "a failed Git excludes configuration read does not run status (%j)",
   async (failure) => {
