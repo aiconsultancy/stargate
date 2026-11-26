@@ -79,9 +79,10 @@ function holdRead<T>(readMs: number) {
 
 export function createEventStreams(
   options: Options,
-  timing: typeof streamTiming & { readMs?: number } = streamTiming,
+  timing: Partial<typeof streamTiming> & { readMs?: number } = {},
 ) {
   const lifetime = new AbortController();
+  const { pollMs, hostMs, heartbeatMs } = { ...streamTiming, ...timing };
   const readMs = timing.readMs ?? 20_000;
   const overviewReadMs = timing.readMs ?? fleetOverviewReadMs;
 
@@ -543,12 +544,12 @@ export function createEventStreams(
       }
     }
 
-    const pollTimer = setInterval(() => void poll(), timing.pollMs);
-    const hostTimer = setInterval(() => void publishHost(), timing.hostMs);
+    const pollTimer = setInterval(() => void poll(), pollMs);
+    const hostTimer = setInterval(() => void publishHost(), hostMs);
 
     const heartbeatTimer = setInterval(() => {
       broadcast([{ type: "heartbeat", data: { at: Date.now() } }]);
-    }, timing.heartbeatMs);
+    }, heartbeatMs);
 
     return {
       clients,

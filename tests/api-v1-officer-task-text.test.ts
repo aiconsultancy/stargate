@@ -178,7 +178,10 @@ function current(
   return task && { summary: task.summary, progress: task.progress };
 }
 
-async function start(initialAssignment?: string) {
+async function start(
+  initialAssignment?: string,
+  timing?: Parameters<typeof startApiV1Server>[0]["timing"],
+) {
   const plugin = await crewPlugin(initialAssignment);
 
   const backend: AgentBackend = {
@@ -259,6 +262,7 @@ async function start(initialAssignment?: string) {
       startedAt: 1,
     },
     signal: shutdown.signal,
+    ...(timing && { timing }),
   });
 
   cleanup.push(async () => {
@@ -457,7 +461,11 @@ function activityTrace(next: () => Promise<string | undefined>) {
 test("activity events quote each listener's own view exactly once per task transition", async () => {
   const first = "Review token=fixture-first   safely";
   const second = "Deploy token=fixture-second   safely";
-  const { plugin, operator, socketPath } = await start(first);
+
+  const { plugin, operator, socketPath } = await start(first, {
+    streams: { pollMs: 25 },
+  });
+
   const socket = await officerStream(socketPath);
   cleanup.push(() => socket.destroy());
   expect(socket.statusCode).toBe(200);
@@ -521,4 +529,4 @@ test("activity events quote each listener's own view exactly once per task trans
       text: "Twiki started “Deploy token=fixture-second safely”.",
     },
   ]);
-}, 20_000);
+});
