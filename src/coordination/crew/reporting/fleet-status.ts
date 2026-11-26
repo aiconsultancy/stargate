@@ -1,7 +1,11 @@
 import { isAbsolute } from "node:path";
 import { Schema } from "effect";
 import { crewStatusSchema } from "../../../shared/crew-status";
-import { HISTORY_PAGE, exactStruct } from "../../../shared/session-history";
+import {
+  HISTORY_PAGE,
+  MAX_CREW_CONTEXTS,
+  exactStruct,
+} from "../../../shared/session-history";
 import { effectProjectKeySchema } from "../protocol/project-key";
 import { agentIDSchema } from "../team";
 
@@ -93,6 +97,84 @@ export const crewGitSchema = exactStruct({
 });
 
 export type CrewGit = typeof crewGitSchema.Type;
+
+/** Settled tasks kept per member and project, newest first. */
+export const settledTasksPerMember = 16;
+
+/** The original input plus the latest resume inputs. */
+export const maxTaskInputs = 64;
+
+const nativeID = Schema.String.check(Schema.isBetweenCodePoints(1, 256));
+
+const taskStatusSchema = Schema.Literals([
+  "dispatching",
+  "running",
+  "cancelling",
+  "uncertain",
+  "completed",
+  "abandoned",
+  "cancelled",
+]);
+
+/** Internal, location-scoped RPC that attributes crew turns to tasks. */
+export const crewTurnsInputSchema = exactStruct({
+  /** Only this member's peers and tasks. */
+  member: Schema.optional(agentIDSchema),
+  /** Only the task, of any age, that has used this input. */
+  inputID: Schema.optional(nativeID),
+});
+
+export type CrewTurnsInput = typeof crewTurnsInputSchema.Type;
+
+export const crewTurnsSchema = exactStruct({
+  /**
+   * Every configured crew member, and whether its current backend is one
+   * the gateway collects (OpenCode); absent from older plugins. At most
+   * `MAX_CREW_CONTEXTS`, the configuration's load-time bound.
+   */
+  members: Schema.optional(
+    Schema.Array(
+      exactStruct({ member: agentIDSchema, collected: Schema.Boolean }),
+    ).check(Schema.isMaxLength(MAX_CREW_CONTEXTS)),
+  ),
+  /**
+   * Each current peer worker session of this plugin's team: at most one per
+   * member context (member and project).
+   */
+  peers: Schema.Array(
+    exactStruct({
+      member: agentIDSchema,
+      /** Null for the captain's default project. */
+      project: Schema.NullOr(effectProjectKeySchema),
+      workerSessionID: nativeID,
+      namespace: nativeID,
+    }),
+  ).check(Schema.isMaxLength(MAX_CREW_CONTEXTS)),
+  /**
+   * Running, dispatching, cancelling and uncertain tasks, plus the latest
+   * settled tasks per member and project; with `inputID`, only its task.
+   * At most `settledTasksPerMember + 1` per member context.
+   */
+  tasks: Schema.Array(
+    exactStruct({
+      taskID: nativeID,
+      member: agentIDSchema,
+      project: Schema.NullOr(effectProjectKeySchema),
+      workerSessionID: nativeID,
+      originCaptainID: nativeID,
+      status: taskStatusSchema,
+      /** Every input sent for the task: the assignment first, then resumes. */
+      inputIDs: Schema.Array(nativeID).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(maxTaskInputs),
+      ),
+    }),
+  ).check(Schema.isMaxLength(MAX_CREW_CONTEXTS * (settledTasksPerMember + 1))),
+});
+
+export type CrewTurns = typeof crewTurnsSchema.Type;
+
+export type CrewTurnsTask = CrewTurns["tasks"][number];
 
 // Git output parsers shared by the crew plugin's and the gateway's readers.
 

@@ -95,9 +95,9 @@ On the socket:
   `Allow: GET, HEAD`, and a request body is never read;
 - only the four routes above answer, at exactly normalised targets: no dot
   segment, doubled slash, encoded slash or dot, NUL, backslash or fragment.
-  Anything else gets 404. A query is ignored, except that `/api/v1/events`
-  with an `agent` or `turn` parameter gets 404: officers never receive
-  `agent-activity`;
+  Anything else gets 404, including the crew activity route. A query is
+  ignored, except that `/api/v1/events` with an `agent`, `crew` or `turn`
+  parameter gets 404: officers never receive `agent-activity`;
 - no token is needed and an `Authorization` header is ignored; no browser
   origin is granted CORS;
 - answers are the same JSON and event frames as on the operator listener,
@@ -179,13 +179,14 @@ and `Last-Event-ID` without a token.
 
 ## Routes
 
-| Route                              | GET response                                                                          |
-| ---------------------------------- | ------------------------------------------------------------------------------------- |
-| `/api/v1/fleet`                    | Fleet overview with captain summaries, host metrics, and gateway version and features |
-| `/api/v1/ships/{id}`               | Ship detail, including crew members                                                   |
-| `/api/v1/ships/{id}/crew/{member}` | One member's detail                                                                   |
-| `/api/v1/agents/{id}/activity`     | An officer's recent turns, a turn by IRC request, or one page of one item             |
-| `/api/v1/events`                   | Server-sent events                                                                    |
+| Route                                       | GET response                                                                          |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `/api/v1/fleet`                             | Fleet overview with captain summaries, host metrics, and gateway version and features |
+| `/api/v1/ships/{id}`                        | Ship detail, including crew members                                                   |
+| `/api/v1/ships/{id}/crew/{member}`          | One member's detail                                                                   |
+| `/api/v1/agents/{id}/activity`              | An officer's recent turns, a turn by IRC request, or one page of one item             |
+| `/api/v1/ships/{id}/crew/{member}/activity` | A crew member's recent worker turns, or one page of one item                          |
+| `/api/v1/events`                            | Server-sent events                                                                    |
 
 `{member}` is a crew member's configured ID. Each of a ship's `crewMembers`
 has that `id`, its configured `name` (which may differ from the ID; the ID
@@ -357,9 +358,12 @@ The response is `V1AgentActivity`: `{ agent, turns, cursor }`. Turns are
 oldest first. Turn IDs are unique across restarts, and item IDs (`i1`, `i2`,
 ...) are stable within their turn. Every change takes the next value of a
 per-agent sequence: each turn and item carries the `seq` of its latest
-change, and `cursor.seq` is the latest change included. `cursor.generation`
-changes when the gateway restarts. `turn.reconnects` counts times the live
-provider stream reattached during the turn, when changes can be missing.
+change, and `cursor.seq` is the latest change included. An agent with no
+retained turn and no viewer is not kept; when it reappears, its sequence
+continues above every such agent's, so a `seq` never goes back within a
+generation. `cursor.generation` changes when the gateway restarts.
+`turn.reconnects` counts times the live provider stream reattached during
+the turn, when changes can be missing.
 `agent.collected` is false for backends this gateway does not collect yet;
 OpenCode and Claude Agent SDK officers are collected.
 
@@ -423,9 +427,9 @@ array is empty for other transports or when the original IRC message ID is
 unknown. Requests queued before link data was recorded are not backfilled.
 A follow-up steered into an already-running input is not a new turn and is
 not included in these links.
-Claude child turns always have `requests: []`: the IRC message started the
-root, not the subagent. `session.parent.turnId` names each child's immediate
-parent.
+Claude child turns have `requests: []`: the IRC message started the root,
+not the subagent. `session.parent.turnId` names each child's immediate
+parent. A child admitted unlinked, below, is the exception.
 
 Unknown, repeated or malformed parameters return 400. An item whose JSON
 exceeds 64 KiB appears in the turn as a stub with identity, kind, status,
@@ -436,9 +440,19 @@ different `seq` values belong to different versions of a changing item;
 start again from page 0.
 
 The gateway keeps the last 16 root turns and their children per officer, in
-memory only, however long the officer stays idle. Across all officers,
-settled families are evicted oldest first beyond 256 settled turns (including
-children) or 64 MiB of settled turn JSON. A family is evicted together;
+memory only, however long the officer stays idle. Across all officers and
+[crew members](#crew-activity), settled families are evicted oldest first
+beyond 256 settled turns (including children) or 64 MiB of settled turn
+JSON, which includes changes proven after a turn ended. Such late changes
+are measured once per 150 ms batch, and before any turn begins or ends, so
+eviction never uses a stale size: a turn they push over the budget is
+evicted at the end of that batch, or sooner. A pending batch is evicted
+against the turns as they were before the turn began or ended, and only then
+does that turn count. If that drain evicts the parent of a child about to
+begin, the child is admitted unlinked: it is a root of its own, keeps its
+`session.id`, has `session.parent: null` and copies its family's
+`requests`, so the snapshot and the request lookup still show it. A child
+of a retained parent links to it as usual. A family is evicted together;
 running families do not count toward those global limits. A settled family
 that exceeds either global limit on its own is evicted first, before any
 older family. Eviction does not limit a running family's child turns: they
@@ -454,6 +468,10 @@ and creating the private temporary directory with `mkdtemp`.
 officer to everything the [event stream](#events) sends. Repeat `agent` for
 up to eight distinct officers. `turn=<id>` with exactly one `agent` follows
 the whole family for a root ID, or only the selected turn for a child ID.
+While a root's watch stays open, it also follows children admitted unlinked
+after that family was evicted, including their families and further unlinked
+descendants. An unlinked child's events still carry its own root and
+`session.parent: null`.
 The snapshot's `turn` and `item` selectors still address exact IDs. With
 either stream parameter present, the query is checked before the stream
 takes one of the eight viewer places: an unknown, repeated or malformed
@@ -479,7 +497,7 @@ shapes:
 | `change.type`  | Payload                                                 |
 | -------------- | ------------------------------------------------------- |
 | `turn-started` | `turn`: the turn without `items`                        |
-| `turn-updated` | `turn`: after a reattachment or usage update            |
+| `turn-updated` | `turn`: after a reattachment, usage or crew task update |
 | `turn-ended`   | `turn`: with its outcome, `endedAt` and settled `usage` |
 | `item`         | `item`: the item, or its identity and `paged`           |
 
@@ -532,6 +550,141 @@ To follow an officer without a gap:
    is not above the same agent's previous event. When the stream closes,
    start again from step 1. The server never drops an event from an open
    stream; it closes the stream instead.
+
+### Crew activity
+
+`GET /api/v1/ships/{id}/crew/{member}/activity` serves a crew member's
+worker turns the same way: the same items, the same `turn`, `item`, `page`,
+`request` and `channel` parameters, the same 400 and 404 answers, and the
+same unredacted, untruncated content, control characters included. `{id}`
+is the captain's registration ID. Crew turns answer no IRC request, so
+`request` always finds nothing. Officers' [sockets](#officers) answer 404,
+and so does a rear admiral, which has no crew of its own, on this route and
+for `crew=` events; its officer feed is unchanged.
+The gateway feature `api.crewActivity` reports the route and its events; it
+is on whenever the Fleet API is.
+
+The gateway follows each OpenCode captain's crew through one event
+subscription and the crew plugin's read-only `crewTurns` RPC, which names
+each member's current worker session and the input IDs of the crew's tasks.
+Its answer is bounded by the crew's load-time limit of 50 member contexts:
+at most 50 members, 50 peer sessions (one per member and project) and
+50 × 17 tasks (each context's active task and its latest 16 settled ones);
+a larger answer is refused as malformed.
+Only root worker sessions of configured OpenCode members with a ready peer
+session are collected: not Pi workers, removed members or pending
+reservations, and sub-sessions not yet. A session that changes member,
+project or crew namespace is no longer collected. A task's resume inputs
+are attributed for each member's latest 64 tasks; an older task's
+assignment input still is.
+
+The response is `V1AgentActivity` with `agent.member` set to the member and
+`agent.id` to the captain. `agent.collected` is false until the captain's
+crew plugin answers `crewTurns`, and for a plugin too old to have it, a Pi
+or other non-OpenCode captain: the route then answers 200 with no turns for
+any well-formed member, never an error. While the plugin answers,
+`agent.collected` follows the member's current configured backend: a
+configured OpenCode member is collected, even before it has a worker
+session or a turn, and a member configured for Pi or another backend is
+not, though turns retained from an earlier OpenCode configuration stay
+readable. Only a member that is neither configured nor holding a worker
+session or a retained turn returns 404.
+
+A crew turn covers one execution of the worker session, as an officer's
+turn does, and ends when the execution settles, with its outcome. A DM,
+notice or callback steered into the running execution never ends a turn.
+If a settle is missed, the session's next native execution start ends its
+open turns `cancelled`, and so do messages of that execution still waiting
+to be placed. Starts and settlements apply in their session's durable
+order: a replayed or late one, of any age, changes nothing. One without a
+durable sequence for its session is applied as it comes.
+
+An execution's messages are placed in the order their first frames arrived.
+Output whose owning input is not known yet appears after up to 2 seconds,
+and after at most 4 while it waits behind an earlier message. The
+execution's earliest message opens its first turn, whose `startedAt` is
+that message's first observed frame. A message whose input proves a task
+joins the execution's latest turn with the same input or task, or else
+opens a turn of its own; while the latest turn's opener is still being
+resolved, it waits up to 2 more seconds first. Output proven to answer a
+task before it is placed therefore never appears under another task; at
+worst, one task is split into two turns of the same execution, both naming
+it. Every other message, a steer or one whose owner is unproven or cannot
+be proven, joins the execution's latest turn, which can be a task's. Turns
+are listed in the order they opened.
+
+Some cases stay approximate. An unproven message joins the execution's
+latest turn, whichever task that turn names. A message placed before its
+owner is proven, because it waited past 2 seconds, passed a hold limit
+below or found all 8 owner lookups busy, joins the execution's latest turn;
+if it later proves to answer another task, it stays in that turn, whose
+`task` does not change: a shown message never moves. A message first seen
+after its execution settled joins that execution, with its outcome, only
+when its first frame's durable sequence (a step, or the start of text,
+reasoning or a tool input) lies between that execution's start and its
+settlement, within the session's last 16 settled executions whose start
+and settlement both carried a durable sequence; when no start of its own
+was seen, the previous settlement stands for it. Otherwise it is placed
+with the current execution and takes no earlier outcome: when it is first
+seen through a delta, when its execution is older than those 16, or when
+either bound of its execution was not seen with a durable sequence, for
+example a start without one, after a reconnect or when the session became
+a peer mid-execution. A settle missed and inferred from the next start
+bounds nothing either, since unseen executions may lie between. A turn opened by a message whose owner cannot
+be proven keeps `task: null`, and a later task message of the execution
+opens its own turn.
+
+Output waiting for its owner is held up to 256 KiB per message and 4 MiB in
+total, counted as each frame's serialized data without its small envelope;
+beyond either, it is placed at once without waiting for its owner. A turn
+it opens is attributed once its owner is proven; a turn it joins keeps its
+own task. Once placed, its frames are released, even while its owner is
+still being resolved. A crew turn evicted by the global limits, on any
+path, is forgotten at once, and later output of its messages is dropped
+while an eviction marker for each message is retained.
+At most 64 messages per worker session wait for placement; past that, the
+oldest is placed at once. A placed message is remembered apart from them
+for as long as it is still known, that is while its execution runs or its
+turn is retained, so its later output, including a retry's repeated step
+start, continues in its turn. Only messages no longer known, those of an
+evicted turn or let go by a hold limit, keep such a marker and count
+against a bound of 1,024 per worker session, which forgets the oldest of
+them first; a message whose marker is forgotten opens again, as an unknown
+one, if more of its output arrives. As a safety
+ceiling, a worker session keeps at most 16,384 known messages; past that,
+the oldest is forgotten and counted in the collector's `forgotten`
+diagnostic, and its later output opens a new message. An unknown message's
+first frame always opens it, so no output is dropped for lack of a step
+start, for example one lost in a reconnect.
+
+Each crew turn adds:
+
+- `task`: `{ id, inputId, project }` when the input that opened the turn is
+  one of the task's inputs (its assignment or a resume), answered in the
+  task's own worker session and member, otherwise `null`: crew mail,
+  notices, compaction or an input that could not be proven. A turn whose
+  task lookup was slow starts with `null` and is updated once, with a
+  `turn-updated` event, also when the turn has already ended: that event
+  then shows the ended turn, and an end in the same window still arrives as
+  `turn-ended`. `project` is the crew
+  project key, `null` for the captain's default project.
+- `session`: `{ id, parent }`, the worker session; `parent` is `null`.
+
+Each member keeps its own last 16 root turns and their children, apart from
+the officer's. Its settled families count towards the same global 256-turn
+and 64 MiB limits, and are evicted the same way: a family together, and
+running families do not count toward those global limits.
+
+`/api/v1/events?crew=<id>/<member>` subscribes to a member's turns. `crew`
+is repeatable and mixes with `agent`; together they allow at most eight
+distinct subjects, and `turn` needs exactly one subject; it follows the
+whole family for a root ID, as for an officer. The rules for 400,
+404 and 503 are the agent subscription's, with the route's 404 for an
+unknown member. Crew events are `agent-activity` events with
+`agentId` set to the captain and `member` set to the member. Each member has
+its own `seq` and cursor: key cursors and the last applied `seq` by
+`(agentId, member)`, and follow the recipe above with the crew route as the
+snapshot.
 
 ## Events
 

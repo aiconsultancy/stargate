@@ -61,6 +61,11 @@ type ReloadRuntime = {
   log: Pick<Logger, "warn">;
 };
 
+/** A rejection handler that only logs. */
+const warning = (log: Pick<Logger, "warn">, message: string) => () => {
+  log.warn(message);
+};
+
 /**
  * The live configuration reload transaction: stage every added IRC worker
  * behind a deferred gate, pause and check every removed member, then commit
@@ -255,10 +260,10 @@ export function reloadTransaction(runtime: ReloadRuntime) {
         for (const { entry } of staged) {
           await Effect.runPromise(
             FiberMap.remove(fibers, entry.registration.key),
-          );
-          await entry.resource.close().catch(() => {
-            log.warn("Staged backend cleanup failed");
-          });
+          ).catch(warning(log, "Staged worker cleanup failed"));
+          await entry.resource
+            .close()
+            .catch(warning(log, "Staged backend cleanup failed"));
         }
       }
     }

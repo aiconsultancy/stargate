@@ -10,9 +10,11 @@ import { openCodeTurnObserver } from "../src/backends/opencode/activity";
 import { configSchema } from "../src/config";
 import {
   activityApi,
+  activityFlushMs,
   activityPageBytes,
   createActivityHub,
   readActivity,
+  settledBytes,
 } from "../src/observability/dashboard/api/v1/activity";
 import type { ApiV1Config } from "../src/observability/dashboard/api/v1/features";
 import { startApiV1Server } from "../src/observability/dashboard/api/v1/server";
@@ -536,7 +538,7 @@ test("a settled family over a global limit on its own goes first", () => {
 
 test.each([false, true])(
   "a late nested-task update counts toward family eviction (root settled: %s)",
-  (settled) => {
+  async (settled) => {
     const hub = createActivityHub({ bytes: 1000 });
     hub.recorder("captain").begin().end("completed");
     const root = hub.recorder("claude").begin(undefined, "root");
@@ -577,10 +579,14 @@ test.each([false, true])(
       },
     );
 
-    if (!settled) {
-      expect(snapshot(hub, "claude").turns[1]?.items[0]).toMatchObject({
-        metadata: { task: { description } },
-      });
+    expect(snapshot(hub, "claude").turns[1]?.items[0]).toMatchObject({
+      metadata: { task: { description } },
+    });
+
+    if (settled) {
+      // Retained until the late change's batch window measures it.
+      await wait(activityFlushMs * 2);
+    } else {
       root.end("completed");
     }
 
@@ -588,6 +594,110 @@ test.each([false, true])(
     expect(snapshot(hub, "captain").turns).toHaveLength(1);
   },
 );
+
+const sessions = (hub: ReturnType<typeof createActivityHub>, agent: string) =>
+  snapshot(hub, agent).turns.map((turn) => turn.session?.id);
+
+test("a begin drains a pending late write before its turn counts", () => {
+  const hub = createActivityHub({ turnsPerAgent: 2, bytes: 1000 });
+  const recorder = hub.recorder("captain");
+  recorder.begin(undefined, "A").end("completed");
+  const b = recorder.begin(undefined, "B");
+  b.end("completed");
+  // B outgrows the budget on its own; the batch window has not measured it.
+  b.update("late", 1, () => text("x".repeat(5000)));
+  expect(sessions(hub, "captain")).toEqual(["A", "B"]);
+
+  recorder.begin(undefined, "C");
+  // Drained first, B goes alone; C then fits beside A.
+  expect(sessions(hub, "captain")).toEqual(["A", "C"]);
+});
+
+test("a child whose parent the begin drain evicts is admitted unlinked", () => {
+  const hub = createActivityHub({ bytes: 1000 });
+  const requests = [{ channel: "#Bridge", msgid: "parent-request" }];
+  const parent = hub.recorder("claude").begin(requests, "parent");
+  parent.end("completed");
+  // The parent outgrows the budget; the batch window has not measured it.
+  parent.update("late", 1, () => text("x".repeat(5000)));
+  expect(sessions(hub, "claude")).toEqual(["parent"]);
+
+  const child = parent.child?.("call", "child");
+  child?.update("k", 2, () => text("child"));
+  const { turns } = snapshot(hub, "claude");
+
+  // Drained first, the parent goes; the child is its own root, which the
+  // Request-filtered route finds.
+  expect(turns).toHaveLength(1);
+  expect(turns[0]).toMatchObject({
+    session: { id: "child", parent: null },
+    requests,
+    items: [{ text: "child" }],
+  });
+  expect(
+    readActivity(
+      hub,
+      config,
+      "claude",
+      new URLSearchParams({ request: "parent-request", channel: "#Bridge" }),
+    ),
+  ).toMatchObject({ status: 200, body: { turns } });
+});
+
+test("unwatched splits leave no routing state on the one retained turn", () => {
+  let measured: Parameters<typeof settledBytes>[0] | undefined;
+
+  const hub = createActivityHub({
+    bytes: 1000,
+    measure(turn) {
+      measured = turn;
+
+      return settledBytes(turn);
+    },
+  });
+
+  const recorder = hub.recorder("claude");
+  let parent = recorder.begin(undefined, "parent");
+  parent.end("completed");
+  const keys = Object.keys(measured ?? {}).toSorted();
+  const late = "x".repeat(5000);
+
+  for (let index = 0; index < 4096; index++) {
+    parent.update("late", 1, () => text(late));
+    const child = parent.child?.("call", `child-${index}`);
+
+    if (!child) {
+      throw new Error("Missing child log");
+    }
+
+    child.end("completed");
+    parent = child;
+  }
+
+  expect(sessions(hub, "claude")).toEqual(["child-4095"]);
+  expect(measured?.session).toEqual({ id: "child-4095", parent: null });
+  expect(Object.keys(measured ?? {}).toSorted()).toEqual(keys);
+});
+
+test("an end drains a pending late write before its turn counts", () => {
+  // One millisecond: the ending turn sorts with the settled ones.
+  const hub = createActivityHub({ bytes: 1700, now: () => 1000 });
+  const ending = hub.recorder("captain").begin(undefined, "X");
+  const recorder = hub.recorder("claude");
+  const a = recorder.begin(undefined, "A");
+  a.update("k", 1, () => text("a".repeat(600)));
+  a.end("completed");
+  const b = recorder.begin(undefined, "B");
+  b.end("completed");
+  // A and B now exceed the budget; the batch window has not measured B.
+  b.update("late", 1, () => text("b".repeat(1000)));
+  expect(sessions(hub, "claude")).toEqual(["A", "B"]);
+
+  ending.end("completed");
+  // Drained first, A goes as the oldest; X then fits beside B.
+  expect(sessions(hub, "claude")).toEqual(["B"]);
+  expect(sessions(hub, "captain")).toEqual(["X"]);
+});
 
 test("activity reads validate the agent and every parameter", () => {
   const hub = createActivityHub();

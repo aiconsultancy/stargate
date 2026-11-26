@@ -212,6 +212,16 @@ export type OpenCodeTurnObserver = (source: {
   ): Promise<boolean | undefined>;
 }) => { submitted(inputID: string): void; end(outcome: ActivityOutcome): void };
 
+/**
+ * Starts a backend's crew turn collector until `signal` aborts. The factory
+ * binds it, so this module does not load the collector into the crew plugin.
+ */
+export type OpenCodeCrewActivity = (
+  client: OpenCodeClient,
+  directory: () => string,
+  signal: AbortSignal,
+) => void;
+
 export class OpenCodeBackend implements AgentBackend {
   public async pinnedBackgroundQuestions(signal: AbortSignal) {
     if (!this.sessionID) {
@@ -376,6 +386,8 @@ export class OpenCodeBackend implements AgentBackend {
   public readonly history: OpenCodeHistory;
   private readonly client;
   private readonly crewStatusProbe: OpenCodeCrewStatus;
+  /** Stops the crew turn collector on close. */
+  private readonly lifetime = new AbortController();
   private readonly notices: OpenCodeNotices;
   private readonly questions: OpenCodeQuestions;
   public readonly pendingQuestions;
@@ -392,6 +404,7 @@ export class OpenCodeBackend implements AgentBackend {
     private readonly config: Config,
     verifiedClient?: OpenCodeClient,
     private readonly observeTurn?: OpenCodeTurnObserver,
+    crewActivity?: OpenCodeCrewActivity,
   ) {
     const options = {
       baseUrl: config.url,
@@ -408,6 +421,9 @@ export class OpenCodeBackend implements AgentBackend {
       this.client,
       () => config.directory,
     );
+
+    crewActivity?.(this.client, () => config.directory, this.lifetime.signal);
+
     this.notices = new OpenCodeNotices(this.client, config);
     this.questions = new OpenCodeQuestions(this.client, this.sessionID);
     const reviews = new OpenCodeReviews(this.client, config);
@@ -1483,8 +1499,11 @@ export class OpenCodeBackend implements AgentBackend {
     );
   }
 
-  public async close() {
+  public close() {
     // Attached OpenCode service belongs to its operator, not Stargate.
+    this.lifetime.abort();
+
+    return Promise.resolve();
   }
 
   public async executionMakers(

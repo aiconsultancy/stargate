@@ -573,6 +573,8 @@ const plugin = Plugin.define({
           report(context.signal, () =>
             projects.crewGit(input, gitStates, context.signal),
           ),
+        crewTurns: (input, context) =>
+          report(context.signal, async () => projects.crewTurns(input)),
         historyRoots: (_input, context) =>
           report(context.signal, () => projects.historyRoots(context.signal)),
         historyDescribe: (input, context) =>

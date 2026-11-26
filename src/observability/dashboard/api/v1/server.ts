@@ -127,15 +127,15 @@ function routeId(encoded: string) {
 type ApiServer = Awaited<ReturnType<typeof startApiServer>>;
 
 /**
- * An `agent` or `turn` parameter subscribes to officer turn activity and is
+ * An `agent`, `crew` or `turn` parameter subscribes to turn activity and is
  * validated first: a status to answer, or the subscriber's watch. Without
- * either, the stream is unchanged and ignores its query as before.
+ * any, the stream is unchanged and ignores its query as before.
  */
 function activityWatch(
   core: Pick<FleetCore, "activity">,
   query: URLSearchParams,
 ) {
-  if (!query.has("agent") && !query.has("turn")) {
+  if (!query.has("agent") && !query.has("crew") && !query.has("turn")) {
     return;
   }
 
@@ -167,11 +167,20 @@ function readDetail(
 ) {
   const agent = /^\/api\/v1\/agents\/([^/]+)\/activity$/.exec(url.pathname);
 
-  if (agent) {
-    const id = routeId(agent[1] ?? "");
+  const crew = /^\/api\/v1\/ships\/([^/]+)\/crew\/([^/]+)\/activity$/.exec(
+    url.pathname,
+  );
+
+  if (agent || crew) {
+    const id = routeId((agent ?? crew)?.[1] ?? "");
+    const member = crew && routeId(crew[2] ?? "");
 
     const read =
-      id === undefined ? undefined : core.activity?.read(id, url.searchParams);
+      id === undefined || member === undefined
+        ? undefined
+        : member === null
+          ? core.activity?.read(id, url.searchParams)
+          : core.activity?.readCrew?.(id, member, url.searchParams);
 
     return read?.status === 200
       ? start(() => Promise.resolve(read.body))

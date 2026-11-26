@@ -42,10 +42,59 @@
   include the whole family. The snapshot identifies details the SDK cannot
   provide.
 
+- No new flag: `/api/v1/ships/{id}/crew/{member}/activity` and
+  `/api/v1/events?crew=<id>/<member>` serve OpenCode crew members' worker
+  turns on the officer route's terms, unredacted, whenever `api` is
+  configured, for captains (a rear admiral answers 404). Each turn names
+  the crew task it answers when attribution is proven, or null. The gateway
+  feature `api.crewActivity`, on by default, reports them. The crew plugin
+  gains the read-only `crewTurns` RPC, which lists every configured member
+  with whether its current backend is collected; an older plugin reads as
+  not collected. A turn is one execution of the worker session: native
+  starts and settlements apply in their session's durable order, so a
+  replayed or late one changes nothing, and a start after a missed settle
+  ends the previous execution, including messages still waiting. Output
+  proven to answer a task before it is placed never appears under another
+  task; a message placed before its owner is proven stays where it joined,
+  and a message first seen after its execution settled joins it only when
+  its durable sequence falls between that execution's witnessed start and
+  settlement, never a missed settle's inferred end
+  ([residuals](docs/api.md#crew-activity)).
+  Placed frames are released at once, and a placed message is remembered
+  apart from the 64 waiting ones while its turn is running or retained, so
+  that its later output, a retry included, never opens another message.
+  Only messages no longer known count against a bound of 1,024 per worker
+  session, and their later output is dropped while that bound retains
+  them; a safety ceiling of 16,384 known messages forgets the oldest
+  and counts it. An unknown message's first frame always opens it. An
+  evicted turn is forgotten on any eviction path, and changes to a settled
+  turn are measured once per 150 ms batch, and before any turn begins or
+  ends; a child whose parent that drain evicts is admitted unlinked, as a
+  root with its family's requests. A watch scoped to the evicted root follows
+  children admitted unlinked and their descendants while it stays open.
+
 - Unmasked Fleet API crew text: none. By owner decision this behaviour change
   ships without a flag, an exception to the flag rule for large features.
 
 ### Changes
+
+- The crew plugin now refuses, at load and with a message naming both
+  counts, a team whose configured crew members times project contexts (the
+  default plus each project) exceed 50, also with no projects configured;
+  before, a single-project crew of more than 50 loaded and then failed its
+  history, Git and `crewTurns` reports. More than 8 additional projects is
+  now refused with its own message
+  ([docs](docs/crew-coordination.md#optional-additional-projects)). The
+  `crewTurns` report is bounded by the same limits: at most 50 members, 50
+  peer sessions and 50 × 17 tasks.
+
+- In Fleet API turn activity, an officer's settled family that a late change
+  takes over the eviction budget is now evicted at the end of the change's
+  150 ms batch, or sooner, rather than at once. Late changes are measured
+  once per batch, as for crew turns. A turn that begins or ends first has
+  the pending batch evicted against the turns as they were, so a late change
+  that takes one family over the budget no longer evicts an older one that
+  fits.
 
 - Attach Subspace chat uploads to admitted IRC requests through the addressed
   officer's existing signing proxy. This uses `subspaceAgents` and adds no flag.

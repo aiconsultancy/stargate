@@ -145,6 +145,12 @@ IDs and filenames to `<namespace>-captain-<ID>.md` or
 `<namespace>-crew-<ID>.md`, for example `galactica-crew-apollo.md` and
 `pegasus-crew-apollo.md`. Communications do not need these full native IDs.
 Names/instructions are non-secret text, not credentials. Unknown fields fail.
+The crew plugin accepts at most 50 member contexts: configured crew members
+times project contexts (the default plus each
+[additional project](../crew-coordination.md#optional-additional-projects)),
+so at most 50 crew members with no projects. A larger team does not load:
+the plugin stops with `Configured crew members times project contexts
+(51 × 1) exceed 50.`, naming its own counts.
 
 A captain's ID must match its name, normalized to lowercase with word
 separators as hyphens: Adama is `adama`. A crew member's `name` is what people

@@ -13,6 +13,7 @@ import {
   activityPageBytes,
   createActivityHub,
   readActivity,
+  settledBytes,
   subscribeActivity,
 } from "../src/observability/dashboard/api/v1/activity";
 import { createEventStreams } from "../src/observability/dashboard/api/v1/events";
@@ -891,6 +892,166 @@ test("a Claude child subscription follows only that child's events in sequence o
     ]);
   } finally {
     viewer.stop();
+  }
+});
+
+/** Each event's turn session and change type. */
+const sessionEvents = (events: V1AgentActivityEvent[]) => {
+  const sessions = new Map<string, string | undefined>();
+
+  for (const { change } of events) {
+    if (change.type !== "item") {
+      sessions.set(change.turn.id, change.turn.session?.id);
+    }
+  }
+
+  return events.map(({ turnId, change }) => [
+    sessions.get(turnId) ?? turnId,
+    change.type,
+  ]);
+};
+
+test("a root's scoped watch follows a child admitted unlinked after its eviction", async () => {
+  const hub = createActivityHub({ bytes: 1000 });
+  const recorder = hub.recorder("claude");
+  const parent = recorder.begin(undefined, "parent");
+  const parentId = snapshot(hub, "claude").turns[0]?.id ?? "";
+  const viewer = watch(hub, `agent=claude&turn=${parentId}`);
+
+  try {
+    parent.end("completed");
+    // The parent outgrows the budget; the batch window has not measured it.
+    parent.update("late", 1, () => text("x".repeat(5000)));
+    const child = parent.child?.("call", "child");
+    recorder.begin(undefined, "unrelated").end("completed");
+    child?.update("k", 2, () => text("child"));
+    child?.end("completed");
+    await flushed();
+
+    // Drained first, the parent goes and the child begins as its own root.
+    expect(snapshot(hub, "claude").turns[0]?.session).toEqual({
+      id: "child",
+      parent: null,
+    });
+    expect(sessionEvents(viewer.events())).toEqual([
+      ["parent", "turn-ended"],
+      ["parent", "item"],
+      ["child", "turn-started"],
+      ["child", "item"],
+      ["child", "turn-ended"],
+    ]);
+    expect(viewer.text()).not.toContain('"audience"');
+    // A new watch of the evicted parent answers as before.
+    expect(
+      subscribeActivity(
+        hub,
+        config,
+        new URLSearchParams(`agent=claude&turn=${parentId}`),
+      ).status,
+    ).toBe(404);
+  } finally {
+    viewer.stop();
+  }
+});
+
+test("a root's scoped watch follows nested children of an unlinked child", async () => {
+  const hub = createActivityHub({ bytes: 1000 });
+  const parent = hub.recorder("claude").begin(undefined, "parent");
+  const parentId = snapshot(hub, "claude").turns[0]?.id ?? "";
+  const viewer = watch(hub, `agent=claude&turn=${parentId}`);
+
+  try {
+    parent.end("completed");
+    parent.update("late", 1, () => text("x".repeat(5000)));
+    const child = parent.child?.("call", "child");
+    // Linked under the unlinked child, which is retained.
+    const linked = child?.child?.("call", "linked");
+    linked?.update("k", 2, () => text("linked"));
+    linked?.end("completed");
+    child?.end("completed");
+    // The child's family goes the same way: its own late child is unlinked.
+    child?.update("late", 3, () => text("y".repeat(5000)));
+    const unlinked = child?.child?.("call", "unlinked");
+    unlinked?.update("k", 4, () => text("unlinked"));
+    await flushed();
+
+    expect(snapshot(hub, "claude").turns.map(({ session }) => session)).toEqual(
+      [{ id: "unlinked", parent: null }],
+    );
+    expect(
+      sessionEvents(viewer.events()).filter(
+        ([session]) => session !== "parent",
+      ),
+    ).toEqual([
+      ["child", "turn-started"],
+      ["linked", "turn-started"],
+      ["linked", "item"],
+      ["linked", "turn-ended"],
+      ["child", "turn-ended"],
+      ["child", "item"],
+      ["unlinked", "turn-started"],
+      ["unlinked", "item"],
+    ]);
+  } finally {
+    viewer.stop();
+  }
+});
+
+test("a further split keeps live root watches but not a closed inherited watch", async () => {
+  let measured: Parameters<typeof settledBytes>[0] | undefined;
+
+  const hub = createActivityHub({
+    bytes: 1000,
+    measure(turn) {
+      measured = turn;
+
+      return settledBytes(turn);
+    },
+  });
+
+  const parent = hub.recorder("claude").begin(undefined, "parent");
+  const parentId = snapshot(hub, "claude").turns[0]?.id ?? "";
+  const ancestor = watch(hub, `agent=claude&turn=${parentId}`);
+  const closing = watch(hub, `agent=claude&turn=${parentId}`);
+
+  try {
+    const oversize = "x".repeat(5000);
+    parent.end("completed");
+    parent.update("late", 1, () => text(oversize));
+    const child = parent.child?.("call", "child");
+    const childId = snapshot(hub, "claude").turns[0]?.id ?? "";
+    const current = watch(hub, `agent=claude&turn=${childId}`);
+
+    try {
+      await flushed();
+      expect(sessionEvents(closing.events())).toContainEqual([
+        "child",
+        "turn-started",
+      ]);
+      closing.stop();
+      const received = closing.text();
+
+      child?.end("completed");
+      child?.update("late", 2, () => text(oversize));
+      child?.child?.("call", "grandchild").end("completed");
+      await flushed();
+
+      for (const viewer of [ancestor, current]) {
+        expect(sessionEvents(viewer.events()).slice(-2)).toEqual([
+          ["grandchild", "turn-started"],
+          ["grandchild", "turn-ended"],
+        ]);
+      }
+
+      expect(closing.text()).toBe(received);
+      expect(measured?.session).toEqual({ id: "grandchild", parent: null });
+      expect(measured?.audience?.size).toBe(2);
+    } finally {
+      current.stop();
+    }
+  } finally {
+    closing.stop();
+    ancestor.stop();
   }
 });
 

@@ -6,6 +6,14 @@ export const HISTORY_TEXT = 20_000;
 export const HISTORY_PARTS = 100;
 
 /**
+ * A crew configuration's member contexts: its configured members times its
+ * project contexts (the default plus each configured project). Checked when
+ * the configuration loads, since each context is a row of a bounded page:
+ * crew history roots, crew Git state and the `crewTurns` report.
+ */
+export const MAX_CREW_CONTEXTS = HISTORY_PAGE;
+
+/**
  * Struct that rejects unknown keys without caller parse options. OpenCode RPC
  * decodes input and encodes output with default options, which strip keys.
  * This checks the raw object at its own node on both sides, so nested objects
