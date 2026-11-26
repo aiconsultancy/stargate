@@ -1787,6 +1787,7 @@
         "src/backends/opencode/reviews.ts",
         "src/backends/claude/config.ts",
         "src/backends/claude/activity.ts",
+        "src/backends/claude/activity-thread.ts",
         "src/backends/claude/executable.ts",
         "src/backends/claude/turn.ts",
         "src/backends/codex/config.ts",
