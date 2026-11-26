@@ -2164,12 +2164,14 @@ test("past the known messages' ceiling, the oldest is counted and opens again", 
   }
 
   await until(() => text(turns[0]).endsWith(ms.at(-1) ?? ""), 15_000);
-  expect(collector.load.forgotten).toBe(1);
+  const before = collector.load.forgotten;
+
   // M0 is no longer known: its later output opens rather than drops.
   delta("ses_mario", "m0", "-again");
   await until(() => text(turns[0]).includes("again"));
 
   expect(turns).toHaveLength(1);
+  expect(before).toBe(1);
   // Known again, it puts the next oldest past the ceiling.
   expect(collector.load.forgotten).toBe(2);
 });
