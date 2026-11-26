@@ -95,6 +95,8 @@ export const activityQueueDefaults = {
 
 export class ActivityRecoveryQueues<E extends Event> {
   private readonly queues = new Map<string, PendingActivity<E>>();
+  // Defaults allow 512 discarded ranges per scope, separate from call evidence.
+  // One collector's 50 crew contexts can hold up to 25,600 such ranges.
   private readonly discardedProofs = new Map<
     ProofScope,
     Map<bigint, CallRange>

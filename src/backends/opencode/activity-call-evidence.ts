@@ -210,7 +210,16 @@ class ScopeEvidence {
   }
 }
 
-/** Exact naming follows its log; bounded ambiguity follows the native incarnation. */
+/**
+ * Exact naming follows its log (128 call records per live log at the default).
+ * The number of evidence-bearing live logs is not explicitly capped here.
+ * Ambiguity follows the incarnation. At the default, each scope holds at most:
+ * - 512 × 128 unnamed orders, plus 512 exact and 512 hashed unnamed ranges;
+ * - 512 × (128 named orders + 1 dropped range), plus 1 saturation range.
+ * That's 132,609 evidence records per scope, or 6,630,450 across the 50
+ * contexts of one crew collector. An officer collector uses one unscoped index.
+ * These counts exclude map keys and the separate candidate/replay queues.
+ */
 export class ActivityCallEvidence {
   // Active scopes only. The crew collector fences each retired incarnation.
   private readonly incarnations = new Map<ActivityIncarnation, ScopeEvidence>();
