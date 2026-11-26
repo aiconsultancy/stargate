@@ -11,8 +11,10 @@ import {
 import {
   type CrewStatusTask,
   type CrewTaskTextMode,
+  codePointHead,
   crewTaskTextLimit,
   crewTaskTextLimits,
+  truncateCrewTaskText,
 } from "../../../shared/crew-status";
 
 type Activity = Omit<CrewStatusTask, "id" | "status">;
@@ -23,18 +25,6 @@ type Activity = Omit<CrewStatusTask, "id" | "status">;
  */
 type StoredActivity = Activity & { maskedProgress: string | null };
 
-/**
- * The first `limit` code points. Only twice that many UTF-16 units are
- * scanned, and the cut never splits a surrogate pair.
- */
-function head(text: string, limit: number) {
-  return text.length <= limit
-    ? text
-    : Array.from(text.slice(0, 2 * limit))
-        .slice(0, limit)
-        .join("");
-}
-
 /** The last `limit` code points, scanning at most twice that many units. */
 function tail(text: string, limit: number) {
   return text.length <= limit
@@ -42,11 +32,6 @@ function tail(text: string, limit: number) {
     : Array.from(text.slice(-2 * limit))
         .slice(-limit)
         .join("");
-}
-
-/** The start of a summary, cut to the stored task text limit. */
-export function activityText(text: string) {
-  return head(text, crewTaskTextLimit);
 }
 
 /**
@@ -97,7 +82,7 @@ function unredactedActivity({
 }: StoredActivity): Activity {
   return {
     ...activity,
-    summary: head(activity.summary, crewTaskTextLimits.summary),
+    summary: codePointHead(activity.summary, crewTaskTextLimits.summary),
     progress: tail(activity.progress, crewTaskTextLimits.progress),
   };
 }
@@ -156,7 +141,9 @@ export class MemberActivityStore {
         task.id,
         task.crewID,
         report ? "report" : "assignment",
-        report ? "Prepare crew activity report" : activityText(assignment),
+        report
+          ? "Prepare crew activity report"
+          : truncateCrewTaskText(assignment),
         task.status,
         now,
         now,
@@ -258,7 +245,7 @@ export class MemberActivityStore {
         updatedAt: null,
         finishedAt: null,
       }),
-      phase: head(
+      phase: codePointHead(
         phase,
         mode === "full" ? crewTaskTextLimit : crewTaskTextLimits.phase,
       ),

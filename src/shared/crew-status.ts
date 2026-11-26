@@ -4,10 +4,14 @@ import { exactStruct } from "./session-history";
 /** Raw dispatch and stored task text bound, in code points. */
 export const crewTaskTextLimit = 64_000;
 
-/** UTF-16 offset of the code-point cap, without scanning beyond it. */
-function crewTaskTextEnd(text: string) {
-  if (text.length <= crewTaskTextLimit) {
-    return text.length;
+/** Take the first `limit` code points without splitting a surrogate pair. */
+export function codePointHead(text: string, limit: number) {
+  if (text.length <= limit) {
+    return text;
+  }
+
+  if (limit <= 0) {
+    return "";
   }
 
   let end = 0;
@@ -17,20 +21,20 @@ function crewTaskTextEnd(text: string) {
     end += point.length;
     points += 1;
 
-    if (points === crewTaskTextLimit) {
+    if (points === limit) {
       break;
     }
   }
 
-  return end;
+  return text.slice(0, end);
 }
 
 export function truncateCrewTaskText(text: string) {
-  return text.slice(0, crewTaskTextEnd(text));
+  return codePointHead(text, crewTaskTextLimit);
 }
 
 export function isCrewTaskTextWithinLimit(text: string) {
-  return crewTaskTextEnd(text) === text.length;
+  return codePointHead(text, crewTaskTextLimit).length === text.length;
 }
 
 /** The ordinary display bounds; the unredacted view counts code points. */
