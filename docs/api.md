@@ -457,14 +457,15 @@ untracked nested repository, with or without commits, is listed as a
 `submodule`: `added` and `untracked`, with zero line counts, no patch and no
 content. It is never indexed and Git never runs inside it, on every Git
 version. An untracked path that Git will not index, such as a file under
-`.GIT/`, is listed the same way, without `kind`.
+`.GIT/`, or an untracked file that the captain's user may not read, such as
+one with mode 000, is listed the same way, without `kind` or `size`.
 
 `path` is decoded as UTF-8, with U+FFFD for each byte that is not valid
 UTF-8. Such a file is still read, sized and fingerprinted by the bytes of
 its name. Two names that decode alike are listed as two entries, but the
 file route's `path` reaches only one of them: an entry with a Git diff
-before an untracked path outside Git's index (a nested repository or a
-file Git refused), then the first in byte order. So with a nested
+before an untracked path outside Git's index (a nested repository, a
+file Git refused or a file it could not read), then the first in byte order. So with a nested
 repository `n\xE8` and a file `n\xE9`, a request for `n\uFFFD` returns the
 file.
 

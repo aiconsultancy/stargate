@@ -1,6 +1,7 @@
 import { afterAll, expect, spyOn, test } from "bun:test";
 import {
   appendFile,
+  chmod,
   mkdir,
   mkdtemp,
   open,
@@ -638,6 +639,77 @@ test("an untracked path Git will not index is listed without bytes; the rest kee
 
   expect(bytesOf(await content(directory, "a*")).toString()).toBe("star\n");
 });
+
+// Root reads a file of any mode.
+test.skipIf(process.getuid?.() === 0)(
+  "an untracked file Git cannot read is listed without bytes; the rest keep patches",
+  async () => {
+    const directory = await checkout();
+    await writeFile(join(directory, "locked"), "secret\n", { mode: 0o000 });
+    await writeFile(join(directory, "other"), "ok\n");
+    await symlink("locked", join(directory, "link"));
+
+    for (const mode of ["branch", "working"] as const) {
+      const result = await listed(directory, { mode });
+
+      expect(result.files).toEqual([
+        {
+          path: "link",
+          previousPath: null,
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          untracked: true,
+          kind: "symlink",
+          size: 6,
+          patch: "@@ -0,0 +1 @@\n+locked\n\\ No newline at end of file\n",
+        },
+        {
+          path: "locked",
+          previousPath: null,
+          status: "added",
+          additions: 0,
+          deletions: 0,
+          untracked: true,
+          patch: null,
+        },
+        {
+          path: "other",
+          previousPath: null,
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          untracked: true,
+          size: 3,
+          patch: "@@ -0,0 +1 @@\n+ok\n",
+        },
+      ]);
+
+      const rest = { mode, at: result.fingerprint };
+
+      expect(
+        await readDiff(
+          directory,
+          input({ kind: "patch", path: "locked", offset: 0 }, rest),
+          signal,
+        ),
+      ).toMatchObject({
+        kind: "patch",
+        file: { path: "locked", patch: null, untracked: true },
+      });
+      expect((await content(directory, "locked", "new", 0, rest)).kind).toBe(
+        "absent",
+      );
+    }
+
+    // Readable again, it has a patch like any other file.
+    await chmod(join(directory, "locked"), 0o644);
+    expect((await listed(directory)).files[1]).toMatchObject({
+      path: "locked",
+      patch: "@@ -0,0 +1 @@\n+secret\n",
+    });
+  },
+);
 
 test("binary and empty files answer with bytes; each side exists only where the file does", async () => {
   const directory = await checkout({ "old.bin": "\0old" });

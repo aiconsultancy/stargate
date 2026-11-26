@@ -829,6 +829,37 @@ export const worktreeSize = (root: string, path: Buffer) =>
   );
 
 /**
+ * False for a worktree file this user may not open, which Git could not
+ * read either; true for anything else, never through a linked directory.
+ */
+export async function openable(root: string, path: Buffer) {
+  const denied = await inWorktree(root, path, async (target) => {
+    if (!(await lstat(target).catch(absentPath))?.isFile()) {
+      return false;
+    }
+
+    const file = await open(
+      target,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    ).catch((error: unknown) => {
+      if (fileError(error) === "EACCES") {
+        return null;
+      }
+
+      absentPath(error);
+
+      return;
+    });
+
+    await file?.close();
+
+    return file === null;
+  });
+
+  return denied !== true;
+}
+
+/**
  * A worktree file's bytes, or a symbolic link's own text, never through a
  * linked directory; the opened file's real path is checked as well.
  */

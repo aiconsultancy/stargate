@@ -30,6 +30,7 @@ import {
   type IsolatedCheckout,
   type IsolatedStream,
   WorktreeChanged,
+  openable,
   readWorktree,
   worktreeSize,
 } from "./git-status";
@@ -266,12 +267,39 @@ class IntentFailed extends Error {
   }
 }
 
+/** Untracked files Git can read, in batches like the fingerprint's. */
+async function readable(directory: string, untracked: Snapshot["untracked"]) {
+  const files = [...untracked].flatMap(([bytes, { nested }]) =>
+    nested ? [] : [bytes],
+  );
+
+  const kept = new Set<string>();
+
+  for (let start = 0; start < files.length; start += 64) {
+    const batch = files.slice(start, start + 64);
+
+    const open = await Promise.all(
+      batch.map((bytes) => openable(directory, Buffer.from(bytes, "latin1"))),
+    );
+
+    for (const [index, bytes] of batch.entries()) {
+      if (open[index]) {
+        kept.add(bytes);
+      }
+    }
+  }
+
+  return kept;
+}
+
 /**
  * Index a copy of the checkout's index with untracked files as intent-to-add.
  * A nested repository never reaches Git: some versions index it as a gitlink
- * that `git diff` then cannot read, and Git never runs inside it.
+ * that `git diff` then cannot read, and Git never runs inside it. Nor does
+ * a file this user may not open, whose read would fail the whole diff.
  */
 async function intentIndex(
+  directory: string,
   checkout: IsolatedCheckout,
   stream: IsolatedStream,
   untracked: Snapshot["untracked"],
@@ -317,9 +345,7 @@ async function intentIndex(
     GIT_ALTERNATE_OBJECT_DIRECTORIES: checkout.objects,
   };
 
-  const files = new Set(
-    [...untracked].flatMap(([bytes, { nested }]) => (nested ? [] : [bytes])),
-  );
+  const files = await readable(directory, untracked);
 
   const unindexed = (indexed: Set<string>) => ({
     env,
@@ -398,9 +424,9 @@ async function intentIndex(
 }
 
 /**
- * Untracked paths outside Git's index: nested repositories, and files Git
- * refused. Each is listed all the same, with neither patch nor content:
- * nothing status shows is left out (SUB-70).
+ * Untracked paths outside Git's index: nested repositories, files Git
+ * refused and files it could not read. Each is listed all the same, with
+ * neither patch nor content: nothing status shows is left out (SUB-70).
  */
 function refused(
   untracked: Snapshot["untracked"],
@@ -485,7 +511,7 @@ async function diffPass<T>(
     const old = mode === "working" ? (head ?? empty) : (base?.commit ?? empty);
 
     const { env, unindexed } = worktree
-      ? await intentIndex(checkout, stream, state.untracked)
+      ? await intentIndex(directory, checkout, stream, state.untracked)
       : { env: {}, unindexed: [] };
 
     // Git's entries, then the untracked paths outside its index.
