@@ -58,10 +58,43 @@ class ScopeEvidence {
   private readonly overflow = new Map<bigint, Range>();
   private readonly named = new Map<string, Map<string, NamedCalls>>();
   private readonly namedCapacity = new Map<string, NamedCapacity>();
+  private readonly writers = new Map<string, number>();
   private readonly capacity: number;
 
   public constructor(private readonly callsPerLog: number) {
     this.capacity = Math.max(1, callsPerLog * 4);
+  }
+
+  public retainWriter(session: string, log: TurnActivityLog) {
+    if (log.retained?.() === false) {
+      return;
+    }
+
+    this.writers.set(session, (this.writers.get(session) ?? 0) + 1);
+    const index = new WeakRef(this);
+    log.onEvicted?.(() => index.deref()?.releaseWriter(session));
+  }
+
+  private releaseWriter(session: string) {
+    const remaining = (this.writers.get(session) ?? 1) - 1;
+
+    if (remaining > 0) {
+      this.writers.set(session, remaining);
+    } else {
+      this.writers.delete(session);
+      this.releaseCapacity(session);
+    }
+  }
+
+  private releaseCapacity(session: string) {
+    const capacity = this.namedCapacity.get(session);
+
+    if (
+      capacity?.count === 0 &&
+      (!capacity.saturated || !this.writers.has(session))
+    ) {
+      this.namedCapacity.delete(session);
+    }
   }
 
   private bucket(session: string) {
@@ -189,10 +222,7 @@ class ScopeEvidence {
 
         if (capacity) {
           capacity.count -= 1;
-
-          if (capacity.count === 0 && !capacity.saturated) {
-            this.namedCapacity.delete(parent);
-          }
+          this.releaseCapacity(parent);
         }
       }
     }
@@ -243,8 +273,9 @@ class ScopeEvidence {
  * to 512 × 128 unnamed orders, plus 512 exact and 512 hashed unnamed ranges.
  * Each evidence-bearing native parent within that scope holds up to 512 ×
  * (128 named orders + 1 dropped range), plus 1 saturation range. The number
- * of native parents is not capped by this index. Empty, unsaturated parent
- * entries are released; fencing or reconnect releases the scope.
+ * of native parents is not capped by this index. A parent without any exact
+ * names keeps its saturation range only while it has a retained writer.
+ * Fencing or reconnect releases the scope.
  * These counts exclude map keys and the separate candidate/replay queues.
  */
 export class ActivityCallEvidence {
@@ -312,13 +343,20 @@ export class ActivityCallEvidence {
   }
 
   private owner(index: ScopeEvidence, log: TurnActivityLog, session: string) {
-    const owned = index.owners.get(log) ?? {
+    const existing = index.owners.get(log);
+
+    if (existing) {
+      return existing;
+    }
+
+    const owned = {
       session,
       calls: new Map<string, Call>(),
       fallback: new Map<string, Call | false>(),
     };
 
     index.owners.set(log, owned);
+    index.retainWriter(session, log);
 
     return owned;
   }
