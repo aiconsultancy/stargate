@@ -302,6 +302,7 @@ export class OpenCodeActivityFamilies {
   public fence(session: string, scope: ActivityIncarnation) {
     scope.active = false;
     this.calls.fence(scope);
+    this.queue.fence(scope);
     this.roots.delete(session);
     this.peers.delete(session);
 
@@ -483,6 +484,7 @@ export class OpenCodeActivityFamilies {
       log,
       callId,
       order: callOrder,
+      ...(scope && { scope }),
     });
     this.queue.schedule(id);
 
@@ -505,9 +507,15 @@ export class OpenCodeActivityFamilies {
 
     const { first } = segment;
 
+    const inferred =
+      !this.executions.get(id)?.admitted && !queued.advanced
+        ? this.inferredOwner(ancestry, first.order)
+        : undefined;
+
     const naming = this.queue.naming(
       queued,
       ({ session, log }) => session === parent && !this.fenced(log),
+      inferred && this.lineage.get(inferred),
     );
 
     const proof = naming.first;
@@ -522,14 +530,8 @@ export class OpenCodeActivityFamilies {
 
     const ambiguous = naming.ambiguous || competing;
 
-    const owner =
-      proof?.log ??
-      (!this.executions.get(id)?.admitted && !queued.advanced
-        ? this.inferredOwner(ancestry, first.order)
-        : undefined);
-
     return {
-      owner,
+      owner: proof?.log ?? inferred,
       ambiguous,
       detached: naming.detached || competing,
       callId: ambiguous ? null : (proof?.callId ?? null),

@@ -382,6 +382,43 @@ test("an expired naming proof still makes an overlapping relaunch ambiguous", as
   f.stop.abort();
 });
 
+test("discarded relaunch proof cannot poison the same child after its peer is fenced", async () => {
+  const f = fixture();
+
+  try {
+    const scope = { active: true };
+    const old = f.root(scope);
+    f.parents.set(child, main);
+    f.create(child, main);
+    f.start(child);
+    f.end(child);
+    f.call(old, "expired");
+    f.names(old, "expired", child);
+    f.settleRoot(old);
+    await Promise.resolve();
+
+    f.advance(2001);
+    // Force the expired hint into discarded overflow before the fence.
+    f.emit("session.created", "ses_unrelated");
+    f.families.fence(main, scope);
+
+    const next = f.root({ active: true });
+    f.call(next, "fresh");
+    f.names(next, "fresh", child);
+    f.start(child);
+    f.ended(child, "reused transcript", "new");
+    await Promise.resolve();
+
+    const [, , parent, result] = f.turns();
+    expect(result).toMatchObject({
+      session: { id: child, parent: { turnId: parent?.id, callId: "fresh" } },
+      items: [{ text: "reused transcript" }],
+    });
+  } finally {
+    f.stop.abort();
+  }
+});
+
 test("name saturation does not charge standalone root quota for unattributed children", () => {
   const ids = Array.from({ length: 17 }, (_, index) => `ses_result_${index}`);
   const buckets = new Set(ids.map((id) => Bun.hash(id, 0n) % 512n));

@@ -1,5 +1,6 @@
 import type { SessionLogItem } from "@opencode/client";
 import type { TurnActivityLog } from "../backend";
+import type { ActivityIncarnation } from "./activity-call-evidence";
 import {
   ActivityLifecycleBuffer,
   ActivityReplayGap,
@@ -14,6 +15,8 @@ type Event = { type: string; data: { sessionID: string } };
 const startType = "session.execution.started";
 
 type CallRange = { first: number; last: number };
+
+type ProofScope = ActivityIncarnation | undefined;
 
 function span(current: CallRange | undefined, next: CallRange): CallRange {
   return {
@@ -34,6 +37,7 @@ export type NamingProof = {
   log: TurnActivityLog;
   callId: string;
   order: number;
+  scope?: ActivityIncarnation;
 };
 
 type Segment<E extends Event> = {
@@ -53,6 +57,7 @@ type Segment<E extends Event> = {
   bytes: number;
   proofs: NamingProof[];
   proofOverflow?: true;
+  droppedProofScopes?: Set<ProofScope>;
 };
 
 export type PendingActivity<E extends Event> = {
@@ -63,7 +68,7 @@ export type PendingActivity<E extends Event> = {
   expires: number;
   needsStart: boolean;
   provisional: { proof: NamingProof; expires: number }[];
-  droppedProofs?: CallRange;
+  droppedProofs?: Map<ProofScope, CallRange>;
   slots: number;
   advanced?: true;
   draining?: true;
@@ -90,7 +95,10 @@ export const activityQueueDefaults = {
 
 export class ActivityRecoveryQueues<E extends Event> {
   private readonly queues = new Map<string, PendingActivity<E>>();
-  private readonly discardedProofs = new Map<bigint, CallRange>();
+  private readonly discardedProofs = new Map<
+    ProofScope,
+    Map<bigint, CallRange>
+  >();
   private activeReads = 0;
   private readonly ready = new Set<string>();
   private bytes = 0;
@@ -179,7 +187,7 @@ export class ActivityRecoveryQueues<E extends Event> {
         const evicted = pending.provisional.shift();
 
         if (evicted) {
-          this.recordDrop(pending, evicted.proof.order);
+          this.recordDrop(pending, evicted.proof);
         }
       }
 
@@ -191,11 +199,19 @@ export class ActivityRecoveryQueues<E extends Event> {
     }
   }
 
-  private recordDrop(pending: PendingActivity<E>, order: number) {
-    pending.droppedProofs = span(pending.droppedProofs, {
-      first: order,
-      last: order,
-    });
+  private recordDrop(
+    pending: PendingActivity<E>,
+    { scope, order }: NamingProof,
+  ) {
+    pending.droppedProofs ??= new Map();
+    const dropped = pending.droppedProofs;
+    dropped.set(
+      scope,
+      span(dropped.get(scope), {
+        first: order,
+        last: order,
+      }),
+    );
   }
 
   private expireProofs(pending: PendingActivity<E>, now: number) {
@@ -204,7 +220,7 @@ export class ActivityRecoveryQueues<E extends Event> {
         return true;
       }
 
-      this.recordDrop(pending, proof.order);
+      this.recordDrop(pending, proof);
 
       return false;
     });
@@ -222,11 +238,16 @@ export class ActivityRecoveryQueues<E extends Event> {
   public naming(
     pending: PendingActivity<E>,
     accepts: (proof: NamingProof) => boolean,
+    inferredScope?: ActivityIncarnation,
   ) {
     const segment = pending.segments[0];
     const proofs = segment?.proofs.filter(accepts) ?? [];
     const first = proofs[0];
-    const overflow = segment?.proofOverflow === true;
+    const scope = first ? first.scope : inferredScope;
+
+    const overflow =
+      segment?.proofOverflow === true ||
+      segment?.droppedProofScopes?.has(scope) === true;
 
     return {
       first,
@@ -251,15 +272,17 @@ export class ActivityRecoveryQueues<E extends Event> {
     if (pending) {
       if (keepAmbiguity) {
         for (const { proof } of pending.provisional) {
-          this.recordDrop(pending, proof.order);
+          this.recordDrop(pending, proof);
         }
 
-        if (pending.droppedProofs) {
-          const key = this.proofBucket(id);
-          this.discardedProofs.set(
-            key,
-            span(this.discardedProofs.get(key), pending.droppedProofs),
-          );
+        const key = this.proofBucket(id);
+
+        for (const [scope, range] of pending.droppedProofs ?? []) {
+          const buckets =
+            this.discardedProofs.get(scope) ?? new Map<bigint, CallRange>();
+
+          buckets.set(key, span(buckets.get(key), range));
+          this.discardedProofs.set(scope, buckets);
         }
       }
 
@@ -288,6 +311,18 @@ export class ActivityRecoveryQueues<E extends Event> {
 
   public resetDiscardedProofs() {
     this.discardedProofs.clear();
+  }
+
+  public fence(scope: ActivityIncarnation) {
+    this.discardedProofs.delete(scope);
+
+    for (const pending of this.queues.values()) {
+      pending.droppedProofs?.delete(scope);
+
+      for (const segment of pending.segments) {
+        segment.droppedProofScopes?.delete(scope);
+      }
+    }
   }
 
   private proofBucket(id: string) {
@@ -343,6 +378,34 @@ export class ActivityRecoveryQueues<E extends Event> {
     }
 
     return pending.lifecycle.retain();
+  }
+
+  private bindDrops(
+    id: string,
+    pending: PendingActivity<E>,
+    segment: Segment<E>,
+  ) {
+    const { floor, first } = segment;
+    const bucket = this.proofBucket(id);
+
+    const mark = (scope: ProofScope, range: CallRange | undefined) => {
+      if (range && floor < range.last && range.first <= first.order) {
+        (segment.droppedProofScopes ??= new Set()).add(scope);
+      }
+    };
+
+    // Dropping a provisional hint may remove a competitor, not prove a match.
+    for (const [scope, range] of pending.droppedProofs ?? []) {
+      mark(scope, range);
+
+      if (range.last <= first.order) {
+        pending.droppedProofs?.delete(scope);
+      }
+    }
+
+    for (const [scope, buckets] of this.discardedProofs) {
+      mark(scope, buckets.get(bucket));
+    }
   }
 
   public enqueue(
@@ -403,20 +466,7 @@ export class ActivityRecoveryQueues<E extends Event> {
 
       if (start) {
         this.expireProofs(pending, this.now());
-        const dropped = pending.droppedProofs;
-
-        // Dropping a provisional hint may remove a competitor, not prove a match.
-        if (
-          [dropped, this.discardedProofs.get(this.proofBucket(id))].some(
-            (range) => range && floor < range.last && range.first <= order,
-          )
-        ) {
-          segment.proofOverflow = true;
-        }
-
-        if (dropped && dropped.last <= order) {
-          delete pending.droppedProofs;
-        }
+        this.bindDrops(id, pending, segment);
 
         for (const { proof } of pending.provisional) {
           if (floor < proof.order && proof.order <= order) {

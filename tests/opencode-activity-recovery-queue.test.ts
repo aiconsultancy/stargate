@@ -43,7 +43,7 @@ test("the provisional count cap evicts old hints without proving the surviving c
     at: 0,
     order: 4,
   });
-  expect(pending.segments[0]).toMatchObject({ proofOverflow: true });
+  expect(queue.naming(pending, () => true)).toMatchObject({ ambiguous: true });
   queue.close();
 });
 
