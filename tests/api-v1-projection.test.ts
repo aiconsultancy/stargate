@@ -1606,6 +1606,8 @@ describe("Fleet API projection", () => {
         expect(first?.member.contexts[0]?.current?.summary).toBe(expected);
         expect(second?.member.contexts[0]?.current?.summary).toBe(expected);
         expect(f.asked).toEqual(["full", status, status]);
+        expect(first).toHaveProperty("taskText", "preview");
+        expect(second).toHaveProperty("taskText", "preview");
       } finally {
         await f.stop();
       }
