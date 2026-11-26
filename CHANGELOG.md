@@ -186,8 +186,10 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   Only the operator listener asks for `unredacted` or `full`. Officers have
   their own crew sample, so the fleet status RPC is read once per backend
   per poll while one listener has clients and twice while both do. The two
-  reads never queue behind each other, and neither listener's sample falls
-  back to the other's.
+  lanes never queue behind each other. A backend has at most two fleet status
+  RPCs in flight in steady state and four at worst, when each lane has one
+  current probe and one abandoned read still draining. Neither listener's
+  sample falls back to the other's.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`

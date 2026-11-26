@@ -50,8 +50,10 @@ type FleetStatusProbe = {
 };
 
 /**
- * Ordinary or task-text fleet status reads: their own read slot, probe and
- * drain bound, failure count and backoff.
+ * Ordinary or task-text fleet status reads: one current probe plus at most
+ * one abandoned, abort-ignoring read still draining. A further timeout starts
+ * nothing in this lane until its abandoned read drains. Failure counts and
+ * backoff are also per lane.
  */
 type FleetStatusLane = {
   read: ReturnType<typeof createReadSlot<FleetCrewStatusRead>>;
@@ -199,8 +201,9 @@ export class OpenCodeCrewStatus {
   /**
    * `taskText` asks for unredacted task text. Only an unsupported RPC or
    * input field allows callers to show ordinary status instead. Ordinary
-   * and task-text reads each run in their own lane: with both listeners a
-   * backend has one probe per lane, and neither waits behind the other.
+   * and task-text reads have no shared limiter: neither lane waits behind
+   * the other. A backend has at most two RPCs in flight in steady state and
+   * four at worst, when each lane has a current probe and a draining read.
    */
   public async fleetCrewStatus(
     input: FleetCrewStatusInput,

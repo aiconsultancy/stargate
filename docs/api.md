@@ -216,12 +216,13 @@ instead, in every route and event, from a crew sample of their own: the
 fleet overview and the `ship` event read one fleet status sample per backend
 for the operator listener and another for officers. While only one listener
 has clients, each poll reads fleet status once per backend; while both do,
-twice. The two reads never queue behind each other: a slow or draining read
-for one listener never delays the other's or leaves it unavailable. An
-officer's sample never falls back to the operator's, and the operator's never
-to an officer's, even when the other is fresher. Git
-branch and base names, subagent titles and pull request titles are the same
-on both.
+twice. The two lanes never queue behind each other. Each allows one current
+probe plus at most one abandoned read that ignores abort and is still
+draining: two RPCs in flight per backend in steady state, four at worst.
+If another probe times out while its lane's abandoned read is still draining,
+that lane starts nothing until the abandoned read drains. Neither listener's
+sample falls back to the other's, even when the other is fresher. Git branch
+and base names, subagent titles and pull request titles are the same on both.
 
 The store makes the final storage cut for progress; Pi members buffer up to
 twice that limit first. For over-limit progress, the store saves the raw
