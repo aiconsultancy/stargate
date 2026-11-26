@@ -60,9 +60,11 @@
   its durable sequence falls between that execution's witnessed start and
   settlement, never a missed settle's inferred end
   ([residuals](docs/api.md#crew-activity)).
-  Placed frames are released at once, an evicted turn is forgotten on any
-  eviction path, and changes to a settled turn are measured once per 150 ms
-  batch.
+  Placed frames are released at once, and a placed message is remembered
+  apart from the 64 waiting ones, up to 1,024 per worker session, so that
+  its later output never opens another message. An evicted turn is
+  forgotten on any eviction path, and changes to a settled turn are
+  measured once per 150 ms batch.
 
 - Unmasked Fleet API crew text: none. By owner decision this behaviour change
   ships without a flag, an exception to the flag rule for large features.

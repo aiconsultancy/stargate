@@ -1921,3 +1921,67 @@ test("an unsequenced start forgets the previous start's bound", async () => {
   expect(text(turns[1])).toBe("late-a");
   expect(turns[1]?.ended).toBeUndefined();
 });
+
+test("a placed message stays known past the waiting messages' bound", async () => {
+  const bs = Array.from({ length: 64 }, (_, i) => `b${i}`);
+
+  const { turns, stream, delta, text } = ordered(
+    { a0: "in-1", ...Object.fromEntries(bs.map((id) => [id, "in-2"])) },
+    [],
+  );
+
+  await until(() => stream.subscribers() === 1);
+  delta("ses_mario", "a0", "a");
+  await until(() => turns.length === 1);
+  // Unproven, it joins A's turn.
+  delta("ses_mario", "a1", "prefix");
+  await until(() => text(turns[0]).includes("prefix"));
+
+  for (const id of bs) {
+    delta("ses_mario", id, id);
+  }
+
+  await until(() => text(turns[1]).split("|").length === bs.length);
+  // Its suffix continues the message where it was placed.
+  delta("ses_mario", "a1", "-suffix");
+  await until(() => text(turns[0]).includes("suffix"));
+  await wait(50);
+
+  expect(turns).toHaveLength(2);
+  expect(text(turns[0])).toBe("a|prefix-suffix");
+  expect(text(turns[1])).toBe(bs.join("|"));
+});
+
+test("past the placed messages' bound, only a native opening frame opens one", async () => {
+  const count = 1025;
+  const { turns, stream, delta, text } = ordered({ m0: "in-1" }, []);
+
+  await until(() => stream.subscribers() === 1);
+
+  for (let index = 0; index < count; index++) {
+    delta("ses_mario", `m${index}`, `m${index}`);
+  }
+
+  await until(() => text(turns[0]).split("|").length === count);
+  // The bound forgot m0 while its execution runs: a delta could be its.
+  delta("ses_mario", "m0", "-forgotten");
+  delta("ses_mario", "x1", "unproven");
+  // A native step start proves a new message.
+  stream.emit(
+    "session.step.started",
+    {
+      sessionID: "ses_mario",
+      assistantMessageID: "x2",
+      agent: "build",
+      model: { providerID: "p", id: "m" },
+      started: 0,
+    },
+    { durable: { aggregateID: "ses_mario", seq: 1, version: 1 } },
+  );
+  delta("ses_mario", "x2", "new");
+  await until(() => text(turns[0]).endsWith("new"));
+  await wait(50);
+
+  expect(turns).toHaveLength(1);
+  expect(text(turns[0]).match(/forgotten|unproven/g)).toBeNull();
+});

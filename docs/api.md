@@ -633,6 +633,13 @@ it opens is attributed once its owner is proven; a turn it joins keeps its
 own task. Once placed, its frames are released, even while its owner is
 still being resolved. A crew turn evicted by the global limits, on any
 path, is forgotten at once, and later output of its messages is dropped.
+At most 64 messages per worker session wait for placement; past that, the
+oldest is placed at once. A placed message is remembered apart from them,
+up to 1,024 per worker session, so that its later output continues in its
+turn while its execution runs or its turn is retained. If that bound
+forgets such a message, then for the rest of the execution an unknown
+message opens only from its native step start; output first seen otherwise
+is dropped, since it may continue a forgotten message.
 
 Each crew turn adds:
 

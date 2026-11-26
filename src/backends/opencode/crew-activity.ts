@@ -432,17 +432,19 @@ export class CrewActivityCollector {
 
     for (const [id, peer] of next) {
       if (!this.sessions.has(id) && !this.fenced.has(id)) {
-        this.sessions.set(id, {
+        const session: Session = {
           id,
           peer,
           open: new Set(),
-          messages: new SessionMessages(),
+          messages: new SessionMessages(() => session.execution),
           execution: 0,
           boundary: -1,
           history: new ExecutionHistory(),
           arrivals: 0,
           dropped: false,
-        });
+        };
+
+        this.sessions.set(id, session);
       }
     }
   }
@@ -563,8 +565,8 @@ export class CrewActivityCollector {
       return;
     }
 
-    // Its turn was evicted.
-    if (entry) {
+    // Its turn was evicted, or a bound forgot it with no proof it is new.
+    if (entry || !session.messages.admits(event.type)) {
       return;
     }
 
