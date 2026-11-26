@@ -557,6 +557,44 @@ test("an untracked nested repository is a submodule with no bytes, never in Git'
   }
 });
 
+test("a registered submodule's dirty worktree is never read, in any mode", async () => {
+  const library = await checkout({ lib: "lib\n" });
+  const directory = await checkout();
+  const sub = join(directory, "sub");
+  await git(
+    directory,
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    "--quiet",
+    library,
+    "sub",
+  );
+  await git(directory, "commit", "--quiet", "-m", "sub");
+  const commit = await git(sub, "rev-parse", "HEAD");
+  // At the same commit, with a tracked edit and an untracked file.
+  await writeFile(join(sub, "lib"), "changed\n");
+  await writeFile(join(sub, "new"), "new\n");
+
+  const added = {
+    path: "sub",
+    status: "added",
+    additions: 1,
+    deletions: 0,
+    patch: `@@ -0,0 +1 @@\n+Subproject commit ${commit}\n`,
+    kind: "submodule",
+  } as const;
+
+  for (const mode of ["branch", "committed"] as const) {
+    const { files } = await listed(directory, { mode });
+    expect(files.map(({ path }) => path)).toEqual([".gitmodules", "sub"]);
+    expect(files[1]).toEqual({ previousPath: null, ...added });
+  }
+
+  expect((await listed(directory, { mode: "working" })).files).toEqual([]);
+});
+
 test("an untracked path Git will not index is listed without bytes; the rest keep patches", async () => {
   const directory = await checkout({ old: "old\n" });
   await unlink(join(directory, "old"));
