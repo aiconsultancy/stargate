@@ -120,6 +120,96 @@ test("legacy state upgrades identity without replacing peers, results or cursors
   }
 });
 
+test.each(["reserve", "enqueue"] as const)(
+  "crew %s keeps the native preamble out of stored activity",
+  async (admission) => {
+    const directory = await mkdtemp(
+      join(fixtureRoot(), "stargate-crew-state-"),
+    );
+
+    const state = await CrewState.open(directory, "custom", "identity-v2");
+
+    try {
+      const peer = state.reservePeer("builder");
+      const preamble = "Generated native instructions 😀\n\n";
+      const assignment = `${preamble}Keep these words in the assignment`;
+      const parts = { preamble, assignment };
+
+      const task =
+        admission === "reserve"
+          ? state.reserveTask(peer, "captain", parts)
+          : state.enqueue(peer, "captain", parts);
+
+      if (!task) {
+        throw new Error("Missing task");
+      }
+
+      expect(state.activity.task(task, "full").summary).toBe(assignment);
+
+      if (admission === "enqueue") {
+        const promoted = state.promote(task.id, null);
+        expect(promoted?.text).toBe(preamble + assignment);
+        expect(state.activity.task(task, "full").summary).toBe(assignment);
+      }
+    } finally {
+      state.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("a queued assignment written by the old offset path reopens and promotes unchanged", async () => {
+  const directory = await mkdtemp(join(fixtureRoot(), "stargate-crew-state-"));
+  let state = await CrewState.open(directory, "legacy-prompt", "identity-v2");
+
+  try {
+    const peer = state.reservePeer("builder");
+    const preamble = "Generated native instructions 😀\n\n";
+    const assignment = "Read the retained task text";
+    const prompt = preamble + assignment;
+    const db = new Database(state.path);
+
+    // The offset was never a column. The queue stored the combined prompt.
+    // The activity row stored the already-sliced summary.
+    try {
+      db.run(
+        `INSERT INTO pending_tasks
+          (id,crewID,workerSessionID,originCaptainID,inputID,text)
+          VALUES ('task_previous',?,?,'captain','msg_previous',?)`,
+        [peer.crewID, peer.sessionID, prompt],
+      );
+      db.run(
+        `INSERT INTO member_activity (taskID,crewID,kind,summary,phase)
+          VALUES ('task_previous',?,'assignment',?,'queued')`,
+        [peer.crewID, prompt.slice(preamble.length)],
+      );
+    } finally {
+      db.close();
+    }
+
+    state.close();
+    state = await CrewState.open(directory, "legacy-prompt", "identity-v2");
+    expect(state.activity.read(peer.crewID, "full").queued).toEqual([
+      expect.objectContaining({ id: "task_previous", summary: assignment }),
+    ]);
+    const promoted = state.promote("task_previous", null);
+    expect(promoted?.text).toBe(prompt);
+    expect(promoted?.task).toMatchObject({
+      inputID: "msg_previous",
+      status: "dispatching",
+    });
+    expect(
+      state.activity.task(
+        { id: "task_previous", status: "dispatching" },
+        "full",
+      ).summary,
+    ).toBe(assignment);
+  } finally {
+    state.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test(
   "queue ceiling and durable controls remain hard guards; queued order is captain policy",
   async () => {

@@ -102,6 +102,8 @@ function unredactedActivity({
   };
 }
 
+// Retained rows carry no provenance marker for the summary.
+// Keep the stored text even if it looks like a clipped generated preamble.
 const shown = {
   ordinary: maskedActivity,
   unredacted: unredactedActivity,
@@ -144,10 +146,8 @@ export class MemberActivityStore {
 
   public assignment<T extends ActivityTask>(
     task: T,
-    text: string,
+    assignment: string,
     report = false,
-    /** Only the dispatcher's own prefix is excluded, never matching user text. */
-    assignmentStart = 0,
   ) {
     const now = Date.now();
     this.db
@@ -158,9 +158,7 @@ export class MemberActivityStore {
         task.id,
         task.crewID,
         report ? "report" : "assignment",
-        report
-          ? "Prepare crew activity report"
-          : activityText(text.slice(assignmentStart)),
+        report ? "Prepare crew activity report" : activityText(assignment),
         task.status,
         now,
         now,

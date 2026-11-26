@@ -5,6 +5,7 @@ import {
   type IrcConfig,
   agentDispatchTarget,
 } from "../../../config";
+import { agentDispatchActive } from "../../../config/composition";
 import type { IrcShip } from "../../../transports/irc/ship";
 import { SubspaceApi } from "./api";
 import { AgentDispatcher } from "./dispatcher";
@@ -46,7 +47,7 @@ export function startAgentDispatch(
 ): AgentDispatchRuntime | undefined {
   const dispatch = host.config;
 
-  if (!dispatch?.enabled && !dispatch?.decisionOutcomeDms) {
+  if (!agentDispatchActive(dispatch)) {
     return;
   }
 
