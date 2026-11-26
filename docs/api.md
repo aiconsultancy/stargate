@@ -239,6 +239,13 @@ deadline leaves crew status unavailable; the member route returns `503`
 rather than redacted text. Ship and member routes both return `503` if the
 whole HTTP read times out.
 
+A successful crew detail response includes `ship`, `member` and `taskText`.
+`taskText` is `"full"` when the operator listener returns the complete stored
+task text, or `"preview"` when the response carries the bounded view (on an
+officer socket or after a legacy plugin fallback). The API stays at version 1.
+Clients should treat a missing field or any value other than `"full"` as
+completeness not confirmed.
+
 Subagent titles and pull request titles are also shown as written, cut to
 180 characters. Each stream's activity events quote its own task text view,
 with whitespace collapsed: officers' sockets the ordinary view, the operator
