@@ -416,7 +416,11 @@ version. An untracked path that Git will not index, such as a file under
 `path` is decoded as UTF-8, with U+FFFD for each byte that is not valid
 UTF-8. Such a file is still read, sized and fingerprinted by the bytes of
 its name. Two names that decode alike are listed as two entries, but the
-file route's `path` reaches only the first of them in byte order.
+file route's `path` reaches only one of them: an entry with a Git diff
+before an untracked path outside Git's index (a nested repository or a
+file Git refused), then the first in byte order. So with a nested
+repository `n\xE8` and a file `n\xE9`, a request for `n\uFFFD` returns the
+file.
 
 Paging limits:
 
