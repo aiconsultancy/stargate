@@ -19,7 +19,10 @@ import type {
 } from "../../../../shared/crew-status";
 import type { DashboardCrewMember, ShipSummary } from "../../dashboard-model";
 import { dashboardCrewSummary } from "../../dashboard-projection";
-import type { DashboardFleetSource } from "../../dashboard-source";
+import type {
+  DashboardFleetSource,
+  FleetSampleView,
+} from "../../dashboard-source";
 import { abortable, runAbortable } from "../../../../lib/effect";
 import { isLoopbackHost } from "../../../../lib/loopback";
 import { backendFingerprint } from "../../../../shared/registration";
@@ -820,6 +823,159 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
     };
   }
 
+  /**
+   * Fleet, ship and crew reads for one listener. The operator listener gets
+   * task text unredacted (`full` for one member); officers' sockets get the
+   * crew plugin's ordinary view, redacted and bounded by the plugin itself.
+   */
+  function taskTextReads(
+    listener: "operator" | "officer",
+  ): Pick<ApiV1Source, "fleet" | "ship" | "crew"> {
+    const operator = listener === "operator";
+    const view: FleetSampleView = operator ? "unredacted" : "ordinary";
+
+    return {
+      async fleet(signal, captureShipRead, crewDeadline) {
+        signal.throwIfAborted();
+        const config = deps.config();
+        const configured = registrations(config);
+
+        // The sample also feeds each ship's `ship` event, in this listener's
+        // View, within the ordinary limits.
+        const fleet = await dashboard.fleetWithCrew(
+          signal,
+          new Set(configured.keys()),
+          crewDeadline,
+          view,
+        );
+
+        signal.throwIfAborted();
+        let admiral: V1Captain | null = null;
+        let longestIdle: V1Fleet["longestIdle"] = null;
+        const pending: Promise<V1Ship>[] = [];
+
+        for (const row of [...fleet.ships].toSorted((a, b) =>
+          a.summary.id.localeCompare(b.summary.id),
+        )) {
+          const { summary, metadata, error } = row;
+          const registration = configured.get(summary.id);
+
+          if (!registration) {
+            continue;
+          }
+
+          const officer = captain(
+            registration,
+            summary.name,
+            summary.queue,
+            fleet.generatedAt,
+          );
+
+          if (officer.role === "rear_admiral") {
+            admiral ??= officer;
+            continue;
+          }
+
+          const { readDetail } = row;
+
+          if (captureShipRead && readDetail) {
+            captureShipRead(summary.id, async (reading) =>
+              shipDetail(registration, await readDetail(reading), reading),
+            );
+          }
+
+          const text = checkoutText(metadata);
+
+          const people = (row.members ?? []).flatMap((person) =>
+            crewMember(summary.id, person, fleet.generatedAt, text, metadata),
+          );
+
+          for (const member of people) {
+            if (
+              member.idleSince !== null &&
+              (!longestIdle ||
+                member.idleSince < longestIdle.since ||
+                (member.idleSince === longestIdle.since &&
+                  summary.id === longestIdle.ship &&
+                  member.id < longestIdle.member))
+            ) {
+              longestIdle = {
+                ship: summary.id,
+                member: member.id,
+                since: member.idleSince,
+              };
+            }
+          }
+
+          pending.push(
+            shipSummary(
+              registration,
+              officer,
+              summary.crew,
+              people,
+              signal,
+              error,
+              metadata,
+            ),
+          );
+        }
+
+        return {
+          apiVersion: API_V1_VERSION,
+          generatedAt: fleet.generatedAt,
+          name: redactCredentials(config.api?.fleetName ?? hostname(), 100),
+          admiral,
+          ships: await Promise.all(pending),
+          longestIdle,
+        };
+      },
+      async ship(id, signal) {
+        const registration = configuredShip(id, signal);
+
+        if (!registration) {
+          return;
+        }
+
+        return shipDetail(
+          registration,
+          await dashboard.shipWithCrew(
+            id,
+            signal,
+            operator ? { taskText: "unredacted" } : {},
+          ),
+          signal,
+        );
+      },
+      async crew(ship, member, signal) {
+        // The plugin's member schema: a member it rejects is never asked for.
+        if (!isFleetMember(member)) {
+          return;
+        }
+
+        const registration = configuredShip(ship, signal);
+
+        if (!registration) {
+          return;
+        }
+
+        // Only this route asks for full task text, for operators.
+        const snapshot = await dashboard.shipWithCrew(ship, signal, {
+          member,
+          ...(operator && { taskText: "full" }),
+        });
+
+        if (snapshot?.view.crewError) {
+          throw new CrewStatusUnavailable(snapshot.view.crewError);
+        }
+
+        const result = await detail(registration, snapshot, signal, member);
+        const person = result?.crewMembers[0];
+
+        return person ? { ship, member: person } : undefined;
+      },
+    };
+  }
+
   return {
     async stop() {
       await git.stop?.();
@@ -854,140 +1010,8 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
 
       return identities;
     },
-    async fleet(signal, captureShipRead, crewDeadline) {
-      signal.throwIfAborted();
-      const config = deps.config();
-      const configured = registrations(config);
-
-      // The sample also feeds each ship's `ship` event: unredacted task
-      // Text within the ordinary limits.
-      const fleet = await dashboard.fleetWithCrew(
-        signal,
-        new Set(configured.keys()),
-        crewDeadline,
-      );
-
-      signal.throwIfAborted();
-      let admiral: V1Captain | null = null;
-      let longestIdle: V1Fleet["longestIdle"] = null;
-      const pending: Promise<V1Ship>[] = [];
-
-      for (const row of [...fleet.ships].toSorted((a, b) =>
-        a.summary.id.localeCompare(b.summary.id),
-      )) {
-        const { summary, metadata, error } = row;
-        const registration = configured.get(summary.id);
-
-        if (!registration) {
-          continue;
-        }
-
-        const officer = captain(
-          registration,
-          summary.name,
-          summary.queue,
-          fleet.generatedAt,
-        );
-
-        if (officer.role === "rear_admiral") {
-          admiral ??= officer;
-          continue;
-        }
-
-        const { readDetail } = row;
-
-        if (captureShipRead && readDetail) {
-          captureShipRead(summary.id, async (reading) =>
-            shipDetail(registration, await readDetail(reading), reading),
-          );
-        }
-
-        const text = checkoutText(metadata);
-
-        const people = (row.members ?? []).flatMap((person) =>
-          crewMember(summary.id, person, fleet.generatedAt, text, metadata),
-        );
-
-        for (const member of people) {
-          if (
-            member.idleSince !== null &&
-            (!longestIdle ||
-              member.idleSince < longestIdle.since ||
-              (member.idleSince === longestIdle.since &&
-                summary.id === longestIdle.ship &&
-                member.id < longestIdle.member))
-          ) {
-            longestIdle = {
-              ship: summary.id,
-              member: member.id,
-              since: member.idleSince,
-            };
-          }
-        }
-
-        pending.push(
-          shipSummary(
-            registration,
-            officer,
-            summary.crew,
-            people,
-            signal,
-            error,
-            metadata,
-          ),
-        );
-      }
-
-      return {
-        apiVersion: API_V1_VERSION,
-        generatedAt: fleet.generatedAt,
-        name: redactCredentials(config.api?.fleetName ?? hostname(), 100),
-        admiral,
-        ships: await Promise.all(pending),
-        longestIdle,
-      };
-    },
-    async ship(id, signal) {
-      const registration = configuredShip(id, signal);
-
-      if (!registration) {
-        return;
-      }
-
-      return shipDetail(
-        registration,
-        // Unredacted task text within the ordinary limits.
-        await dashboard.shipWithCrew(id, signal, { taskText: "unredacted" }),
-        signal,
-      );
-    },
-    async crew(ship, member, signal) {
-      // The plugin's member schema: a member it rejects is never asked for.
-      if (!isFleetMember(member)) {
-        return;
-      }
-
-      const registration = configuredShip(ship, signal);
-
-      if (!registration) {
-        return;
-      }
-
-      // Only this route asks for full task text.
-      const snapshot = await dashboard.shipWithCrew(ship, signal, {
-        member,
-        taskText: "full",
-      });
-
-      if (snapshot?.view.crewError) {
-        throw new CrewStatusUnavailable(snapshot.view.crewError);
-      }
-
-      const result = await detail(registration, snapshot, signal, member);
-      const person = result?.crewMembers[0];
-
-      return person ? { ship, member: person } : undefined;
-    },
+    ...taskTextReads("operator"),
+    officer: taskTextReads("officer"),
     gatewayFeatures: () => gatewayFeatures(deps.config()),
   };
 }

@@ -120,6 +120,17 @@ const MAX_DEPTH = 8;
 const crewUnavailable = "Crew status unavailable.";
 const crewPollIntervalMs = 3000;
 
+/**
+ * The task text a shared Fleet sample carries: `unredacted` within the
+ * ordinary limits for the operator listener, or the plugin's `ordinary`
+ * redacted view for officers' sockets. Each has its own slot per backend.
+ */
+export type FleetSampleView = "unredacted" | "ordinary";
+
+/** Whether a sample is in a view: an ordinary one names no task text mode. */
+const inView = (sample: CrewRead | undefined, view: FleetSampleView) =>
+  sample !== undefined && (sample.taskText ?? "ordinary") === view;
+
 type CrewRead = {
   status: CrewStatus | null;
   error?: string;
@@ -170,20 +181,24 @@ export function dashboardSource(
     { at: number; sessions: HistorySession[] }
   >();
 
+  type SampleSlot = {
+    read: ReturnType<typeof createReadSlot<CrewRead>>;
+    // Bumped by invalidation; an attempt started before it stores nothing.
+    generation: number;
+    latest?: CrewRead;
+    last?: { sample: CrewRead; at: number };
+    pending?: {
+      attempt: Promise<CrewRead>;
+      result: Promise<CrewRead>;
+      fallback: CrewRead | undefined;
+    };
+  };
+
+  // At most one slot per view and backend. A view's samples and fallbacks
+  // Never answer the other view.
   const fleetCrew = new WeakMap<
     AgentBackend,
-    {
-      read: ReturnType<typeof createReadSlot<CrewRead>>;
-      // Bumped by invalidation; an attempt started before it stores nothing.
-      generation: number;
-      latest?: CrewRead;
-      last?: { sample: CrewRead; at: number };
-      pending?: {
-        attempt: Promise<CrewRead>;
-        result: Promise<CrewRead>;
-        fallback: CrewRead | undefined;
-      };
-    }
+    Partial<Record<FleetSampleView, SampleSlot>>
   >();
 
   const retirements = new WeakMap<AgentBackend, AbortController>();
@@ -329,6 +344,7 @@ export function dashboardSource(
     members: readonly DashboardShip[],
     signal: AbortSignal,
     read: (reading: AbortSignal) => Promise<CrewRead>,
+    view: FleetSampleView,
     crewDeadline?: AbortSignal,
   ): Promise<CrewRead> {
     signal.throwIfAborted();
@@ -339,16 +355,18 @@ export function dashboardSource(
       return { status: null };
     }
 
-    const slot = fleetCrew.get(backend) ?? {
+    const slots = fleetCrew.get(backend) ?? {};
+
+    const slot = slots[view] ?? {
       read: createReadSlot<CrewRead>(fleetCrewDeadlineMs),
       generation: 0,
     };
 
-    fleetCrew.set(backend, slot);
+    slots[view] = slot;
+    fleetCrew.set(backend, slots);
 
     const unavailable = (): CrewRead => {
-      const latest =
-        slot.latest?.taskText === "unredacted" ? slot.latest : undefined;
+      const latest = inView(slot.latest, view) ? slot.latest : undefined;
 
       return {
         ...latest,
@@ -368,15 +386,19 @@ export function dashboardSource(
       // A recent sample stays usable throughout this refresh. A cold caller
       // Needs the shared result to establish availability.
       const fallback =
-        last?.sample.taskText === "unredacted" &&
+        last &&
+        inView(last.sample, view) &&
         performance.now() - last.at < fleetCrewDeadlineMs + crewPollIntervalMs
           ? last.sample
           : undefined;
 
       const result = attempt
         .then(
+          // An ordinary sample never carries a task text mode.
           (sample) =>
-            sample.error ? unavailable() : { ...sample, observedAt: now() },
+            sample.error || (view === "ordinary" && !inView(sample, view))
+              ? unavailable()
+              : { ...sample, observedAt: now() },
           unavailable,
         )
         .then((sample) => {
@@ -407,7 +429,7 @@ export function dashboardSource(
 
     const fallback = () =>
       pending.fallback &&
-      (slot.last?.sample.taskText === "unredacted"
+      (slot.last && inView(slot.last.sample, view)
         ? slot.last.sample
         : pending.fallback);
 
@@ -599,6 +621,7 @@ export function dashboardSource(
     signal: AbortSignal,
     selected?: ReadonlySet<string>,
     crewDeadline?: AbortSignal,
+    view: FleetSampleView = "unredacted",
   ) {
     const groups = captains();
 
@@ -636,9 +659,11 @@ export function dashboardSource(
             ? await readWithDeadline(retired, undefined, (active) => {
                 reading.throwIfAborted();
 
-                return crew(member, AbortSignal.any([reading, active]), {
-                  taskText: "unredacted",
-                });
+                return crew(
+                  member,
+                  AbortSignal.any([reading, active]),
+                  view === "unredacted" ? { taskText: view } : {},
+                );
               }).result.catch((error: unknown) => {
                 reading.throwIfAborted();
 
@@ -663,7 +688,7 @@ export function dashboardSource(
       };
 
       const read = selected
-        ? sampleCrew(members, signal, readCrew, crewDeadline)
+        ? sampleCrew(members, signal, readCrew, view, crewDeadline)
         : readCrew(signal);
 
       reads.set(key, read);
@@ -856,18 +881,14 @@ export function dashboardSource(
     fleetBackend: (id: string) => find(id)?.backend,
     invalidateFleetCrew() {
       for (const { backend } of ships) {
-        const slot = fleetCrew.get(backend);
+        for (const slot of Object.values(fleetCrew.get(backend) ?? {})) {
+          slot.generation++;
+          delete slot.latest;
+          delete slot.last;
 
-        if (!slot) {
-          continue;
-        }
-
-        slot.generation++;
-        delete slot.latest;
-        delete slot.last;
-
-        if (slot.pending) {
-          slot.pending.fallback = undefined;
+          if (slot.pending) {
+            slot.pending.fallback = undefined;
+          }
         }
       }
     },
@@ -880,7 +901,8 @@ export function dashboardSource(
       signal: AbortSignal,
       selected: ReadonlySet<string>,
       crewDeadline?: AbortSignal,
-    ) => readFleet(signal, selected, crewDeadline),
+      view: FleetSampleView = "unredacted",
+    ) => readFleet(signal, selected, crewDeadline, view),
     shipWithCrew: (
       id: string,
       signal: AbortSignal,
@@ -923,11 +945,15 @@ export function dashboardSource(
     fleetBackend: (id: string) => AgentBackend | undefined;
     invalidateFleetCrew: () => void;
     retireFleetBackend: (backend: AgentBackend) => void;
-    /** The shared sample is always unfiltered, with bounded unredacted text. */
+    /**
+     * The shared sample is always unfiltered, with bounded task text:
+     * unredacted unless the ordinary view is asked for.
+     */
     fleetWithCrew: (
       signal: AbortSignal,
       selected: ReadonlySet<string>,
       crewDeadline?: AbortSignal,
+      view?: FleetSampleView,
     ) => ReturnType<typeof readFleet>;
     shipWithCrew: (
       id: string,

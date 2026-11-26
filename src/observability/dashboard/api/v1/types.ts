@@ -645,6 +645,11 @@ export interface ApiV1Source {
   ): Promise<V1CrewDetail | undefined>;
   /** Gateway-wide switches from the loaded configuration. */
   gatewayFeatures(): V1Feature[];
+  /**
+   * The same reads for officers' sockets, with the crew plugin's ordinary
+   * task text: redacted and bounded, never `unredacted` or `full`.
+   */
+  officer: Pick<ApiV1Source, "fleet" | "ship" | "crew">;
 }
 
 /** One poll's view, compared with the previous one to emit events. */

@@ -80,11 +80,16 @@ const features = [
   { key: "api", label: "Fleet API", enabled: true, defaultEnabled: false },
 ];
 
-const source: ApiV1Source = {
+const reads: Pick<ApiV1Source, "fleet" | "ship" | "crew"> = {
   fleet: async () => overview,
   ship: async (id) => (id === ship.id ? ship : undefined),
   crew: async (id, name) =>
     id === ship.id && name === member.id ? { ship: id, member } : undefined,
+};
+
+const source: ApiV1Source = {
+  ...reads,
+  officer: reads,
   gatewayFeatures: () => features,
 };
 

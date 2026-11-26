@@ -790,12 +790,17 @@ test("activity reads validate the agent and every parameter", () => {
   });
 });
 
-const source: ApiV1Source = {
+const reads: Pick<ApiV1Source, "fleet" | "ship" | "crew"> = {
   fleet: async () => {
     throw new Error("unused");
   },
   ship: async () => undefined,
   crew: async () => undefined,
+};
+
+const source: ApiV1Source = {
+  ...reads,
+  officer: reads,
   gatewayFeatures: () => [],
 };
 
