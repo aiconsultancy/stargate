@@ -3,8 +3,10 @@ import type { ActivityOutcome, TurnActivityLog } from "../backend";
 import {
   childSessionID,
   compactedHistory,
+  detachedAttribution,
   freshChild,
   linkExistingChild,
+  markDiscardedContinuation,
   openChild,
   recordChildName,
 } from "./activity-attribution";
@@ -100,6 +102,7 @@ type Ancestry = {
   creationTime?: number | undefined;
   deferredInference?: number;
   inferred?: TurnActivityLog;
+  continuation?: Child;
 };
 
 type Root = { uniqueSince: number; observed?: number };
@@ -173,7 +176,12 @@ export class OpenCodeActivityFamilies {
             this.calls.discardStart(id, through);
           }
         },
-        candidate: (id) => {
+        candidate: (id, queued) => {
+          markDiscardedContinuation(
+            this.facts(queued).continuation?.log,
+            queued,
+            isActivityEvent,
+          );
           const child = this.children.get(id);
 
           if (child?.unproven && !child.continuation) {
@@ -636,6 +644,8 @@ export class OpenCodeActivityFamilies {
 
     if (continuation) {
       ancestry.parent = continuation.parentSession;
+      ancestry.continuation = continuation;
+      queued.postLoss = true;
       queued.needsStart = false;
     }
 
@@ -858,8 +868,7 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
-    const anchor = previous?.continuation;
-    const opened = this.openTurn(id, queued, pending, pending.parent, anchor);
+    const opened = this.openTurn(id, queued, segment, pending, pending.parent);
 
     if (!opened) {
       return;
@@ -878,7 +887,7 @@ export class OpenCodeActivityFamilies {
       callFloor: segment.floor,
       ...(ambiguous && { ambiguousCall: true }),
       ...(unproven && { unproven: true }),
-      ...(anchor && unproven && { continuation: true }),
+      ...(pending.continuation && unproven && { continuation: true }),
       projector: new ActivityProjector(),
       start: first.order,
       nativeStart: started ? first.created : undefined,
@@ -949,32 +958,29 @@ export class OpenCodeActivityFamilies {
   private openTurn(
     id: string,
     queued: Pending,
+    segment: Pending["segments"][number],
     pending: Ancestry,
     parent: string,
-    anchor: Child | undefined,
   ) {
-    const segment = queued.segments[0];
+    const { first } = segment;
+    const started = first.type === "session.execution.started";
+    const continuation = pending.continuation;
 
-    if (!segment) {
+    const anchor =
+      continuation?.log.retained?.() === false ? undefined : continuation;
+
+    const normal =
+      !anchor || (started && !queued.lifecycle.lost)
+        ? this.attribution(id, queued, pending, parent)
+        : undefined;
+
+    const fallback = anchor !== undefined && !normal?.owner;
+
+    if (fallback && started && !queued.closing && !segment.gap) {
       return;
     }
 
-    const { first } = segment;
-    const started = first.type === "session.execution.started";
-    const normal = this.attribution(id, queued, pending, parent);
-
-    const fallback =
-      anchor && (!started || !normal?.owner)
-        ? {
-            owner: anchor.parent,
-            detached: true,
-            callId: null,
-            ambiguous: false,
-            proof: undefined,
-          }
-        : undefined;
-
-    const attribution = fallback ?? normal;
+    const attribution = fallback ? detachedAttribution(anchor.parent) : normal;
 
     if (!attribution) {
       return;
@@ -989,7 +995,7 @@ export class OpenCodeActivityFamilies {
     }
 
     const unproven =
-      fallback !== undefined ||
+      fallback ||
       !freshChild(this.executions, id, first, pending, proof?.timing);
 
     const log = openChild(attribution, id, first.at, unproven, (writer) =>
@@ -1000,12 +1006,8 @@ export class OpenCodeActivityFamilies {
       return { owner, log, callId, ambiguous, proof, scope, unproven, started };
     }
 
-    if (
-      anchor &&
-      (segment.gap ||
-        segment.frames.some(({ event }) => isActivityEvent(event)))
-    ) {
-      markActivityGap(anchor.log, first.at);
+    if (queued.segments.length > 1) {
+      markDiscardedContinuation(anchor?.log, queued, isActivityEvent, true);
     }
 
     this.queue.skip(id, queued);

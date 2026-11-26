@@ -5,7 +5,8 @@ import type {
   CallTiming,
 } from "./activity-call-evidence";
 import { childAttributionMarker } from "./activity-projector";
-import type { NamingProof } from "./activity-recovery-queue";
+import type { NamingProof, PendingActivity } from "./activity-recovery-queue";
+import { markActivityGap } from "./activity-replay-gap";
 
 type History = {
   needsFreshness(id: string, created: number | undefined): boolean;
@@ -29,6 +30,39 @@ type Attribution = {
   detached: boolean;
   callId: string | null;
 };
+
+export function detachedAttribution(owner: TurnActivityLog) {
+  return {
+    owner,
+    detached: true,
+    callId: null,
+    ambiguous: false,
+    proof: undefined,
+  };
+}
+
+export function markDiscardedContinuation<
+  Event extends { type: string; data: { sessionID: string } },
+>(
+  log: TurnActivityLog | undefined,
+  pending: PendingActivity<Event>,
+  isActivity: (event: Event) => boolean,
+  headOnly = false,
+) {
+  if (!log || log.retained?.() === false) {
+    return;
+  }
+
+  const discarded = pending.segments.find(
+    ({ gap, frames }, index) =>
+      (headOnly ? index === 0 : !pending.draining || index > 0) &&
+      (gap !== undefined || frames.some(({ event }) => isActivity(event))),
+  );
+
+  if (discarded) {
+    markActivityGap(log, discarded.first.at);
+  }
+}
 
 export const childSessionID = (value: unknown): value is string =>
   typeof value === "string" && /^ses[A-Za-z0-9_-]{1,253}$/.test(value);

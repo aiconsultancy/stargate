@@ -77,6 +77,8 @@ export type PendingActivity<E extends Event> = {
   slots: number;
   advanced?: true;
   draining?: true;
+  postLoss?: true;
+  closing?: true;
   read?: AbortController;
   recovery?: Promise<void>;
 };
@@ -99,9 +101,9 @@ export const activityQueueDefaults = {
   ttl: 2000,
 };
 
-type Removal = {
+type Removal<E extends Event> = {
   start(id: string, order: number): void;
-  candidate(id: string): void;
+  candidate(id: string, pending: PendingActivity<E>): void;
 };
 
 export class ActivityRecoveryQueues<E extends Event> {
@@ -124,7 +126,7 @@ export class ActivityRecoveryQueues<E extends Event> {
     private readonly maxReads: number,
     private readonly needsStart: (id: string) => boolean,
     private readonly admit: (id: string) => void,
-    private readonly removed?: Removal,
+    private readonly removed?: Removal<E>,
   ) {}
 
   public entries() {
@@ -162,7 +164,7 @@ export class ActivityRecoveryQueues<E extends Event> {
           break;
         }
 
-        this.discard(oldest[0], true);
+        this.closeWindow(...oldest);
       }
 
       pending = {
@@ -285,7 +287,7 @@ export class ActivityRecoveryQueues<E extends Event> {
 
       this.queues.delete(id);
       pending.read?.abort();
-      this.removed?.candidate(id);
+      this.removed?.candidate(id, pending);
 
       for (const segment of pending.segments) {
         this.bytes -= segment.bytes;
@@ -333,8 +335,28 @@ export class ActivityRecoveryQueues<E extends Event> {
 
     for (const [id, pending] of this.queues) {
       if (this.expires(pending) <= now) {
-        this.discard(id, true);
+        this.closeWindow(id, pending);
       }
+    }
+  }
+
+  private closeWindow(id: string, pending: PendingActivity<E>) {
+    if (pending.postLoss && !pending.closing) {
+      pending.closing = true;
+
+      // Make retained output visible before freeing the candidate's slot.
+      while (this.peek(id) === pending && pending.segments.length > 0) {
+        const count = pending.segments.length;
+        this.admit(id);
+
+        if (pending.segments.length >= count) {
+          break;
+        }
+      }
+    }
+
+    if (this.peek(id) === pending) {
+      this.discard(id, true);
     }
   }
 
@@ -434,6 +456,14 @@ export class ActivityRecoveryQueues<E extends Event> {
     const lifecycle = terminal || start;
 
     if (lifecycle && !this.retainBoundary(pending, packet)) {
+      if (pending.lifecycle.lost && pending.postLoss && segment) {
+        (segment.gap ??= new ActivityReplayGap()).incomplete = true;
+
+        if (!pending.draining) {
+          this.closeWindow(id, pending);
+        }
+      }
+
       return;
     }
 
@@ -559,9 +589,13 @@ export class ActivityRecoveryQueues<E extends Event> {
 
     pending.draining = true;
 
-    if (pending.lifecycle.lost) {
+    if (pending.lifecycle.lost && !pending.closing) {
       hooks.lost();
-    } else if (segment.gap?.slots.size && this.activeReads < this.maxReads) {
+    } else if (
+      !pending.closing &&
+      segment.gap?.slots.size &&
+      this.activeReads < this.maxReads
+    ) {
       const read = new AbortController();
       pending.read = read;
       this.activeReads += 1;
@@ -630,7 +664,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       pending.provisional.length === 0
     ) {
       this.discard(id, true);
-    } else {
+    } else if (!pending.closing) {
       pending.expires = this.now() + this.limits.ttl;
       this.armExpiry();
       this.schedule(id);
@@ -721,7 +755,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       return;
     }
 
-    if (!complete) {
+    if (!complete || (pending.postLoss && pending.lifecycle.lost)) {
       hooks.gap();
     }
 
