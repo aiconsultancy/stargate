@@ -1,6 +1,13 @@
+import { permissions } from "../scripts/github-local-app";
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGitHubOperation } from "../scripts/github-operations";
@@ -59,7 +66,7 @@ test("the standalone CLI loads a configured adapter and performs a repository ch
       `export function createAdapter() { return {
       policy: { organization: "example", readRepositories: ["project"] },
       async json(repo, scope, path) {
-        if (repo !== "project" || scope !== "read" || path !== "/repos/example/project") throw new Error();
+        if (repo !== "project" || scope !== "check" || path !== "/repos/example/project") throw new Error();
         return { full_name: "example/project" };
       },
     }; }`,
@@ -89,6 +96,68 @@ test("the standalone CLI loads a configured adapter and performs a repository ch
       repository: "example/project",
       read: true,
     });
+
+    const mcp = Bun.spawn(
+      [
+        process.execPath,
+        "--no-env-file",
+        "--no-install",
+        "scripts/github-officer-mcp.ts",
+        path,
+      ],
+      { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+    );
+
+    const requests = [
+      { method: "initialize", params: { protocolVersion: "2025-06-18" } },
+      { method: "tools/list" },
+      {
+        method: "tools/call",
+        params: {
+          name: "operate",
+          arguments: { operation: "check", repo: "project" },
+        },
+      },
+      {
+        method: "tools/call",
+        params: {
+          name: "operate",
+          arguments: { operation: "check", repo: "foreign" },
+        },
+      },
+      {
+        method: "tools/call",
+        params: {
+          name: "operate",
+          arguments: { operation: "check", repo: "project", command: "bash" },
+        },
+      },
+    ];
+
+    await mcp.stdin.write(
+      requests
+        .map((request, id) =>
+          JSON.stringify({ ...request, id, jsonrpc: "2.0" }),
+        )
+        .join("\n") + "\n",
+    );
+    await mcp.stdin.end();
+    const mcpOutput = await new Response(mcp.stdout).text();
+
+    const replies = mcpOutput
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    expect(await mcp.exited).toBe(0);
+    expect(replies[0]?.result.serverInfo.name).toBe("github-officer");
+    expect(replies[1]?.result.tools).toMatchObject([{ name: "operate" }]);
+    expect(JSON.parse(replies[2]?.result.content[0].text)).toEqual({
+      repository: "example/project",
+      read: true,
+    });
+    expect(replies[3]?.result.isError).toBe(true);
+    expect(replies[4]?.result.isError).toBe(true);
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -108,7 +177,7 @@ const rawDiff = Buffer.from(
 const contextDigest = createHash("sha256").update(rawDiff).digest("hex");
 const marker = "fixture-review-v1:";
 
-function proof(family: "codex" | "claude") {
+function proof(family: "codex" | "claude", approvedHead: string) {
   const model = family === "codex" ? "codex-model" : "claude-model";
   const agent = `peer-crew-${family}`;
   const resultText = "Reviewed the exact fixture diff.";
@@ -117,7 +186,7 @@ function proof(family: "codex" | "claude") {
     id: `proof-${family}`,
     repository,
     pullRequest: 8,
-    headSHA: head,
+    headSHA: approvedHead,
     baseSHA: base,
     mergeBaseSHA: mergeBase,
     contextDigest,
@@ -171,15 +240,15 @@ function receipt(value: ReturnType<typeof proof>, id: number) {
   return {
     id,
     user: { login: "fixture-peer[bot]", type: "Bot" },
-    commit_id: head,
+    commit_id: value.headSHA,
     state: "APPROVED",
     body: `Previous review format.\n<!-- ${marker}${JSON.stringify({ proofID: value.id, proofDigest })} -->`,
   };
 }
 
-function fixture() {
-  const first = proof("codex");
-  const second = proof("claude");
+function fixture(approvedHead = head) {
+  const first = proof("codex", approvedHead);
+  const second = proof("claude", approvedHead);
   const reviews = [receipt(first, 1), receipt(second, 2)];
   const errors: string[] = [];
   const writes: { path: string; body?: JsonObject }[] = [];
@@ -191,7 +260,7 @@ function fixture() {
     merged: false,
     mergeable: true,
     mergeable_state: "clean",
-    head: { sha: head, repo: { full_name: repository } },
+    head: { sha: approvedHead, repo: { full_name: repository } },
     base: { sha: base, ref: "main", repo: { full_name: repository } },
     user: { login: "fixture-owner[bot]", type: "Bot" },
     changed_files: 1,
@@ -281,6 +350,223 @@ const mergeRequest = officerRequest([
   "8",
 ]);
 
+test("a repository check requests metadata and read-only content without PR access", () => {
+  expect(permissions("check")).toEqual({ metadata: "read", contents: "read" });
+  expect(permissions("pr-status")).toMatchObject({
+    pull_requests: "read",
+    checks: "read",
+  });
+});
+
+test("push accepts the configured HTTPS repository with or without the .git suffix", async () => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "github-push-")));
+  const checkout = join(home, "project");
+  const gitDir = join(checkout, ".git");
+  mkdirSync(gitDir, { recursive: true });
+  const { adapter } = fixture();
+  adapter.policy.home = home;
+  let origin: string;
+  const pushed: string[][] = [];
+  adapter.git = async (_directory, args, publication) => {
+    if (args[0] === "remote") {
+      return origin;
+    }
+
+    if (args.includes("--show-toplevel")) {
+      return checkout;
+    }
+
+    if (args.includes("--git-common-dir")) {
+      return gitDir;
+    }
+
+    if (args[0] === "symbolic-ref") {
+      return "fix/example";
+    }
+
+    expect(publication).toBe("project");
+    pushed.push(args);
+
+    return "";
+  };
+
+  const request = officerRequest([
+    "push",
+    "--repo",
+    "project",
+    "--directory",
+    checkout,
+    "--branch",
+    "fix/example",
+  ]);
+
+  try {
+    for (origin of [
+      "https://github.com/example/project",
+      "https://github.com/example/project.git",
+    ]) {
+      expect(await runGitHubOperation(adapter, request)).toMatchObject({
+        pushed: true,
+      });
+    }
+
+    origin = "https://GitHub.com:443/EXAMPLE/project/";
+    expect(await runGitHubOperation(adapter, request)).toMatchObject({
+      pushed: true,
+    });
+    origin = "https://github.com/unassigned/project";
+    await expect(runGitHubOperation(adapter, request)).rejects.toThrow(
+      "Unexpected push origin",
+    );
+    expect(pushed).toEqual(
+      Array.from({ length: 3 }, () => [
+        "push",
+        "https://github.com/example/project.git",
+        "HEAD:refs/heads/fix/example",
+      ]),
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the local App can use non-prefixed branches but respects operator protection globs", async () => {
+  const { adapter } = fixture();
+  adapter.policy.protectedBranches = ["main", "release/*", "stable.?"];
+  adapter.git = async () => "";
+  const directory = mkdtempSync(join(tmpdir(), "github-ref-"));
+  const input = join(directory, "pr.json");
+
+  const pr = officerRequest([
+    "pr-create",
+    "--repo",
+    "project",
+    "--input",
+    input,
+  ]);
+
+  let mutations = 0;
+  adapter.json = async () => {
+    mutations++;
+
+    return { number: 21 };
+  };
+
+  try {
+    for (const head of ["main", "release/nested/branch", "stable.1"]) {
+      writeFileSync(
+        input,
+        JSON.stringify({ title: "Title", head, base: "develop", body: "Body" }),
+      );
+      await expect(runGitHubOperation(adapter, pr)).rejects.toThrow(
+        "protected by the fleet",
+      );
+    }
+
+    writeFileSync(
+      input,
+      JSON.stringify({
+        title: "Title",
+        head: "workstream/deploy",
+        base: "develop",
+        body: "Body",
+      }),
+    );
+    expect(await runGitHubOperation(adapter, pr)).toMatchObject({ number: 21 });
+    expect(mutations).toBe(1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("local squash requires an App-owned ready PR, a protected default branch, and exact-head human approval", async () => {
+  const { adapter, pull } = fixture();
+  const checkout = realpathSync(mkdtempSync(join(tmpdir(), "github-squash-")));
+  const request = { ...mergeRequest, directory: checkout, expected_head: head };
+  adapter.policy.squashCheckout = checkout;
+  let permission = "write";
+  let approvedHead = "e".repeat(40);
+  let moved = false;
+  let checks = 0;
+  let writes = 0;
+  adapter.json = async (_repo, scope, path, options) => {
+    if (path === pullPath) {
+      if (moved && ++checks === 2) {
+        return { ...pull, head: { ...pull.head, sha: "e".repeat(40) } };
+      }
+
+      return pull;
+    }
+
+    if (path === "/repos/example/project") {
+      expect(scope).toBe("check");
+
+      return { full_name: repository, default_branch: "main" };
+    }
+
+    if (path.endsWith("/branches/main")) {
+      return { protected: true, commit: { sha: base } };
+    }
+
+    if (path.startsWith(pullPath + "/reviews?")) {
+      return [
+        {
+          id: 1,
+          state: "APPROVED",
+          commit_id: approvedHead,
+          submitted_at: "2026-01-02T12:00:00Z",
+          user: { type: "User", id: 2, login: "human-reviewer" },
+        },
+      ];
+    }
+
+    if (path.endsWith("/collaborators/human-reviewer/permission")) {
+      return { user: { type: "User", id: 2 }, permission };
+    }
+
+    expect(scope).toBe("merge");
+    expect(options?.body).toEqual({ sha: head, merge_method: "squash" });
+    writes++;
+
+    return { merged: true, sha: merged };
+  };
+
+  try {
+    await expect(runGitHubOperation(adapter, request)).rejects.toThrow(
+      "current-head human approval",
+    );
+    approvedHead = head;
+    permission = "read";
+    await expect(runGitHubOperation(adapter, request)).rejects.toThrow(
+      "repository writer",
+    );
+    permission = "write";
+    pull.user.login = "other-app[bot]";
+    await expect(runGitHubOperation(adapter, request)).rejects.toThrow(
+      "own open App PR",
+    );
+    pull.user.login = "fixture-owner[bot]";
+    pull.base.ref = "release";
+    await expect(runGitHubOperation(adapter, request)).rejects.toThrow(
+      "default branch",
+    );
+    pull.base.ref = "main";
+    moved = true;
+    await expect(runGitHubOperation(adapter, request)).rejects.toThrow(
+      "exact current head",
+    );
+    expect(writes).toBe(0);
+    moved = false;
+    expect(await runGitHubOperation(adapter, request)).toMatchObject({
+      merged: true,
+      humanApproval: true,
+    });
+    expect(writes).toBe(1);
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
 test("merge rechecks both native review families, the exact diff, and sends only the reviewed head", async () => {
   const { adapter, writes, errors } = fixture();
 
@@ -295,6 +581,42 @@ test("merge rechecks both native review families, the exact diff, and sends only
     { path: pullPath + "/merge", body: { sha: head, merge_method: "merge" } },
   ]);
   expect(errors).toEqual([]);
+});
+
+test("merge refuses a stale requested head even when the replacement has valid approvals", async () => {
+  const replacement = "e".repeat(40);
+  const { adapter, writes } = fixture(replacement);
+  const request = { ...mergeRequest, expected_head: head };
+
+  await expect(runGitHubOperation(adapter, request)).rejects.toThrow(
+    "requested merge SHA",
+  );
+  expect(writes).toEqual([]);
+  expect(
+    await runGitHubOperation(adapter, {
+      ...request,
+      expected_head: replacement,
+    }),
+  ).toMatchObject({ merged: true, headSHA: replacement });
+});
+
+test("merge refuses a head change between the proof check and the write", async () => {
+  const nextHead = "e".repeat(40);
+  const { adapter, pull, writes } = fixture();
+  const json = adapter.json;
+  let reads = 0;
+  adapter.json = async (repo, scope, path, options) => {
+    if (path === pullPath && ++reads === 2) {
+      pull.head.sha = nextHead;
+    }
+
+    return json(repo, scope, path, options);
+  };
+
+  await expect(
+    runGitHubOperation(adapter, { ...mergeRequest, expected_head: head }),
+  ).rejects.toThrow("head changed before merge");
+  expect(writes).toEqual([]);
 });
 
 test("merge refuses stale or unverifiable evidence before a write", async () => {
@@ -394,13 +716,14 @@ test("signed publication keeps repository, feature ref, mutation and expected he
 });
 
 test("repositories outside standing merge authority can only enter a protected queue after exact-head human approval", async () => {
-  const { adapter, pull } = fixture();
+  const replacement = "e".repeat(40);
+  const { adapter, pull } = fixture(replacement);
 
   const approved = {
     id: 9,
     user: { id: 5, type: "User", login: "owner" },
     state: "APPROVED",
-    commit_id: head,
+    commit_id: replacement,
     submitted_at: "2026-01-02T12:00:00Z",
   };
 
@@ -410,7 +733,7 @@ test("repositories outside standing merge authority can only enter a protected q
     id: "entry-unit",
     position: 2,
     state: "QUEUED",
-    headCommit: { oid: head },
+    headCommit: { oid: replacement },
     mergeQueue: queue,
   };
 
@@ -444,7 +767,7 @@ test("repositories outside standing merge authority can only enter a protected q
               id: "fixture-pull",
               baseRefName: "develop",
               baseRefOid: base,
-              headRefOid: head,
+              headRefOid: replacement,
               isDraft: false,
               state: "OPEN",
               reviewDecision: "APPROVED",
@@ -492,18 +815,26 @@ test("repositories outside standing merge authority can only enter a protected q
     throw new Error("Unexpected queue request.");
   };
 
-  expect(await runGitHubOperation(adapter, mergeRequest)).toMatchObject({
+  await expect(
+    runGitHubOperation(adapter, { ...mergeRequest, expected_head: head }),
+  ).rejects.toThrow("requested merge SHA");
+  expect(writes).toEqual([]);
+
+  const request = { ...mergeRequest, expected_head: replacement };
+  expect(await runGitHubOperation(adapter, request)).toMatchObject({
     queued: true,
-    headSHA: head,
+    headSHA: replacement,
     base: "develop",
     queueEntryID: entry.id,
     humanApproval: true,
     reviewID: 9,
   });
-  expect(writes).toMatchObject([{ variables: { pr: "fixture-pull", head } }]);
+  expect(writes).toMatchObject([
+    { variables: { pr: "fixture-pull", head: replacement } },
+  ]);
 
   permission = "read";
-  await expect(runGitHubOperation(adapter, mergeRequest)).rejects.toThrow(
+  await expect(runGitHubOperation(adapter, request)).rejects.toThrow(
     "repository writer",
   );
   expect(writes).toHaveLength(1);

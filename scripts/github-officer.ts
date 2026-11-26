@@ -8,7 +8,7 @@ import {
   object,
 } from "./github-wire";
 
-const requiredOptions = {
+export const requiredOptions = {
   check: [],
   push: ["directory", "branch"],
   "branch-create": ["input"],
@@ -36,7 +36,7 @@ Usage: fleet-github <operation> --repo <repository-key> [options]
   ready          Mark the current App's PR ready (--pr)
   review-context Save the exact review context (--pr, --output)
   review         Publish the current officer's verified review (--pr, --proof-id)
-  merge          Request a policy-gated merge (--pr)
+  merge          Request a policy-gated merge (--pr, --expected-head, --directory for checkout policy)
 
 Writes may succeed even when their response is lost. Inspect the branch or PR before retrying.
 `;
@@ -79,7 +79,10 @@ export function officerRequest(argv: string[]) {
   for (const key of Object.keys(values)) {
     if (
       !expected.has(key as keyof typeof values) &&
-      !(selected === "merge" && key === "expected-head")
+      !(
+        selected === "merge" &&
+        (key === "expected-head" || key === "directory")
+      )
     ) {
       throw new GitHubRefused(
         "An option is unavailable for this operation. Run fleet-github --help.",
@@ -126,6 +129,22 @@ export function officerRequest(argv: string[]) {
   };
 }
 
+export async function runOfficerRequest(
+  adapter: string,
+  request: ReturnType<typeof officerRequest>,
+) {
+  const module: unknown = await import(pathToFileURL(adapter).href);
+  const factory = object(module)["createAdapter"];
+
+  check(
+    typeof factory === "function",
+    "The configured adapter has no factory.",
+  );
+  const createAdapter = factory as (repo: string) => Promise<GitHubAdapter>;
+
+  return runGitHubOperation(await createAdapter(request.repo), request);
+}
+
 async function main() {
   const [adapter, ...args] = process.argv.slice(2);
 
@@ -139,22 +158,7 @@ async function main() {
     return;
   }
 
-  const request = officerRequest(args);
-
-  const module: unknown = await import(pathToFileURL(adapter).href);
-  const factory = object(module)["createAdapter"];
-
-  check(
-    typeof factory === "function",
-    "The configured adapter has no factory.",
-  );
-  const createAdapter = factory as (repo: string) => Promise<GitHubAdapter>;
-
-  const response = await runGitHubOperation(
-    await createAdapter(request.repo),
-    request,
-  );
-
+  const response = await runOfficerRequest(adapter, officerRequest(args));
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }
 

@@ -108,6 +108,17 @@ For example, use this command array in an OpenCode local MCP registration:
 ]
 ```
 
+Install Bun and the reviewed Stargate dependencies, including Effect, before
+registering this command. Replace existing registrations of `officer_files.py`
+with the Bun command and restart the affected officer engine. Keep the prior
+profile and source together if you need to revert. Use
+`--config=/dev/null --no-env-file --no-install` in the registered Bun command.
+
+Use `--rest` for a signing socket that fronts the Subspace REST API, or use
+`--rest --endpoint URL --actor OFFICER` for the installer-controlled local
+agent listener. Point the endpoint only at that listener. Use `--legacy-upload`
+only for an existing IRC `upload_file` registration.
+
 The socket supplies the officer's own Subspace identity. Installations with an
 authenticated loopback MCP relay can use `--port PORT --actor OFFICER` instead.
 Use a plain filename and an allowed extension. Each file must contain 1 byte to 10 MiB. New text accepts up to 65,536 UTF-8 bytes. A staged file must be owned by the officer, have one hard link and be writable only by its owner. Both directories must be canonical absolute paths. Create the export directory
@@ -147,14 +158,21 @@ When the officer profile selects an offline browser, call `prepare_file` with
 `preview: "teams"` and the original file source. It accepts an issue attachment,
 an existing upload, an outbox file, or new text. The file must be Markdown or
 plain text. The returned marker points to a labelled PNG preview. Include it
-and the original file name in the Teams reply. If the tool reports several
+and the original file name in the Teams reply. The renderer accepts up to 32,000 UTF-8 bytes,
+produces an indexed PNG up to 22,000 bytes and supports pages 1 through 100.
+If the tool reports several
 pages, set `page` on subsequent calls. Do not supply a chat upload ID for a
 preview.
 
-For a local shell workflow, the same renderer takes Markdown on stdin:
+To enable this tool, pass `--playwright` with the absolute path to the
+operator-installed Playwright module in the officer's MCP command. Use
+`--chromium` for a reviewed Chromium executable or `--browser-cache` for a
+reviewed Playwright browser cache. Chromium runs with its sandbox enabled.
+
+For a local shell workflow, the same renderer reads Markdown or plain text on stdin:
 
 ```sh
-bun scripts/markdown-preview.ts \
+bun --config=/dev/null --no-env-file --no-install scripts/markdown-preview.ts \
   --playwright /srv/browser-tools/node_modules/playwright/index.mjs \
   --name notes.md --output /srv/officers/captain/outbox/notes-preview.png < notes.md
 ```

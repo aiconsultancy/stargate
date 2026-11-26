@@ -1130,6 +1130,39 @@ describe("Teams waiting phrases", () => {
   });
 });
 
+test("Teams can disable incoming screenshots while preserving text messages", async () => {
+  const f = registrationFixture({ incomingImages: false });
+
+  try {
+    const attachments = [
+      {
+        contentType: "image/png",
+        contentUrl: SERVICE_URL + "v3/attachments/test-image/views/original",
+      },
+    ];
+
+    expect(
+      await f.registration.accept(activity({ text: "", attachments })),
+    ).toBe(false);
+    expect(
+      await f.registration.accept(
+        activity({ text: "Please review", attachments }),
+      ),
+    ).toBe(true);
+    const jobs = f.store.ready(f.registration.key, Date.now(), 10);
+    expect(jobs).toHaveLength(1);
+    const job = jobs[0];
+
+    if (!job) {
+      throw new Error("text message was lost");
+    }
+
+    expect(f.store.attachmentRecords.inputFiles(job.id)).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
 test("pasted screenshots are durable inputs even when the personal message has no text", async () => {
   const f = registrationFixture();
 

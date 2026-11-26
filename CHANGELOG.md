@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+The shared officer file, repository refresh and GitHub tools run on Bun. Update
+existing file registrations to `scripts/officer-files.ts` after installing the
+reviewed Stargate dependencies. See [attachments](docs/attachments.md).
+
 ### Feature flags
 
 - Default change: Teams registrations enable `livePresence` by default. Set it to
   `false` to disable typing and work-in-progress updates.
+- Teams registrations accept incoming screenshots by default. Set
+  `incomingImages: false` to turn off their download.
 
 - New flags: `usageGuard.enabled`, default off. OpenCode captain peer DMs require the fleet plugin option `peerMessages` (default off) and an explicit gateway grant.
 - Default changes: the `stargate.crew` plugin's `feedbackEnabled` option changes

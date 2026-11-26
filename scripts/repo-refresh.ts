@@ -23,7 +23,7 @@ const tools = [
   {
     name: readTool,
     description:
-      "Read lines and the verified commit SHA from a fetched origin branch. Pass nextLine as startLine for more.",
+      "Read lines and the verified commit from a fetched origin branch. Pass the returned commit and nextLine as startLine to continue.",
     inputSchema: {
       type: "object",
       properties: {
@@ -31,6 +31,10 @@ const tools = [
         branch: { type: "string" },
         path: { type: "string" },
         startLine: { type: "integer", minimum: 1 },
+        commit: {
+          type: "string",
+          description: "Commit returned by the initial read.",
+        },
       },
       required: ["repository", "branch", "path"],
       additionalProperties: false,
@@ -45,6 +49,7 @@ const readArgs = Schema.Struct({
   branch: Schema.String,
   path: Schema.String,
   startLine: Schema.optionalKey(Schema.Int),
+  commit: Schema.optionalKey(Schema.String),
 });
 
 const decodeOperation = Schema.decodeUnknownResult(
@@ -79,10 +84,8 @@ const installedJob = Schema.Struct({
   origin: Schema.String,
   expectedOrigin: Schema.String,
   gitOptions: Schema.Array(Schema.String),
-  gitEnvironment: Schema.optionalKey(
-    Schema.Record(Schema.String, Schema.String),
-  ),
-  gitRunner: Schema.optionalKey(Schema.Array(Schema.String)),
+  gitEnvironment: Schema.Record(Schema.String, Schema.String),
+  gitRunner: Schema.Array(Schema.String),
 });
 
 const decodeJob = Schema.decodeUnknownSync(Schema.fromJsonString(installedJob));
@@ -173,11 +176,14 @@ export async function readOriginFile(
   branch: string,
   path: string,
   startLine = 1,
+  requestedCommit?: string,
 ) {
   for (const part of path.split("/")) {
     if (
       part !== ".env.example" &&
-      /(?:\.env(?:\..*)?|\.pem|\.key)$/i.test(part)
+      /(?:^\.(?:env(?:\..*)?|npmrc|netrc)|^id_(?:rsa|dsa|ecdsa|ed25519)|^credentials\.json|\.(?:pem|key|p12|pfx))$/i.test(
+        part,
+      )
     ) {
       throw new Error("The file matches a restricted credential filename.");
     }
@@ -187,9 +193,16 @@ export async function readOriginFile(
 
   await git("check-ref-format", ref);
 
-  const commit = verifiedSha(
+  const head = verifiedSha(
     await git("rev-parse", "--verify", `${ref}^{commit}`),
   );
+
+  const commit =
+    requestedCommit === undefined ? head : verifiedSha(requestedCommit);
+
+  if (commit !== head) {
+    await git("merge-base", "--is-ancestor", commit, head);
+  }
 
   const blob = `${commit}:${path}`;
   const type = await git("cat-file", "-t", blob);
@@ -276,6 +289,25 @@ export async function refreshRefs(
   origin: string,
   expectedOrigin: string,
 ) {
+  const remote = URL.parse(origin);
+
+  if (
+    !(
+      origin.startsWith("/") &&
+      Array.from(origin).every((character) => character.charCodeAt(0) >= 32)
+    ) &&
+    !(
+      remote &&
+      ["https:", "http:"].includes(remote.protocol) &&
+      !remote.username &&
+      !remote.password &&
+      !remote.search &&
+      !remote.hash
+    )
+  ) {
+    throw new Error("The source URL must not carry credentials or options.");
+  }
+
   if ((await git("remote", "get-url", "origin")) !== expectedOrigin) {
     throw new Error(
       "The checkout origin does not match the configured repository.",
@@ -335,9 +367,17 @@ export async function execute(input: string) {
   const git: Git = async (...args) => {
     const stdout = await runGit(
       [
-        ...(job.gitRunner ?? []),
+        ...job.gitRunner,
         "/usr/bin/git",
         ...job.gitOptions,
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "protocol.allow=never",
+        "-c",
+        "fetch.recurseSubmodules=false",
         "-c",
         "http.followRedirects=false",
         "-c",
@@ -346,7 +386,7 @@ export async function execute(input: string) {
         job.checkout,
         ...args,
       ],
-      job.gitEnvironment ?? process.env,
+      job.gitEnvironment,
     );
 
     const output = new TextDecoder("utf-8", {
@@ -373,6 +413,7 @@ export async function execute(input: string) {
           request.args.branch,
           request.args.path,
           request.args.startLine,
+          request.args.commit,
         );
 
   return { repository: request.args.repository, ...result };

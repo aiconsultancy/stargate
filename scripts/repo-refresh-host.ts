@@ -35,7 +35,12 @@ type SocketDependencies = {
   execute(input: string): Promise<unknown>;
 };
 
-function readPolicy(command: string[], tool: string, repository: string) {
+function readPolicy(
+  command: string[],
+  tool: string,
+  repository: string,
+  peerUid: number,
+) {
   const [executable, ...args] = command;
 
   if (!executable) {
@@ -45,9 +50,9 @@ function readPolicy(command: string[], tool: string, repository: string) {
   return new Promise<string>((resolve, reject) => {
     execFile(
       executable,
-      [...args, tool, repository],
+      [...args, tool, repository, String(peerUid)],
       {
-        timeout: 5000,
+        timeout: 25_000,
         maxBuffer: 32_768,
         encoding: "utf8",
         env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
@@ -125,7 +130,7 @@ export async function serveRepositorySocket(
     const request = dependencies.operation(tool, args);
 
     const policy = Schema.decodeUnknownSync(policyResult)(
-      await readPolicy(command, tool, request.args.repository),
+      await readPolicy(command, tool, request.args.repository, peer[1] ?? -1),
     );
 
     if (policy.callerUid !== peer[1]) {
@@ -140,6 +145,7 @@ export async function serveRepositorySocket(
       if (
         !info.isDirectory() ||
         info.uid !== policy.checkoutUid ||
+        (info.mode & 0o022) !== 0 ||
         (await realpath(folder)) !== folder
       ) {
         throw new Error("Protected checkout ownership differs.");

@@ -296,14 +296,28 @@ export class ConnectorClient {
     signal: AbortSignal,
   ): Promise<Response> {
     const target = imageView(service, url);
-    signal.throwIfAborted();
-    const token = await untilAborted(this.#tokens.getToken(), signal);
 
-    return this.#fetch(target, {
-      headers: { authorization: `Bearer ${token}` },
-      redirect: "error",
-      signal,
-    });
+    for (let attempt = 0; ; attempt++) {
+      signal.throwIfAborted();
+      const token = await untilAborted(this.#tokens.getToken(), signal);
+
+      const response = await this.#fetch(target, {
+        headers: { authorization: `Bearer ${token}` },
+        redirect: "error",
+        signal,
+      });
+
+      if (
+        attempt === 0 &&
+        (response.status === 401 || response.status === 403)
+      ) {
+        await response.body?.cancel();
+        this.#tokens.invalidate();
+        continue;
+      }
+
+      return response;
+    }
   }
 
   // Options.signal bounds the whole send, token and retry included.

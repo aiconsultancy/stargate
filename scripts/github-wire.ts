@@ -1,6 +1,7 @@
 export type JsonObject = Record<string, unknown>;
 
 export type GitHubScope =
+  | "check"
   | "read"
   | "pr-status"
   | "pr"
@@ -14,6 +15,7 @@ export type GithubPolicy = {
   organization: string;
   repositoryNames?: Readonly<Record<string, string>>;
   squashCheckout?: string;
+  protectedBranches?: readonly string[];
   caller: string;
   app: string;
   rank: "captain" | "rear_admiral";

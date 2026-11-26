@@ -20,6 +20,7 @@ const custody = Schema.Struct({
   role: Schema.Literals(["captain", "rear_admiral"]),
   contents: Schema.Literals(["read", "write"]),
   directPublication: Schema.Boolean,
+  protectedBranches: Schema.optionalKey(Schema.Array(Schema.String)),
   repos: Schema.Record(
     Schema.String,
     Schema.Struct({
@@ -159,7 +160,7 @@ async function request(path: string, token: string, options: RequestInit) {
   });
 }
 
-function permissions(scope: GitHubScope) {
+export function permissions(scope: GitHubScope) {
   const granted: Record<string, string> = {
     metadata: "read",
     contents: "read",
@@ -203,7 +204,7 @@ async function git(
     Object.assign(env, {
       GIT_CONFIG_COUNT: "1",
       GIT_CONFIG_KEY_0: "http.https://github.com/.extraHeader",
-      GIT_CONFIG_VALUE_0: `Authorization: Bearer ${token}`,
+      GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from("x-access-token:" + token).toString("base64")}`,
     });
   }
 
@@ -332,7 +333,10 @@ export async function createAdapter(
     check(
       scope !== "enqueue" &&
         (scope !== "merge" || repo.mergeCheckout) &&
-        (writable || scope === "read" || scope === "pr-status"),
+        (writable ||
+          scope === "check" ||
+          scope === "read" ||
+          scope === "pr-status"),
       "GitHub access is restricted by the installed policy.",
     );
     let pending = tokens.get(scope);
@@ -372,6 +376,11 @@ export async function createAdapter(
     reviewMarker: "stargate-review-v1:",
     captains: {},
     reviewModels: {},
+    protectedBranches: current.protectedBranches ?? [
+      "main",
+      "master",
+      "release/*",
+    ],
   };
 
   if (repo.mergeCheckout) {

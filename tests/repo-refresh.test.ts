@@ -72,6 +72,12 @@ test("origin refresh and branch reads use a verified SHA without changing checko
             origin,
             expectedOrigin: origin,
             gitOptions,
+            gitEnvironment: {
+              PATH: "/usr/bin:/bin",
+              GIT_CONFIG_GLOBAL: "/dev/null",
+              GIT_CONFIG_NOSYSTEM: "1",
+            },
+            gitRunner: [],
           },
           ["execute"],
         ),
@@ -133,10 +139,29 @@ test("origin refresh and branch reads use a verified SHA without changing checko
       lines: ["read this"],
       nextLine: null,
     });
+    writeFileSync(join(origin, "proof.md"), "unexpected newer lines\n");
+    git(origin, "add", ".");
+    git(origin, "commit", "--quiet", "-m", "newer");
+    await execute("refresh_origin", {});
+    expect(
+      await execute("read_origin_file", {
+        branch: "main",
+        path: "proof.md",
+        startLine: 2,
+        commit,
+      }),
+    ).toEqual({
+      repository,
+      commit,
+      startLine: 2,
+      lines: ["read this"],
+      nextLine: null,
+    });
     expect(
       await execute("read_origin_file", {
         branch: "main",
         path: ".env.example",
+        commit,
       }),
     ).toEqual({
       repository,
@@ -166,7 +191,7 @@ test("origin refresh and branch reads use a verified SHA without changing checko
   } finally {
     rmSync(root, { force: true, recursive: true });
   }
-});
+}, 20_000);
 
 test("repository MCP relays only supported operations to the configured private socket", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "repo-tool-")));
@@ -308,7 +333,9 @@ test.skipIf(process.platform !== "linux")(
 
       writeFileSync(
         configuration,
-        `console.log(${JSON.stringify(JSON.stringify(policy))});\n`,
+        `if (process.argv[2] !== "read_origin_file" || process.argv[3] !== "project" ||
+             process.argv[4] !== "${uid}") process.exit(99);
+        console.log(${JSON.stringify(JSON.stringify(policy))});\n`,
       );
       const client = createConnection(socket);
       const answer: Buffer[] = [];

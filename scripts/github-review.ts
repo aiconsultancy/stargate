@@ -469,7 +469,7 @@ async function mergeProofs(
   );
 }
 
-async function humanApproval(
+export async function humanApproval(
   adapter: GitHubAdapter,
   repo: string,
   endpoint: string,
@@ -750,6 +750,7 @@ export async function reviewOperation(
   number: number,
   operation: "review" | "merge",
   proofId: string | null,
+  expectedHead: string | null,
 ) {
   const repository = githubRepository(adapter.policy, repo);
   const endpoint = `/repos/${repository}/pulls/${number}`;
@@ -768,6 +769,10 @@ export async function reviewOperation(
 
   if (operation === "merge") {
     check(
+      expectedHead === null || head === sha(expectedHead),
+      "PR head differs from the requested merge SHA.",
+    );
+    check(
       author === adapter.policy.caller,
       "Only the author captain may merge.",
     );
@@ -783,6 +788,11 @@ export async function reviewOperation(
 
     await mergeProofs(adapter, repo, number, pull, author, context);
     const current = object(await adapter.json(repo, "merge", endpoint));
+
+    check(
+      field(current, "head", "sha") === head,
+      "Live PR head changed before merge.",
+    );
 
     const currentContext = await liveContext(
       adapter,

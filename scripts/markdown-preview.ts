@@ -39,6 +39,7 @@ type Chromium = {
 };
 
 const viewport = { width: 880, height: 680 };
+export const contentHeight = viewport.height - 55;
 const inputLimit = 32_000;
 const previewLimit = 22_000;
 
@@ -50,11 +51,15 @@ function escaped(value: string) {
 }
 
 export function previewHtml(source: string, name: string, page: number) {
-  const content = Bun.markdown.html(source, {
-    noHtmlBlocks: true,
-    noHtmlSpans: true,
-    tagFilter: true,
-  });
+  const plain = /\.(?:txt|text)$/i.test(name);
+
+  const content = plain
+    ? `<pre class="plain">${escaped(source)}</pre>`
+    : Bun.markdown.html(source, {
+        noHtmlBlocks: true,
+        noHtmlSpans: true,
+        tagFilter: true,
+      });
 
   return `<!doctype html><html lang="en">
 <meta charset="utf-8">
@@ -62,18 +67,20 @@ export function previewHtml(source: string, name: string, page: number) {
 <title>Document preview</title>
 <style>
 html { color: #111; background: #fff; scrollbar-width:none }
-body { margin:0; padding:54px 36px 20px; font:17px/1.35 Arial, sans-serif; overflow-wrap:anywhere }
+body { margin:0; font:17px/1.35 Arial, sans-serif; overflow-wrap:anywhere }
 header { position:fixed; inset:0 0 auto; height:43px; padding:0 36px; display:flex; align-items:center;
   justify-content:space-between; background:#fff; border-bottom:2px solid #444 }
-main { max-width: 100%; }
+section { position:fixed; inset:55px 0 0; overflow:hidden }
+main { display:flow-root; padding:0 36px }
 h1,h2,h3 { margin:0.7em 0 0.25em; line-height:1.1 }
 p,pre,ul,ol,table { margin:0.35em 0 0.65em }
 pre { white-space:pre-wrap; border:1px solid #aaa; padding:7px }
+.plain { padding:0; border:0; margin:0 }
 a { color:inherit; text-decoration:underline } img { display:none }
 td,th { padding:3px 7px; border:1px solid #999 } table { border-collapse:collapse }
 </style>
 <header><strong>${escaped(name)}</strong><span>Document preview · page ${page}</span></header>
-<main>${content}</main></html>`;
+<section><main>${content}</main></section></html>`;
 }
 
 export async function indexedPreview(raw: Uint8Array) {
@@ -102,7 +109,9 @@ async function sourceText() {
     size += chunk.length;
 
     if (size > inputLimit) {
-      throw new Error("Provide at most 32 KB of Markdown on stdin.");
+      throw new Error(
+        "Provide at most 32 KB of Markdown or plain text on stdin.",
+      );
     }
 
     chunks.push(chunk);
@@ -113,7 +122,7 @@ async function sourceText() {
   );
 
   if (!source.trim()) {
-    throw new Error("Provide Markdown on stdin.");
+    throw new Error("Provide Markdown or plain text on stdin.");
   }
 
   return source;
@@ -178,16 +187,24 @@ export async function renderMarkdownPreview(
       waitUntil: "load",
       timeout: 10_000,
     });
-    const pageHeight = viewport.height - 55;
-    const offset = (pageNumber - 1) * pageHeight;
 
-    const total = await page.evaluate((position) => {
-      globalThis.scrollTo(0, position);
+    const total = await page.evaluate(
+      (offset) => {
+        const content = globalThis.document.querySelector("main");
 
-      return globalThis.document.documentElement.scrollHeight;
-    }, offset);
+        if (!content) {
+          throw new Error("Document content is unavailable.");
+        }
 
-    const pages = Math.max(1, Math.ceil((total - 55) / pageHeight));
+        const height = content.getBoundingClientRect().height;
+        content.style.transform = `translateY(${-offset}px)`;
+
+        return height;
+      },
+      (pageNumber - 1) * contentHeight,
+    );
+
+    const pages = Math.max(1, Math.ceil(total / contentHeight));
 
     if (pageNumber > pages) {
       throw new Error("The requested page is outside this document.");

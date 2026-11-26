@@ -472,3 +472,36 @@ test("Teams downloads an admitted Connector image once with its own token and bo
     ),
   ).rejects.toThrow();
 });
+
+test("Teams invalidates the image token once when the Connector rejects it", async () => {
+  const service = "https://smba.trafficmanager.net/emea/";
+  const view = service + "v3/attachments/fixture/views/original";
+  const headers: string[] = [];
+  let generation = 0;
+
+  const connector = new ConnectorClient({
+    tokenProvider: {
+      invalidate() {
+        generation++;
+      },
+      async getToken() {
+        return "fixture-" + generation;
+      },
+    },
+    fetch: Object.assign(
+      async (_target: RequestInfo | URL, options?: RequestInit) => {
+        headers.push(new Headers(options?.headers).get("authorization") ?? "");
+
+        return new Response(headers.length === 1 ? "expired" : "image", {
+          status: headers.length === 1 ? 401 : 200,
+        });
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  });
+
+  expect((await connector.fetchImage(service, view, signal())).status).toBe(
+    200,
+  );
+  expect(headers).toEqual(["Bearer fixture-0", "Bearer fixture-1"]);
+});

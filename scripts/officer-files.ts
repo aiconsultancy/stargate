@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { Result, Schema } from "effect";
+import { officerRequestLines } from "./officer-stdio";
 import { type PreviewBrowser, renderMarkdownPreview } from "./markdown-preview";
 
 import { RestFiles } from "./officer-rest-files";
@@ -970,57 +971,12 @@ async function prepare(input: unknown, config: Config, signal: AbortSignal) {
     : prepareOutput(config, name, data, args, signal);
 }
 
-async function* requestLines(limit: number) {
-  let pending = Buffer.alloc(0);
-  const reader = Bun.stdin.stream().getReader();
-
-  try {
-    for (;;) {
-      const chunk = await reader.read();
-
-      if (chunk.done) {
-        if (pending.length > 0) {
-          yield pending.toString("utf8");
-        }
-
-        return;
-      }
-
-      const bytes = Buffer.from(chunk.value);
-      let start = 0;
-
-      while (start < bytes.length) {
-        const end = bytes.indexOf(10, start) + 1;
-        const piece = bytes.subarray(start, end === 0 ? bytes.length : end);
-
-        if (pending.length + piece.length > limit) {
-          await reader.cancel();
-
-          return;
-        }
-
-        pending = Buffer.concat([pending, piece]);
-
-        if (!end) {
-          break;
-        }
-
-        yield pending.toString("utf8");
-        pending = Buffer.alloc(0);
-        start = end;
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
 async function serve(config: Config) {
   const legacy = "legacyUpload" in config;
   const tool = legacy ? uploadTool : prepareTool;
   const invalid = { error: { code: -32_600, message: "Invalid request" } };
 
-  for await (const line of requestLines(legacy ? 8192 : 400_000)) {
+  for await (const line of officerRequestLines(legacy ? 8192 : 400_000)) {
     const parsed = Schema.decodeUnknownResult(requestSchema)(line);
     let id: string | number | null = null;
     let reply: Record<string, unknown> = invalid;

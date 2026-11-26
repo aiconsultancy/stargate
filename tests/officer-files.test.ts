@@ -570,7 +570,7 @@ test("prepare_file renders a labelled Markdown issue preview through the officer
           async setContent(html) {
             if (!html.includes("<h1>Requested release notes</h1>") || !html.includes("notes.md")) throw new Error();
           },
-          async evaluate() { return 680; },
+          async evaluate() { return 625; },
           async screenshot() {
             return Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
           },

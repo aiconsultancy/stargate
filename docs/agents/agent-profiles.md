@@ -158,16 +158,37 @@ unknown locks automatically.
 ## Repository tools
 
 Fleet installers can load `scripts/repo-refresh.ts mcp --socket PATH` for a rear
-admiral. Configure the companion Linux socket service to start the same script
-with `serve -- POLICY_COMMAND`. The configured policy supplies the repository
-checkout, expected origin, read-only Git credentials and owner IDs. File reads
-return the exact fetched commit SHA. Refresh updates the origin refs and keeps
-the local branch and files in place.
+admiral. On Linux, configure a systemd socket with `Accept=yes` and access for
+the officer, and start the same script as `serve -- POLICY_COMMAND` with the
+accepted socket on standard input. Run Bun with the reviewed dependencies
+installed and `--config=/dev/null --no-env-file --no-install`.
 
-To provide repository-scoped GitHub operations, configure an adapter for
-`bun scripts/github-officer.ts /absolute/path/to/adapter.ts --help`. The
-adapter exports `createAdapter()` and supplies the installed GitHub identity,
-repository policy, authenticated transport and native review evidence. See
-`scripts/github-wire.ts` for the interface. The command checks GitHub policy
-and verified evidence before signing, publishing, reviewing or requesting a
-merge. Operators configure credential custody for their deployment.
+The broker takes the peer UID from `SO_PEERCRED`. It appends the operation,
+configured repository key and observed peer UID to the operator-owned policy
+command. The command must reject a different caller before obtaining credentials.
+Its JSON contains `checkout`, `checkoutUid`, `callerUid`, `origin`,
+`expectedOrigin`, `gitOptions`, `gitEnvironment` and `gitRunner`. Keep credentials
+in the environment and out of the origin URL. The checkout and its Git metadata
+must belong to the configured owner and refuse group and other writes. Refresh
+locks Git metadata and updates only the origin refs. Reads return the verified
+commit. Pass that commit with `nextLine` as `startLine` to continue on the same
+version.
+
+To provide repository-scoped GitHub operations, use an operator-owned wrapper
+that fixes the Bun entrypoint and the absolute adapter path. Provide
+`scripts/github-officer.ts` for CLI use or `scripts/github-officer-mcp.ts` for an
+officer whose harness uses MCP. The adapter exports `createAdapter(repository)`
+with the identity, policy, transport and native reviews defined by
+`scripts/github-wire.ts`.
+
+The included `github-local-app.ts` reads the operator-selected root-owned
+registry from `STARGATE_GITHUB_APP_CONFIG`. Registry keys are OS usernames.
+Each row contains `home`, `login`, `role`, `contents`, `directPublication`,
+`protectedBranches` and `repos`. Repository entries map a tool key to GitHub
+`owner` and `name`, with an optional operator-authorised `mergeCheckout`.
+It reads `github-app.json` and `github-app.pem` from the officer's
+`~/.config/subspace` directory. Both must be owned by the officer with mode 0600.
+This custody model grants the local officer UID access to the App key.
+Enforce repository and branch policy through GitHub rulesets. For custody
+outside that UID, install a deployment adapter backed by an operator service
+and grant only the required repository scopes.

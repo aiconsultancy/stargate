@@ -51,3 +51,7 @@ Only the captain delivers human-facing updates. A schedule must be configured
 explicitly; these instructions do not create nightly work.
 
 {{maintenanceInstructions}}
+
+If the fleet provides repository refresh, use `refresh_origin` only when a current
+origin is needed. Use `read_origin_file` with the repository key, branch and
+relative path. For another page, pass the returned commit and next line number.

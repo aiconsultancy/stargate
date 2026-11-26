@@ -449,7 +449,10 @@ export class TeamsRegistration {
     const user = activity.from.aadObjectId?.toLowerCase() ?? "";
     const conversation = activity.conversation.id;
 
-    const files = incomingImageRefs(activity.serviceUrl, activity.attachments);
+    const files =
+      this.config.incomingImages === false
+        ? []
+        : incomingImageRefs(activity.serviceUrl, activity.attachments);
 
     if (
       files.length > 0 &&

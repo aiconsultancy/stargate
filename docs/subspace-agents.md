@@ -166,10 +166,11 @@ For each request it:
   headers, is dropped;
 - adds the configured access headers and `Authorization: Bearer <token>`,
   minting a new token for every request;
-- passes the body unchanged (at most 8 MiB), so a crew member's `relayedCrew`
-  reaches the API as written. Crew sessions run under their captain and act
-  as the captain. The REST chat upload route accepts a file up to 10 MiB,
-  plus bounded base64 and JSON overhead;
+- passes the body unchanged. The normal request limit is 8 MiB. The REST chat
+  upload route accepts up to 10,485,760 decoded file bytes and a total request
+  body up to 13,985,112 bytes (base64 expansion plus 4,096 bytes). Up to 32
+  requests can be buffered per listener. A crew member's `relayedCrew`
+  reaches the API as written, under its captain's identity;
 - returns the API's status and body as they stream (at most 64 MiB), with only
   `Allow`, `Cache-Control`, `Content-Disposition`, `Content-Type`, `ETag`,
   `Last-Modified`, `MCP-Protocol-Version`, `Mcp-Session-Id`, `Retry-After` and

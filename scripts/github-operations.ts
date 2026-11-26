@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
 import type { officerRequest } from "./github-officer";
-import { reviewContext, reviewOperation } from "./github-review";
+import { humanApproval, reviewContext, reviewOperation } from "./github-review";
 import {
   type GitHubAdapter,
   type JsonObject,
@@ -26,15 +26,43 @@ const commitQuery =
 
 const publishLimit = 16 * 1024 * 1024;
 
-function featureBranch(value: unknown) {
+function featureBranch(value: unknown, protectedBranches?: readonly string[]) {
   const branch = text(value);
+  const namedBranch = /^[A-Za-z0-9][A-Za-z0-9/_.-]{0,180}$/;
 
   check(
-    branchPattern.test(branch) &&
+    (protectedBranches ? namedBranch : branchPattern).test(branch) &&
       !branch.includes("..") &&
-      !/[/.]$/.test(branch),
+      !/[/.]$/.test(branch) &&
+      branch
+        .split("/")
+        .every(
+          (part) =>
+            part.length > 0 && !part.startsWith(".") && !part.endsWith(".lock"),
+        ),
     "Select a supported feature branch.",
   );
+
+  for (const pattern of protectedBranches ?? []) {
+    check(
+      /^[a-zA-Z0-9*?._/-]{1,120}$/.test(pattern),
+      "Invalid protected branch pattern.",
+    );
+
+    const matcher = new RegExp(
+      "^" +
+        pattern
+          .replaceAll(".", "\\.")
+          .replaceAll("*", ".*")
+          .replaceAll("?", ".") +
+        "$",
+    );
+
+    check(
+      !matcher.test(branch),
+      "The selected branch is protected by the fleet.",
+    );
+  }
 
   return branch;
 }
@@ -104,7 +132,11 @@ async function push(
   fullName: string,
   request: OfficerRequest,
 ) {
-  const branch = featureBranch(request.branch);
+  const branch = featureBranch(
+    request.branch,
+    adapter.policy.protectedBranches,
+  );
+
   const directory = await realpath(text(request.directory));
   const origin = `https://github.com/${fullName}.git`;
   const { home } = adapter.policy;
@@ -117,8 +149,21 @@ async function push(
     "Git metadata is unavailable.",
   );
 
+  const configuredOrigin = URL.parse(
+    await adapter.git(directory, ["remote", "get-url", "origin"]),
+  );
+
   check(
-    (await adapter.git(directory, ["remote", "get-url", "origin"])) === origin,
+    configuredOrigin?.protocol === "https:" &&
+      configuredOrigin.hostname === "github.com" &&
+      !configuredOrigin.username &&
+      !configuredOrigin.password &&
+      !configuredOrigin.search &&
+      !configuredOrigin.hash &&
+      configuredOrigin.pathname
+        .replace(/\/$/, "")
+        .replace(/\.git$/, "")
+        .toLowerCase() === `/${fullName.toLowerCase()}`,
     "Unexpected push origin.",
   );
   const top = await adapter.git(directory, ["rev-parse", "--show-toplevel"]);
@@ -273,7 +318,7 @@ async function publishCommit(
       branch["repositoryNameWithOwner"] === fullName,
     "Only signed commits to the selected repository are accepted.",
   );
-  featureBranch(branch["branchName"]);
+  featureBranch(branch["branchName"], adapter.policy.protectedBranches);
   sha(text(mutation["expectedHeadOid"]).toLowerCase());
 
   const result = await adapter.json(repo, "publish", "/graphql", {
@@ -309,22 +354,56 @@ async function guardedSquash(
 
   check(
     allowed &&
-      (await realpath(process.cwd())) === allowed &&
+      (await realpath(request.directory ?? process.cwd())) === allowed &&
       adapter.policy.mergeRepositories.includes(request.repo),
     "Squash merging requires the configured captain checkout.",
   );
   const head = sha(request.expected_head);
-  const pull = await adapter.json(request.repo, "read", endpoint);
+  const repo = request.repo;
+  const pull = await adapter.json(repo, "read", endpoint);
+  const base = text(field(pull, "base", "ref"));
+  const baseSha = sha(field(pull, "base", "sha"));
+
+  function requireCurrent(value: unknown) {
+    ownPull(value, adapter);
+    check(
+      field(value, "head", "sha") === head &&
+        field(value, "draft") === false &&
+        field(value, "merged") === false &&
+        field(value, "mergeable") === true &&
+        field(value, "mergeable_state") === "clean" &&
+        field(value, "head", "repo", "full_name") === fullName &&
+        field(value, "base", "repo", "full_name") === fullName &&
+        field(value, "base", "ref") === base &&
+        field(value, "base", "sha") === baseSha,
+      "Select the exact current head of a ready same-repository PR.",
+    );
+  }
+
+  requireCurrent(pull);
+  const root = `/repos/${fullName}`;
+  const repository = await adapter.json(repo, "check", root);
 
   check(
-    field(pull, "head", "sha") === head &&
-      field(pull, "state") === "open" &&
-      field(pull, "draft") === false &&
-      field(pull, "merged") === false &&
-      field(pull, "head", "repo", "full_name") === fullName &&
-      field(pull, "base", "repo", "full_name") === fullName,
-    "Select the exact current head of a ready same-repository PR.",
+    field(repository, "full_name") === fullName &&
+      field(repository, "default_branch") === base,
+    "Squash merging is limited to the selected repository's default branch.",
   );
+
+  const target = await adapter.json(
+    repo,
+    "read",
+    `${root}/branches/${encodeURIComponent(base)}`,
+  );
+
+  check(
+    field(target, "protected") === true &&
+      field(target, "commit", "sha") === baseSha,
+    "Confirm default branch protection and the current base commit.",
+  );
+  await humanApproval(adapter, repo, endpoint, head);
+  requireCurrent(await adapter.json(repo, "read", endpoint));
+  await humanApproval(adapter, repo, endpoint, head);
 
   const result = await adapter.json(
     request.repo,
@@ -341,7 +420,12 @@ async function guardedSquash(
     "Squash merge unconfirmed. Inspect the PR before retrying.",
   );
 
-  return { merged: true, headSHA: head, mergeSHA: sha(field(result, "sha")) };
+  return {
+    merged: true,
+    headSHA: head,
+    mergeSHA: sha(field(result, "sha")),
+    humanApproval: true,
+  };
 }
 
 export async function runGitHubOperation(
@@ -371,7 +455,7 @@ export async function runGitHubOperation(
 
   switch (operation) {
     case "check": {
-      const value = await adapter.json(repo, "read", root);
+      const value = await adapter.json(repo, "check", root);
 
       check(
         field(value, "full_name") === fullName,
@@ -461,7 +545,7 @@ export async function runGitHubOperation(
           ),
         "PR requires title, head, base and body.",
       );
-      const head = featureBranch(changes["head"]);
+      const head = featureBranch(changes["head"], policy.protectedBranches);
       const base = text(changes["base"]);
 
       check(base !== head, "PR base must differ from the feature branch.");
@@ -488,7 +572,7 @@ export async function runGitHubOperation(
         onlyFields(value, ["ref", "sha"]) && ref.startsWith("refs/heads/"),
         "Choose a feature ref and its exact base.",
       );
-      featureBranch(ref.slice("refs/heads/".length));
+      featureBranch(ref.slice("refs/heads/".length), policy.protectedBranches);
       sha(text(value["sha"]).toLowerCase());
 
       const result = await adapter.json(repo, "publish", `${root}/git/refs`, {
@@ -554,6 +638,7 @@ export async function runGitHubOperation(
         request.pr,
         operation,
         request.proof_id,
+        request.expected_head,
       );
   }
 }

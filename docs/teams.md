@@ -161,7 +161,7 @@ including its caption and reply metadata, against the Teams 80 KB budget.
 The gateway can reduce the longest edge to 256 pixels to fit the preview byte limit. Up to two native decoders run at once. GIF previews show the first frame. Animated PNG and animated WebP are refused. JPEG previews flatten transparency. A busy decoder can retry before publication.
 Images are never truncated or
 silently replaced by their captions. No arbitrary image URLs are fetched, and
-no extra public file endpoint is needed. Paste a screenshot into a Teams message for the officer to inspect. In groups and channels, mention the bot. Stargate downloads only inline image attachments from the authenticated Bot Connector for the admitted turn. PNG, JPEG, WebP and GIF can be up to 10 MiB each, 25 MiB total, and 4096 pixels per edge. HTML image sources and links to files in Microsoft 365 are separate from inline images.
+no extra public file endpoint is needed. Paste a screenshot into a Teams message for the officer to inspect. The registration option `incomingImages: false` disables incoming screenshot downloads. In groups and channels, mention the bot. Stargate downloads only inline image attachments from the authenticated Bot Connector for the admitted turn. PNG, JPEG, WebP and GIF can be up to 10 MiB each, 25 MiB total, and 4096 pixels per edge. HTML image sources and links to files in Microsoft 365 are separate from inline images.
 
 The local encoded receipt stays in private delivery state. Publication uses the
 original authenticated conversation and reply activity with a fresh access
