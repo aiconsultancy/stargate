@@ -3,7 +3,7 @@ import {
   execFile,
   spawn as spawnChild,
 } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import {
   access,
   chmod,
@@ -13,12 +13,10 @@ import {
   readdir,
   rm,
 } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   type Options,
@@ -33,13 +31,17 @@ import {
   checkAttachments,
 } from "../chat/attachments/attachments";
 import {
+  type ActivityRequest,
   type AgentBackend,
   type BackendContext,
   type PromptSourceContext,
   type TextSink,
+  type TurnActivityRecorder,
   sourceLine,
 } from "./backend";
+import { ClaudeActivity } from "./claude/activity";
 import type { claudeBackendSchema } from "./claude/config";
+import { claudeCLI, versionFailure } from "./claude/executable";
 import { ClaudeTurn, claudeFailure } from "./claude/turn";
 import { secret } from "../lib/credentials";
 import {
@@ -69,56 +71,6 @@ type UserContent = Exclude<SDKUserMessage["message"]["content"], string>;
 class ClaudeTurnError extends Error {}
 
 const exec = promisify(execFile);
-const versionFailure = "Cannot verify Claude Code version for MCP delivery";
-const sdkMetadata = Schema.Struct({ claudeCodeVersion: Schema.String });
-
-/** Resolve from the SDK, never PATH, using its native platform preference. */
-function claudeCLI() {
-  const entry = import.meta.resolve("@anthropic-ai/claude-agent-sdk");
-  const require = createRequire(entry);
-  const root = dirname(fileURLToPath(entry));
-
-  const { claudeCodeVersion } = Schema.decodeUnknownSync(sdkMetadata)(
-    JSON.parse(readFileSync(join(root, "package.json"), "utf8")),
-  );
-
-  if (!parseVersion(claudeCodeVersion)) {
-    throw new ClaudeTurnError(versionFailure);
-  }
-
-  const native = () => {
-    const report = process.report?.getReport() as
-      | { header?: { glibcVersionRuntime?: string } }
-      | undefined;
-
-    const platform = `${process.platform}-${process.arch}`;
-
-    const candidates =
-      process.platform === "linux"
-        ? report && report.header?.glibcVersionRuntime === undefined
-          ? [`${platform}-musl`, platform]
-          : [platform, `${platform}-musl`]
-        : [platform];
-
-    for (const target of candidates) {
-      try {
-        const path = require.resolve(
-          `@anthropic-ai/claude-agent-sdk-${target}/claude${process.platform === "win32" ? ".exe" : ""}`,
-        );
-
-        if (existsSync(path)) {
-          return path;
-        }
-      } catch {
-        // This platform package is not installed; try the next candidate.
-      }
-    }
-
-    throw new ClaudeTurnError(versionFailure);
-  };
-
-  return { version: claudeCodeVersion, native };
-}
 
 // A CLI that ends without a result proves nothing about its tools: frames
 // Can be lost with the process. Never report that nothing ran.
@@ -392,6 +344,7 @@ export class ClaudeBackend implements AgentBackend {
     /** PID records of running CLIs, for restart recovery. */
     private readonly records: string,
     private readonly runtime: ClaudeRuntime,
+    private readonly activity?: TurnActivityRecorder,
   ) {}
 
   private get grace() {
@@ -413,7 +366,7 @@ export class ClaudeBackend implements AgentBackend {
       await chmod(directory, 0o700);
     }
 
-    return new ClaudeBackend(config, home, records, runtime);
+    return new ClaudeBackend(config, home, records, runtime, context.activity);
   }
 
   public async createSession({
@@ -470,6 +423,8 @@ export class ClaudeBackend implements AgentBackend {
     files: readonly Attachment[] = [],
     context?: PromptSourceContext,
     onProgress?: (value: TurnProgress) => void,
+    _liveProgress?: boolean,
+    activityRequests?: () => readonly ActivityRequest[],
   ): Promise<string> {
     const stage = onProgress
       ? (value: TurnStage) => {
@@ -594,6 +549,14 @@ export class ClaudeBackend implements AgentBackend {
         await answered.promise;
       };
 
+      const visiblePartials = onText !== undefined || onProgress !== undefined;
+
+      const activity = ClaudeActivity.start(
+        this.activity,
+        id,
+        activityRequests,
+      );
+
       const options: Options = {
         abortController: run.controller,
         cwd: this.config.directory,
@@ -622,8 +585,8 @@ export class ClaudeBackend implements AgentBackend {
         strictMcpConfig: true,
         // Slack text is data: no @file expansion or slash-command dispatch.
         verbatimPrompts: true,
-        includePartialMessages:
-          onText !== undefined || onProgress !== undefined,
+        includePartialMessages: visiblePartials || activity !== undefined,
+        ...(activity && { forwardSubagentText: true }),
         maxTurns: this.config.maxTurns,
         systemPrompt: {
           type: "preset",
@@ -638,18 +601,20 @@ export class ClaudeBackend implements AgentBackend {
         spawnClaudeCodeProcess: (spawn) => this.spawn(run, spawn),
       };
 
-      const turn = new ClaudeTurn();
+      const turn = new ClaudeTurn(visiblePartials);
       let settle: ReturnType<typeof setTimeout> | undefined;
 
       try {
         for await (const frame of query({ prompt: messages(), options })) {
-          const changed = turn.add(frame, stage);
+          const decision = turn.add(frame, stage);
 
           if (turn.session !== undefined && turn.session !== id) {
             throw new ClaudeTurnError("Claude session identity changed");
           }
 
-          if (changed && onText) {
+          activity?.add(frame, decision);
+
+          if (decision.changed && onText) {
             const visible = turn.visible();
 
             if (visible) {
@@ -676,6 +641,15 @@ export class ClaudeBackend implements AgentBackend {
       } finally {
         clearTimeout(settle);
         answered.resolve();
+        // Any caller abort (Stop, turn timeout, shutdown) cancels.
+        // A stop by the backend itself, such as a lost CLI, fails.
+        activity?.end(
+          signal.aborted
+            ? "cancelled"
+            : turn.result?.ok
+              ? "completed"
+              : "failed",
+        );
       }
 
       signal.throwIfAborted();

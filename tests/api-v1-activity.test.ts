@@ -38,6 +38,23 @@ const config: ApiV1Config = Schema.decodeUnknownSync(configSchema)({
       },
       backend: { type: "pi-durable", model: "openai/local", directory: "/w" },
     },
+    {
+      ...bot("claude"),
+      slack: {
+        appId: "A789",
+        appTokenEnv: "CLAUDE_APP_TOKEN",
+        botTokenEnv: "CLAUDE_BOT_TOKEN",
+      },
+      backend: {
+        type: "claude",
+        model: "claude-sonnet-5-5",
+        directory: "/w",
+        provider: {
+          baseURL: "http://127.0.0.1:8317/v1",
+          apiKeyEnv: "CLAUDE_PROVIDER_KEY",
+        },
+      },
+    },
   ],
   teams: [
     {
@@ -273,6 +290,7 @@ test("a large tool output pages back whole", () => {
     metadata: null,
     content: [{ type: "text", text: output }],
     error: null,
+    unavailable: ["after-turn"],
   }));
   log.update("small", 2, () => text("small reply"));
   log.end("completed");
@@ -281,7 +299,11 @@ test("a large tool output pages back whole", () => {
   const turn = turns[0];
   const paged = turn?.items[0] as V1ActivityPagedItem;
   expect(paged.paged.pages).toBeGreaterThan(1);
-  expect(paged).toMatchObject({ kind: "tool", callId: "call-big" });
+  expect(paged).toMatchObject({
+    kind: "tool",
+    callId: "call-big",
+    unavailable: ["after-turn"],
+  });
   expect(JSON.stringify(paged)).not.toContain("line of output");
   expect(turn?.items[1]).toMatchObject({ text: "small reply" });
 
@@ -337,7 +359,7 @@ test("eviction keeps whole turns", () => {
 
   const hub = createActivityHub({
     turnsPerAgent: 3,
-    turns: 5,
+    turns: 4,
     now: () => now,
   });
 
@@ -395,6 +417,177 @@ test("eviction keeps whole turns", () => {
     "running",
   ]);
 });
+
+test("activity retention counts roots per agent and evicts children with their root", () => {
+  const hub = createActivityHub({ turnsPerAgent: 1, turns: 3 });
+  const recorder = hub.recorder("claude");
+  const requests = [{ channel: "#Bridge", msgid: "claude-request" }];
+  const root = recorder.begin(requests, "root");
+  const child = root.child?.("call", "child");
+  const oldest = snapshot(hub, "claude").turns[0];
+  expect(snapshot(hub, "claude").turns).toMatchObject([
+    { requests, session: { id: "root", parent: null } },
+    {
+      requests: [],
+      session: { id: "child", parent: { turnId: oldest?.id, callId: "call" } },
+    },
+  ]);
+  root.end("completed");
+  const next = recorder.begin(undefined, "next");
+  expect(snapshot(hub, "claude").turns).toHaveLength(3);
+  child?.end("completed");
+  expect(snapshot(hub, "claude").turns).toMatchObject([
+    { session: { id: "next" } },
+  ]);
+  next.end("completed");
+});
+
+test("IRC request lookups return the matching Claude family in retained order", () => {
+  const hub = createActivityHub();
+  const recorder = hub.recorder("claude");
+  const requests = [{ channel: "#Bridge", msgid: "claude-request" }];
+  const root = recorder.begin(requests, "root");
+  recorder.begin(undefined, "unrelated");
+  const child = root.child?.("call", "child");
+  child?.update("reply", 1, () => text("child output"));
+
+  const read = (params: Record<string, string>) =>
+    readActivity(hub, config, "claude", new URLSearchParams(params));
+
+  const [rootTurn, , childTurn] = snapshot(hub, "claude").turns;
+
+  if (!rootTurn || !childTurn) {
+    throw new Error("Expected a retained family");
+  }
+
+  expect(read({ request: "claude-request", channel: "#bridge" })).toMatchObject(
+    {
+      status: 200,
+      body: { turns: [rootTurn, { ...childTurn, requests: [] }] },
+    },
+  );
+  expect(read({ request: "missing" })).toEqual({ status: 404 });
+  expect(read({ turn: rootTurn.id })).toMatchObject({
+    status: 200,
+    body: { turns: [rootTurn] },
+  });
+  expect(read({ turn: rootTurn.id, item: "i1" })).toEqual({ status: 404 });
+  expect(read({ turn: childTurn.id, item: "i1" })).toMatchObject({
+    status: 200,
+    body: { turn: childTurn.id },
+  });
+});
+
+test("a running Claude family cannot evict another officer's settled turns", () => {
+  const hub = createActivityHub();
+  const captain = hub.recorder("captain");
+  captain.begin().end("completed");
+  captain.begin().end("completed");
+  const before = snapshot(hub, "captain");
+  const root = hub.recorder("claude").begin(undefined, "root");
+
+  for (let index = 0; index < 257; index++) {
+    root.child?.(`call-${index}`, `child-${index}`)?.end("completed");
+  }
+
+  expect(snapshot(hub, "claude").turns).toHaveLength(258);
+  expect(snapshot(hub, "captain")).toEqual(before);
+});
+
+test("settled bytes include Claude turn usage", () => {
+  const hub = createActivityHub({ bytes: 90 });
+  const recorder = hub.recorder("claude");
+  recorder.begin(undefined, "first").end("completed");
+  expect(snapshot(hub, "claude").turns).toHaveLength(1);
+  const second = recorder.begin(undefined, "second");
+  second.setUsage?.({
+    steps: 1,
+    tokens: { input: 1, output: 1, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+    cost: 1,
+  });
+  second.end("completed");
+  // Usage alone takes the second turn over the cap; the first stays.
+  expect(snapshot(hub, "claude").turns).toMatchObject([
+    { session: { id: "first" } },
+  ]);
+});
+
+test("a settled family over a global limit on its own goes first", () => {
+  const byTurns = createActivityHub({ turns: 3 });
+  byTurns.recorder("captain").begin().end("completed");
+  const root = byTurns.recorder("claude").begin(undefined, "root");
+
+  for (let index = 0; index < 3; index++) {
+    root.child?.(`call-${index}`, `child-${index}`)?.end("completed");
+  }
+
+  root.end("completed");
+  expect(snapshot(byTurns, "claude").turns).toEqual([]);
+  expect(snapshot(byTurns, "captain").turns).toHaveLength(1);
+
+  const byBytes = createActivityHub({ bytes: 1000 });
+  byBytes.recorder("captain").begin().end("completed");
+  const large = byBytes.recorder("claude").begin(undefined, "large");
+  large.update("k", 1, () => text("x".repeat(5000)));
+  large.end("completed");
+  expect(snapshot(byBytes, "claude").turns).toEqual([]);
+  expect(snapshot(byBytes, "captain").turns).toHaveLength(1);
+});
+
+test.each([false, true])(
+  "a late nested-task update counts toward family eviction (root settled: %s)",
+  (settled) => {
+    const hub = createActivityHub({ bytes: 1000 });
+    hub.recorder("captain").begin().end("completed");
+    const root = hub.recorder("claude").begin(undefined, "root");
+    const child = root.child?.("outer", "child");
+
+    if (!child) {
+      throw new Error("Expected a child writer");
+    }
+
+    child.update("nested", 1, () => ({
+      kind: "tool",
+      name: "Agent",
+      callId: "nested",
+      status: "running",
+      rawInput: "",
+      input: null,
+      executed: true,
+      metadata: null,
+      content: null,
+      error: null,
+    }));
+    child.end("completed");
+
+    if (settled) {
+      root.end("completed");
+    }
+
+    expect(snapshot(hub, "claude").turns).toHaveLength(2);
+    const description = "x".repeat(5000);
+    child.update(
+      "nested",
+      2,
+      () => text("unexpected new item"),
+      (item) => {
+        if (item.kind === "tool") {
+          item.metadata = { task: { description, status: "completed" } };
+        }
+      },
+    );
+
+    if (!settled) {
+      expect(snapshot(hub, "claude").turns[1]?.items[0]).toMatchObject({
+        metadata: { task: { description } },
+      });
+      root.end("completed");
+    }
+
+    expect(snapshot(hub, "claude").turns).toEqual([]);
+    expect(snapshot(hub, "captain").turns).toHaveLength(1);
+  },
+);
 
 test("activity reads validate the agent and every parameter", () => {
   const hub = createActivityHub();
@@ -477,6 +670,13 @@ test("activity reads validate the agent and every parameter", () => {
   expect(pi).toMatchObject({
     status: 200,
     body: { agent: { backend: "pi-durable", collected: false } },
+  });
+  expect(snapshot(hub, "claude")).toMatchObject({
+    agent: {
+      backend: "claude",
+      collected: true,
+      unavailable: ["step.cost", "step.tokens.reasoning"],
+    },
   });
 });
 

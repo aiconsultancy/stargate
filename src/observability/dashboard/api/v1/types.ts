@@ -332,6 +332,7 @@ export type V1ActivityTokens = {
  * of the item's latest change; a client keeps the item with the higher seq.
  */
 type V1ActivityItemBase = {
+  unavailable?: string[];
   id: string;
   seq: number;
   startedAt: number;
@@ -401,7 +402,7 @@ export type V1ActivityPagedItem = V1ActivityItemBase & {
   paged: { pages: number; bytes: number };
 };
 
-/** Settled use summed over the turn's steps. */
+/** Provider total when available, otherwise summed over the turn's steps. */
 export type V1ActivityUsage = {
   steps: number;
   tokens: V1ActivityTokens;
@@ -416,11 +417,18 @@ export type V1ActivityTurn = V1ActivityTurnSummary & {
 
 /** A turn without its items, as the `agent-activity` event carries it. */
 export type V1ActivityTurnSummary = {
+  /** SDK session and, for children, the parent turn and spawning call. */
+  session?: {
+    id: string;
+    parent: { turnId: string; callId: string | null } | null;
+  };
   /** Stable and unique across gateway restarts. */
   id: string;
   /** The agent change sequence of the turn's latest change. */
   seq: number;
   status: "running" | "completed" | "failed" | "cancelled";
+  /** Observation ended without a confirmed native outcome. Only on cancelled turns. */
+  lost?: true;
   startedAt: number;
   updatedAt: number;
   endedAt: number | null;
@@ -443,8 +451,9 @@ export type V1AgentActivity = {
     backend: V1Backend;
     /** False when this gateway does not collect turns for the backend. */
     collected: boolean;
+    unavailable?: string[];
   };
-  /** Oldest first; at most 16 recent turns. */
+  /** Oldest first; at most 16 recent root turns and their children. */
   turns: V1ActivityTurn[];
   cursor: V1ActivityCursor;
 };
@@ -465,8 +474,8 @@ export type V1ActivityItemPage = {
 
 /**
  * One coalesced change. Every change type is an upsert by ID: a turn's
- * summary (`turn-started`, `turn-updated` for a reconnect, `turn-ended`
- * with its outcome) or one item, as the snapshot route shows it.
+ * summary (including `session` when known) or one item, as the snapshot
+ * route shows it. Paged item stubs retain any `unavailable` entries.
  */
 export type V1AgentActivityChange =
   | {

@@ -33,6 +33,15 @@
   streams and 256 KiB per viewer; `api.agentActivity` now covers the event
   too.
 
+- No new flag: Claude Agent SDK officers now appear in Fleet API turn
+  activity, with live reasoning, tool calls and results, linked child turns,
+  and the query's usage, result errors and result-only reply text. With the
+  Fleet API configured, Claude officers run with partial messages and
+  forwarded subagent text. Their changes use the same `agent-activity`
+  stream as OpenCode; IRC request links and root turn stream subscriptions
+  include the whole family. The snapshot identifies details the SDK cannot
+  provide.
+
 - Unmasked Fleet API crew text: none. By owner decision this behaviour change
   ships without a flag, an exception to the flag rule for large features.
 

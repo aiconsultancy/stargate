@@ -345,7 +345,7 @@ export type ActivityTokens = {
 };
 
 /** One turn item as a backend projects it; never a raw provider frame. */
-export type ActivityItem =
+export type ActivityItem = { unavailable?: string[] } & (
   | {
       kind: "step";
       status: "running" | "completed" | "failed";
@@ -378,11 +378,18 @@ export type ActivityItem =
       metadata: Readonly<Record<string, unknown>> | null;
       content: ActivityContent[] | null;
       error: ActivityError | null;
-    };
+    }
+);
 
 export type ActivityOutcome = "completed" | "failed" | "cancelled";
 
 export type ActivityRequest = { channel: string; msgid: string };
+
+export type ActivityUsage = {
+  steps: number;
+  tokens: ActivityTokens;
+  cost: number;
+};
 
 /** One officer turn's writer. Calls never throw, block or affect the turn. */
 export type TurnActivityLog = {
@@ -395,12 +402,20 @@ export type TurnActivityLog = {
   ): void;
   /** The backend's live event stream reattached; changes can be missing. */
   reconnected(): void;
-  end(outcome: ActivityOutcome): void;
+  /** A provider-supplied total, rather than the sum of observed steps. */
+  setUsage?(usage: ActivityUsage): void;
+  /** Begin a child owned by a tool call observed in this turn. */
+  child?(callId: string, sessionId: string): TurnActivityLog;
+  /** End without claiming a native outcome when observation was lost. */
+  end(outcome: ActivityOutcome, lost?: true): void;
 };
 
 /** Collects officer turns for operator views; one per registration. */
 export type TurnActivityRecorder = {
-  begin(requests?: readonly ActivityRequest[]): TurnActivityLog;
+  begin(
+    requests?: readonly ActivityRequest[],
+    sessionId?: string,
+  ): TurnActivityLog;
 };
 
 export type BackendContext = {
