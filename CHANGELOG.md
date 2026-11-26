@@ -69,7 +69,8 @@
   evicted turn is forgotten on any eviction path, and changes to a settled
   turn are measured once per 150 ms batch, and before any turn begins or
   ends; a child whose parent that drain evicts is admitted unlinked, as a
-  root with its family's requests.
+  root with its family's requests, and a stream scoped to the evicted root
+  still follows it and its own children.
 
 - Unmasked Fleet API crew text: none. By owner decision this behaviour change
   ships without a flag, an exception to the flag rule for large features.

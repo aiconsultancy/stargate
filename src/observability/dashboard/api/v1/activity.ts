@@ -53,6 +53,8 @@ type Limits = typeof defaults;
 export type ActivityFrame = {
   turnId: string;
   root: string;
+  /** Never served: the turn's `unlinkedFrom`. */
+  unlinkedFrom: readonly string[];
   seq: number;
   bytes: Uint8Array;
 };
@@ -171,6 +173,7 @@ function flush(generation: string, owner: Agent) {
       frames.push({
         turnId: pending.turn.id,
         root: pending.turn.root,
+        unlinkedFrom: pending.turn.unlinkedFrom ?? [],
         seq: pending.seq,
         bytes: encoder.encode(
           `event: agent-activity\ndata: ${JSON.stringify(data)}\n\n`,
@@ -316,7 +319,6 @@ function evict(
   }
 }
 
-/** A crew turn's task, first observed frame and eviction listener. */
 /** A child's parent, spawning call and session, and its family's requests. */
 type ChildLink = {
   parent: StoredTurn;
@@ -326,12 +328,21 @@ type ChildLink = {
 };
 
 /**
- * A child begins under its parent, or, if the drain before it evicted that
- * parent, unlinked: a root of its own that copies its family's requests.
+ * How a turn begins: a child under its parent, or, if the drain before it
+ * evicted that parent, unlinked: a root of its own that copies its family's requests and
+ * records the family it came from. A linked child shares its parent's record.
  */
-function childStart(retained: readonly StoredTurn[], link?: ChildLink) {
+function turnStart(
+  retained: readonly StoredTurn[],
+  own: {
+    requests: readonly ActivityRequest[];
+    session: V1ActivityTurn["session"] | undefined;
+    root: string | undefined;
+  },
+  link?: ChildLink,
+) {
   if (!link) {
-    return;
+    return { ...own, unlinkedFrom: undefined };
   }
 
   const { parent, callId, sessionId } = link;
@@ -341,11 +352,13 @@ function childStart(retained: readonly StoredTurn[], link?: ChildLink) {
         requests: [],
         session: { id: sessionId, parent: { turnId: parent.id, callId } },
         root: parent.root,
+        unlinkedFrom: parent.unlinkedFrom,
       }
     : {
         requests: link.requests,
         session: { id: sessionId, parent: null },
         root: undefined,
+        unlinkedFrom: [parent.root, ...(parent.unlinkedFrom ?? [])],
       };
 }
 
@@ -510,7 +523,7 @@ export function createActivityHub(
   ): CrewTurnActivityLog {
     remeasure.drain();
     const owner = agent(agentId);
-    const start = childStart(owner.turns, link) ?? { requests, session, root };
+    const start = turnStart(owner.turns, { requests, session, root }, link);
     const family = link?.requests ?? requests;
     const startedAt = Math.min(crew?.startedAt ?? Infinity, now());
 
@@ -535,6 +548,7 @@ export function createActivityHub(
       ...(crew && { task: structuredClone(crew.task) }),
       items: new Map(),
       ...(crew?.evicted && { evicted: crew.evicted }),
+      ...(start.unlinkedFrom && { unlinkedFrom: start.unlinkedFrom }),
     };
 
     owner.turns.push(turn);
@@ -969,7 +983,9 @@ export type ActivitySubscribe =
  * before a viewer place is taken: anything but distinct, well-formed `agent`
  * and `crew` values (at most eight together) and one `turn` with exactly one
  * subject is 400; an agent that is not a registration, a crew member the
- * route would not serve, or a turn its subject no longer has, is 404.
+ * route would not serve, or a turn its subject no longer has, is 404. A
+ * scoped watch follows the turn, its family if it is a root, and families
+ * admitted unlinked from that family after its eviction.
  */
 export function subscribeActivity(
   hub: ActivityHub,
@@ -1034,7 +1050,10 @@ export function subscribeActivity(
             turn === undefined
               ? frames
               : frames.filter(
-                  (frame) => frame.root === turn || frame.turnId === turn,
+                  (frame) =>
+                    frame.root === turn ||
+                    frame.turnId === turn ||
+                    frame.unlinkedFrom.includes(turn),
                 );
 
           // One frame at a time, each within the viewer's queue.

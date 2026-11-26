@@ -43,6 +43,11 @@ export type StoredTurn = {
   bytes?: number;
   /** Told once the hub evicts the turn (crew turns only). */
   evicted?: () => void;
+  /**
+   * Never served: the evicted family roots its family was admitted unlinked
+   * from, nearest first, so that a watch scoped to one still follows it.
+   */
+  unlinkedFrom?: readonly string[];
 };
 
 export function itemJson(item: StoredItem): V1ActivityItem {
