@@ -1773,6 +1773,7 @@
         "src/backends/opencode/activity-call-evidence.ts",
         "src/backends/opencode/activity-child-executions.ts",
         "src/backends/opencode/activity-family.ts",
+        "src/backends/opencode/activity-naming-evidence.ts",
         "src/backends/opencode/activity-projector.ts",
         "src/backends/opencode/activity-recovery-queue.ts",
         "src/backends/opencode/activity-replay-gap.ts",
