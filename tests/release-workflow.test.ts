@@ -17,6 +17,7 @@ test("main checks do not invoke a release or run a second full suite", async () 
   expect(check).toContain("flag-red-main:");
   expect(check).toContain("github.event_name == 'push'");
   expect(check).toContain("github.ref == 'refs/heads/main'");
+  expect(check).toContain("repos/$GH_REPO/commits/main");
   expect(check).toContain("--label red-main");
 });
 

@@ -35,16 +35,19 @@ still applies to the new head.
 
 ### If `main` goes red
 
-Every push to `main` runs the full **Quality checks** suite. Breaking `main` is
-undesirable but not an emergency: fix it in a separate follow-up PR rather than
-rewriting history. When **Quality checks** fails on a `main` push, the workflow
-flags it by opening (or updating) a `red-main` GitHub issue that names the
-commit, merged PR, author, merger/pusher, and failing run URL. Once `main` is
-green again, the workflow closes open `red-main` issues automatically.
+Pushes to `main` run the full **Quality checks** suite (GitHub Actions
+concurrency runs one `main` check at a time and keeps the latest queued push).
+Breaking `main` is undesirable but not an emergency: fix it in a separate
+follow-up PR rather than rewriting history. When **Quality checks** fails on the
+current `main` commit, the workflow flags it by opening (or updating) a
+`red-main` GitHub issue that links the commit and names the merged PR, author,
+pusher, and failing run URL. Once `main` is green again, the workflow closes
+open `red-main` issues automatically (stale reruns of older commits do not
+modify issues).
 
-The release workflow publishes only the current `main` commit, and only after
-**Quality checks** have passed on that commit. Never cut a release from a red
-commit on `main`.
+The release workflow checks that the dispatched SHA is current `main` and has
+passed **Quality checks** before tagging. Never cut a release from a red commit
+on `main`.
 
 ## Prepare release notes
 
@@ -93,11 +96,12 @@ gh workflow run release.yml --repo aiconsultancy/stargate --ref main -f dry_run=
 ```
 
 The publish job uses the `release` GitHub environment (restricted to protected
-branches only; there is no separate reviewer approval gate). The workflow
-verifies again that `main` has not moved and that **Quality checks** passed on
-that exact commit. If `main` is red or has advanced, the job fails without
-publishing. Release runs are serialised; neither preview nor merge cancels an
-existing release run.
+branches only; there is no separate reviewer approval gate). Before tagging, the
+workflow checks again that the dispatched SHA still matches `main` and that
+**Quality checks** passed on that exact commit; if `main` is red or has
+advanced, it fails without publishing. Release runs use `cancel-in-progress:
+false` so an in-progress run is not cancelled, though GitHub keeps only the
+newest pending dispatch in the concurrency queue.
 
 `scripts/release-version.ts` selects the largest Conventional Commit bump
 since the latest `vX.Y.Z` tag:

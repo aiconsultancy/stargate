@@ -106,14 +106,22 @@ jobs:
           QUALITY_RESULT: ${{ needs.quality.result }}
         run: |
           set -euo pipefail
+          current_main=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
+          if [ "$current_main" != "$HEAD_SHA" ]; then
+            echo "Skipping red-main update: $HEAD_SHA is no longer current main ($current_main)."
+            exit 0
+          fi
+
           short_sha="${HEAD_SHA:0:8}"
           run_url="https://github.com/$GH_REPO/actions/runs/$RUN_ID"
-          open_issues=$(gh issue list --repo "$GH_REPO" --state open --label red-main --json number --jq '.[].number')
+          commit_url="https://github.com/$GH_REPO/commit/$HEAD_SHA"
+          open_issues=$(gh api --paginate "repos/$GH_REPO/issues?state=open&labels=red-main&per_page=100" \
+            --jq '.[] | select(.pull_request == null) | .number')
 
           if [ "$QUALITY_RESULT" = "success" ]; then
             while IFS= read -r num; do
               [ -n "$num" ] || continue
-              gh issue close "$num" --repo "$GH_REPO" --comment "main is green again on \`$short_sha\` ([Quality checks]($run_url))."
+              gh issue close "$num" --repo "$GH_REPO" --comment "main is green again on [\`$short_sha\`]($commit_url) ([Quality checks]($run_url))."
             done <<< "$open_issues"
             exit 0
           fi
@@ -123,28 +131,26 @@ jobs:
             --force >/dev/null 2>&1 || true
 
           commit_json=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA")
-          subject=$(printf '%s' "$commit_json" | jq -r '.commit.message | split("\n")[0]')
-          subject=${subject//|/\\|}
-          author=$(printf '%s' "$commit_json" | jq -r 'if .author.login then "@" + .author.login else (.commit.author.name // "unknown") end')
+          author_login=$(printf '%s' "$commit_json" | jq -r '.author.login // empty')
+          if [ -n "$author_login" ]; then
+            author="@$author_login"
+          else
+            raw_author=$(printf '%s' "$commit_json" | jq -r '.commit.author.name // "unknown"' | tr '\r\n`' '   ')
+            author="\`$raw_author\`"
+          fi
 
           pulls_json=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/pulls" 2>/dev/null || printf '[]')
           pr_line=$(printf '%s' "$pulls_json" | jq -r '.[0] // empty | "#\(.number) by @\(.user.login)"')
-          merger=$(printf '%s' "$pulls_json" | jq -r '.[0].merged_by.login // empty')
-          if [ -n "$merger" ]; then
-            pushed_by="@$merger"
-          else
-            pushed_by="@$PUSH_ACTOR"
-          fi
 
           body=$(cat <<EOF
-          \`main\` went red on commit \`$short_sha\`. No release can be cut until \`Quality checks\` is green on \`main\`. Open a follow-up PR to fix it.
+          \`main\` went red on commit [\`$short_sha\`]($commit_url). No release can be cut until \`Quality checks\` is green on \`main\`. Open a follow-up PR to fix it.
 
           | Field | Value |
           | --- | --- |
-          | Commit | \`$HEAD_SHA\` ($subject) |
+          | Commit | [\`$HEAD_SHA\`]($commit_url) |
           | PR | ${pr_line:-none} |
           | Author | $author |
-          | Merged / pushed by | $pushed_by |
+          | Pushed by | @$PUSH_ACTOR |
           | Failing run | [Quality checks]($run_url) |
           EOF
           )
