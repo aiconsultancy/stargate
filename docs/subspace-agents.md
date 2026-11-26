@@ -168,7 +168,8 @@ For each request it:
   minting a new token for every request;
 - passes the body unchanged (at most 8 MiB), so a crew member's `relayedCrew`
   reaches the API as written. Crew sessions run under their captain and act
-  as the captain;
+  as the captain. The REST chat upload route accepts a file up to 10 MiB,
+  plus bounded base64 and JSON overhead;
 - returns the API's status and body as they stream (at most 64 MiB), with only
   `Allow`, `Cache-Control`, `Content-Disposition`, `Content-Type`, `ETag`,
   `Last-Modified`, `MCP-Protocol-Version`, `Mcp-Session-Id`, `Retry-After` and

@@ -154,3 +154,20 @@ unknown locks automatically.
 
 [gist]: https://gist.github.com/withakay/1c20e455063bc9be4c4ede76ef866a71
 [agents]: https://opencode.ai/v2/docs/agents
+
+## Repository tools
+
+Fleet installers can load `scripts/repo-refresh.ts mcp --socket PATH` for a rear
+admiral. Configure the companion Linux socket service to start the same script
+with `serve -- POLICY_COMMAND`. The configured policy supplies the repository
+checkout, expected origin, read-only Git credentials and owner IDs. File reads
+return the exact fetched commit SHA. Refresh updates the origin refs and keeps
+the local branch and files in place.
+
+To provide repository-scoped GitHub operations, configure an adapter for
+`bun scripts/github-officer.ts /absolute/path/to/adapter.ts --help`. The
+adapter exports `createAdapter()` and supplies the installed GitHub identity,
+repository policy, authenticated transport and native review evidence. See
+`scripts/github-wire.ts` for the interface. The command checks GitHub policy
+and verified evidence before signing, publishing, reviewing or requesting a
+merge. Operators configure credential custody for their deployment.

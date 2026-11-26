@@ -88,16 +88,17 @@ delivery are separate; a visible text reply is not proof its files were shared.
 ## Giving officers a file tool
 
 A captain or another officer can prepare files without a shell using the optional
-Python 3 stdio MCP server on Unix. Register it in each officer's agent profile and grant
+Bun TypeScript stdio MCP server on Linux or macOS. Register it in each officer's agent profile and grant
 that officer the `prepare_file` tool. Give each officer their own staging and
 export directories. The gateway needs read access to the export directory.
 For example, use this command array in an OpenCode local MCP registration:
 
 ```json
 [
-  "python3",
-  "-I",
-  "/srv/stargate/scripts/officer_files.py",
+  "bun",
+  "--no-env-file",
+  "--no-install",
+  "/srv/stargate/scripts/officer-files.ts",
   "--staging",
   "/srv/officers/captain/outbox",
   "--exports",
@@ -139,3 +140,24 @@ Existing completed requests are not replayed or bulk-exported. A historical proo
 file can be published in a new, explicitly requested reply to its proven source.
 Existing custom agent definitions are not overwritten by installation. Add the
 publication rule to their referenced instructions when updating an existing team.
+
+### Sending a Markdown document preview to Teams
+
+When the officer profile selects an offline browser, call `prepare_file` with
+`preview: "teams"` and the original file source. It accepts an issue attachment,
+an existing upload, an outbox file, or new text. The file must be Markdown or
+plain text. The returned marker points to a labelled PNG preview. Include it
+and the original file name in the Teams reply. If the tool reports several
+pages, set `page` on subsequent calls. Do not supply a chat upload ID for a
+preview.
+
+For a local shell workflow, the same renderer takes Markdown on stdin:
+
+```sh
+bun scripts/markdown-preview.ts \
+  --playwright /srv/browser-tools/node_modules/playwright/index.mjs \
+  --name notes.md --output /srv/officers/captain/outbox/notes-preview.png < notes.md
+```
+
+Use `--chromium` when the installation selects a specific reviewed executable.
+Prepare the resulting PNG from staging to get its publication marker.

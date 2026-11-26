@@ -416,6 +416,57 @@ test("an addressed IRC upload reaches the officer's turn through that officer's 
   expect(requests).toHaveLength(1);
 });
 
+test("the signing proxy admits a 10 MiB chat upload and refuses one extra byte", async () => {
+  const stub = stubApi();
+  const socketPath = await officerSocket();
+  const { log } = capturedLog();
+  const received: number[] = [];
+
+  stub.handler = (request) => {
+    if (request.path === enrol) {
+      return enrolled(request);
+    }
+
+    received.push(request.body.length);
+
+    return Response.json({ ok: true });
+  };
+
+  const started = await startSubspaceAgents({
+    config: section(stub.url, [captain("captain-a", { socketPath })]),
+    dataDirectory: await privateDirectory(),
+    irc: [{ id: "ship-a", account: "captain-a" }],
+    log,
+    env,
+    ownership,
+  });
+
+  cleanup.push(() => started.close());
+
+  const upload = (bytes: number) => {
+    const base64 = Buffer.alloc(bytes, 123).toString("base64");
+
+    return overSocket(
+      socketPath,
+      "POST",
+      "/api/v1/chat/uploads",
+      {
+        "content-type": "application/json",
+      },
+      JSON.stringify({ base64 }),
+    );
+  };
+
+  const limit = 10 * 1024 * 1024;
+
+  expect((await upload(limit)).status).toBe(200);
+  expect((await upload(limit + 1)).status).toBe(413);
+  expect(received).toEqual([
+    JSON.stringify({ base64: Buffer.alloc(limit, 123).toString("base64") })
+      .length,
+  ]);
+});
+
 test("the upload reader refuses inconsistent metadata and unverified bytes", async () => {
   const stub = stubApi();
   const socketPath = await officerSocket();
