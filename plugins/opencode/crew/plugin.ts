@@ -65,8 +65,14 @@ import {
 } from "../../../src/coordination/crew/controls/notifications";
 import { CrewPost } from "../../../src/coordination/crew/controls/post";
 import { effectProjectToolInput } from "../../../src/coordination/crew/input/project-options";
-import { createCrewGitReader } from "../../../src/coordination/crew/workspace/git-state";
-import { spawnGit } from "../../../src/coordination/crew/workspace/git-runner";
+import {
+  createCheckoutDiffReader,
+  createCrewGitReader,
+} from "../../../src/coordination/crew/workspace/git-state";
+import {
+  spawnGit,
+  streamGit,
+} from "../../../src/coordination/crew/workspace/git-runner";
 import { liveFleetGit } from "../../../src/coordination/crew/workspace/git-status";
 import { CrewProjects } from "../../../src/coordination/crew/workspace/projects";
 import {
@@ -295,7 +301,9 @@ const plugin = Plugin.define({
       (maintenance) => maintenance.dispose(),
     );
 
-    const gitStates = createCrewGitReader(liveFleetGit(spawnGit));
+    const checkoutGit = liveFleetGit(spawnGit, streamGit);
+    const gitStates = createCrewGitReader(checkoutGit);
+    const checkoutDiffs = createCheckoutDiffReader(checkoutGit);
 
     const report = async <T>(
       signal: AbortSignal,
@@ -575,6 +583,10 @@ const plugin = Plugin.define({
           ),
         crewTurns: (input, context) =>
           report(context.signal, async () => projects.crewTurns(input)),
+        checkoutDiff: (input, context) =>
+          report(context.signal, () =>
+            projects.checkoutDiff(input, checkoutDiffs, context.signal),
+          ),
         historyRoots: (_input, context) =>
           report(context.signal, () => projects.historyRoots(context.signal)),
         historyDescribe: (input, context) =>

@@ -798,6 +798,49 @@ test("crew Git state covers every configured worktree, read as the captain", asy
   }
 });
 
+test("a crew diff reads only a configured member's worktree", async () => {
+  const f = await fixture(2);
+  const projects = await CrewProjects.open(f.options, f.factory);
+  const directories: string[] = [];
+
+  const read = async (directory: string) => {
+    directories.push(directory);
+
+    return { kind: "missing" as const };
+  };
+
+  const diff = (member: string, project: string | null) =>
+    projects.checkoutDiff(
+      { member, project, mode: "branch", request: { kind: "list", start: 0 } },
+      read,
+      new AbortController().signal,
+    );
+
+  try {
+    await diff("worker2", "stargate");
+    await diff("worker", null);
+    expect(directories).toEqual([
+      join(f.root, "worker2-stargate"),
+      join(f.root, "worker-default"),
+    ]);
+
+    // An unknown member or project, or an inherited name, reads nothing.
+    for (const [member, project] of [
+      ["nobody", null],
+      ["worker", "unknown"],
+      ["constructor", null],
+      ["__proto__", "stargate"],
+    ] as const) {
+      expect(await diff(member, project)).toEqual({ kind: "missing" });
+    }
+
+    expect(directories).toHaveLength(2);
+  } finally {
+    await projects.close();
+    await f.close();
+  }
+});
+
 test("aggregate activity includes busy workers after the twenty-row project page", async () => {
   const f = await fixture(18);
   const projects = await CrewProjects.open(f.options, f.factory);

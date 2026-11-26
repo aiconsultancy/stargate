@@ -5,6 +5,8 @@ import { ircFeedbackDefaults } from "../../../../config";
 import { truncateCodePoints } from "../../../../lib/code-points";
 import { redactCredentials } from "../../../../lib/credentials";
 import type {
+  CheckoutDiff,
+  CheckoutDiffInput,
   CrewGit,
   CrewGitInput,
   CrewGitState,
@@ -91,10 +93,14 @@ const activityOrder: readonly V1Activity[] = [
 
 const hour = 3_600_000;
 
-/** Git state reported by the captain's crew plugin, in the v1 shape. */
+/**
+ * Git state reported by the captain's crew plugin, in the v1 shape. Only a
+ * crew checkout carries its fingerprint: only crew checkouts serve diffs.
+ */
 export function reportedGit(
   state: CrewGitState | null,
   directory: string,
+  crew = false,
 ): V1Git | null {
   if (!state) {
     return null;
@@ -129,6 +135,7 @@ export function reportedGit(
     repository: state.remote === null ? null : githubRepository(state.remote),
     commit: state.commit,
     ...(state.changedFiles !== null && { dirty: state.changedFiles > 0 }),
+    ...(crew && state.fingerprint && { fingerprint: state.fingerprint }),
   };
 }
 
@@ -371,6 +378,26 @@ function timeState(
   return since;
 }
 
+/**
+ * One crew diff page from a ship's captain, computed by its crew plugin.
+ * Undefined for an unknown ship or a captain that cannot serve diffs.
+ */
+export function crewDiffSource(deps: Pick<ApiV1Deps, "dashboard" | "config">) {
+  return async (
+    ship: string,
+    input: CheckoutDiffInput,
+    signal: AbortSignal,
+  ): Promise<CheckoutDiff | undefined> => {
+    const registration = registrations(deps.config()).get(ship);
+
+    if (!registration || role(registration) === "rear_admiral") {
+      return;
+    }
+
+    return deps.dashboard.fleetBackend(ship)?.checkoutDiff?.(input, signal);
+  };
+}
+
 export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
   const { dashboard } = deps;
   const now = deps.now ?? Date.now;
@@ -450,7 +477,7 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
             entry
               ? {
                   path: entry.directory,
-                  state: reportedGit(entry.git, entry.directory),
+                  state: reportedGit(entry.git, entry.directory, true),
                 }
               : { path: undefined, state: null },
           );

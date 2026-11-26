@@ -7,13 +7,17 @@
  * length limit. The crew plugin still stores task text bounded and redacted.
  * The agent activity route serves tool input and output, errors, reply and
  * reasoning text complete and unredacted, and pages large items instead of
- * cutting them. The fleet, ship and crew routes carry no prompt or reply text.
+ * cutting them. The crew diff routes serve every changed path's patch and
+ * bytes the same way. The fleet, ship and crew routes carry no prompt or
+ * reply text.
  *
  * Routes (all GET, bearer token, private networks only, `Cache-Control:
  * no-store`):
  *   /api/v1/fleet                       -> V1Fleet
  *   /api/v1/ships/{id}                  -> V1ShipDetail
  *   /api/v1/ships/{id}/crew/{member}    -> V1CrewDetail
+ *   /api/v1/ships/{id}/crew/{member}/diff       -> V1Diff
+ *   /api/v1/ships/{id}/crew/{member}/diff/file  -> V1DiffFilePage
  *   /api/v1/agents/{id}/activity        -> V1AgentActivity or V1ActivityItemPage
  *   /api/v1/events                      -> text/event-stream of V1Event
  */
@@ -102,6 +106,74 @@ export type V1Git = {
    * the user that owns the worktree; `gateway` is this process.
    */
   source?: "captain" | "gateway";
+  /**
+   * Crew checkouts read by the captain: changes with anything their diff
+   * shows, and equals `V1Diff.fingerprint` in every mode.
+   */
+  fingerprint?: string;
+};
+
+export type V1DiffMode = "branch" | "committed" | "working";
+
+/** One changed path, in GitHub's per-file shape. */
+export type V1DiffFile = {
+  path: string;
+  /** The old path of a rename; else null. */
+  previousPath: string | null;
+  status: "added" | "removed" | "modified" | "renamed";
+  /** Null when binary. */
+  additions: number | null;
+  deletions: number | null;
+  /** Not in Git's index: new, and not ignored. */
+  untracked?: true;
+  binary?: true;
+  /** Bytes of the new side, or of the old side for a removed file. */
+  size?: number;
+  /** Hunks only, without file headers; null when there are none. */
+  patch: string | null;
+  /** Continue the patch with the file route's `page`. */
+  patchNextPage?: string;
+  kind?: "submodule" | "symlink";
+};
+
+/** A crew checkout's changes; `files: []` means none. */
+export type V1Diff = {
+  ship: string;
+  member: string;
+  project: string | null;
+  mode: V1DiffMode;
+  fingerprint: string;
+  /** The checkout kept changing: this answer may mix two states. */
+  unstable: boolean;
+  branch: string | null;
+  /** Null when `origin/HEAD` cannot be resolved. */
+  base: { ref: string; commit: string } | null;
+  /** Null on an unborn branch. */
+  head: string | null;
+  /** Changed paths in the whole diff, and their line counts. */
+  total: number;
+  additions: number;
+  deletions: number;
+  /** Sorted by path in byte order. */
+  files: V1DiffFile[];
+  nextPage?: string;
+};
+
+/** One page of a file's bytes, base64-encoded. */
+export type V1DiffContent = {
+  side: "old" | "new";
+  encoding: "base64";
+  offset: number;
+  size: number;
+  data: string;
+  nextPage?: string;
+};
+
+/** A page of one file's patch, or of one side's bytes. */
+export type V1DiffFilePage = {
+  fingerprint: string;
+  file: V1DiffFile;
+  content?: V1DiffContent;
 };
 
 export type V1PullRequest = {

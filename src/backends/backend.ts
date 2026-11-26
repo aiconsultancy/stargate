@@ -1,6 +1,8 @@
 import type { ActivityWatch } from "../chat/activity/activity";
 import type { Attachment } from "../chat/attachments/attachments";
 import type {
+  CheckoutDiff,
+  CheckoutDiffInput,
   CrewGit,
   CrewGitInput,
   FleetCrewStatus,
@@ -302,6 +304,14 @@ export interface AgentBackend {
     input: CrewGitInput,
     signal: AbortSignal,
   ): Promise<CrewGit | undefined>;
+  /**
+   * One crew diff page, computed by the crew plugin as the captain.
+   * Undefined when the plugin cannot serve diffs; throws when it fails.
+   */
+  checkoutDiff?(
+    input: CheckoutDiffInput,
+    signal: AbortSignal,
+  ): Promise<CheckoutDiff | undefined>;
   /** Sanitized subscription limits; never runs a model or creates a session. */
   quota?(signal: AbortSignal): Promise<QuotaSnapshot>;
   cronQuota?(signal: AbortSignal): Promise<QuotaObservation>;

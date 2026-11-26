@@ -171,6 +171,7 @@ test("reads branch, commit, base, counts, dirty state and remote", async () => {
     changedFiles: 1,
     remote: "https://github.com/example/project.git",
     checkedAt: 42,
+    fingerprint: expect.stringMatching(/^[a-f0-9]{32}$/),
   });
   expect(JSON.stringify(state)).not.toContain("secret");
 });
@@ -188,6 +189,7 @@ test("a detached checkout without upstream has no branch or base", async () => {
     changedFiles: 0,
     remote: null,
     checkedAt: 1,
+    fingerprint: expect.stringMatching(/^[a-f0-9]{32}$/),
   });
 });
 

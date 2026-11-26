@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { readWithDeadline } from "../../../../lib/read-deadline";
 import type { ApiRoute } from "../route";
 import type { ActivityApi } from "./activity";
+import { type CrewDiffApi, crewDiffRoute } from "./crew-diff";
 import { apiRequestMs, maxFleetReads, startApiServer } from "../server";
 import type { ApiV1Config } from "./config";
 import {
@@ -56,6 +57,11 @@ type Options = {
    * serve neither the route nor the event. Absent, both answer 404.
    */
   activity?: ActivityApi;
+  /**
+   * Crew diffs, for the operator listener only, like turn activity. Absent,
+   * the diff routes answer 404.
+   */
+  crewDiff?: CrewDiffApi;
   fleetReadMs?: number;
   routes?: readonly ApiRoute[];
   /** Compose trusted producer policies against the exact loaded operator token. */
@@ -207,6 +213,7 @@ function readDetail(
 type FleetCore = Pick<ApiV1Source, "crew" | "ship" | "shipIdentities"> & {
   diff: ApiV1Diff;
   activity?: Options["activity"];
+  crewDiff?: Options["crewDiff"];
   readFleet: ApiV1Source["fleet"];
   completeFleet: (
     fleet: V1Snapshot["fleet"],
@@ -362,6 +369,29 @@ async function answer(
       return Response.json(result, { headers });
     }
 
+    const diff = crewDiffRoute.exec(pathname);
+
+    // Crew diffs have their own two slots, never the shared read slots.
+    if (diff && core.crewDiff) {
+      const ship = routeId(diff[1] ?? "");
+      const member = routeId(diff[2] ?? "");
+
+      const result =
+        ship && member
+          ? await core.crewDiff.read(
+              { ship, member, file: diff[3] !== undefined },
+              url.searchParams,
+              read,
+            )
+          : 404;
+
+      read.throwIfAborted();
+
+      return typeof result === "number" || method === "HEAD"
+        ? empty(typeof result === "number" ? result : 200)
+        : Response.json(result, { headers });
+    }
+
     const detail = readDetail(core, url, (run) => startHttpRead(read, run));
 
     if (typeof detail !== "object") {
@@ -404,8 +434,13 @@ async function officerRequest(
     return new Response(null, { status: 404, headers });
   }
 
-  // Turn activity is unredacted: operators only, never an officer's socket.
-  return answer({ ...core, activity: undefined }, readers, request, headers);
+  // Turn activity and crew diffs: operators only, never an officer's socket.
+  return answer(
+    { ...core, activity: undefined, crewDiff: undefined },
+    readers,
+    request,
+    headers,
+  );
 }
 
 export async function startApiV1Server(options: Options) {
@@ -490,6 +525,7 @@ export async function startApiV1Server(options: Options) {
     ...(shipIdentities && { shipIdentities }),
     diff: options.diff,
     ...(options.activity && { activity: options.activity }),
+    ...(options.crewDiff && { crewDiff: options.crewDiff }),
     readFleet: async (signal, captureShipRead, crewDeadline) => ({
       ...(await source.fleet(signal, captureShipRead, crewDeadline)),
       name: fleetName,

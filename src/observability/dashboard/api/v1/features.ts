@@ -59,6 +59,8 @@ export function gatewayFeatures(config: ApiV1Config): V1Feature[] {
       config.api !== undefined,
       true,
     ),
+    // No switch of its own: on whenever the Fleet API is.
+    flag("api.crewDiffs", "Crew diffs", config.api !== undefined, true),
     flag(
       "api.crewActivity",
       "Crew turn activity",

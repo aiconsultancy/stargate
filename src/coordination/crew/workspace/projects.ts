@@ -16,6 +16,8 @@ import {
   crewOptionsSchema,
 } from "../execution/engine";
 import type {
+  CheckoutDiff,
+  CheckoutDiffInput,
   CrewGit,
   CrewGitInput,
   CrewTurns,
@@ -23,7 +25,7 @@ import type {
   FleetCrewStatus,
 } from "../reporting/fleet-status";
 import { crewTurns } from "../reporting/member-activity";
-import type { CrewGitReader } from "./git-state";
+import type { CheckoutDiffReader, CrewGitReader } from "./git-state";
 import { MAX_CREW_PROJECTS } from "../input/project-options";
 import { effectProjectKeySchema } from "../protocol/project-key";
 import { CrewError } from "../execution/state";
@@ -427,6 +429,23 @@ export class CrewProjects {
         git: states[index] ?? null,
       })),
     };
+  }
+
+  /** A crew diff of one configured worktree; never another directory. */
+  public async checkoutDiff(
+    input: CheckoutDiffInput,
+    read: CheckoutDiffReader,
+    signal: AbortSignal,
+  ): Promise<CheckoutDiff> {
+    const engine = this.contexts.get(input.project ?? "default");
+
+    const directory =
+      engine?.options.team.crew.some(({ id }) => id === input.member) &&
+      Object.hasOwn(engine.options.worktrees, input.member)
+        ? engine.options.worktrees[input.member]
+        : undefined;
+
+    return directory ? read(directory, input, signal) : { kind: "missing" };
   }
 
   public async historyRoots(signal: AbortSignal) {

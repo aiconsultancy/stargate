@@ -179,14 +179,16 @@ and `Last-Event-ID` without a token.
 
 ## Routes
 
-| Route                                       | GET response                                                                          |
-| ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `/api/v1/fleet`                             | Fleet overview with captain summaries, host metrics, and gateway version and features |
-| `/api/v1/ships/{id}`                        | Ship detail, including crew members                                                   |
-| `/api/v1/ships/{id}/crew/{member}`          | One member's detail                                                                   |
-| `/api/v1/agents/{id}/activity`              | An officer's recent turns, a turn by IRC request, or one page of one item             |
-| `/api/v1/ships/{id}/crew/{member}/activity` | A crew member's recent worker turns, or one page of one item                          |
-| `/api/v1/events`                            | Server-sent events                                                                    |
+| Route                                        | GET response                                                                          |
+| -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `/api/v1/fleet`                              | Fleet overview with captain summaries, host metrics, and gateway version and features |
+| `/api/v1/ships/{id}`                         | Ship detail, including crew members                                                   |
+| `/api/v1/ships/{id}/crew/{member}`           | One member's detail                                                                   |
+| `/api/v1/ships/{id}/crew/{member}/diff`      | A crew member's [diff](#crew-diffs), one page of files                                |
+| `/api/v1/ships/{id}/crew/{member}/diff/file` | One changed file's patch or bytes, one page                                           |
+| `/api/v1/agents/{id}/activity`               | An officer's recent turns, a turn by IRC request, or one page of one item             |
+| `/api/v1/ships/{id}/crew/{member}/activity`  | A crew member's recent worker turns, or one page of one item                          |
+| `/api/v1/events`                             | Server-sent events                                                                    |
 
 `{member}` is a crew member's configured ID. Each of a ship's `crewMembers`
 has that `id`, its configured `name` (which may differ from the ID; the ID
@@ -336,6 +338,133 @@ omitted. With no binding or no readable branch and commit, `pullRequest` is
 null and `pullRequestKnown` is absent. A context with `pullRequestKnown: true`
 and `pullRequest: null` has a settled lookup with no matching PR. A failed
 or incomplete refresh retains the last successful lookup result.
+
+A crew member's `git` also carries `fingerprint`, the checkout state its
+[diff](#crew-diffs) belongs to; the project checkout's does not.
+
+### Crew diffs
+
+`GET /api/v1/ships/{id}/crew/{member}/diff` lists what a crew member changed
+in its worktree, and `GET /api/v1/ships/{id}/crew/{member}/diff/file` serves
+one changed file. The routes are on whenever the Fleet API is, behind the
+same token, network check and `Cache-Control: no-store`; the gateway feature
+`api.crewDiffs` reports them. There is no configuration flag, by the owner's
+decision. Officers' [sockets](#officers) return 404 for both.
+
+Patches and file bytes are served exactly as they are in the worktree,
+without redaction, including any credential a crew member wrote into a
+changed file. Large content is paged, never hidden. Treat the API token
+accordingly. Files that Git ignores (`.gitignore`, `.git/info/exclude` and
+the user's excludes file) are never listed or served, and neither is
+anything under `.git/` or any unchanged file. Diff content is never logged
+or stored, except in the gateway's 30-second memory cache.
+
+The captain's crew plugin computes the diff as the captain's user, over its
+internal `checkoutDiff` RPC, in the member's configured worktree. Captains
+whose plugins predate the method are asked again after a minute; until then
+the routes return 404. Rear admirals, unknown ships, unknown members, members
+without a worktree and directories that are not a checkout's top level
+return 404.
+
+| Query parameter | Routes | Meaning                                                   |
+| --------------- | ------ | --------------------------------------------------------- |
+| `mode`          | both   | `branch` (default), `committed` or `working`              |
+| `project`       | both   | A configured project key; omitted for the default project |
+| `page`          | both   | An opaque cursor from `nextPage` or `patchNextPage`       |
+| `path`          | file   | Required: the repository-relative path of a listed file   |
+| `at`            | file   | The `fingerprint` of the list the path came from          |
+| `side`          | file   | `old` or `new`: that side's bytes instead of the patch    |
+
+Unknown, repeated or malformed parameters return 400, and so does a path
+that is empty, absolute, or has an empty, `.` or `..` component, a NUL, a
+backslash or a control character. Without `project` the default project is
+used and the answer carries `project: null`.
+
+The three modes compare against `refs/remotes/origin/HEAD` and never fetch:
+
+- `branch`: the merge base of `origin/HEAD` and HEAD against the working
+  tree, including untracked files;
+- `committed`: the merge base against HEAD;
+- `working`: HEAD against the working tree, including untracked files.
+
+The answer is `V1Diff`: `ship`, `member`, `project`, `mode`, `fingerprint`,
+`unstable`, `branch`, `base`, `head`, `total` (files in the whole diff),
+`additions`, `deletions`, `files` and, while more files follow, `nextPage`.
+`head` is null on an unborn branch. `base` is `{ ref, commit }`, with
+`ref` such as `origin/main` and `commit` the merge base; it is null when
+`origin/HEAD` cannot be resolved or shares no history with HEAD, including
+on an unborn branch, and the diff then starts from the empty tree. An empty
+`files` means no changes.
+
+Files are sorted by path, in byte order. Each `V1DiffFile` has `path`,
+`previousPath` (the old path of a rename, else null), `status` (`added`,
+`removed`, `modified` or `renamed`), `additions` and `deletions` (null when
+binary), `patch` and, when set, `untracked: true`, `binary: true`, `size`
+(the new side's bytes, or the old side's for a removed file), `kind`
+(`submodule` or `symlink`) and `patchNextPage`. A patch holds only hunks,
+starting at `@@`, as GitHub's per-file patches do; it is null for binary
+files and changes without hunks, such as a pure rename. Renames are found
+with Git's default similarity; a change of file type is one `modified`
+entry. A symbolic link is shown as its link text, never its target's
+content. A submodule shows its commit change and has no content.
+
+Paging limits:
+
+- A list page holds at most 1,000 files and at most 4 MiB of inline patch
+  text, counted in UTF-8 bytes. It ends before the file that would pass
+  4 MiB, but always holds at least one file.
+- Each inline patch holds at most 64 KiB, cut between characters. When it
+  continues, `patchNextPage` is a cursor for the file route.
+- The file route with `path` and no `page` returns the patch from its first
+  byte. Each patch page holds at most 1 MiB; `file.patchNextPage` continues
+  it.
+- A content page holds at most 1 MiB of raw bytes.
+
+Cursors are opaque: pass them back unchanged, with the same ship, member,
+`mode`, `project` and, on the file route, `path`. A cursor used elsewhere,
+or with an `at` or `side` that disagrees with it, returns 400.
+
+The file route answers `V1DiffFilePage`: `{ fingerprint, file, content? }`.
+`file` is the listed entry. Without `side` it carries the patch page; a file
+with no hunks, such as a binary or empty file, answers with `content`
+instead, and a submodule answers with neither. With `side`, `file.patch` is
+null and `content` is `{ side, encoding: "base64", offset, size, data,
+nextPage? }`: `size` is the side's whole size and `data` holds the bytes
+from `offset`. `nextPage` appears only while `offset` plus the page's bytes
+is less than `size`; an empty file is one page of size 0. The default side
+is `new`, or `old` for a removed file. A side the file does not have (the
+old side of an added file, the new side of a removed one) returns 404. File
+pages carry no `unstable`.
+
+`fingerprint` identifies the checkout state: it changes with HEAD, the
+`origin/HEAD` commit, the index, or the size or modification time of any
+changed or untracked file. It is the same in every mode and equals the
+crew member's `git.fingerprint` in ship detail, the crew member route and
+the `ship` event, so a console can refresh its diff when the event shows a
+new value. The file route serves only a path in the same mode's diff at the
+current fingerprint. With `at`, or with a cursor, a different current
+fingerprint returns 409: start again from the list. A list whose fingerprint
+moves while it is computed is computed once more; if it moves again, the
+answer carries `unstable: true`.
+
+| Status | Meaning                                                                        |
+| ------ | ------------------------------------------------------------------------------ |
+| 200    | The diff or file page                                                          |
+| 400    | Malformed query, mode, path or cursor                                          |
+| 404    | Unknown ship, member or project, no checkout, or a path the diff does not have |
+| 409    | `at` or the cursor's fingerprint is no longer current                          |
+| 503    | Both diff slots are busy, or the computation passed 10 seconds                 |
+| 500    | Git or the captain's plugin failed                                             |
+
+Error answers have empty bodies. Each gateway runs at most two diff
+computations at once, apart from the eight shared Fleet read slots; identical
+requests in flight share one computation, which stops, with Git, when its
+last request leaves. A computation has 10 seconds. Answers for a request
+with `at` or a cursor are kept in memory for 30 seconds, at most 16 answers
+or 16 MiB. The plugin runs Git without hooks, optional locks, external diff
+or text conversion drivers, repository attributes, or submodule worktree
+reads, and in a private Git directory, so a read never changes the
+checkout's index.
 
 ### Officer activity
 
