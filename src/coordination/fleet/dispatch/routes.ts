@@ -41,6 +41,10 @@ export const dispatchRoutes = {
 
     return `${prefix}/issues?${query.toString()}&${page(cursor)}`;
   },
+  decisionOutcomes: (fleetId: string, cursor?: string) =>
+    `${prefix}/fleets/${segment(fleetId)}/decision-outcomes?${page(cursor, 10)}`,
+  decisionOutcomeDelivered: (fleetId: string, eventId: string) =>
+    `${prefix}/fleets/${segment(fleetId)}/decision-outcomes/${segment(eventId)}/delivered`,
   /** One issue by UUID or identifier; PATCH it with `version` to edit. */
   issue: (reference: string) => `${prefix}/issues/${segment(reference)}`,
   comments: (reference: string) =>
@@ -55,8 +59,8 @@ export const issueEdit = {
 
 export const commentBody = (body: string) => ({ body });
 
-function page(cursor: string | undefined) {
-  const query = new URLSearchParams({ limit: String(pageLimit) });
+function page(cursor: string | undefined, limit = pageLimit) {
+  const query = new URLSearchParams({ limit: String(limit) });
 
   if (cursor !== undefined) {
     query.set("cursor", cursor);

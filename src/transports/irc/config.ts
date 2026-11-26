@@ -385,6 +385,8 @@ export function createIrcConfig<
     dmPolicy: Schema.Literals(["agent", "redirect"]).pipe(
       settingsDefault("agent"),
     ),
+    /** A captain can admit marked outcome DMs only from this fleet account. */
+    decisionOutcomeSender: Schema.optional(ircAccount),
     /**
      * Crew messaging over IRC (OpenCode captain; opt-in). `sessions` binds
      * each crew IRC session to its crew member in the crew plugin, so

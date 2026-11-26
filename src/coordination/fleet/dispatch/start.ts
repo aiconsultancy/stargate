@@ -38,7 +38,7 @@ export type AgentDispatchRuntime = {
 
 /**
  * Agent dispatch for this configuration, or undefined when the section is
- * absent or `enabled` is false. Off means nothing is opened, listened to or
+ * absent or both features are off. Off means nothing is opened, listened to or
  * contacted: no ledger file, no chat listener and no API request.
  */
 export function startAgentDispatch(
@@ -46,7 +46,7 @@ export function startAgentDispatch(
 ): AgentDispatchRuntime | undefined {
   const dispatch = host.config;
 
-  if (!dispatch?.enabled) {
+  if (!dispatch?.enabled && !dispatch?.decisionOutcomeDms) {
     return;
   }
 
@@ -76,6 +76,8 @@ export function startAgentDispatch(
       fleet: dispatch.fleet,
       pollIntervalMs: dispatch.pollIntervalSeconds * 1000,
       answerTimeoutMs: dispatch.answerTimeoutSeconds * 1000,
+      decisionOutcomeDms: dispatch.decisionOutcomeDms ?? false,
+      issueDispatch: dispatch.enabled,
       retryLadderMs: dispatch.retryLadderSeconds.map(
         (seconds) => seconds * 1000,
       ),
@@ -119,7 +121,9 @@ export function startAgentDispatch(
     }
   };
 
-  ship.dispatchListener = listener;
+  if (dispatch.enabled) {
+    ship.dispatchListener = listener;
+  }
 
   return {
     key: `${primary.key}:agent-dispatch`,
