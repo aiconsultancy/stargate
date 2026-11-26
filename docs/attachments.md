@@ -123,8 +123,13 @@ only for an existing IRC `upload_file` registration.
 The socket supplies the officer's own Subspace identity. Installations with an
 authenticated loopback MCP relay can use `--port PORT --actor OFFICER` instead.
 Use a plain filename and an allowed extension. Each file must contain 1 byte to 10 MiB. New text accepts up to 65,536 UTF-8 bytes. A staged file must be owned by the officer, have one hard link and be writable only by its owner. Both directories must be canonical absolute paths. Create the export directory
-setgid and grant its group to the intended gateway. Apply a retention policy to
-prepared exports after the outbox has completed delivery.
+setgid and grant its group to the intended gateway. The publisher creates a private
+subdirectory per file, then grants the gateway group read access after the write.
+The officer service can keep `RestrictSUIDSGID=yes`. Installers that run the
+publisher in this sandbox should require `sandboxFiles: 1` in
+`scripts/officer-tools-contract.json` alongside the existing `files: 1`
+interface. Releases with only `files: 1` can fail after writing the file.
+Apply a retention policy to prepared exports after the outbox has completed delivery.
 
 | Source                    | Tool arguments                        | Result                                                                                                    |
 | ------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
