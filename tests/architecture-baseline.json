@@ -10,8 +10,8 @@
     "src/nightly/run.ts",
     "src/runtime.ts"
   ],
-  "sourceFiles": 346,
-  "sourceEdges": 1424,
+  "sourceFiles": 349,
+  "sourceEdges": 1433,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],

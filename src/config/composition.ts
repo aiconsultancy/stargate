@@ -627,6 +627,15 @@ function subspaceAgentsIssues(
 export const teamsSchema = settingsStruct({
   livePresence: Schema.optional(Schema.Boolean),
   incomingImages: Schema.optional(Schema.Boolean),
+  attachmentFileHosts: Schema.optional(
+    Schema.Array(
+      Schema.String.check(
+        settingsPattern(
+          /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sharepoint\.com$/,
+        ),
+      ),
+    ).check(Schema.isMaxLength(4)),
+  ),
   id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
   displayName: Schema.optional(
     Schema.String.check(Schema.isMinCodePoints(1)).check(
@@ -637,6 +646,7 @@ export const teamsSchema = settingsStruct({
   tenantId: settingsUUID,
   socketPath: absolutePath,
   access: settingsStruct({
+    allowUnmentionedConversations: Schema.optional(Schema.Boolean),
     users: Schema.mutable(Schema.Array(settingsUUID)).check(
       Schema.isMinLength(1),
     ),

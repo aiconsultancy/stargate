@@ -14,6 +14,7 @@ import type {
   ConnectorClient,
   OutgoingActivity,
 } from "../src/transports/teams/connector";
+import type { TeamsDocuments } from "../src/transports/teams/inbound-documents";
 import {
   type TeamsActivity,
   TeamsRegistration,
@@ -103,6 +104,9 @@ export function registrationFixture(
     fleet?: boolean;
     presence?: boolean;
     incomingImages?: boolean;
+    attachmentFileHosts?: readonly string[];
+    botClientId?: string;
+    documents?: TeamsDocuments;
     agent?: string;
     displayName?: string;
   } = {},
@@ -117,7 +121,10 @@ export function registrationFixture(
     ...(options.incomingImages !== undefined && {
       incomingImages: options.incomingImages,
     }),
-    botClientId: APP_ID,
+    ...(options.attachmentFileHosts && {
+      attachmentFileHosts: options.attachmentFileHosts,
+    }),
+    botClientId: options.botClientId ?? APP_ID,
     tenantId: TENANT_ID,
     socketPath: join(directory, "bridge.sock"),
     access: { users: [HUMAN, OTHER_HUMAN], channels: ["allowed-channel"] },
@@ -166,7 +173,7 @@ export function registrationFixture(
     store,
     backend,
     () => {},
-    connector,
+    { connector, ...(options.documents && { documents: options.documents }) },
   );
 
   return {
@@ -207,7 +214,7 @@ export function registrationFixture(
         store,
         backend,
         () => {},
-        connector,
+        { connector },
       );
     },
     async close() {
