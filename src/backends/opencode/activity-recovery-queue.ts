@@ -633,7 +633,7 @@ export class ActivityRecoveryQueues<E extends Event> {
     const signal = AbortSignal.any([hooks.signal, read.signal]);
     const current = () => this.peek(id) === pending && hooks.owned();
 
-    const { complete, failed, index } = await recoverFrames(
+    const { complete, index } = await recoverFrames(
       segment.frames,
       gap,
       (after) => hooks.read(after, signal),
@@ -673,7 +673,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       hooks.gap();
     }
 
-    if (pending.lifecycle.lost || failed) {
+    if (pending.lifecycle.lost) {
       hooks.lost();
 
       return;

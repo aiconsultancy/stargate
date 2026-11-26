@@ -832,7 +832,7 @@ test("overflowing lifecycle slots invalidates ownership until a fresh start", as
   f.stop.abort();
 });
 
-test("a failed replay read fences subsequent output from the lost execution", async () => {
+test("a failed content read keeps held text and a witnessed child outcome", async () => {
   const gate = Promise.withResolvers<void>();
   const f = fixture(undefined, gate.promise);
   f.root();
@@ -841,14 +841,16 @@ test("a failed replay read fences subsequent output from the lost execution", as
   f.create(child, main);
   expect(f.logReads).toHaveLength(1);
   f.ended(child, "queued output", "new");
+  f.end(child);
   gate.reject(new Error("fixture read failed"));
   await f.families.reconnected();
-  f.ended(child, "later output", "new");
-  expect(f.turns()[1]).toMatchObject({
-    status: "cancelled",
-    lost: true,
-    items: [{ unavailable: ["activity.frames"] }],
+  const turn = f.turns()[1];
+
+  expect(turn).toMatchObject({
+    status: "completed",
+    items: [{ unavailable: ["activity.frames"] }, { text: "queued output" }],
   });
+  expect(turn?.lost).toBeUndefined();
   f.stop.abort();
 });
 

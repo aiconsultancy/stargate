@@ -657,6 +657,8 @@ wait in a bounded buffer and replay in arrival order once the parent is
 proven. Unproven frames expire. When the buffer fills before admission,
 the collector reads missing durable frames from the native log; if any
 frames cannot be recovered, the child shows `unavailable: ["activity.frames"]`.
+A failed content read does not discard held frames or change a witnessed
+outcome. It marks missing content, not an unknown outcome.
 OpenCode children have their own session and turn IDs. Their `callId` may
 start as `null` and fill once in a `turn-updated`. Each busy period of a
 reused child is a separate turn; a follow-up that joins an already-running

@@ -114,7 +114,7 @@ export class ActivityReplayGap {
     apply: (event: SessionLogItem, slot: GapSlot) => boolean,
   ) {
     if (this.slots.size === 0) {
-      return { complete: !this.incomplete, failed: false };
+      return !this.incomplete;
     }
 
     const after = Math.min(...this.slots.keys()) - 1;
@@ -141,13 +141,10 @@ export class ActivityReplayGap {
         }
       }
     } catch {
-      return { complete: false, failed: true };
+      return false;
     }
 
-    return {
-      complete: !this.incomplete && this.slots.size === 0,
-      failed: signal.aborted,
-    };
+    return !signal.aborted && !this.incomplete && this.slots.size === 0;
   }
 }
 
@@ -185,7 +182,7 @@ export async function recoverFrames<Packet extends { order: number }>(
   let index = 0;
   let through = 0;
 
-  const result = await gap.recover(read, signal, (event, slot) => {
+  const complete = await gap.recover(read, signal, (event, slot) => {
     const packet = slot.order > through ? restore(event, slot) : undefined;
 
     if (!packet) {
@@ -207,5 +204,5 @@ export async function recoverFrames<Packet extends { order: number }>(
     return true;
   });
 
-  return { ...result, index };
+  return { complete, index };
 }
