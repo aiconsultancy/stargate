@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import type { SessionLogItem } from "@opencode/client";
+import { expect, expectTypeOf, test } from "bun:test";
+import type { SessionEventDurable, SessionLogItem } from "@opencode/client";
 import { setImmediate, setTimeout as wait } from "node:timers/promises";
 import { Schema } from "effect";
 import type { TurnActivityLog } from "../src/backends/backend";
@@ -49,6 +49,7 @@ function fixture(
   const logReads: [string, number][] = [];
   let seq = 0;
   let now = 0;
+  let native = 0;
 
   const families = new OpenCodeActivityFamilies(
     {
@@ -98,6 +99,7 @@ function fixture(
     owner?: TurnActivityLog,
     eventID?: string,
     replaySeq?: number,
+    created: number | null = ++native,
   ) => {
     const durable =
       replaySeq ?? (type.startsWith("session.execution.") ? ++seq : undefined);
@@ -107,6 +109,7 @@ function fixture(
     const event = {
       id: eventID,
       type,
+      ...(created !== null && { created }),
       data: { sessionID, ...data },
       ...(durable !== undefined && {
         durable: {
@@ -1440,6 +1443,10 @@ test.each([512, 513])(
   },
 );
 
+test("OpenCode durable frames require a numeric native timestamp", () => {
+  expectTypeOf<SessionEventDurable>().toMatchTypeOf<{ created: number }>();
+});
+
 function evictChildren(f: ReturnType<typeof fixture>, count: number) {
   const root = f.root();
 
@@ -1454,6 +1461,279 @@ function evictChildren(f: ReturnType<typeof fixture>, count: number) {
   f.settleRoot(root);
   expect(f.turns()).toHaveLength(0);
 }
+
+// Parent call envelopes captured from OpenCode 2.3.2 /api/event. Only the
+// Event IDs, timestamps and per-session positions are from the capture.
+const nativeCall = {
+  input: {
+    id: "evt_219442341001DNGAJvvcSrL3k3",
+    at: 1_795_720_225_601,
+    seq: 54_344,
+  },
+  called: {
+    id: "evt_219442346001MD0bHxySQU0Eyc",
+    at: 1_795_720_225_606,
+    seq: 54_346,
+  },
+};
+
+function capturedCall(
+  f: ReturnType<typeof fixture>,
+  owner: TurnActivityLog,
+  input: Record<string, unknown>,
+  sawInput = true,
+) {
+  if (sawInput) {
+    const { id, at, seq } = nativeCall.input;
+    f.emit(
+      "session.tool.input.started",
+      main,
+      {
+        assistantMessageID: "answer",
+        id: "launch",
+        name: "subagent",
+      },
+      owner,
+      id,
+      seq,
+      at,
+    );
+  }
+
+  const { id, at, seq } = nativeCall.called;
+  f.emit(
+    "session.tool.called",
+    main,
+    {
+      assistantMessageID: "answer",
+      id: "launch",
+      input,
+      executed: true,
+    },
+    owner,
+    id,
+    seq,
+    at,
+  );
+}
+
+function nativeChild(
+  f: ReturnType<typeof fixture>,
+  id: string,
+  seq: number,
+  created: number | null,
+  text: string,
+) {
+  f.emit(
+    "session.execution.started",
+    id,
+    {},
+    undefined,
+    undefined,
+    seq,
+    created,
+  );
+  f.emit(
+    "session.text.ended",
+    id,
+    {
+      assistantMessageID: `answer-${seq}`,
+      ordinal: 0,
+      text,
+    },
+    undefined,
+    undefined,
+    seq + 1,
+    (created ?? nativeCall.input.at) + 1,
+  );
+  f.emit(
+    "session.execution.succeeded",
+    id,
+    {},
+    undefined,
+    undefined,
+    seq + 2,
+    (created ?? nativeCall.input.at) + 2,
+  );
+}
+
+test.each([true, false])(
+  "a genuine resume after 5,000 evictions attaches with input start seen: %p",
+  async (sawInput) => {
+    const f = fixture();
+
+    try {
+      evictChildren(f, 5000);
+      const root = f.root();
+      const id = "ses_old_0";
+      const parent = f.turns()[0]?.id;
+      f.parents.set(id, main);
+      f.logFrames.set(id, [{ type: "log.synced", aggregateID: id, seq: 4 }]);
+      capturedCall(f, root, { agent: "explore", sessionID: id }, sawInput);
+      f.names(root, "launch", id);
+      await setImmediate();
+      // Equality is valid, and seeing input.started makes it the reference,
+      // Even when tool.called carries a later timestamp.
+      nativeChild(
+        f,
+        id,
+        4,
+        sawInput ? nativeCall.input.at : nativeCall.called.at,
+        "genuinely new",
+      );
+      await setImmediate();
+
+      expect(f.turns().slice(1)).toMatchObject([
+        {
+          session: { id, parent: { turnId: parent, callId: "launch" } },
+          status: "completed",
+          items: [{ text: "genuinely new" }],
+        },
+      ]);
+      expect(f.logReads).toEqual([]);
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+test.each([{ sessionID: "" }, { task_id: "" }])(
+  "an empty resume field %j admits a new child after 5,000 evictions",
+  async (input) => {
+    const f = fixture();
+
+    try {
+      evictChildren(f, 5000);
+      const root = f.root();
+      f.parents.set(child, main);
+      capturedCall(f, root, { agent: "explore", ...input });
+      f.names(root, "launch", child);
+      await setImmediate();
+      nativeChild(f, child, 1, nativeCall.called.at, "new child");
+      await setImmediate();
+
+      expect(f.turns()[1]).toMatchObject({
+        session: { id: child, parent: { callId: "launch" } },
+        status: "completed",
+        items: [{ text: "new child" }],
+      });
+      expect(f.logReads).toEqual([]);
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+test("replayed creation and start past the exact fence never attach to the current root", () => {
+  const f = fixture();
+
+  try {
+    evictChildren(f, 5000);
+    f.root();
+    const id = "ses_old_0";
+    f.emit(
+      "session.created",
+      id,
+      { parentID: main },
+      undefined,
+      undefined,
+      0,
+      2,
+    );
+    nativeChild(f, id, 1, 3, "replayed transcript");
+
+    expect(f.turns()[1]).toMatchObject({
+      session: { id, parent: null },
+      status: "cancelled",
+      lost: true,
+      requests: [],
+      items: [{ text: "replayed transcript" }],
+    });
+  } finally {
+    f.stop.abort();
+  }
+});
+
+test.each([true, false])(
+  "a named start after 2.5 s is still visible with proven time: %p",
+  async (proven) => {
+    const f = fixture();
+
+    try {
+      const root = f.root();
+      f.parents.set(child, main);
+      capturedCall(f, root, { agent: "explore" });
+      f.create(child, main);
+      f.names(root, "launch", child);
+      await setImmediate();
+      f.advance(2500);
+      f.delta(main, " still running");
+      nativeChild(
+        f,
+        child,
+        2,
+        proven ? nativeCall.called.at : 0,
+        "late transcript",
+      );
+      await setImmediate();
+
+      expect(f.turns()[1]).toMatchObject({
+        session: { id: child, parent: proven ? { callId: "launch" } : null },
+        status: proven ? "completed" : "cancelled",
+        ...(!proven && { lost: true }),
+        items: [{ text: "late transcript" }],
+      });
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+test.each([nativeCall.input.at - 1, 0, null, NaN, Infinity, -1])(
+  "a replayed start with native time %p is visible and uncertain",
+  async (created) => {
+    const f = fixture(undefined, undefined, 1, 1);
+
+    try {
+      evictChildren(f, 37);
+      const root = f.root();
+      const id = "ses_old_0";
+      f.parents.set(id, main);
+      // Even a call claiming to launch a new session must not spend its proof
+      // On an old or undated start from a compacted ID.
+      capturedCall(f, root, { agent: "explore" });
+      f.names(root, "launch", id);
+      await setImmediate();
+      nativeChild(f, id, 1, created, "uncertain transcript");
+      await setImmediate();
+
+      expect(f.turns()).toMatchObject([
+        {
+          items: [
+            { callId: "launch", unavailable: ["activity.child-attribution"] },
+          ],
+        },
+        {
+          session: { id, parent: null },
+          status: "cancelled",
+          lost: true,
+          items: [{ text: "uncertain transcript" }],
+        },
+      ]);
+      nativeChild(f, id, 4, nativeCall.called.at + 1, "proven transcript");
+      await setImmediate();
+      expect(f.turns()[0]?.items[0]).not.toHaveProperty("unavailable");
+      expect(f.turns()[2]).toMatchObject({
+        session: { id, parent: { callId: "launch" } },
+        status: "completed",
+        items: [{ text: "proven transcript" }],
+      });
+      expect(f.logReads).toEqual([]);
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
 
 test("brand-new child sessions can still start at 1 after 5,000 evictions", async () => {
   const f = fixture();
