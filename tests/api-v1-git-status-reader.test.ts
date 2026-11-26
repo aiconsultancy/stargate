@@ -395,8 +395,7 @@ test.each([
       kind === "inside" ? join(directory, "data") : join(root, "data");
 
     const snapshots = join(dataDirectory, "stargate-git-status");
-    const original = fs.mkdir;
-    let denied: { mockRestore(): void } | undefined;
+    let denied: ReturnType<typeof spyOn> | undefined;
 
     try {
       await mkdir(directory);
@@ -407,8 +406,10 @@ test.each([
         await mkdir(snapshots);
         await chmod(snapshots, 0o750);
       } else if (kind === "denied") {
-        // Making the status folder fails with EACCES. A stub, not a mode, so
-        // A runner that bypasses file permissions still takes this path.
+        // Making the status folder fails with EACCES.
+        // Unlike a mode, a stub holds when the runner ignores permissions.
+        const original = fs.mkdir;
+
         denied = spyOn(fs, "mkdir").mockImplementation(
           async (path, options) => {
             if (String(path) === snapshots) {
@@ -417,8 +418,8 @@ test.each([
               });
             }
 
-            // Every mkdir overload must accept the stub. No caller here
-            // Reads the created path, so the stub resolves to undefined.
+            // The stub must fit every mkdir overload, so it returns undefined.
+            // No caller here reads the created path.
             await original(path, options);
 
             return undefined;

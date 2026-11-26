@@ -305,11 +305,9 @@ status runs with `-c core.excludesFile=/dev/null`, so Git's default
 Files ignored only there count in `changedFiles`, although `git status` in a
 terminal hides them. This is deliberate: the read stays isolated from
 the user's configuration. To have both readers honour such patterns, put them
-in `.gitignore` or `.git/info/exclude`. The captain's read honours a
-repository `core.excludesFile` wherever its target is. The gateway's fallback
-read honours it only if the target sits inside the checkout or its Git
-directories, so a file in the home directory, such as `~/.config/git/ignore`,
-does not count there.
+in `.gitignore` or `.git/info/exclude`. A repository `core.excludesFile`
+reaches the gateway's fallback read only under the copy rule above: a file
+elsewhere, such as `~/.config/git/ignore`, is skipped there.
 Git versions that support
 `GIT_ATTR_SOURCE` also ignore worktree `.gitattributes`. The captain caches
 each checkout's result for 15 seconds, with a five-second read limit.
