@@ -2673,6 +2673,129 @@ async function postLossStart(
   return { f, root };
 }
 
+test.each([
+  { earlier: "none", nameAt: 2100 },
+  { earlier: "queued", nameAt: 2100 },
+  { earlier: "queued", nameAt: 3899 },
+  { earlier: "queued", nameAt: 3901 },
+  { earlier: "recovering", nameAt: 3899 },
+  { earlier: "recovering", nameAt: 3901 },
+] as const)("a post-loss start gets its own naming window: %j", async (row) => {
+  const gate = Promise.withResolvers<void>();
+  const { earlier, nameAt } = row;
+  const recovering = earlier === "recovering";
+  const f = fixture(undefined, recovering ? gate.promise : undefined);
+
+  try {
+    const root = f.root();
+    f.parents.set(child, main);
+    f.create(child, main);
+    f.emit("session.execution.started", child, {}, undefined, undefined, 1, 10);
+    f.failedReads.add("log");
+    await f.families.reconnected();
+    f.failedReads.delete("log");
+
+    if (earlier !== "none") {
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        "unnamed",
+        3,
+        23,
+      );
+      f.ended(child, "unnamed transcript", "unnamed-answer");
+
+      if (recovering) {
+        // Hold the first segment's durable recovery, then leave its slot missing.
+        f.ended(child, "x".repeat(256 * 1024), "missing-answer");
+        await setImmediate();
+        expect(f.logReads).toEqual([[child, 4]]);
+      }
+
+      f.end(child);
+    }
+
+    f.advance(1900);
+    f.call(root, "fresh-retry");
+    f.called(root, "fresh-retry", { agent: "explore", sessionID: child });
+    f.emit(
+      "session.execution.started",
+      child,
+      {},
+      undefined,
+      "fresh-start",
+      7,
+      41,
+    );
+    f.ended(child, "new transcript", "new-answer");
+
+    let afterFirstDeadline: ReturnType<typeof f.turns> | undefined;
+
+    if (earlier === "queued") {
+      expect(f.turns()).toHaveLength(2);
+      f.advance(100);
+      f.delta(main, "tick");
+      afterFirstDeadline = f.turns().slice(2);
+    }
+
+    f.advance(nameAt - (earlier === "queued" ? 2000 : 1900));
+    f.names(root, "fresh-retry", child);
+    f.end(child);
+
+    if (recovering) {
+      // A name seen in time remains valid when the earlier read releases late.
+      f.advance(2000);
+      gate.resolve();
+    }
+
+    await setImmediate();
+
+    const turns = f.turns().slice(2);
+    const namedInTime = nameAt < 3900;
+
+    const next = {
+      session: {
+        id: child,
+        parent: namedInTime ? { callId: "fresh-retry" } : null,
+      },
+      status: namedInTime ? "completed" : "cancelled",
+      ...(!namedInTime && { lost: true }),
+      items: [{ text: "new transcript" }],
+    };
+
+    const detached = {
+      session: { id: child, parent: null },
+      status: "cancelled",
+      lost: true,
+    };
+
+    expect(turns).toMatchObject(earlier === "none" ? [next] : [detached, next]);
+    expect(turns.at(-1)?.lost).toBe(namedInTime ? undefined : true);
+
+    if (earlier === "queued" && namedInTime) {
+      expect(afterFirstDeadline).toMatchObject([detached]);
+    }
+
+    if (earlier !== "none") {
+      const items = turns[0]?.items;
+      expect(items).toHaveLength(recovering ? 2 : 1);
+      expect(items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ text: "unnamed transcript" }),
+          ...(recovering
+            ? [expect.objectContaining({ unavailable: ["activity.frames"] })]
+            : []),
+        ]),
+      );
+    }
+  } finally {
+    gate.resolve();
+    f.stop.abort();
+  }
+});
+
 test.each(["started", "succeeded"] as const)(
   "reconnect log %s still lets a resume name arrive after the live start",
   async (boundary) => {
