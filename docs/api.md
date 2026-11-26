@@ -655,8 +655,12 @@ their roots. A child needs native ancestry and either an owned `subagent`
 call naming it or a single unambiguous running parent. Early child frames
 wait in a bounded buffer and replay in arrival order once the parent is
 proven. Ancestry lookups use at most eight concurrent reads per collector;
-eligible candidates wait in the same bounded buffer for a free slot.
-Unproven frames expire. When the buffer fills before admission,
+eligible candidates wait in the same buffer for a free slot. Before
+admission, it holds up to 128 waiting candidates, expires unproven frames
+after two seconds, and budgets 256 KiB for payload frames. Once proven,
+children under a running root have no additional session-count admission
+cap. Retention applies to the settled family, with oversized families
+removed before older fitting families. When the buffer fills before admission,
 the collector reads missing durable frames from the native log; if any
 frames cannot be recovered, the child shows `unavailable: ["activity.frames"]`.
 A failed content read does not discard held frames or change a witnessed
@@ -682,7 +686,11 @@ does not inherit an older outcome. A delta without a native ID cannot be
 deduplicated. The delta ID window can forget old IDs, not transcript text.
 After a child session starts a new execution, an unsequenced delta for an
 unknown assistant message is withheld; the final text can still arrive in
-the durable message-end frame.
+the durable message-end frame. Writer associations are released when the
+hub evicts the turn. The collector retains routing markers for up to 512
+evicted child sessions. Once those markers roll over, a child with no
+record of native creation needs a durable frame to establish a previously
+unknown assistant message; late unsequenced frames cannot establish it.
 
 After a stream reconnect, the collector uses bounded reads of native
 execution boundaries to check whether a child is still in the same busy

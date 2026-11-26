@@ -1254,6 +1254,85 @@ test("reconnect cannot readmit a start discarded before parent proof", async () 
   f.stop.abort();
 });
 
+test("a running root keeps all 513 children until oversize-first family eviction", async () => {
+  const f = fixture();
+  const sentinel = f.root();
+  f.settleRoot(sentinel);
+  const sentinelID = f.turns()[0]?.id ?? "missing sentinel";
+  const root = f.root();
+  const rootID = f.turns()[1]?.id;
+
+  const children = Array.from(
+    { length: 513 },
+    (_, index) => `ses_bulk_${index}`,
+  );
+
+  const first = "ses_bulk_0";
+
+  try {
+    for (const [index, id] of children.entries()) {
+      f.create(id, main);
+      f.start(id);
+      f.delta(id, `live ${index}`, "old-assistant");
+      f.delta(id, " complete", "old-assistant");
+      f.end(id);
+    }
+
+    const turns = f.turns();
+    expect(turns).toHaveLength(515);
+    expect(turns[1]?.status).toBe("running");
+
+    for (const [index, id] of children.entries()) {
+      expect(turns[index + 2]).toMatchObject({
+        session: { id, parent: { turnId: rootID } },
+        status: "completed",
+        items: [{ text: `live ${index} complete` }],
+      });
+    }
+
+    f.settleRoot(root);
+    expect(f.turns().map(({ id }) => id)).toEqual([sentinelID]);
+
+    const next = f.root();
+    f.parents.set(first, main);
+    f.call(next, "next");
+    f.names(next, "next", first);
+    f.start(first);
+    await setImmediate();
+
+    f.delta(first, "late compacted output", "old-assistant");
+    f.emit(
+      "session.text.ended",
+      first,
+      {
+        assistantMessageID: "old-unseen",
+        ordinal: 0,
+        text: "late durable output",
+      },
+      undefined,
+      undefined,
+      2,
+    );
+    expect(f.turns()[2]).toMatchObject({ session: { id: first }, items: [] });
+
+    f.emit(
+      "session.text.started",
+      first,
+      { assistantMessageID: "fresh", ordinal: 0 },
+      undefined,
+      undefined,
+      1600,
+    );
+    f.delta(first, "new live output", "fresh");
+    expect(f.turns()[2]).toMatchObject({
+      items: [{ text: "new live output" }],
+    });
+    f.end(first);
+  } finally {
+    f.stop.abort();
+  }
+});
+
 test("family eviction replaces child writer associations with tombstones immediately", () => {
   const hub = createActivityHub({ turnsPerAgent: 1 });
   const recorder = hub.recorder("officer");
@@ -1264,9 +1343,8 @@ test("family eviction replaces child writer associations with tombstones immedia
     throw new Error("Expected child writer");
   }
 
-  const execution = { parent, log, lower: 1 };
+  const execution = { log, lower: 1 };
   const history = new ChildExecutions<typeof execution>(1);
-  history.track(child);
   history.admitted(child, execution);
   history.remember(child, execution, "assistant-id");
   history.settled(child, execution, 6);
@@ -1274,10 +1352,25 @@ test("family eviction replaces child writer associations with tombstones immedia
   expect(history.owner(child, "unseen", 4)).toBe(execution);
   parent.end("completed");
   log.end("completed");
-  recorder.begin();
+  const next = recorder.begin();
   expect(history.owner(child, "assistant-id", undefined)).toBeNull();
   expect(history.owner(child, "unseen", 4)).toBeNull();
   expect(history.get(child)?.latest).toBeUndefined();
+
+  const replacement = next.child?.(null, grandchild);
+
+  if (!replacement) {
+    throw new Error("Expected replacement writer");
+  }
+
+  history.admitted(grandchild, { log: replacement, lower: 1 });
+  expect(history.mayHaveCompacted(child)).toBe(false);
+  replacement.end("completed");
+  next.end("completed");
+  recorder.begin();
+  expect(history.get(child)).toBeUndefined();
+  expect(history.mayHaveCompacted(child)).toBe(true);
+  expect(history.mayHaveCompacted(grandchild)).toBe(false);
 });
 
 test("late items from an evicted child execution do not enter its replacement", async () => {

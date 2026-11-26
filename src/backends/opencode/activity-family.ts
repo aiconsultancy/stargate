@@ -71,6 +71,7 @@ type Child = ChildReplayState & {
   latest: number;
   lower?: number;
   reused?: true;
+  uncertainHistory?: true;
   callId: string | null;
   ambiguousCall?: true;
   callFloor: number;
@@ -891,13 +892,12 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
-    const history =
-      owner && !this.fenced(owner) ? this.executions.track(id) : undefined;
-
     const log =
-      history && owner?.child?.(callId, id, first.at, detached || undefined);
+      owner && !this.fenced(owner)
+        ? owner.child?.(callId, id, first.at, detached || undefined)
+        : undefined;
 
-    if (!owner || !history || !log) {
+    if (!owner || !log) {
       this.queue.skip(id, queued);
 
       return;
@@ -916,7 +916,9 @@ export class OpenCodeActivityFamilies {
       start: first.order,
       latest: first.order,
       ...(startSeq !== undefined && { lower: startSeq }),
-      ...((history.admitted ?? first.reused) && { reused: true }),
+      ...((previous?.admitted ?? first.reused) && { reused: true }),
+      ...(pending.created === undefined &&
+        this.executions.mayHaveCompacted(id) && { uncertainHistory: true }),
     };
 
     this.children.set(id, child);
@@ -1074,9 +1076,9 @@ export class OpenCodeActivityFamilies {
 
     if (!known) {
       return (
-        active?.reused === true &&
         seq === undefined &&
-        event.type.endsWith(".delta")
+        (active?.uncertainHistory === true ||
+          (active?.reused === true && event.type.endsWith(".delta")))
       );
     }
 
