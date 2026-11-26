@@ -79,7 +79,10 @@ async function captureFleetHead(run: FleetGitCommand): Promise<FleetHead> {
   throw new Error("Git HEAD unavailable");
 }
 
-/** Classify even a failed sample against the checkout it started on. */
+/**
+ * Classify even a failed sample against the checkout it started on. A good
+ * sample followed by an unreadable HEAD counts as a move, so it is not cached.
+ */
 export async function guardFleetHead<T>(
   run: FleetGitCommand,
   deadline: () => AbortSignal,
@@ -89,15 +92,21 @@ export async function guardFleetHead<T>(
   const [result] = await Promise.allSettled([sample(before)]);
   deadline().throwIfAborted();
 
-  const after = await captureFleetHead(run).catch((error: unknown) => {
+  const after = await captureFleetHead(run).catch(() => {
     deadline().throwIfAborted();
+
     // An unreadable HEAD must not erase a more specific sample failure.
-    throw result.status === "rejected" ? result.reason : error;
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
+
+    // After a good sample, HEAD may be mid-move: a move, not a stable failure.
+    return null;
   });
 
   deadline().throwIfAborted();
 
-  if (before.ref !== after.ref || before.oid !== after.oid) {
+  if (!after || before.ref !== after.ref || before.oid !== after.oid) {
     return { kind: "moved" as const };
   }
 
@@ -110,7 +119,7 @@ export async function guardFleetHead<T>(
 
 class UnsafeStatusTemp extends Error {}
 
-async function trustedStatusRoot(path: string, serviceOwned = false) {
+export async function trustedStatusRoot(path: string, serviceOwned = false) {
   const canonical = await realpath(path).catch(() => {});
 
   if (!canonical) {
@@ -205,13 +214,21 @@ const statusArgs = [
 ];
 
 /** Run in a private Git directory with no info/attributes or filter config. */
-function isolatedGit(
-  directory: string,
-  gitDir: string,
-  format: "sha1" | "sha256",
-  config: string,
-  excludes: string,
-) {
+function isolatedGit({
+  directory,
+  gitDir,
+  format,
+  config,
+  excludes,
+}: {
+  directory: string;
+  gitDir: string;
+  format: "sha1" | "sha256";
+  /** The checkout's status settings, as `git config -z` output. */
+  config: string;
+  /** The ignore file to use as `core.excludesFile`. */
+  excludes: string;
+}) {
   const settings: string[] = [];
 
   for (const entry of config.split("\0")) {
@@ -277,7 +294,7 @@ export type StatusStorage = {
 
 const liveStorage: StatusStorage = {
   async parent(root) {
-    return (await statusParent(root)).path;
+    return statusParent(root);
   },
   install(gitDir, metadata) {
     return Promise.resolve({
@@ -438,13 +455,13 @@ export class FleetStatusRead {
 
     signal.throwIfAborted();
 
-    const isolated = isolatedGit(
+    const isolated = isolatedGit({
       directory,
       gitDir,
       format,
-      settings.kind === "value" ? settings.value : "",
-      configured ? join(gitDir, configuredTarget) : "/dev/null",
-    );
+      config: settings.kind === "value" ? settings.value : "",
+      excludes: configured ? join(gitDir, configuredTarget) : "/dev/null",
+    });
 
     return {
       index,
@@ -609,82 +626,35 @@ export function liveFleetGit(
   };
 }
 
-const statusDirectoryName = "stargate-git-status";
+export const statusDirectoryName = "stargate-git-status";
 export const statusDirectoryPrefix = `${statusDirectoryName}-`;
 
 function fileError(error: unknown) {
   return error instanceof Error && "code" in error ? error.code : undefined;
 }
 
-export async function statusDataDirectory(dataDirectory: string) {
-  const canonical = await trustedStatusRoot(dataDirectory, true);
-
-  return canonical && join(canonical, statusDirectoryName);
-}
-
+/**
+ * The trusted temporary directory, or a private folder already made in it,
+ * that holds status repositories. It must resolve outside the checkout, so
+ * status never runs inside it.
+ */
 export async function statusParent(
   root: string,
   {
-    dataDirectory,
     temporaryDirectory = tmpdir,
-    retainedTemporary,
+    retained,
   }: {
-    dataDirectory?: string | undefined;
-    temporaryDirectory?: () => string;
-    retainedTemporary?: (() => Promise<string | undefined>) | undefined;
+    temporaryDirectory?: (() => string) | undefined;
+    retained?: string | undefined;
   } = {},
 ) {
-  if (dataDirectory) {
-    try {
-      const parent = await statusDataDirectory(dataDirectory);
-
-      if (parent && outsideCheckout(root, parent)) {
-        await mkdir(parent, { mode: 0o700 }).catch((error: unknown) => {
-          if (fileError(error) !== "EEXIST") {
-            throw error;
-          }
-        });
-
-        if (await privateStatusDirectory(parent)) {
-          return { path: parent, kind: "ready" as const };
-        }
-      }
-    } catch (error) {
-      if (
-        !["ENOENT", "EACCES", "EPERM", "ENOTDIR", "EROFS"].includes(
-          String(fileError(error)),
-        )
-      ) {
-        throw error;
-      }
-    }
-  }
-
-  const retained = await retainedTemporary?.();
   const temporary = retained ?? (await trustedStatusRoot(temporaryDirectory()));
 
   if (!temporary || !outsideCheckout(root, temporary)) {
     throw new UnsafeStatusTemp();
   }
 
-  return {
-    path: temporary,
-    kind: retained === undefined ? ("lease" as const) : ("ready" as const),
-  };
-}
-
-export async function privateStatusDirectory(path: string) {
-  const metadata = await lstat(path).catch(() => {});
-
-  if (
-    metadata?.isDirectory() &&
-    (metadata.mode & 0o777) === 0o700 &&
-    metadata.uid === process.getuid?.()
-  ) {
-    return metadata;
-  }
-
-  return;
+  return temporary;
 }
 
 /** Repository-relative, inside the worktree and outside any `.git`. */

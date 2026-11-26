@@ -215,7 +215,7 @@ gateway poll the Subspace API and offer issues to the fleet's captains. It
 is off by default (`enabled: false`) and every key requires a restart. Keys:
 `enabled`, `fleet`, `api.baseUrl`, `api.tokenEnv`, `api.headersEnv`,
 `messaging.type`, `messaging.registration`, `messaging.channel`,
-`captainAccounts`, `pollIntervalSeconds` (default 120),
+`captainAccounts`, `decisionOutcomeDms` (default off), `pollIntervalSeconds` (default 120),
 `answerTimeoutSeconds` (default 300) and `retryLadderSeconds` (default
 `[3600, 10800, 21600, 43200]`). See [agent dispatch](agent-dispatch.md) for
 each key, the credential it needs and how captains answer.

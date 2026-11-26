@@ -332,13 +332,14 @@ test.each(["branch switch", "branch update", "switch during comparison"])(
 );
 
 test.each([
-  ["status", true],
-  ["rev-list", true],
-  ["status", false],
-  ["rev-list", false],
+  ["status", "HEAD moved"],
+  ["rev-list", "HEAD moved"],
+  ["status", "HEAD unchanged"],
+  ["rev-list", "HEAD unchanged"],
 ] as const)(
   "gateway Git %s failure only bypasses cache on a HEAD move (%s)",
-  async (phase, move) => {
+  async (phase, head) => {
+    const move = head === "HEAD moved";
     const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
 
     try {
@@ -399,6 +400,48 @@ test.each([
     }
   },
 );
+
+test("an unreadable final gateway HEAD after a good read is not cached", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+
+  try {
+    git(directory, "init", "-b", "main");
+    git(directory, "commit", "--allow-empty", "-m", "First");
+    let heads = 0;
+
+    const read = createGitReader(
+      Date.now,
+      (args, options) => {
+        // The second HEAD read is the recheck after status.
+        if (args.includes("symbolic-ref") && args.at(-1) === "HEAD") {
+          heads++;
+
+          if (heads === 2) {
+            return Promise.resolve({ code: 128, stdout: "" });
+          }
+        }
+
+        return readCommand(args, options);
+      },
+      undefined,
+      undefined,
+      () => 0,
+    );
+
+    expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+      branch: null,
+      changedFiles: null,
+      error: "Git state unavailable.",
+    });
+    expect(heads).toBe(2);
+    expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+      branch: "main",
+      changedFiles: 0,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test.each([{ code: 2, stdout: "" }, { code: 1, stdout: "unexpected" }, null])(
   "a failed Git excludes configuration read does not run status (%j)",
@@ -1312,6 +1355,33 @@ test("isolated status detects same-size edits with a racy index timestamp", asyn
   }
 });
 
+test("status rejects a private temporary directory inside the checkout", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+
+  try {
+    git(directory, "init", "-b", "main");
+    git(directory, "commit", "--allow-empty", "-m", "Initial");
+    const temporary = join(directory, "private-temp");
+    await mkdir(temporary, { mode: 0o700 });
+
+    const read = createGitReader(
+      Date.now,
+      readCommand,
+      undefined,
+      () => temporary,
+    );
+
+    expect(await read(directory, new AbortController().signal)).toMatchObject({
+      branch: null,
+      changedFiles: null,
+      error: "Git state unavailable.",
+    });
+    expect(await readdir(temporary)).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("status ignores worktree and info attributes", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
 
@@ -1326,8 +1396,11 @@ test("status ignores worktree and info attributes", async () => {
       "other.txt text eol=lf\n",
     );
 
+    // Git stores LF but records the CRLF files' size.
+    // A new mtime alone then makes status compare contents.
+    // They match only when the attributes apply.
     for (const name of ["tracked.txt", "other.txt"]) {
-      await writeFile(join(directory, name), "original\n");
+      await writeFile(join(directory, name), "original\r\n");
     }
 
     git(directory, "add", ".");
@@ -1340,7 +1413,7 @@ test("status ignores worktree and info attributes", async () => {
       ).exitCode === 0;
 
     for (const name of ["tracked.txt", "other.txt"]) {
-      await writeFile(join(directory, name), "original\r\n");
+      await utimes(join(directory, name), 1_000_000_000, 1_000_000_000);
     }
 
     expect(

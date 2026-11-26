@@ -185,10 +185,14 @@ export type GatewayConfig =
       | "transcription"
     > & { steerThreadFollowUps?: boolean });
 
-function statusText(job: Job, cause: RequestFailure) {
+function statusText(
+  job: Job,
+  cause: RequestFailure,
+  transport: GatewayTransport,
+) {
   return job.deferDelivery && cause === "history"
     ? "The agent finished, but its public reply is not yet readable in session history. Stargate will retain it locally when it becomes readable. The request was not repeated."
-    : failureText(cause);
+    : (transport.failureText?.(cause) ?? failureText(cause));
 }
 
 /** The failure a thrown error names when no signal ended the turn. */
@@ -2518,7 +2522,7 @@ export class Gateway {
 
           if (deferred) {
             failure = "history";
-            output = [statusText(job, failure)];
+            output = [statusText(job, failure, transport)];
           } else {
             output =
               (reacted || silent) && !answer.trim()
@@ -2572,8 +2576,8 @@ export class Gateway {
           );
           output = [
             failure === "timeout" && observeProgress
-              ? `${statusText(job, failure)} ${turnProgressText(progress)}`
-              : statusText(job, failure),
+              ? `${statusText(job, failure, transport)} ${turnProgressText(progress)}`
+              : statusText(job, failure, transport),
           ];
           transcript = undefined;
 
@@ -2632,7 +2636,7 @@ export class Gateway {
 
           if (!reactionDelivered) {
             failure = "reaction";
-            output = [statusText(job, failure)];
+            output = [statusText(job, failure, transport)];
           }
         }
 
@@ -2656,7 +2660,7 @@ export class Gateway {
           failure = "history";
           output = this.store.respond(
             job.id,
-            [statusText(job, failure)],
+            [statusText(job, failure, transport)],
             failure,
           );
           this.queueTranscript(this.catchUpKey(job.conversation));

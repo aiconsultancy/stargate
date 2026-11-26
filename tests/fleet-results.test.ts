@@ -379,10 +379,12 @@ async function world(
     vance,
     () => {},
     {
-      async sendToConversation(_service, conversation, message) {
-        sent.push({ conversation, activity: message });
+      connector: {
+        async sendToConversation(_service, conversation, message) {
+          sent.push({ conversation, activity: message });
 
-        return { id: `reply-${sent.length}` };
+          return { id: `reply-${sent.length}` };
+        },
       },
     },
   );
@@ -775,10 +777,12 @@ test("fleet results: outbox and queued continuation survive reopen after queue-b
     f.vance,
     () => {},
     {
-      async sendToConversation(_service, conversation, message) {
-        f.sent.push({ conversation, activity: message });
+      connector: {
+        async sendToConversation(_service, conversation, message) {
+          f.sent.push({ conversation, activity: message });
 
-        return { id: "recovered-reply" };
+          return { id: "recovered-reply" };
+        },
       },
     },
   );

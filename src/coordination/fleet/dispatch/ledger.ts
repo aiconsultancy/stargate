@@ -103,6 +103,9 @@ export class DispatchLedger {
         at INTEGER NOT NULL, sent INTEGER NOT NULL,
         PRIMARY KEY(issue, assignee)
       );
+      CREATE TABLE IF NOT EXISTS dispatch_decision_outcomes (
+        id TEXT PRIMARY KEY
+      );
       CREATE TABLE IF NOT EXISTS dispatch_issues (
         issue TEXT PRIMARY KEY, state TEXT NOT NULL, offerID TEXT,
         value TEXT NOT NULL
@@ -231,6 +234,24 @@ export class DispatchLedger {
         "INSERT OR IGNORE INTO dispatch_notified(issue, assignee, identifier, at, sent) VALUES(?,?,?,?,?)",
       )
       .run(issue, assignee, identifier, Math.floor(at), sent ? 1 : 0);
+  }
+
+  public decisionOutcomeSent(id: string) {
+    return (
+      this.db
+        .query("SELECT id FROM dispatch_decision_outcomes WHERE id=?")
+        .get(id) !== null
+    );
+  }
+
+  public recordDecisionOutcomeSent(id: string) {
+    this.db
+      .query("INSERT OR IGNORE INTO dispatch_decision_outcomes(id) VALUES(?)")
+      .run(id);
+  }
+
+  public clearDecisionOutcomeSent(id: string) {
+    this.db.query("DELETE FROM dispatch_decision_outcomes WHERE id=?").run(id);
   }
 
   /** An unreadable row is skipped, never fatal to the rest of the ledger. */

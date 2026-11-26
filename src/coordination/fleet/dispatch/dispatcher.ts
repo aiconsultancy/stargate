@@ -157,6 +157,10 @@ export class AgentDispatcher {
 
   /** Earliest time any timer is due, if any. */
   private nextDue(): number | undefined {
+    if (this.settings.issueDispatch === false) {
+      return;
+    }
+
     let due: number | undefined;
 
     for (const tracked of this.options.ledger.active()) {
@@ -275,7 +279,7 @@ export class AgentDispatcher {
   private async timers(signal: AbortSignal) {
     // Nothing moves until this process has read the roster: at a poll, or
     // Before an acceptance write as a confirmed identity.
-    if (!this.polling.roster) {
+    if (this.settings.issueDispatch === false || !this.polling.roster) {
       return;
     }
 

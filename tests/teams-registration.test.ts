@@ -34,6 +34,7 @@ describe("Teams intake and source ownership", () => {
         await f.registration.accept(
           activity({
             id: "channel-message",
+            entities: [{ type: "mention", mentioned: activity().recipient }],
             conversation: {
               id: "channel-conversation",
               conversationType: "channel",
@@ -202,6 +203,7 @@ describe("Teams intake and source ownership", () => {
 
     try {
       const channel = activity({
+        entities: [{ type: "mention", mentioned: activity().recipient }],
         conversation: {
           id: "thread-conversation",
           conversationType: "channel",
@@ -537,6 +539,7 @@ describe("Opt-in Teams native permission decisions", () => {
       await f.running(
         activity({
           id: "channel-input",
+          entities: [{ type: "mention", mentioned: activity().recipient }],
           conversation: {
             id: "channel-conversation",
             conversationType: "channel",
