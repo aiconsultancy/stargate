@@ -59,6 +59,9 @@ A fleet's own officers (its rear admiral and captains) and their crew read
 the same Fleet API, the whole fleet and read-only, without the token. Agents
 never hold the token. Each officer reads through a Unix socket that only its
 own processes can reach: the socket's file permissions are its identity.
+Officers get crew task text as the crew plugin shows ordinary readers:
+redacted and bounded, never the [raw task text](#routes) the operator
+listener serves.
 
 The socket is `fleet-api.sock` in the officer's Subspace socket directory,
 beside its signing proxy socket (see [Subspace API agent identity](subspace-agents.md)).
@@ -100,8 +103,11 @@ On the socket:
   parameter gets 404: officers never receive `agent-activity`;
 - no token is needed and an `Authorization` header is ignored; no browser
   origin is granted CORS;
-- answers are the same JSON and event frames as on the operator listener,
-  without officer turn activity.
+- answers have the same shape as on the operator listener, without officer
+  turn activity. Crew task text is the crew plugin's ordinary view:
+  credentials redacted, control characters stripped and progress masked
+  before the cut, within 180, 80 and 400 code points in ship detail, the
+  `ship` event and the crew member route alike.
 
 Officers' reads and event streams have their own eight HTTP read slots and
 eight stream slots, shared by all officers, so officers can never use up the
@@ -194,15 +200,26 @@ and `Last-Event-ID` without a token.
 has that `id`, its configured `name` (which may differ from the ID; the ID
 when no name is set), `role` and `model`.
 
-Crew task text (`summary`, `phase` and `progress`) and Git branch and base
-names appear exactly as the crew wrote them: the API neither redacts
-credential-shaped text nor replaces checkout paths, in every route and
-event. Ship detail and the sample that feeds the `ship` event request task
-text without a member filter. They show it unredacted, up to 180, 80 and 400
-code points (the start of the summary and phase, the end of the progress);
-the fleet overview carries no task text. The crew member route applies no
-limit of its own: it returns the task text the crew plugin stores, up to
-64,000 code points per field.
+On the operator listener, crew task text (`summary`, `phase` and
+`progress`) and Git branch and base names appear exactly as the crew wrote
+them: the API neither redacts credential-shaped text nor replaces checkout
+paths, in every route and event. Ship detail and the sample that feeds the
+`ship` event request task text without a member filter. They show it
+unredacted, up to 180, 80 and 400 code points (the start of the summary and
+phase, the end of the progress); the fleet overview carries no task text.
+The crew member route applies no limit of its own: it returns the task text
+the crew plugin stores, up to 64,000 code points per field. The
+`unredacted` and `full` views are for the operator listener only.
+
+[Officers' sockets](#officers) ask the crew plugin for its ordinary view
+instead, in every route and event, from a crew sample of their own: the
+fleet overview and the `ship` event read one fleet status sample per backend
+for the operator listener and another for officers. While only one listener
+has clients, each poll reads fleet status once per backend; while both do,
+twice. An officer's sample never falls back to the operator's, and the
+operator's never to an officer's, even when the other is fresher. Git
+branch and base names, subagent titles and pull request titles are the same
+on both.
 
 The store makes the final storage cut for progress; Pi members buffer up to
 twice that limit first. For over-limit progress, the store saves the raw
@@ -222,12 +239,13 @@ Subagent titles and pull request titles are also shown as written, cut to
 180 characters. Activity events quote task text and branch names unredacted,
 with whitespace collapsed.
 
-These text fields (task text, branch and base names, subagent titles and
-pull request titles) can hold any Unicode character, including control
-characters such as ESC and BEL, C1 controls, and bidirectional formatting
-characters such as U+202E. The API does not strip them; only the length
-limits above apply. A client that prints them, to a terminal or a page, must
-escape them, for example by showing each as a visible marker.
+These text fields (task text on the operator listener, branch and base
+names, subagent titles and pull request titles) can hold any Unicode
+character, including control characters such as ESC and BEL, C1 controls,
+and bidirectional formatting characters such as U+202E. The API does not
+strip them; only the length limits above apply. A client that prints them,
+to a terminal or a page, must escape them, for example by showing each as a
+visible marker.
 
 `HEAD` returns headers without a body. Unknown ships, members, and routes
 return 404. Missing or invalid tokens receive 401 (officers' sockets need

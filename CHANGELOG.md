@@ -180,6 +180,13 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   masked. The full view still shows the raw last 64,000 code points. Pi crew
   members buffer up to twice that before the final storage cut. Shorter
   progress and legacy rows are still masked on read.
+- Officers' Fleet API sockets show crew task text as the crew plugin's
+  ordinary view: redacted, control characters stripped and bounded to
+  180/80/400 in ship detail, the `ship` event and the crew member route.
+  Only the operator listener asks for `unredacted` or `full`. Officers have
+  their own crew sample, so the fleet status RPC is read once per backend
+  per poll while one listener has clients and twice while both do; neither
+  listener's sample falls back to the other's.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`
