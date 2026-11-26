@@ -395,6 +395,48 @@ test("an unreadable final gateway HEAD after a good read is not cached", async (
   }
 });
 
+test("a failed gateway sample keeps and caches its own error when the final HEAD is unreadable", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+
+  try {
+    git(directory, "init", "-b", "main");
+    git(directory, "commit", "--allow-empty", "-m", "First");
+    // The sample fails on its own: info/exclude is over the copy limit.
+    await truncate(join(directory, ".git", "info", "exclude"), 2 * 1024 * 1024);
+    let heads = 0;
+
+    const read = createGitReader(
+      Date.now,
+      (args, options) => {
+        // The second HEAD read is the recheck after the sample.
+        if (args.includes("symbolic-ref") && args.at(-1) === "HEAD") {
+          heads++;
+
+          if (heads === 2) {
+            return Promise.resolve({ code: 128, stdout: "" });
+          }
+        }
+
+        return readCommand(args, options);
+      },
+      undefined,
+      undefined,
+      () => 0,
+    );
+
+    const failed = await read(directory, AbortSignal.timeout(3000));
+    expect(failed).toMatchObject({
+      changedFiles: null,
+      error: "Git metadata exceeds the status read limit.",
+    });
+    expect(heads).toBe(2);
+    expect(await read(directory, AbortSignal.timeout(3000))).toBe(failed);
+    expect(heads).toBe(2);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test.each([{ code: 2, stdout: "" }, { code: 1, stdout: "unexpected" }, null])(
   "a failed Git excludes configuration read does not run status (%j)",
   async (failure) => {
@@ -566,6 +608,38 @@ test("isolated status honours a repository excludes file and info/exclude preced
     ).toMatchObject({ changedFiles: 1 });
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("isolated status skips the default user ignore file even when Git can find it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stargate-api-git-"));
+
+  try {
+    const directory = join(root, "checkout");
+    // With no core.excludesFile set, Git reads $XDG_CONFIG_HOME/git/ignore,
+    // Or $HOME/.config/git/ignore. Both point at this file.
+    await mkdir(join(root, ".config", "git"), { recursive: true });
+    await writeFile(join(root, ".config", "git", "ignore"), "user-ignored\n");
+    await mkdir(directory);
+    git(directory, "init", "-b", "main");
+    await writeFile(join(directory, "user-ignored"), "");
+
+    const read = createGitReader(Date.now, (args, options) =>
+      readCommand(args, {
+        ...options,
+        env: {
+          ...options.env,
+          HOME: root,
+          XDG_CONFIG_HOME: join(root, ".config"),
+        },
+      }),
+    );
+
+    expect(await read(directory, new AbortController().signal)).toMatchObject({
+      changedFiles: 1,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

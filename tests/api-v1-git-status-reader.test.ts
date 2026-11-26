@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { readCommand } from "../src/observability/dashboard/api/v1/command";
 import {
   git,
@@ -373,6 +373,64 @@ test.each(["success", "failure"])(
       await waitForRemoval(snapshots);
       expect(await readdir(snapshots)).toEqual([]);
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each([
+  ["is not private", "shared"],
+  ["is inside the checkout", "inside"],
+  ["cannot be made", "read-only"],
+] as const)(
+  "uses the temporary snapshot root when the data directory's folder %s",
+  async (_, kind) => {
+    const root = await realpath(
+      await mkdtemp(join(tmpdir(), "stargate-api-git-")),
+    );
+
+    const directory = join(root, "checkout");
+
+    const dataDirectory =
+      kind === "inside" ? join(directory, "data") : join(root, "data");
+
+    try {
+      await mkdir(directory);
+      git(directory, "init", "-b", "main");
+      await mkdir(dataDirectory, { mode: 0o700 });
+
+      if (kind === "shared") {
+        const snapshots = join(dataDirectory, "stargate-git-status");
+        await mkdir(snapshots);
+        await chmod(snapshots, 0o750);
+      } else if (kind === "read-only") {
+        // Making the status folder fails with EACCES.
+        await chmod(dataDirectory, 0o500);
+      }
+
+      let parent: string | undefined;
+
+      const read = createGitReader(
+        Date.now,
+        (args, options) => {
+          const snapshot = options.env["GIT_DIR"];
+
+          if (snapshot && args.includes("status")) {
+            parent = dirname(snapshot);
+          }
+
+          return readCommand(args, options);
+        },
+        dataDirectory,
+      );
+
+      expect(await read(directory, AbortSignal.timeout(3000))).toMatchObject({
+        changedFiles: 0,
+      });
+      expect(parent && dirname(parent)).toBe(await realpath(tmpdir()));
+      expect(parent && basename(parent)).toStartWith("stargate-git-status-");
+    } finally {
+      await chmod(dataDirectory, 0o700).catch(() => {});
       await rm(root, { recursive: true, force: true });
     }
   },
