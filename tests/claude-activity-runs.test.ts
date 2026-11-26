@@ -26,7 +26,6 @@ function fixture() {
   const add = (frame: SDKMessage) =>
     activity.add(frame, {
       changed: false,
-      toolEvidence: false,
       resultFallback: "",
     });
 

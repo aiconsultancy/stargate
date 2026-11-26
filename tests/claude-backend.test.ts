@@ -1464,7 +1464,7 @@ test("Claude work frames require a string parent or a tool-use block", () => {
     [{ type: "assistant", message: { content: [] } }, false],
   ] as const) {
     const turn = new ClaudeTurn();
-    turn.add(raw);
+    expect(turn.add(raw)).toEqual({ changed: false, resultFallback: "" });
     expect(turn.worked).toBe(worked);
     expect(turn.answer()).toBe("");
   }
