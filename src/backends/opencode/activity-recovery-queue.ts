@@ -3,7 +3,9 @@ import type { TurnActivityLog } from "../backend";
 import {
   type ActivityIncarnation,
   type CallTiming,
+  type EarlierCallRange,
   callPrecedesStart,
+  openedInWindow,
 } from "./activity-call-evidence";
 import {
   ActivityLifecycleBuffer,
@@ -61,6 +63,7 @@ type Segment<E extends Event> = {
     reused?: true;
   };
   floor: number;
+  earlier?: readonly EarlierCallRange[];
   expires: number;
   boundaryOrder?: number;
   gap?: ActivityReplayGap;
@@ -78,6 +81,7 @@ export type PendingActivity<E extends Event> = {
   lifecycle: ActivityLifecycleBuffer;
   lifecycleSeq?: number;
   floor: number;
+  earlier?: readonly EarlierCallRange[];
   expires: number;
   needsStart: boolean;
   provisional: TimedProof[];
@@ -111,7 +115,7 @@ export const activityQueueDefaults = {
 };
 
 type Removal<E extends Event> = {
-  start(id: string, order: number): void;
+  start(id: string, order: number, nativeStart?: number): void;
   candidate(id: string, pending: PendingActivity<E>, headOnly?: true): void;
 };
 
@@ -202,10 +206,9 @@ export class ActivityRecoveryQueues<E extends Event> {
     }
 
     const segment = pending.segments.find(
-      ({ floor, first }) =>
-        first.type === startType &&
-        floor < proof.order &&
-        proof.order <= first.order,
+      (segment) =>
+        segment.first.type === startType &&
+        openedInWindow(proof.order, proof.timing.created, this.window(segment)),
     );
 
     if (segment) {
@@ -222,11 +225,21 @@ export class ActivityRecoveryQueues<E extends Event> {
       }
     } else if (
       proof.order >
-      (pending.segments.findLast(({ first }) => first.type === startType)?.first
-        .order ?? pending.floor)
+        (pending.segments.findLast(({ first }) => first.type === startType)
+          ?.first.order ?? pending.floor) ||
+      (pending.segments.length === 0 &&
+        openedInWindow(proof.order, proof.timing.created, {
+          after: pending.floor,
+          through: Infinity,
+          ...(pending.earlier && { earlier: pending.earlier }),
+        }))
     ) {
       this.hold(pending, proof);
     }
+  }
+
+  public window({ floor, first, earlier }: Segment<E>) {
+    return { after: floor, through: first.order, ...(earlier && { earlier }) };
   }
 
   private offerSegment(segment: Segment<E>, proof: TimedProof) {
@@ -272,8 +285,10 @@ export class ActivityRecoveryQueues<E extends Event> {
   public hasProofFrom(pending: PendingActivity<E>, session: string) {
     return (
       pending.provisional.some((proof) => proof.session === session) ||
-      pending.segments.some(({ proofs }) =>
-        proofs.some((proof) => proof.session === session),
+      pending.segments.some(
+        ({ proofs, witness }) =>
+          witness?.session === session ||
+          proofs.some((proof) => proof.session === session),
       )
     );
   }
@@ -398,7 +413,7 @@ export class ActivityRecoveryQueues<E extends Event> {
     const head = pending.segments[0];
 
     // Publish known names and post-loss output before releasing an expired head.
-    if (head && (pending.postLoss || head.proofs.length > 0)) {
+    if (head && (pending.postLoss || head.proofs.length > 0 || head.witness)) {
       this.admit(id);
 
       if (this.peek(id) !== pending || pending.draining) {
@@ -583,6 +598,7 @@ export class ActivityRecoveryQueues<E extends Event> {
           ...(packet.reused && { reused: true }),
         },
         floor,
+        ...(!segment && pending.earlier && { earlier: pending.earlier }),
         expires: start ? at + this.limits.ttl : pending.expires,
         frames: [],
         proofs: [],
@@ -591,6 +607,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       };
       pending.segments.push(segment);
       pending.needsStart = false;
+      delete pending.earlier;
 
       if (start) {
         const opened = segment;
@@ -604,7 +621,13 @@ export class ActivityRecoveryQueues<E extends Event> {
             return true;
           }
 
-          if (floor < proof.order) {
+          if (
+            openedInWindow(
+              proof.order,
+              proof.timing.created,
+              this.window(opened),
+            )
+          ) {
             this.offerSegment(opened, proof);
           }
 
@@ -752,7 +775,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       this.releaseSlots(pending, segment);
 
       if (preserve) {
-        this.preserveNames(pending, segment);
+        this.preserveNames(id, pending, segment);
       } else if (segment.first.type === startType) {
         pending.floor = segment.first.order;
       }
@@ -777,13 +800,48 @@ export class ActivityRecoveryQueues<E extends Event> {
     }
   }
 
-  private preserveNames(pending: PendingActivity<E>, old: Segment<E>) {
+  private preserveNames(
+    id: string,
+    pending: PendingActivity<E>,
+    old: Segment<E>,
+  ) {
+    const { first } = old;
     const next = pending.segments[0];
 
-    if (next) {
-      next.floor = old.floor;
+    const retiredAt =
+      pending.postLoss &&
+      !pending.closing &&
+      first.type === startType &&
+      this.now() >= old.expires
+        ? first.created
+        : undefined;
 
-      if (old.proofOverflow) {
+    let earlier = old.earlier;
+
+    if (retiredAt !== undefined) {
+      this.removed?.start(id, first.order, retiredAt);
+
+      // Native time must exclude a held call from every range it overlapped.
+      // The normal floor stays at the released start.
+      earlier = [
+        ...(earlier?.map((band) => ({
+          ...band,
+          nativeStart: Math.max(band.nativeStart, retiredAt),
+        })) ?? []),
+        { after: old.floor, through: first.order, nativeStart: retiredAt },
+      ];
+    }
+
+    const floor = retiredAt === undefined ? old.floor : first.order;
+
+    if (next) {
+      next.floor = floor;
+
+      if (earlier) {
+        next.earlier = earlier;
+      }
+
+      if (retiredAt === undefined && old.proofOverflow) {
         next.proofOverflow = true;
       }
 
@@ -791,6 +849,12 @@ export class ActivityRecoveryQueues<E extends Event> {
         (next.droppedProofScopes ??= new Set()).add(scope);
       }
     } else {
+      pending.floor = floor;
+
+      if (earlier) {
+        pending.earlier = earlier;
+      }
+
       for (const scope of old.droppedProofScopes ?? []) {
         pending.droppedProofs ??= new Map();
         pending.droppedProofs.set(
@@ -802,7 +866,7 @@ export class ActivityRecoveryQueues<E extends Event> {
         );
       }
 
-      if (old.proofOverflow) {
+      if (retiredAt === undefined && old.proofOverflow) {
         for (const proof of old.proofs) {
           this.recordDrop(pending, proof);
         }

@@ -1,8 +1,11 @@
 import type { TurnActivityLog } from "../backend";
-import type {
-  ActivityCallEvidence,
-  ActivityIncarnation,
-  CallTiming,
+import {
+  type ActivityCallEvidence,
+  type ActivityIncarnation,
+  type CallTiming,
+  type CallWindow,
+  callPrecedesStart,
+  openedInWindow,
 } from "./activity-call-evidence";
 import { childAttributionMarker } from "./activity-projector";
 import type {
@@ -26,7 +29,7 @@ type AttributedChild = {
   nativeStart?: number | undefined;
   callId: string | null;
   ambiguousCall?: true;
-  callFloor: number;
+  callWindow: CallWindow;
 };
 
 type Attribution = {
@@ -50,7 +53,7 @@ export function resolveAttribution(
   { id, parent }: { id: string; parent: string },
   inferred: TurnActivityLog | undefined,
   naming: ReturnType<ActivityRecoveryQueues<never>["naming"]>,
-  window: { after: number; through: number },
+  window: CallWindow,
   lineage: WeakMap<TurnActivityLog, ActivityIncarnation>,
 ) {
   const proof = naming.first ?? naming.witness;
@@ -139,18 +142,15 @@ export function linkExistingChild(
 ) {
   if (
     child.parent === log &&
-    child.callFloor < order &&
-    (timing.created === undefined ||
-      child.nativeStart === undefined ||
-      timing.created <= child.nativeStart) &&
+    openedInWindow(order, timing.created, child.callWindow) &&
+    callPrecedesStart(timing.created, child.nativeStart) &&
     child.callId === null &&
     !child.ambiguousCall
   ) {
     if (
       calls.competing(session, scope, id, {
         except: order,
-        after: child.callFloor,
-        through: child.start,
+        ...child.callWindow,
       })
     ) {
       child.ambiguousCall = true;

@@ -14,6 +14,7 @@ import {
 import {
   ActivityCallEvidence,
   type ActivityIncarnation,
+  type CallWindow,
 } from "./activity-call-evidence";
 import {
   ChildExecutions,
@@ -93,7 +94,7 @@ type Child = ChildReplayState & {
   continuation?: true;
   callId: string | null;
   ambiguousCall?: true;
-  callFloor: number;
+  callWindow: CallWindow;
 };
 
 type Ancestry = {
@@ -169,12 +170,16 @@ export class OpenCodeActivityFamilies {
         this.admit(id);
       },
       {
-        start: (id, through) => {
+        start: (id, through, nativeStart) => {
           const latest = this.executions.get(id)?.latest;
 
           // A retained execution may still accept a late name for its start.
-          if (latest?.callId !== null || latest.ambiguousCall) {
-            this.calls.discardStart(id, through);
+          if (
+            nativeStart !== undefined ||
+            latest?.callId !== null ||
+            latest.ambiguousCall
+          ) {
+            this.calls.discardStart(id, through, nativeStart);
           }
         },
         candidate: (id, queued, headOnly) => {
@@ -482,7 +487,7 @@ export class OpenCodeActivityFamilies {
       { id, parent },
       inferred,
       naming,
-      { after: segment.floor, through: first.order },
+      this.queue.window(segment),
       this.lineage,
     );
   }
@@ -875,7 +880,7 @@ export class OpenCodeActivityFamilies {
       parentSession: pending.parent,
       log,
       callId,
-      callFloor: segment.floor,
+      callWindow: this.queue.window(segment),
       ...(ambiguous && { ambiguousCall: true }),
       ...(unproven && { unproven: true }),
       ...(pending.continuation && unproven && { continuation: true }),

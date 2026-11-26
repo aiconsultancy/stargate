@@ -695,6 +695,9 @@ and incarnation prevent proving ownership,
 an admitted child's `session.parent` stays `null`. It does not count as a
 standalone root against the 16-root limit, but it still counts toward the
 global settled turn and byte limits.
+A start that began before a call in native time cannot belong to that call,
+even if the call appeared first on the stream. Without a native start time,
+an earlier call can still leave a later start ambiguous.
 A parent with no remaining exact names keeps its saturation record only
 while its activity writer is retained.
 
@@ -751,9 +754,13 @@ ends `cancelled` with `lost: true`, meaning observation was lost, not that
 the native session was interrupted. A newer start seen by the log may
 establish that loss but can still be admitted once from the live stream.
 A live start after a loss gets its own two-second naming window, even if
-an earlier start for the same session is still waiting. A valid name can
-arrive within that window and still attach the turn and its witnessed
-outcome. Output beyond the old cursor without a new start, or buffered
+an earlier start for the same session is still waiting or recovering frames.
+An expired start cannot take a new name. While it drains, the collector can
+hold a bounded number of names and check their original arrival time against
+the next start's own window. Calls the expired start could have owned do not
+compete for that next start when native timing separates them. A valid name
+within the window can still attach the turn and its witnessed outcome.
+Output beyond the old cursor without a new start, or buffered
 output from a start whose window or candidate budget closes without
 proof, appears in a separate detached turn with no parent, request, crew
 task or claimed native outcome. Frames that cannot be kept or recovered

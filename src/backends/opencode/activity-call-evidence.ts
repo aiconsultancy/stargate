@@ -28,11 +28,23 @@ const resumes = (value: unknown) =>
 
 type Range = { first: number; last: number };
 
-type NamedCalls = { orders: Set<number>; dropped?: Range };
+type NamedCalls = { orders: Map<number, number | undefined>; dropped?: Range };
 
 type NamedCapacity = { count: number; saturated?: Range };
 
-type Window = { except: number; after: number; through: number };
+export type EarlierCallRange = {
+  after: number;
+  through: number;
+  nativeStart: number;
+};
+
+export type CallWindow = {
+  after: number;
+  through: number;
+  earlier?: readonly EarlierCallRange[];
+};
+
+type Window = CallWindow & { except: number };
 
 function overlaps(
   range: Range | undefined,
@@ -48,6 +60,15 @@ function overlaps(
   return first <= last && (first !== last || first !== except);
 }
 
+function mightOverlap(range: Range | undefined, window: Window) {
+  return (
+    overlaps(range, window) ||
+    window.earlier?.some((band) =>
+      overlaps(range, { ...band, except: window.except }),
+    ) === true
+  );
+}
+
 function extend(range: Range | undefined, { first, last }: Range) {
   return {
     first: Math.min(range?.first ?? first, first),
@@ -55,13 +76,26 @@ function extend(range: Range | undefined, { first, last }: Range) {
   };
 }
 
-function inWindow(order: number, { after, through, except }: Window) {
-  return after < order && order <= through && order !== except;
+export function openedInWindow(
+  order: number,
+  created: number | undefined,
+  window: CallWindow,
+) {
+  return (
+    order <= window.through &&
+    (order > window.after ||
+      window.earlier?.some(
+        ({ after, through, nativeStart }) =>
+          after < order &&
+          order <= through &&
+          !callPrecedesStart(created, nativeStart),
+      ) === true)
+  );
 }
 
 class ScopeEvidence {
   public readonly owners = new WeakMap<TurnActivityLog, OwnerCalls>();
-  private readonly pending = new Map<string, Set<number>>();
+  private readonly pending = new Map<string, Map<number, number | undefined>>();
   private readonly ranges = new Map<string, Range>();
   private readonly overflow = new Map<bigint, Range>();
   private readonly named = new Map<string, Map<string, NamedCalls>>();
@@ -126,8 +160,9 @@ class ScopeEvidence {
     this.ranges.set(session, extend(range, { first: order, last: order }));
   }
 
-  public unnamed(session: string, order: number) {
-    const orders = this.pending.get(session) ?? new Set<number>();
+  public unnamed(session: string, order: number, created: number | undefined) {
+    const orders =
+      this.pending.get(session) ?? new Map<number, number | undefined>();
 
     if (!this.pending.has(session) && this.pending.size >= this.capacity) {
       const oldest = this.pending.entries().next().value;
@@ -135,7 +170,7 @@ class ScopeEvidence {
       if (oldest) {
         const [id, dropped] = oldest;
 
-        for (const order of dropped) {
+        for (const order of dropped.keys()) {
           this.rememberUnnamed(id, order);
         }
 
@@ -144,7 +179,7 @@ class ScopeEvidence {
     }
 
     if (orders.size >= this.callsPerLog) {
-      const oldest = orders.values().next().value;
+      const oldest = orders.keys().next().value;
 
       if (oldest !== undefined) {
         this.rememberUnnamed(session, oldest);
@@ -152,12 +187,17 @@ class ScopeEvidence {
       }
     }
 
-    orders.add(order);
+    orders.set(order, created);
     this.pending.delete(session);
     this.pending.set(session, orders);
   }
 
-  public identify(session: string, child: string, order: number) {
+  public identify(
+    session: string,
+    child: string,
+    order: number,
+    created: number | undefined,
+  ) {
     const orders = this.pending.get(session);
 
     if (orders?.delete(order) && orders.size === 0) {
@@ -192,10 +232,10 @@ class ScopeEvidence {
       return;
     }
 
-    const calls: NamedCalls = named ?? { orders: new Set() };
+    const calls: NamedCalls = named ?? { orders: new Map() };
 
     if (calls.orders.size >= this.callsPerLog) {
-      const oldest = calls.orders.values().next().value;
+      const oldest = calls.orders.keys().next().value;
 
       if (oldest !== undefined) {
         calls.dropped = extend(calls.dropped, { first: oldest, last: oldest });
@@ -203,7 +243,7 @@ class ScopeEvidence {
       }
     }
 
-    calls.orders.add(order);
+    calls.orders.set(order, created);
 
     if (!named) {
       capacity.count += 1;
@@ -213,7 +253,12 @@ class ScopeEvidence {
     }
   }
 
-  public retire(child: string, through: number, session?: string) {
+  public retire(
+    child: string,
+    through: number,
+    session?: string,
+    nativeStart?: number,
+  ) {
     const parents = this.named.get(child);
 
     if (!parents) {
@@ -223,7 +268,7 @@ class ScopeEvidence {
     for (const [parent, calls] of parents) {
       if (
         (session === undefined || parent === session) &&
-        this.trim(calls, through)
+        this.trim(calls, through, nativeStart)
       ) {
         parents.delete(parent);
         const capacity = this.namedCapacity.get(parent);
@@ -240,17 +285,20 @@ class ScopeEvidence {
     }
   }
 
-  private trim(calls: NamedCalls, through: number) {
-    for (const order of calls.orders) {
-      if (order <= through) {
+  private trim(calls: NamedCalls, through: number, nativeStart?: number) {
+    for (const [order, created] of calls.orders) {
+      if (order <= through && callPrecedesStart(created, nativeStart)) {
         calls.orders.delete(order);
       }
     }
 
-    if (calls.dropped && calls.dropped.last <= through) {
-      delete calls.dropped;
-    } else if (calls.dropped && calls.dropped.first <= through) {
-      calls.dropped.first = through + 1;
+    // Compressed evidence no longer remembers native time; it can still compete.
+    if (nativeStart === undefined && calls.dropped) {
+      if (calls.dropped.last <= through) {
+        delete calls.dropped;
+      } else if (calls.dropped.first <= through) {
+        calls.dropped.first = through + 1;
+      }
     }
 
     return !calls.dropped && calls.orders.size === 0;
@@ -259,17 +307,19 @@ class ScopeEvidence {
   public competing(session: string, child: string, window: Window) {
     const named = this.named.get(child)?.get(session);
 
+    const inWindow = ([order, created]: [number, number | undefined]) =>
+      order !== window.except && openedInWindow(order, created, window);
+
     return (
-      overlaps(this.ranges.get(session), window) ||
-      overlaps(this.overflow.get(this.bucket(session)), window) ||
-      overlaps(named?.dropped, window) ||
-      overlaps(this.namedCapacity.get(session)?.saturated, window) ||
-      named?.orders.values().some((order) => inWindow(order, window)) ===
-        true ||
+      mightOverlap(this.ranges.get(session), window) ||
+      mightOverlap(this.overflow.get(this.bucket(session)), window) ||
+      mightOverlap(named?.dropped, window) ||
+      mightOverlap(this.namedCapacity.get(session)?.saturated, window) ||
+      named?.orders.entries().some((entry) => inWindow(entry)) === true ||
       this.pending
         .get(session)
-        ?.values()
-        .some((order) => inWindow(order, window)) === true
+        ?.entries()
+        .some((entry) => inWindow(entry)) === true
     );
   }
 }
@@ -348,7 +398,7 @@ export class ActivityCallEvidence {
     this.keep(calls, key, { order, timing: { created, launch: "unknown" } });
     owned.launches.delete(key);
     owned.nonSubagent.delete(key);
-    index.unnamed(session, order);
+    index.unnamed(session, order, created);
   }
 
   private owner(index: ScopeEvidence, log: TurnActivityLog, session: string) {
@@ -417,7 +467,7 @@ export class ActivityCallEvidence {
     }
 
     call.named = true;
-    index.identify(session, child, call.order);
+    index.identify(session, child, call.order, call.timing.created);
 
     return call.order;
   }
@@ -496,11 +546,11 @@ export class ActivityCallEvidence {
   }
 
   /** A discarded start cannot establish a parent, so retire across scopes. */
-  public discardStart(child: string, through: number) {
-    this.unscoped.retire(child, through);
+  public discardStart(child: string, through: number, nativeStart?: number) {
+    this.unscoped.retire(child, through, undefined, nativeStart);
 
     for (const index of this.incarnations.values()) {
-      index.retire(child, through);
+      index.retire(child, through, undefined, nativeStart);
     }
   }
 
