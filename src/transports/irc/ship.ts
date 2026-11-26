@@ -16,6 +16,7 @@ import {
 import {
   dispatchRequestTurn,
   ircDispatchOffer,
+  isDecisionOutcomeDm,
   isRearAdmiral,
 } from "../../coordination/fleet/dispatch/irc";
 import { dispatchTag } from "../../coordination/fleet/dispatch/protocol";
@@ -1224,7 +1225,11 @@ export class IrcShip {
 
     if (
       this.config.dmPolicy === "redirect" &&
-      !client.isChannel(message.params[0] ?? "")
+      !client.isChannel(message.params[0] ?? "") &&
+      !(
+        member.role === "captain" &&
+        isDecisionOutcomeDm(message, this.config, client.nick, client.fold)
+      )
     ) {
       // Never a turn: answer with the ship channel, act on nothing.
       this.advance(member, client, message);

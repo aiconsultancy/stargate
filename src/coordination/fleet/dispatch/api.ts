@@ -11,6 +11,7 @@ export type FleetAgent = {
   name: string;
   rank: string;
   available: boolean;
+  ircNick?: string;
 };
 
 export type FleetRoster = { id: string; slug: string; agents: FleetAgent[] };
@@ -53,6 +54,17 @@ export type EditResult =
   | { conflict: false; version: number | undefined }
   | { conflict: true };
 
+const decisionOutcomeSchema = Schema.Struct({
+  id: Schema.String.check(Schema.isUUID()),
+  identifier: Schema.String.check(
+    Schema.isPattern(/^D-[0-9]{5,19}-[A-Z][A-Z0-9]{1,4}$/u),
+  ),
+  recordedByUserId: Schema.String.check(Schema.isUUID()),
+  status: Schema.Literals(["accepted", "rejected"]),
+});
+
+export type DecisionOutcome = typeof decisionOutcomeSchema.Type;
+
 /** The API surface the dispatcher needs; tests supply a fake. */
 export interface DispatchApi {
   me(signal: AbortSignal): Promise<DispatchIdentity>;
@@ -70,6 +82,16 @@ export interface DispatchApi {
     cursor: string | undefined,
     signal: AbortSignal,
   ): Promise<ListingPart<DispatchIssue>>;
+  decisionOutcomes?(
+    fleetId: string,
+    cursor: string | undefined,
+    signal: AbortSignal,
+  ): Promise<ListingPart<DecisionOutcome>>;
+  acknowledgeDecisionOutcome?(
+    fleetId: string,
+    outcomeId: string,
+    signal: AbortSignal,
+  ): Promise<void>;
   /** Undefined when the issue is gone or no longer readable. */
   issue(
     reference: string,
@@ -139,6 +161,7 @@ const fleetSchema = Schema.Struct({
       name: Schema.String,
       rank: Schema.String,
       available: Schema.optional(Schema.Boolean),
+      ircNick: nullableString,
     }),
   ),
 });
@@ -455,6 +478,7 @@ export class SubspaceApi implements DispatchApi {
         name: agent.name,
         rank: agent.rank,
         available: agent.available ?? true,
+        ...(agent.ircNick && { ircNick: agent.ircNick }),
       })),
     };
   }
@@ -518,6 +542,45 @@ export class SubspaceApi implements DispatchApi {
 
   public readyIssues(cursor: string | undefined, signal: AbortSignal) {
     return this.issueListing(dispatchRoutes.readyIssues, cursor, signal);
+  }
+
+  public async decisionOutcomes(
+    fleetId: string,
+    cursor: string | undefined,
+    signal: AbortSignal,
+  ): Promise<ListingPart<DecisionOutcome>> {
+    const page = await this.walk(
+      (next) => dispatchRoutes.decisionOutcomes(fleetId, next),
+      cursor,
+      1,
+      signal,
+    );
+
+    return {
+      items: page.items.map((item) =>
+        decode(decisionOutcomeSchema, item, "decision outcome"),
+      ),
+      next: page.next,
+    };
+  }
+
+  public async acknowledgeDecisionOutcome(
+    fleetId: string,
+    outcomeId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const { status } = await this.request(
+      "POST",
+      dispatchRoutes.decisionOutcomeDelivered(fleetId, outcomeId),
+      signal,
+    );
+
+    if (status !== 204) {
+      throw new DispatchApiError(
+        status,
+        "The API refused the decision delivery receipt",
+      );
+    }
   }
 
   public async issue(reference: string, signal: AbortSignal) {

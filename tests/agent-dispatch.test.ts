@@ -23,6 +23,60 @@ import {
 
 afterEach(removeDirectories);
 
+test("decision outcomes wait for the recording captain and retry a receipt after restart", async () => {
+  const f = await fixture({ decisionOutcomeDms: true });
+  const id = "00000000-0000-4000-8000-000000000009";
+  const account = "example-captain-a";
+  f.api.pendingOutcomes.set(id, {
+    id,
+    recordedByUserId: CAPTAIN_A,
+    identifier: "D-00042-NAV",
+    status: "accepted",
+  });
+
+  f.chat.offline.add(account);
+  await f.dispatcher.step(signal);
+  expect(f.chat.decisionDms).toEqual([]);
+  expect(f.api.acknowledgedOutcomes).toEqual([]);
+
+  f.chat.offline.delete(account);
+  f.api.failOutcomeAcknowledgementFor = id;
+
+  const anotherId = "00000000-0000-4000-8000-000000000010";
+  f.api.pendingOutcomes.set(anotherId, {
+    id: anotherId,
+    recordedByUserId: CAPTAIN_B,
+    identifier: "D-00043-NAV",
+    status: "rejected",
+  });
+
+  await f.dispatcher.step(signal);
+  expect(f.chat.decisionDms).toEqual([
+    { account, identifier: "D-00042-NAV", status: "accepted" },
+    {
+      account: "example-captain-b",
+      identifier: "D-00043-NAV",
+      status: "rejected",
+    },
+  ]);
+  expect(f.api.acknowledgedOutcomes).toEqual([anotherId]);
+  expect(f.ledger.decisionOutcomeSent(id)).toBe(true);
+
+  f.ledger.close();
+  const ledger = new DispatchLedger(f.path);
+
+  try {
+    delete f.api.failOutcomeAcknowledgementFor;
+    f.chat.offline.add(account);
+    await f.open(ledger).step(signal);
+    expect(f.chat.decisionDms).toHaveLength(2);
+    expect(f.api.acknowledgedOutcomes).toEqual([anotherId, id]);
+    expect(ledger.decisionOutcomeSent(id)).toBe(false);
+  } finally {
+    ledger.close();
+  }
+});
+
 test("first start records existing assignments without sending anything", async () => {
   const f = await fixture();
   f.api.add({ id: "i1", identifier: "PRJ-1", assigneeId: CAPTAIN_A });

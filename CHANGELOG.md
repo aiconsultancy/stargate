@@ -8,6 +8,8 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 ### Feature flags
 
+- `agentDispatch.decisionOutcomeDms` enables decision-outcome DMs to recording
+  captains when Subspace serves the outcome feed. The default is off.
 - Default change: Teams registrations enable `livePresence` by default. Set it to
   `false` to disable typing and work-in-progress updates.
 - Teams registrations accept incoming screenshots by default. Set
