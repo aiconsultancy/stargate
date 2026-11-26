@@ -26,6 +26,7 @@ type Dropped = Map<ProofScope, CallRange>;
 
 export type NamingSegment = {
   proofs: TimedProof[];
+  // A witness never proves a link; it may only choose the detached owner.
   witnesses?: TimedProof[];
   proofOverflow?: true;
   droppedProofScopes?: Set<ProofScope>;
