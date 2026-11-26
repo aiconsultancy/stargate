@@ -25,7 +25,8 @@ import type {
   FleetCrewStatus,
 } from "../reporting/fleet-status";
 import { crewTurns } from "../reporting/member-activity";
-import type { CheckoutDiffReader, CrewGitReader } from "./git-state";
+import type { CheckoutDiffReader } from "./checkout-diff";
+import type { CrewGitReader } from "./git-state";
 import { MAX_CREW_PROJECTS } from "../input/project-options";
 import { effectProjectKeySchema } from "../protocol/project-key";
 import { CrewError } from "../execution/state";

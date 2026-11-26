@@ -65,10 +65,8 @@ import {
 } from "../../../src/coordination/crew/controls/notifications";
 import { CrewPost } from "../../../src/coordination/crew/controls/post";
 import { effectProjectToolInput } from "../../../src/coordination/crew/input/project-options";
-import {
-  createCheckoutDiffReader,
-  createCrewGitReader,
-} from "../../../src/coordination/crew/workspace/git-state";
+import { createCheckoutDiffReader } from "../../../src/coordination/crew/workspace/checkout-diff";
+import { createCrewGitReader } from "../../../src/coordination/crew/workspace/git-state";
 import {
   spawnGit,
   streamGit,

@@ -10,8 +10,8 @@
     "src/nightly/run.ts",
     "src/runtime.ts"
   ],
-  "sourceFiles": 343,
-  "sourceEdges": 1411,
+  "sourceFiles": 344,
+  "sourceEdges": 1416,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],
@@ -50,6 +50,7 @@
       "src/coordination/crew/execution/task-records.ts",
       "src/coordination/crew/execution/update-notices.ts",
       "src/coordination/crew/protocol/project-key.ts",
+      "src/coordination/crew/workspace/checkout-diff.ts",
       "src/coordination/crew/workspace/git-runner.ts",
       "src/coordination/crew/workspace/git-state.ts",
       "src/coordination/crew/workspace/git-status.ts",

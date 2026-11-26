@@ -22,10 +22,8 @@ import {
   statusEntries,
   utf8Prefix,
 } from "../src/coordination/crew/reporting/fleet-status";
-import {
-  createCheckoutDiffReader,
-  createCrewGitReader,
-} from "../src/coordination/crew/workspace/git-state";
+import { createCheckoutDiffReader } from "../src/coordination/crew/workspace/checkout-diff";
+import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
 import {
   spawnGit,
   streamGit,
