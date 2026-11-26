@@ -350,23 +350,32 @@ function officerStream(socketPath: string) {
   });
 }
 
-test("an officer's crew route carries the plugin's ordinary view; the operator's carries full text", async () => {
-  const { plugin, operator, officer } = await start();
-  const path = "/api/v1/ships/captain/crew/twiki";
-  const ordinary = plugin.view("ordinary", "twiki");
+test.each(["officer", "operator"] as const)(
+  "crew detail marks the task text served to the %s",
+  async (listener) => {
+    const { plugin, operator, officer } = await start();
+    const path = "/api/v1/ships/captain/crew/twiki";
 
-  expectOrdinary(ordinary);
-  const shown = (await officer(path)) as V1CrewDetail;
-  expect(current(shown.member.contexts[0]?.current)).toEqual(ordinary);
-  expect(plugin.asked).toEqual(["ordinary"]);
-
-  const people = (await (await operator(path)).json()) as V1CrewDetail;
-  expect(current(people.member.contexts[0]?.current)).toEqual({
-    summary: assignment,
-    progress,
-  });
-  expect(plugin.asked).toEqual(["ordinary", "full"]);
-});
+    if (listener === "officer") {
+      const ordinary = plugin.view("ordinary", "twiki");
+      expectOrdinary(ordinary);
+      const shown = (await officer(path)) as V1CrewDetail;
+      expect(current(shown.member.contexts[0]?.current)).toEqual(ordinary);
+      expect(plugin.asked).toEqual(["ordinary"]);
+      expect(shown).toHaveProperty("taskText", "preview");
+    } else {
+      const response = await operator(path);
+      expect(response.status).toBe(200);
+      const people = (await response.json()) as V1CrewDetail;
+      expect(current(people.member.contexts[0]?.current)).toEqual({
+        summary: assignment,
+        progress,
+      });
+      expect(plugin.asked).toEqual(["full"]);
+      expect(people).toHaveProperty("taskText", "full");
+    }
+  },
+);
 
 test("an officer's ship detail carries the plugin's ordinary view; the operator's carries unredacted text", async () => {
   const { plugin, operator, officer } = await start();

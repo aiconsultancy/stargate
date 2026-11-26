@@ -747,6 +747,7 @@ export function dashboardSource(
         view: ShipView;
         metadata?: CrewRead["metadata"];
         crewObservedAt?: number;
+        taskText?: CrewRead["taskText"];
       }
     | undefined
   > {
@@ -774,7 +775,7 @@ export function dashboardSource(
       }
     };
 
-    const [{ status, error, metadata, observedAt }, sessions] =
+    const [{ status, error, metadata, observedAt, taskText }, sessions] =
       await Promise.all([sample ?? crewRead(), roots(ship, signal)]);
 
     const named = agent(ship);
@@ -860,6 +861,7 @@ export function dashboardSource(
       view,
       metadata,
       ...(observedAt !== undefined && { crewObservedAt: observedAt }),
+      ...(taskText !== undefined && { taskText }),
     };
   }
 
