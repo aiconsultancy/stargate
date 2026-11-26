@@ -1769,6 +1769,7 @@
         "src/crew/instruction-context.ts",
         "src/backends/opencode/activity.ts",
         "src/crew/origin.ts",
+        "src/backends/opencode/activity-attribution.ts",
         "src/backends/opencode/activity-call-evidence.ts",
         "src/backends/opencode/activity-child-executions.ts",
         "src/backends/opencode/activity-family.ts",
