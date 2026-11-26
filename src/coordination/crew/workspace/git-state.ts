@@ -49,6 +49,69 @@ export async function output(git: Git, args: string[]) {
 
 export type Origin = { ref: string; commit: string };
 
+const originHead = "refs/remotes/origin/HEAD";
+const objectId = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+
+/**
+ * `origin/HEAD`: the ref it points to, in full and shortened as for-each-ref
+ * shortens it, and its commit. Each is empty when there is none, as when
+ * `origin/HEAD` is absent or points to a missing ref.
+ */
+export type OriginHead = { target: string; short: string; commit: string };
+
+const originFields = [
+  "refname",
+  "symref",
+  "symref:short",
+  "objectname",
+  "objecttype",
+  "*objectname",
+  "*objecttype",
+];
+
+/**
+ * Read `origin/HEAD` with one Git process, which the poll's base and the
+ * fingerprint share. Only a tag of a tag takes a second, to peel it.
+ */
+export async function readOriginHead(git: Git): Promise<OriginHead> {
+  const text = await output(git, [
+    "for-each-ref",
+    `--format=${originFields.map((field) => `%(${field})`).join("%00")}`,
+    originHead,
+  ]);
+
+  // The pattern matches refs below it as well: only origin/HEAD counts.
+  const [, target = "", short = "", oid = "", type = "", peeled = "", inner] =
+    text
+      ?.split("\n")
+      .map((line) => line.split("\0"))
+      .find(
+        (fields) =>
+          fields[0] === originHead && fields.length === originFields.length,
+      ) ?? [];
+
+  const commit =
+    type === "commit"
+      ? oid
+      : type === "tag" && inner === "commit"
+        ? peeled
+        : type === "tag"
+          ? ((await output(git, [
+              "rev-parse",
+              "--verify",
+              "-q",
+              "--end-of-options",
+              `${originHead}^{commit}`,
+            ])) ?? "")
+          : "";
+
+  return {
+    target,
+    short,
+    commit: objectId.test(commit.trim()) ? commit.trim() : "",
+  };
+}
+
 /** A path's size and modification time, or `-` when it is gone. */
 async function stamp(path: string | Buffer, follow = false) {
   const info = await (
@@ -95,19 +158,18 @@ function withBytes(entries: StatusEntry[], raw: Buffer): StatusPaths[] {
  * The checkout's status and fingerprint for `head`. The fingerprint hashes
  * HEAD, `origin/HEAD`, the index file's size and mtime, the status output,
  * and the size and mtime of every path it names. It is the same in every
- * diff mode, and the same here and in crew Git state.
+ * diff mode, and the same here and in crew Git state. `origin/HEAD` is read
+ * here unless the caller already has it.
  */
-export async function fingerprintOf(git: Git, directory: string, head: Head) {
-  const [status, originRef, originCommit] = await Promise.all([
+export async function fingerprintOf(
+  git: Git,
+  directory: string,
+  head: Head,
+  originRead?: OriginHead,
+) {
+  const [status, { target: ref, commit }] = await Promise.all([
     git.status(head.oid),
-    output(git, ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"]),
-    output(git, [
-      "rev-parse",
-      "--verify",
-      "-q",
-      "--end-of-options",
-      "refs/remotes/origin/HEAD^{commit}",
-    ]),
+    originRead ?? readOriginHead(git),
   ]);
 
   if (status.kind !== "value") {
@@ -141,10 +203,7 @@ export async function fingerprintOf(git: Git, directory: string, head: Head) {
     );
   }
 
-  const commit = originCommit?.trim() ?? "";
-  const ref = originRef?.trim() ?? "";
-
-  const origin: Origin | null = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)
+  const origin: Origin | null = commit
     ? {
         ref:
           ref.startsWith("refs/remotes/") && ref.length <= 268
@@ -264,31 +323,26 @@ async function inspect(
         ? head.ref.slice("refs/heads/".length)
         : null;
 
-      const upstream = branch
-        ? await optional([
-            "rev-parse",
-            "--verify",
-            "-q",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "--end-of-options",
-            `${branch}@{upstream}`,
-          ])
-        : null;
+      const [upstream, origin] = await Promise.all([
+        branch
+          ? optional([
+              "rev-parse",
+              "--verify",
+              "-q",
+              "--abbrev-ref",
+              "--symbolic-full-name",
+              "--end-of-options",
+              `${branch}@{upstream}`,
+            ])
+          : null,
+        readOriginHead(git),
+      ]);
 
-      const base = name(
-        upstream ??
-          (await optional([
-            "symbolic-ref",
-            "--short",
-            "-q",
-            "refs/remotes/origin/HEAD",
-          ])),
-      );
+      const base = name(upstream ?? origin.short);
 
       // A failed comparison must not make the guard check HEAD before status ends.
       const [statusRead, remoteRead, comparison] = await Promise.allSettled([
-        fingerprintOf(git, directory, head),
+        fingerprintOf(git, directory, head, origin),
         optional(["remote", "get-url", "origin"]),
         base && commit
           ? run([

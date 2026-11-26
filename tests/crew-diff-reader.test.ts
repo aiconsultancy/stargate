@@ -24,7 +24,10 @@ import {
 } from "../src/coordination/crew/reporting/fleet-status";
 import { createCheckoutDiffReader } from "../src/coordination/crew/workspace/checkout-diff";
 import { DiffOutputParser } from "../src/coordination/crew/workspace/diff-output";
-import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
+import {
+  type CheckoutGit,
+  createCrewGitReader,
+} from "../src/coordination/crew/workspace/git-state";
 import {
   spawnGit,
   streamGit,
@@ -372,31 +375,61 @@ test("committed and working modes split the branch at HEAD", async () => {
   expect(bytesOf(await content(directory, "file.txt")).toString()).toBe("c\n");
 });
 
-test("the fingerprint moves with HEAD, the index, origin and any changed file", async () => {
+/** Each mode's fingerprint and crew Git state's, which must be one value. */
+async function fingerprints(directory: string) {
+  const modes = await Promise.all(
+    (["branch", "committed", "working"] as const).map(
+      async (mode) => (await listed(directory, { mode })).fingerprint,
+    ),
+  );
+
+  // A new reader each time: a poll's answer is cached for 15 seconds.
+  const state = await createCrewGitReader(checkoutGit)(directory, signal);
+
+  return [...modes, state?.fingerprint];
+}
+
+test("the fingerprint is one value for crew Git state and every mode, and moves with each change", async () => {
   const directory = await checkout({ "file.txt": "a\n" });
   await mkdir(join(directory, "dir"));
   await writeFile(join(directory, "dir", "untracked"), "1\n");
   const seen = new Set<string>();
 
   const next = async () => {
-    const { fingerprint } = await listed(directory);
-    expect(seen.has(fingerprint)).toBe(false);
-    seen.add(fingerprint);
+    const [fingerprint, ...rest] = await fingerprints(directory);
+    expect(rest).toEqual([fingerprint, fingerprint, fingerprint]);
+    expect(seen.has(fingerprint ?? "")).toBe(false);
+    seen.add(fingerprint ?? "");
 
-    return fingerprint;
+    return fingerprint ?? "";
   };
 
   const first = await next();
-  expect((await listed(directory)).fingerprint).toBe(first);
+  expect(await fingerprints(directory)).toEqual(Array(4).fill(first));
 
-  // The same size: only the modification time differs.
-  await writeFile(join(directory, "dir", "untracked"), "2\n");
+  // A tracked file's size, then only its modification time.
+  await writeFile(join(directory, "file.txt"), "ab\n");
+  await next();
+  await writeFile(join(directory, "file.txt"), "ba\n");
+  await utimes(join(directory, "file.txt"), 1, 1);
+  await next();
+
+  // An untracked file's size, then only its modification time.
+  await writeFile(join(directory, "dir", "untracked"), "12\n");
+  await next();
+  await writeFile(join(directory, "dir", "untracked"), "21\n");
   await utimes(join(directory, "dir", "untracked"), 1, 1);
   await next();
+
+  // The index, HEAD's commit, then HEAD's branch at the same commit.
   await git(directory, "add", "dir/untracked");
   await next();
   await git(directory, "commit", "-qm", "c");
   await next();
+  await git(directory, "checkout", "-q", "-b", "other");
+  await next();
+
+  // The origin/HEAD commit.
   await git(directory, "update-ref", "refs/remotes/origin/main", "HEAD");
   await next();
 
@@ -405,6 +438,60 @@ test("the fingerprint moves with HEAD, the index, origin and any changed file", 
     kind: "stale",
     fingerprint: [...seen].at(-1) ?? "",
   });
+});
+
+test("a crew Git poll reads origin/HEAD once, for its base and the fingerprint", async () => {
+  const directory = await checkout({ "file.txt": "a\n" });
+  const main = await git(directory, "rev-parse", "origin/main");
+  const commands: string[] = [];
+
+  const counted: CheckoutGit = (path, reading) => {
+    const opened = checkoutGit(path, reading);
+
+    return {
+      ...opened,
+      command: (args) => {
+        commands.push(args[0] ?? "");
+
+        return opened.command(args);
+      },
+    };
+  };
+
+  // Without an upstream, the base is origin/HEAD's branch.
+  expect(await createCrewGitReader(counted)(directory, signal)).toMatchObject({
+    base: "origin/main",
+    ahead: 0,
+    behind: 0,
+  });
+  expect(commands).toEqual([
+    "rev-parse",
+    "rev-parse",
+    "for-each-ref",
+    "remote",
+    "rev-list",
+  ]);
+
+  // An annotated tag, and a tag of a tag, peel to the commit.
+  await git(directory, "tag", "-a", "-m", "one", "one", "origin/main");
+  await git(directory, "tag", "-a", "-m", "two", "two", "one");
+
+  for (const tag of ["one", "two"]) {
+    await git(
+      directory,
+      "update-ref",
+      "--no-deref",
+      "refs/remotes/origin/HEAD",
+      `refs/tags/${tag}`,
+    );
+
+    const [fingerprint, ...rest] = await fingerprints(directory);
+    expect(rest).toEqual([fingerprint, fingerprint, fingerprint]);
+    expect((await listed(directory)).base).toEqual({
+      ref: "origin/HEAD",
+      commit: main,
+    });
+  }
 });
 
 test("a checkout that keeps changing is retried once, then marked unstable or stale", async () => {

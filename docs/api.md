@@ -301,12 +301,13 @@ safety checks fail, `git.error` is `Git status requires a safe temporary directo
 Each `git` object may carry these optional fields, added without changing the
 existing ones:
 
-| Field      | Meaning                                                                 |
-| ---------- | ----------------------------------------------------------------------- |
-| `worktree` | Absolute path of the checkout on the fleet VM                           |
-| `commit`   | Full object ID of `HEAD`; null when unborn or unknown                   |
-| `dirty`    | `changedFiles > 0`; absent when the count is unknown                    |
-| `source`   | `captain` (the crew plugin) or `gateway` (the Fleet API process itself) |
+| Field         | Meaning                                                                     |
+| ------------- | --------------------------------------------------------------------------- |
+| `worktree`    | Absolute path of the checkout on the fleet VM                               |
+| `commit`      | Full object ID of `HEAD`; null when unborn or unknown                       |
+| `dirty`       | `changedFiles > 0`; absent when the count is unknown                        |
+| `source`      | `captain` (the crew plugin) or `gateway` (the Fleet API process itself)     |
+| `fingerprint` | Crew members only: the [crew diff](#crew-diffs) `fingerprint` of this state |
 
 Without a captain report, the gateway's own reader below applies.
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
@@ -386,7 +387,14 @@ and `pullRequest: null` has a settled lookup with no matching PR. A failed
 or incomplete refresh retains the last successful lookup result.
 
 A crew member's `git` also carries `fingerprint`, the checkout state its
-[diff](#crew-diffs) belongs to; the project checkout's does not.
+[diff](#crew-diffs) belongs to; the project checkout's does not. It is the
+diff's `fingerprint` for the same state in every mode, and the `ship` event
+carries each new value. The captain computes it in the poll that reads the
+rest of the crew member's Git state. That poll reads `origin/HEAD` with one
+`git for-each-ref`, which also names the base when the branch has no
+upstream, so the fingerprint costs one Git process for a branch with an
+upstream and none without. It also reads the size and modification time of
+the index and of each path status names.
 
 ### Crew diffs
 
