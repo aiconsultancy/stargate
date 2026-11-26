@@ -664,7 +664,8 @@ start as `null` and fill once in a `turn-updated`. Each busy period of a
 reused child is a separate turn; a follow-up that joins an already-running
 child does not move it to a different parent. The child records its own
 outcome and can keep running after the root reply.
-If competing calls or a saturated name index prevent proving ownership,
+If competing calls or a saturated name index for the same native parent
+and incarnation prevent proving ownership,
 an admitted child's `session.parent` stays `null`. It does not count as a
 standalone root against the 16-root limit, but it still counts toward the
 global settled turn and byte limits.

@@ -694,6 +694,86 @@ test("call capacity across parents preserves unresolved evidence in overflow", a
   f.stop.abort();
 });
 
+test.each([
+  [512, grandchild, true],
+  [513, grandchild, true],
+  [513, main, false],
+] as const)(
+  "after %i names from %s, a reused child's link is proven: %p",
+  async (count, nativeParent, linked) => {
+    const f = fixture();
+    const root = f.root({ active: true });
+
+    try {
+      f.parents.set(child, main);
+      f.call(root, "first");
+      f.names(root, "first", child);
+      f.start(child);
+      f.end(child);
+      await Promise.resolve();
+      expect(f.turns()[1]?.session?.parent?.callId).toBe("first");
+
+      f.create(grandchild, main);
+      f.start(grandchild);
+
+      if (nativeParent !== main) {
+        f.call(root, "relaunch");
+      }
+
+      for (let index = 0; index < count; index++) {
+        const id = `noise-${index}`;
+        const owner = nativeParent === main ? root : undefined;
+
+        f.emit(
+          "session.tool.input.started",
+          nativeParent,
+          {
+            assistantMessageID: "answer",
+            id,
+            name: "subagent",
+          },
+          owner,
+        );
+        f.emit(
+          "session.tool.progress",
+          nativeParent,
+          {
+            assistantMessageID: "answer",
+            id,
+            metadata: { sessionID: `ses_noise_${index}` },
+          },
+          owner,
+        );
+      }
+
+      await Promise.resolve();
+
+      if (nativeParent === main) {
+        // Keep this exact call open rather than overflowing the per-log call slots.
+        f.call(root, "relaunch");
+      }
+
+      f.names(root, "relaunch", child);
+      f.start(child);
+      f.ended(child, "relaunch output", "relaunch-answer");
+      f.end(child);
+      await Promise.resolve();
+
+      const turns = f.turns();
+      expect(turns.at(-1)).toMatchObject({
+        session: {
+          id: child,
+          parent: linked ? { turnId: turns[0]?.id, callId: "relaunch" } : null,
+        },
+        status: "completed",
+        items: [{ text: "relaunch output" }],
+      });
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
 test.each(["live", "paused recovery"] as const)(
   "a call opened before the previous terminal names the next start during %s",
   async (mode) => {

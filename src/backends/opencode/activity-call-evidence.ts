@@ -10,6 +10,8 @@ type Range = { first: number; last: number };
 
 type NamedCalls = { orders: Set<number>; dropped?: Range };
 
+type NamedCapacity = { count: number; saturated?: Range };
+
 type Window = { except: number; after: number; through: number };
 
 function overlaps(
@@ -43,8 +45,7 @@ class ScopeEvidence {
   private readonly ranges = new Map<string, Range>();
   private readonly overflow = new Map<bigint, Range>();
   private readonly named = new Map<string, Map<string, NamedCalls>>();
-  private namedCount = 0;
-  private saturated: Range | undefined;
+  private readonly namedCapacity = new Map<string, NamedCapacity>();
   private readonly capacity: number;
 
   public constructor(private readonly callsPerLog: number) {
@@ -125,11 +126,15 @@ class ScopeEvidence {
 
     const parents = this.named.get(child) ?? new Map<string, NamedCalls>();
     const named = parents.get(session);
+    const capacity = this.namedCapacity.get(session) ?? { count: 0 };
 
-    if (!named && this.namedCount >= this.capacity) {
-      // Do not evict exact child identities into hash buckets. At the hard
-      // Bound, withhold certainty for this scope's untracked order window.
-      this.saturated = extend(this.saturated, { first: order, last: order });
+    if (!named && capacity.count >= this.capacity) {
+      // Do not evict exact child identities into hash buckets. Saturation is
+      // Evidence only against links for this native parent in this scope.
+      capacity.saturated = extend(capacity.saturated, {
+        first: order,
+        last: order,
+      });
 
       return;
     }
@@ -148,7 +153,8 @@ class ScopeEvidence {
     calls.orders.add(order);
 
     if (!named) {
-      this.namedCount += 1;
+      capacity.count += 1;
+      this.namedCapacity.set(session, capacity);
       parents.set(session, calls);
       this.named.set(child, parents);
     }
@@ -167,7 +173,15 @@ class ScopeEvidence {
         this.trim(calls, through)
       ) {
         parents.delete(parent);
-        this.namedCount -= 1;
+        const capacity = this.namedCapacity.get(parent);
+
+        if (capacity) {
+          capacity.count -= 1;
+
+          if (capacity.count === 0 && !capacity.saturated) {
+            this.namedCapacity.delete(parent);
+          }
+        }
       }
     }
 
@@ -199,7 +213,7 @@ class ScopeEvidence {
       overlaps(this.ranges.get(session), window) ||
       overlaps(this.overflow.get(this.bucket(session)), window) ||
       overlaps(named?.dropped, window) ||
-      overlaps(this.saturated, window) ||
+      overlaps(this.namedCapacity.get(session)?.saturated, window) ||
       named?.orders.values().some((order) => inWindow(order, window)) ===
         true ||
       this.pending
@@ -212,12 +226,12 @@ class ScopeEvidence {
 
 /**
  * Exact naming follows its log (128 call records per live log at the default).
- * The number of evidence-bearing live logs is not explicitly capped here.
- * Ambiguity follows the incarnation. At the default, each scope holds at most:
- * - 512 × 128 unnamed orders, plus 512 exact and 512 hashed unnamed ranges;
- * - 512 × (128 named orders + 1 dropped range), plus 1 saturation range.
- * That's 132,609 evidence records per scope, or 6,630,450 across the 50
- * contexts of one crew collector. An officer collector uses one unscoped index.
+ * Ambiguity follows the incarnation. With default limits, a scope holds up
+ * to 512 × 128 unnamed orders, plus 512 exact and 512 hashed unnamed ranges.
+ * Each evidence-bearing native parent within that scope holds up to 512 ×
+ * (128 named orders + 1 dropped range), plus 1 saturation range. The number
+ * of native parents is not capped by this index. Empty, unsaturated parent
+ * entries are released; fencing or reconnect releases the scope.
  * These counts exclude map keys and the separate candidate/replay queues.
  */
 export class ActivityCallEvidence {
