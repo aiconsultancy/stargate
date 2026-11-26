@@ -6,7 +6,9 @@ import {
   mock,
   test,
 } from "bun:test";
+import { OpenCode } from "@opencode/client";
 import type { AgentBackend } from "../src/backends/backend";
+import { OpenCodeCrewStatus } from "../src/backends/opencode/crew-status";
 import type { FleetCrewStatusInput } from "../src/coordination/crew/reporting/fleet-status";
 import type { CrewStatus } from "../src/shared/crew-status";
 import { CronStore } from "../src/automation/cron/store";
@@ -230,6 +232,83 @@ describe("dashboard source", () => {
       "ordinary",
     );
     expect(calls.at(-1)).toEqual({});
+  });
+
+  test("an officer sample keeps role and model while an operator read is pending", async () => {
+    const { ship, store, cronStore } = fixture();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const asked: string[] = [];
+
+    const metadata = {
+      projectDirectory: "/fixture",
+      contexts: [
+        {
+          member: "pilot",
+          project: null,
+          directory: "/fixture/pilot",
+          role: "Navigator",
+          model: "provider/model",
+        },
+      ],
+    };
+
+    // The plugin holds the operator's task-text ask, ignoring abort.
+    const transport = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const taskText = (await new Request(input, init).text()).includes(
+          '"taskText"',
+        );
+
+        asked.push(taskText ? "unredacted" : "ordinary");
+
+        if (taskText) {
+          entered.resolve();
+          await release.promise;
+        }
+
+        const members = [member("pilot", true)];
+
+        return Response.json({
+          output: {
+            status: { members, total: 1, truncated: false },
+            metadata,
+            ...(taskText && { taskText: "unredacted" }),
+          },
+        });
+      },
+      { preconnect: fetch.preconnect },
+    );
+
+    const crew = new OpenCodeCrewStatus(
+      OpenCode.make({ baseUrl: "http://127.0.0.1:1", fetch: transport }),
+      () => "/fixture",
+    );
+
+    ship.backend.fleetCrewStatus = (input, reading) =>
+      crew.fleetCrewStatus(input, reading);
+    const source = dashboardSource([ship], store, cronStore);
+    const selected = new Set([ship.bot.id]);
+
+    try {
+      const operator = source.fleetWithCrew(signal, selected);
+      await entered.promise;
+
+      const officer = await source.fleetWithCrew(
+        signal,
+        selected,
+        undefined,
+        "ordinary",
+      );
+
+      // Its own fleet status answer, not the crew status fallback.
+      expect(officer.ships[0]?.metadata).toEqual(metadata);
+      expect(asked).toEqual(["unredacted", "ordinary"]);
+      release.resolve();
+      expect((await operator).ships[0]?.metadata).toEqual(metadata);
+    } finally {
+      release.resolve();
+    }
   });
 
   test.each([
