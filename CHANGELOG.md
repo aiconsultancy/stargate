@@ -165,6 +165,17 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   and the last 64,000 of progress. For multi-project dispatches the assignment
   is validated on its own before Stargate adds the project preamble; the
   full task view contains the assignment without that preamble.
+- A failed fleet status re-ask no longer marks the crew plugin as lacking
+  `taskText`: Stargate treats the field as unsupported, for a minute, only
+  after the re-ask without it succeeds. A failed re-ask makes the read
+  unavailable. A member ID the plugin's schema rejects is never sent to it,
+  and the crew member route answers 404 for it.
+- Progress longer than the stored 64,000 code points keeps its ordinary
+  (redacted) view masked from the uncut text, in a new nullable
+  `member_activity.maskedProgress` column, so a credential the cut splits stays
+  masked. The full view still shows the raw last 64,000 code points. Pi crew
+  members buffer up to twice that before the store's cut. Shorter progress and
+  older rows are still masked on read.
 
 - Let a crew member's `name` differ from its ID in the crew plugin's team
   ([docs](docs/agents/default-opencode.md)), so a fleet can name `claude-1`

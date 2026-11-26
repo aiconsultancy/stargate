@@ -22,7 +22,7 @@ import {
   type Peer,
 } from "../execution/state";
 import type { CrewMember } from "../team";
-import { activityProgress } from "../reporting/member-activity";
+import { activityProgressBuffer } from "../reporting/member-activity";
 
 type PiConfig = typeof piDurableBackendSchema.Type;
 
@@ -714,8 +714,9 @@ export class PiCrewWorkers {
           return;
         }
 
-        // Bound before buffering; crew status readers redact on read.
-        pendingProgress = activityProgress(text);
+        // Bound before buffering, but keep the masker's whole window: the
+        // Store masks the ordinary view from it, then makes the final cut.
+        pendingProgress = activityProgressBuffer(text);
 
         if (cancelProgress) {
           return;

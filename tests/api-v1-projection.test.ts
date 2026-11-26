@@ -1488,6 +1488,58 @@ describe("Fleet API projection", () => {
     }
   });
 
+  test("HTTP crew detail for a member the plugin rejects answers 404 with no RPC", async () => {
+    const f = fleetTextFixture((mode) => fleetTextAnswer(mode));
+    const dataDirectory = await mkdtemp(join(tmpdir(), "stargate-api-"));
+    const shutdown = new AbortController();
+
+    const reservation = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response(null),
+    });
+
+    const listen = `127.0.0.1:${reservation.port}`;
+    await reservation.stop(true);
+    let server: Awaited<ReturnType<typeof startApiV1Server>> | undefined;
+
+    try {
+      server = await startApiV1Server({
+        config: { listen },
+        dataDirectory,
+        source: f.source,
+        diff: diffEvents,
+        gateway: {
+          version: "1.0.0",
+          startedAt: 1,
+          opencodeVersion: async () => null,
+        },
+        signal: shutdown.signal,
+      });
+
+      const token = await apiToken(dataDirectory);
+
+      // Each passes the route's own check, but not the plugin's member schema.
+      for (const member of ["Pilot", "pilot.x", "-pilot", "pilot%20x"]) {
+        for (const method of ["GET", "HEAD"]) {
+          const response = await fetch(
+            new URL(`/api/v1/ships/captain/crew/${member}`, server.url),
+            { method, headers: { Authorization: `Bearer ${token}` } },
+          );
+
+          expect(response.status).toBe(404);
+        }
+      }
+
+      expect(f.asked).toEqual([]);
+    } finally {
+      shutdown.abort();
+      await server?.stop();
+      await f.stop();
+      await rm(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test("an unavailable Fleet sample cannot reuse ordinary text from a legacy read", async () => {
     let now = performance.now();
     const clock = spyOn(performance, "now").mockImplementation(() => now);

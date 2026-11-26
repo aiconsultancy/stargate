@@ -398,6 +398,66 @@ test("stored task text is cut at 64,000 code points without splitting a surrogat
   }
 });
 
+test("a credential the progress cut splits stays masked for ordinary readers and whole in the full view", async () => {
+  const f = await fixture();
+
+  try {
+    const twiki = f.engine.state.reservePeer("twiki");
+    f.engine.state.readyPeer("twiki");
+    const task = f.engine.state.reserveTask(twiki, "captain", "Rotate keys");
+
+    if (!task) {
+      throw new Error("Missing task");
+    }
+
+    f.engine.state.running(task.id);
+
+    // The key's header falls just before the last 64,000 code points.
+    const header = `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\n`;
+    const body = "Zm9v".repeat(crewTaskTextLimit / 4);
+    f.engine.state.activity.progress(task.id, `Key: ${header}${body}`);
+
+    const read = (taskText?: "unredacted" | "full") =>
+      f.engine.status({ member: "twiki" }, taskText && { taskText }).members[0]
+        ?.current?.progress;
+
+    expect(read()).toBe("Key: [REDACTED PRIVATE KEY]");
+    expect(read("full")).toBe(body);
+    expect(read("unredacted")).toBe(body.slice(-400));
+
+    // Progress that fits is masked on read, as before.
+    f.engine.state.activity.progress(task.id, `Key: ${header}Zm9v`);
+    expect(read()).toBe("Key: [REDACTED PRIVATE KEY]");
+    expect(read("full")).toBe(`Key: ${header}Zm9v`);
+
+    // Rows from before the column are masked on read; opening only adds it.
+    const legacy = new Database(":memory:");
+    legacy.run(`
+      CREATE TABLE tasks (id TEXT PRIMARY KEY, crewID TEXT);
+      CREATE TABLE member_activity (
+        taskID TEXT PRIMARY KEY, crewID TEXT NOT NULL,
+        kind TEXT NOT NULL, summary TEXT NOT NULL,
+        phase TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '',
+        createdAt INTEGER, startedAt INTEGER, updatedAt INTEGER,
+        finishedAt INTEGER
+      );
+      INSERT INTO member_activity (taskID,crewID,kind,summary,phase,progress)
+        VALUES ('old','twiki','assignment','Old','running','token=old-value');
+    `);
+    const store = new MemberActivityStore(legacy);
+    new MemberActivityStore(legacy);
+    expect(store.task({ id: "old", status: "running" }).progress).toBe(
+      "token=[REDACTED]",
+    );
+    expect(store.task({ id: "old", status: "running" }, "full").progress).toBe(
+      "token=old-value",
+    );
+    legacy.close();
+  } finally {
+    await f.close();
+  }
+});
+
 test("legacy uncertain task stays uncertain with unknown times and no raw result or session IDs", async () => {
   const f = await fixture();
 

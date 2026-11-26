@@ -165,3 +165,137 @@ test.each(["busy", "draining"] as const)(
     }
   },
 );
+
+/**
+ * A crew plugin that checks input as the real one does: an invalid member
+ * fails either ask, and an old plugin also refuses `taskText` itself.
+ */
+function pluginFixture() {
+  const asked: string[] = [];
+  const plugin = { old: false, reject: false };
+
+  const output = {
+    status: { members: [], total: 0, truncated: false },
+    metadata: { projectDirectory: "/fixture", contexts: [] },
+  };
+
+  const invalid = () =>
+    Response.json(
+      { _tag: "RpcError", type: "rpc.invalid_input", message: "Fixture" },
+      { status: 400 },
+    );
+
+  const rpc = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const body = await request.text();
+      const member = /"member":"([^"]*)"/.exec(body)?.[1];
+      const mode = /"taskText":"(\w+)"/.exec(body)?.[1];
+      asked.push(`${member}:${mode ?? "ordinary"}`);
+
+      if (
+        plugin.reject ||
+        (member !== undefined && !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(member)) ||
+        (plugin.old && mode)
+      ) {
+        return invalid();
+      }
+
+      return Response.json({
+        output: { ...output, ...(mode && { taskText: mode }) },
+      });
+    },
+  });
+
+  const crew = new OpenCodeCrewStatus(
+    OpenCode.make({ baseUrl: rpc.url.href }),
+    () => "/fixture",
+  );
+
+  return { asked, plugin, output, crew, stop: () => rpc.stop(true) };
+}
+
+test("a member the plugin rejects is never sent, nor marks the field unsupported", async () => {
+  const f = pluginFixture();
+  const signal = new AbortController().signal;
+  const full = { member: "pilot", taskText: "full" } as const;
+
+  try {
+    // Phobos's fixture: the member, not the field, is what the plugin rejects.
+    for (const member of ["Pilot", "pilot.x", "-pilot", "p".repeat(65)]) {
+      expect(
+        await f.crew.fleetCrewStatus({ member, taskText: "full" }, signal),
+      ).toEqual({ kind: "unavailable" });
+    }
+
+    expect(f.asked).toEqual([]);
+    expect(await f.crew.fleetCrewStatus(full, signal)).toEqual({
+      kind: "answer",
+      answer: { ...f.output, taskText: "full" },
+    });
+  } finally {
+    await f.stop();
+  }
+});
+
+test("a failed re-ask is unavailable and caches nothing", async () => {
+  const f = pluginFixture();
+  const signal = new AbortController().signal;
+  const full = { member: "pilot", taskText: "full" } as const;
+
+  try {
+    // Both asks fail, so the input was bad, not the field.
+    f.plugin.reject = true;
+    expect(await f.crew.fleetCrewStatus(full, signal)).toEqual({
+      kind: "unavailable",
+    });
+    expect(f.asked).toEqual(["pilot:full", "pilot:ordinary"]);
+    f.plugin.reject = false;
+    expect(await f.crew.fleetCrewStatus(full, signal)).toEqual({
+      kind: "answer",
+      answer: { ...f.output, taskText: "full" },
+    });
+
+    // Each failed pair is one failure: three in a row pause probes.
+    f.plugin.reject = true;
+
+    for (let i = 0; i < 3; i++) {
+      expect(await f.crew.fleetCrewStatus(full, signal)).toEqual({
+        kind: "unavailable",
+      });
+    }
+
+    f.asked.length = 0;
+    f.plugin.reject = false;
+    expect(await f.crew.fleetCrewStatus(full, signal)).toEqual({
+      kind: "unavailable",
+    });
+    expect(f.asked).toEqual([]);
+  } finally {
+    await f.stop();
+  }
+});
+
+test("a genuine old plugin still falls back, and its fallback is cached", async () => {
+  const f = pluginFixture();
+  const signal = new AbortController().signal;
+  const full = { member: "pilot", taskText: "full" } as const;
+  f.plugin.old = true;
+
+  try {
+    for (const asked of [
+      ["pilot:full", "pilot:ordinary"],
+      ["pilot:ordinary"],
+    ]) {
+      f.asked.length = 0;
+      expect(await f.crew.fleetCrewStatus(full, signal)).toEqual({
+        kind: "unsupported",
+        answer: f.output,
+      });
+      expect(f.asked).toEqual(asked);
+    }
+  } finally {
+    await f.stop();
+  }
+});

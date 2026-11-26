@@ -456,6 +456,29 @@ test("Pi progress keeps the end beyond the 64,000-code-point buffer", async () =
   }
 });
 
+test("Pi progress keeps the masker's window: a credential the store's cut splits stays masked", async () => {
+  const f = await fixture();
+
+  try {
+    await f.start();
+    await f.emit("First update");
+    f.clock.advance(100);
+
+    // The key's header falls just before the stored 64,000 code points.
+    const header = `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\n`;
+    const body = "Zm9v".repeat(16_000);
+    await f.emit(`${"x".repeat(70_000)}Key: ${header}${body}`);
+    f.clock.advance(900);
+    expect(f.rawProgress()).toBe(body);
+    expect(f.unredactedProgress()).toBe(body.slice(-400));
+    expect(f.progress()).toBe(
+      `${"x".repeat(400 - 27)}Key: [REDACTED PRIVATE KEY]`,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
 for (const outcome of ["success", "failure", "cancel", "close"] as const) {
   test(`Pi progress flushes pending tail on ${outcome}, clears timers and ignores late callbacks`, async () => {
     const f = await fixture();

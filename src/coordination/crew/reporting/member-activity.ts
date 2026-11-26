@@ -18,6 +18,12 @@ import {
 type Activity = Omit<CrewStatusTask, "id" | "status">;
 
 /**
+ * A stored row. `maskedProgress` is the ordinary view of progress that was
+ * longer than the store keeps, masked from the uncut text; null otherwise.
+ */
+type StoredActivity = Activity & { maskedProgress: string | null };
+
+/**
  * The first `limit` code points. Only twice that many UTF-16 units are
  * scanned, and the cut never splits a surrogate pair.
  */
@@ -43,9 +49,13 @@ export function activityText(text: string) {
   return head(text, crewTaskTextLimit);
 }
 
-/** The newest progress, cut to the stored task text limit. */
-export function activityProgress(text: string) {
-  return tail(text, crewTaskTextLimit);
+/**
+ * The newest progress as a producer may buffer it before the store: twice
+ * the stored limit, so the store still masks with the masker's whole
+ * window before it makes the final cut.
+ */
+export function activityProgressBuffer(text: string) {
+  return tail(text, 2 * crewTaskTextLimit);
 }
 
 function maskTaskText(text: string, limit: number, keep: "head" | "tail") {
@@ -56,18 +66,24 @@ function maskTaskText(text: string, limit: number, keep: "head" | "tail") {
   return redactCredentials(stripped, limit, keep).toWellFormed();
 }
 
+/** Ordinary progress, masked and bounded: from uncut text when it is cut. */
+const maskProgress = (text: string) =>
+  maskTaskText(text, crewTaskTextLimits.progress, "tail");
+
 /**
  * How ordinary crew status shows stored text: redacted and bounded, exactly
  * as the store held it before it kept raw text. Rows written then are
- * already redacted, and redacting them again leaves them unchanged.
+ * already redacted, and redacting them again leaves them unchanged. Cut
+ * progress shows its copy masked before the cut.
  */
-function maskedActivity(activity: Activity): Activity {
-  const { summary, progress } = crewTaskTextLimits;
-
+function maskedActivity({
+  maskedProgress,
+  ...activity
+}: StoredActivity): Activity {
   return {
     ...activity,
-    summary: maskTaskText(activity.summary, summary, "head"),
-    progress: maskTaskText(activity.progress, progress, "tail"),
+    summary: maskTaskText(activity.summary, crewTaskTextLimits.summary, "head"),
+    progress: maskedProgress ?? maskProgress(activity.progress),
   };
 }
 
@@ -75,7 +91,10 @@ function maskedActivity(activity: Activity): Activity {
  * The ordinary bounds and ends (the summary's start, the progress tail)
  * without redaction or control stripping.
  */
-function unredactedActivity(activity: Activity): Activity {
+function unredactedActivity({
+  maskedProgress: _,
+  ...activity
+}: StoredActivity): Activity {
   return {
     ...activity,
     summary: head(activity.summary, crewTaskTextLimits.summary),
@@ -86,8 +105,8 @@ function unredactedActivity(activity: Activity): Activity {
 const shown = {
   ordinary: maskedActivity,
   unredacted: unredactedActivity,
-  full: (activity: Activity) => activity,
-} satisfies Record<CrewTaskTextMode, (activity: Activity) => Activity>;
+  full: ({ maskedProgress: _, ...activity }: StoredActivity) => activity,
+} satisfies Record<CrewTaskTextMode, (stored: StoredActivity) => Activity>;
 
 type ActivityTask = {
   id: string;
@@ -112,6 +131,15 @@ export class MemberActivityStore {
         ON member_activity(crewID,updatedAt);
       CREATE INDEX IF NOT EXISTS member_task_history ON tasks(crewID);
     `);
+
+    const columns = db
+      .query<{ name: string }, []>("PRAGMA table_info(member_activity)")
+      .all();
+
+    // Only added: rows written before keep masking on read.
+    if (!columns.some((column) => column.name === "maskedProgress")) {
+      db.run("ALTER TABLE member_activity ADD COLUMN maskedProgress TEXT");
+    }
   }
 
   public assignment<T extends ActivityTask>(
@@ -174,12 +202,18 @@ export class MemberActivityStore {
     this.trim(task.crewID);
   }
 
+  /**
+   * The store makes the only cut: the last 64,000 code points, raw, for the
+   * full view. Progress that is cut keeps its ordinary view masked from the
+   * uncut text, so a credential the cut splits is still masked there.
+   */
   public progress(taskID: string, text: string) {
-    const raw = activityProgress(text);
+    const raw = tail(text, crewTaskTextLimit);
+    const masked = raw === text ? null : maskProgress(text);
     this.db
-      .query(`UPDATE member_activity SET progress=?,updatedAt=?
-      WHERE taskID=? AND progress<>?`)
-      .run(raw, Date.now(), taskID, raw);
+      .query(`UPDATE member_activity SET progress=?,maskedProgress=?,updatedAt=?
+      WHERE taskID=? AND (progress<>? OR maskedProgress IS NOT ?)`)
+      .run(raw, masked, Date.now(), taskID, raw, masked);
   }
 
   /** Task text as `mode` shows it; ordinary status redacts and bounds it. */
@@ -188,8 +222,8 @@ export class MemberActivityStore {
     mode: CrewTaskTextMode = "ordinary",
   ): CrewStatusTask {
     const stored = this.db
-      .query<Activity, [string]>(`SELECT kind,summary,phase,
-      progress,createdAt,startedAt,updatedAt,finishedAt
+      .query<StoredActivity, [string]>(`SELECT kind,summary,phase,
+      progress,maskedProgress,createdAt,startedAt,updatedAt,finishedAt
       FROM member_activity WHERE taskID=?`)
       .get(task.id);
 

@@ -7,6 +7,7 @@ import {
   type FleetCrewStatusRead,
   checkoutDiffSchema,
   crewGitSchema,
+  fleetCrewStatusInputSchema,
   fleetCrewStatusOutputSchema,
 } from "../../coordination/crew/reporting/fleet-status";
 import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
@@ -32,6 +33,9 @@ const isInvalidInput = (error: unknown) =>
   typeof error === "object" &&
   "type" in error &&
   error.type === "rpc.invalid_input";
+
+/** The plugin's own input check, made before anything is asked of it. */
+const validFleetInput = Schema.is(fleetCrewStatusInputSchema);
 
 /** Reads location-scoped crew status and coalesced fleet status probes. */
 export class OpenCodeCrewStatus {
@@ -169,6 +173,13 @@ export class OpenCodeCrewStatus {
     input: FleetCrewStatusInput,
     signal: AbortSignal,
   ): Promise<FleetCrewStatusRead> {
+    // A member the plugin would reject is never sent: nothing to probe.
+    if (!validFleetInput(input)) {
+      signal.throwIfAborted();
+
+      return { kind: "unavailable" };
+    }
+
     for (;;) {
       signal.throwIfAborted();
       const pending = this.fleetStatusRead.pending;
@@ -279,11 +290,14 @@ export class OpenCodeCrewStatus {
         throw error;
       }
 
-      // An older plugin rejects the field: ask again without it. Neither
-      // Mode is asked for again until an upgrade may have happened.
+      // An older plugin rejects the field: ask again without it. Only when
+      // That succeeds is the field unsupported, and neither mode is asked
+      // For again until an upgrade may have happened. A failed re-ask means
+      // The input was bad, not the field: it caches nothing.
+      const answer = await read(ordinary);
       this.taskTextRetryAt = performance.now() + 60_000;
 
-      return { kind: "unsupported", answer: await read(ordinary) };
+      return { kind: "unsupported", answer };
     }
   }
 

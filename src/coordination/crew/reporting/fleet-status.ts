@@ -52,6 +52,9 @@ export const fleetCrewStatusInputSchema = exactStruct({
 
 export type FleetCrewStatusInput = typeof fleetCrewStatusInputSchema.Type;
 
+/** A member ID the plugin accepts; any other is never sent to it. */
+export const isFleetMember = Schema.is(agentIDSchema);
+
 const fullTextStatus = crewStatusSchemaWith({
   summary: crewTaskTextLimit,
   phase: crewTaskTextLimit,

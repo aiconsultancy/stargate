@@ -4,13 +4,14 @@ import type { AgentBackend } from "../../../../backends/backend";
 import { ircFeedbackDefaults } from "../../../../config";
 import { truncateCodePoints } from "../../../../lib/code-points";
 import { redactCredentials } from "../../../../lib/credentials";
-import type {
-  CheckoutDiff,
-  CheckoutDiffInput,
-  CrewGit,
-  CrewGitInput,
-  CrewGitState,
-  FleetCrewStatus,
+import {
+  type CheckoutDiff,
+  type CheckoutDiffInput,
+  type CrewGit,
+  type CrewGitInput,
+  type CrewGitState,
+  type FleetCrewStatus,
+  isFleetMember,
 } from "../../../../coordination/crew/reporting/fleet-status";
 import type {
   CrewStatus,
@@ -961,7 +962,8 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
       );
     },
     async crew(ship, member, signal) {
-      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(member)) {
+      // The plugin's member schema: a member it rejects is never asked for.
+      if (!isFleetMember(member)) {
         return;
       }
 

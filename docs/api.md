@@ -911,11 +911,14 @@ Unchanged backends keep their in-flight reads, including reads shared with
 HTTP requests.
 After a shared read fails or reaches its deadline, the overview marks the
 ship unavailable and retains its last successful crew counts if available.
-OpenCode `fleetStatus` probes start with a 400 ms budget that doubles after
-a timeout, up to 6.4 seconds, leaving time for ordinary crew status.
-Concurrent callers with the same filter share one probe.
-An explicit missing-method response or three consecutive failures pause
-probes for one minute. Timeouts count toward that pause at the maximum budget.
+Ordinary OpenCode `fleetStatus` probes, which ask for no task text, start
+with a 400 ms budget that doubles after a timeout, up to 6.4 seconds, leaving
+time for ordinary crew status. Timeouts count toward the pause below at the
+maximum budget. Task text reads have no probe budget, and their timeouts
+never double it: they wait for the caller's crew deadline. Concurrent callers
+with the same filter share one probe. An explicit missing-method response or
+three consecutive failures pause probes for one minute. A member ID the crew
+plugin would reject is never sent to it: the crew member route answers 404.
 
 Activity includes newly observed task outcomes, even if the task also
 started between polls. Discovering an existing PR after startup or Git
