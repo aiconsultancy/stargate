@@ -1995,9 +1995,13 @@ const owning = (assistants: readonly string[], input: string) =>
 /** Text items only: a step item reads as an empty string. */
 const texts = (text: string) => text.split("|").filter(Boolean);
 
-test("past 1,024 placed messages, a retried message joins its original turn", async () => {
+/**
+ * A0 opens a turn, 1,024 messages of another task follow, and a0 retries;
+ * `outage` leaves any later owner lookup of a0 unanswered.
+ */
+async function retried(outage: boolean) {
   const bs = ids("b", 1024);
-  let lookups = 0;
+  const lookups: string[] = [];
 
   const { turns, stream, delta, text } = fixture({
     turns: {
@@ -2008,10 +2012,14 @@ test("past 1,024 placed messages, a retried message joins its original turn", as
       ],
     },
     owners: { a0: "in-1", ...owning(bs, "in-2") },
-    // Only its first owner lookup answers: a reopened retry joins the
-    // Latest turn, unproven.
-    hold: (assistant) =>
-      assistant === "a0" && ++lookups > 1 ? new Promise(() => {}) : undefined,
+    hold: (assistant) => {
+      lookups.push(assistant);
+      const again = lookups.filter((looked) => looked === "a0").length > 1;
+
+      return outage && assistant === "a0" && again
+        ? new Promise(() => {})
+        : undefined;
+    },
     collector: { bufferMs: 50 },
   });
 
@@ -2025,15 +2033,27 @@ test("past 1,024 placed messages, a retried message joins its original turn", as
   }
 
   await until(() => text(turns[1]).split("|").length === bs.length);
-  // The retry repeats the step start of a message still running.
+
+  // The retry repeats the step start of a message still running; OpenCode
+  // Reuses its ID on a retry before any output.
   stepStarted(stream, "a0", 2);
   delta("ses_mario", "a0", "-retry");
   await until(() => text(turns[0]).includes("retry"));
   await wait(50);
 
+  // Still known, it needs no second lookup.
+  expect(lookups.filter((assistant) => assistant === "a0")).toEqual(["a0"]);
   expect(turns).toHaveLength(2);
   expect(texts(text(turns[0]))).toEqual(["prefix-retry"]);
   expect(text(turns[1])).toBe(bs.join("|"));
+}
+
+test("past 1,024 placed messages, a retried message joins its original turn", async () => {
+  await retried(false);
+});
+
+test("past 1,024 placed messages, a retry joins its turn during a lookup outage", async () => {
+  await retried(true);
 });
 
 test("a message whose step start fell in a reconnect gap keeps its text", async () => {
@@ -2051,6 +2071,7 @@ test("a message whose step start fell in a reconnect gap keeps its text", async 
   await until(() => stream.subscriptions() === 2 && stream.subscribers() === 1);
   // Its step start was lost in the gap: its first frame is a delta.
   delta("ses_mario", "x1", "new");
+  await until(() => text(turns[0]).endsWith("|new"));
   stream.emit("session.text.ended", {
     sessionID: "ses_mario",
     assistantMessageID: "x1",
@@ -2136,11 +2157,13 @@ test("past the known messages' ceiling, the oldest is counted and opens again", 
 
   await until(() => stream.subscribers() === 1);
 
-  for (const id of ms) {
+  // Each opens with its step start, as a new message's output does.
+  for (const [index, id] of ms.entries()) {
+    stepStarted(stream, id, index + 1);
     delta("ses_mario", id, id);
   }
 
-  await until(() => turns[0]?.items.size === ms.length, 15_000);
+  await until(() => text(turns[0]).endsWith(ms.at(-1) ?? ""), 15_000);
   expect(collector.load.forgotten).toBe(1);
   // M0 is no longer known: its later output opens rather than drops.
   delta("ses_mario", "m0", "-again");
