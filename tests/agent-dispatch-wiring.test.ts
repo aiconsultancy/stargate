@@ -405,6 +405,27 @@ for (const variant of ["absent", "enabled: false"] as const) {
   });
 }
 
+test("runtime: decision outcome DMs work with issue dispatch off", async () => {
+  const admiral = await serveAdmiral({
+    ...dispatchRaw,
+    enabled: false,
+    decisionOutcomeDms: true,
+  });
+
+  await until(
+    () =>
+      admiral.http.requests.some(({ path }) =>
+        path.includes("decision-outcomes"),
+      ),
+    5000,
+    "decision feed read",
+  );
+  expect(
+    admiral.http.requests.some(({ path }) => path.includes("/issues")),
+  ).toBe(false);
+  await admiral.stop();
+});
+
 test("runtime end to end: an offer in the command channel, an answer reply from the asked account, one assignment", async () => {
   const admiral = await serveAdmiral(
     { ...dispatchRaw, pollIntervalSeconds: 30, answerTimeoutSeconds: 60 },
@@ -701,6 +722,64 @@ test("rear admiral: only an enrolled agent configured as the fleet's rear_admira
       fold,
     ),
   ).toBe(false);
+});
+
+test("captain intake admits a marked outcome DM from the rear admiral in redirect mode", async () => {
+  const fake = new FakeIrcServer({
+    accounts: { "example-captain-a": "captain-pass" },
+  }).start();
+
+  cleanup.push(() => fake.stop());
+
+  const directory = await tempDirectory();
+  const store = openStore(join(directory, "stargate.sqlite"));
+  cleanup.push(() => store.close());
+
+  const raw = captainIrc(fake.port);
+
+  const config = Schema.decodeUnknownSync(ircSchema)({
+    ...raw,
+    dmPolicy: "redirect",
+    decisionOutcomeSender: "rear-admiral",
+    access: { ...raw.access, peerTurnsPerHour: 1 },
+    fleetControl: { ...raw.fleetControl, results: true },
+  });
+
+  const ship = await IrcShip.create(config, store, silent, {
+    env: { STARGATE_IRC_CAPTAIN: "captain-pass" },
+    timing: { reconnectMinMs: 20, intervalMs: 5, burst: 10 },
+  });
+
+  ship.start(() => true);
+  cleanup.push(() => ship.close());
+
+  const [captain] = ship.registrations;
+
+  if (!captain) {
+    throw new Error("missing registration");
+  }
+
+  await until(
+    () => captain.client.inChannel("#fleet-command"),
+    5000,
+    "captain joined",
+  );
+
+  const admiral = { nick: "rear-admiral", account: "rear-admiral" };
+  const peer = { nick: "example-captain-b", account: "example-captain-b" };
+  const nick = "example-captain-a";
+  const text = `${nick}: D-00042-NAV was accepted.`;
+  const marker = { "+draft/fleet-decision-outcome": "1" };
+
+  fake.say(peer, nick, text, marker);
+  fake.say(admiral, nick, text);
+
+  const id = fake.say(admiral, nick, text, marker);
+
+  const job = () => store.jobByEvent(captain.key, `rear-admiral:${id}`);
+  await until(() => job() !== null, 5000, "decision outcome queued");
+  expect(job()?.text).toContain("D-00042-NAV was accepted.");
+  expect(store.queueCounts(captain.key).queued).toBe(1);
 });
 
 test("captain intake: only the rear admiral's request passes the peer limit and records an offer, in the command channel, as a turn without the title", async () => {
@@ -1132,6 +1211,76 @@ test("IRC answer intake: only an authenticated reply with an answer marker in th
   expect(isDispatchRequest(status)).toBe(false);
 });
 
+test("IRC decision outcome goes only to the captain's verified current nick", async () => {
+  let messageId: string | undefined = "verified-msgid";
+  let sameRecipient = true;
+  const messages: { target: string; text: string }[] = [];
+
+  const messenger = new IrcDispatchMessenger(
+    {
+      async waitReady() {},
+      async verifiedNick(account) {
+        expect(account).toBe("captain-a");
+
+        return "Captain-A-Current";
+      },
+      recipientGuard(account, nick) {
+        expect([account, nick]).toEqual(["captain-a", "Captain-A-Current"]);
+
+        return () => sameRecipient;
+      },
+      hasCap: (cap) => cap === "echo-message" || cap === "message-tags",
+      budget: () => 400,
+      async publish(target, text, _tags, guard) {
+        if (!guard?.()) {
+          return;
+        }
+
+        messages.push({ target, text });
+
+        return messageId;
+      },
+      async privmsg() {},
+      async send() {},
+      inChannel: () => true,
+      registered: true,
+    },
+    "#fleet-command",
+    () => true,
+    silent,
+  );
+
+  const captain = {
+    userId: CAPTAIN_A,
+    name: "captain-a",
+    account: "captain-a",
+  };
+
+  const outcome = {
+    id: "00000000-0000-4000-8000-000000000009",
+    recordedByUserId: CAPTAIN_A,
+    identifier: "D-00042-NAV",
+    status: "rejected",
+  } as const;
+
+  const signal = new AbortController().signal;
+  expect(await messenger.decisionOutcome(captain, outcome, signal)).toBe(true);
+  expect(messages).toEqual([
+    {
+      target: "Captain-A-Current",
+      text: "Captain-A-Current: D-00042-NAV was rejected.",
+    },
+  ]);
+
+  sameRecipient = false;
+  expect(await messenger.decisionOutcome(captain, outcome, signal)).toBe(false);
+  expect(messages).toHaveLength(1);
+
+  sameRecipient = true;
+  messageId = undefined;
+  expect(await messenger.decisionOutcome(captain, outcome, signal)).toBe(false);
+});
+
 test("IRC messenger: an offline captain is skipped; a missing capability or our own outage holds the offer", async () => {
   const { log, lines } = capturedLog();
   let caps = new Set(["message-tags", "echo-message"]);
@@ -1143,6 +1292,7 @@ test("IRC messenger: an offline captain is skipped; a missing capability or our 
     {
       async waitReady() {},
       verifiedNick: () => lookup(),
+      recipientGuard: () => () => true,
       hasCap: (cap) => caps.has(cap),
       budget: () => 400,
       async publish(_target, text, tags) {
@@ -1226,6 +1376,7 @@ test("IRC messenger: no request PRIVMSG carries the issue title; a best-effort N
     {
       async waitReady() {},
       verifiedNick: async () => "example-captain",
+      recipientGuard: () => () => true,
       hasCap: () => true,
       budget: () => budget,
       async publish(_target, text, tags = {}) {
@@ -1344,6 +1495,7 @@ test("IRC messenger: an assignment notice whose identifier the marker cannot car
         ready++;
       },
       verifiedNick: async () => "example-captain",
+      recipientGuard: () => () => true,
       hasCap: () => true,
       budget: () => 400,
       async publish() {
@@ -1402,6 +1554,7 @@ test("IRC messenger: without message-tags an assignment notice is held, never se
     {
       async waitReady() {},
       verifiedNick: async () => "example-captain",
+      recipientGuard: () => () => true,
       hasCap: (cap) => caps.has(cap),
       budget: () => 400,
       async publish() {

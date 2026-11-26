@@ -3,11 +3,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  chownSync,
   linkSync,
   mkdtempSync,
   mkdirSync,
   realpathSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -25,6 +27,16 @@ test("officer file tools prepare requested local and written documents without s
   try {
     mkdirSync(staging);
     mkdirSync(exports);
+
+    const sharedGroup = process
+      .getgroups?.()
+      .find((gid) => gid !== process.getgid?.());
+
+    if (sharedGroup !== undefined) {
+      chownSync(exports, -1, sharedGroup);
+    }
+
+    chmodSync(exports, 0o2750);
     writeFileSync(join(staging, "output.pdf"), "sample-pdf", { mode: 0o600 });
     symlinkSync(join(staging, "output.pdf"), join(staging, "linked.pdf"));
 
@@ -63,21 +75,41 @@ test("officer file tools prepare requested local and written documents without s
       }),
     );
 
-    const child = spawnSync(
-      process.execPath,
-      [
-        "--no-env-file",
-        "--no-install",
-        "scripts/officer-files.ts",
-        "--staging",
-        staging,
-        "--exports",
-        exports,
-        "--socket",
-        join(root, "unused.sock"),
-      ],
-      { input: requests.join("\n") + "\n", encoding: "utf8" },
+    // Exercise the service's prohibition on requesting setuid or setgid bits.
+    const preload = join(root, "restrict-chmod.ts");
+    writeFileSync(
+      preload,
+      `import { open } from "node:fs/promises";
+const handle = await open(import.meta.filename);
+const prototype = Object.getPrototypeOf(handle);
+await handle.close();
+const chmod = prototype.chmod;
+prototype.chmod = function (mode) {
+  if ((mode & 0o6000) || (mode === 0o750 && process.env.FAIL_PUBLISH)) {
+    throw new Error("Operation not permitted");
+  }
+  return chmod.call(this, mode);
+};`,
     );
+
+    const command = [
+      "--no-env-file",
+      "--no-install",
+      "--preload",
+      preload,
+      "scripts/officer-files.ts",
+      "--staging",
+      staging,
+      "--exports",
+      exports,
+      "--socket",
+      join(root, "unused.sock"),
+    ];
+
+    const child = spawnSync(process.execPath, command, {
+      input: requests.join("\n") + "\n",
+      encoding: "utf8",
+    });
 
     expect(child.status).toBe(0);
 
@@ -105,10 +137,27 @@ test("officer file tools prepare requested local and written documents without s
       const path = fileURLToPath(url);
 
       expect(statSync(path).mode & 0o777).toBe(0o640);
-      expect(statSync(join(path, "..")).mode & 0o2777).toBe(0o2750);
+      expect(statSync(join(path, "..")).mode & 0o7777).toBe(0o750);
+
+      if (sharedGroup !== undefined) {
+        expect(statSync(path).gid).toBe(sharedGroup);
+        expect(statSync(join(path, "..")).gid).toBe(sharedGroup);
+      }
 
       return readFileSync(path, "utf8");
     });
+
+    const beforeFailure = readdirSync(exports).sort();
+
+    const failure = spawnSync(process.execPath, command, {
+      input: requests[0] + "\n",
+      encoding: "utf8",
+      env: { ...process.env, FAIL_PUBLISH: "1" },
+    });
+
+    expect(failure.status).toBe(0);
+    expect(JSON.parse(failure.stdout).result.isError).toBe(true);
+    expect(readdirSync(exports).sort()).toEqual(beforeFailure);
 
     expect(files).toEqual(["other", "Requested minutes"]);
     expect(replies.slice(2).map(({ result }) => result.isError)).toEqual([

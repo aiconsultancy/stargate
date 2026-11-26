@@ -366,8 +366,8 @@ export class OpenCodeCrewStatus {
       },
     );
 
-    // A task text probe ended by its last waiter's deadline is one ordinary
-    // Failure, in either phase. A caller that went away counts nothing.
+    // A last-waiter deadline counts as one task text failure in either phase.
+    // A disconnect counts nothing.
     const ended = (): FleetCrewStatusRead => {
       if (
         input.taskText &&

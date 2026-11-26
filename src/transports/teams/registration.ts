@@ -1,3 +1,5 @@
+import { type TeamsActivity, activitySchema } from "./activity";
+import { TeamsDocuments, isDocumentRef } from "./inbound-documents";
 import { downloadImages, incomingImageRefs } from "./inbound-images";
 import { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
@@ -18,11 +20,6 @@ import {
 } from "../../coordination/fleet/fleet-source";
 import type { GatewayTransport, TransportDelivery } from "../../gateway/ports";
 import { backendFingerprint } from "../../gateway/routing";
-import {
-  settingsDefault,
-  settingsPattern,
-  settingsUUID,
-} from "../../config/settings-schema";
 import type { Store } from "../../gateway/store";
 import { resolveWaiting } from "../../config/waiting-overrides";
 import { botDisplayName } from "../../shared/waiting";
@@ -35,76 +32,21 @@ import { ConnectorClient, ManagedIdentityTokenProvider } from "./connector";
 import { createTeamsListener } from "./http";
 import { teamsImageTransport } from "./images";
 import { TeamsPresence } from "./presence";
-import { isAllowedServiceUrl } from "./service-url";
-import { TEAMS_MESSAGE_BYTE_BUDGET, chunkText, extractText } from "./teams";
+import {
+  TEAMS_MESSAGE_BYTE_BUDGET,
+  chunkText,
+  extractText,
+  hasBotMention,
+  mentionsAnyBot,
+  quotedReplies,
+} from "./teams";
 import {
   type SocketIdentity,
   listenOnUnixSocket,
   unlinkOwnSocket,
 } from "../../lib/unix-socket";
 
-const account = Schema.Struct({
-  id: Schema.String.check(Schema.isMinCodePoints(1)),
-  aadObjectId: Schema.optional(settingsUUID),
-  role: Schema.optional(Schema.String),
-});
-
-const timestamp = Schema.String.check(
-  settingsPattern(
-    /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?Z)$/,
-  ),
-).annotate({ format: "date-time" });
-
-export const activitySchema = Schema.Struct({
-  type: Schema.Literal("message"),
-  id: Schema.String.check(
-    Schema.isMinCodePoints(1),
-    Schema.isMaxCodePoints(512),
-  ),
-  channelId: Schema.Literal("msteams"),
-  serviceUrl: Schema.String.check(Schema.makeFilter(isAllowedServiceUrl)),
-  from: account,
-  recipient: account,
-  conversation: Schema.Struct({
-    id: Schema.String.check(
-      Schema.isMinCodePoints(1),
-      Schema.isMaxCodePoints(1024),
-    ),
-    conversationType: Schema.Literals(["personal", "channel", "groupChat"]),
-    tenantId: Schema.optional(settingsUUID),
-  }),
-  channelData: Schema.optional(
-    Schema.Struct({
-      tenant: Schema.optional(Schema.Struct({ id: settingsUUID })),
-      channel: Schema.optional(Schema.Struct({ id: Schema.String })),
-    }),
-  ),
-  attachments: Schema.optional(
-    Schema.Array(
-      Schema.Struct({
-        contentType: Schema.optional(Schema.String),
-        contentUrl: Schema.optional(Schema.String),
-      }),
-    ),
-  ),
-  text: Schema.String.check(Schema.isMaxCodePoints(40_000)).pipe(
-    settingsDefault(""),
-  ),
-  timestamp: Schema.optional(timestamp),
-  entities: Schema.optional(
-    Schema.mutable(
-      Schema.Array(
-        Schema.Struct({
-          type: Schema.optional(Schema.String),
-          text: Schema.optional(Schema.String),
-          mentioned: Schema.optional(account),
-        }),
-      ),
-    ),
-  ),
-});
-
-export type TeamsActivity = typeof activitySchema.Type;
+export { type TeamsActivity, activitySchema } from "./activity";
 
 function activityTenantMatches(activity: TeamsActivity, expected: string) {
   const conversation = activity.conversation.tenantId;
@@ -127,15 +69,23 @@ export function allowedActivity(config: TeamsConfig, activity: TeamsActivity) {
     (!config.fleetPolicy ||
       fleetAuthority(config.fleetPolicy, user) === "human") &&
     activityTenantMatches(activity, config.tenantId) &&
-    activity.from.id !== activity.recipient.id &&
+    activity.recipient.id.toLowerCase() ===
+      `28:${config.botClientId.toLowerCase()}` &&
+    activity.from.id.toLowerCase() !== activity.recipient.id.toLowerCase() &&
     activity.from.role !== "bot" &&
     config.access.users.some((id) => id.toLowerCase() === user) &&
     !config.access.deniedUsers.some((id) => id.toLowerCase() === user) &&
     !config.access.deniedChannels.includes(channel) &&
     (activity.conversation.conversationType === "personal" ||
-      config.access.channels.includes(channel)),
+      (config.access.channels.includes(channel) &&
+        (hasBotMention(activity) ||
+          (config.access.allowUnmentionedConversations === true &&
+            !mentionsAnyBot(activity))))),
   );
 }
+
+type TeamsConnector = Pick<ConnectorClient, "sendToConversation"> &
+  Partial<Pick<ConnectorClient, "fetchImage">>;
 
 type Reference = {
   conversation: string;
@@ -169,8 +119,8 @@ export class TeamsRegistration {
   public readonly transport: GatewayTransport;
   public readonly delivery: TransportDelivery;
   private readonly db: Database;
-  private readonly connector: Pick<ConnectorClient, "sendToConversation"> &
-    Partial<Pick<ConnectorClient, "fetchImage">>;
+  private readonly documents: TeamsDocuments;
+  private readonly connector: TeamsConnector;
   private server: Server | undefined;
   private socketIdentity: SocketIdentity | undefined;
   private readonly abort = new AbortController();
@@ -181,9 +131,9 @@ export class TeamsRegistration {
     private readonly store: Store,
     private readonly backend: AgentBackend,
     private readonly log: (message: string) => void,
-    connector?: Pick<ConnectorClient, "sendToConversation"> &
-      Partial<Pick<ConnectorClient, "fetchImage">>,
+    io: { connector?: TeamsConnector; documents?: TeamsDocuments } = {},
   ) {
+    this.documents = io.documents ?? new TeamsDocuments(config);
     this.key = JSON.stringify([
       "teams",
       config.id,
@@ -211,7 +161,7 @@ export class TeamsRegistration {
     }
 
     this.connector =
-      connector ??
+      io.connector ??
       new ConnectorClient({
         tokenProvider: new ManagedIdentityTokenProvider({
           clientId: config.botClientId,
@@ -233,6 +183,10 @@ export class TeamsRegistration {
             : ("quiet" as const),
       }),
       name: "teams",
+      failureText: (cause) =>
+        cause === "attachments"
+          ? "Stargate could not read the Teams attachments. Try attaching them again, or resend the message on its own. Confirm the file types, size limits, and the bot’s file configuration."
+          : undefined,
       key: this.key,
       allowed: (user, channel) => this.allowed(user, channel),
       source: (job) => {
@@ -333,15 +287,9 @@ export class TeamsRegistration {
         async (refs, channel, stop) => {
           const ref = this.reference(channel);
 
-          if (
-            !ref ||
-            !this.allowed(ref.user, channel) ||
-            !this.connector.fetchImage
-          ) {
-            throw new Error("Teams image unavailable");
+          if (!ref || !this.allowed(ref.user, channel)) {
+            throw new Error("Teams attachments unavailable");
           }
-
-          const fetchImage = this.connector.fetchImage.bind(this.connector);
 
           const signal = AbortSignal.any([
             stop,
@@ -349,8 +297,24 @@ export class TeamsRegistration {
             AbortSignal.timeout(30_000),
           ]);
 
-          return downloadImages(ref.service, refs, signal, (url, active) =>
-            fetchImage(ref.service, url, active),
+          const images = refs.filter((id) => !isDocumentRef(id));
+          const documents = refs.filter((id) => isDocumentRef(id));
+
+          const files = await downloadImages(
+            ref.service,
+            images,
+            signal,
+            (url, active) => {
+              if (!this.connector.fetchImage) {
+                throw new Error("Teams image unavailable");
+              }
+
+              return this.connector.fetchImage(ref.service, url, active);
+            },
+          );
+
+          return files.concat(
+            await this.documents.download(documents, channel, files, signal),
           );
         },
       ),
@@ -449,35 +413,26 @@ export class TeamsRegistration {
     const user = activity.from.aadObjectId?.toLowerCase() ?? "";
     const conversation = activity.conversation.id;
 
-    const files =
+    const personal = activity.conversation.conversationType === "personal";
+
+    const images =
       this.config.incomingImages === false
         ? []
         : incomingImageRefs(activity.serviceUrl, activity.attachments);
 
-    if (
-      files.length > 0 &&
-      activity.conversation.conversationType !== "personal" &&
-      !activity.entities?.some(
-        (entity) =>
-          entity.type === "mention" &&
-          entity.mentioned?.id === activity.recipient.id,
-      )
-    ) {
+    const quote = quotedReplies(activity.text, activity.entities);
+    const body = extractText({ ...activity, text: quote.body });
+    const prepared = this.documents.prepare(activity, images);
+    const { files } = prepared;
+
+    if (!body && files.length === 0) {
       return false;
     }
 
-    const text = extractText({
-      text: activity.text,
-      recipient: { id: activity.recipient.id },
-      entities: (activity.entities ?? []).map((entity) => ({
-        ...(entity.type && { type: entity.type }),
-        ...(entity.text && { text: entity.text }),
-        ...(entity.mentioned && { mentioned: { id: entity.mentioned.id } }),
-      })),
-    });
+    const eventId = `${conversation}:${activity.id}`;
 
-    if (!text && files.length === 0) {
-      return false;
+    if (this.store.jobByEvent(this.key, eventId)) {
+      return true;
     }
 
     this.db
@@ -489,12 +444,12 @@ export class TeamsRegistration {
         activity.serviceUrl,
         activity.recipient.id,
         user,
-        Number(activity.conversation.conversationType === "personal"),
+        Number(personal),
         activity.channelData?.channel?.id ?? conversation,
       );
 
-    if (/^\/?(?:approve|deny)\b/i.test(text)) {
-      await this.approve(activity, text);
+    if (/^\/?(?:approve|deny)\b/i.test(body)) {
+      await this.approve(activity, body);
 
       return true;
     }
@@ -514,12 +469,18 @@ export class TeamsRegistration {
         channel: conversation,
         messageID: activity.id,
         receivedAt: activity.timestamp ?? new Date().toISOString(),
-        origin: { botKey: this.key, eventId: `${conversation}:${activity.id}` },
+        origin: { botKey: this.key, eventId },
       });
     }
 
-    this.store.enqueue({
-      eventId: `${conversation}:${activity.id}`,
+    const request =
+      body ||
+      (prepared.hasDocuments
+        ? "Inspect the attached file."
+        : "Inspect the attached screenshot.");
+
+    const queued = this.store.enqueue({
+      eventId,
       botKey: this.key,
       conversation: JSON.stringify([this.key, conversation]),
       channel: conversation,
@@ -530,9 +491,13 @@ export class TeamsRegistration {
           : Date.now(),
       }),
       user,
-      text: text || "Inspect the attached screenshot.",
+      text: [request, quote.context].filter(Boolean).join("\n\n"),
       files,
     });
+
+    if (queued) {
+      prepared.remember?.();
+    }
 
     return true;
   }

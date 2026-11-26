@@ -142,6 +142,8 @@ export interface GatewayTransport {
   readonly name: "slack" | "irc" | "teams";
   /** Queue, session and outbox namespace of this registration. */
   readonly key: string;
+  /** User-facing copy for a failure specific to this transport. */
+  failureText?(cause: RequestFailure): string | undefined;
   /** Current access rules, rechecked before work and before delivery. */
   allowed(user: string, channel: string, job?: GatewayAccessContext): boolean;
   /** Model-visible source of a chat message; undefined for other jobs. */

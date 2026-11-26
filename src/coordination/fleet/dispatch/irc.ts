@@ -7,6 +7,7 @@ import {
   fold,
   validMsgid,
 } from "../../../transports/irc/protocol";
+import type { DecisionOutcome } from "./api";
 import {
   type CaptainRef,
   type DispatchAnswerInput,
@@ -30,6 +31,7 @@ type DispatchClient = Pick<
   IrcClient,
   | "waitReady"
   | "verifiedNick"
+  | "recipientGuard"
   | "hasCap"
   | "budget"
   | "publish"
@@ -40,6 +42,40 @@ type DispatchClient = Pick<
 >;
 
 const joinWaitMs = 10_000;
+const decisionOutcomeTag = "+draft/fleet-decision-outcome";
+
+export function isDecisionOutcomeDm(
+  message: IrcMessage,
+  config: Pick<IrcConfig, "decisionOutcomeSender" | "fleetPolicy">,
+  nick: string,
+  caseFold: (value: string) => string,
+) {
+  const account = message.tags.get("account");
+  const sender = config.decisionOutcomeSender;
+
+  if (
+    !sender ||
+    !account ||
+    caseFold(account) !== caseFold(sender) ||
+    config.fleetPolicy?.role !== "captain" ||
+    !config.fleetPolicy.agentAccounts.some(
+      (peer) => caseFold(peer) === caseFold(account),
+    ) ||
+    message.command !== "PRIVMSG" ||
+    message.tags.get(decisionOutcomeTag) !== "1" ||
+    !validMsgid(message.tags.get("msgid")) ||
+    caseFold(message.params[0] ?? "") !== caseFold(nick)
+  ) {
+    return false;
+  }
+
+  const match =
+    /^([^ ]+): D-[0-9]{5,19}-[A-Z][A-Z0-9]{1,4} was (?:accepted|rejected)\.$/u.exec(
+      message.params[1] ?? "",
+    );
+
+  return !!match?.[1] && caseFold(match[1]) === caseFold(nick);
+}
 
 /** Cut text to at most `bytes` UTF-8 bytes on a code point boundary. */
 function fitBytes(text: string, bytes: number) {
@@ -117,6 +153,42 @@ export class IrcDispatchMessenger implements DispatchMessenger {
 
       return;
     }
+  }
+
+  public async decisionOutcome(
+    captain: CaptainRef,
+    outcome: DecisionOutcome,
+    signal: AbortSignal,
+  ) {
+    await this.client.waitReady(joinWaitMs, signal);
+
+    if (
+      !this.client.hasCap("echo-message") ||
+      !this.client.hasCap("message-tags")
+    ) {
+      throw new Error(
+        "IRC decision delivery requires echo-message and message-tags",
+      );
+    }
+
+    const nick = await this.nick(captain);
+
+    if (!nick) {
+      return false;
+    }
+
+    signal.throwIfAborted();
+    const text = `${nick}: ${outcome.identifier} was ${outcome.status}.`;
+    const sameRecipient = this.client.recipientGuard(captain.account, nick);
+
+    const messageId = await this.client.publish(
+      nick,
+      text,
+      { [decisionOutcomeTag]: "1" },
+      () => !signal.aborted && this.allowed() && sameRecipient(),
+    );
+
+    return validMsgid(messageId);
   }
 
   private tags(marker: DispatchMarker, replyTo?: string) {

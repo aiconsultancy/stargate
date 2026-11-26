@@ -1,1 +1,8 @@
-{ "files": 1, "refresh": 2, "github": 1, "preview": 1 }
+{
+  "files": 1,
+  "sandboxFiles": 1,
+  "refresh": 2,
+  "github": 1,
+  "preview": 1,
+  "teamsAttachmentFiles": 1
+}

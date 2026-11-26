@@ -797,7 +797,7 @@ test.each([
     const probeDeadline = new AbortController();
     const unavailable = { kind: "unavailable" } as const;
 
-    const failTwice = async (input: FleetCrewStatusInput = ordinary) => {
+    const failTwice = async (input: FleetCrewStatusInput) => {
       for (let i = 0; i < 2; i++) {
         expect(await crew.fleetCrewStatus(input, signal)).toEqual(unavailable);
       }
@@ -814,8 +814,13 @@ test.each([
 
     try {
       if (end === "disconnect") {
-        await failTwice();
-        expect(asked.splice(0)).toEqual(["ordinary", "ordinary"]);
+        await failTwice(full);
+        expect(asked.splice(0)).toEqual([
+          "full",
+          "ordinary",
+          "full",
+          "ordinary",
+        ]);
       }
 
       reply = "hold";

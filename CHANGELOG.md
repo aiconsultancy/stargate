@@ -8,6 +8,17 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 ### Feature flags
 
+- `agentDispatch.decisionOutcomeDms` enables decision-outcome DMs to recording
+  captains when Subspace serves the outcome feed. The default is off.
+
+- New off-by-default Teams options: `attachmentFileHosts` enables document
+  receipt from exact tenant SharePoint hosts in personal chats.
+  `access.allowUnmentionedConversations` allows messages without a bot mention in explicitly
+  listed conversations.
+- Default change: channel and group-chat messages require this bot's @mention.
+  Incoming activities must identify this registration's Teams bot recipient.
+  Teams quoted previews provide untrusted context for admitted requests.
+
 - Default change: Teams registrations enable `livePresence` by default. Set it to
   `false` to disable typing and work-in-progress updates.
 - Teams registrations accept incoming screenshots by default. Set
@@ -96,6 +107,11 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 ### Changes
 
+- Fleet API Git state: when `HEAD` cannot be read again after a good status
+  read, both the captain's and the gateway's readers now treat it as a
+  possible move. They report `Git state unavailable.` without caching it, so
+  the next read tries again instead of repeating the failure for 15 seconds.
+
 - The crew plugin now refuses, at load and with a message naming both
   counts, a team whose configured crew members times project contexts (the
   default plus each project) exceed 50, also with no projects configured;
@@ -171,7 +187,7 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 - Only the initial fleet status request can establish that a plugin lacks
   the method. Stargate treats `taskText` as unsupported, for a minute, only
   when the re-ask without it succeeds. A failed re-ask makes the read
-  unavailable and counts as one ordinary failure, as does a task text read
+  unavailable and counts as one task text failure, as does a task text read
   ended by its crew deadline. A disconnect counts nothing, even if the plugin
   ignores the abort and Stargate later abandons the probe. A re-ask answered
   after the deadline caches nothing. A member ID the plugin's schema rejects

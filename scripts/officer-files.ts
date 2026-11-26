@@ -667,7 +667,8 @@ async function saveFile(rootPath: string, name: string, data: Uint8Array) {
           await file.close();
         }
 
-        await directory.chmod(0o2750);
+        // The file inherits its group before this directory becomes readable.
+        await directory.chmod(0o750);
       } catch (error) {
         await rm(filePath, { force: true });
         throw error;

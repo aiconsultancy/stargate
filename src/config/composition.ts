@@ -257,7 +257,7 @@ export const agentDispatchDefaults = {
 /**
  * Deterministic agent dispatch on the rear admiral's gateway (see
  * docs/agent-dispatch.md). Stargate polls the Subspace API over outbound
- * HTTPS only; nothing here listens for connections. Off unless `enabled`.
+ * HTTPS only; nothing here listens for connections.
  */
 export const agentDispatchSchema = settingsStruct({
   enabled: Schema.Boolean.pipe(settingsDefault(false)),
@@ -296,6 +296,8 @@ export const agentDispatchSchema = settingsStruct({
     /** Defaults to the registration's fleetChannels.command. */
     channel: Schema.optional(ircChannel),
   }),
+  /** Send resolved decision notices to the recording captain by IRC DM. */
+  decisionOutcomeDms: Schema.optional(Schema.Boolean),
   /** Subspace agent name to chat account; an unlisted name is its own account. */
   captainAccounts: settingsRecord(
     Schema.String.check(settingsPattern(/^[A-Za-z0-9-]{1,64}$/)),
@@ -314,6 +316,12 @@ export const agentDispatchSchema = settingsStruct({
 });
 
 export type AgentDispatchConfig = typeof agentDispatchSchema.Type;
+
+function agentDispatchActive(
+  config: AgentDispatchConfig | undefined,
+): config is AgentDispatchConfig {
+  return config?.enabled === true || config?.decisionOutcomeDms === true;
+}
 
 /** The rear admiral registration and channel that dispatch uses, or why not. */
 export function agentDispatchTarget(
@@ -619,6 +627,15 @@ function subspaceAgentsIssues(
 export const teamsSchema = settingsStruct({
   livePresence: Schema.optional(Schema.Boolean),
   incomingImages: Schema.optional(Schema.Boolean),
+  attachmentFileHosts: Schema.optional(
+    Schema.Array(
+      Schema.String.check(
+        settingsPattern(
+          /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sharepoint\.com$/,
+        ),
+      ),
+    ).check(Schema.isMaxLength(4)),
+  ),
   id: Schema.String.check(settingsPattern(/^[a-z0-9][a-z0-9_-]{0,63}$/)),
   displayName: Schema.optional(
     Schema.String.check(Schema.isMinCodePoints(1)).check(
@@ -629,6 +646,7 @@ export const teamsSchema = settingsStruct({
   tenantId: settingsUUID,
   socketPath: absolutePath,
   access: settingsStruct({
+    allowUnmentionedConversations: Schema.optional(Schema.Boolean),
     users: Schema.mutable(Schema.Array(settingsUUID)).check(
       Schema.isMinLength(1),
     ),
@@ -784,7 +802,7 @@ const configCheck = (liveNotificationPolicy = false) =>
       context,
     ) => {
       // A disabled section is inert: it names nothing that must exist yet.
-      if (agentDispatch?.enabled) {
+      if (agentDispatchActive(agentDispatch)) {
         const target = agentDispatchTarget(agentDispatch, irc);
 
         if (typeof target === "string") {
