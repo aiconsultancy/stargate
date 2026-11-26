@@ -1420,14 +1420,18 @@ describe("Fleet API projection", () => {
     );
 
     try {
+      // Only task text failures back off the task text lane.
       for (let attempt = 0; attempt < 3; attempt++) {
-        await f.crew.fleetCrewStatus({}, signal);
+        await f.crew.fleetCrewStatus(
+          { member: "pilot", taskText: "full" },
+          signal,
+        );
       }
 
       await expect(f.source.crew("captain", "pilot", signal)).rejects.toThrow(
         "Crew status unavailable.",
       );
-      expect(f.asked).toEqual(["ordinary", "ordinary", "ordinary"]);
+      expect(f.asked).toEqual(["full", "full", "full"]);
     } finally {
       await f.stop();
     }

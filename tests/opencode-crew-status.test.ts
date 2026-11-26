@@ -95,7 +95,7 @@ test.each([
 );
 
 test.each(["busy", "draining"] as const)(
-  "task text waits behind a %s probe with a different filter",
+  "task text waits behind a %s task-text probe with a different filter",
   async (state) => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -108,9 +108,12 @@ test.each(["busy", "draining"] as const)(
       async () => {
         if (++called === 1) {
           entered.resolve();
+          // Ignores abort: a deadline leaves it draining.
           await release.promise;
 
-          return Response.json({ output: { status, metadata } });
+          return Response.json({
+            output: { status, metadata, taskText: "unredacted" },
+          });
         }
 
         return Response.json({
@@ -125,20 +128,18 @@ test.each(["busy", "draining"] as const)(
       () => "/fixture",
     );
 
-    const timeout = spyOn(AbortSignal, "timeout").mockReturnValueOnce(
-      deadline.signal,
-    );
-
     const caller = new AbortController();
-    const ordinary = reader.fleetCrewStatus({}, caller.signal);
+
+    const unredacted = reader
+      .fleetCrewStatus({ taskText: "unredacted" }, deadline.signal)
+      .catch((error: unknown) => error);
 
     try {
       await entered.promise;
-      timeout.mockRestore();
 
       if (state === "draining") {
         deadline.abort(new DOMException("Fixture deadline", "TimeoutError"));
-        await ordinary;
+        await unredacted;
       }
 
       const full = reader.fleetCrewStatus(
@@ -154,20 +155,33 @@ test.each(["busy", "draining"] as const)(
       expect(observed).toBe("waiting");
       expect(called).toBe(1);
       release.resolve();
-      await ordinary;
+      await unredacted;
       expect(await full).toEqual({
         kind: "answer",
         answer: { status, metadata, taskText: "full" },
       });
       expect(called).toBe(2);
     } finally {
-      timeout.mockRestore();
       release.resolve();
       caller.abort();
-      await ordinary.catch(() => {});
+      deadline.abort();
+      await unredacted;
     }
   },
 );
+
+/** Each fleet status lane's consecutive failure count. */
+const failures = (crew: OpenCodeCrewStatus) => {
+  const lanes = Reflect.get(crew, "lanes") as Record<
+    "ordinary" | "taskText",
+    { failures: number }
+  >;
+
+  return {
+    ordinary: lanes.ordinary.failures,
+    taskText: lanes.taskText.failures,
+  };
+};
 
 /** A transport whose first fleet status ask waits for `release`. */
 function heldTransport() {
@@ -263,7 +277,7 @@ test("a task text read answering after 19.2 seconds is neither abandoned nor cou
     expect(await first).toEqual(answer);
     expect(await second).toEqual(answer);
     expect(f.asked).toEqual(["pilot:full"]);
-    expect(Reflect.get(f.crew, "fleetStatusFailures")).toBe(0);
+    expect(failures(f.crew)).toEqual({ ordinary: 0, taskText: 0 });
   } finally {
     clock.mockRestore();
     f.release.resolve();
@@ -783,11 +797,9 @@ test.each([
     const probeDeadline = new AbortController();
     const unavailable = { kind: "unavailable" } as const;
 
-    const failTwice = async () => {
+    const failTwice = async (input: FleetCrewStatusInput = ordinary) => {
       for (let i = 0; i < 2; i++) {
-        expect(await crew.fleetCrewStatus(ordinary, signal)).toEqual(
-          unavailable,
-        );
+        expect(await crew.fleetCrewStatus(input, signal)).toEqual(unavailable);
       }
     };
 
@@ -853,12 +865,18 @@ test.each([
           answer: fullAnswer,
         });
       } else {
-        // Exactly two more failures reach the plugin before the 3-failure pause.
+        // Exactly two more failures in its lane reach the plugin before that
+        // Lane's 3-failure pause.
+        const lane = end === "ordinary timeout" ? ordinary : full;
         reply = "fail";
-        await failTwice();
+        await failTwice(lane);
         reply = "healthy";
-        expect(await crew.fleetCrewStatus(full, signal)).toEqual(unavailable);
-        expect(asked).toEqual(["ordinary", "ordinary"]);
+        expect(await crew.fleetCrewStatus(lane, signal)).toEqual(unavailable);
+        expect(asked).toEqual(
+          lane === full
+            ? ["full", "ordinary", "full", "ordinary"]
+            : ["ordinary", "ordinary"],
+        );
       }
     } finally {
       caller.abort();
