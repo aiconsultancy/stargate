@@ -78,6 +78,7 @@ type Child = ChildReplayState & {
 
 type Ancestry = {
   parent?: string;
+  lookup?: number;
   created?: number;
   deferredInference?: number;
   inferred?: TurnActivityLog;
@@ -201,7 +202,7 @@ export class OpenCodeActivityFamilies {
   private readonly queue: ActivityRecoveryQueues<ActivityFamilyEvent>;
   private readonly ancestry = new WeakMap<Pending, Ancestry>();
   private readonly calls: ActivityCallEvidence;
-  private readonly reads = new Set<string>();
+  private readonly reads = new Map<string, Pending>();
   private order = 0;
   private reconciliation = 0;
   private proofFloor = 0;
@@ -488,8 +489,9 @@ export class OpenCodeActivityFamilies {
     });
     this.queue.schedule(id);
 
-    if (pending.parent === undefined) {
-      void this.readParent(id, queued);
+    if (pending.parent === undefined && this.reads.get(id) !== queued) {
+      pending.lookup = order;
+      this.readParents();
     }
   }
 
@@ -786,13 +788,36 @@ export class OpenCodeActivityFamilies {
     return AbortSignal.any([this.source.signal, AbortSignal.timeout(readMs)]);
   }
 
-  private async readParent(id: string, pending: Pending) {
-    if (this.reads.has(id) || this.reads.size >= maxReads) {
+  private readParents() {
+    if (this.source.signal.aborted || this.reads.size >= maxReads) {
       return;
     }
 
-    this.reads.add(id);
+    const now = this.now();
 
+    for (const [id, queued] of this.queue.entries()) {
+      const ancestry = this.facts(queued);
+
+      if (
+        (ancestry.lookup ?? -Infinity) <= this.proofFloor ||
+        ancestry.parent !== undefined ||
+        queued.expires <= now ||
+        this.reads.has(id)
+      ) {
+        continue;
+      }
+
+      delete ancestry.lookup;
+      this.reads.set(id, queued);
+      void this.readParent(id, queued);
+
+      if (this.reads.size >= maxReads) {
+        break;
+      }
+    }
+  }
+
+  private async readParent(id: string, pending: Pending) {
     try {
       const parent = await this.source.parent(id, this.readSignal());
 
@@ -810,6 +835,9 @@ export class OpenCodeActivityFamilies {
       // An unavailable read cannot prove a link.
     } finally {
       this.reads.delete(id);
+      queueMicrotask(() => {
+        this.readParents();
+      });
     }
   }
 

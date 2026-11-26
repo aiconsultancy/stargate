@@ -1,9 +1,11 @@
 import { expect, test } from "bun:test";
 import type { SessionLogItem } from "@opencode/client";
+import { setImmediate } from "node:timers/promises";
 import type { TurnActivityLog } from "../src/backends/backend";
 import { ChildExecutions } from "../src/backends/opencode/activity-child-executions";
 import {
   type ActivityFamilyEvent,
+  type ActivityFamilyReads,
   OpenCodeActivityFamilies,
   isActivityEvent,
 } from "../src/backends/opencode/activity-family";
@@ -18,6 +20,7 @@ function fixture(
   logGate?: Promise<void>,
   pending?: number,
   globalTurns?: number,
+  readParent?: ActivityFamilyReads["parent"],
 ) {
   const stop = new AbortController();
 
@@ -38,10 +41,10 @@ function fixture(
   const families = new OpenCodeActivityFamilies(
     {
       signal: stop.signal,
-      parent: async (id) => {
+      parent: async (id, signal) => {
         reads.push(id);
 
-        return parents.get(id);
+        return readParent ? readParent(id, signal) : parents.get(id);
       },
       active: async () =>
         Object.fromEntries([...active].map((id) => [id, { type: "running" }])),
@@ -189,6 +192,103 @@ test("reconnect inspects all tracked children beyond the first read page", async
   ).toEqual(ids.map(() => "running"));
   f.stop.abort();
 });
+
+test.each([
+  [7, "current"],
+  [8, "current"],
+  [8, "expired"],
+  [8, "fenced"],
+] as const)(
+  "ancestry reads drain %i busy slots with a %s candidate",
+  async (held, mode) => {
+    const gate = Promise.withResolvers<void>();
+    let active = 0;
+    let peak = 0;
+
+    const f = fixture(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async (id) => {
+        active += 1;
+        peak = Math.max(peak, active);
+
+        try {
+          if (id === child) {
+            return main;
+          }
+
+          await gate.promise;
+        } finally {
+          active -= 1;
+        }
+
+        return;
+      },
+    );
+
+    const scope = { active: true };
+    const root = f.root(scope);
+
+    try {
+      f.create(child, main);
+      f.start(child);
+      f.ended(child, "first transcript", "first");
+      f.end(child);
+
+      const ids = Array.from(
+        { length: held },
+        (_, index) => `ses_held_${index}`,
+      );
+
+      for (const id of ids) {
+        f.call(root, id);
+        f.names(root, id, id);
+      }
+
+      f.call(root, "relaunch");
+      f.names(root, "relaunch", child);
+      f.start(child);
+      f.ended(child, "second transcript", "second");
+      f.end(child);
+      expect(f.reads).toEqual(held === 8 ? ids : [...ids, child]);
+
+      if (mode === "expired") {
+        f.advance(2001);
+      } else if (mode === "fenced") {
+        f.families.fence(main, scope);
+      }
+
+      gate.resolve();
+      await setImmediate();
+      expect(peak).toBe(8);
+      expect(f.reads).toEqual(mode === "current" ? [...ids, child] : ids);
+
+      const turns = f.turns();
+      expect(turns[1]).toMatchObject({
+        status: "completed",
+        items: [{ text: "first transcript" }],
+      });
+
+      if (mode === "current") {
+        expect(turns[2]).toMatchObject({
+          session: {
+            id: child,
+            parent: { turnId: turns[0]?.id, callId: "relaunch" },
+          },
+          status: "completed",
+          items: [{ text: "second transcript" }],
+        });
+      } else {
+        expect(turns).toHaveLength(2);
+      }
+    } finally {
+      gate.resolve();
+      f.stop.abort();
+    }
+  },
+);
 
 test("reclassifying a child or fencing its peer marks its outcome lost", () => {
   for (const change of ["peer", "fence"]) {
@@ -746,7 +846,7 @@ test.each([
         );
       }
 
-      await Promise.resolve();
+      await setImmediate();
 
       if (nativeParent === main) {
         // Keep this exact call open rather than overflowing the per-log call slots.
@@ -760,7 +860,9 @@ test.each([
       await Promise.resolve();
 
       const turns = f.turns();
-      expect(turns.at(-1)).toMatchObject({
+      const executions = turns.filter((turn) => turn.session?.id === child);
+      expect(executions).toHaveLength(2);
+      expect(executions[1]).toMatchObject({
         session: {
           id: child,
           parent: linked ? { turnId: turns[0]?.id, callId: "relaunch" } : null,

@@ -654,7 +654,9 @@ and crew collectors follow native sub-sessions on the same event stream as
 their roots. A child needs native ancestry and either an owned `subagent`
 call naming it or a single unambiguous running parent. Early child frames
 wait in a bounded buffer and replay in arrival order once the parent is
-proven. Unproven frames expire. When the buffer fills before admission,
+proven. Ancestry lookups use at most eight concurrent reads per collector;
+eligible candidates wait in the same bounded buffer for a free slot.
+Unproven frames expire. When the buffer fills before admission,
 the collector reads missing durable frames from the native log; if any
 frames cannot be recovered, the child shows `unavailable: ["activity.frames"]`.
 A failed content read does not discard held frames or change a witnessed
