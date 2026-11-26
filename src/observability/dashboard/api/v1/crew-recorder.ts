@@ -41,7 +41,8 @@ export function crewRecorder(
   recorders: CrewRecorders,
   begin: (
     start: CrewTurnStart,
-    startedAt?: number,
+    startedAt: number | undefined,
+    maySpawn: () => boolean,
     evicted?: () => void,
   ) => CrewTurnActivityLog,
 ): CrewTurnRecorder {
@@ -57,7 +58,7 @@ export function crewRecorder(
 
   return {
     begin: (start, startedAt, evicted) =>
-      owns() ? begin(start, startedAt, evicted) : fencedLog,
+      owns() ? begin(start, startedAt, owns, evicted) : fencedLog,
     roster(members, uncollected = []) {
       if (!owns()) {
         return;

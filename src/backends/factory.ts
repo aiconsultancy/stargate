@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import type { AgentBackend, BackendContext } from "./backend";
 import type { BackendConfig } from "./config";
 import { openCodeTurnObserver } from "./opencode/activity";
-import { crewActivityStarter } from "./opencode/crew-activity";
+import { crewActivityStarter } from "./opencode/crew-activity-source";
 import { OpenCodeBackend } from "./opencode/opencode";
 import { PiDurableBackend } from "./pi/pi-durable";
 

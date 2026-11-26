@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { setTimeout as wait } from "node:timers/promises";
 import type { OpenCodeClient } from "@opencode/client";
+import type { ActivityFamilyReads } from "../src/backends/opencode/activity-family";
 import type {
   ActivityItem,
   ActivityOutcome,
@@ -73,7 +74,11 @@ function eventStream() {
 
       // Only the subscribed types, as the server sends.
       const push = (frame: { type: string; data: unknown }) => {
-        if (options?.types && !options.types.includes(frame.type)) {
+        if (
+          frame.type !== "server.connected" &&
+          options?.types &&
+          !options.types.includes(frame.type)
+        ) {
           return;
         }
 
@@ -141,6 +146,7 @@ type RecordedTurn = {
   items: Map<string, ActivityItem>;
   attributed: CrewTurnTask[];
   ended: ActivityOutcome | undefined;
+  lost?: true;
   startedAt: number | undefined;
   reconnects: number;
 };
@@ -184,8 +190,12 @@ function fakeRecorder() {
         reconnected() {
           turn.reconnects += 1;
         },
-        end(outcome) {
+        end(outcome, lost) {
           turn.ended ??= outcome;
+
+          if (lost) {
+            turn.lost = true;
+          }
         },
         attribute(task) {
           turn.attributed.push(task);
@@ -238,6 +248,7 @@ function fixture(options: {
   collector?: Partial<CrewActivityOptions>;
   unsupported?: boolean;
   recorder?: CrewTurnRecorder;
+  family?: Partial<ActivityFamilyReads>;
   /** Delays an ownership answer. */
   hold?: (assistant: string) => Promise<void> | undefined;
 }) {
@@ -250,6 +261,12 @@ function fixture(options: {
     options.recorder ?? recorded.recorder,
     {
       events: stream.events,
+      family: {
+        parent: async () => undefined,
+        active: async () => ({}),
+        async *log() {},
+        ...options.family,
+      },
       turns: async (input) => {
         reads.push(input);
 
@@ -1320,6 +1337,7 @@ test("a native start after a missed settle ends the open turns cancelled", async
 
   expect(turns[0]?.ended).toBe("cancelled");
   expect(text(turns[0])).toBe("a");
+  expect(turns[0]?.lost).toBeTrue();
   // B's DM and its task continuation: B's own turns, with B's outcome.
   expect(turns.slice(1).map((turn) => [turn.ended, text(turn)])).toEqual([
     ["completed", "dm"],
@@ -1348,6 +1366,490 @@ test("a repeated native start never splits an execution", async () => {
 
   expect(turns).toHaveLength(1);
   expect(turns[0]?.ended).toBe("completed");
+});
+
+test("a missed-settle start marks a waiting-only crew execution lost when it is placed", async () => {
+  const release = Promise.withResolvers<void>();
+
+  const { turns, stream, delta, collector, text } = fixture({
+    turns: { peers: [peer("mario", "ses_mario")], tasks: [] },
+    owners: { waiting: undefined, next: undefined },
+    hold: (assistant) =>
+      assistant === "waiting" ? release.promise : undefined,
+  });
+
+  await until(() => stream.subscribers() === 1);
+  started(stream, 1);
+  delta("ses_mario", "waiting", "before the boundary");
+  await until(() => collector.load.heldBytes > 0);
+  started(stream, 2);
+  delta("ses_mario", "next", "after the boundary");
+  await until(() => turns.length === 1);
+  release.resolve();
+  await until(() => turns.length === 2);
+
+  expect(turns[0]?.ended).toBeUndefined();
+  expect(text(turns[0])).toBe("after the boundary");
+  expect(turns[1]).toMatchObject({ ended: "cancelled", lost: true });
+  expect(text(turns[1])).toBe("before the boundary");
+});
+
+const crewTurns = (hub: ReturnType<typeof createActivityHub>) =>
+  hub.turns(crewSubject("captain", "mario"))?.turns ?? [];
+
+function nativeBoundary(
+  stream: ReturnType<typeof eventStream>,
+  type: "started" | "succeeded",
+  sessionID: string,
+  seq: number,
+) {
+  stream.emit(
+    `session.execution.${type}`,
+    { sessionID },
+    { durable: { aggregateID: sessionID, seq, version: 1 } },
+  );
+}
+
+function namesChild(
+  stream: ReturnType<typeof eventStream>,
+  sessionID: string,
+  assistantMessageID: string,
+  id: string,
+  child: string,
+) {
+  const tool = { sessionID, assistantMessageID, id };
+  stream.emit("session.tool.input.started", { ...tool, name: "subagent" });
+  stream.emit("session.tool.progress", {
+    ...tool,
+    metadata: { sessionID: child },
+  });
+}
+
+test("a late crew ownership read links the child to its placed turn, not the current turn", async () => {
+  const hub = createActivityHub();
+  const owner = Promise.withResolvers<void>();
+  const root = "ses_mario";
+  const child = "ses_child";
+
+  const { stream, delta, reads, settle } = fixture({
+    recorder: hub.crewRecorder("captain"),
+    turns: {
+      peers: [peer("mario", root)],
+      tasks: [
+        task("task_old", root, ["in-old"]),
+        task("task_new", root, ["in-new"]),
+      ],
+    },
+    owners: { old: "in-old", next: "in-new" },
+    hold: (assistant) => (assistant === "old" ? owner.promise : undefined),
+    family: { parent: async () => root },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  nativeBoundary(stream, "started", root, 1);
+  namesChild(stream, root, "old", "launch", child);
+  nativeBoundary(stream, "started", child, 1);
+  delta(child, "child-a", "first");
+  delta(child, "child-b", "second");
+  settle(root);
+  nativeBoundary(stream, "started", root, 3);
+  delta(root, "next", "next root");
+  await until(() => crewTurns(hub)[0]?.task?.id === "task_new");
+  owner.resolve();
+  await until(() => crewTurns(hub).length === 3);
+
+  const [next, previous, descendant] = crewTurns(hub);
+  expect(previous).toMatchObject({
+    task: { id: "task_old" },
+    status: "completed",
+  });
+  expect(descendant).toMatchObject({
+    requests: [],
+    status: "running",
+    task: { id: "task_old" },
+    session: { id: child, parent: { turnId: previous?.id, callId: "launch" } },
+    items: [{ text: "first" }, { text: "second" }],
+  });
+  expect(next?.status).toBe("running");
+  expect(reads.every((read) => read.inputID === undefined)).toBeTrue();
+
+  // Joining output stays in the original family, but either call may name the next start.
+  namesChild(stream, root, "next", "join", child);
+  delta(child, "child-b", " joined");
+  nativeBoundary(stream, "succeeded", child, 2);
+  namesChild(stream, root, "next", "relaunch", child);
+  nativeBoundary(stream, "started", child, 3);
+  stream.emit(
+    "session.text.started",
+    { sessionID: child, assistantMessageID: "child-c", ordinal: 0 },
+    {
+      durable: { aggregateID: child, seq: 4, version: 1 },
+    },
+  );
+  delta(child, "child-c", "fresh period");
+  await until(() => crewTurns(hub)[3]?.items.length === 1);
+  expect(crewTurns(hub)[2]).toMatchObject({
+    status: "completed",
+    items: [{ text: "first" }, { text: "second joined" }],
+  });
+  expect(crewTurns(hub)[3]).toMatchObject({
+    items: [{ text: "fresh period" }],
+    session: { parent: null },
+  });
+});
+
+test("native child discovery retries once a tool-free parent message is placed", async () => {
+  const hub = createActivityHub();
+  const root = "ses_mario";
+  const child = "ses_child";
+  const placement = Promise.withResolvers<void>();
+
+  const { stream, delta, collector } = fixture({
+    recorder: hub.crewRecorder("captain"),
+    turns: { peers: [peer("mario", root)], tasks: [] },
+    owners: { a: undefined },
+    hold: () => placement.promise,
+    collector: { bufferMs: 1000 },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  delta(root, "a", "root output without any tool call");
+  await until(() => collector.load.resolving === 1);
+  stream.emit("session.created", { sessionID: child, parentID: root });
+  nativeBoundary(stream, "started", child, 1);
+  delta(child, "child-a", "child output");
+  await wait(10);
+  expect(crewTurns(hub)).toHaveLength(0);
+  placement.resolve();
+  await until(() => crewTurns(hub).length === 2);
+  const [parent, descendant] = crewTurns(hub);
+  expect(descendant).toMatchObject({
+    session: { id: child, parent: { turnId: parent?.id, callId: null } },
+    items: [{ text: "child output" }],
+  });
+});
+
+test("an oversized durable child frame held before proof is recovered and paged intact", async () => {
+  const hub = createActivityHub();
+  const root = "ses_mario";
+  const child = "ses_child";
+  const placement = Promise.withResolvers<void>();
+  const recovering = Promise.withResolvers<void>();
+  const releaseRecovery = Promise.withResolvers<void>();
+  const text = "λ🙂 line\n".repeat(36_000);
+
+  const data = {
+    sessionID: child,
+    assistantMessageID: "child-a",
+    ordinal: 0,
+    text,
+  };
+
+  const durable = { aggregateID: child, seq: 2, version: 1 } as const;
+  const reads: number[] = [];
+
+  const { stream, delta, collector } = fixture({
+    recorder: hub.crewRecorder("captain"),
+    turns: { peers: [peer("mario", root)], tasks: [] },
+    owners: { a: undefined },
+    hold: () => placement.promise,
+    collector: { bufferMs: 1000 },
+    family: {
+      async *log(id, after) {
+        if (id === child) {
+          reads.push(after);
+          recovering.resolve();
+          await releaseRecovery.promise;
+          yield {
+            type: "session.text.ended",
+            id: "oversize",
+            created: 2,
+            data,
+            durable,
+          };
+        }
+      },
+    },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  delta(root, "a", "tool-free parent");
+  await until(() => collector.load.resolving === 1);
+  stream.emit("session.created", { sessionID: child, parentID: root });
+  nativeBoundary(stream, "started", child, 1);
+  stream.emit("session.text.ended", data, { durable });
+  await wait(10);
+  expect(crewTurns(hub)).toHaveLength(0);
+  placement.resolve();
+  await recovering.promise;
+  stream.emit(
+    "session.text.ended",
+    { ...data, ordinal: 1, text: "arrived during recovery" },
+    {
+      durable: { ...durable, seq: 3 },
+    },
+  );
+  nativeBoundary(stream, "succeeded", child, 4);
+  releaseRecovery.resolve();
+  await until(() =>
+    crewTurns(hub).some(
+      (turn) => turn.session?.id === child && turn.status === "completed",
+    ),
+  );
+  expect(reads).toEqual([1]);
+
+  const turn = crewTurns(hub).find((entry) => entry.session?.id === child);
+  const item = turn?.items[0];
+
+  if (!turn || !item || !("paged" in item)) {
+    throw new Error("Expected a paged child item");
+  }
+
+  expect(item.paged.pages).toBeGreaterThan(1);
+  const pages: string[] = [];
+
+  for (let page = 0; page < item.paged.pages; page += 1) {
+    const query = new URLSearchParams({
+      turn: turn.id,
+      item: item.id,
+      page: String(page),
+    });
+
+    const response = readCrewActivity(hub, config, "captain", "mario", query);
+
+    if (response.status !== 200 || !("data" in response.body)) {
+      throw new Error(`Expected child item page ${page}`);
+    }
+
+    pages.push(response.body.data);
+  }
+
+  const recovered: unknown = JSON.parse(pages.join(""));
+  expect(recovered).toMatchObject({ kind: "text", text });
+  expect(turn.items[1]).toMatchObject({ text: "arrived during recovery" });
+  expect(turn.items).toHaveLength(2);
+});
+
+test("deferred tool-free discovery resolves to the original settled execution", async () => {
+  const hub = createActivityHub();
+  const root = "ses_mario";
+  const child = "ses_child";
+  const placement = Promise.withResolvers<void>();
+
+  const { stream, delta, collector } = fixture({
+    recorder: hub.crewRecorder("captain"),
+    turns: { peers: [peer("mario", root)], tasks: [] },
+    owners: { old: undefined, next: undefined },
+    hold: (assistant) => (assistant === "old" ? placement.promise : undefined),
+    collector: { bufferMs: 1000 },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  nativeBoundary(stream, "started", root, 1);
+  delta(root, "old", "earlier output");
+  await until(() => collector.load.resolving === 1);
+  stream.emit("session.created", { sessionID: child, parentID: root });
+  nativeBoundary(stream, "started", child, 1);
+  delta(child, "child-a", "earlier child");
+  nativeBoundary(stream, "succeeded", root, 2);
+  nativeBoundary(stream, "started", root, 3);
+  delta(root, "next", "fresh output");
+  await until(() => crewTurns(hub).length > 0);
+  placement.resolve();
+  await until(() => crewTurns(hub).length === 3);
+  const original = crewTurns(hub).find(({ status }) => status === "completed");
+
+  expect(
+    crewTurns(hub).find(({ session }) => session?.id === child),
+  ).toMatchObject({
+    session: { parent: { turnId: original?.id, callId: null } },
+    items: [{ text: "earlier child" }],
+  });
+});
+
+test("peer replacement cannot adopt an old descendant", async () => {
+  const hub = createActivityHub();
+  const old = "ses_old";
+  const replacement = "ses_new";
+  const child = "ses_child";
+  const pending = Promise.withResolvers<string>();
+
+  const { stream, delta, state } = fixture({
+    recorder: hub.crewRecorder("captain"),
+    turns: { peers: [peer("mario", old)], tasks: [] },
+    owners: { a: undefined, b: undefined },
+    collector: { refreshMs: 20 },
+    family: {
+      parent: async (id) =>
+        id === "ses_pending"
+          ? pending.promise
+          : id === child
+            ? old
+            : replacement,
+    },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  namesChild(stream, old, "a", "original", child);
+  nativeBoundary(stream, "started", child, 1);
+  delta(child, "child-a", "old output");
+  namesChild(stream, old, "a", "unresolved", "ses_pending");
+  nativeBoundary(stream, "started", "ses_pending", 1);
+  await until(() => crewTurns(hub)[1]?.items.length === 1);
+  state.turns = { peers: [peer("mario", replacement)], tasks: [] };
+  await until(() => crewTurns(hub)[1]?.status === "cancelled");
+  pending.resolve(old);
+
+  namesChild(stream, replacement, "b", "not-mine", child);
+  nativeBoundary(stream, "started", child, 1); // Replay of the old period
+  delta(child, "child-a", "must not append");
+  namesChild(stream, replacement, "b", "mine", "ses_fresh");
+  nativeBoundary(stream, "started", "ses_fresh", 1);
+  delta("ses_fresh", "child-b", "new output");
+  await until(() =>
+    crewTurns(hub).some((turn) => turn.session?.id === "ses_fresh"),
+  );
+  const [oldRoot, oldChild, newRoot, newChild] = crewTurns(hub);
+  expect(crewTurns(hub)).toHaveLength(4);
+  expect(oldChild).toMatchObject({
+    session: { parent: { turnId: oldRoot?.id } },
+    items: [{ text: "old output" }],
+  });
+  expect(newChild).toMatchObject({
+    session: { parent: { turnId: newRoot?.id } },
+    items: [{ text: "new output" }],
+  });
+});
+
+test("removing a peer preserves another peer's waiting child and ancestry read", async () => {
+  const hub = createActivityHub();
+  const removed = "ses_removed";
+  const remains = "ses_remains";
+  const child = "ses_child";
+  const ancestry = Promise.withResolvers<string>();
+  const startedRead = Promise.withResolvers<void>();
+  const surviving = peer("mario", remains);
+
+  const { stream, delta, state, reads } = fixture({
+    recorder: hub.crewRecorder("captain"),
+    turns: { peers: [peer("luigi", removed), surviving], tasks: [] },
+    owners: { a: undefined },
+    collector: { refreshMs: 20 },
+    family: {
+      parent: () => {
+        startedRead.resolve();
+
+        return ancestry.promise;
+      },
+    },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  namesChild(stream, remains, "a", "launch", child);
+  nativeBoundary(stream, "started", child, 1);
+  delta(child, "b", "pending");
+  await startedRead.promise;
+  const before = reads.length;
+  state.turns = { peers: [surviving], tasks: [] };
+  await until(() => reads.length > before);
+  ancestry.resolve(remains);
+  await until(() => crewTurns(hub).length === 2);
+  expect(crewTurns(hub)[1]).toMatchObject({
+    session: { id: child, parent: { callId: "launch" } },
+    items: [{ text: "pending" }],
+  });
+});
+
+test("crew reconnect fences delivery until durable evidence identifies a newer execution", async () => {
+  const root = "ses_mario";
+  const gate = Promise.withResolvers<void>();
+  const reads: number[] = [];
+
+  const { turns, stream, delta, text } = fixture({
+    turns: {
+      peers: [peer("mario", root)],
+      tasks: [task("task_1", root, ["in"])],
+    },
+    owners: { a: "in", b: "in", c: "in" },
+    family: {
+      active: async () => ({ [root]: { type: "running" } }),
+      async *log(id, after) {
+        reads.push(after);
+
+        if (reads.length === 1) {
+          yield { type: "log.synced", aggregateID: id, seq: after };
+
+          return;
+        }
+
+        await gate.promise;
+        yield {
+          id: "next-start",
+          created: 7,
+          type: "session.execution.started",
+          data: { sessionID: id },
+          durable: { aggregateID: id, seq: 7, version: 1 },
+        };
+      },
+    },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  started(stream, 1);
+  delta(root, "a", "old");
+  await until(() => turns.length === 1);
+  stream.emit("server.connected", {});
+  delta(root, "b", " same execution");
+  await until(() => text(turns[0]).includes("same execution"));
+  expect(turns[0]?.ended).toBeUndefined();
+
+  stream.emit("server.connected", {});
+  started(stream, 7); // Duplicates the start found in the log
+  nativeBoundary(stream, "succeeded", root, 5); // Stale settlement
+  delta(root, "c", "new execution");
+  await until(() => reads.length === 2);
+  expect(turns).toHaveLength(1);
+  gate.resolve();
+  await until(() => turns.length === 2);
+  expect(reads).toEqual([1, 1]);
+  expect(turns[0]).toMatchObject({ ended: "cancelled", lost: true });
+  expect(turns[1]?.ended).toBeUndefined();
+  expect(text(turns[1])).toBe("new execution");
+});
+
+test("crew reconnect applies the durable settlement without opening an interval across the gap", async () => {
+  const root = "ses_mario";
+
+  const { turns, stream, delta, text } = fixture({
+    turns: { peers: [peer("mario", root)], tasks: [] },
+    owners: { a: undefined, late: undefined },
+    family: {
+      async *log(id) {
+        yield {
+          id: "recovered-settlement",
+          created: 8,
+          type: "session.execution.succeeded",
+          data: { sessionID: id },
+          durable: { aggregateID: id, seq: 8, version: 1 },
+        };
+      },
+    },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  started(stream, 1);
+  delta(root, "a", "old");
+  await until(() => turns.length === 1);
+  stream.emit("server.connected", {});
+  await until(() => turns[0]?.ended !== undefined);
+  boundary(stream, "session.execution.failed", 8);
+  lateText(stream, "late", 4);
+  delta(root, "late", "unproven across gap");
+  await until(() => turns.length === 2);
+  expect(turns[0]).toMatchObject({ ended: "completed" });
+  expect(turns[0]?.lost).toBeUndefined();
+  expect(turns[1]?.ended).toBeUndefined();
+  expect(text(turns[1])).toBe("unproven across gap");
 });
 
 test("a late frame that evicts its own turn leaves nothing to write to", async () => {
@@ -1905,8 +2407,10 @@ test("a start after a missed settle proves no interval for a late message", asyn
   expect(turns).toHaveLength(2);
   expect(text(turns[0])).toBe("a");
   expect(turns[0]?.ended).toBe("cancelled");
+  expect(turns[0]?.lost).toBe(true);
   expect(text(turns[1])).toBe("b|late");
   expect(turns[1]?.ended).toBeUndefined();
+  expect(turns[1]?.lost).toBeUndefined();
 });
 
 test("an unsequenced start forgets the previous start's bound", async () => {
@@ -2071,16 +2575,18 @@ test("a message whose step start fell in a reconnect gap keeps its text", async 
   await until(() => stream.subscriptions() === 2 && stream.subscribers() === 1);
   // Its step start was lost in the gap: its first frame is a delta.
   delta("ses_mario", "x1", "new");
-  await until(() => text(turns[0]).endsWith("|new"));
+  await until(() => text(turns[1]) === "new");
   stream.emit("session.text.ended", {
     sessionID: "ses_mario",
     assistantMessageID: "x1",
     ordinal: 0,
     text: "new message",
   });
-  await until(() => text(turns[0]).endsWith("new message"));
+  await until(() => text(turns[1]) === "new message");
 
-  expect(turns).toHaveLength(1);
+  expect(turns).toHaveLength(2);
+  expect(turns[0]).toMatchObject({ ended: "cancelled", lost: true });
+  expect(text(turns[0]).split("|")).toEqual(ms);
 });
 
 test("a late delta of a retained turn joins it after more than 1,024 placements", async () => {

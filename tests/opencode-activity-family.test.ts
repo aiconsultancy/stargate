@@ -1,0 +1,1193 @@
+import { expect, test } from "bun:test";
+import type { SessionLogItem } from "@opencode/client";
+import type { TurnActivityLog } from "../src/backends/backend";
+import { ChildExecutions } from "../src/backends/opencode/activity-child-executions";
+import {
+  type ActivityFamilyEvent,
+  OpenCodeActivityFamilies,
+  isActivityEvent,
+} from "../src/backends/opencode/activity-family";
+import { createActivityHub } from "../src/observability/dashboard/api/v1/activity";
+
+const main = "ses_root";
+const child = "ses_child";
+const grandchild = "ses_grandchild";
+
+function fixture(
+  turnsPerAgent?: number,
+  logGate?: Promise<void>,
+  pending?: number,
+) {
+  const stop = new AbortController();
+
+  const hub = createActivityHub(
+    turnsPerAgent === undefined ? {} : { turnsPerAgent },
+  );
+
+  const recorder = hub.recorder("officer");
+  const parents = new Map<string, string>();
+  const reads: string[] = [];
+  const active = new Set<string>();
+  const logFrames = new Map<string, SessionLogItem[]>();
+  const logReads: [string, number][] = [];
+  let seq = 0;
+  let now = 0;
+
+  const families = new OpenCodeActivityFamilies(
+    {
+      signal: stop.signal,
+      parent: async (id) => {
+        reads.push(id);
+
+        return parents.get(id);
+      },
+      active: async () =>
+        Object.fromEntries([...active].map((id) => [id, { type: "running" }])),
+      async *log(id, after) {
+        logReads.push([id, after]);
+        await logGate;
+        yield* logFrames.get(id) ?? [];
+      },
+    },
+    pending === undefined ? {} : { pending },
+    () => now,
+  );
+
+  const root = (scope?: { active: boolean }, id = main) => {
+    const log = recorder.begin(undefined, id);
+    families.track(id, log, scope);
+    emit(
+      "session.text.delta",
+      id,
+      { assistantMessageID: "answer", ordinal: 0, delta: "root is running" },
+      log,
+    );
+
+    return log;
+  };
+
+  const emit = (
+    type: ActivityFamilyEvent["type"],
+    sessionID: string,
+    data: object = {},
+    owner?: TurnActivityLog,
+    eventID?: string,
+    replaySeq?: number,
+  ) => {
+    const durable =
+      replaySeq ?? (type.startsWith("session.execution.") ? ++seq : undefined);
+
+    seq = Math.max(seq, durable ?? 0);
+
+    const event = {
+      id: eventID,
+      type,
+      data: { sessionID, ...data },
+      ...(durable !== undefined && {
+        durable: {
+          aggregateID: sessionID,
+          seq: durable,
+          version: 1,
+        },
+      }),
+    } as unknown as ActivityFamilyEvent;
+
+    const order = families.receive(event);
+
+    if (owner && isActivityEvent(event)) {
+      families.owned(owner, event, order);
+    }
+  };
+
+  return {
+    stop,
+    families,
+    reads,
+    active,
+    logFrames,
+    logReads,
+    parents,
+    root,
+    emit,
+    advance: (ms: number) => {
+      now += ms;
+    },
+    turns: () => hub.turns("officer")?.turns ?? [],
+    settleRoot(log: TurnActivityLog) {
+      families.settled(main, log);
+      log.end("completed");
+    },
+    create: (id: string, parentID: string) =>
+      emit("session.created", id, { parentID }),
+    start: (id: string) => emit("session.execution.started", id),
+    end: (id: string) => emit("session.execution.succeeded", id),
+    delta: (id: string, delta: string, assistantMessageID = "answer") =>
+      emit("session.text.delta", id, {
+        assistantMessageID,
+        ordinal: 0,
+        delta,
+      }),
+    ended: (id: string, text: string, assistantMessageID: string) =>
+      emit(
+        "session.text.ended",
+        id,
+        { assistantMessageID, ordinal: 0, text },
+        undefined,
+        undefined,
+        ++seq,
+      ),
+    call: (
+      owner: TurnActivityLog,
+      id: string,
+      name = "subagent",
+      parent = main,
+    ) =>
+      emit(
+        "session.tool.input.started",
+        parent,
+        { assistantMessageID: "answer", id, name },
+        owner,
+      ),
+    names: (
+      owner: TurnActivityLog,
+      id: string,
+      sessionID: unknown,
+      parent = main,
+    ) =>
+      emit(
+        "session.tool.progress",
+        parent,
+        { assistantMessageID: "answer", id, metadata: { sessionID } },
+        owner,
+      ),
+  };
+}
+
+test("reconnect inspects all tracked children beyond the first read page", async () => {
+  const f = fixture();
+  f.root();
+  const ids = Array.from({ length: 11 }, (_, index) => `ses_held_${index}`);
+
+  for (const [index, id] of ids.entries()) {
+    f.create(id, main);
+    f.start(id);
+    f.active.add(id);
+    f.logFrames.set(id, [
+      { type: "log.synced", aggregateID: id, seq: index + 1 },
+    ]);
+  }
+
+  await f.families.reconnected();
+  expect(f.logReads.map(([id]) => id)).toEqual(ids);
+  expect(
+    f
+      .turns()
+      .slice(1)
+      .map(({ status }) => status),
+  ).toEqual(ids.map(() => "running"));
+  f.stop.abort();
+});
+
+test("reclassifying a child or fencing its peer marks its outcome lost", () => {
+  for (const change of ["peer", "fence"]) {
+    const f = fixture();
+    const scope = { active: true };
+    f.root(scope);
+    f.create(child, main);
+    f.start(child);
+
+    if (change === "peer") {
+      f.families.peer(child);
+    } else {
+      f.families.fence(main, scope);
+    }
+
+    expect(f.turns()[1]).toMatchObject({ status: "cancelled", lost: true });
+    f.stop.abort();
+  }
+});
+
+test("replays child frames after parent proof, in arrival order", async () => {
+  const f = fixture();
+  const root = f.root();
+  f.parents.set(child, main);
+  f.call(root, "launch");
+  f.start(child);
+  f.delta(child, "first");
+  f.delta(child, " second");
+  f.end(child);
+  expect(f.turns()).toHaveLength(1);
+
+  // Creation was missed. Only the already-owned native tool permits a read.
+  f.settleRoot(root);
+  f.names(root, "launch", child);
+  await Promise.resolve();
+
+  const [parent, observed] = f.turns();
+  expect(f.reads).toEqual([child]);
+  expect(observed).toMatchObject({
+    session: { id: child, parent: { turnId: parent?.id, callId: "launch" } },
+    requests: [],
+    status: "completed",
+    items: [{ kind: "text", text: "first second" }],
+  });
+  f.stop.abort();
+});
+
+test("an unrecoverable early frame leaves a visible child item", () => {
+  const f = fixture();
+  f.root();
+  f.delta(child, "x".repeat(300_000));
+  f.create(child, main);
+  f.ended(child, "later output", "answer");
+  expect(f.turns()[1]).toMatchObject({
+    items: [
+      { kind: "text", unavailable: ["activity.frames"] },
+      { kind: "text", text: "later output" },
+    ],
+  });
+  f.stop.abort();
+});
+
+test("a payload-oversized start still fences queued output from the old child", async () => {
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, gate.promise);
+  f.root();
+  f.start(child);
+  f.ended(child, "x".repeat(300_000), "old");
+  f.create(child, main);
+  expect(f.logReads).toHaveLength(1);
+
+  // The log cannot recover this start. The live boundary itself must survive.
+  f.emit("session.execution.started", child, { extra: "x".repeat(300_000) });
+  f.ended(child, "not the old child's output", "new");
+  gate.resolve();
+  await f.families.reconnected();
+  expect(f.turns()[1]).toMatchObject({
+    status: "cancelled",
+    lost: true,
+    items: [{ unavailable: ["activity.frames"] }],
+  });
+  expect(f.turns()).toHaveLength(2);
+  f.stop.abort();
+});
+
+test("a relaunch keeps its parent's naming proof while recovery is paused", async () => {
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, gate.promise);
+  const old = f.root();
+  f.start(child);
+  f.ended(child, "x".repeat(300_000), "old");
+  f.create(child, main);
+  expect(f.logReads).toHaveLength(1);
+  f.end(child);
+  f.settleRoot(old);
+
+  const next = f.root();
+  f.call(next, "relaunch");
+  f.start(child);
+  f.names(next, "relaunch", child);
+  f.ended(child, "new execution", "new");
+  f.end(child);
+  gate.resolve();
+  await f.families.reconnected();
+
+  const [, previous, nextRoot, relaunched] = f.turns();
+  expect(previous).toMatchObject({
+    status: "completed",
+    items: [{ unavailable: ["activity.frames"] }],
+  });
+  expect(relaunched).toMatchObject({
+    session: { parent: { turnId: nextRoot?.id, callId: "relaunch" } },
+    status: "completed",
+    items: [{ text: "new execution" }],
+  });
+  f.stop.abort();
+});
+
+test("two relaunches bind delayed proof to their own starts during paused recovery", async () => {
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, gate.promise);
+  const old = f.root();
+  f.start(child);
+  f.ended(child, "x".repeat(300_000), "lost");
+  f.create(child, main);
+  expect(f.logReads).toHaveLength(1);
+  f.end(child);
+  f.settleRoot(old);
+
+  const first = f.root();
+  f.call(first, "first");
+  f.start(child);
+  f.ended(child, "first one", "a");
+  f.ended(child, "first two", "b");
+  f.end(child);
+  f.settleRoot(first);
+
+  const second = f.root();
+  f.call(second, "second");
+  f.start(child);
+  f.names(second, "second", child);
+  f.names(first, "first", child);
+  f.ended(child, "second one", "c");
+  f.ended(child, "second two", "d");
+  f.end(child);
+  gate.resolve();
+  await f.families.reconnected();
+
+  const [, original, firstRoot, secondRoot, firstChild, secondChild] =
+    f.turns();
+
+  expect(original?.items).toMatchObject([{ unavailable: ["activity.frames"] }]);
+  expect(firstChild).toMatchObject({
+    session: { parent: { turnId: firstRoot?.id, callId: "first" } },
+    status: "completed",
+    items: [{ text: "first one" }, { text: "first two" }],
+  });
+  expect(secondChild).toMatchObject({
+    session: { parent: { turnId: secondRoot?.id, callId: "second" } },
+    status: "completed",
+    items: [{ text: "second one" }, { text: "second two" }],
+  });
+  f.stop.abort();
+});
+
+test("an expired naming proof still makes an overlapping relaunch ambiguous", async () => {
+  const f = fixture();
+  const root = f.root();
+  f.parents.set(child, main);
+  f.create(child, main);
+  f.start(child);
+  f.end(child);
+  f.call(root, "expired");
+  f.names(root, "expired", child);
+  f.ended(child, "not a new execution", "unowned");
+  await Promise.resolve();
+  expect(f.turns()).toHaveLength(2);
+  f.settleRoot(root);
+
+  f.advance(2001);
+  const next = f.root();
+  f.call(next, "fresh");
+  f.names(next, "fresh", child);
+  f.start(child);
+  f.ended(child, "new execution", "new");
+  await Promise.resolve();
+  expect(f.turns()[3]).toMatchObject({
+    session: { parent: null },
+    items: [{ text: "new execution" }],
+  });
+  f.stop.abort();
+});
+
+test.each(["expiry", "eviction"] as const)(
+  "an unnamed call still competes after %s with only one naming hint left",
+  async (loss) => {
+    const f = fixture(
+      undefined,
+      undefined,
+      loss === "eviction" ? 1 : undefined,
+    );
+
+    const root = f.root();
+    f.parents.set(child, main);
+    f.call(root, "competing");
+
+    if (loss === "expiry") {
+      f.advance(2001);
+    }
+
+    f.call(root, "surviving");
+    f.start(child);
+    f.names(root, "surviving", child);
+    await Promise.resolve();
+    f.names(root, "competing", child);
+    f.ended(child, "unattributed", "answer");
+    f.end(child);
+    expect(f.turns()[1]).toMatchObject({
+      session: { id: child, parent: null },
+      items: [{ text: "unattributed" }],
+    });
+    f.stop.abort();
+  },
+);
+
+test.each(["retained", "evicted"] as const)(
+  "settlement preserves %s launch ambiguity until a witnessed start",
+  async (mode) => {
+    const f = fixture(undefined, undefined, mode === "evicted" ? 1 : undefined);
+    const first = f.root();
+    f.call(first, "older");
+    f.call(first, "newer");
+    f.settleRoot(first);
+
+    const second = f.root();
+    f.parents.set(child, main);
+    f.call(second, "next");
+    f.names(second, "next", child);
+    f.start(child);
+    f.ended(child, "visible without a link", "answer");
+    f.end(child);
+    await Promise.resolve();
+
+    expect(f.turns()[2]).toMatchObject({
+      session: { id: child, parent: null },
+      status: "completed",
+      items: [{ text: "visible without a link" }],
+    });
+
+    f.call(second, "after-start");
+    f.names(second, "after-start", child);
+    f.start(child);
+    f.ended(child, "a new execution", "later");
+    f.end(child);
+    await Promise.resolve();
+
+    const [, parent, , later] = f.turns();
+    expect(later).toMatchObject({
+      session: {
+        id: child,
+        parent: { turnId: parent?.id, callId: "after-start" },
+      },
+      items: [{ text: "a new execution" }],
+    });
+    f.stop.abort();
+  },
+);
+
+test("an evicted named call does not compete for a different child", async () => {
+  const f = fixture(undefined, undefined, 1);
+  const root = f.root();
+  f.parents.set(child, main);
+  f.call(root, "first");
+  f.names(root, "first", child);
+  f.start(child);
+  f.end(child);
+  await Promise.resolve();
+  expect(f.turns()[1]?.session?.parent?.callId).toBe("first");
+
+  f.parents.set(grandchild, main);
+  f.call(root, "second");
+  f.names(root, "second", grandchild);
+  f.start(grandchild);
+  f.ended(grandchild, "unique child output", "answer");
+  f.end(grandchild);
+  await Promise.resolve();
+
+  const [parent, , observed] = f.turns();
+  expect(observed).toMatchObject({
+    session: {
+      id: grandchild,
+      parent: { turnId: parent?.id, callId: "second" },
+    },
+    status: "completed",
+    items: [{ text: "unique child output" }],
+  });
+  f.stop.abort();
+});
+
+test("fenced launch evidence does not compete in a new peer incarnation", async () => {
+  const f = fixture(undefined, undefined, 1);
+  const scope = { active: true };
+  const old = f.root(scope);
+  f.call(old, "older");
+  f.call(old, "newer");
+  f.settleRoot(old);
+  f.families.fence(main, scope);
+
+  const current = f.root({ active: true });
+  f.parents.set(child, main);
+  f.call(current, "current");
+  f.names(current, "current", child);
+  f.start(child);
+  await Promise.resolve();
+
+  const [, parent, observed] = f.turns();
+  expect(observed?.session?.parent).toMatchObject({
+    turnId: parent?.id,
+    callId: "current",
+  });
+  f.stop.abort();
+});
+
+test("call capacity across parents preserves unresolved evidence in overflow", async () => {
+  const f = fixture(undefined, undefined, 1);
+  const old = f.root();
+  f.call(old, "older");
+  f.settleRoot(old);
+
+  // Churn both exact parent slots and exact eviction ranges.
+  for (let index = 0; index < 10; index++) {
+    const id = `ses_other_${index}`;
+    const root = f.root(undefined, id);
+    f.call(root, "other", "subagent", id);
+  }
+
+  const current = f.root();
+  f.parents.set(child, main);
+  f.call(current, "current");
+  f.names(current, "current", child);
+  f.start(child);
+  f.ended(child, "visible after overflow", "answer");
+  f.end(child);
+  await Promise.resolve();
+
+  expect(f.turns().at(-1)).toMatchObject({
+    session: { id: child, parent: null },
+    items: [{ text: "visible after overflow" }],
+  });
+  f.stop.abort();
+});
+
+test.each(["live", "paused recovery"] as const)(
+  "a call opened before the previous terminal names the next start during %s",
+  async (mode) => {
+    const gate = Promise.withResolvers<void>();
+    const paused = mode === "paused recovery";
+    const f = fixture(undefined, paused ? gate.promise : undefined);
+    const root = f.root();
+    f.parents.set(child, main);
+    f.start(child);
+
+    if (paused) {
+      f.ended(child, "x".repeat(300_000), "original");
+    }
+
+    f.create(child, main);
+    expect(f.logReads).toHaveLength(paused ? 1 : 0);
+    f.call(root, "next");
+    f.names(root, "next", child);
+    f.end(child);
+    f.start(child);
+    f.ended(child, "next output", "next");
+    f.end(child);
+    gate.resolve();
+    await f.families.reconnected();
+
+    expect(f.turns()[2]).toMatchObject({
+      session: { parent: { callId: "next" } },
+      status: "completed",
+      items: [{ text: "next output" }],
+    });
+    f.stop.abort();
+  },
+);
+
+test("parallel calls naming the same start preserve an unattributed transcript", async () => {
+  const f = fixture();
+  const first = f.root();
+  const second = f.root();
+  f.parents.set(child, main);
+  f.call(first, "first");
+  f.call(second, "second");
+  f.names(second, "second", child);
+  f.names(first, "first", child);
+  f.start(child);
+  f.ended(child, "unattributed output", "unattributed");
+  f.end(child);
+  await Promise.resolve();
+  expect(f.turns()[2]).toMatchObject({
+    session: { id: child, parent: null },
+    status: "completed",
+    items: [{ text: "unattributed output" }],
+  });
+
+  f.call(second, "fresh");
+  f.names(second, "fresh", child);
+  f.start(child);
+  f.ended(child, "attributed output", "attributed");
+  await Promise.resolve();
+  expect(f.turns()[3]).toMatchObject({
+    session: { parent: { turnId: f.turns()[1]?.id, callId: "fresh" } },
+    items: [{ text: "attributed output" }],
+  });
+  f.stop.abort();
+});
+
+test("a slow competing name cannot retroactively attach an ambiguous start", async () => {
+  const f = fixture();
+  const first = f.root();
+  const second = f.root();
+  f.parents.set(child, main);
+  f.call(first, "first");
+  f.call(second, "second");
+  f.start(child);
+  f.names(first, "first", child);
+  await Promise.resolve();
+  f.ended(child, "first output", "a");
+  f.names(second, "second", child);
+  f.ended(child, "second output", "b");
+  f.end(child);
+  expect(f.turns()[2]).toMatchObject({
+    session: { id: child, parent: null },
+    items: [{ text: "first output" }, { text: "second output" }],
+  });
+  f.stop.abort();
+});
+
+test("among parallel calls only the native parent may name the child", async () => {
+  const f = fixture();
+  const foreign = f.root(undefined, grandchild);
+  const native = f.root();
+  f.parents.set(child, main);
+  f.call(foreign, "foreign", "subagent", grandchild);
+  f.call(native, "native");
+  f.names(foreign, "foreign", child, grandchild);
+  f.names(native, "native", child);
+  f.start(child);
+  f.ended(child, "native output", "native");
+  await Promise.resolve();
+  expect(f.turns()[2]).toMatchObject({
+    session: { parent: { turnId: f.turns()[1]?.id, callId: "native" } },
+    items: [{ text: "native output" }],
+  });
+  f.stop.abort();
+});
+
+test("overflowing lifecycle slots invalidates ownership until a fresh start", async () => {
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, gate.promise);
+  const root = f.root();
+  f.parents.set(child, main);
+  f.start(child);
+  f.ended(child, "x".repeat(300_000), "old");
+  f.create(child, main);
+
+  for (let index = 0; index < 65; index += 1) {
+    f.start(child);
+  }
+
+  f.ended(child, "unprovable", "new");
+  gate.resolve();
+  await f.families.reconnected();
+  f.ended(child, "still unprovable", "new");
+  expect(f.turns()[1]).toMatchObject({
+    status: "cancelled",
+    lost: true,
+    items: [{ unavailable: ["activity.frames"] }],
+  });
+  expect(f.turns()).toHaveLength(2);
+
+  f.call(root, "fresh");
+  f.names(root, "fresh", child);
+  await Promise.resolve();
+  f.start(child);
+  f.ended(child, "fresh output", "new");
+  expect(f.turns()[2]).toMatchObject({ items: [{ text: "fresh output" }] });
+  f.stop.abort();
+});
+
+test("a failed replay read fences subsequent output from the lost execution", async () => {
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, gate.promise);
+  f.root();
+  f.start(child);
+  f.ended(child, "x".repeat(300_000), "old");
+  f.create(child, main);
+  expect(f.logReads).toHaveLength(1);
+  f.ended(child, "queued output", "new");
+  gate.reject(new Error("fixture read failed"));
+  await f.families.reconnected();
+  f.ended(child, "later output", "new");
+  expect(f.turns()[1]).toMatchObject({
+    status: "cancelled",
+    lost: true,
+    items: [{ unavailable: ["activity.frames"] }],
+  });
+  f.stop.abort();
+});
+
+test("fills a child call ID only from the owning turn", () => {
+  const f = fixture();
+  const root = f.root();
+  f.call(root, "launch");
+  f.call(root, "not-subagent", "shell");
+  f.create(child, main);
+  f.start(child);
+  const other = f.root();
+  const link = () => f.turns()[1]?.session?.parent?.callId;
+  f.call(other, "other");
+  f.names(other, "other", child);
+  f.names(root, "not-subagent", child);
+  f.names(root, "launch", { session: child });
+  expect(link()).toBeNull();
+
+  f.names(root, "launch", child);
+  expect(link()).toBe("launch");
+  f.stop.abort();
+});
+
+test("admits a grandchild only after its parent and rejects foreign sessions", () => {
+  const f = fixture();
+  f.root();
+  f.start(child);
+  f.create(grandchild, child);
+  f.start(grandchild);
+  f.delta(grandchild, "nested");
+  f.create("ses_foreign", "ses_untracked");
+  f.start("ses_foreign");
+  f.create("ses_self", "ses_self");
+  f.start("ses_self");
+  expect(f.turns()).toHaveLength(1);
+
+  f.create(child, main);
+  const [root, parent, nested] = f.turns();
+  expect(f.turns()).toHaveLength(3);
+  expect(parent?.session).toMatchObject({
+    id: child,
+    parent: { turnId: root?.id, callId: null },
+  });
+  expect(nested).toMatchObject({
+    session: { id: grandchild, parent: { turnId: parent?.id, callId: null } },
+    items: [{ kind: "text", text: "nested" }],
+  });
+  f.stop.abort();
+});
+
+test("keeps the running child and leaves the next start unlinked when two calls fit", async () => {
+  const f = fixture();
+  f.parents.set(child, main);
+  const root = f.root();
+  f.call(root, "first");
+  f.create(child, main);
+  f.names(root, "first", child);
+  f.start(child);
+  f.settleRoot(root);
+  const later = f.root();
+  f.call(later, "joined");
+  f.names(later, "joined", child);
+  f.delta(child, "still first");
+  f.end(child);
+  f.call(later, "new-period");
+  f.names(later, "new-period", child);
+  f.start(child);
+  f.ended(child, "new output", "new-answer");
+  await Promise.resolve();
+
+  const [firstRoot, first, , next] = f.turns();
+  expect(first).toMatchObject({
+    session: { parent: { turnId: firstRoot?.id, callId: "first" } },
+    items: [{ text: "still first" }],
+  });
+  expect(next).toMatchObject({
+    session: { parent: null },
+    items: [{ text: "new output" }],
+  });
+  f.stop.abort();
+});
+
+test("routes late child deltas to their own execution and deduplicates native event IDs", async () => {
+  const f = fixture();
+  const first = f.root();
+  f.parents.set(child, main);
+  f.call(first, "first");
+  f.create(child, main);
+  f.names(first, "first", child);
+  f.start(child);
+
+  const delta = (assistantMessageID: string, eventID: string, delta: string) =>
+    f.emit(
+      "session.text.delta",
+      child,
+      { assistantMessageID, ordinal: 0, delta },
+      undefined,
+      eventID,
+    );
+
+  delta("old", "evt_original", "old");
+  delta("old", "evt_original", "old");
+  f.end(child);
+  f.settleRoot(first);
+
+  const next = f.root();
+  f.call(next, "next");
+  f.names(next, "next", child);
+  f.start(child);
+  await Promise.resolve();
+  f.ended(child, "new", "new");
+  delta("old", "evt_old_late", " late");
+  delta("old", "evt_old_late", " late");
+  // Equal payloads from different native event IDs are not duplicate events.
+  delta("old", "evt_old_distinct", " late");
+
+  const [firstRoot, oldChild, nextRoot, newChild] = f.turns();
+  expect(oldChild).toMatchObject({
+    session: { parent: { turnId: firstRoot?.id, callId: "first" } },
+    items: [{ text: "old late late" }],
+    status: "completed",
+  });
+  expect(newChild).toMatchObject({
+    session: { parent: { turnId: nextRoot?.id, callId: "next" } },
+    items: [{ text: "new" }],
+  });
+  f.stop.abort();
+});
+
+test("settling a child keeps only a short exact window for late delta IDs", () => {
+  const f = fixture();
+  f.root();
+  f.create(child, main);
+  f.start(child);
+
+  const id = (index: number) =>
+    `00000000-0000-0000-0000-${index.toString(16).padStart(12, "0")}`;
+
+  const delta = (eventID: string, text: string) =>
+    f.emit(
+      "session.text.delta",
+      child,
+      { assistantMessageID: "answer", ordinal: 0, delta: text },
+      undefined,
+      eventID,
+    );
+
+  for (let index = 0; index < 65; index += 1) {
+    delta(id(index), "a");
+  }
+
+  f.end(child);
+  delta(id(64), "duplicate");
+  delta(`${id(64)}\n`, " distinct");
+  delta(id(0), " expired");
+  delta("x".repeat(1025), " oversized ID");
+  expect(f.turns()[1]).toMatchObject({
+    items: [{ text: `${"a".repeat(65)} distinct expired oversized ID` }],
+  });
+  f.stop.abort();
+});
+
+test("a completed child cursor outlives candidate expiry and reconnect", async () => {
+  const f = fixture();
+  const first = f.root();
+  f.parents.set(child, main);
+  f.create(child, main);
+  f.start(child);
+  f.delta(child, "one");
+  f.end(child);
+  f.settleRoot(first);
+
+  // Churn the bounded wait list before expiring it, without evicting the family.
+  for (let index = 0; index <= 128; index += 1) {
+    f.start(`ses_unproven_${index}`);
+  }
+
+  f.advance(3000);
+  await f.families.reconnected();
+
+  const next = f.root();
+  f.call(next, "next");
+  f.names(next, "next", child);
+  f.emit("session.execution.started", child, {}, undefined, undefined, 1);
+  f.emit("session.text.delta", child, {
+    assistantMessageID: "new",
+    ordinal: 0,
+    delta: "not yet",
+  });
+  await Promise.resolve();
+  expect(f.turns()).toHaveLength(3);
+
+  f.start(child);
+  f.ended(child, "two", "new");
+  expect(f.turns()[3]).toMatchObject({ items: [{ text: "two" }] });
+  f.stop.abort();
+});
+
+test("reconnect cannot readmit a start discarded before parent proof", async () => {
+  const f = fixture();
+  const old = f.root();
+  f.start(child);
+  f.settleRoot(old);
+  await f.families.reconnected();
+
+  const next = f.root();
+  f.parents.set(child, main);
+  f.call(next, "next");
+  f.names(next, "next", child);
+  await Promise.resolve();
+  f.emit("session.execution.started", child, {}, undefined, undefined, 1);
+  f.ended(child, "old late output", "old-assistant");
+  expect(f.turns()).toHaveLength(2);
+
+  f.start(child);
+  f.delta(child, "stale output without an admitted prior writer", "unseen-old");
+  f.ended(child, "new", "new-assistant");
+  expect(f.turns()[2]).toMatchObject({ items: [{ text: "new" }] });
+  f.stop.abort();
+});
+
+test("family eviction replaces child writer associations with tombstones immediately", () => {
+  const hub = createActivityHub({ turnsPerAgent: 1 });
+  const recorder = hub.recorder("officer");
+  const parent = recorder.begin();
+  const log = parent.child?.(null, child);
+
+  if (!log) {
+    throw new Error("Expected child writer");
+  }
+
+  const execution = { parent, log, lower: 1 };
+  const history = new ChildExecutions<typeof execution>(1);
+  history.track(child);
+  history.admitted(child, execution);
+  history.remember(child, execution, "assistant-id");
+  history.settled(child, execution, 6);
+  expect(history.owner(child, "assistant-id", undefined)).toBe(execution);
+  expect(history.owner(child, "unseen", 4)).toBe(execution);
+  parent.end("completed");
+  log.end("completed");
+  recorder.begin();
+  expect(history.owner(child, "assistant-id", undefined)).toBeNull();
+  expect(history.owner(child, "unseen", 4)).toBeNull();
+  expect(history.get(child)?.latest).toBeUndefined();
+});
+
+test("late items from an evicted child execution do not enter its replacement", async () => {
+  const f = fixture(1);
+  const old = f.root();
+  f.parents.set(child, main);
+  f.create(child, main);
+  f.start(child);
+  f.delta(child, "old", "old-assistant");
+  f.end(child);
+  f.settleRoot(old);
+
+  const next = f.root();
+  expect(f.turns()).toHaveLength(1);
+  f.call(next, "next");
+  f.names(next, "next", child);
+  f.start(child);
+  await Promise.resolve();
+  f.delta(child, "late", "old-assistant");
+  f.ended(child, "new", "new-assistant");
+  expect(f.turns()[1]).toMatchObject({ items: [{ text: "new" }] });
+  f.stop.abort();
+});
+
+test("a durable frame behind a higher sequence is applied once", () => {
+  const f = fixture();
+  f.root();
+  f.create(child, main);
+  f.start(child);
+
+  for (const [seq, delta] of [
+    [6, "six"],
+    [4, " four"],
+    [4, " duplicate"],
+  ] as const) {
+    f.emit(
+      "session.text.delta",
+      child,
+      { assistantMessageID: "answer", ordinal: 0, delta },
+      undefined,
+      undefined,
+      seq,
+    );
+  }
+
+  expect(f.turns()[1]).toMatchObject({ items: [{ text: "six four" }] });
+  f.stop.abort();
+});
+
+test("sparse durable replay overflow preserves output and exposes uncertainty", () => {
+  const f = fixture();
+  f.root();
+  f.create(child, main);
+  f.start(child);
+
+  for (let index = 0; index <= 8192; index += 1) {
+    f.emit(
+      "session.text.delta",
+      child,
+      { assistantMessageID: "answer", ordinal: 0, delta: "a" },
+      undefined,
+      undefined,
+      4 + 2 * index,
+    );
+  }
+
+  expect(f.turns()[1]).toMatchObject({
+    items: [{ text: "a".repeat(8193) }, { unavailable: ["activity.frames"] }],
+  });
+  f.stop.abort();
+});
+
+test("a long child keeps every durable frame and non-durable delta", () => {
+  const f = fixture();
+  f.root();
+  f.create(child, main);
+  f.start(child);
+  const assistantMessageID = "message".repeat(45);
+  const n = 8200;
+
+  for (let index = 0; index < n; index += 1) {
+    f.emit(
+      "session.text.delta",
+      child,
+      { assistantMessageID, ordinal: 0, delta: "a" },
+      undefined,
+      undefined,
+      index + 2,
+    );
+    f.emit(
+      "session.text.delta",
+      child,
+      { assistantMessageID, ordinal: 0, delta: "b" },
+      undefined,
+      `event-${index}-${assistantMessageID}`,
+    );
+  }
+
+  expect(f.turns()[1]).toMatchObject({ items: [{ text: "ab".repeat(n) }] });
+  f.ended(child, "ab".repeat(n) + "!", assistantMessageID);
+  expect(f.turns()[1]).toMatchObject({
+    items: [{ text: "ab".repeat(n) + "!" }],
+  });
+  f.stop.abort();
+});
+
+test("an unproven late delta cannot appear in a reused execution", async () => {
+  const f = fixture();
+  const old = f.root();
+  f.parents.set(child, main);
+  f.create(child, main);
+  f.start(child);
+  f.emit("session.execution.succeeded", child, {}, undefined, undefined, 8);
+  f.settleRoot(old);
+  const next = f.root();
+  f.call(next, "next");
+  f.names(next, "next", child);
+  f.start(child);
+  await Promise.resolve();
+
+  f.delta(child, "unproven old", "unseen");
+  expect(f.turns()[3]).toMatchObject({ items: [] });
+  f.emit(
+    "session.text.ended",
+    child,
+    { assistantMessageID: "unseen", ordinal: 0, text: "old complete" },
+    undefined,
+    undefined,
+    4,
+  );
+  f.ended(child, "new complete", "new");
+  expect(f.turns()[1]).toMatchObject({ items: [{ text: "old complete" }] });
+  expect(f.turns()[3]).toMatchObject({ items: [{ text: "new complete" }] });
+  f.stop.abort();
+});
+
+test("a witnessed child interval routes a first-seen durable message to the old parent", async () => {
+  const f = fixture();
+  const first = f.root();
+  f.parents.set(child, main);
+  f.create(child, main);
+  f.start(child);
+  f.emit("session.execution.succeeded", child, {}, undefined, undefined, 8);
+  f.settleRoot(first);
+
+  const next = f.root();
+  f.call(next, "next");
+  f.names(next, "next", child);
+  f.start(child);
+  await Promise.resolve();
+  f.ended(child, "new", "new-assistant");
+
+  const late = { assistantMessageID: "late", ordinal: 0, delta: "old" };
+  f.emit("session.text.delta", child, late, undefined, undefined, 4);
+  f.emit("session.text.delta", child, late, undefined, undefined, 4);
+  expect(f.turns()[1]).toMatchObject({
+    status: "completed",
+    items: [{ text: "old" }],
+  });
+  expect(f.turns()[3]).toMatchObject({
+    status: "running",
+    items: [{ text: "new" }],
+  });
+  f.stop.abort();
+});
+
+test("drops expired unproven frames and marks an unobserved outcome lost on reconnect", async () => {
+  const f = fixture();
+  f.root();
+  f.delta(child, "expired");
+  f.advance(2001);
+  f.create(child, main);
+  f.start(child);
+  f.delta(child, "retained");
+  await f.families.reconnected();
+  expect(f.turns()[1]).toMatchObject({
+    status: "cancelled",
+    lost: true,
+    reconnects: 1,
+    items: [{ text: "retained" }],
+  });
+  f.stop.abort();
+});
+
+test("does not use a tool name or a newly unique root to override native ancestry", async () => {
+  const f = fixture();
+  const root = f.root();
+  const overlap = f.root();
+  f.create(child, main);
+  f.start(child);
+  f.delta(child, "ambiguous until proven");
+  f.settleRoot(overlap);
+  f.delta(child, " still ambiguous");
+
+  f.parents.set("ses_foreign", "ses_foreign_parent");
+  f.call(root, "forged-relationship");
+  f.names(root, "forged-relationship", "ses_foreign");
+  f.start("ses_foreign");
+  await Promise.resolve();
+  expect(f.reads).toEqual(["ses_foreign"]);
+  expect(f.turns()).toHaveLength(2);
+  f.stop.abort();
+});
+
+test("reconnect only keeps a running child if its durable period is unchanged", async () => {
+  const f = fixture();
+  f.root();
+  f.create(child, main);
+  f.start(child);
+  f.active.add(child);
+  f.logFrames.set(child, [{ type: "log.synced", aggregateID: child, seq: 1 }]);
+  await f.families.reconnected();
+  expect(f.turns()[1]?.status).toBe("running");
+  expect(f.logReads).toEqual([[child, 1]]);
+
+  f.logFrames.set(child, [
+    {
+      type: "session.execution.started",
+      id: "next-start",
+      created: 2,
+      durable: { aggregateID: child, seq: 2, version: 1 },
+      data: { sessionID: child },
+    },
+  ]);
+  await f.families.reconnected();
+  expect(f.turns()[1]).toMatchObject({ status: "cancelled", lost: true });
+  f.stop.abort();
+});
+
+test("reconnect can recover a proven native child outcome without replaying items", async () => {
+  const f = fixture();
+  f.root();
+  f.create(child, main);
+  f.start(child);
+  f.logFrames.set(child, [
+    {
+      type: "session.execution.succeeded",
+      id: "settled",
+      created: 2,
+      durable: { aggregateID: child, seq: 2, version: 1 },
+      data: { sessionID: child },
+    },
+  ]);
+  await f.families.reconnected();
+  expect(f.turns()[1]).toMatchObject({
+    status: "completed",
+    items: [],
+    reconnects: 1,
+  });
+  expect(f.turns()[1]?.lost).toBeUndefined();
+  f.stop.abort();
+});

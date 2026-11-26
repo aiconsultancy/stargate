@@ -418,10 +418,21 @@ export type TurnActivityLog = {
   reconnected(): void;
   /** A provider-supplied total, rather than the sum of observed steps. */
   setUsage?(usage: ActivityUsage): void;
-  /** Begin a child owned by a tool call observed in this turn. */
-  child?(callId: string, sessionId: string): TurnActivityLog;
+  /** Begin a child under this retained turn, or leave its parent unattributed. */
+  child?(
+    callId: string | null,
+    sessionId: string,
+    startedAt?: number,
+    detached?: true,
+  ): TurnActivityLog | undefined;
+  /** Supply the verified call ID of a child whose call was not yet known. */
+  link?(callId: string): void;
   /** End without claiming a native outcome when observation was lost. */
   end(outcome: ActivityOutcome, lost?: true): void;
+  /** False once the recorder evicts this turn and ignores further frames. */
+  retained?(): boolean;
+  /** Notify after the recorder removes this writer's retained turn. */
+  onEvicted?(notify: () => void): void;
 };
 
 /** Collects officer turns for operator views; one per registration. */
@@ -456,11 +467,6 @@ export type CrewTurnStart = {
 export type CrewTurnActivityLog = TurnActivityLog & {
   /** A late task lookup attributed this turn to a task. */
   attribute(task: CrewTurnTask): void;
-  /**
-   * False once the recorder no longer keeps the turn: the writer can drop it
-   * and ignore its later frames.
-   */
-  retained?(): boolean;
 };
 
 /** Collects crew worker turns for operator views; one per registration. */

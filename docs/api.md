@@ -618,7 +618,7 @@ array is empty for other transports or when the original IRC message ID is
 unknown. Requests queued before link data was recorded are not backfilled.
 A follow-up steered into an already-running input is not a new turn and is
 not included in these links.
-Claude child turns have `requests: []`: the IRC message started the root,
+Child turns have `requests: []`: the IRC message started the root,
 not the subagent. `session.parent.turnId` names each child's immediate
 parent. A child admitted unlinked, below, is the exception.
 
@@ -649,9 +649,43 @@ that exceeds either global limit on its own is evicted first, before any
 older family. Eviction does not limit a running family's child turns: they
 are bounded only by the query's own turns and tool calls. No content is cut.
 OpenCode turns appear when the input is submitted and include output only
-once transcript placement proves it belongs to that turn. Claude recording
-starts at query submission, after stopping orphans, probing the CLI version,
-and creating the private temporary directory with `mkdtemp`.
+once transcript placement proves it belongs to that turn. OpenCode officer
+and crew collectors follow native sub-sessions on the same event stream as
+their roots. A child needs native ancestry and either an owned `subagent`
+call naming it or a single unambiguous running parent. Early child frames
+wait in a bounded buffer and replay in arrival order once the parent is
+proven. Unproven frames expire. When the buffer fills before admission,
+the collector reads missing durable frames from the native log; if any
+frames cannot be recovered, the child shows `unavailable: ["activity.frames"]`.
+OpenCode children have their own session and turn IDs. Their `callId` may
+start as `null` and fill once in a `turn-updated`. Each busy period of a
+reused child is a separate turn; a follow-up that joins an already-running
+child does not move it to a different parent. The child records its own
+outcome and can keep running after the root reply.
+
+Known child assistant messages and frames strictly inside a witnessed child
+execution's durable bounds stay with their original execution; frames
+for an evicted turn are dropped. Native event IDs deduplicate streamed
+deltas, and the child session's durable cursor survives candidate expiry
+and reconnect while the parent is tracked. An item with no witnessed
+message association falls back to the current admitted child execution and
+does not inherit an older outcome. A delta without a native ID cannot be
+deduplicated. The delta ID window can forget old IDs, not transcript text.
+After a child session starts a new execution, an unsequenced delta for an
+unknown assistant message is withheld; the final text can still arrive in
+the durable message-end frame.
+
+After a stream reconnect, the collector uses bounded reads of native
+execution boundaries to check whether a child is still in the same busy
+period or a native outcome is known. It does not reconstruct the transcript.
+If neither continuity nor the outcome is proven, the child ends
+`cancelled` with `lost: true`, meaning observation was lost, not that the
+native session was interrupted. The same marker appears if a new native
+start reveals a missed settlement or crew ownership of a child is lost.
+
+Claude recording starts at query submission, after stopping orphans,
+probing the CLI version, and creating the private temporary directory with
+`mkdtemp`.
 
 #### Live activity events
 
@@ -688,11 +722,11 @@ shapes:
 | `change.type`  | Payload                                                 |
 | -------------- | ------------------------------------------------------- |
 | `turn-started` | `turn`: the turn without `items`                        |
-| `turn-updated` | `turn`: after a reattachment, usage or crew task update |
+| `turn-updated` | `turn`: after reattachment, usage, task or call linking |
 | `turn-ended`   | `turn`: with its outcome, `endedAt` and settled `usage` |
 | `item`         | `item`: the item, or its identity and `paged`           |
 
-All turn upserts include `requests`, starting with `turn-started`. Claude
+All turn upserts include `requests`, starting with `turn-started`. OpenCode and Claude
 root and child events share the officer's `agentId`, sequence and generation;
 their turn upserts include `session` exactly as in the snapshot.
 
@@ -731,16 +765,16 @@ To follow an officer without a gap:
    when the stream opens, so a snapshot fetched earlier can miss changes.
    Keep the stream's `agent-activity` events.
 2. Fetch `/api/v1/agents/<id>/activity`.
-3. Apply each kept or later event whose `seq` is above that agent's snapshot
-   `cursor.seq`, replacing the turn or item with the same ID. Drop the rest:
-   the snapshot already holds them. `seq` and the cursor are per agent: with
-   several `agent` values, events from different officers interleave, and
-   each is compared only with its own agent's cursor and events.
-4. Refetch that agent's snapshot and apply again from step 3 when an event's
-   `generation` differs from its cursor's (the gateway restarted) or its `seq`
-   is not above the same agent's previous event. When the stream closes,
-   start again from step 1. The server never drops an event from an open
-   stream; it closes the stream instead.
+3. For each kept or later event, compare `generation` with that agent's
+   cursor first. If they differ (the gateway restarted), refetch that
+   agent's snapshot before comparing sequence numbers. Ignore buffered
+   events from the superseded generation.
+4. Within the same generation, drop events whose `seq` is at or below
+   that agent's cursor. Apply newer events by replacing the turn or item
+   with the same ID, then advance the cursor to that `seq`. With several
+   `agent` values, compare each event only with its own agent's cursor.
+   When the stream closes, start again from step 1. The server never
+   drops an event from an open stream; it closes the stream instead.
 
 ### Crew activity
 
@@ -762,10 +796,12 @@ Its answer is bounded by the crew's load-time limit of 50 member contexts:
 at most 50 members, 50 peer sessions (one per member and project) and
 50 × 17 tasks (each context's active task and its latest 16 settled ones);
 a larger answer is refused as malformed.
-Only root worker sessions of configured OpenCode members with a ready peer
-session are collected: not Pi workers, removed members or pending
-reservations, and sub-sessions not yet. A session that changes member,
-project or crew namespace is no longer collected. A task's resume inputs
+Only configured OpenCode members with a ready peer session provide roots:
+not Pi workers, removed members or pending reservations. Their proven
+sub-sessions follow the same family rules as the officer route. A session
+that changes member, project or crew namespace is no longer collected.
+Replacing or removing a peer stops observation of its descendants; a
+replacement cannot adopt an old descendant's execution. A task's resume inputs
 are attributed for each member's latest 64 tasks; an older task's
 assignment input still is.
 
@@ -785,10 +821,16 @@ A crew turn covers one execution of the worker session, as an officer's
 turn does, and ends when the execution settles, with its outcome. A DM,
 notice or callback steered into the running execution never ends a turn.
 If a settle is missed, the session's next native execution start ends its
-open turns `cancelled`, and so do messages of that execution still waiting
-to be placed. Starts and settlements apply in their session's durable
-order: a replayed or late one, of any age, changes nothing. One without a
-durable sequence for its session is applied as it comes.
+open turns `cancelled` with `lost: true`, including turns whose messages were
+still waiting to be placed. Starts and settlements apply in their session's
+durable order: a replayed or late one, of any age, changes nothing. One
+without a durable sequence for its session is applied as it comes.
+After reconnect, newer stream frames wait
+while bounded reads check the durable boundary of the current execution.
+Being active is not proof that it is the same execution. If the log proves
+a settlement, its old crew root turns get that outcome. If neither a
+settlement nor continuation can be proven, those turns end `cancelled`
+with `lost: true` before the new execution's output is placed.
 
 An execution's messages are placed in the order their first frames arrived.
 Output whose owning input is not known yet appears after up to 2 seconds,
@@ -821,9 +863,9 @@ seen through a delta, when its execution is older than those 16, or when
 either bound of its execution was not seen with a durable sequence, for
 example a start without one, after a reconnect or when the session became
 a peer mid-execution. A settle missed and inferred from the next start
-bounds nothing either, since unseen executions may lie between. A turn opened by a message whose owner cannot
-be proven keeps `task: null`, and a later task message of the execution
-opens its own turn.
+bounds nothing either, since unseen executions may lie between. A turn
+opened by a message whose owner cannot be proven keeps `task: null`, and
+a later task message of the execution opens its own turn.
 
 Output waiting for its owner is held up to 256 KiB per message and 4 MiB in
 total, counted as each frame's serialized data without its small envelope;
@@ -855,11 +897,14 @@ Each crew turn adds:
   task's own worker session and member, otherwise `null`: crew mail,
   notices, compaction or an input that could not be proven. A turn whose
   task lookup was slow starts with `null` and is updated once, with a
-  `turn-updated` event, also when the turn has already ended: that event
-  then shows the ended turn, and an end in the same window still arrives as
-  `turn-ended`. `project` is the crew
-  project key, `null` for the captain's default project.
-- `session`: `{ id, parent }`, the worker session; `parent` is `null`.
+  `turn-updated` event, also when the turn has
+  already ended: that event then shows the ended turn, and an end in the
+  same window still arrives as `turn-ended`. `project` is the crew
+  project key, `null` for the captain's default project. Children inherit
+  their root's task, including attribution that arrives after they ended;
+  no child makes its own task lookup.
+- `session`: `{ id, parent }`, the worker or child session. `parent` is
+  `null` for a root and `{ turnId, callId }` for a child.
 
 Each member keeps its own last 16 root turns and their children, apart from
 the officer's. Its settled families count towards the same global 256-turn

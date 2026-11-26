@@ -6,6 +6,7 @@ import type {
   CrewTurnStart,
   TurnActivityRecorder,
 } from "../../../../backends/backend";
+import { evict, notifyEviction } from "./activity-retention";
 import {
   type StoredItem,
   type StoredTurn,
@@ -251,109 +252,6 @@ function mark(
   }
 }
 
-/** A turn's cached size, measured again after a write cleared it. */
-function measuredBytes(turn: StoredTurn, measure: typeof settledBytes) {
-  return (turn.bytes ??= measure(turn));
-}
-
-/**
- * Evict settled families together so a retained child never loses its
- * parent, then tell each evicted turn's writer: every path evicts here.
- */
-function evict(
-  agents: ReadonlyMap<string, Agent>,
-  limits: Limits,
-  measure: typeof settledBytes,
-) {
-  type Family = {
-    owner: Agent;
-    turns: StoredTurn[];
-    endedAt: number | null;
-    bytes: number;
-  };
-
-  const ended: Family[] = [];
-  const removed: StoredTurn[] = [];
-
-  function remove(family: Family) {
-    for (const turn of family.turns) {
-      family.owner.turns.splice(family.owner.turns.indexOf(turn), 1);
-      removed.push(turn);
-    }
-  }
-
-  for (const owner of agents.values()) {
-    const families = new Map<string, Family>();
-
-    for (const turn of owner.turns) {
-      const family = families.get(turn.root) ?? {
-        owner,
-        turns: [],
-        endedAt: 0,
-        bytes: 0,
-      };
-
-      family.turns.push(turn);
-      family.endedAt =
-        family.endedAt === null || turn.endedAt === null
-          ? null
-          : Math.max(family.endedAt, turn.endedAt);
-      families.set(turn.root, family);
-    }
-
-    let excess = families.size - limits.turnsPerAgent;
-
-    for (const family of families.values()) {
-      if (family.endedAt === null) {
-        continue;
-      }
-
-      if (excess <= 0) {
-        family.bytes = family.turns.reduce(
-          (bytes, turn) => bytes + measuredBytes(turn, measure),
-          0,
-        );
-        ended.push(family);
-
-        continue;
-      }
-
-      remove(family);
-      excess -= 1;
-    }
-  }
-
-  // Drop a family over a global limit on its own before older families.
-  const fitting = ended.filter((family) => {
-    if (family.turns.length <= limits.turns && family.bytes <= limits.bytes) {
-      return true;
-    }
-
-    remove(family);
-
-    return false;
-  });
-
-  let bytes = fitting.reduce((sum, family) => sum + family.bytes, 0);
-  // In-flight families do not spend the settled-turn budget.
-  let turnCount = fitting.reduce((sum, family) => sum + family.turns.length, 0);
-  fitting.sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
-
-  for (const family of fitting) {
-    if (turnCount <= limits.turns && bytes <= limits.bytes) {
-      break;
-    }
-
-    remove(family);
-    turnCount -= family.turns.length;
-    bytes -= family.bytes;
-  }
-
-  for (const turn of removed) {
-    turn.evicted?.();
-  }
-}
-
 type TurnStart =
   | {
       kind: "root";
@@ -365,6 +263,7 @@ type TurnStart =
       session: CrewTurnStart["session"];
       task: CrewTurnStart["task"];
       startedAt: number | undefined;
+      maySpawn: () => boolean;
       evicted: (() => void) | undefined;
     }
   | {
@@ -373,6 +272,9 @@ type TurnStart =
       callId: string | null;
       sessionId: string;
       requests: readonly ActivityRequest[];
+      startedAt: number | undefined;
+      maySpawn: (() => boolean) | undefined;
+      detached: true | undefined;
     };
 
 /** Keep only live inherited watches and the parent root's current watches. */
@@ -409,10 +311,24 @@ function turnStart(owner: Agent, id: string, source: TurnStart) {
   }
 
   if (source.kind === "crew") {
-    return { requests: [], session: source.session, root: id };
+    return {
+      requests: [],
+      session: source.session,
+      root: id,
+      task: source.task,
+    };
   }
 
   const { parent, callId, sessionId } = source;
+
+  if (source.detached) {
+    return {
+      requests: [],
+      session: { id: sessionId, parent: null },
+      root: id,
+      task: parent.task === undefined ? undefined : null,
+    };
+  }
 
   return owner.turns.includes(parent)
     ? {
@@ -420,13 +336,37 @@ function turnStart(owner: Agent, id: string, source: TurnStart) {
         session: { id: sessionId, parent: { turnId: parent.id, callId } },
         root: parent.root,
         audience: parent.audience,
+        task: parent.task,
       }
     : {
         requests: source.requests,
         session: { id: sessionId, parent: null },
         root: id,
         audience: unlinkedAudience(owner, parent),
+        task: parent.task,
       };
+}
+
+function touch(owner: Agent, turn: StoredTurn, at: number) {
+  delete turn.bytes;
+  turn.seq = ++owner.seq;
+  turn.updatedAt = Math.max(turn.updatedAt, at);
+}
+
+function markTurn(
+  generation: string,
+  owner: Agent,
+  turn: StoredTurn,
+  at: number,
+  key: string,
+  type: Lifecycle["type"],
+) {
+  mark(generation, owner, `${key}:${turn.id}`, () => ({
+    seq: turn.seq,
+    at,
+    turn,
+    change: { type, turn: turnSummary(turn) },
+  }));
 }
 
 /** A settled turn's size, measured when it ends and after later changes. */
@@ -559,7 +499,9 @@ export function createActivityHub(
     const start = turnStart(owner, id, source);
     const crew = source.kind === "crew" ? source : undefined;
     const family = source.kind === "crew" ? [] : source.requests;
-    const startedAt = Math.min(crew?.startedAt ?? Infinity, now());
+    const maySpawn = source.kind === "root" ? undefined : source.maySpawn;
+    const observed = source.kind === "root" ? undefined : source.startedAt;
+    const startedAt = Math.min(observed ?? Infinity, now());
 
     owner.seq += 1;
 
@@ -578,7 +520,7 @@ export function createActivityHub(
         msgid,
       })),
       ...(start.session && { session: structuredClone(start.session) }),
-      ...(crew && { task: structuredClone(crew.task) }),
+      ...(start.task !== undefined && { task: structuredClone(start.task) }),
       items: new Map(),
       ...(crew?.evicted && { evicted: crew.evicted }),
       ...(start.audience && { audience: start.audience }),
@@ -587,35 +529,20 @@ export function createActivityHub(
     owner.turns.push(turn);
     retain();
 
-    mark(generation, owner, `start:${turn.id}`, () => ({
-      seq: turn.seq,
-      at: startedAt,
-      turn,
-      change: { type: "turn-started", turn: turnSummary(turn) },
-    }));
+    markTurn(generation, owner, turn, startedAt, "start", "turn-started");
 
     const keys = new Map<string, StoredItem>();
 
-    const touch = (at: number) => {
-      delete turn.bytes;
-      turn.seq = ++owner.seq;
-      turn.updatedAt = Math.max(turn.updatedAt, at);
-
-      return turn.seq;
-    };
-
     const changed = (at: number) => {
-      const seq = touch(at);
-
-      mark(generation, owner, `turn:${turn.id}`, () => ({
-        seq,
-        at,
+      touch(owner, turn, at);
+      markTurn(
+        generation,
+        owner,
         turn,
-        change: {
-          type: turn.endedAt === null ? "turn-updated" : "turn-ended",
-          turn: turnSummary(turn),
-        },
-      }));
+        at,
+        "turn",
+        turn.endedAt === null ? "turn-updated" : "turn-ended",
+      );
     };
 
     /** A change after the end has the settled turn measured again, whole. */
@@ -647,7 +574,8 @@ export function createActivityHub(
 
           delete turn.bytes;
           change?.(item.value);
-          item.seq = touch(at);
+          touch(owner, turn, at);
+          item.seq = turn.seq;
           item.updatedAt = Math.max(item.updatedAt, at);
 
           const stored = item;
@@ -674,34 +602,50 @@ export function createActivityHub(
         changed(now());
         resize();
       }),
-      child(callId, sessionId) {
+      child(callId, sessionId, startedAt, detached) {
+        if (gone() || maySpawn?.() === false) {
+          return;
+        }
+
         return begin(agentId, {
           kind: "child",
           parent: turn,
           callId,
           sessionId,
           requests: family,
+          startedAt,
+          maySpawn,
+          detached,
         });
+      },
+      link(callId) {
+        const parent = turn.session?.parent;
+
+        if (parent?.callId === null && !gone()) {
+          parent.callId = callId;
+          const at = now();
+          touch(owner, turn, at);
+          markTurn(generation, owner, turn, at, "link", "turn-updated");
+          resize();
+        }
       },
       attribute(task) {
         // Crew turns only, and once: a late task lookup succeeded.
-        if (turn.task !== null || gone()) {
+        if (turn.task !== null || turn.root !== turn.id || gone()) {
           return;
         }
 
-        turn.task = structuredClone(task);
         const at = now();
-        const seq = touch(at);
 
-        // Its own upsert: it never replaces an end in the same flush, and
-        // After the end it is still an update, not another end.
-        mark(generation, owner, `task:${turn.id}`, () => ({
-          seq,
-          at,
-          turn,
-          change: { type: "turn-updated", turn: turnSummary(turn) },
-        }));
-        resize();
+        for (const child of owner.turns) {
+          if (child.root === turn.id && child.task === null) {
+            child.task = structuredClone(task);
+            touch(owner, child, at);
+            // A separate upsert, so attribution never replaces an end.
+            markTurn(generation, owner, child, at, "task", "turn-updated");
+            remeasure(child);
+          }
+        }
       },
       end(outcome: ActivityOutcome, lost?: true) {
         if (turn.endedAt !== null) {
@@ -721,6 +665,11 @@ export function createActivityHub(
         retain();
       },
       retained: () => owner.turns.includes(turn),
+      onEvicted(notify) {
+        if (!gone()) {
+          notifyEviction(turn, notify);
+        }
+      },
     };
   }
 
@@ -745,12 +694,13 @@ export function createActivityHub(
         ship,
         ++recorders,
         { owners, crews, uncollected },
-        (start, startedAt, evicted) =>
+        (start, startedAt, maySpawn, evicted) =>
           begin(crewSubject(ship, start.member), {
             kind: "crew",
             session: start.session,
             task: start.task,
             startedAt,
+            maySpawn,
             evicted,
           }),
       ),

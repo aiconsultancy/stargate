@@ -202,6 +202,13 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 ### Feature flags
 
+- No new flag: OpenCode officer and crew activity follow proven sub-sessions
+  after the root returns. Crew descendants inherit their root's verified
+  task, including late attribution. A turn whose observation is lost may
+  end `cancelled` with `lost: true`; no new status is introduced.
+  If early child frames overflow the in-memory buffer, Stargate recovers
+  durable content from the native log or marks the gap `unavailable`.
+
 - New flag: OpenCode `stargate.crew` plugin option `feedbackEnabled` defaults
   off. It enables the private ship feedback inbox for pinned teams. Submit
   and captain review require separate native permissions.

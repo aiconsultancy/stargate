@@ -1,4 +1,38 @@
+import { Predicate } from "effect";
 import type { ActivityOutcome } from "../backend";
+
+/** The frame's position in this session's own durable log, when supplied. */
+export function boundarySeq(event: unknown) {
+  const durable: unknown = Predicate.hasProperty(event, "durable")
+    ? event.durable
+    : undefined;
+
+  const session: unknown = Predicate.hasProperty(event, "data")
+    ? Predicate.hasProperty(event.data, "sessionID") && event.data.sessionID
+    : undefined;
+
+  return Predicate.hasProperty(durable, "seq") &&
+    Predicate.hasProperty(durable, "aggregateID") &&
+    durable.aggregateID === session &&
+    Number.isSafeInteger(durable.seq)
+    ? Number(durable.seq)
+    : undefined;
+}
+
+/** The boundary fence survives reconnects and applies to both starts and ends. */
+export function staleBoundary(session: { boundary: number }, seq?: number) {
+  if (seq === undefined) {
+    return false;
+  }
+
+  if (seq <= session.boundary) {
+    return true;
+  }
+
+  session.boundary = seq;
+
+  return false;
+}
 
 /**
  * Settled executions remembered per session. 16 matches the turns the hub
@@ -15,6 +49,7 @@ export type WitnessedExecution = {
   /** Its settlement's sequence. */
   settled: number;
   outcome: ActivityOutcome;
+  lost: true | undefined;
 };
 
 /**
@@ -37,6 +72,7 @@ export class ExecutionHistory {
     position: number,
     seq: number | undefined,
     outcome: ActivityOutcome,
+    lost?: true,
   ) {
     if (seq !== undefined && this.lower !== undefined) {
       this.settledExecutions.push({
@@ -44,6 +80,7 @@ export class ExecutionHistory {
         lower: this.lower,
         settled: seq,
         outcome,
+        lost,
       });
 
       if (this.settledExecutions.length > witnessedExecutions) {

@@ -207,6 +207,13 @@ function generationFailureKind(error: {
 export type OpenCodeTurnObserver = (source: {
   sessionID: string;
   events: OpenCodeClient["event"];
+  lifetime: AbortSignal;
+  parent: (
+    sessionID: string,
+    signal: AbortSignal,
+  ) => Promise<string | undefined>;
+  active: (signal: AbortSignal) => Promise<Readonly<Record<string, unknown>>>;
+  log: OpenCodeClient["experimental"]["session"]["log"];
   requests?: () => readonly ActivityRequest[];
   /** The prompt's transcript-placement proof; undefined is not yet provable. */
   owns(
@@ -946,6 +953,12 @@ export class OpenCodeBackend implements AgentBackend {
     const activity = this.observeTurn?.({
       sessionID: sessionId,
       events: this.client.event,
+      lifetime: this.lifetime.signal,
+      parent: async (id, signal) =>
+        (await this.client.session.get({ sessionID: id }, { signal })).parentID,
+      active: (signal) => this.client.session.active({ signal }),
+      log: (input, options) =>
+        this.client.experimental.session.log(input, options),
       ...(activityRequests && { requests: activityRequests }),
       owns: (assistant, input, check) =>
         inputOwnership(this.client, sessionId, input, check, assistant),

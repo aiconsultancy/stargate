@@ -863,6 +863,47 @@ test("a Claude root subscription follows child changes in sequence order", async
   }
 });
 
+test("root and exact-child subscriptions converge after a late call link", async () => {
+  const hub = createActivityHub();
+  const root = hub.recorder("captain").begin(undefined, "parent-session");
+  const child = root.child?.(null, "child-session");
+  const [parent, initial] = snapshot(hub, "captain").turns;
+  const rootView = watch(hub, `agent=captain&turn=${parent?.id ?? ""}`);
+  const childView = watch(hub, `agent=captain&turn=${initial?.id ?? ""}`);
+
+  try {
+    child?.end("cancelled", true);
+    child?.link?.("verified-call");
+    child?.link?.("not-a-replacement");
+    await flushed();
+
+    const [ended, linked] = childView.events();
+    expect(rootView.events()).toEqual(childView.events());
+    expect(childView.events()).toHaveLength(2);
+    expect(ended?.change).toMatchObject({
+      type: "turn-ended",
+      turn: { lost: true, session: { parent: { callId: null } } },
+    });
+    expect(linked?.seq ?? 0).toBeGreaterThan(ended?.seq ?? Infinity);
+    expect(linked?.change).toMatchObject({
+      type: "turn-updated",
+      turn: { lost: true, session: { parent: { callId: "verified-call" } } },
+    });
+
+    if (linked?.change.type !== "turn-updated") {
+      throw new Error("Expected a link update");
+    }
+
+    expect(snapshot(hub, "captain").turns[1]).toEqual({
+      ...linked.change.turn,
+      items: [],
+    });
+  } finally {
+    childView.stop();
+    rootView.stop();
+  }
+});
+
 test("a Claude child subscription follows only that child's events in sequence order", async () => {
   const hub = createActivityHub();
   const root = hub.recorder("claude").begin(undefined, "root");
@@ -1033,7 +1074,7 @@ test("a further split keeps live root watches but not a closed inherited watch",
 
       child?.end("completed");
       child?.update("late", 2, () => text(oversize));
-      child?.child?.("call", "grandchild").end("completed");
+      child?.child?.("call", "grandchild")?.end("completed");
       await flushed();
 
       for (const viewer of [ancestor, current]) {

@@ -12,7 +12,10 @@ import type {
 } from "@earendil-works/pi-durable";
 import { Schema } from "effect";
 import { latestInput } from "../src/backends/backend";
-import { openCodeTurnObserver } from "../src/backends/opencode/activity";
+import {
+  openCodeTurnObserver,
+  settleGraceMs,
+} from "../src/backends/opencode/activity";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { createActivityHub } from "../src/observability/dashboard/api/v1/activity";
 import { PiDurableBackend, piPartialText } from "../src/backends/pi/pi-durable";
@@ -578,6 +581,16 @@ function openCodeStreamFixture(
           id: `event-${++sequence}`,
           created: sequence,
           type,
+          ...(type.startsWith("session.execution.") ||
+          type === "session.created"
+            ? {
+                durable: {
+                  aggregateID: data["sessionID"],
+                  seq: sequence,
+                  version: 1,
+                },
+              }
+            : {}),
           location: { directory: "/workspace" },
           data,
         })}\n\n`,
@@ -1147,8 +1160,142 @@ test("OpenCode records the prompt's own turn activity without changing the reply
   } finally {
     controller.abort();
     await result.catch(() => {});
+    await backend.close();
     await fixture.close();
   }
+});
+
+test("OpenCode officer activity follows a background child after the root reply without changing output", async () => {
+  const hub = createActivityHub();
+  const turns = () => hub.turns("captain")?.turns ?? [];
+
+  const run = async (record: boolean) => {
+    const fixture = openCodeStreamFixture();
+    const controller = new AbortController();
+
+    const backend = new OpenCodeBackend(
+      fixture.config,
+      undefined,
+      record ? openCodeTurnObserver(hub.recorder("captain")) : undefined,
+    );
+
+    const visible: string[] = [];
+    const progress: TurnProgress[] = [];
+
+    const result = backend.prompt(
+      "session-current",
+      "Run a fixture",
+      controller.signal,
+      (text) => visible.push(text),
+      undefined,
+      undefined,
+      undefined,
+      (change) => progress.push(change),
+      true,
+    );
+
+    try {
+      await fixture.waiting;
+      const child = "ses_fixture_child";
+
+      const parentTool = {
+        sessionID: "session-current",
+        assistantMessageID: "answer-current",
+        id: "launch",
+      };
+
+      fixture.emit("session.tool.input.started", {
+        ...parentTool,
+        name: "subagent",
+      });
+      fixture.emit("session.created", {
+        sessionID: child,
+        parentID: "session-current",
+        projectID: "global",
+        location: { directory: "/workspace" },
+        slug: "fixture-child",
+        version: "2.3.2",
+      });
+      fixture.emit("session.execution.started", { sessionID: child });
+      fixture.emit("session.text.delta", {
+        sessionID: child,
+        assistantMessageID: "child-reply",
+        ordinal: 0,
+        delta: "private child ",
+      });
+
+      if (record) {
+        for (let i = 0; i < 200 && turns()[1]?.items.length !== 1; i++) {
+          await Bun.sleep(10);
+        }
+
+        expect(turns()[1]?.status).toBe("running");
+      }
+
+      fixture.emit("session.tool.progress", {
+        ...parentTool,
+        metadata: { sessionID: child },
+      });
+
+      if (record) {
+        for (
+          let i = 0;
+          i < 200 && turns()[1]?.session?.parent?.callId !== "launch";
+          i++
+        ) {
+          await Bun.sleep(10);
+        }
+
+        expect(turns()[1]?.session?.parent?.callId).toBe("launch");
+      }
+
+      fixture.finish();
+      const reply = await result;
+
+      if (record) {
+        await Bun.sleep(settleGraceMs + 50);
+        fixture.emit("session.text.delta", {
+          sessionID: child,
+          assistantMessageID: "child-reply",
+          ordinal: 0,
+          delta: "after the root",
+        });
+        fixture.emit("session.execution.succeeded", { sessionID: child });
+
+        for (let i = 0; i < 200 && turns()[1]?.status === "running"; i++) {
+          await Bun.sleep(10);
+        }
+
+        const [root, observed] = turns();
+        expect(root).toMatchObject({
+          status: "completed",
+          session: { id: "session-current", parent: null },
+        });
+        expect(observed).toMatchObject({
+          status: "completed",
+          session: {
+            id: child,
+            parent: { turnId: root?.id, callId: "launch" },
+          },
+          items: [{ kind: "text", text: "private child after the root" }],
+        });
+      }
+
+      // The two prompts run sequentially; compare the payloads, not their clocks.
+      return {
+        reply,
+        visible,
+        progress: progress.map(({ observedAt: _at, ...payload }) => payload),
+      };
+    } finally {
+      controller.abort();
+      await result.catch(() => {});
+      await backend.close();
+      await fixture.close();
+    }
+  };
+
+  expect(await run(true)).toEqual(await run(false));
 });
 
 const humanIrcSource = {
