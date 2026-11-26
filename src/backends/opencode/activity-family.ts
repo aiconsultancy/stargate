@@ -1,6 +1,14 @@
 import type { OpenCodeClient, SessionLogItem } from "@opencode/client";
 import type { ActivityOutcome, TurnActivityLog } from "../backend";
 import {
+  childSessionID,
+  compactedHistory,
+  freshChild,
+  linkExistingChild,
+  openChild,
+  recordChildName,
+} from "./activity-attribution";
+import {
   ActivityCallEvidence,
   type ActivityIncarnation,
 } from "./activity-call-evidence";
@@ -12,11 +20,9 @@ import {
   type ActivityEvent,
   ActivityProjector,
   activityEvents,
-  childAttributionMarker,
 } from "./activity-projector";
 import {
   ActivityRecoveryQueues,
-  type NamingProof,
   type PendingActivity,
   type QueuedPacket,
   activityQueueDefaults as defaults,
@@ -120,9 +126,6 @@ const isFamilyLogItem = (
 export const isActivityEvent = (
   event: ActivityFamilyEvent,
 ): event is ActivityEvent => itemEvents.has(event.type);
-
-const sessionID = (value: unknown): value is string =>
-  typeof value === "string" && /^ses[A-Za-z0-9_-]{1,253}$/.test(value);
 
 /** Correlates native ancestry with collector-owned turns, never wall-clock proximity. */
 export class OpenCodeActivityFamilies {
@@ -386,17 +389,21 @@ export class OpenCodeActivityFamilies {
     }
 
     const id = event.data.metadata?.["sessionID"];
-    const callId = event.data.id;
 
-    if (!sessionID(id) || id === session) {
+    if (!childSessionID(id) || id === session) {
       return;
     }
 
-    const key = `${assistantMessageID}:${callId}`;
-    const timing = this.calls.timing(scope, log, key);
-    const callOrder = this.calls.name(session, scope, log, key, id);
+    const proof = recordChildName(
+      this.calls,
+      session,
+      scope,
+      log,
+      event.data,
+      id,
+    );
 
-    if (callOrder === null || !timing) {
+    if (!proof) {
       return;
     }
 
@@ -404,36 +411,15 @@ export class OpenCodeActivityFamilies {
     const child = this.executions.get(id)?.latest;
 
     // A call opened after this start can name the next execution while this child is still live.
-    if (child && callOrder <= child.start) {
-      if (
-        child.parent === log &&
-        child.callFloor < callOrder &&
-        (timing.created === undefined ||
-          child.nativeStart === undefined ||
-          timing.created <= child.nativeStart) &&
-        child.callId === null &&
-        !child.ambiguousCall
-      ) {
-        if (
-          this.calls.competing(session, scope, id, {
-            except: callOrder,
-            after: child.callFloor,
-            through: child.start,
-          })
-        ) {
-          child.ambiguousCall = true;
-        } else {
-          child.callId = callId;
-          child.log.link?.(callId);
-        }
-      }
-
-      if (
-        (child.callId !== null || child.ambiguousCall) &&
-        child.start === this.executions.startOrder(id)
-      ) {
-        this.calls.retire(session, scope, id, child.start);
-      }
+    if (child && proof.order <= child.start) {
+      linkExistingChild(
+        this.calls,
+        scope,
+        id,
+        child,
+        this.executions.startOrder(id),
+        proof,
+      );
 
       return;
     }
@@ -444,16 +430,6 @@ export class OpenCodeActivityFamilies {
     if (pending.parent !== undefined && pending.parent !== session) {
       return;
     }
-
-    const proof: NamingProof = {
-      session,
-      log,
-      callId,
-      order: callOrder,
-      timing,
-      markAttribution: childAttributionMarker(log, assistantMessageID, callId),
-      ...(scope && { scope }),
-    };
 
     this.queue.offerProof(queued, proof);
     this.queue.schedule(id);
@@ -880,9 +856,17 @@ export class OpenCodeActivityFamilies {
       return;
     }
 
-    const unproven = !this.fresh(id, first, pending, proof);
+    const unproven = !freshChild(
+      this.executions,
+      id,
+      first,
+      pending,
+      proof?.timing,
+    );
 
-    const log = this.openChild(attribution, id, first.at, unproven);
+    const log = openChild(attribution, id, first.at, unproven, (parent) =>
+      this.fenced(parent),
+    );
 
     if (!owner || !log) {
       this.queue.skip(id, queued);
@@ -905,7 +889,7 @@ export class OpenCodeActivityFamilies {
       latest: first.order,
       ...(startSeq !== undefined && { lower: startSeq }),
       ...((previous?.admitted ?? first.reused) && { reused: true }),
-      ...this.compactedHistory(id, pending, proof),
+      ...compactedHistory(this.executions, id, pending, proof?.timing),
     };
 
     this.children.set(id, child);
@@ -960,65 +944,6 @@ export class OpenCodeActivityFamilies {
         }
       },
     });
-  }
-
-  private openChild(
-    {
-      owner,
-      detached,
-      callId,
-    }: NonNullable<ReturnType<OpenCodeActivityFamilies["attribution"]>>,
-    id: string,
-    at: number,
-    unproven: boolean,
-  ) {
-    return owner && !this.fenced(owner)
-      ? owner.child?.(
-          unproven ? null : callId,
-          id,
-          at,
-          unproven || detached || undefined,
-        )
-      : undefined;
-  }
-
-  private fresh(
-    id: string,
-    first: Pending["segments"][number]["first"],
-    pending: Ancestry,
-    proof: NamingProof | undefined,
-  ) {
-    const needsProof = this.executions.needsFreshness(id, pending.creationTime);
-
-    if (first.type !== "session.execution.started") {
-      return !needsProof;
-    }
-
-    if (first.seq !== undefined && first.created === undefined) {
-      return false;
-    }
-
-    const callTime = proof?.timing.created;
-
-    if (callTime !== undefined && first.created !== undefined) {
-      return first.created >= callTime;
-    }
-
-    return !needsProof && !first.late && proof?.timing.launch !== "resumes";
-  }
-
-  private compactedHistory(
-    id: string,
-    pending: Ancestry,
-    proof: NamingProof | undefined,
-  ) {
-    return this.executions.mayHaveCompacted(id) &&
-      proof?.timing.launch !== "new" &&
-      (pending.created === undefined ||
-        proof?.timing.launch === "resumes" ||
-        this.executions.needsFreshness(id, pending.creationTime))
-      ? { uncertainHistory: true as const }
-      : {};
   }
 
   private loseBoundary(id: string, child: Child) {
