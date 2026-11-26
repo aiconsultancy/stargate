@@ -304,10 +304,12 @@ default `KillMode` also stops these processes when the service stops.
 
 ## Tests
 
-`tests/claude-backend.test.ts` drives the real SDK against a fake CLI
-(`tests/claude-fixture.ts`). `tests/claude-cli.test.ts` runs the pinned real
-Claude Code CLI against a loopback Messages fixture with canary credentials
-in a fake home directory. No test contacts a provider.
+`tests/claude-backend.test.ts` and `tests/claude-activity.test.ts` drive the
+real SDK against a fake CLI (`tests/claude-fixture.ts`) through the shared
+`tests/claude-backend-fixture.ts` harness. `tests/claude-activity-runs.test.ts`
+feeds SDK frames directly to the activity recorder. `tests/claude-cli.test.ts`
+runs the pinned real Claude Code CLI against a loopback Messages fixture
+with canary credentials in a fake home directory. No test contacts a provider.
 
 [sdk]: https://platform.claude.com/docs/en/agent-sdk/overview
 
