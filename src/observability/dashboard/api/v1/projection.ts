@@ -959,9 +959,11 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         }
 
         // Only this route asks for full task text, for operators.
+        const requestedTaskText = operator ? "full" : undefined;
+
         const snapshot = await dashboard.shipWithCrew(ship, signal, {
           member,
-          ...(operator && { taskText: "full" }),
+          ...(requestedTaskText && { taskText: requestedTaskText }),
         });
 
         if (snapshot?.view.crewError) {
@@ -971,7 +973,13 @@ export function createApiV1Source(deps: ApiV1Deps): ApiV1Source {
         const result = await detail(registration, snapshot, signal, member);
         const person = result?.crewMembers[0];
 
-        return person ? { ship, member: person } : undefined;
+        // A legacy plugin may answer with ordinary text after a full request.
+        const taskText =
+          requestedTaskText === "full" && snapshot?.taskText === "full"
+            ? "full"
+            : "preview";
+
+        return person ? { ship, member: person, taskText } : undefined;
       },
     };
   }
