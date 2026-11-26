@@ -61,10 +61,15 @@
   settlement, never a missed settle's inferred end
   ([residuals](docs/api.md#crew-activity)).
   Placed frames are released at once, and a placed message is remembered
-  apart from the 64 waiting ones, up to 1,024 per worker session, so that
-  its later output never opens another message. An evicted turn is
-  forgotten on any eviction path, and changes to a settled turn are
-  measured once per 150 ms batch.
+  apart from the 64 waiting ones while its turn is running or retained, so
+  that its later output, a retry included, never opens another message.
+  Only messages no longer known count against a bound of 1,024 per worker
+  session; a safety ceiling of 16,384 known messages forgets the oldest
+  and counts it. An unknown message's first frame always opens it. An
+  evicted turn is forgotten on any eviction path, and changes to a settled
+  turn are measured once per 150 ms batch, and before any turn begins or
+  ends; a child whose parent that drain evicts is admitted unlinked, as a
+  root with its family's requests.
 
 - Unmasked Fleet API crew text: none. By owner decision this behaviour change
   ships without a flag, an exception to the flag rule for large features.

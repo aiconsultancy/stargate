@@ -427,9 +427,9 @@ array is empty for other transports or when the original IRC message ID is
 unknown. Requests queued before link data was recorded are not backfilled.
 A follow-up steered into an already-running input is not a new turn and is
 not included in these links.
-Claude child turns always have `requests: []`: the IRC message started the
-root, not the subagent. `session.parent.turnId` names each child's immediate
-parent.
+Claude child turns have `requests: []`: the IRC message started the root,
+not the subagent. `session.parent.turnId` names each child's immediate
+parent. A child admitted unlinked, below, is the exception.
 
 Unknown, repeated or malformed parameters return 400. An item whose JSON
 exceeds 64 KiB appears in the turn as a stub with identity, kind, status,
@@ -448,7 +448,11 @@ are measured once per 150 ms batch, and before any turn begins or ends, so
 eviction never uses a stale size: a turn they push over the budget is
 evicted at the end of that batch, or sooner. A pending batch is evicted
 against the turns as they were before the turn began or ended, and only then
-does that turn count. A family is evicted together;
+does that turn count. If that drain evicts the parent of a child about to
+begin, the child is admitted unlinked: it is a root of its own, keeps its
+`session.id`, has `session.parent: null` and copies its family's
+`requests`, so the snapshot and the request lookup still show it. A child
+of a retained parent links to it as usual. A family is evicted together;
 running families do not count toward those global limits. A settled family
 that exceeds either global limit on its own is evicted first, before any
 older family. Eviction does not limit a running family's child turns: they
@@ -634,12 +638,17 @@ own task. Once placed, its frames are released, even while its owner is
 still being resolved. A crew turn evicted by the global limits, on any
 path, is forgotten at once, and later output of its messages is dropped.
 At most 64 messages per worker session wait for placement; past that, the
-oldest is placed at once. A placed message is remembered apart from them,
-up to 1,024 per worker session, so that its later output continues in its
-turn while its execution runs or its turn is retained. If that bound
-forgets such a message, then for the rest of the execution an unknown
-message opens only from its native step start; output first seen otherwise
-is dropped, since it may continue a forgotten message.
+oldest is placed at once. A placed message is remembered apart from them
+for as long as it is still known, that is while its execution runs or its
+turn is retained, so its later output, including a retry's repeated step
+start, continues in its turn. Only messages no longer known, those of an
+evicted turn or let go by a hold limit, count against a bound of 1,024 per
+worker session, which forgets the oldest of them first. As a safety
+ceiling, a worker session keeps at most 16,384 known messages; past that,
+the oldest is forgotten and counted in the collector's `forgotten`
+diagnostic, and its later output opens a new message. An unknown message's
+first frame always opens it, so no output is dropped for lack of a step
+start, for example one lost in a reconnect.
 
 Each crew turn adds:
 
