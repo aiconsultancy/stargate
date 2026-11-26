@@ -23,6 +23,12 @@ export type DiffEntry = {
 /** Bytes of each entry's hunks to keep, by entry index in Git's order. */
 export type DiffPlan = Map<number, { from: number; to: number }>;
 
+/**
+ * Called as each planned entry's hunks end, in Git's order, except the
+ * last: false stops Git there, before a later entry is read.
+ */
+export type DiffSettle = (index: number, entry: DiffEntry) => boolean;
+
 const rawRecord =
   /^:([0-7]{6}) ([0-7]{6}) ([a-f0-9]{40}|[a-f0-9]{64}) ([a-f0-9]{40}|[a-f0-9]{64}) ([ACDMRTUX])(\d{0,3})$/;
 
@@ -56,11 +62,17 @@ export class DiffOutputParser {
     private readonly patches: boolean,
     private readonly planner: (entries: DiffEntry[]) => DiffPlan = () =>
       new Map(),
+    private readonly settle: DiffSettle = () => true,
   ) {}
 
-  /** Every planned entry is read and Git was told to stop. */
+  /** Git was told to stop: every planned entry is read, or `settle` said so. */
   public get done() {
     return this.stopped;
+  }
+
+  /** Entries before this index were read whole; the rest were not read. */
+  public get read() {
+    return this.stopped ? this.current : this.entries.length;
   }
 
   /** False once every planned entry is read: Git may then stop. */
@@ -318,7 +330,14 @@ export class DiffOutputParser {
         throw new Error("More Git diff sections than records");
       }
 
-      if (this.current > this.last) {
+      const ended = this.entries[this.current - 1];
+
+      if (
+        this.current > this.last ||
+        (ended &&
+          this.plan.has(this.current - 1) &&
+          !this.settle(this.current - 1, ended))
+      ) {
         this.stopped = true;
 
         return;

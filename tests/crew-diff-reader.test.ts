@@ -819,6 +819,74 @@ test("a list page ends before the file that would pass 4 MiB, and at 1,000 files
   ]);
 });
 
+test("a list keeps patch bytes only up to its 4 MiB page, then stops Git", async () => {
+  const directory = await checkout();
+  const big = `${"y".repeat(99)}\n`.repeat(700);
+
+  const names = Array.from(
+    { length: 150 },
+    (_, index) => `big-${String(index).padStart(3, "0")}`,
+  );
+
+  for (const name of names) {
+    await writeFile(join(directory, name), big);
+  }
+
+  const parsers: DiffOutputParser[] = [];
+  const { feed } = DiffOutputParser.prototype;
+
+  const spy = spyOn(DiffOutputParser.prototype, "feed").mockImplementation(
+    function (this: DiffOutputParser, chunk: Buffer) {
+      if (!parsers.includes(this)) {
+        parsers.push(this);
+      }
+
+      return feed.call(this, chunk);
+    },
+  );
+
+  try {
+    const perPage = Math.floor(diffLimits.listPatches / diffLimits.inlinePatch);
+
+    for (const start of [0, perPage]) {
+      parsers.length = 0;
+      const page = await list(directory, {}, start);
+
+      if (page.kind !== "list") {
+        throw new Error(page.kind);
+      }
+
+      // The pages are as before: whole files, each with its first 64 KiB.
+      expect(page.files.map(({ path }) => path)).toEqual(
+        names.slice(start, start + perPage),
+      );
+      expect(page.files.every(({ patchNext }) => patchNext !== undefined)).toBe(
+        true,
+      );
+
+      expect(parsers.length).toBe(1);
+      const [parser] = parsers;
+
+      const kept =
+        parser?.entries.reduce((sum, entry) => sum + entry.keptBytes, 0) ?? 0;
+
+      // About one page, not 64 KiB for each of the 150 files.
+      expect(kept).toBeGreaterThan(
+        diffLimits.listPatches - diffLimits.inlinePatch,
+      );
+      expect(kept).toBeLessThanOrEqual(
+        diffLimits.listPatches + 2 * diffLimits.inlinePatch,
+      );
+
+      // Git stopped one file past the page; later files were never read.
+      expect(parser?.done).toBe(true);
+      expect(parser?.read).toBe(start + perPage + 1);
+    }
+  } finally {
+    spy.mockRestore();
+  }
+});
+
 test("an unborn branch has no head; without origin there is no base", async () => {
   const directory = join(root, `unborn-${count++}`);
   await mkdir(directory);

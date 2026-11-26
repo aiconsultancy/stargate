@@ -9,7 +9,12 @@ import {
   diffLimits,
   utf8Prefix,
 } from "../reporting/fleet-status";
-import { type DiffEntry, DiffOutputParser, type DiffPlan } from "./diff-output";
+import {
+  type DiffEntry,
+  DiffOutputParser,
+  type DiffPlan,
+  type DiffSettle,
+} from "./diff-output";
 import {
   type CheckoutGit,
   type Git,
@@ -151,6 +156,10 @@ function patchPage(entry: DiffEntry, offset: number, limit: number) {
     ...(next < entry.size && { patchNext: next }),
   };
 }
+
+/** A list's patch for an entry: its first 64 KiB, if it has hunks. */
+const inlinePatch = (entry: DiffEntry) =>
+  entry.size > 0 ? patchPage(entry, 0, diffLimits.inlinePatch) : undefined;
 
 /** Byte order, as Git sorts paths. */
 const byPath = (entries: DiffEntry[]) =>
@@ -432,11 +441,19 @@ type Pass = {
   base: Origin | null;
   stream: IsolatedStream;
   worktree: boolean;
+  /** True for a Git entry whose hunks Git stopped before reading. */
+  unread: (index: number) => boolean;
+};
+
+/** Hunk windows to keep, and optionally when Git may stop early. */
+type PatchReading = {
+  plan: (entries: PassEntry[]) => DiffPlan;
+  settle?: DiffSettle;
 };
 
 /**
- * Run Git's diff once for the mode, then build the answer from it. With a
- * planner, patches are read too, keeping the windows it plans.
+ * Run Git's diff once for the mode, then build the answer from it. With
+ * `reading`, patches are read too, keeping the windows it plans.
  */
 async function diffPass<T>(
   git: Git,
@@ -444,9 +461,9 @@ async function diffPass<T>(
   mode: CheckoutDiffInput["mode"],
   state: Snapshot,
   build: (pass: Pass) => Promise<T>,
-  planner?: (entries: PassEntry[]) => DiffPlan,
+  reading?: PatchReading,
 ) {
-  const patches = planner !== undefined;
+  const patches = reading !== undefined;
   const head = state.head.oid;
   let base: Origin | null = null;
 
@@ -480,13 +497,14 @@ async function diffPass<T>(
     // Only Git's own entries have hunks to plan.
     const parser = new DiffOutputParser(
       patches,
-      planner &&
+      reading &&
         ((entries) =>
           new Map(
-            [...planner(all(entries))].filter(
+            [...reading.plan(all(entries))].filter(
               ([index]) => index < entries.length,
             ),
           )),
+      reading?.settle,
     );
 
     const diff = checkout.command([
@@ -519,14 +537,16 @@ async function diffPass<T>(
     }
 
     parser.end();
+    const { read, entries } = parser;
 
     return build({
       directory,
-      entries: all(parser.entries),
+      entries: all(entries),
       snapshot: state,
       base,
       stream,
       worktree,
+      unread: (index) => index >= read && index < entries.length,
     });
   });
 }
@@ -548,8 +568,12 @@ async function listPage(
       continue;
     }
 
-    const patch =
-      entry.size > 0 ? patchPage(entry, 0, diffLimits.inlinePatch) : undefined;
+    // Git stopped before this file: the next page starts with it.
+    if (pass.unread(index)) {
+      break;
+    }
+
+    const patch = inlinePatch(entry);
 
     const bytes = Buffer.byteLength(patch?.patch ?? "");
 
@@ -696,6 +720,9 @@ function computeDiff(
 
   if (request.kind === "list") {
     const window = { from: 0, to: diffLimits.inlinePatch + 4 };
+    let first: number | undefined;
+    let firstRead = false;
+    let used = 0;
 
     return diffPass(
       git,
@@ -706,12 +733,29 @@ function computeDiff(
         request.start > 0 && request.start >= pass.entries.length
           ? absent
           : listPage(pass, request.start, byPath(pass.entries)),
-      (entries) =>
-        new Map(
-          byPath(entries)
-            .slice(request.start, request.start + diffLimits.files)
-            .map((index) => [index, window]),
-        ),
+      {
+        plan: (entries) => {
+          const page = byPath(entries).slice(
+            request.start,
+            request.start + diffLimits.files,
+          );
+
+          first = page.find((index) => entries[index]?.unindexed !== true);
+
+          return new Map(page.map((index) => [index, window]));
+        },
+        /*
+         * Git writes files in byte order, the page's order. Once the page's
+         * first file is read and the patches read pass its budget, no later
+         * file is on this page: Git stops, and the next page starts there.
+         */
+        settle: (index, entry) => {
+          firstRead ||= index === first;
+          used += Buffer.byteLength(inlinePatch(entry)?.patch ?? "");
+
+          return !firstRead || used <= diffLimits.listPatches;
+        },
+      },
     );
   }
 
@@ -760,22 +804,24 @@ function computeDiff(
                 },
         };
       },
-      (entries) => {
-        target = find(entries);
+      {
+        plan: (entries) => {
+          target = find(entries);
 
-        return new Map(
-          target < 0
-            ? []
-            : [
-                [
-                  target,
-                  {
-                    from: request.offset,
-                    to: request.offset + diffLimits.page + 4,
-                  },
+          return new Map(
+            target < 0
+              ? []
+              : [
+                  [
+                    target,
+                    {
+                      from: request.offset,
+                      to: request.offset + diffLimits.page + 4,
+                    },
+                  ],
                 ],
-              ],
-        );
+          );
+        },
       },
     );
   }
