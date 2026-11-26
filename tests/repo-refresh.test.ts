@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -9,7 +10,7 @@ import {
 } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const gitOptions = [
   "-c",
@@ -62,6 +63,19 @@ test("origin refresh and branch reads use a verified SHA without changing checko
   const checkout = join(root, "reference");
   const repository = "project";
 
+  const restrictedPaths = [
+    "api.pem",
+    "prod.env",
+    "x.env.local",
+    "config/db.env.production/proof.md",
+    ".npmrc",
+    ".netrc",
+    "id_ed25519",
+    "credentials.json",
+    "identity.p12",
+    "identity.pfx",
+  ];
+
   const execute = async (tool: string, args: Record<string, unknown>) =>
     JSON.parse(
       await result(
@@ -101,7 +115,13 @@ test("origin refresh and branch reads use a verified SHA without changing checko
       "keep old fetch head\n",
     );
     writeFileSync(join(origin, "proof.md"), "published\r\nread this\n");
-    writeFileSync(join(origin, "api.pem"), "restricted");
+
+    for (const path of restrictedPaths) {
+      const fixture = join(origin, path);
+      mkdirSync(dirname(fixture), { recursive: true });
+      writeFileSync(fixture, "restricted fixture\n");
+    }
+
     writeFileSync(join(origin, "invalid.txt"), new Uint8Array([0xff, 0xff]));
     writeFileSync(join(origin, ".env.example"), "safe example\n");
     git(origin, "add", ".");
@@ -172,7 +192,7 @@ test("origin refresh and branch reads use a verified SHA without changing checko
     });
 
     for (const path of [
-      "api.pem",
+      ...restrictedPaths,
       "invalid.txt",
       "../proof.md",
       "/proof.md",

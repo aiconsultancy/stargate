@@ -96,6 +96,7 @@ For example, use this command array in an OpenCode local MCP registration:
 ```json
 [
   "bun",
+  "--config=/dev/null",
   "--no-env-file",
   "--no-install",
   "/srv/stargate/scripts/officer-files.ts",

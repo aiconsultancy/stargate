@@ -222,7 +222,7 @@ Additional captain instructions:
 
 ## File and repository tools
 
-If `subspace_publish` is installed, use its `prepare_file` tool for issue
+If your profile exposes `prepare_file`, use it for issue
 attachments, existing uploads or a file in your configured outbox. For Markdown
 and plain text in Teams, request `preview: teams` and post the returned marker
 with the original file name.

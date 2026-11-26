@@ -181,7 +181,7 @@ export async function readOriginFile(
   for (const part of path.split("/")) {
     if (
       part !== ".env.example" &&
-      /(?:^\.(?:env(?:\..*)?|npmrc|netrc)|^id_(?:rsa|dsa|ecdsa|ed25519)|^credentials\.json|\.(?:pem|key|p12|pfx))$/i.test(
+      /(?:\.env(?:\..*)?|^\.(?:npmrc|netrc)|^id_(?:rsa|dsa|ecdsa|ed25519)|^credentials\.json|\.(?:pem|key|p12|pfx))$/i.test(
         part,
       )
     ) {
