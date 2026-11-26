@@ -3,7 +3,6 @@ import type { Logger } from "pino";
 import {
   type AgentDispatchConfig,
   type IrcConfig,
-  agentDispatchActive,
   agentDispatchTarget,
 } from "../../../config";
 import type { IrcShip } from "../../../transports/irc/ship";
@@ -47,7 +46,7 @@ export function startAgentDispatch(
 ): AgentDispatchRuntime | undefined {
   const dispatch = host.config;
 
-  if (!agentDispatchActive(dispatch)) {
+  if (!dispatch?.enabled && !dispatch?.decisionOutcomeDms) {
     return;
   }
 

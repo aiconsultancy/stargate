@@ -317,7 +317,7 @@ export const agentDispatchSchema = settingsStruct({
 
 export type AgentDispatchConfig = typeof agentDispatchSchema.Type;
 
-export function agentDispatchActive(
+function agentDispatchActive(
   config: AgentDispatchConfig | undefined,
 ): config is AgentDispatchConfig {
   return config?.enabled === true || config?.decisionOutcomeDms === true;

@@ -18,7 +18,6 @@ import {
   type AgentDispatchConfig,
   type BotConfig,
   type IrcConfig,
-  agentDispatchActive,
   botSchema,
   configSchema,
   reloadConfigSchema,
@@ -162,7 +161,10 @@ export async function checkCredentials(
     await checkIrcCredentials(registration, env);
   }
 
-  if (agentDispatchActive(agentDispatch)) {
+  if (
+    agentDispatch?.enabled === true ||
+    agentDispatch?.decisionOutcomeDms === true
+  ) {
     for (const name of [
       agentDispatch.api.tokenEnv,
       ...Object.values(agentDispatch.api.headersEnv),
