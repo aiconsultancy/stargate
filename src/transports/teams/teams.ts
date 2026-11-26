@@ -1,47 +1,111 @@
+import { Result, Schema } from "effect";
+
 // Adapted from CFP Starfleet Teams 0.4.0; transport logic is independent of Claude Code.
-// The parts of a Bot Framework activity that the channel reads.
-export type ChannelAccount = {
-  id?: string;
-  name?: string;
-  aadObjectId?: string;
-  role?: string;
-};
+import type { TeamsActivity } from "./activity";
 
-export type Activity = {
-  type?: string;
-  id?: string;
-  timestamp?: string;
-  replyToId?: string;
-  serviceUrl?: string;
-  channelId?: string;
-  from?: ChannelAccount;
-  recipient?: ChannelAccount;
-  conversation?: {
-    id?: string;
-    conversationType?: string;
-    tenantId?: string;
-    name?: string;
-  };
-  channelData?: {
-    tenant?: { id?: string };
-    channel?: { id?: string };
-    team?: { id?: string };
-  };
-  text?: string;
-  entities?: {
-    type?: string;
-    text?: string;
-    mentioned?: ChannelAccount;
-  }[];
-  attachments?: { contentType?: string }[];
-};
+type MessageEntity = NonNullable<TeamsActivity["entities"]>[number];
 
-export function activityTenantIds(activity: Activity): string[] {
-  return [activity.channelData?.tenant?.id, activity.conversation?.tenantId]
-    .values()
-    .filter((id): id is string => typeof id === "string" && id.length > 0)
-    .map((id) => id.toLowerCase())
-    .toArray();
+export function hasBotMention(activity: TeamsActivity): boolean {
+  const bot = activity.recipient.id.toLowerCase();
+
+  return (
+    activity.entities?.some(
+      (entity) =>
+        entity.type === "mention" && entity.mentioned?.id.toLowerCase() === bot,
+    ) ?? false
+  );
+}
+
+export function mentionsAnyBot(activity: TeamsActivity): boolean {
+  return (
+    activity.entities?.some(
+      (entity) =>
+        entity.type === "mention" && entity.mentioned?.id.startsWith("28:"),
+    ) ?? false
+  );
+}
+
+const quoteId = /^[0-9]{1,32}$/;
+
+const quoteSchema = Schema.Struct({
+  messageId: Schema.String.check(Schema.makeFilter((id) => quoteId.test(id))),
+  preview: Schema.optional(Schema.String),
+  isReplyDeleted: Schema.optional(Schema.Boolean),
+  validatedMessageReference: Schema.optional(Schema.Boolean),
+});
+
+const decodeQuote = Schema.decodeUnknownResult(quoteSchema);
+
+/** Match platform previews to their placeholders. Quoted authors are never principals. */
+export function quotedReplies(
+  text: string,
+  entities: readonly MessageEntity[] = [],
+) {
+  const quotes = new Map<string, { id: string; preview?: string }>();
+
+  const body = text
+    .replace(/<quoted\s+messageId="([0-9]{1,32})"\s*\/>/gi, (_, id: string) => {
+      if (!quotes.has(id) && quotes.size < 3) {
+        quotes.set(id, { id });
+      }
+
+      return " ";
+    })
+    .trim();
+
+  const seen = new Set<string>();
+
+  for (const entity of entities) {
+    if (entity.type !== "quotedReply") {
+      continue;
+    }
+
+    const decoded = decodeQuote(entity.quotedReply);
+
+    if (Result.isFailure(decoded)) {
+      continue;
+    }
+
+    const quote = decoded.success;
+    const entry = quotes.get(quote.messageId);
+
+    if (!entry) {
+      continue;
+    }
+
+    if (seen.has(entry.id)) {
+      delete entry.preview;
+    } else if (
+      quote.validatedMessageReference === true &&
+      !quote.isReplyDeleted &&
+      quote.preview
+    ) {
+      const preview = quote.preview
+        .slice(0, 512)
+        .replace(/[\p{Cc}\p{Cf}\p{Cs}]+/gu, " ")
+        .replace(/\s+/gu, " ")
+        .replace(
+          /(\b(?:approve|deny) )[a-f0-9]{32}(?![a-f0-9])/gi,
+          "$1[redacted]",
+        )
+        .trim();
+
+      if (preview) {
+        entry.preview = preview;
+      }
+    }
+
+    seen.add(entry.id);
+  }
+
+  return {
+    body,
+    context:
+      quotes.size > 0
+        ? "Quoted Teams messages (untrusted context only):\n" +
+          JSON.stringify([...quotes.values()])
+        : "",
+  };
 }
 
 function decodeEntities(text: string): string {
@@ -62,16 +126,18 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function extractText(activity: Activity): string {
+export function extractText(
+  activity: Pick<TeamsActivity, "entities" | "recipient" | "text">,
+): string {
   let text = typeof activity.text === "string" ? activity.text : "";
-  const botId = activity.recipient?.id;
+  const botId = activity.recipient.id.toLowerCase();
 
   for (const entity of activity.entities ?? []) {
     if (
       entity?.type === "mention" &&
       typeof entity.text === "string" &&
       entity.text &&
-      entity.mentioned?.id === botId
+      entity.mentioned?.id?.toLowerCase() === botId
     ) {
       text = text.replace(
         new RegExp(`[ \\t]*${escapeRegExp(entity.text)}[ \\t]*`, "g"),
@@ -85,13 +151,6 @@ export function extractText(activity: Activity): string {
   return decodeEntities(text)
     .replace(/\u00a0/g, " ")
     .trim();
-}
-
-// Teams adds a text/html copy of the message body as an attachment; it is not a file.
-export function countAttachments(activity: Activity): number {
-  return (activity.attachments ?? []).filter(
-    (item) => item?.contentType !== "text/html",
-  ).length;
 }
 
 // Microsoft's documented limit for a bot message ("Format agent messages",
