@@ -476,7 +476,7 @@ export class OpenCodeActivityFamilies {
       inferred && this.lineage.get(inferred),
     );
 
-    const proof = naming.first;
+    const proof = naming.first ?? naming.witness;
 
     const competing =
       proof !== undefined &&
@@ -492,7 +492,7 @@ export class OpenCodeActivityFamilies {
       owner: proof?.log ?? inferred,
       ambiguous,
       detached: naming.detached || competing,
-      callId: ambiguous ? null : (proof?.callId ?? null),
+      callId: ambiguous ? null : (naming.first?.callId ?? null),
       proof,
     };
   }

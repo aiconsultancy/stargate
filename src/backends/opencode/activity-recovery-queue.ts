@@ -1,6 +1,10 @@
 import type { SessionLogItem } from "@opencode/client";
 import type { TurnActivityLog } from "../backend";
-import type { ActivityIncarnation, CallTiming } from "./activity-call-evidence";
+import {
+  type ActivityIncarnation,
+  type CallTiming,
+  callPrecedesStart,
+} from "./activity-call-evidence";
 import {
   ActivityLifecycleBuffer,
   ActivityReplayGap,
@@ -43,6 +47,8 @@ export type NamingProof = {
   timing: CallTiming;
 };
 
+type TimedProof = NamingProof & { seenAt: number };
+
 type Segment<E extends Event> = {
   frames: QueuedPacket<E>[];
   first: {
@@ -61,7 +67,8 @@ type Segment<E extends Event> = {
   // Recovery consumes gap entries in place; keep their reserved count.
   slots: number;
   bytes: number;
-  proofs: NamingProof[];
+  proofs: TimedProof[];
+  witness?: TimedProof;
   proofOverflow?: true;
   droppedProofScopes?: Set<ProofScope>;
 };
@@ -73,11 +80,12 @@ export type PendingActivity<E extends Event> = {
   floor: number;
   expires: number;
   needsStart: boolean;
-  provisional: NamingProof[];
+  provisional: TimedProof[];
   droppedProofs?: Map<ProofScope, CallRange>;
   slots: number;
   advanced?: true;
   draining?: true;
+  unprovenDrain?: true;
   postLoss?: true;
   closing?: true;
   read?: AbortController;
@@ -185,14 +193,14 @@ export class ActivityRecoveryQueues<E extends Event> {
   }
 
   public offerProof(pending: PendingActivity<E>, proof: NamingProof) {
-    this.routeProof(pending, proof, this.now());
+    this.routeProof(pending, { ...proof, seenAt: this.now() });
   }
 
-  private routeProof(
-    pending: PendingActivity<E>,
-    proof: NamingProof,
-    seenAt?: number,
-  ) {
+  private routeProof(pending: PendingActivity<E>, proof: TimedProof) {
+    if (proof.scope?.active === false) {
+      return;
+    }
+
     const segment = pending.segments.find(
       ({ floor, first }) =>
         first.type === startType &&
@@ -201,24 +209,49 @@ export class ActivityRecoveryQueues<E extends Event> {
     );
 
     if (segment) {
-      if (seenAt === undefined || seenAt < segment.expires) {
-        this.bind(segment, proof);
+      if (
+        segment === pending.segments[0] &&
+        pending.unprovenDrain &&
+        (proof.seenAt >= segment.expires ||
+          !callPrecedesStart(proof.timing.created, segment.first.created))
+      ) {
+        // The successor may be eligible even when the published head is not.
+        this.hold(pending, proof);
+      } else {
+        this.offerSegment(segment, proof);
       }
     } else if (
       proof.order >
       (pending.segments.findLast(({ first }) => first.type === startType)?.first
         .order ?? pending.floor)
     ) {
-      if (pending.provisional.length >= this.limits.pending) {
-        const evicted = pending.provisional.shift();
-
-        if (evicted) {
-          this.recordDrop(pending, evicted);
-        }
-      }
-
-      pending.provisional.push(proof);
+      this.hold(pending, proof);
     }
+  }
+
+  private offerSegment(segment: Segment<E>, proof: TimedProof) {
+    if (proof.seenAt >= segment.expires || proof.scope?.active === false) {
+      return;
+    }
+
+    if (callPrecedesStart(proof.timing.created, segment.first.created)) {
+      this.bind(segment, proof);
+    } else {
+      // An in-time name can expose detached output without ever proving a link.
+      segment.witness ??= proof;
+    }
+  }
+
+  private hold(pending: PendingActivity<E>, proof: TimedProof) {
+    if (pending.provisional.length >= this.limits.pending) {
+      const evicted = pending.provisional.shift();
+
+      if (evicted) {
+        this.recordDrop(pending, evicted);
+      }
+    }
+
+    pending.provisional.push(proof);
   }
 
   private recordDrop(
@@ -253,6 +286,7 @@ export class ActivityRecoveryQueues<E extends Event> {
     const segment = pending.segments[0];
     const proofs = segment?.proofs.filter(accepts) ?? [];
     const first = proofs[0];
+    const witness = segment?.witness;
     const scope = first ? first.scope : inferredScope;
 
     const overflow =
@@ -261,12 +295,13 @@ export class ActivityRecoveryQueues<E extends Event> {
 
     return {
       first,
+      witness: witness && accepts(witness) ? witness : undefined,
       ambiguous: overflow || proofs.length > 1,
       detached: overflow || proofs.some(({ log }) => log !== first?.log),
     };
   }
 
-  private bind(segment: Segment<E>, proof: NamingProof) {
+  private bind(segment: Segment<E>, proof: TimedProof) {
     // Never turn ambiguity into certainty by evicting a bound competitor.
     if (segment.proofs.length < 2) {
       segment.proofs.push(proof);
@@ -558,17 +593,23 @@ export class ActivityRecoveryQueues<E extends Event> {
       pending.needsStart = false;
 
       if (start) {
-        this.bindDrops(id, pending, segment);
+        const opened = segment;
+        this.bindDrops(id, pending, opened);
 
-        for (const proof of pending.provisional) {
-          if (floor < proof.order && proof.order <= order) {
-            this.bind(segment, proof);
+        pending.provisional = pending.provisional.filter((proof) => {
+          if (
+            proof.order > order ||
+            (proof.order <= floor && pending.segments.length > 1)
+          ) {
+            return true;
           }
-        }
 
-        pending.provisional = pending.provisional.filter(
-          ({ order: opened }) => opened > order,
-        );
+          if (floor < proof.order) {
+            this.offerSegment(opened, proof);
+          }
+
+          return false;
+        });
       }
 
       this.armExpiry();
@@ -646,6 +687,10 @@ export class ActivityRecoveryQueues<E extends Event> {
 
     pending.draining = true;
 
+    if (hooks.preserveProofs) {
+      pending.unprovenDrain = true;
+    }
+
     if (pending.lifecycle.lost && !pending.closing) {
       hooks.lost();
     } else if (
@@ -699,6 +744,8 @@ export class ActivityRecoveryQueues<E extends Event> {
 
   private advance(id: string, pending: PendingActivity<E>, preserve?: true) {
     const segment = pending.segments.shift();
+    delete pending.draining;
+    delete pending.unprovenDrain;
 
     if (segment) {
       this.bytes -= segment.bytes;
@@ -711,7 +758,6 @@ export class ActivityRecoveryQueues<E extends Event> {
       }
     }
 
-    delete pending.draining;
     pending.advanced = true;
     pending.needsStart = pending.segments.length === 0;
 
@@ -763,7 +809,19 @@ export class ActivityRecoveryQueues<E extends Event> {
       }
     }
 
-    for (const proof of old.proofs) {
+    const held = pending.provisional.filter(
+      ({ order }) => order <= old.first.order,
+    );
+
+    pending.provisional = pending.provisional.filter(
+      ({ order }) => order > old.first.order,
+    );
+
+    for (const proof of [
+      ...old.proofs,
+      ...(old.witness ? [old.witness] : []),
+      ...held,
+    ]) {
       // Moving a witnessed name to a successor is not a new proof arrival.
       this.routeProof(pending, proof);
     }

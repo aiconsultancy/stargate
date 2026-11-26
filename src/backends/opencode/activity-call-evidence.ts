@@ -7,6 +7,13 @@ export type CallTiming = {
   launch: "resumes" | "new" | "unknown";
 };
 
+export function callPrecedesStart(
+  call: number | undefined,
+  start: number | undefined,
+) {
+  return call === undefined || start === undefined || call <= start;
+}
+
 type Call = { order: number; named?: true; timing: CallTiming };
 
 type OwnerCalls = {
