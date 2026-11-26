@@ -699,7 +699,7 @@ export class OpenCodeActivityFamilies {
         this.executions.advance(id, child, result.seq);
         this.finish(id, child, result.outcome);
       } else {
-        this.executions.advance(id, child, result?.seq);
+        // A log-only start proves loss of the old period, not live admission.
         this.finish(id, child, "cancelled", true);
       }
     }
