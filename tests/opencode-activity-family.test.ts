@@ -3,6 +3,7 @@ import type { SessionEventDurable, SessionLogItem } from "@opencode/client";
 import { setImmediate, setTimeout as wait } from "node:timers/promises";
 import { Schema } from "effect";
 import type { TurnActivityLog } from "../src/backends/backend";
+import { ActivityCallEvidence } from "../src/backends/opencode/activity-call-evidence";
 import { ChildExecutions } from "../src/backends/opencode/activity-child-executions";
 import {
   type ActivityFamilyEvent,
@@ -45,6 +46,7 @@ function fixture(
   const parents = new Map<string, string>();
   const reads: string[] = [];
   const active = new Set<string>();
+  const failedReads = new Set<"active" | "log">();
   const logFrames = new Map<string, SessionLogItem[]>();
   const logReads: [string, number][] = [];
   let seq = 0;
@@ -59,9 +61,20 @@ function fixture(
 
         return readParent ? readParent(id, signal) : parents.get(id);
       },
-      active: async () =>
-        Object.fromEntries([...active].map((id) => [id, { type: "running" }])),
+      active: async () => {
+        if (failedReads.has("active")) {
+          throw new Error("active read failed");
+        }
+
+        return Object.fromEntries(
+          [...active].map((id) => [id, { type: "running" }]),
+        );
+      },
       async *log(id, after) {
+        if (failedReads.has("log")) {
+          throw new Error("log read failed");
+        }
+
         logReads.push([id, after]);
         await logGate;
         yield* logFrames.get(id) ?? [];
@@ -133,6 +146,7 @@ function fixture(
     families,
     reads,
     active,
+    failedReads,
     logFrames,
     logReads,
     parents,
@@ -1482,9 +1496,13 @@ function capturedCall(
   owner: TurnActivityLog,
   input: Record<string, unknown>,
   sawInput = true,
+  times: { input: number | null; called: number | null } = {
+    input: nativeCall.input.at,
+    called: nativeCall.called.at,
+  },
 ) {
   if (sawInput) {
-    const { id, at, seq } = nativeCall.input;
+    const { id, seq } = nativeCall.input;
     f.emit(
       "session.tool.input.started",
       main,
@@ -1496,11 +1514,11 @@ function capturedCall(
       owner,
       id,
       seq,
-      at,
+      times.input,
     );
   }
 
-  const { id, at, seq } = nativeCall.called;
+  const { id, seq } = nativeCall.called;
   f.emit(
     "session.tool.called",
     main,
@@ -1513,7 +1531,7 @@ function capturedCall(
     owner,
     id,
     seq,
-    at,
+    times.called,
   );
 }
 
@@ -1606,7 +1624,11 @@ test.each([{ sessionID: "" }, { task_id: "" }])(
       evictChildren(f, 5000);
       const root = f.root();
       f.parents.set(child, main);
-      capturedCall(f, root, { agent: "explore", ...input });
+      f.create(child, main);
+      capturedCall(f, root, { agent: "explore", ...input }, true, {
+        input: null,
+        called: null,
+      });
       f.names(root, "launch", child);
       await setImmediate();
       nativeChild(f, child, 1, nativeCall.called.at, "new child");
@@ -1623,6 +1645,94 @@ test.each([{ sessionID: "" }, { task_id: "" }])(
     }
   },
 );
+
+test.each([0, null])(
+  "a resume called at %p cannot prove a compacted start",
+  async (callTime) => {
+    const f = fixture(undefined, undefined, 1, 1);
+
+    try {
+      evictChildren(f, 37);
+      const root = f.root();
+      const id = "ses_old_0";
+      f.parents.set(id, main);
+      capturedCall(f, root, { agent: "explore", sessionID: id }, true, {
+        input: callTime,
+        called: callTime,
+      });
+      f.names(root, "launch", id);
+      await setImmediate();
+      nativeChild(f, id, 1, 5, "uncertain replay");
+      expect(f.turns()[1]).toMatchObject({
+        session: { id, parent: null },
+        lost: true,
+        items: [{ text: "uncertain replay" }],
+      });
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+test("an undated durable start is uncertain even for a brand-new child", () => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    capturedCall(f, root, { agent: "explore" });
+    f.names(root, "launch", child);
+    f.create(child, main);
+    nativeChild(f, child, 1, null, "undated launch");
+    expect(f.turns()).toMatchObject([
+      {
+        items: [
+          { callId: "launch", unavailable: ["activity.child-attribution"] },
+        ],
+      },
+      {
+        session: { id: child, parent: null },
+        lost: true,
+        items: [{ text: "undated launch" }],
+      },
+    ]);
+  } finally {
+    f.stop.abort();
+  }
+});
+
+test("a background launch can start 30 s after its naming call succeeds", async () => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    f.parents.set(child, main);
+    capturedCall(f, root, { agent: "explore" });
+    f.emit(
+      "session.tool.success",
+      main,
+      {
+        assistantMessageID: "answer",
+        id: "launch",
+        executed: true,
+        metadata: { sessionID: child, status: "running" },
+      },
+      root,
+      undefined,
+      undefined,
+      nativeCall.called.at + 1,
+    );
+    await setImmediate();
+    f.advance(30_000);
+    nativeChild(f, child, 1, nativeCall.called.at + 30_000, "background work");
+    await setImmediate();
+    expect(f.turns()[1]).toMatchObject({
+      session: { id: child, parent: { callId: "launch" } },
+      items: [{ text: "background work" }],
+    });
+  } finally {
+    f.stop.abort();
+  }
+});
 
 test("replayed creation and start past the exact fence never attach to the current root", () => {
   const f = fixture();
@@ -1943,6 +2053,32 @@ test("a child evicted without a sequence boundary contributes its latest native 
   expect(history.possiblyReplayed("ses_unsequenced", undefined)).toBe(false);
 });
 
+test("a compacted undated boundary uses the latest observed native time", () => {
+  const hub = createActivityHub({ turnsPerAgent: 1, turns: 1 });
+  const recorder = hub.recorder("officer");
+  const history = new ChildExecutions<{ log: TurnActivityLog }>(1);
+
+  for (let index = 0; index < 12; index += 1) {
+    const id = `ses_untimed_${index}`;
+    const parent = recorder.begin();
+    const log = parent.child?.(null, id);
+
+    if (!log) {
+      throw new Error("Expected child writer");
+    }
+
+    const child = { log };
+    history.admitted(id, child);
+    history.advance(id, child, 1, index === 11 ? 50 : undefined);
+    log.end("completed");
+    parent.end("completed");
+  }
+
+  expect(history.needsFreshness("ses_untimed_0", 5)).toBe(true);
+  expect(history.needsFreshness("ses_untimed_0", 50)).toBe(true);
+  expect(history.needsFreshness("ses_new", 51)).toBe(false);
+});
+
 test("family eviction replaces child writer associations with tombstones immediately", () => {
   const hub = createActivityHub({ turnsPerAgent: 1 });
   const recorder = hub.recorder("officer");
@@ -2210,26 +2346,353 @@ test("reconnect only keeps a running child if its durable period is unchanged", 
   f.stop.abort();
 });
 
+test.each(["officer", "crew"] as const)(
+  "%s child reconnect requires every durable position covered by the watermark",
+  async (subject) => {
+    const f = fixture(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      subject === "crew" ? "crew" : undefined,
+    );
+
+    const covered = "ses_covered";
+    const sparse = "ses_sparse";
+
+    try {
+      f.root(subject === "crew" ? { active: true } : undefined);
+
+      for (const [id, seqs] of [
+        [child, []],
+        [covered, [2, 3]],
+        [sparse, [3]],
+      ] as const) {
+        f.create(id, main);
+        f.emit("session.execution.started", id, {}, undefined, undefined, 1);
+        f.active.add(id);
+        f.logFrames.set(id, [
+          ...seqs.map((seq): SessionLogItem => ({
+            id: `${id}-${seq}`,
+            type: "session.text.ended",
+            created: seq + 10,
+            data: {
+              sessionID: id,
+              assistantMessageID: "covered-answer",
+              ordinal: 0,
+              text: "not replayed",
+            },
+            durable: { aggregateID: id, seq, version: 1 },
+          })),
+          { type: "log.synced", aggregateID: id, seq: 3 },
+        ]);
+      }
+
+      await f.families.reconnected();
+      const reconnect = f.turns().slice(1);
+      f.ended(child, "replacement transcript", "next-answer");
+      expect({ reconnect, oldItems: f.turns()[1]?.items }).toMatchObject({
+        reconnect: [
+          { status: "cancelled", lost: true },
+          { status: "running", items: [] },
+          { status: "cancelled", lost: true },
+        ],
+        oldItems: [],
+      });
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+test.each(["old terminal", "new start"] as const)(
+  "a reconnect that reads the %s admits the same buffered live start exactly once",
+  async (boundary) => {
+    const f = fixture();
+    const startID = "replacement-start";
+
+    try {
+      const root = f.root();
+      f.parents.set(child, main);
+      f.create(child, main);
+      f.emit("session.execution.started", child, {}, undefined, undefined, 1);
+      f.logFrames.set(child, [
+        {
+          id: boundary === "new start" ? startID : "old-terminal",
+          type:
+            boundary === "new start"
+              ? "session.execution.started"
+              : "session.execution.succeeded",
+          created: boundary === "new start" ? 23 : 18,
+          data: { sessionID: child },
+          durable: {
+            aggregateID: child,
+            seq: boundary === "new start" ? 3 : 2,
+            version: 1,
+          },
+        },
+      ]);
+
+      await f.families.reconnected();
+      expect(f.turns()[1]).toMatchObject(
+        boundary === "new start"
+          ? { status: "cancelled", lost: true }
+          : { status: "completed" },
+      );
+
+      f.call(root, "retry");
+      f.called(root, "retry", { agent: "explore", sessionID: child });
+      f.names(root, "retry", child);
+      await setImmediate();
+
+      for (let seen = 0; seen < 2; seen += 1) {
+        f.emit(
+          "session.execution.started",
+          child,
+          {},
+          undefined,
+          startID,
+          3,
+          23,
+        );
+      }
+
+      f.ended(child, "new transcript", "new-answer");
+      f.end(child);
+      expect(f.turns().slice(2)).toMatchObject([
+        {
+          session: { id: child, parent: { callId: "retry" } },
+          status: "completed",
+          items: [{ text: "new transcript" }],
+        },
+      ]);
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
 test("reconnect can recover a proven native child outcome without replaying items", async () => {
   const f = fixture();
   f.root();
   f.create(child, main);
   f.start(child);
+  f.ended(child, "first period", "first-answer");
+  f.active.add(child);
   f.logFrames.set(child, [
     {
       type: "session.execution.succeeded",
       id: "settled",
       created: 2,
-      durable: { aggregateID: child, seq: 2, version: 1 },
+      durable: { aggregateID: child, seq: 3, version: 1 },
       data: { sessionID: child },
     },
+    { type: "log.synced", aggregateID: child, seq: 9 },
   ]);
   await f.families.reconnected();
   expect(f.turns()[1]).toMatchObject({
     status: "completed",
-    items: [],
+    items: [{ text: "first period" }],
     reconnects: 1,
   });
   expect(f.turns()[1]?.lost).toBeUndefined();
   f.stop.abort();
+});
+
+test.each(["active", "log", "unproven", "no retention"] as const)(
+  "%s reconnect loss leaves later live output visible without attribution",
+  async (reason) => {
+    const f = fixture(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "crew",
+    );
+
+    try {
+      const root = f.root({ active: true });
+      f.call(root, "initial");
+      f.called(root, "initial", { agent: "explore" });
+      f.names(root, "initial", child);
+      f.create(child, main);
+      f.emit(
+        "session.execution.started",
+        child,
+        {},
+        undefined,
+        undefined,
+        1,
+        reason === "unproven" ? null : 20,
+      );
+      f.ended(child, "before reconnect", "first-answer");
+      f.active.add(child);
+      f.logFrames.set(child, [
+        {
+          type: "log.synced",
+          aggregateID: child,
+          seq: reason === "no retention" ? 9 : 2,
+        },
+      ]);
+
+      if (reason === "active" || reason === "log") {
+        f.failedReads.add(reason);
+      }
+
+      await f.families.reconnected();
+      expect(f.turns()[1]).toMatchObject({ status: "cancelled", lost: true });
+      f.emit(
+        "session.text.ended",
+        child,
+        {
+          assistantMessageID: "first-answer",
+          ordinal: 0,
+          text: "replayed",
+        },
+        undefined,
+        undefined,
+        2,
+      );
+      f.delta(child, "transient continuation", "next-answer");
+      f.emit(
+        "session.text.ended",
+        child,
+        {
+          assistantMessageID: "next-answer",
+          ordinal: 1,
+          text: "after reconnect",
+        },
+        undefined,
+        undefined,
+        10,
+      );
+      f.end(child);
+      await setImmediate();
+      f.advance(5000);
+      f.delta(main, "tick");
+
+      expect(f.turns().slice(1)).toMatchObject([
+        {
+          status: "cancelled",
+          lost: true,
+          items: [{ text: "before reconnect" }],
+        },
+        {
+          status: "cancelled",
+          lost: true,
+          session: { id: child, parent: null },
+          task: null,
+          requests: [],
+          items: [
+            { text: "transient continuation" },
+            { text: "after reconnect" },
+          ],
+        },
+      ]);
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
+test("published child retains and pages live content during early log recovery", async () => {
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, gate.promise);
+  const early = "early".repeat(60_000);
+  const live = "live".repeat(75_000);
+  const end = { assistantMessageID: "answer", ordinal: 0, text: early };
+
+  try {
+    const root = f.root();
+    f.parents.set(child, main);
+    f.call(root, "retry");
+    f.called(root, "retry", { agent: "explore", sessionID: child });
+    f.names(root, "retry", child);
+    f.emit("session.execution.started", child, {}, undefined, undefined, 3);
+    f.emit("session.text.ended", child, end, undefined, "early", 4);
+    f.logFrames.set(child, [
+      {
+        id: "early",
+        type: "session.text.ended",
+        created: 20,
+        data: { sessionID: child, ...end },
+        durable: { aggregateID: child, seq: 4, version: 1 },
+      },
+    ]);
+    await setImmediate();
+    expect(f.logReads).toEqual([[child, 3]]);
+    expect(f.turns()[1]).toMatchObject({
+      session: { id: child, parent: { callId: "retry" } },
+      status: "running",
+    });
+
+    f.emit("session.text.ended", child, end, undefined, "early", 4);
+    f.emit("session.text.delta", child, {
+      assistantMessageID: "answer",
+      ordinal: 1,
+      delta: live,
+    });
+    f.emit("session.execution.interrupted", child, {}, undefined, undefined, 5);
+    gate.resolve();
+    await setImmediate();
+    const turn = f.turns()[1];
+    expect(turn).toMatchObject({
+      status: "cancelled",
+      items: [
+        { paged: { pages: expect.any(Number) } },
+        { paged: { pages: expect.any(Number) } },
+      ],
+    });
+
+    if (!turn) {
+      throw new Error("Missing published child");
+    }
+
+    for (const [index, prefix] of ["early", "live"].entries()) {
+      const item = turn?.items[index];
+      const page = item && f.hub.page("officer", turn.id, item.id, 0);
+      expect(page).toMatchObject({ item: item?.id });
+      expect(JSON.stringify(page)).toContain(prefix.repeat(10));
+    }
+  } finally {
+    gate.resolve();
+    f.stop.abort();
+  }
+});
+
+test("name saturation survives a live parent but not retirement plus writer eviction", () => {
+  const hub = createActivityHub({ turnsPerAgent: 1 });
+  const recorder = hub.recorder("officer");
+  const calls = new ActivityCallEvidence(1);
+  const scope = { active: true };
+  const window = { after: 0, through: 6, except: 0 };
+
+  const parents = Array.from(
+    { length: 300 },
+    (_, index) => `ses_parent_${index}`,
+  );
+
+  for (const id of parents) {
+    const log = recorder.begin(undefined, id);
+
+    for (let order = 1; order <= 5; order += 1) {
+      const childID = `${id}-kid-${order}`;
+      calls.open(id, scope, log, childID, order);
+      calls.name(id, scope, log, childID, childID);
+    }
+
+    for (let order = 1; order <= 5; order += 1) {
+      calls.retire(id, scope, `${id}-kid-${order}`, 6);
+    }
+
+    expect(calls.competing(id, scope, `${id}-kid-5`, window)).toBe(true);
+    log.end("completed");
+  }
+
+  recorder.begin(undefined, "ses_final");
+  expect(
+    parents.filter((id) => calls.competing(id, scope, `${id}-kid-5`, window)),
+  ).toEqual([]);
 });
