@@ -48,7 +48,7 @@ test("the provisional count cap evicts old hints without proving the surviving c
   queue.close();
 });
 
-test("a successor recovers after its retired predecessor used every replay slot", async () => {
+function recoveryFixture() {
   const id = "ses_child";
 
   type Event = SessionExecutionStarted | SessionTextEnded;
@@ -87,6 +87,53 @@ test("a successor recovers after its retired predecessor used every replay slot"
   const enqueue = (event: Event) =>
     queue.enqueue(id, { event, at: 0, order: event.durable.seq }, pending);
 
+  return { id, queue, pending, frame, enqueue };
+}
+
+test("only the published segment bypasses the byte budget during recovery", async () => {
+  const { id, queue, pending, frame, enqueue } = recoveryFixture();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const early = frame("session.text.ended", 2);
+  const live = frame("session.text.ended", 3);
+  const later = frame("session.text.ended", 5);
+
+  try {
+    enqueue(frame("session.execution.started", 1));
+    enqueue(early);
+    queue.drain(id, pending, {
+      signal: new AbortController().signal,
+      async *read() {
+        entered.resolve();
+        await release.promise;
+        yield early;
+      },
+      accepts: (event): event is typeof early => event === early,
+      owned: () => true,
+      replay() {},
+      gap() {},
+      lost() {},
+      superseded() {},
+    });
+    await entered.promise;
+
+    enqueue(live);
+    enqueue(frame("session.execution.started", 4));
+    enqueue(later);
+    expect(pending.segments[0]?.frames.map(({ order }) => order)).toEqual([
+      1, 3,
+    ]);
+    expect(pending.segments[1]?.frames.map(({ order }) => order)).toEqual([4]);
+    expect(pending.segments[1]?.gap?.slots.has(5)).toBe(true);
+  } finally {
+    release.resolve();
+    await queue.settleReads();
+    queue.close();
+  }
+});
+
+test("a successor recovers after its retired predecessor used every replay slot", async () => {
+  const { id, queue, pending, frame, enqueue } = recoveryFixture();
   enqueue(frame("session.execution.started", 1));
 
   for (let seq = 2; seq < 2 + maxActivityGapSlots; seq += 1) {
@@ -100,7 +147,7 @@ test("a successor recovers after its retired predecessor used every replay slot"
 
   const omitted = frame("session.text.ended", start + 1);
   enqueue(omitted);
-  const replayed: Event[] = [];
+  const replayed: ReturnType<typeof frame>[] = [];
   let incomplete = false;
 
   queue.drain(id, pending, {

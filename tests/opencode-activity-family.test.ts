@@ -242,6 +242,45 @@ test("reconnect inspects all tracked children beyond the first read page", async
   f.stop.abort();
 });
 
+test("shared root reconciliation rejects an uncovered watermark for an officer writer", async () => {
+  const f = fixture();
+
+  try {
+    // Officer prompts normally use input ownership, not this durable root path.
+    const log = f.root();
+
+    const root = {
+      id: main,
+      startSeq: 1,
+      dropped: false,
+      open: new Set([{ log }]),
+    };
+
+    f.active.add(main);
+    f.logFrames.set(main, [{ type: "log.synced", aggregateID: main, seq: 5 }]);
+
+    const lost: unknown[] = [];
+    await f.families.reconcileRoots([root], (session, boundary) => {
+      expect(session).toBe(root);
+      lost.push(boundary);
+      log.end("cancelled", true);
+    });
+
+    expect(f.logReads).toEqual([[main, 1]]);
+    expect(lost).toEqual([undefined]);
+    expect(f.turns()).toMatchObject([
+      {
+        session: { id: main, parent: null },
+        status: "cancelled",
+        lost: true,
+        reconnects: 1,
+      },
+    ]);
+  } finally {
+    f.stop.abort();
+  }
+});
+
 test.each([
   [7, "current"],
   [8, "current"],
@@ -2159,6 +2198,34 @@ test("a compacted undated boundary uses the latest observed native time", () => 
   expect(history.needsFreshness("ses_new", 51)).toBe(false);
 });
 
+test("untimed compaction requires freshness proof until native time is observed", () => {
+  const hub = createActivityHub({ turnsPerAgent: 1, turns: 1 });
+  const recorder = hub.recorder("officer");
+  const history = new ChildExecutions<{ log: TurnActivityLog }>(1);
+
+  for (let index = 0; index < 12; index += 1) {
+    const id = `ses_untimed_${index}`;
+    const parent = recorder.begin();
+    const log = parent.child?.(null, id);
+
+    if (!log) {
+      throw new Error("Expected child writer");
+    }
+
+    const child = { log };
+    history.admitted(id, child);
+    history.advance(id, child, 1);
+    log.end("completed");
+    parent.end("completed");
+  }
+
+  expect(history.possiblyReplayed("ses_untimed_0", 1)).toBe(false);
+  expect(history.needsFreshness("ses_untimed_0", 5)).toBe(true);
+  history.observeNativeTime(50);
+  expect(history.needsFreshness("ses_untimed_0", 50)).toBe(true);
+  expect(history.needsFreshness("ses_new", 51)).toBe(false);
+});
+
 test("family eviction replaces child writer associations with tombstones immediately", () => {
   const hub = createActivityHub({ turnsPerAgent: 1 });
   const recorder = hub.recorder("officer");
@@ -2866,6 +2933,121 @@ test.each(["active", "log", "unproven", "no retention"] as const)(
     }
   },
 );
+
+test("an unproven later start cannot advance the last proven post-loss cursor", async () => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    f.parents.set(child, main);
+    f.create(child, main);
+    f.start(child);
+    f.end(child);
+    f.call(root, "retry");
+    f.called(root, "retry", { agent: "explore", sessionID: child });
+    f.names(root, "retry", child);
+    f.emit(
+      "session.execution.started",
+      child,
+      {},
+      undefined,
+      undefined,
+      5,
+      null,
+    );
+    await setImmediate();
+    expect(f.turns()[2]).toMatchObject({
+      session: { id: child, parent: null },
+      status: "running",
+    });
+    await f.families.reconnected();
+
+    // This trailing frame was between the proven terminal and the undated start.
+    f.emit(
+      "session.text.ended",
+      child,
+      {
+        assistantMessageID: "tail",
+        ordinal: 0,
+        text: "unobserved tail",
+      },
+      undefined,
+      undefined,
+      4,
+    );
+    f.end(child);
+    expect(f.turns().slice(2)).toMatchObject([
+      { status: "cancelled", lost: true, items: [] },
+      {
+        session: { id: child, parent: null },
+        status: "cancelled",
+        lost: true,
+        items: [{ text: "unobserved tail" }],
+      },
+    ]);
+  } finally {
+    f.stop.abort();
+  }
+});
+
+test("discarding post-loss output whose parent is fenced marks a gap on the lost turn", async () => {
+  const f = fixture();
+
+  try {
+    const scope = { active: true };
+    f.root(scope);
+    f.create(child, main);
+    f.start(child);
+    f.ended(child, "before loss", "answer");
+    await f.families.reconnected();
+    f.families.fence(main, scope);
+    f.delta(child, "cannot publish", "answer");
+    expect(f.turns()[1]?.items).toMatchObject([{ text: "before loss" }]);
+    f.advance(2000);
+    f.delta(main, "tick");
+
+    expect(f.turns().slice(1)).toMatchObject([
+      {
+        status: "cancelled",
+        lost: true,
+        items: [{ text: "before loss" }, { unavailable: ["activity.frames"] }],
+      },
+    ]);
+  } finally {
+    f.stop.abort();
+  }
+});
+
+test("a named replacement cannot reopen the lost writer for an old assistant message", async () => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    f.parents.set(child, main);
+    f.create(child, main);
+    f.start(child);
+    f.ended(child, "before loss", "old-answer");
+    await f.families.reconnected();
+    f.call(root, "retry");
+    f.called(root, "retry", { agent: "explore", sessionID: child });
+    f.names(root, "retry", child);
+    f.start(child);
+    await setImmediate();
+    expect(f.turns()[2]).toMatchObject({
+      session: { parent: { callId: "retry" } },
+    });
+
+    f.delta(child, "should not rewrite the lost period", "old-answer");
+    f.ended(child, "replacement output", "new-answer");
+    f.end(child);
+    expect(f.turns().slice(1)).toMatchObject([
+      { status: "cancelled", lost: true, items: [{ text: "before loss" }] },
+      { status: "completed", items: [{ text: "replacement output" }] },
+    ]);
+  } finally {
+    f.stop.abort();
+  }
+});
 
 test("published child retains and pages live content during early log recovery", async () => {
   const gate = Promise.withResolvers<void>();

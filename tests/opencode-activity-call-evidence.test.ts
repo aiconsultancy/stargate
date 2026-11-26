@@ -140,6 +140,27 @@ test("the per-log naming limit does not erase another log's exact proof", () => 
   expect(evidence.name(parent, undefined, second, "second", child)).toBe(3);
 });
 
+test("fallback launch input cannot turn a known non-subagent call into naming proof", () => {
+  const evidence = new ActivityCallEvidence(2);
+  const owner = log();
+  evidence.open(parent, undefined, owner, "shell", 1, { subagent: false });
+
+  const input = {
+    order: 2,
+    created: 2,
+    input: { sessionID: child },
+    mayLaunch: true,
+  };
+
+  evidence.input(parent, undefined, owner, "shell", input);
+  evidence.input(parent, undefined, owner, "missing-input-start", input);
+
+  expect(evidence.name(parent, undefined, owner, "shell", child)).toBeNull();
+  expect(
+    evidence.name(parent, undefined, owner, "missing-input-start", child),
+  ).toBe(2);
+});
+
 function oldBucket(key: string) {
   return Bun.hash(key, 0n) % 4n;
 }

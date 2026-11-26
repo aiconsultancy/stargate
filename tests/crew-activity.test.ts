@@ -1821,6 +1821,39 @@ test("crew reconnect fences delivery until durable evidence identifies a newer e
   expect(text(turns[1])).toBe("new execution");
 });
 
+test("an uncovered reconnect watermark cannot extend a running crew root", async () => {
+  const root = "ses_mario";
+
+  const { turns, stream, delta, text } = fixture({
+    turns: {
+      peers: [peer("mario", root)],
+      tasks: [task("task_1", root, ["in"])],
+    },
+    owners: { a: "in", b: "in" },
+    family: {
+      active: async () => ({ [root]: { type: "running" } }),
+      async *log(id, after) {
+        yield { type: "log.synced", aggregateID: id, seq: after + 4 };
+      },
+    },
+  });
+
+  await until(() => stream.subscribers() === 1);
+  started(stream, 1);
+  delta(root, "a", "old period");
+  await until(() => text(turns[0]) === "old period");
+  stream.emit("server.connected", {});
+  delta(root, "b", "after the gap");
+  await until(() => turns.some((turn) => text(turn).includes("after the gap")));
+
+  expect(turns[0]).toMatchObject({
+    ended: "cancelled",
+    lost: true,
+    reconnects: 1,
+  });
+  expect(turns.map(text)).toEqual(["old period", "after the gap"]);
+});
+
 test("crew reconnect applies the durable settlement without opening an interval across the gap", async () => {
   const root = "ses_mario";
 
