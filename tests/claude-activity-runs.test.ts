@@ -94,6 +94,8 @@ function fixture() {
   });
 
   return {
+    add,
+    assistant,
     task,
     taskFrame,
     spawn,
@@ -143,6 +145,7 @@ function fixture() {
       });
     },
     end: (outcome: ActivityOutcome = "completed") => activity.end(outcome),
+    turns: () => hub.turns("officer")?.turns ?? [],
     children: () =>
       hub.turns("officer")?.turns.filter((turn) => turn.session?.parent) ?? [],
     tool: () =>
@@ -297,6 +300,54 @@ test("a Claude child can receive its first frame after its task outcome", () => 
   expect(f.children()[0]?.items).toContainEqual(
     expect.objectContaining({ kind: "text", text: "Output 001" }),
   );
+});
+
+test("late Claude frames cannot append or update items in an ended thread", () => {
+  const f = fixture();
+  const childTool = "tool_child_read";
+
+  const progress = (elapsedSeconds: number) =>
+    f.add({
+      ...envelope(),
+      type: "tool_progress",
+      parent_tool_use_id: callId,
+      tool_use_id: childTool,
+      tool_name: "Read",
+      elapsed_time_seconds: elapsedSeconds,
+    });
+
+  f.start("001");
+  f.assistant(
+    "msg_child_tool",
+    { type: "tool_use", id: childTool, name: "Read", input: {} },
+    callId,
+  );
+  progress(1);
+  expect(f.children()[0]?.items).toContainEqual(
+    expect.objectContaining({
+      callId: childTool,
+      metadata: { elapsed_time_seconds: 1 },
+    }),
+  );
+
+  f.finish("001", "stopped");
+  const settled = f.children();
+  expect(settled).toMatchObject([{ status: "cancelled" }]);
+  f.output("late child output");
+  expect(f.children()).toEqual(settled);
+  progress(2);
+  expect(f.children()).toEqual(settled);
+
+  f.end();
+  const ended = f.turns();
+  expect(ended[0]?.status).toBe("completed");
+  f.assistant(
+    "msg_late_root",
+    { type: "text", text: "late root output", citations: null },
+    null,
+  );
+
+  expect(f.turns()).toEqual(ended);
 });
 
 test.each([
