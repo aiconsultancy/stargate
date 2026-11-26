@@ -1333,6 +1333,67 @@ test("a running root keeps all 513 children until oversize-first family eviction
   }
 });
 
+test.each([512, 513])(
+  "an evicted family of %i children cannot spend a new call on durable replay",
+  async (count) => {
+    const f = fixture();
+
+    try {
+      const firstRoot = f.root();
+
+      for (let index = 0; index < count; index += 1) {
+        const id = `ses_old_${index}`;
+        f.create(id, main);
+        f.start(id);
+        f.ended(id, `old-${index}`, `old-id-${index}`);
+        f.end(id);
+      }
+
+      f.settleRoot(firstRoot);
+      expect(f.turns()).toHaveLength(0);
+      await f.families.reconnected();
+
+      const id = "ses_old_0";
+      const root = f.root();
+      const parent = f.turns()[0]?.id;
+      f.parents.set(id, main);
+      f.call(root, "new");
+      f.names(root, "new", id);
+      await setImmediate();
+
+      f.emit("session.execution.started", id, {}, undefined, undefined, 1);
+      f.emit(
+        "session.text.ended",
+        id,
+        { assistantMessageID: "old-id-0", ordinal: 0, text: "old-0" },
+        undefined,
+        undefined,
+        2,
+      );
+      f.emit("session.execution.succeeded", id, {}, undefined, undefined, 3);
+      const afterReplay = f.turns().slice(1);
+
+      f.start(id);
+      f.ended(id, "new transcript", "new-id");
+      f.end(id);
+      await setImmediate();
+
+      expect({ afterReplay, children: f.turns().slice(1) }).toMatchObject({
+        afterReplay: [],
+        children: [
+          {
+            session: { id, parent: { turnId: parent, callId: "new" } },
+            status: "completed",
+            items: [{ text: "new transcript" }],
+          },
+        ],
+      });
+    } finally {
+      f.stop.abort();
+    }
+  },
+);
+
 test("family eviction replaces child writer associations with tombstones immediately", () => {
   const hub = createActivityHub({ turnsPerAgent: 1 });
   const recorder = hub.recorder("officer");
