@@ -60,7 +60,10 @@ import {
   type FleetControlOptions,
 } from "../coordination/fleet/control";
 import { fleetRequestAction } from "../coordination/fleet/permissions";
-import { peerMessageInputSchema } from "../coordination/fleet/protocol";
+import {
+  FleetError,
+  peerMessageInputSchema,
+} from "../coordination/fleet/protocol";
 import { FleetResults, fleetOrigin } from "../coordination/fleet/results";
 import {
   sendFleetAssignment,
@@ -128,8 +131,12 @@ const normalisePeerInput = Schema.decodeUnknownSync(peerMessageInputSchema, {
   onExcessProperty: "error",
 });
 
+/** Shown to the caller: names the cause and a workaround, never internals. */
+export const fleetChatTurnRequired =
+  "Fleet tools, including stargate_dm with via, work only in a turn started by a chat message (IRC, Slack or Teams). A turn woken by a crew DM or notice has none. Ask in your ship channel or tag the other captain on IRC instead.";
+
 /** Bind fleet calls to an executing native input and matching tool payload. */
-function fleetAuthorizer(
+export function fleetAuthorizer(
   store: Pick<Store, "permissionCandidates">,
   backend: Pick<AgentBackend, "toolBelongsToInput">,
   pin: string,
@@ -169,7 +176,7 @@ function fleetAuthorizer(
       }
     }
 
-    throw new Error("Fleet caller is not an active native input");
+    throw new FleetError(fleetChatTurnRequired);
   };
 }
 

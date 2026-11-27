@@ -129,7 +129,14 @@ export async function sendFleetPeerMessage(
     );
   }
 
-  const nick = await client.verifiedNick(target.account);
+  const nick = await client.verifiedNick(target.account).catch(() => {
+    signal.throwIfAborted();
+
+    // WHOIS failed, timed out or the connection dropped: safe, actionable text.
+    throw new FleetError(
+      "IRC could not confirm that the recipient captain is online under its configured account. Try again later or ask in your ship channel.",
+    );
+  });
 
   if (/[@\s\p{Cc}]/u.test(nick)) {
     throw new FleetError(

@@ -41,6 +41,8 @@ import {
   fleetControlSchema,
 } from "../src/coordination/fleet/protocol";
 import { sendFleetAssignment } from "../src/coordination/fleet/fleet-irc";
+import { fleetAuthorizer, fleetChatTurnRequired } from "../src/app/runtime";
+import type { Job } from "../src/gateway/store-types";
 import {
   authenticateActivityRequest,
   BotFrameworkKeyStore,
@@ -202,6 +204,143 @@ test("peer DM IPC requires an exact captain target, native pin and separate gran
       ),
     ).rejects.toThrow("policy refuses");
     expect(calls).toEqual([target.account]);
+  } finally {
+    await runtime.close();
+  }
+});
+
+const peerRequest: FleetRequest = {
+  operation: "peer-message",
+  caller: caller(),
+  input: {
+    op: "send",
+    to: target.id,
+    text: "Hello",
+    via: "ship",
+    delivery: "steer",
+  },
+};
+
+const runningJob: Job = {
+  id: 1,
+  eventId: "irc-event",
+  botKey: "irc-key",
+  conversation: "#owner",
+  channel: "#owner",
+  thread: "irc-event",
+  user: "jac",
+  text: "Please tell the other captain",
+  status: "running",
+  response: null,
+  sent: 0,
+  attempts: 0,
+  input: "msg_chat_input",
+};
+
+test("the fleet authoriser binds a peer DM to a running chat job's native input", async () => {
+  const checks: unknown[] = [];
+
+  const authorize = fleetAuthorizer(
+    { permissionCandidates: (key) => (key === "irc-key" ? [runningJob] : []) },
+    {
+      async toolBelongsToInput(...args) {
+        checks.push(args);
+
+        return true;
+      },
+    },
+    "ses_owner",
+    ["slack-key", "irc-key"],
+  );
+
+  await expect(
+    authorize(peerRequest.caller, signal(), peerRequest),
+  ).resolves.toEqual({
+    botKey: "irc-key",
+    eventId: "irc-event",
+    sessionID: "ses_owner",
+    inputID: "msg_chat_input",
+  });
+  expect(checks).toHaveLength(1);
+  expect(checks[0]).toMatchObject([
+    "ses_owner",
+    "msg_native_assistant",
+    "msg_chat_input",
+    expect.anything(),
+    {
+      agent: "native-agent",
+      id: "tool-call",
+      tool: "stargate_dm",
+      input: peerRequest.input,
+    },
+  ]);
+});
+
+test("the fleet authoriser refuses a turn without a running chat job with an actionable reason", async () => {
+  const refusals = [
+    fleetAuthorizer(
+      { permissionCandidates: () => [] },
+      { toolBelongsToInput: async () => true },
+      "ses_owner",
+      ["irc-key"],
+    ),
+    fleetAuthorizer(
+      { permissionCandidates: () => [runningJob] },
+      { toolBelongsToInput: async () => false },
+      "ses_owner",
+      ["irc-key"],
+    ),
+  ];
+
+  for (const authorize of refusals) {
+    const failure = await authorize(
+      peerRequest.caller,
+      signal(),
+      peerRequest,
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(FleetError);
+    expect(failure).toHaveProperty("message", fleetChatTurnRequired);
+  }
+
+  expect(fleetChatTurnRequired).not.toMatch(/ses_|msg_|job|raw details/i);
+});
+
+test("a peer DM from a turn woken without a chat message returns the reason through fleet control", async () => {
+  const runtime = await fixture();
+  const calls: string[] = [];
+
+  try {
+    const { socketPath } = await runtime.open("ses_owner", {
+      config: {
+        socketPath: join(runtime.directory, "ses_owner.sock"),
+        statePath: runtime.statePath,
+        targets: [{ ...target, role: "captain" }],
+      },
+      permissions: [
+        { action: "fleet_peer_message", resource: target.id, effect: "allow" },
+      ],
+      authorize: fleetAuthorizer(
+        { permissionCandidates: () => [] },
+        { toolBelongsToInput: async () => true },
+        "ses_owner",
+        ["irc-key"],
+      ),
+      peerMessage: async (peer) => {
+        calls.push(peer.account);
+
+        return peer.channel;
+      },
+    });
+
+    const failure = await fleetRequest(socketPath, peerRequest, signal()).catch(
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(FleetError);
+    expect(failure).toHaveProperty("message", fleetChatTurnRequired);
+    expect(String(failure)).not.toContain("raw details withheld");
+    expect(calls).toEqual([]);
   } finally {
     await runtime.close();
   }

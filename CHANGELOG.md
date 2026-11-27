@@ -11,6 +11,12 @@ mockups from a fleet's preview service. Standalone Stargate leaves it off.
 It accepts a dedicated HTTP origin for fleets that serve previews over a
 private network. Existing HTTPS and loopback origins remain supported.
 
+Fleet tools called in a turn that no chat message started, such as one woken
+by a crew DM, now say that they need a chat-started turn and suggest a
+workaround, instead of "Fleet operation unavailable; raw details withheld." A
+cross-ship `stargate_dm` also says when IRC cannot confirm that the recipient
+captain is online. See [fleet tools](docs/fleet-tools.md).
+
 ### Feature flags
 
 - `agentDispatch.decisionOutcomeDms` enables decision-outcome DMs to recording
@@ -36,6 +42,7 @@ private network. Existing HTTPS and loopback origins remain supported.
 - Enabled by default: `feedbackEnabled` for pinned teams. Set it to `false`
   in the plugin options to disable the private feedback inbox tools.
 
+- Clearer fleet tool refusals add no flags and change no defaults.
 - Crew names and officers' Fleet API sockets add no flags and change no
   defaults. Officer sockets require `subspaceAgents`, which remains off by
   default.

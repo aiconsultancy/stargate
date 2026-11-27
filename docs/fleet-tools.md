@@ -31,6 +31,14 @@ permission proof. During an active turn, that engine can invoke operations the
 gateway policy explicitly permits. Keep this policy, gateway credentials and
 the evidence database outside engine write access.
 
+Fleet tools, including `stargate_dm` with `via`, work only in a turn started by
+a chat message: an IRC, Slack or Teams request that the gateway is still
+running. A turn woken by a crew DM, crew hand-back or other notice has no such
+request, so every fleet operation refuses with a message saying so. The
+refusal is not an outage, and retrying in the same turn cannot succeed. Ask in
+the ship channel or tag the other captain on IRC instead, or make the call
+from the next turn a chat message starts.
+
 ## Configure the gateway and plugin
 
 The optional IRC `fleetControl` object declares a private socket, shared private
@@ -283,3 +291,7 @@ With `peerMessages` enabled, `stargate_dm` advertises `via: "ship"` or
 without `@` or control characters. Omit `via` for local-team mail.
 Fleet peer messages carry agent identity and no approval authority. Use
 `fleet_dispatch` for work that needs a retained instruction or review context.
+A peer DM, like every fleet tool, needs a turn started by a chat message; see
+the opening of this page. When IRC cannot confirm that the recipient captain
+is online under its configured account, the tool says so instead of returning
+an opaque failure.

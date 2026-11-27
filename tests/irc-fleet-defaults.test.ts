@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { effectiveIrcConfig, ircSchema } from "../src/config";
 import { sendFleetPeerMessage } from "../src/coordination/fleet/fleet-irc";
-import { peerMessageInputSchema } from "../src/coordination/fleet/protocol";
+import {
+  FleetError,
+  peerMessageInputSchema,
+} from "../src/coordination/fleet/protocol";
 import { fleetInstructions } from "../src/coordination/fleet/fleet-policy";
 import {
   fold,
@@ -193,6 +196,80 @@ test("peer DM uses the verified current nick and sends only to the selected room
   ).rejects.toThrow("no longer allowed");
 
   expect(sent).toHaveLength(2);
+});
+
+test("a peer DM says when IRC cannot confirm the recipient captain is online", async () => {
+  const config = effective(input());
+
+  const target = config.fleetControl?.targets.find(
+    ({ id }) => id === "phoenix",
+  );
+
+  if (!target) {
+    throw new Error("Missing test target");
+  }
+
+  const sent: string[] = [];
+
+  const client = {
+    fold,
+    inChannel: (channel: string) => config.channels.includes(channel),
+    verifiedNick: async (): Promise<string> => {
+      throw new Error("IRC recipient is not online under that account");
+    },
+    recipientGuard: () => () => true,
+    waitReady: async () => {},
+    budget: () => 300,
+    multiline: undefined,
+    privmsg: async (_channel: string, text: string) => {
+      sent.push(text);
+    },
+    sendBatch: async () => {
+      throw new Error("Expected no message");
+    },
+  };
+
+  const message = Schema.decodeUnknownSync(peerMessageInputSchema)({
+    op: "send",
+    to: "phoenix",
+    text: "Hello",
+    via: "ship",
+  });
+
+  const failure = await sendFleetPeerMessage(
+    () => config,
+    client,
+    target,
+    message,
+    () => true,
+    AbortSignal.timeout(1000),
+  ).catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(FleetError);
+  expect(failure).toHaveProperty(
+    "message",
+    "IRC could not confirm that the recipient captain is online under its configured account. Try again later or ask in your ship channel.",
+  );
+
+  const cancelled = new AbortController();
+  cancelled.abort();
+
+  const aborted = await sendFleetPeerMessage(
+    () => config,
+    {
+      ...client,
+      verifiedNick: async (): Promise<string> => {
+        throw new Error("IRC account lookup timed out");
+      },
+    },
+    target,
+    message,
+    () => true,
+    cancelled.signal,
+  ).catch((error: unknown) => error);
+
+  expect(aborted).not.toBeInstanceOf(FleetError);
+  expect(sent).toEqual([]);
 });
 
 test("a peer DM wakes only its explicitly addressed captain, even when the body names another", () => {
