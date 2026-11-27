@@ -522,7 +522,9 @@ fingerprint returns 409: start again from the list. A list whose fingerprint
 moves while it is computed is computed once more; if it moves again, the
 answer carries `unstable: true`. A file page is computed once more too,
 including when a file shrinks while it is read, and returns 409 if the
-fingerprint moves again.
+fingerprint moves again. An untracked file that becomes unreadable before Git
+reads it moves no fingerprint, so the diff is computed once more and lists it
+without patch or size.
 
 | Status | Meaning                                                                        |
 | ------ | ------------------------------------------------------------------------------ |
