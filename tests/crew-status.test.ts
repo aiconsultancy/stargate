@@ -392,6 +392,9 @@ test("code-point head handles small limits without splitting an astral character
 });
 
 test.each([
+  [-1, ""],
+  [-Infinity, ""],
+  [0.5, ""],
   [1.5, "😀"],
   [NaN, ""],
   [Infinity, "😀abc"],
