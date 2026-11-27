@@ -305,15 +305,10 @@ export class ActivityRecoveryQueues<E extends Event> {
 
   public fence(scope: ActivityIncarnation) {
     this.evidence.fence(scope);
-    const orphaned = new Set<string>();
 
-    for (const [id, pending] of this.queues) {
-      if (this.evidence.discardWriter(pending, pending.segments, scope)) {
-        orphaned.add(id);
-      }
+    for (const pending of this.queues.values()) {
+      this.evidence.discardWriter(pending, pending.segments, scope);
     }
-
-    return orphaned;
   }
 
   public expire() {

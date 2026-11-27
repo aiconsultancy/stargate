@@ -219,21 +219,68 @@ test.each([
 
 test.each([
   {
-    mode: "witness only",
+    mode: "witness before fence",
     real: 50,
     foreign: 51,
     nameForeign: true,
     fence: true,
+    lateName: false,
+    nativeParent: main,
   },
-  { mode: "real proof", real: 30, foreign: 31, nameForeign: true, fence: true },
+  {
+    mode: "proof before fence",
+    real: 30,
+    foreign: 31,
+    nameForeign: true,
+    fence: true,
+    lateName: false,
+    nativeParent: main,
+  },
+  {
+    mode: "witness after fence",
+    real: 50,
+    foreign: 51,
+    nameForeign: true,
+    fence: true,
+    lateName: true,
+    nativeParent: main,
+  },
+  {
+    mode: "proof after fence",
+    real: 30,
+    foreign: 31,
+    nameForeign: true,
+    fence: true,
+    lateName: true,
+    nativeParent: main,
+  },
+  {
+    mode: "fence ended the native parent",
+    real: 30,
+    foreign: 31,
+    nameForeign: true,
+    fence: true,
+    lateName: true,
+    nativeParent: other,
+  },
   {
     mode: "no foreign name",
     real: 50,
     foreign: 51,
     nameForeign: false,
     fence: true,
+    lateName: true,
+    nativeParent: main,
   },
-  { mode: "no fence", real: 50, foreign: 51, nameForeign: true, fence: false },
+  {
+    mode: "no fence",
+    real: 50,
+    foreign: 51,
+    nameForeign: true,
+    fence: false,
+    lateName: true,
+    nativeParent: main,
+  },
 ])(
   "foreign writer fenced before ancestry cannot erase child output ($mode)",
   async (row) => {
@@ -253,28 +300,39 @@ test.each([
         f.name(foreign, other, "foreign");
       }
 
-      f.name(root, main, "real");
+      if (!row.lateName) {
+        f.name(root, main, "real");
+      }
+
       f.end();
-      expect(f.reads).toEqual([child]);
+      expect(f.reads).toEqual(row.nameForeign || !row.lateName ? [child] : []);
       expect(f.childTurns()).toEqual([]);
 
       if (row.fence) {
         f.families.fence(other, scope);
       }
 
-      parent.resolve(main);
+      if (row.lateName) {
+        f.name(root, main, "real");
+      }
+
+      expect(f.reads).toEqual([child]);
+      parent.resolve(row.nativeParent);
       await setImmediate();
 
       const linked = row.real < 40;
 
-      const expected = [
-        {
-          session: { parent: linked ? { callId: "real" } : null },
-          status: linked ? "completed" : "cancelled",
-          ...(!linked && { lost: true, requests: [] }),
-          items: [{ text: "Observed child text" }],
-        },
-      ];
+      const expected =
+        row.nativeParent === other
+          ? []
+          : [
+              {
+                session: { parent: linked ? { callId: "real" } : null },
+                status: linked ? "completed" : "cancelled",
+                ...(!linked && { lost: true, requests: [] }),
+                items: [{ text: "Observed child text" }],
+              },
+            ];
 
       expect(f.childTurns()).toMatchObject(expected);
       f.advance(1701);

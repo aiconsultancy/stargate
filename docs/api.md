@@ -738,7 +738,9 @@ A non-empty string `sessionID` or `task_id` means the call resumes a session.
 A named child can still appear after the pending window. OpenCode 2.3.2
 can return from the naming call while the child runs in the background,
 so a waiting name has no time-based expiry; the bounded candidate queue,
-reconnect and crew fencing can still clear it. Native time establishes order,
+reconnect and crew fencing can still clear it. Fencing removes that writer's
+names, but leaves buffered frames with unresolved ancestry for the native
+parent read to settle. Native time establishes order,
 not causation. If a start is older than the call or cannot be proven fresh,
 the call shows
 `unavailable: ["activity.child-attribution"]`. The unproven frames appear in

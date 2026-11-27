@@ -241,14 +241,14 @@ export class OpenCodeActivityFamilies {
   public fence(session: string, scope: ActivityIncarnation) {
     scope.active = false;
     this.calls.fence(scope);
-    const orphaned = this.queue.fence(scope);
+    this.queue.fence(scope);
     this.roots.delete(session);
     this.peers.delete(session);
 
     const waiting = this.queue
       .entries()
       .map(([id]) => id)
-      .filter((id) => this.waitsFor(id, session, scope, orphaned))
+      .filter((id) => this.waitsFor(id, session, scope))
       .toArray();
 
     for (const id of waiting) {
@@ -262,12 +262,7 @@ export class OpenCodeActivityFamilies {
     }
   }
 
-  private waitsFor(
-    id: string,
-    session: string,
-    scope: ActivityIncarnation,
-    orphaned: ReadonlySet<string>,
-  ) {
+  private waitsFor(id: string, session: string, scope: ActivityIncarnation) {
     const visited = new Set<string>();
     let ancestorID = id;
 
@@ -287,13 +282,13 @@ export class OpenCodeActivityFamilies {
 
       if (
         pending.parent === session ||
-        (!pending.parent && orphaned.has(ancestorID)) ||
         (pending.inferred && this.lineage.get(pending.inferred) === scope)
       ) {
         return true;
       }
 
       if (!pending.parent) {
+        // The fenced scope's name was not native ancestry; a live writer can still name it.
         return false;
       }
 

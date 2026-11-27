@@ -161,42 +161,23 @@ export class ActivityNamingEvidence {
     this.discarded.delete(scope);
   }
 
-  /** An unresolved candidate can still belong to another writer. */
   public discardWriter(
     held: HeldNames,
     segments: readonly NamingSegment[],
     scope: ActivityIncarnation,
   ) {
-    let removed = false;
-    let live = false;
-
-    const keep = (proof: TimedProof) => {
-      if (proof.scope === scope) {
-        removed = true;
-
-        return false;
-      }
-
-      live ||= proof.scope?.active !== false;
-
-      return true;
-    };
-
+    const keep = (proof: TimedProof) => proof.scope !== scope;
     held.droppedProofs?.delete(scope);
     held.provisional = held.provisional.filter(keep);
 
     for (const segment of segments) {
       segment.droppedProofScopes?.delete(scope);
-      // An exact spill may belong to another writer. Wait for native ancestry.
-      live ||= segment.witnessOverflow === true;
       segment.proofs = segment.proofs.filter(keep);
 
       if (segment.witnesses) {
         segment.witnesses = segment.witnesses.filter(keep);
       }
     }
-
-    return removed && !live;
   }
 
   private bucket(id: string) {

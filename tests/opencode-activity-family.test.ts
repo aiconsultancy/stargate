@@ -352,7 +352,7 @@ test.each([
       gate.resolve();
       await setImmediate();
       expect(peak).toBe(8);
-      expect(f.reads).toEqual(mode === "current" ? [...ids, child] : ids);
+      expect(f.reads).toEqual(mode === "expired" ? ids : [...ids, child]);
 
       const turns = f.turns();
       expect(turns[1]).toMatchObject({
