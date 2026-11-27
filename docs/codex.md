@@ -1,12 +1,13 @@
-# Codex SDK backend
+# Codex backend
 
-`backend.type: "codex"` runs each turn in the Codex CLI through the
-[Codex SDK][sdk]. `package.json` pins `@openai/codex-sdk` to one exact
-version, and a test keeps it exact. The SDK depends on `@openai/codex` of the
-same version, which installs the native Codex CLI for the host platform,
-with its bundled `bwrap` sandbox helper and `rg`. Stargate uses that binary, not
-a `codex` command on `PATH`. A test checks that Stargate resolves the same binary
-and helper directory as the SDK.
+`backend.type: "codex"` runs each turn through `codex app-server` over stdio
+JSON-RPC 2.0 using the native Codex CLI installed with the pinned
+`@openai/codex-sdk` / `@openai/codex` package. `package.json` pins
+`@openai/codex-sdk` to one exact version, and a test keeps it exact. The package
+installs the native Codex CLI for the host platform, with its bundled `bwrap`
+sandbox helper and `rg`. Stargate uses that binary, not a `codex` command on
+`PATH`. A test checks that Stargate resolves the same binary and helper
+directory as the SDK.
 
 Use it for a Slack bot, an IRC captain or an IRC crew member, beside
 `opencode`, `pi-durable`, `claude` and `module` backends. Crew members of the
@@ -140,12 +141,12 @@ directory. Use a separate OS account or container for an untrusted audience.
 
 ### What runs outside the sandbox
 
-Stargate's launcher, the Codex CLI and the commands that the CLI runs itself
+The Codex CLI (`codex app-server`) and the commands that the CLI runs itself
 (for example `git` in a repository) run outside the sandbox, with the proxy
 key in their environment. Nothing that they run or read may be writable from
 inside the sandbox. With `sandbox: "workspace-write"`, Stargate therefore
 refuses a `directory` that contains, or lies inside, Stargate's data directory
-(the launcher, `CODEX_HOME`, `ZDOTDIR` and thread maps), Stargate's
+(`CODEX_HOME`, `ZDOTDIR`, run records and thread maps), Stargate's
 installation, or the Codex SDK and CLI packages, and a `directory` that
 contains the home directory (start-up files such as `~/.gitconfig`). A
 `directory` inside the home directory is fine. Paths are compared after
@@ -157,25 +158,12 @@ turn and holds nothing of Stargate's.
 
 After these checks Stargate uses only the canonical form of each path (all
 symbolic links resolved) for everything it writes, checks or runs: the
-workspace, the data directory and its subdirectories, the launcher, the
-CLI, the helper directory, the turn's `TMPDIR` and every `PATH` entry. A
-symbolic link on such a path is refused when its directory is writable by
-Stargate's user or lies inside a writable root, because it could be retargeted
-after the check. Links that only root controls, such as `/bin` →
-`/usr/bin`, are resolved and accepted.
-
-The launcher is written for each turn as `<…>/codex-bin/<turn>.sh` (mode
-0700, in a 0700 directory) with `O_EXCL | O_NOFOLLOW`, after checking that no
-component of its path is a symbolic link. It is checked again for exactly
-its expected content, owner and mode immediately before the turn, run by
-that canonical path, and removed after it. It never looks
-commands up through `PATH`: it runs `sh`, `mkfifo`, `cat` and `rm` by
-absolute path from `/usr/bin` or `/bin`, and only when root owns each path
-and the file it resolves to, with no group- or world-writable directory on
-the way. It uses the canonical path, except when that has another name
-(`/usr/bin/rm` → `gnurm`): programs such as busybox select their command by
-name, so the root-controlled path as written is kept. It runs the native
-CLI by its canonical path.
+workspace, the data directory and its subdirectories, the CLI, the helper
+directory, the turn's `TMPDIR` and every `PATH` entry. A symbolic link on
+such a path is refused when its directory is writable by Stargate's user or
+lies inside a writable root, because it could be retargeted after the check.
+Links that only root controls, such as `/bin` → `/usr/bin`, are resolved and
+accepted. Stargate spawns the native CLI directly by its canonical path.
 
 The operator's `PATH` is never passed on. The CLI and its tool commands
 get a fixed `PATH` that Stargate builds at start-up:
@@ -243,9 +231,10 @@ Stargate passes these settings as `--config` overrides on every turn:
 
 `CODEX_HOME` is a private directory of the backend namespace, so the host's
 `~/.codex` (login, `config.toml`, profiles, MCP servers, hooks, rules) is
-never read. A project `.codex/config.toml` in `directory` is not loaded,
-because the project is not marked as trusted in that private home. Managed
-(administrator) configuration of the host still applies.
+never read. Stargate also pins `projects."<directory>".trust_level = "untrusted"`
+via `--config`, so a project `.codex/config.toml` in `directory` is never
+loaded, even under `workspace-write`. Managed (administrator) configuration of
+the host still applies.
 
 The model sees the remaining Codex tools: `exec` (JavaScript that calls
 `exec_command`, `write_stdin`, `apply_patch`, `view_image`, `clock__curr_time`
@@ -291,30 +280,31 @@ fails otherwise.
 ## Sessions
 
 A new conversation gets a random Stargate UUID. Its first turn starts a Codex
-thread; Stargate stores the thread ID that Codex reports in
-`<…>/codex-threads/<conversation>.json` before the turn continues. Later
-turns resume that thread (`codex exec resume`), also after a Stargate restart.
-A turn that reports another thread ID fails without changing the mapping. A
-backend-setting change selects a new namespace with its own `CODEX_HOME`;
-Stargate never resumes another namespace's or another backend's thread. One
-conversation runs one turn at a time.
+thread via `thread/start` and begins the turn via `turn/start`; Stargate stores
+the thread ID in `<…>/codex-threads/<conversation>.json` once `turn/start`
+succeeds. Later turns resume that thread via `thread/resume`, also after a
+Stargate restart. A turn that reports another thread ID fails without changing
+the mapping. A backend-setting change selects a new namespace with its own
+`CODEX_HOME`; Stargate never resumes another namespace's or another backend's
+thread. One conversation runs one turn at a time.
 
-Each turn starts one Codex process, which exits after the turn. Stargate streams
-the turn's completed agent messages to the live reply. Reasoning, commands,
-command output, file changes and error items are not shown. The reply is the
-agent messages of this turn, joined by blank lines. Codex reports a message
-only when it is complete, so the preview grows by whole messages.
+Each turn starts one `codex app-server` process over stdio JSON-RPC 2.0, which
+exits after the turn. Stargate streams `item/agentMessage/delta` chunks and
+completed agent messages to the live reply, and records turn items to the Fleet
+API activity recorder when configured. Reasoning, commands, command output,
+file changes and error items are not shown in chat replies. The reply is the
+agent messages of this turn, joined by blank lines.
 
-Images (PNG, JPEG, GIF, WebP) are passed to Codex as image inputs, and UTF-8
-text files are added to the prompt. PDF and other files fail the turn before
-Codex starts, with the normal attachment notice.
+Images (PNG, JPEG, GIF, WebP) are passed to Codex as `localImage` inputs, and
+UTF-8 text files are added to the prompt. PDF and other files fail the turn
+before Codex starts, with the normal attachment notice.
 
 ## Cancellation and recovery
 
-Stop, the turn time limit and shutdown abort the SDK's stream, which sends
-`SIGTERM` to the Codex CLI. The turn then fails with the normal notice. Tool
-effects are not undone. A CLI that has not exited five seconds after its
-result is stopped the same way; the turn keeps its result.
+Stop, the turn time limit and shutdown first send `turn/interrupt` to
+`codex app-server` (bounded by a 100 ms grace window), then close the child
+stdio pipes and send `SIGTERM` to the CLI. The turn then fails with the normal
+notice. Tool effects are not undone.
 
 No process of a turn outlives it. The Codex CLI runs in Stargate's own process
 group, and its sandbox helpers and commands run in new sessions and PID
@@ -322,26 +312,8 @@ namespaces, so there is no group to signal. Instead every process of a turn
 inherits a random `STARGATE_CODEX_TURN` value. Every process that carries the
 value gets `SIGTERM`, and whatever remains after five seconds gets
 `SIGKILL`. This includes the CLI itself, the sandbox helper and commands
-that ignore `SIGTERM`.
-
-This clean-up starts when the turn is cancelled, without waiting for the
-CLI's output to end: the SDK sends only `SIGTERM` and then waits for that
-output, which a CLI that ignores `SIGTERM` never closes. A cancelled turn,
-`interrupt` and shutdown therefore settle within about six seconds. After a
-turn ends by itself, the same clean-up stops what it left.
-
-The SDK exposes neither the CLI process nor its output stream, and a process
-that the CLI starts can inherit that output and keep it open. Stargate therefore
-starts the CLI through its own launcher (`<…>/codex-bin/<turn>.sh`, the SDK's
-`codexPathOverride`), a short `sh` script. It `exec`s the CLI, so the CLI
-stays the SDK's child with unchanged signals and exit status, but sends the
-CLI's output through a FIFO to `cat`. The FIFO is unlinked as soon as both
-ends are open. Only `cat` then holds Stargate's output and error pipes, and it
-carries the turn marker, so the clean-up closes them even while a process
-without the marker keeps the CLI's own output open. The CLI's stderr goes to
-`/dev/null`; Stargate never uses it. If the output is still open one second
-after the clean-up (only possible without `/proc`), the turn stops waiting
-for it.
+that ignore `SIGTERM`. Closing the child stdio handles ensures a non-marked
+descendant that inherited stdout cannot keep Stargate's pipes or wait open.
 
 Stargate finds these processes through `/proc` (Linux only), with the same
 checks as the [Claude backend](claude.md#cancellation-and-recovery): all
@@ -373,10 +345,7 @@ default `KillMode` also stops these processes when the service stops.
   `model` and restart (this selects a new session namespace).
 - Process clean-up and orphan recovery are Linux-only and best effort.
   Without `/proc`, a cancelled turn still settles, but a CLI that ignores
-  `SIGTERM` can keep running, and so can its output pipe.
-- The launcher needs root-owned `sh`, `mkfifo`, `cat` and `rm` in `/usr/bin`
-  or `/bin`. Hosts without them there, such as NixOS, cannot start a Codex
-  backend.
+  `SIGTERM` can keep running.
 - With `workspace-write`, a workspace, data directory or CLI path that
   passes through a symbolic link in a directory that Stargate's user can write
   is refused; use the real path.
@@ -403,9 +372,10 @@ default `KillMode` also stops these processes when the service stops.
 
 ## Tests
 
-`tests/codex-backend.test.ts` drives the real SDK against a fake CLI
-(`tests/codex-fixture.ts`): arguments, environment, sessions, text, errors,
-attachments, busy threads and process clean-up. `tests/codex-cli.test.ts`
+`tests/codex-backend.test.ts` drives the `codex app-server` client against a
+fake app-server CLI (`tests/codex-fixture.ts`): arguments, environment,
+sessions, deltas, activity, errors, attachments, busy threads and process
+clean-up. `tests/codex-cli.test.ts`
 runs the pinned real Codex CLI against a loopback Responses fixture, with
 canary credentials, configuration, skills and `AGENTS.md` in a fake home and
 project, and a recording HTTP proxy that must see no connection. It checks

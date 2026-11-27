@@ -1,7 +1,6 @@
 import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import {
-  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -26,10 +25,7 @@ import {
   codexConfig,
   codexEnvironment,
   codexInput,
-  codexLauncher,
   nativeCodex,
-  verifyLauncher,
-  writeLauncher,
 } from "../src/backends/codex";
 import {
   checkCodexPaths,
@@ -38,6 +34,10 @@ import {
   trustedPath,
   trustedUtilities,
 } from "../src/backends/codex-paths";
+import type {
+  ActivityItem,
+  TurnActivityRecorder,
+} from "../src/backends/backend";
 import { runCli } from "../src/app/cli";
 import { backendSchema, codexBackendSchema, ircSchema } from "../src/config";
 import {
@@ -113,10 +113,24 @@ const decodeLogEntry = Schema.decodeUnknownSync(
       argv: Schema.Array(Schema.String),
       env: zodStringRecord(Schema.String),
       cwd: Schema.String,
+      threadMethod: Schema.String,
+      resumedThread: Schema.optional(Schema.String),
+      sandbox: Schema.String,
+      approvalPolicy: Schema.String,
+      model: Schema.String,
     }),
     Schema.Struct({
       prompt: Schema.String,
       images: Schema.Array(Schema.Boolean),
+      effort: Schema.NullOr(Schema.String),
+      sandboxPolicy: Schema.Unknown,
+    }),
+    Schema.Struct({ steered: Schema.String }),
+    Schema.Struct({ interrupted: Schema.Boolean }),
+    Schema.Struct({
+      serverReplyId: Schema.Finite,
+      result: Schema.Unknown,
+      error: Schema.Unknown,
     }),
     Schema.Struct({ grandchild: Schema.Finite }),
   ]),
@@ -200,11 +214,11 @@ async function until(check: () => Promise<boolean> | boolean, ms = 10_000) {
   }
 }
 
-/** `--config key=value` arguments as a map. */
+/** `-c key=value` arguments as a map. */
 function overrides(argv: readonly string[]) {
   const map = new Map<string, string>();
   argv.forEach((argument, index) => {
-    if (argument !== "--config") {
+    if (argument !== "-c" && argument !== "--config") {
       return;
     }
 
@@ -237,25 +251,27 @@ test("Codex turn streams agent messages only and returns this turn's answer", as
   expect(first?.prompt).toBe("Say hello");
 });
 
-test("Codex runs with a read-only sandbox, no approvals and no network", async () => {
-  const { backend, runs, root } = await open();
+test("Codex runs app-server with a read-only sandbox, no approvals and no network", async () => {
+  const { backend, runs, prompts, root } = await open();
   await backend.prompt(await session(backend), "hi", signal());
   const [run] = await runs();
+  const [promptEntry] = await prompts();
   const argv = run?.argv ?? [];
-  expect(argv.slice(0, 2)).toEqual(["exec", "--experimental-json"]);
-  expect(argv).toContain("--sandbox");
-  expect(argv[argv.indexOf("--sandbox") + 1]).toBe("read-only");
-  expect(argv[argv.indexOf("--model") + 1]).toBe("gpt-6.1-sol");
-  expect(argv[argv.indexOf("--cd") + 1]).toBe(join(root, "workspace"));
-  expect(argv).toContain("--skip-git-repo-check");
+  expect(argv[0]).toBe("app-server");
+  expect(run?.sandbox).toBe("read-only");
+  expect(run?.approvalPolicy).toBe("never");
+  expect(run?.model).toBe("gpt-6.1-sol");
+  expect(run?.cwd).toBe(join(root, "workspace"));
+  expect(promptEntry?.sandboxPolicy).toEqual({
+    type: "readOnly",
+    networkAccess: false,
+  });
 
   for (const flag of argv) {
     expect(flag).not.toMatch(/dangerously|--trust|--profile|^-p$|bypass/);
   }
 
   const map = overrides(argv);
-  expect(map.get("approval_policy")).toBe('"never"');
-  expect(map.get("sandbox_workspace_write.network_access")).toBe("false");
   expect(map.get("web_search")).toBe('"disabled"');
   expect(map.get("model_provider")).toBe('"stargate"');
   expect(map.get("model_providers.stargate.base_url")).toBe(
@@ -281,7 +297,7 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
     expect(flag).not.toContain(key);
   }
 
-  // Explicit widening maps to the CLI's own enforcement.
+  // Explicit widening maps to the app-server's own enforcement.
   const widened = await open({
     sandbox: "workspace-write",
     network: true,
@@ -292,15 +308,20 @@ test("Codex runs with a read-only sandbox, no approvals and no network", async (
 
   await widened.backend.prompt(await session(widened.backend), "hi", signal());
   const [wide] = await widened.runs();
+  const [widePrompt] = await widened.prompts();
   const wideMap = overrides(wide?.argv ?? []);
-  expect(wide?.argv[(wide?.argv.indexOf("--sandbox") ?? 0) + 1]).toBe(
-    "workspace-write",
-  );
-  expect(wideMap.get("sandbox_workspace_write.network_access")).toBe("true");
+  expect(wide?.sandbox).toBe("workspace-write");
+  expect(wide?.approvalPolicy).toBe("never");
+  expect(widePrompt?.effort).toBe("high");
+  expect(widePrompt?.sandboxPolicy).toEqual({
+    type: "workspaceWrite",
+    writableRoots: [join(widened.root, "workspace")],
+    networkAccess: true,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: true,
+  });
   expect(wideMap.has("project_doc_max_bytes")).toBe(false);
   expect(wideMap.get("developer_instructions")).toBe('"Be brief."');
-  expect(wideMap.get("model_reasoning_effort")).toBe('"high"');
-  expect(wideMap.get("approval_policy")).toBe('"never"');
 });
 
 test("Codex child receives only a minimal, explicit environment", async () => {
@@ -383,26 +404,37 @@ test("Codex resumes its own thread, also after restart, and never another namesp
     "Hello world\n\nDone.",
   );
   const [created, resumed, restarted] = await first.runs();
-  expect(created?.argv).not.toContain("resume");
-  const thread = resumed?.argv[resumed.argv.indexOf("resume") + 1];
+  expect(created?.threadMethod).toBe("thread/start");
+  const thread = resumed?.resumedThread;
+  expect(resumed?.threadMethod).toBe("thread/resume");
   expect(thread).toMatch(/^[0-9a-f-]{36}$/);
   expect(thread).not.toBe(id);
-  expect(restarted?.argv[restarted.argv.indexOf("resume") + 1]).toBe(thread);
+  expect(restarted?.resumedThread).toBe(thread);
   // Another namespace has its own CODEX_HOME and mapping: a new thread.
   const second = await open();
   await second.backend.prompt(id, "four", signal());
   const [other] = await second.runs();
-  expect(other?.argv).not.toContain("resume");
+  expect(other?.threadMethod).toBe("thread/start");
   expect(other?.env["CODEX_HOME"]).not.toBe(created?.env["CODEX_HOME"]);
+
   // A thread that changes identity fails without remapping.
-  await expect(reopened.prompt(id, "rethread", signal())).rejects.toThrow(
+  const rethreader = await CodexBackend.open(
+    config({}, join(first.root, "workspace")),
+    { dataDirectory: first.dataDirectory },
+    {
+      executable: join(first.root, "fake-codex"),
+      graceMs: 200,
+      environment: { STARGATE_TEST_RETHREAD: "1" },
+    },
+  );
+
+  cleanup.push(() => rethreader.close());
+  await expect(rethreader.prompt(id, "five", signal())).rejects.toThrow(
     "Codex thread identity changed",
   );
-  await reopened.prompt(id, "five", signal());
+  await reopened.prompt(id, "six", signal());
   const all = await first.runs();
-  expect(all.at(-1)?.argv[(all.at(-1)?.argv.indexOf("resume") ?? 0) + 1]).toBe(
-    thread,
-  );
+  expect(all.at(-1)?.resumedThread).toBe(thread);
 
   // Backend settings select the namespace, as for other backends.
   const fingerprint = (backend: unknown) =>
@@ -618,36 +650,86 @@ test("the launcher starts the CLI that the SDK would start", () => {
   expect([native.helpers]).toEqual(sdk.exec.pathDirs);
 });
 
-test("the launcher keeps arguments, input and exit status, and only cat holds its output", async () => {
-  const root = await mkdtemp(join(tmpdir(), "stargate-codex-launcher-"));
+test("Codex app-server streams deltas, records reasoning/failed tools, filters foreign turns, enforces line cap, and fails closed on server requests", async () => {
+  const root = await mkdtemp(join(tmpdir(), "stargate-codex-appserver-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const odd = join(root, "it's a dir");
-  await mkdir(odd);
-  const cli = join(odd, "cli");
+  const executable = join(root, "fake-codex");
   await writeFile(
-    cli,
-    `#!/bin/sh\nprintf '%s|' "$@"\ncat\necho to-stderr >&2\nexit 7\n`,
+    executable,
+    `#!/bin/sh\nexec "${process.execPath}" "${fixture}" "$@"\n`,
     { mode: 0o755 },
   );
-  const launcher = join(root, "launcher");
-  await writeFile(launcher, codexLauncher(cli, await trustedUtilities()), {
-    mode: 0o700,
-  });
-  const temporary = join(root, "tmp");
-  await mkdir(temporary);
+  const dataDirectory = join(root, "data");
+  await mkdir(dataDirectory, { recursive: true });
+  await mkdir(join(root, "workspace"), { recursive: true });
 
-  const child = Bun.spawn([launcher, "exec", "a b", "it's"], {
-    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", TMPDIR: temporary },
-    stdin: new TextEncoder().encode("prompt"),
-    stdout: "pipe",
-    stderr: "pipe",
+  const recorded: ActivityItem[] = [];
+  let endedOutcome: string | undefined;
+
+  const activity: TurnActivityRecorder = {
+    begin: () => ({
+      update: (_key, _at, create, change) => {
+        const item = create();
+        change?.(item);
+        recorded.push(item);
+      },
+      reconnected: () => {},
+      end: (outcome) => {
+        endedOutcome = outcome;
+      },
+    }),
+  };
+
+  const backend = await CodexBackend.open(
+    config({}, join(root, "workspace")),
+    { dataDirectory, activity },
+    { executable, graceMs: 200 },
+  );
+
+  cleanup.push(() => backend.close());
+
+  const id = await session(backend);
+  const previews: string[] = [];
+
+  const answer = await backend.prompt(id, "delta", signal(), (text) =>
+    previews.push(text),
+  );
+
+  expect(answer).toBe("Hello world\n\nDone.");
+  expect(previews).toEqual(["Hello ", "Hello world", "Hello world\n\nDone."]);
+  expect(endedOutcome).toBe("completed");
+  expect(recorded.some((item) => item.kind === "reasoning")).toBe(true);
+  expect(recorded.some((item) => item.kind === "tool")).toBe(true);
+  expect(recorded.some((item) => item.kind === "text")).toBe(true);
+
+  const filtered = await backend.prompt(id, "foreign-turn", signal());
+  expect(filtered).toBe("Hello world\n\nDone.");
+  expect(
+    recorded.some((item) => item.kind === "tool" && item.status === "failed"),
+  ).toBe(true);
+
+  expect(await backend.prompt(id, "server-requests", signal())).toBe(
+    "Hello world\n\nDone.",
+  );
+
+  const logLines = (
+    await readFile(join(dataDirectory, "codex", "fixture.jsonl"), "utf8")
+  )
+    .trim()
+    .split("\n")
+    .map((line) => decodeLogEntry(JSON.parse(line)));
+
+  const replies = logLines.filter((entry) => "serverReplyId" in entry);
+  expect(replies.find((r) => r.serverReplyId === 9001)?.result).toEqual({
+    decision: "decline",
+  });
+  expect(replies.find((r) => r.serverReplyId === 9002)?.error).toMatchObject({
+    code: -32_601,
   });
 
-  expect(await new Response(child.stdout).text()).toBe("exec|a b|it's|prompt");
-  expect(await new Response(child.stderr).text()).toBe("");
-  expect(await child.exited).toBe(7);
-  // The FIFO was unlinked as soon as both ends were open.
-  expect(await readdir(temporary)).toEqual([]);
+  await expect(backend.prompt(id, "overflow", signal())).rejects.toThrow(
+    "Backend failure: crash",
+  );
 });
 
 test("a writable Codex directory never holds what runs outside the sandbox", async () => {
@@ -799,55 +881,23 @@ test("Codex uses canonical paths only and refuses links that can change", async 
   expect(await trustedPath("/bin/sh")).toBe(await realpath("/bin/sh"));
 });
 
-test("a Codex turn writes, verifies and runs only a fresh canonical launcher", async () => {
+test("a Codex turn refuses symbolic-linked data directories", async () => {
   const { backend, runs, dataDirectory, root } = await open({
     sandbox: "workspace-write",
   });
 
-  const bin = join(dataDirectory, "codex-bin");
+  const threadsDir = join(dataDirectory, "codex-threads");
   const id = await session(backend);
   await backend.prompt(id, "hi", signal());
-  // Each turn's launcher is removed after it.
-  expect(await readdir(bin)).toEqual([]);
-  // A file planted where an earlier version kept its launcher is never run.
-  await writeFile(join(bin, "codex"), "#!/bin/sh\nexit 99\n", { mode: 0o700 });
-  await backend.prompt(id, "again", signal());
-  expect((await runs()).length).toBe(2);
-  // The launcher directory swapped for a link: the turn fails before it
-  // Writes or runs anything there.
+  expect((await runs()).length).toBe(1);
   const elsewhere = join(root, "elsewhere");
   await mkdir(elsewhere);
-  await rm(bin, { recursive: true });
-  await symlink(elsewhere, bin);
-  await expect(backend.prompt(id, "third", signal())).rejects.toThrow(
-    /symbolic link|verification/,
+  await rm(threadsDir, { recursive: true });
+  await symlink(elsewhere, threadsDir);
+  await expect(backend.prompt(id, "second", signal())).rejects.toThrow(
+    /symbolic link/,
   );
-  expect(await readdir(elsewhere)).toEqual([]);
-  expect((await runs()).length).toBe(2);
-  await expect(writeLauncher(join(bin, "x.sh"), "#!/bin/sh\n")).rejects.toThrow(
-    "verification",
-  );
-  expect(await readdir(elsewhere)).toEqual([]);
-  // The launcher check fails closed on content, mode and symbolic links.
-  await rm(bin);
-  await mkdir(bin, { mode: 0o700 });
-  const launcher = join(bin, "check.sh");
-  const script = "#!/bin/sh\nexit 0\n";
-  await writeLauncher(launcher, script);
-  await expect(writeLauncher(launcher, script)).rejects.toThrow();
-  await expect(verifyLauncher(launcher, `${script}x`)).rejects.toThrow(
-    "verification",
-  );
-  await chmod(launcher, 0o755);
-  await expect(verifyLauncher(launcher, script)).rejects.toThrow(
-    "verification",
-  );
-  await rm(launcher);
-  await writeFile(join(root, "other.sh"), script, { mode: 0o700 });
-  await symlink(join(root, "other.sh"), launcher);
-  await expect(verifyLauncher(launcher, script)).rejects.toThrow(
-    "verification",
-  );
+  expect((await runs()).length).toBe(1);
 });
 
 test("the CLI's PATH holds only the helper and root-owned system directories", async () => {
@@ -1198,65 +1248,52 @@ test("Codex failures carry a fixed cause, never CLI or provider text", async () 
 
   expect(previews.join("\n")).not.toContain("raw");
   const turn = new CodexTurn();
-  turn.add({
-    type: "item.completed",
+  turn.addNotification("item/completed", {
     item: { id: "e", type: "error", message: "raw" },
   });
-  turn.add({ type: "turn.failed", error: { message: "raw" } });
+  turn.addNotification("turn/completed", {
+    turn: { id: "t1", status: "failed", error: { message: "raw" } },
+  });
   expect(turn.answer()).toBe("");
   expect(turn.result).toEqual({ ok: false });
 });
 
-test("Codex frames keep optional text and errors without accepting malformed fields", () => {
-  for (const type of ["item.started", "item.updated", "item.completed"]) {
+test("Codex app-server frames keep optional text and errors without accepting malformed fields", () => {
+  for (const method of ["item/started", "item/completed"] as const) {
     const turn = new CodexTurn();
-    turn.add({ type: "thread.started", thread_id: "", extra: "ignored" });
-    expect(turn.thread).toBe("");
-    turn.add({ type: "thread.started", thread_id: null });
-    expect(turn.thread).toBe("");
     expect(
-      turn.add({ type, item: { id: "m", type: "agent_message", extra: 1 } }),
+      turn.addNotification(method, {
+        item: { id: "m", type: "agentMessage", extra: 1 },
+      }),
     ).toBe(false);
     expect(
-      turn.add({
-        type,
-        item: { id: "m", type: "agent_message", text: "visible", extra: 1 },
+      turn.addNotification(method, {
+        item: { id: "m", type: "agentMessage", text: "visible", extra: 1 },
       }),
     ).toBe(true);
 
     for (const item of [
-      { id: "m", type: "agent_message", text: null },
-      { id: "m", type: "agent_message", text: 1 },
-      { type: "agent_message", text: "hidden" },
+      { id: "m", type: "agentMessage", text: null },
+      { id: "m", type: "agentMessage", text: 1 },
+      { type: "agentMessage", text: "hidden" },
     ]) {
-      expect(turn.add({ type, item })).toBe(false);
+      expect(turn.addNotification(method, { item })).toBe(false);
     }
 
     expect(turn.answer()).toBe("visible");
-    turn.add({ type, item: { id: "tool", type: "command_execution" } });
+    turn.addNotification(method, {
+      item: { id: "tool", type: "commandExecution" },
+    });
     expect(turn.worked).toBe(true);
   }
 
-  for (const [fields, accepted] of [
-    [{}, true],
-    [{ message: undefined, error: undefined }, true],
-    [{ message: null }, false],
-    [{ error: null }, false],
-    [{ error: {} }, false],
-    [{ error: { message: 401 } }, false],
-  ] as const) {
-    const turn = new CodexTurn();
-    turn.add({ type: "turn.failed", ...fields, extra: 1 });
-    expect(turn.result).toEqual(accepted ? { ok: false } : undefined);
-    expect(turn.failure).toBeUndefined();
-    expect(turn.answer()).toBe("");
-  }
-
   const turn = new CodexTurn();
-  turn.add({
-    type: "turn.failed",
-    message: "status 429 PRIVATE",
-    error: { message: "status 401 PRIVATE", extra: 1 },
+  turn.addNotification("turn/completed", {
+    turn: {
+      id: "t1",
+      status: "failed",
+      error: { message: "status 401 PRIVATE" },
+    },
   });
   expect(turn.failure).toEqual({ kind: "auth", status: 401 });
   expect(turn.answer()).toBe("");
@@ -1323,9 +1360,7 @@ test("Codex conversation and stored thread UUIDs preserve spelling and reject ex
     );
   }
 
-  expect(
-    (await runs()).map((run) => run.argv[run.argv.indexOf("resume") + 1]),
-  ).toEqual(ids);
+  expect((await runs()).map((run) => run.resumedThread)).toEqual(ids);
 
   for (const id of [
     "../unsafe",
@@ -1640,20 +1675,19 @@ test("Codex request progress exposes event kinds without tool data or reasoning"
   const turn = new CodexTurn();
   const stages: string[] = [];
   const stage = (s: string) => stages.push(s);
-  turn.add({ type: "turn.started" }, stage);
+  turn.addNotification("turn/started", {}, stage);
 
-  for (const type of ["reasoning", "command_execution", "agent_message"]) {
-    turn.add(
-      { type: "item.started", item: { id: type, type, text: "private" } },
+  for (const type of ["reasoning", "commandExecution", "agentMessage"]) {
+    turn.addNotification(
+      "item/started",
+      { item: { id: type, type, text: "private" } },
       stage,
     );
   }
 
-  turn.add(
-    {
-      type: "item.updated",
-      item: { id: "reasoning", type: "reasoning", text: "private" },
-    },
+  turn.addNotification(
+    "item/completed",
+    { item: { id: "reasoning", type: "reasoning", text: "private" } },
     stage,
   );
   expect(stages).toEqual(["model", "reasoning", "tool", "reply"]);
