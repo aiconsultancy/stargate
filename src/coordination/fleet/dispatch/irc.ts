@@ -193,7 +193,10 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     return validMsgid(messageId);
   }
 
-  private tags(marker: DispatchMarker, replyTo?: string) {
+  private tags(
+    marker: DispatchMarker,
+    replyTo?: string,
+  ): Record<string, string> {
     if (!this.client.hasCap("message-tags")) {
       return {};
     }
@@ -312,6 +315,49 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     await this.title(issue, undefined);
 
     return true;
+  }
+
+  public async assignmentRequest(
+    captain: CaptainRef,
+    issue: IssueLabel,
+    channel: string,
+    signal: AbortSignal,
+  ) {
+    this.carried(issue);
+    const nick = await this.nick(captain);
+
+    if (!nick) {
+      return false;
+    }
+
+    const tags = this.tags({ kind: "assignment", issue: issue.identifier });
+
+    if (!(dispatchTag in tags)) {
+      throw new Error("IRC message-tags unavailable");
+    }
+
+    const text = dispatchText.assignmentRequest(nick, issue.identifier);
+
+    if (
+      Buffer.byteLength(text) > this.client.budget("PRIVMSG", channel, tags)
+    ) {
+      return "skip" as const;
+    }
+
+    const sameRecipient = this.client.recipientGuard(captain.account, nick);
+
+    const message = await this.client.publish(
+      channel,
+      text,
+      tags,
+      () =>
+        !signal.aborted &&
+        this.allowed() &&
+        sameRecipient() &&
+        this.client.inChannel(channel),
+    );
+
+    return validMsgid(message) ? true : ("unconfirmed" as const);
   }
 
   public async offer(
@@ -567,17 +613,7 @@ export async function sendDispatchAnswer(
 export const assignmentCapacityTag = "+stargate/assignment-capacity";
 const timeoutMs = 5000;
 
-type CapacityClient = Pick<
-  IrcClient,
-  | "fold"
-  | "budget"
-  | "hasCap"
-  | "inChannel"
-  | "publish"
-  | "recipientGuard"
-  | "send"
-  | "verifiedNick"
->;
+type CapacityClient = Pick<IrcClient, "fold" | "hasCap" | "inChannel" | "send">;
 
 export class IrcAssignmentRequests implements AssignmentRequests {
   private readonly pending = new Map<
@@ -593,6 +629,7 @@ export class IrcAssignmentRequests implements AssignmentRequests {
     private readonly client: CapacityClient,
     private readonly shipChannels: Readonly<Record<string, string>>,
     private readonly allowed: () => boolean,
+    private readonly messenger: Pick<IrcDispatchMessenger, "assignmentRequest">,
   ) {}
 
   private home(captain: CaptainRef) {
@@ -683,35 +720,11 @@ export class IrcAssignmentRequests implements AssignmentRequests {
     issue: DispatchIssue,
     signal: AbortSignal,
   ) {
-    const channel = this.home(captain);
+    const home = this.home(captain);
 
-    if (!channel || !isMarkerIssue(issue.identifier)) {
-      return false;
-    }
-
-    const nick = await this.client.verifiedNick(captain.account);
-    const sameRecipient = this.client.recipientGuard(captain.account, nick);
-    const tags = { [dispatchTag]: `assignment,${issue.identifier}` };
-    const text = dispatchText.assignmentRequest(nick, issue.identifier);
-
-    if (
-      Buffer.byteLength(text) > this.client.budget("PRIVMSG", channel, tags)
-    ) {
-      return "skip" as const;
-    }
-
-    const message = await this.client.publish(
-      channel,
-      text,
-      tags,
-      () =>
-        !signal.aborted &&
-        this.allowed() &&
-        sameRecipient() &&
-        this.client.inChannel(channel),
-    );
-
-    return validMsgid(message);
+    return home
+      ? this.messenger.assignmentRequest(captain, issue, home, signal)
+      : false;
   }
 }
 

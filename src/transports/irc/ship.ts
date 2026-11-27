@@ -21,7 +21,10 @@ import {
   isDecisionOutcomeDm,
   isRearAdmiral,
 } from "../../coordination/fleet/dispatch/irc";
-import { dispatchTag } from "../../coordination/fleet/dispatch/protocol";
+import {
+  dispatchTag,
+  parseDispatchMarker,
+} from "../../coordination/fleet/dispatch/protocol";
 import type {
   DispatchOffer,
   FleetSource,
@@ -1520,8 +1523,15 @@ export class IrcShip {
 
     const text = dispatchTurn ?? admission.text;
 
+    const assignmentParent =
+      dispatchRequest &&
+      parseDispatchMarker(message.tags.get(dispatchTag))?.kind === "assignment"
+        ? message.tags.get("msgid")
+        : undefined;
+
     const input = {
       ...admission,
+      ...(validMsgid(assignmentParent) && { replyParent: assignmentParent }),
       text: privateReview ? `${text}\n\n${privateReview}` : text,
       ...this.stagger(member, client, admission),
       ...(dispatchID && { fleet: { kind: "assignment" as const, dispatchID } }),

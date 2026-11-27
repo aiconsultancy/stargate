@@ -690,6 +690,7 @@ test("an authenticated capacity probe is passive and the resulting request opens
     admiral.client,
     { [target.account]: home },
     () => true,
+    new IrcDispatchMessenger(admiral.client, command, () => true, silent),
   );
 
   admiralShip.dispatchListener = (message) => requests.receive(message);
@@ -743,6 +744,22 @@ test("an authenticated capacity probe is passive and the resulting request opens
     5000,
     "assignment turn admitted",
   );
+
+  const threaded = fake.say(
+    { nick: "rear-admiral", account: "rear-admiral" },
+    home,
+    "@example-captain-a: EX-2 is assigned to you.",
+    { [dispatchTag]: "assignment,EX-2" },
+  );
+
+  await until(
+    () => store.jobByEvent(captain.key, `${home}:${threaded}`) !== null,
+    5000,
+    "assignment thread admitted",
+  );
+  expect(
+    store.jobByEvent(captain.key, `${home}:${threaded}`)?.replyParent,
+  ).toBe(threaded);
 }, 15_000);
 
 test("rear admiral intake: an answer reaches the dispatcher only past the registration's account and channel rules", async () => {

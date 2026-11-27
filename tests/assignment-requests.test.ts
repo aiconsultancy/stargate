@@ -45,10 +45,10 @@ test("assigned work waits for crew and reminds a captain only while the issue is
   const ledger = new DispatchLedger(":memory:");
   let issue = pending();
 
-  const tracker = pending({
-    id: "tracker",
+  const archived = pending({
+    id: "archived-issue",
     identifier: "EX-2",
-    type: "tracker",
+    archived: true,
   });
 
   let capacity = false;
@@ -62,7 +62,7 @@ test("assigned work waits for crew and reminds a captain only while the issue is
         expect(since).toBeUndefined();
         expect(waitingOnly).toBe(true);
 
-        return { items: [tracker, issue], next: undefined };
+        return { items: [archived, issue], next: undefined };
       },
       async issue(id) {
         expect(id).toBe(issue.id);
@@ -86,7 +86,7 @@ test("assigned work waits for crew and reminds a captain only while the issue is
     },
     ledger,
     reminderMs: 4 * HOUR,
-    answerMs: HOUR / 12,
+    captainIntervalMs: HOUR / 12,
     log: pino({ level: "silent" }),
     now: clock.now,
   });
@@ -152,7 +152,7 @@ test("an issue reassigned during the capacity probe is not sent to its former ca
     },
     ledger,
     reminderMs: 4 * HOUR,
-    answerMs: HOUR / 12,
+    captainIntervalMs: HOUR / 12,
     log: pino({ level: "silent" }),
   });
 
@@ -189,7 +189,7 @@ test("a stalled capacity check leaves other captains and Ready for agents answer
     api: f.api,
     ledger: f.ledger,
     reminderMs: 4 * HOUR,
-    answerMs: 5 * MINUTE,
+    captainIntervalMs: 5 * MINUTE,
     requests: {
       async hasCapacity(target) {
         return target.userId === CAPTAIN_A ? slow.promise : true;
@@ -222,7 +222,14 @@ test("a new assignment comes before a reminder even if the API lists the reminde
   const clock = new Clock();
   const ledger = new DispatchLedger(":memory:");
   const old = pending();
-  const fresh = pending({ id: "issue-2", identifier: "EX-2" });
+
+  const fresh = pending({
+    id: "tracker-2",
+    identifier: "EX-2",
+    type: "tracker",
+  });
+
+  const unreadable = pending({ id: "unreadable", identifier: "EX-4" });
   const oversized = pending({ id: "issue-3", identifier: "EX-3" });
   const asked: string[] = [];
   ledger.recordAssignmentRequest(
@@ -235,15 +242,19 @@ test("a new assignment comes before a reminder even if the API lists the reminde
   const work = new AssignedWork({
     api: {
       async assignedIssues() {
-        return { items: [old, oversized, fresh], next: undefined };
+        return { items: [old, unreadable, oversized, fresh], next: undefined };
       },
       async issue(id) {
+        if (id === unreadable.id) {
+          throw new Error("fixture read failure");
+        }
+
         return [old, oversized, fresh].find((candidate) => candidate.id === id);
       },
     },
     ledger,
     reminderMs: 4 * HOUR,
-    answerMs: 5 * MINUTE,
+    captainIntervalMs: 5 * MINUTE,
     requests: {
       async hasCapacity() {
         return true;

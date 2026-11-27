@@ -30,6 +30,7 @@ type PiConfig = typeof piDurableBackendSchema.Type;
 type PiWorkerContext = BackendContext & { crew?: PiCrewBinding };
 
 export interface PiWorkerBackend extends AgentBackend {
+  inspectIdle?(sessionID: string, signal: AbortSignal): Promise<boolean>;
   waitForIdle?(sessionID: string, signal: AbortSignal): Promise<void>;
   notify?(
     sessionID: string,
@@ -68,6 +69,11 @@ export type PiWorkerFactory = ((
   config: PiConfig,
   context: PiWorkerContext,
 ) => Promise<PiWorkerBackend>) & {
+  storedIdle?: (
+    dataDirectory: string,
+    sessionID: string,
+    signal: AbortSignal,
+  ) => Promise<boolean>;
   /** Must inspect committed receipts without scheduling or submitting work. */
   recover?: (
     context: BackendContext,
@@ -89,6 +95,16 @@ const nativeFactory: PiWorkerFactory = Object.assign(
     );
   },
   {
+    async storedIdle(
+      dataDirectory: string,
+      sessionID: string,
+      signal: AbortSignal,
+    ) {
+      const { PiDurableBackend } =
+        await import("../../../backends/pi/pi-durable");
+
+      return PiDurableBackend.storedIdle(dataDirectory, sessionID, signal);
+    },
     async recover(
       context: BackendContext,
       conversationID: string,
@@ -164,6 +180,12 @@ export class PiCrewWorkers {
     return `${this.state.path}:${peer.sessionID}`;
   }
 
+  private async dataDirectory(member: CrewMember) {
+    const hash = createHash("sha256").update(member.id).digest("hex");
+
+    return join(await realpath(resolve(this.stateDirectory)), "pi", hash);
+  }
+
   private backend(
     member: CrewMember,
     directory: string,
@@ -182,13 +204,7 @@ export class PiCrewWorkers {
 
     if (!backend) {
       backend = (async () => {
-        const hash = createHash("sha256").update(member.id).digest("hex");
-
-        const dataDirectory = join(
-          await realpath(resolve(this.stateDirectory)),
-          "pi",
-          hash,
-        );
+        const dataDirectory = await this.dataDirectory(member);
 
         for (
           let previous = closing.get(dataDirectory);
@@ -472,13 +488,7 @@ export class PiCrewWorkers {
       return;
     }
 
-    const hash = createHash("sha256").update(member.id).digest("hex");
-
-    const dataDirectory = join(
-      await realpath(resolve(this.stateDirectory)),
-      "pi",
-      hash,
-    );
+    const dataDirectory = await this.dataDirectory(member);
 
     signal.throwIfAborted();
 
@@ -488,6 +498,22 @@ export class PiCrewWorkers {
       task.inputID,
       signal,
     );
+  }
+
+  private async passiveIdle(
+    member: CrewMember,
+    sessionID: string,
+    signal: AbortSignal,
+  ) {
+    const backend = await this.backends.get(member.id);
+
+    return backend
+      ? (await backend.inspectIdle?.(sessionID, signal)) === true
+      : (await this.factory.storedIdle?.(
+          await this.dataDirectory(member),
+          sessionID,
+          signal,
+        )) === true;
   }
 
   public async idle(
@@ -508,18 +534,16 @@ export class PiCrewWorkers {
     }
 
     try {
-      const backend = await (passive
-        ? this.backends.get(member.id)
-        : this.backend(member, directory));
+      const checking = AbortSignal.any([signal, AbortSignal.timeout(100)]);
 
-      if (!backend || (passive && !backend.waitForIdle)) {
-        return false;
+      if (passive) {
+        if (!(await this.passiveIdle(member, conversationID, checking))) {
+          return false;
+        }
+      } else {
+        const backend = await this.backend(member, directory);
+        await backend.waitForIdle?.(conversationID, checking);
       }
-
-      await backend.waitForIdle?.(
-        conversationID,
-        AbortSignal.any([signal, AbortSignal.timeout(100)]),
-      );
 
       return (
         !executions.has(this.key(peer)) && !notifications.has(this.key(peer))

@@ -811,7 +811,7 @@ test("a failed Pi harness open is retried, not cached for the process", async ()
   }
 });
 
-test("an assignment capacity probe does not open a cold Pi runtime", async () => {
+test("an assignment capacity probe finds an idle cold Pi worker without opening its runtime", async () => {
   const f = await fixture();
   let reopened: CrewEngine | undefined;
 
@@ -825,9 +825,13 @@ test("an assignment capacity probe does not open a cold Pi runtime", async () =>
       f.sessions,
       f.mailer,
       undefined,
-      f.factory,
+      Object.assign(f.factory, {
+        async storedIdle() {
+          return true;
+        },
+      }),
     );
-    expect(await reopened.hasDispatchCapacity(f.caller().signal)).toBe(false);
+    expect(await reopened.hasDispatchCapacity(f.caller().signal)).toBe(true);
     expect(f.lifecycle).toEqual(before);
   } finally {
     await reopened?.close();

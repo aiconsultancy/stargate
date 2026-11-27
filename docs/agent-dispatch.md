@@ -18,8 +18,9 @@ under `src/coordination/fleet/dispatch/`.
    with no queued work and no usage cooldown. The request asks the captain
    to reply in its thread and move the issue to In Progress when work starts.
    A still-waiting issue is eligible for a reminder after four hours, when
-   crew are available again. Trackers and assignments to crew, the rear
-   admiral or people are skipped.
+   crew are available again. That includes assigned trackers in Backlog or
+   Todo. The rear admiral leaves at least five minutes between requests to
+   the same captain. Assignments to crew, the rear admiral or people are skipped.
 2. **Ready for agents.** When an unassigned issue in this fleet is flagged
    _Ready for agents_, the rear admiral offers it to the captains one at a
    time. Each captain has `answerTimeoutSeconds` (default 5 minutes) to accept
@@ -31,8 +32,12 @@ under `src/coordination/fleet/dispatch/`.
    to retry.
 
 Ready for agents offers and their outcomes remain visible in fleet command.
-Ship channels carry the passive capacity check as an IRC tag, followed by
-the request when crew are available. The check starts no agent turn.
+Ship channels carry the passive capacity check as a
+`+stargate/assignment-capacity` TAGMSG. An authenticated captain's gateway
+answers with a `yes` or `no` tag carrying the probe nonce. The check starts
+no agent turn. Upgrade the captains with the rear admiral so the crew plugin
+can answer. A request with an uncertain server receipt waits until its next
+reminder window before it can repeat.
 
 ## Decision outcomes by direct message
 
@@ -208,7 +213,7 @@ Every `pollIntervalSeconds`, after the first poll at start:
   API marks each available;
 - issues assigned to those captains. Legacy notices scan recent changes,
   overlapping the last scan by five minutes. Capacity-aware requests scan
-  assigned Backlog and Todo issues again so they can send reminders;
+  assigned Backlog and Todo issues, including trackers, so they can send reminders;
 - unassigned issues flagged for agents (`readyForAgents=true&assignee=none`),
   kept when their project's initiative, or that initiative's nearest ancestor
   with a fleet, belongs to this fleet;

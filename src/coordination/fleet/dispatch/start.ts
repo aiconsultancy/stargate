@@ -85,12 +85,21 @@ export function startAgentDispatch(
   });
 
   const requestConfig = dispatch.assignmentRequests;
+  const readyOffers = dispatch.readyOffers ?? true;
+
+  const messenger = new IrcDispatchMessenger(
+    client,
+    target.channel,
+    host.allowed,
+    log,
+  );
 
   const assignmentRequests = requestConfig
     ? new IrcAssignmentRequests(
         client,
         requestConfig.shipChannels,
         host.allowed,
+        messenger,
       )
     : undefined;
 
@@ -102,8 +111,8 @@ export function startAgentDispatch(
           requests: assignmentRequests,
           log,
           reminderMs: requestConfig.reminderSeconds * 1000,
-          answerMs: dispatch.answerTimeoutSeconds * 1000,
-          readyOffers: dispatch.readyOffers ?? true,
+          captainIntervalMs: 5 * 60 * 1000,
+          readyOffers,
         })
       : requestConfig === null
         ? null
@@ -116,7 +125,7 @@ export function startAgentDispatch(
       answerTimeoutMs: dispatch.answerTimeoutSeconds * 1000,
       decisionOutcomeDms: dispatch.decisionOutcomeDms ?? false,
       issueDispatch: dispatch.enabled,
-      readyOffers: dispatch.readyOffers ?? true,
+      readyOffers,
       recheckIdentity: "socketPath" in dispatch.api,
       retryLadderMs: dispatch.retryLadderSeconds.map(
         (seconds) => seconds * 1000,
@@ -128,12 +137,7 @@ export function startAgentDispatch(
     },
     api,
     ...(assignedWork !== undefined && { assignedWork }),
-    messenger: new IrcDispatchMessenger(
-      client,
-      target.channel,
-      host.allowed,
-      log,
-    ),
+    messenger,
     ledger,
     log,
   });
@@ -148,7 +152,7 @@ export function startAgentDispatch(
       return;
     }
 
-    if (dispatch.readyOffers === false) {
+    if (!readyOffers) {
       return;
     }
 

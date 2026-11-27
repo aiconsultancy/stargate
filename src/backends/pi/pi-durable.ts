@@ -52,7 +52,7 @@ import {
 } from "../../shared/request-failure";
 import type { SessionHistory } from "../../shared/session-history";
 import { piInputContent } from "./pi-attachments";
-import { piSessionHistory } from "./pi-history";
+import { piSessionHistory, storedPiIdle } from "./pi-history";
 
 type Config = typeof piDurableBackendSchema.Type;
 
@@ -331,6 +331,28 @@ export function piPartialText(view: ConversationView): string {
   });
 }
 
+/** Inspect the isolated worker's store without resuming its scheduler. */
+async function idlePiWorker(
+  harness: Harness,
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+
+  const conversation = await harness.conversation(
+    conversationId(sessionId) as ConversationId,
+    context,
+  );
+
+  if (!conversation) {
+    return false;
+  }
+
+  const state = await harness.inspect(context);
+
+  return state.tasks.length === 0 && state.submissions.length === 0;
+}
+
 export class PiDurableBackend implements AgentBackend {
   public readonly supportsAttachments = true;
   public readonly history: SessionHistory;
@@ -409,6 +431,14 @@ export class PiDurableBackend implements AgentBackend {
         await storage.close(BACKGROUND_CONTEXT);
       }
     }
+  }
+
+  public static storedIdle(
+    dataDirectory: string,
+    sessionId: string,
+    signal: AbortSignal,
+  ) {
+    return storedPiIdle(dataDirectory, conversationId(sessionId), signal);
   }
 
   public static async open(
@@ -964,6 +994,10 @@ export class PiDurableBackend implements AgentBackend {
     if (conversation) {
       await conversation.abort(context);
     }
+  }
+
+  public inspectIdle(sessionId: string, signal: AbortSignal) {
+    return idlePiWorker(this.harness, sessionId, signal);
   }
 
   public async waitForIdle(sessionId: string, signal: AbortSignal) {

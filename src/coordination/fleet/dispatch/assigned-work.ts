@@ -9,13 +9,12 @@ export interface AssignmentRequests {
     captain: CaptainRef,
     issue: DispatchIssue,
     signal: AbortSignal,
-  ): Promise<boolean | "skip">;
+  ): Promise<boolean | "skip" | "unconfirmed">;
 }
 
 function waiting(issue: DispatchIssue) {
   return (
     isMarkerIssue(issue.identifier) &&
-    issue.type !== "tracker" &&
     !issue.archived &&
     (issue.stateType === "backlog" || issue.stateType === "unstarted")
   );
@@ -36,7 +35,7 @@ export class AssignedWork {
       ledger: DispatchLedger;
       requests: AssignmentRequests;
       reminderMs: number;
-      answerMs: number;
+      captainIntervalMs: number;
       readyOffers?: boolean;
       log: Logger;
       now?: () => number;
@@ -70,7 +69,13 @@ export class AssignedWork {
   }
 
   public async poll(captains: readonly CaptainRef[], signal: AbortSignal) {
-    const { api, ledger, reminderMs, answerMs, now = Date.now } = this.options;
+    const {
+      api,
+      ledger,
+      reminderMs,
+      captainIntervalMs,
+      now = Date.now,
+    } = this.options;
 
     const byId = new Map(captains.map((captain) => [captain.userId, captain]));
     const ids = [...byId.keys()].toSorted();
@@ -123,7 +128,7 @@ export class AssignedWork {
 
       if (
         (last !== undefined && now() - last < reminderMs) ||
-        (recent !== undefined && now() - recent < answerMs) ||
+        (recent !== undefined && now() - recent < captainIntervalMs) ||
         (this.options.readyOffers !== false &&
           offer?.state === "accepting" &&
           offer.offer?.captain === captain.userId)
@@ -166,7 +171,22 @@ export class AssignedWork {
 
       for (const { issue } of queue) {
         signal.throwIfAborted();
-        const current = await api.issue(issue.id, signal);
+
+        const current = await api
+          .issue(issue.id, signal)
+          .catch((error: unknown) => {
+            signal.throwIfAborted();
+            log.warn(
+              {
+                issue: issue.identifier,
+                status:
+                  error instanceof DispatchApiError ? error.status : undefined,
+              },
+              "Assignment request could not read this issue",
+            );
+
+            return null;
+          });
 
         if (
           !current ||
@@ -183,13 +203,25 @@ export class AssignedWork {
           continue;
         }
 
-        if (sent) {
+        if (sent === true || sent === "unconfirmed") {
           ledger.recordAssignmentRequest(
             current.id,
             captain.userId,
             current.identifier,
             now(),
           );
+
+          if (sent === "unconfirmed") {
+            log.warn(
+              { issue: current.identifier, captain: captain.userId },
+              "Assignment request was sent without an IRC receipt",
+            );
+          } else {
+            log.info(
+              { issue: current.identifier, captain: captain.userId },
+              "Agent dispatch requested assigned work",
+            );
+          }
         }
 
         return;

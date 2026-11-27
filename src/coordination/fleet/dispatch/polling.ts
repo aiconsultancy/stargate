@@ -647,7 +647,7 @@ export class DispatchPolling {
 
       const assignee = issue.assignee;
 
-      if (assignee?.kind !== "agent" || issue.type === "tracker") {
+      if (assignee?.kind !== "agent") {
         continue;
       }
 
@@ -666,6 +666,7 @@ export class DispatchPolling {
       const offered = ledger.tracked(issue.id);
 
       if (
+        this.settings.readyOffers !== false &&
         offered?.state === "accepting" &&
         offered.offer?.captain === captain.userId
       ) {
