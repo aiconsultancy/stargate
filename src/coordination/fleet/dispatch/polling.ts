@@ -375,6 +375,10 @@ export class DispatchPolling {
           ledger.recordDecisionOutcomeSent(outcome.id);
         }
 
+        if (!(await this.identityConfirmed(signal))) {
+          return;
+        }
+
         await api.acknowledgeDecisionOutcome(fleetId, outcome.id, signal);
         ledger.clearDecisionOutcomeSent(outcome.id);
       } catch (error) {
@@ -464,7 +468,13 @@ export class DispatchPolling {
    */
   private async checkIdentity(fleet: string, signal: AbortSignal) {
     if (this.verifiedFleet !== undefined && !this.settings.recheckIdentity) {
-      return this.verifiedFleet === fleet;
+      if (this.verifiedFleet === fleet) {
+        return true;
+      }
+
+      this.roster = undefined;
+
+      return false;
     }
 
     try {
@@ -476,6 +486,7 @@ export class DispatchPolling {
         me.fleetId !== fleet ||
         (this.verifiedUser !== undefined && me.userId !== this.verifiedUser)
       ) {
+        this.roster = undefined;
         this.warnOnce(
           "identity",
           "Agent dispatch is idle: the API token is not this fleet's rear admiral agent (GET /api/v1/me). Retrying at each poll",
@@ -491,6 +502,7 @@ export class DispatchPolling {
       return true;
     } catch (error) {
       signal.throwIfAborted();
+      this.roster = undefined;
       this.apiFailed(
         "me",
         "Agent dispatch cannot confirm its API identity",

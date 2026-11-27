@@ -78,6 +78,30 @@ test("decision outcomes wait for the recording captain and retry a receipt after
   }
 });
 
+test("a changed signing identity holds a sent decision receipt until it is restored", async () => {
+  const f = await fixture({ decisionOutcomeDms: true, recheckIdentity: true });
+  const id = "00000000-0000-4000-8000-000000000011";
+  f.api.pendingOutcomes.set(id, {
+    id,
+    recordedByUserId: CAPTAIN_A,
+    identifier: "D-00042-NAV",
+    status: "accepted",
+  });
+
+  const identity = f.api.identity;
+  let reads = 0;
+  f.api.me = async () =>
+    ++reads === 2 ? { ...identity, kind: "human" } : identity;
+  await f.dispatcher.step(signal);
+  expect(f.chat.decisionDms).toHaveLength(1);
+  expect(f.api.acknowledgedOutcomes).toEqual([]);
+  expect(f.ledger.decisionOutcomeSent(id)).toBe(true);
+
+  await f.dispatcher.step(signal);
+  expect(f.chat.decisionDms).toHaveLength(1);
+  expect(f.api.acknowledgedOutcomes).toEqual([id]);
+});
+
 test("first start records existing assignments without sending anything", async () => {
   const f = await fixture();
   f.api.add({ id: "i1", identifier: "PRJ-1", assigneeId: CAPTAIN_A });
