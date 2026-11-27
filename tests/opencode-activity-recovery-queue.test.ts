@@ -4,6 +4,7 @@ import type {
   SessionTextEnded,
 } from "@opencode/client";
 import type { TurnActivityLog } from "../src/backends/backend";
+import type { ActivityIncarnation } from "../src/backends/opencode/activity-call-evidence";
 import {
   ActivityRecoveryQueues,
   activityQueueDefaults,
@@ -128,6 +129,7 @@ function namingHandoffFixture(limit = 2) {
   let admit = () => {};
   const id = "ses_child";
   const retired: [number, number | undefined][] = [];
+  const spilled: string[] = [];
 
   const queue = new ActivityRecoveryQueues<{
     type: string;
@@ -145,6 +147,9 @@ function namingHandoffFixture(limit = 2) {
         retired.push([order, nativeStart]);
       },
       candidate() {},
+      witness(_id, { callId }) {
+        spilled.push(callId);
+      },
     },
   );
 
@@ -157,6 +162,7 @@ function namingHandoffFixture(limit = 2) {
     pending,
     queue,
     retired,
+    spilled,
     start(order: number, created: number, at: number) {
       now = at;
       queue.enqueue(id, {
@@ -169,7 +175,13 @@ function namingHandoffFixture(limit = 2) {
         order,
       });
     },
-    name(order: number, created: number, at: number, session = "ses_parent") {
+    name(
+      order: number,
+      created: number,
+      at: number,
+      session = "ses_parent",
+      scope?: ActivityIncarnation,
+    ) {
       now = at;
       queue.offerProof(pending, {
         session,
@@ -177,6 +189,7 @@ function namingHandoffFixture(limit = 2) {
         callId: String(order),
         order,
         timing: { created, launch: "resumes" },
+        ...(scope && { scope }),
       });
     },
     omit() {
@@ -216,6 +229,11 @@ function namingHandoffFixture(limit = 2) {
           fixture.drain(now);
         }
       };
+    },
+    expire(at: number, observe: () => void) {
+      now = at;
+      admit = observe;
+      queue.expire();
     },
     closeByBudget(at: number, observe: () => void) {
       now = at;
@@ -386,6 +404,35 @@ test("refreshing a witness keeps its slot and leaves other writers in the pool",
         .witness?.order,
     ).toBe(2);
     expect(f.queue.peek(f.id)?.segments[0]?.witnesses).toHaveLength(2);
+  } finally {
+    f.queue.close();
+  }
+});
+
+test("an expired head with only a spilled witness still gets an admission attempt", () => {
+  const f = namingHandoffFixture(1);
+  const foreign = { active: true };
+
+  try {
+    delete f.pending.postLoss;
+    f.start(10, 10, 0);
+    f.name(1, 20, 300);
+    f.name(2, 21, 300, "ses_other_parent", foreign);
+    expect(f.spilled).toEqual(["1"]);
+    foreign.active = false;
+    f.queue.fence(foreign);
+    expect(f.queue.naming(f.pending, () => true)).toMatchObject({
+      first: undefined,
+      witness: undefined,
+    });
+
+    const offered: string[] = [];
+
+    f.expire(2000, () => {
+      offered.push(...f.spilled);
+    });
+    expect(offered).toEqual(["1"]);
+    expect(f.queue.peek(f.id)).toBeUndefined();
   } finally {
     f.queue.close();
   }

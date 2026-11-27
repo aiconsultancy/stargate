@@ -282,3 +282,63 @@ test("native retirement cannot exclude a compressed name without its time", () =
   evidence.discardStart(child, 2);
   expect(evidence.competing(parent, undefined, child, window)).toBe(false);
 });
+
+function spillFixture(capacity: number) {
+  const evidence = new ActivityCallEvidence(capacity);
+  const scope = { active: true };
+  const owner = log();
+  const start = { order: 10 };
+
+  return {
+    evidence,
+    scope,
+    owner,
+    name(order: number, created: number) {
+      const key = String(order);
+      evidence.open(parent, scope, owner, key, order, { created });
+      expect(evidence.name(parent, scope, owner, key, child)).toBe(order);
+    },
+    spill(order: number) {
+      evidence.spillWitness(parent, scope, child, order, start, owner);
+    },
+    lookup: () => evidence.spilledWitness(parent, child, start, () => true),
+  };
+}
+
+test("an already compressed named order cannot store a spill", () => {
+  const f = spillFixture(1);
+  f.name(1, 1);
+  f.name(2, 2);
+  f.spill(1);
+  expect(f.lookup()).toBeUndefined();
+
+  f.spill(2);
+  expect(f.lookup()).toBe(f.owner);
+});
+
+test("an exact spill is dropped when its named order is compressed", () => {
+  const f = spillFixture(1);
+  f.name(1, 1);
+  f.spill(1);
+  expect(f.lookup()).toBe(f.owner);
+
+  f.name(2, 2);
+  expect(f.lookup()).toBeUndefined();
+});
+
+test("native retirement drops a spill with its exact order, not the whole ledger", () => {
+  const f = spillFixture(2);
+  f.name(1, 1);
+  f.name(2, 3);
+  f.spill(1);
+  expect(f.lookup()).toBe(f.owner);
+
+  f.evidence.discardStart(child, 2, 2);
+  expect(f.lookup()).toBeUndefined();
+
+  f.spill(2);
+  expect(f.lookup()).toBe(f.owner);
+  f.scope.active = false;
+  f.evidence.fence(f.scope);
+  expect(f.lookup()).toBeUndefined();
+});

@@ -623,11 +623,8 @@ export class ActivityCallEvidence {
     return (
       unscoped ??
       this.incarnations
-        .entries()
-        .filter(([scope]) => scope.active)
-        .map(([, index]) =>
-          index.spilledWitness(session, child, start, accepts),
-        )
+        .values()
+        .map((index) => index.spilledWitness(session, child, start, accepts))
         .find((writer) => writer !== undefined)
     );
   }
