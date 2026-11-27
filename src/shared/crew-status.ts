@@ -6,11 +6,13 @@ export const crewTaskTextLimit = 64_000;
 
 /** Take the first `limit` code points without splitting a surrogate pair. */
 export function codePointHead(text: string, limit: number) {
-  if (text.length <= limit) {
+  const bound = Math.floor(limit);
+
+  if (text.length <= bound) {
     return text;
   }
 
-  if (limit <= 0) {
+  if (Number.isNaN(bound) || bound <= 0) {
     return "";
   }
 
@@ -21,7 +23,7 @@ export function codePointHead(text: string, limit: number) {
     end += point.length;
     points += 1;
 
-    if (points === limit) {
+    if (points >= bound) {
       break;
     }
   }

@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -389,6 +389,49 @@ test("code-point head handles small limits without splitting an astral character
   expect(codePointHead("short", 5)).toBe("short");
   expect(codePointHead("a😀b", 2)).toBe("a😀");
   expect(codePointHead("😀", 0)).toBe("");
+});
+
+test.each([
+  [1.5, "😀"],
+  [NaN, ""],
+  [Infinity, "😀abc"],
+] as const)("code-point head handles a limit of %s", (limit, expected) => {
+  expect(codePointHead("😀abc", limit)).toBe(expected);
+});
+
+test("code-point head stops iteration at the floored fractional limit", () => {
+  const input = `😀${"a".repeat(100_000)}`;
+  const iterate = String.prototype[Symbol.iterator];
+  let reads = 0;
+
+  const spy = spyOn(String.prototype, Symbol.iterator).mockImplementation(
+    function (this: string) {
+      const iterator = iterate.call(this);
+
+      if (this === input) {
+        const next = iterator.next.bind(iterator);
+
+        iterator.next = () => {
+          reads += 1;
+
+          if (reads > 2) {
+            throw new Error("Read past the two-code-point prefix");
+          }
+
+          return next();
+        };
+      }
+
+      return iterator;
+    },
+  );
+
+  try {
+    expect(codePointHead(input, 2.5)).toBe("😀a");
+    expect(reads).toBe(2);
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test("stored task text is cut at 64,000 code points without splitting a surrogate pair", async () => {
