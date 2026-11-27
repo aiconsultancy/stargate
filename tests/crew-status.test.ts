@@ -398,7 +398,7 @@ test.each([
   [1.5, "😀"],
   [NaN, ""],
   [Infinity, "😀abc"],
-] as const)("code-point head handles a limit of %s", (limit, expected) => {
+] as const)("code-point head handles a limit of %p", (limit, expected) => {
   expect(codePointHead("😀abc", limit)).toBe(expected);
 });
 
