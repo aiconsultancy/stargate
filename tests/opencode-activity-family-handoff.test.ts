@@ -98,7 +98,12 @@ function fixture(parent: Promise<string> = Promise.resolve(main)) {
     },
     start(at: number | null, text: string) {
       emit("session.execution.started", child, {}, at);
-      emit("session.text.ended", child, { ordinal: 0, text }, null);
+      emit(
+        "session.text.ended",
+        child,
+        { assistantMessageID: `child-answer-${seq}`, ordinal: 0, text },
+        null,
+      );
     },
     end() {
       emit("session.execution.succeeded", child, {}, null);
@@ -180,6 +185,113 @@ test.each([
     }
   },
 );
+
+test.each([
+  { mode: "timed control", first: 105, earlyCall: 101, expected: "c3" },
+  { mode: "untimed A1", first: null, earlyCall: 101, expected: "c3" },
+  {
+    mode: "untimed A1 without c1",
+    first: null,
+    earlyCall: undefined,
+    expected: "c3",
+  },
+  { mode: "untimed A1 and c1", first: null, earlyCall: null, expected: "c3" },
+  {
+    mode: "untimed A2",
+    first: 203,
+    second: null,
+    earlyCall: 101,
+    expected: "c3",
+  },
+  {
+    mode: "timed maximum survives out-of-order timestamps",
+    first: 205,
+    earlyCall: 204,
+    expected: "c3",
+  },
+  {
+    mode: "early m survives and competes with c3",
+    first: null,
+    earlyCall: 250,
+    expected: null,
+  },
+  {
+    mode: "early m alone never binds",
+    first: null,
+    earlyCall: 250,
+    name: "m",
+    expected: null,
+  },
+  {
+    mode: "Deimos timed A1 with an empty first band",
+    first: 105,
+    earlyCall: undefined,
+    expected: "c3",
+  },
+  {
+    mode: "Deimos untimed A1 without c2",
+    first: null,
+    earlyCall: undefined,
+    omitSecondCall: true,
+    expected: "c3",
+  },
+])("post-loss untimed retirement and timed cutoff: $mode", async (row) => {
+  const f = fixture();
+
+  try {
+    const root = f.root();
+    f.create();
+    f.start(5, "first period");
+    await f.families.reconnected();
+
+    if (row.earlyCall !== undefined) {
+      f.call(root, main, "m", row.earlyCall);
+    }
+
+    f.start(row.first, "A1 output");
+    f.end();
+    f.advance(1900);
+
+    if (!row.omitSecondCall) {
+      f.call(root, main, "c2", 201);
+    }
+
+    f.start(row.second === null ? null : 203, "A2 output");
+    f.end();
+    f.advance(100);
+    f.advance(1800);
+
+    if (row.name !== "m") {
+      f.call(root, main, "c3", 300);
+    }
+
+    f.start(301, "A3 output");
+    f.advance(100);
+    f.advance(200);
+    f.name(root, main, row.name ?? "c3");
+    f.end();
+    f.advance(2100);
+
+    expect(f.childTurns()?.slice(1)).toMatchObject([
+      ...["A1 output", "A2 output"].map((text) => ({
+        session: { parent: null },
+        status: "cancelled",
+        lost: true,
+        items: [{ text }],
+      })),
+      {
+        session: {
+          parent: row.expected === null ? null : { callId: row.expected },
+        },
+        status: row.name === "m" ? "cancelled" : "completed",
+        ...(row.name === "m" && { lost: true }),
+        items: [{ text: "A3 output" }],
+      },
+    ]);
+  } finally {
+    f.stop.abort();
+  }
+});
 
 test.each([
   { kind: "proof", foreign: 31, fence: true },

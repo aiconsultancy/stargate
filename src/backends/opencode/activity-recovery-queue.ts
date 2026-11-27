@@ -721,16 +721,16 @@ export class ActivityRecoveryQueues<E extends Event> {
     }
 
     if (expired) {
-      // Extend the contiguous band with a conservative native cutoff.
-      // Any untimed expiry leaves earlier openings as competition only.
+      // Exclusion and binding use independent cutoffs for the earlier band.
       earlier = {
         after: earlier?.after ?? old.floor,
         through: first.order,
         nativeStart:
-          retiredStart === undefined ||
-          (earlier !== undefined && earlier.nativeStart === undefined)
-            ? undefined
+          retiredStart === undefined
+            ? earlier?.nativeStart
             : Math.max(earlier?.nativeStart ?? retiredStart, retiredStart),
+        untimedThrough:
+          retiredStart === undefined ? first.order : earlier?.untimedThrough,
       };
     }
 

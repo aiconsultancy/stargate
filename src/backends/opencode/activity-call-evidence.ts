@@ -35,8 +35,10 @@ type NamedCapacity = { count: number; saturated?: Range };
 export type EarlierCallRange = {
   after: number;
   through: number;
-  // An untimed expiry keeps this band for competition, never for binding.
+  // The maximum known start excludes calls; an untimed start does not reset it.
   nativeStart: number | undefined;
+  // Surviving calls through the last untimed retirement only compete.
+  untimedThrough?: number | undefined;
 };
 
 export type CallWindow = {
@@ -80,6 +82,18 @@ function extend(range: Range | undefined, { first, last }: Range) {
   };
 }
 
+function survivesRetirement(
+  { after, through, nativeStart }: EarlierCallRange,
+  order: number,
+  created: number | undefined,
+) {
+  return (
+    after < order &&
+    order <= through &&
+    (nativeStart === undefined || !callPrecedesStart(created, nativeStart))
+  );
+}
+
 export function openedInWindow(
   order: number,
   created: number | undefined,
@@ -90,11 +104,9 @@ export function openedInWindow(
   return (
     order <= window.through &&
     (order > window.after ||
-      (earlier !== undefined &&
-        earlier.after < order &&
-        order <= earlier.through &&
-        earlier.nativeStart !== undefined &&
-        !callPrecedesStart(created, earlier.nativeStart)))
+      (earlier?.nativeStart !== undefined &&
+        order > (earlier.untimedThrough ?? -Infinity) &&
+        survivesRetirement(earlier, order, created)))
   );
 }
 
@@ -315,11 +327,8 @@ class ScopeEvidence {
 
     const inWindow = ([order, created]: [number, number | undefined]) =>
       order !== window.except &&
-      (openedInWindow(order, created, window) ||
-        (earlier !== undefined &&
-          earlier.nativeStart === undefined &&
-          earlier.after < order &&
-          order <= earlier.through));
+      ((window.after < order && order <= window.through) ||
+        (earlier !== undefined && survivesRetirement(earlier, order, created)));
 
     return (
       callRangeMightOverlap(this.ranges.get(session), window, window.except) ||
