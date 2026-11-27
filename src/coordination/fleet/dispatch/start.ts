@@ -5,7 +5,10 @@ import {
   type IrcConfig,
   agentDispatchTarget,
 } from "../../../config";
-import { agentDispatchActive } from "../../../config/composition";
+import {
+  agentDispatchActive,
+  dispatchPrimaryApi,
+} from "../../../config/composition";
 import type { IrcShip } from "../../../transports/irc/ship";
 import { SubspaceApi } from "./api";
 import { AssignedWork } from "./assigned-work";
@@ -58,6 +61,28 @@ export function startAgentDispatch(
     return;
   }
 
+  const apiConfig = dispatchPrimaryApi(dispatch);
+
+  const relay = dispatch.decisionOutcomeDms
+    ? dispatch.decisionRelay
+    : undefined;
+
+  const options = {
+    ...(host.fetch && { fetch: host.fetch }),
+    ...(host.env && { env: host.env }),
+  };
+
+  const decisionApi =
+    relay && new SubspaceApi({ ...relay, ...options, decisionRelay: true });
+
+  const api = apiConfig
+    ? new SubspaceApi({ ...apiConfig, ...options })
+    : decisionApi;
+
+  if (!api || (dispatch.enabled && !apiConfig)) {
+    throw new Error("Agent dispatch requires an API connection");
+  }
+
   const target = agentDispatchTarget(dispatch, host.irc);
 
   if (typeof target === "string") {
@@ -78,12 +103,6 @@ export function startAgentDispatch(
   const ledger = new DispatchLedger(
     join(host.dataDirectory, "agent-dispatch.sqlite"),
   );
-
-  const api = new SubspaceApi({
-    ...dispatch.api,
-    ...(host.fetch && { fetch: host.fetch }),
-    ...(host.env && { env: host.env }),
-  });
 
   const requestConfig = dispatch.assignmentRequests;
   const offersEnabled = dispatch.enabled && dispatch.readyOffers !== false;
@@ -140,6 +159,7 @@ export function startAgentDispatch(
       sameAccount: (a, b) => client.fold(a) === client.fold(b),
     },
     api,
+    ...(decisionApi && api !== decisionApi && { decisionApi }),
     assignmentMode,
     messenger,
     ledger,

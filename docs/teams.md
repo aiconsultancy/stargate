@@ -60,11 +60,22 @@ scope even when the activity's conversation ID is different. Denied users and
 channels override the allow lists. Wildcards are not supported for Teams.
 Registration IDs and socket paths must be unique within the gateway.
 
+For a registration with `fleetPolicy.role: "rear_admiral"`, set
+`access.allowInstalledConversations: true` to accept a verified mention of
+that bot in a Teams channel or group where it is installed. The default is
+off. Tenant, human and deny rules still apply. Messages without a mention
+still need an explicit channel entry and `allowUnmentionedConversations`.
+For those mentions, the allowed human can use any conversation where the
+bot is installed. Keep the human allow list limited to the intended users.
+The gateway trusts the authenticated Teams activity for the conversation.
+It can reply to conversations it learned from that intake.
+
 The activity must identify the configured bot and tenant. If it carries tenant IDs in
 both conversation and channel data, both must agree. Bot senders, self messages,
 missing human object IDs and unsupported activity types are refused. Access is
-checked again before work and delivery; removing a permitted channel also
-blocks replies to its previously stored conversation references.
+checked again before work and delivery. A channel deny blocks replies to its
+previously stored references. Where access depends on a channel allow list,
+removing the entry also blocks replies.
 
 ### Quoted messages
 

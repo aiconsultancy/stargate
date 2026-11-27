@@ -24,7 +24,7 @@ import {
 } from "../config";
 import {
   type SubspaceAgentsConfig,
-  agentDispatchActive,
+  dispatchPrimaryApi,
 } from "../config/composition";
 import { checkIrcCredentials } from "../transports/irc/credential-preflight";
 import {
@@ -164,10 +164,12 @@ export async function checkCredentials(
     await checkIrcCredentials(registration, env);
   }
 
-  if (agentDispatchActive(agentDispatch) && "tokenEnv" in agentDispatch.api) {
+  const dispatchApi = dispatchPrimaryApi(agentDispatch);
+
+  if (dispatchApi && "tokenEnv" in dispatchApi) {
     for (const name of [
-      agentDispatch.api.tokenEnv,
-      ...Object.values(agentDispatch.api.headersEnv),
+      dispatchApi.tokenEnv,
+      ...Object.values(dispatchApi.headersEnv),
     ]) {
       if (!env[name]?.trim()) {
         throw new Error(

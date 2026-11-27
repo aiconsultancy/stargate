@@ -26,7 +26,7 @@ test("an officer can publish, replace and withdraw only its own static mockup", 
   const demo = join(staging, "demo");
   const index = join(demo, "index.html");
   const live = join(storage, "public", "p");
-  const baseUrl = "https://previews.example.com/";
+  const baseUrl = "http://previews.example.com:8080/";
 
   await mkdir(demo, { recursive: true });
 

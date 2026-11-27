@@ -207,7 +207,9 @@ Caddy. Standalone Stargate does not start these services.
   owned by the officer identity bound to their local publishing socket.
 
 Installer integrations require `mockupPreviews: 1` in
-`scripts/officer-tools-contract.json`. Run `scripts/officer-previews.ts broker
+`scripts/officer-tools-contract.json`. A shared HTTP origin uses the
+`mockupPreviewsHttp: 1` capability and must be behind the fleet's private
+network. Run `scripts/officer-previews.ts broker
 <storage> <sockets> <base-url/> <captain>...` under a dedicated publisher account.
 Each captain uses `scripts/officer-previews.ts mcp <socket> <staging>` with its
 own socket. Create each socket directory owned by the publisher, with the
