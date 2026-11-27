@@ -292,6 +292,7 @@ export interface AgentBackend {
   pair?(signal: AbortSignal): Promise<{ code: string; expiresIn: number }>;
   /** Read-only configured crew status; does not require/create a conversation. */
   crewStatus?(input: CrewStatusInput, signal: AbortSignal): Promise<CrewStatus>;
+  assignmentCapacity?(signal: AbortSignal): Promise<boolean>;
   /**
    * Private fleet metadata from the same location-scoped crew status read.
    * A `taskText` read may use ordinary status only for unsupported plugins.

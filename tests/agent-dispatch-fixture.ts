@@ -21,6 +21,7 @@ import {
   UndeliverableIssue,
 } from "../src/coordination/fleet/dispatch/dispatcher";
 import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
+import type { AssignedWorkPoller } from "../src/coordination/fleet/dispatch/polling";
 import type { IssueLabel } from "../src/coordination/fleet/dispatch/protocol";
 
 export const FLEET = "00000000-0000-4000-8000-0000000000f1";
@@ -845,6 +846,7 @@ export async function tempDirectory() {
 }
 
 export type FixtureOptions = {
+  recheckIdentity?: boolean;
   ladder?: number[];
   decisionOutcomeDms?: boolean;
   enrolled?: string[];
@@ -883,13 +885,19 @@ export async function fixture(options: FixtureOptions = {}) {
       })
     : api;
 
-  const open = (ledger = new DispatchLedger(path)) =>
+  const open = (
+    ledger = new DispatchLedger(path),
+    readyOffers = true,
+    assignedWork?: AssignedWorkPoller,
+  ) =>
     new AgentDispatcher({
       settings: {
         fleet: "example-fleet",
         pollIntervalMs: 2 * MINUTE,
         answerTimeoutMs: 5 * MINUTE,
         decisionOutcomeDms: options.decisionOutcomeDms ?? false,
+        offersEnabled: readyOffers,
+        recheckIdentity: options.recheckIdentity ?? false,
         retryLadderMs: options.ladder ?? [HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR],
         captainAccount: (name) => `example-${name}`,
         enrolled: (account) => enrolled.has(account),
@@ -897,6 +905,9 @@ export async function fixture(options: FixtureOptions = {}) {
       api: client,
       messenger: chat,
       ledger,
+      assignmentMode: assignedWork
+        ? { kind: "requests", work: assignedWork }
+        : { kind: "legacy" },
       now: clock.now,
       log: options.log ?? silent,
       ...(options.wait ? { wait: options.wait } : {}),

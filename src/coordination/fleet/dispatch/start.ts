@@ -8,9 +8,16 @@ import {
 import { agentDispatchActive } from "../../../config/composition";
 import type { IrcShip } from "../../../transports/irc/ship";
 import { SubspaceApi } from "./api";
+import { AssignedWork } from "./assigned-work";
 import { AgentDispatcher } from "./dispatcher";
-import { IrcDispatchMessenger, ircDispatchAnswer } from "./irc";
+import {
+  IrcAssignmentRequests,
+  IrcDispatchMessenger,
+  assignmentCapacityTag,
+  ircDispatchAnswer,
+} from "./irc";
 import { DispatchLedger } from "./ledger";
+import type { AssignmentMode } from "./polling";
 
 /** What the gateway runtime supplies to agent dispatch. */
 export type AgentDispatchHost = {
@@ -72,13 +79,58 @@ export function startAgentDispatch(
     join(host.dataDirectory, "agent-dispatch.sqlite"),
   );
 
+  const api = new SubspaceApi({
+    ...dispatch.api,
+    ...(host.fetch && { fetch: host.fetch }),
+    ...(host.env && { env: host.env }),
+  });
+
+  const requestConfig = dispatch.assignmentRequests;
+  const offersEnabled = dispatch.enabled && dispatch.readyOffers !== false;
+
+  const messenger = new IrcDispatchMessenger(
+    client,
+    target.channel,
+    host.allowed,
+    log,
+  );
+
+  let assignmentRequests: IrcAssignmentRequests | undefined;
+  let assignmentMode: AssignmentMode;
+
+  if (!dispatch.enabled || requestConfig === null) {
+    assignmentMode = { kind: "off" };
+  } else if (requestConfig === undefined) {
+    assignmentMode = { kind: "legacy" };
+  } else {
+    assignmentRequests = new IrcAssignmentRequests(
+      client,
+      requestConfig.shipChannels,
+      host.allowed,
+      messenger,
+    );
+    assignmentMode = {
+      kind: "requests",
+      work: new AssignedWork({
+        api,
+        ledger,
+        requests: assignmentRequests,
+        log,
+        reminderMs: requestConfig.reminderSeconds * 1000,
+        captainIntervalMs: 5 * 60 * 1000,
+        offersEnabled,
+      }),
+    };
+  }
+
   const dispatcher = new AgentDispatcher({
     settings: {
       fleet: dispatch.fleet,
       pollIntervalMs: dispatch.pollIntervalSeconds * 1000,
       answerTimeoutMs: dispatch.answerTimeoutSeconds * 1000,
       decisionOutcomeDms: dispatch.decisionOutcomeDms ?? false,
-      issueDispatch: dispatch.enabled,
+      offersEnabled,
+      recheckIdentity: api.usesEnrolledIdentity,
       retryLadderMs: dispatch.retryLadderSeconds.map(
         (seconds) => seconds * 1000,
       ),
@@ -87,19 +139,9 @@ export function startAgentDispatch(
         enrolled.some((entry) => client.fold(entry) === client.fold(account)),
       sameAccount: (a, b) => client.fold(a) === client.fold(b),
     },
-    api: new SubspaceApi({
-      baseUrl: dispatch.api.baseUrl,
-      tokenEnv: dispatch.api.tokenEnv,
-      headersEnv: dispatch.api.headersEnv,
-      ...(host.fetch && { fetch: host.fetch }),
-      ...(host.env && { env: host.env }),
-    }),
-    messenger: new IrcDispatchMessenger(
-      client,
-      target.channel,
-      host.allowed,
-      log,
-    ),
+    api,
+    assignmentMode,
+    messenger,
     ledger,
     log,
   });
@@ -108,6 +150,16 @@ export function startAgentDispatch(
     message,
     caseFold,
   ) => {
+    if (message.tags.has(assignmentCapacityTag)) {
+      assignmentRequests?.receive(message);
+
+      return;
+    }
+
+    if (!offersEnabled) {
+      return;
+    }
+
     const answer = ircDispatchAnswer(
       message,
       target.channel,
@@ -122,7 +174,7 @@ export function startAgentDispatch(
     }
   };
 
-  if (dispatch.enabled) {
+  if (assignmentRequests || offersEnabled) {
     ship.dispatchListener = listener;
   }
 

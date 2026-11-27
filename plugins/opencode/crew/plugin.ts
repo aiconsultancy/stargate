@@ -573,6 +573,16 @@ const plugin = Plugin.define({
           ),
         status: (input, context) =>
           report(context.signal, async () => projects.status(input)),
+        assignmentCapacity: (_input, context) =>
+          report(context.signal, async () => {
+            for (const engine of projects.contexts.values()) {
+              if (await engine.hasDispatchCapacity(context.signal)) {
+                return true;
+              }
+            }
+
+            return false;
+          }),
         fleetStatus: (input, context) =>
           report(context.signal, async () => projects.fleetStatus(input)),
         crewGit: (input, context) =>

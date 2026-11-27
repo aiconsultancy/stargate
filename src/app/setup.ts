@@ -164,7 +164,7 @@ export async function checkCredentials(
     await checkIrcCredentials(registration, env);
   }
 
-  if (agentDispatchActive(agentDispatch)) {
+  if (agentDispatchActive(agentDispatch) && "tokenEnv" in agentDispatch.api) {
     for (const name of [
       agentDispatch.api.tokenEnv,
       ...Object.values(agentDispatch.api.headersEnv),
