@@ -329,7 +329,7 @@ export const reservedAuthenticatedRequestHeaders = new Set([
 ]);
 
 /** Direct bearer or the enrolled rear admiral's local signing proxy. */
-export const agentDispatchApiSchema = Schema.Union([
+const agentDispatchApiSchema = Schema.Union([
   settingsStruct({ socketPath: absolutePath }),
   settingsStruct({
     /** API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback. */
@@ -354,6 +354,44 @@ export const agentDispatchApiSchema = Schema.Union([
     ).pipe(settingsDefault({})),
   }),
 ]);
+
+export const agentDispatchConnections = {
+  api: Schema.optional(agentDispatchApiSchema),
+  decisionRelay: Schema.optional(settingsStruct({ socketPath: absolutePath })),
+  /** Send resolved decision notices to the recording captain by IRC DM. */
+  decisionOutcomeDms: Schema.optional(Schema.Boolean),
+};
+
+type DispatchConnections = Schema.Struct.Type<
+  typeof agentDispatchConnections
+> & {
+  enabled: boolean;
+};
+
+function needsDispatchApi(config: DispatchConnections): boolean {
+  return (
+    config.enabled ||
+    Boolean(config.decisionOutcomeDms && !config.decisionRelay)
+  );
+}
+
+export const checkAgentDispatchConnections = settingsCheck<DispatchConnections>(
+  (config, context) => {
+    if (needsDispatchApi(config) && !config.api) {
+      context.addIssue({
+        code: "custom",
+        path: ["api"],
+        message:
+          "Issue dispatch or decision outcomes without a relay require an API connection",
+      });
+    }
+  },
+);
+
+/** The connection for issues and for decisions without a separate relay. */
+export function dispatchPrimaryApi(config: DispatchConnections | undefined) {
+  return config && needsDispatchApi(config) ? config.api : undefined;
+}
 
 /** An ordinary local signing socket must belong to the dispatching rear admiral. */
 export function dispatchTargetIssue(

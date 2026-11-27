@@ -36,7 +36,9 @@ import {
 import { decodeSettings } from "./settings-errors";
 import {
   absolutePath,
-  agentDispatchApiSchema,
+  agentDispatchConnections,
+  checkAgentDispatchConnections,
+  dispatchPrimaryApi,
   dispatchTargetIssue,
   envName,
   reservedAuthenticatedRequestHeaders,
@@ -54,6 +56,8 @@ import { transcriptionSchema } from "../chat/transcription/config";
 import { waitingSchema } from "./waiting";
 
 import { type BackendConfig, backendSchema } from "../backends/config";
+
+export { dispatchPrimaryApi } from "./settings-schema";
 
 const userRule = Schema.Union([
   Schema.Literal("*"),
@@ -253,8 +257,7 @@ export const agentDispatchSchema = settingsStruct({
   fleet: Schema.String.check(
     settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/),
   ),
-  api: Schema.optional(agentDispatchApiSchema),
-  decisionRelay: Schema.optional(settingsStruct({ socketPath: absolutePath })),
+  ...agentDispatchConnections,
   readyOffers: Schema.optional(Schema.Boolean),
   messaging: settingsStruct({
     /** IRC is the only messaging system today. */
@@ -277,8 +280,6 @@ export const agentDispatchSchema = settingsStruct({
       }),
     ),
   ),
-  /** Send resolved decision notices to the recording captain by IRC DM. */
-  decisionOutcomeDms: Schema.optional(Schema.Boolean),
   /** Subspace agent name to chat account; an unlisted name is its own account. */
   captainAccounts: settingsRecord(
     Schema.String.check(settingsPattern(/^[A-Za-z0-9-]{1,64}$/)),
@@ -294,31 +295,9 @@ export const agentDispatchSchema = settingsStruct({
   retryLadderSeconds: Schema.mutable(Schema.Array(dispatchSeconds(60, 604_800)))
     .check(Schema.isMaxLength(10))
     .pipe(settingsDefault([...agentDispatchDefaults.retryLadderSeconds])),
-}).check(
-  settingsCheck((value, context) => {
-    if (
-      (value.enabled || (value.decisionOutcomeDms && !value.decisionRelay)) &&
-      !value.api
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["api"],
-        message:
-          "Issue dispatch or decision outcomes without a relay require an API connection",
-      });
-    }
-  }),
-);
+}).check(checkAgentDispatchConnections);
 
 export type AgentDispatchConfig = typeof agentDispatchSchema.Type;
-
-/** The connection for issues and for decisions without a separate relay. */
-export function dispatchPrimaryApi(config: AgentDispatchConfig | undefined) {
-  return config?.enabled ||
-    (config?.decisionOutcomeDms && !config.decisionRelay)
-    ? config.api
-    : undefined;
-}
 
 export function agentDispatchActive(
   config: AgentDispatchConfig | undefined,
