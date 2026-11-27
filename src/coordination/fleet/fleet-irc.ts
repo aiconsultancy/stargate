@@ -141,9 +141,14 @@ export async function sendFleetPeerMessage(
   const nick = await client.verifiedNick(target.account).catch(() => {
     signal.throwIfAborted();
 
-    // As in agent dispatch, a failure of this connection says nothing about the
-    // Captain. Every IrcUnavailable rejection needs or clears registration, so
-    // Reading it avoids importing the transport's error class into this slice.
+    /*
+     * As in agent dispatch, a failure of this connection says nothing about the
+     * recipient. verifiedNick rejects with IrcUnavailable only while this client
+     * is unregistered: a new lookup is refused then, and a disconnect clears
+     * registration before it rejects pending lookups. So reading registered
+     * tells the two cases apart without importing the transport's error class
+     * into this slice.
+     */
     throw new FleetError(
       client.registered ? peerRecipientUnconfirmed : peerIrcDisconnected,
     );
