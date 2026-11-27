@@ -78,10 +78,10 @@ export type DispatchSettings = {
   fleet: string;
   pollIntervalMs: number;
   answerTimeoutMs: number;
-  decisionOutcomeDms?: boolean;
-  issueDispatch?: boolean;
-  readyOffers?: boolean;
-  recheckIdentity?: boolean;
+  decisionOutcomeDms: boolean;
+  issueDispatch: boolean;
+  offersEnabled: boolean;
+  recheckIdentity: boolean;
   /** Waits between rounds; one more round than entries, then give up. */
   retryLadderMs: readonly number[];
   /** IRC (or other transport) account for an API agent name. */
@@ -181,26 +181,36 @@ export class DispatchPolling {
   private readonly pollAssignmentMode: (
     signal: AbortSignal,
   ) => Promise<void> | void;
-  public readonly offersEnabled: boolean;
+  private assignmentIdentity = new AbortController();
 
   public constructor({ options, now, finish }: PollingPort) {
     this.options = options;
     this.now = now;
     this.finish = finish;
-    this.offersEnabled =
-      options.settings.issueDispatch !== false &&
-      options.settings.readyOffers !== false;
 
     const work = options.assignedWork;
     this.pollAssignmentMode = work
       ? (signal) => {
-          work.start(this.eligibleCaptains(), signal);
+          work.start(
+            this.eligibleCaptains(),
+            AbortSignal.any([signal, this.assignmentIdentity.signal]),
+          );
         }
       : this.pollAssigned.bind(this);
   }
 
   private get settings() {
     return this.options.settings;
+  }
+
+  public get offersEnabled() {
+    return this.settings.offersEnabled;
+  }
+
+  private invalidateRoster() {
+    this.roster = undefined;
+    this.assignmentIdentity.abort();
+    this.assignmentIdentity = new AbortController();
   }
 
   /** Log a problem once until it clears; never logs bodies or secrets. */
@@ -275,7 +285,7 @@ export class DispatchPolling {
 
     this.roster = this.captainsOf(roster, readAt);
 
-    if (this.settings.issueDispatch !== false) {
+    if (this.settings.issueDispatch) {
       try {
         await this.pollAssignmentMode(signal);
 
@@ -472,7 +482,7 @@ export class DispatchPolling {
         return true;
       }
 
-      this.roster = undefined;
+      this.invalidateRoster();
 
       return false;
     }
@@ -486,7 +496,7 @@ export class DispatchPolling {
         me.fleetId !== fleet ||
         (this.verifiedUser !== undefined && me.userId !== this.verifiedUser)
       ) {
-        this.roster = undefined;
+        this.invalidateRoster();
         this.warnOnce(
           "identity",
           "Agent dispatch is idle: the API token is not this fleet's rear admiral agent (GET /api/v1/me). Retrying at each poll",
@@ -502,7 +512,7 @@ export class DispatchPolling {
       return true;
     } catch (error) {
       signal.throwIfAborted();
-      this.roster = undefined;
+      this.invalidateRoster();
       this.apiFailed(
         "me",
         "Agent dispatch cannot confirm its API identity",

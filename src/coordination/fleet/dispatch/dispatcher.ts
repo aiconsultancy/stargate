@@ -157,7 +157,7 @@ export class AgentDispatcher {
 
   /** Earliest time any timer is due, if any. */
   private nextDue(): number | undefined {
-    if (!this.polling.offersEnabled) {
+    if (!this.polling.offersEnabled || !this.polling.roster) {
       return;
     }
 
@@ -288,11 +288,15 @@ export class AgentDispatcher {
   private async timers(signal: AbortSignal) {
     // Nothing moves until this process has read the roster: at a poll, or
     // Before an acceptance write as a confirmed identity.
-    if (!this.polling.offersEnabled || !this.polling.roster) {
+    if (!this.polling.offersEnabled) {
       return;
     }
 
     for (const tracked of this.options.ledger.active()) {
+      if (!this.polling.roster) {
+        return;
+      }
+
       signal.throwIfAborted();
       const retry = this.retryAt.get(tracked.issue);
 

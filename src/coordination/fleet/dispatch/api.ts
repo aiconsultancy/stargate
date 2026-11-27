@@ -268,15 +268,29 @@ export type SubspaceApiOptions = (
 /** HTTPS client for the Subspace API. Never logs requests or responses. */
 export class SubspaceApi implements DispatchApi {
   private readonly base: string;
-  private readonly env: NodeJS.ProcessEnv;
+  private readonly socketPath: string | undefined;
+  private readonly authorize: (headers: Headers) => void;
   private readonly fetcher: typeof fetch;
-  public constructor(private readonly options: SubspaceApiOptions) {
-    this.base =
-      "socketPath" in options
-        ? "http://localhost"
-        : options.baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
-    this.env = options.env ?? process.env;
+  private readonly timeoutMs: number;
+
+  public constructor(options: SubspaceApiOptions) {
     this.fetcher = options.fetch ?? fetch;
+    this.timeoutMs = options.timeoutMs ?? 20_000;
+
+    if ("socketPath" in options) {
+      this.base = "http://localhost";
+      this.socketPath = options.socketPath;
+      this.authorize = () => {};
+    } else {
+      this.base = options.baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
+      this.authorize = (headers) => {
+        this.addCredentials(headers, options);
+      };
+    }
+  }
+
+  public get usesEnrolledIdentity() {
+    return this.socketPath !== undefined;
   }
 
   private headers(body: boolean) {
@@ -286,11 +300,17 @@ export class SubspaceApi implements DispatchApi {
       headers.set("content-type", "application/json");
     }
 
-    if ("socketPath" in this.options) {
-      return headers;
-    }
+    this.authorize(headers);
 
-    const token = this.env[this.options.tokenEnv]?.trim();
+    return headers;
+  }
+
+  private addCredentials(
+    headers: Headers,
+    options: Extract<SubspaceApiOptions, { tokenEnv: string }>,
+  ) {
+    const env = options.env ?? process.env;
+    const token = env[options.tokenEnv]?.trim();
 
     if (!token) {
       throw new DispatchApiError(
@@ -301,8 +321,8 @@ export class SubspaceApi implements DispatchApi {
 
     headers.set("authorization", `Bearer ${token}`);
 
-    for (const [name, variable] of Object.entries(this.options.headersEnv)) {
-      const value = this.env[variable]?.trim();
+    for (const [name, variable] of Object.entries(options.headersEnv)) {
+      const value = env[variable]?.trim();
 
       if (!value) {
         throw new DispatchApiError(
@@ -313,8 +333,6 @@ export class SubspaceApi implements DispatchApi {
 
       headers.set(name, value);
     }
-
-    return headers;
   }
 
   /**
@@ -332,14 +350,11 @@ export class SubspaceApi implements DispatchApi {
     try {
       response = await this.fetcher(`${this.base}${path}`, {
         method,
-        ...("socketPath" in this.options && { unix: this.options.socketPath }),
+        ...(this.socketPath !== undefined && { unix: this.socketPath }),
         headers: this.headers(body !== undefined),
         ...(body !== undefined && { body: JSON.stringify(body) }),
         redirect: "error",
-        signal: AbortSignal.any([
-          signal,
-          AbortSignal.timeout(this.options.timeoutMs ?? 20_000),
-        ]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]),
       });
     } catch (error) {
       if (error instanceof DispatchApiError) {

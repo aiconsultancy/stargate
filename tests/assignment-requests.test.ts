@@ -56,6 +56,7 @@ test("assigned work waits for crew and reminds a captain only while the issue is
   const asks: string[] = [];
 
   const work = new AssignedWork({
+    offersEnabled: true,
     api: {
       async assignedIssues(accounts, since, _cursor, _signal, filter) {
         expect(accounts).toEqual([CAPTAIN_A]);
@@ -124,6 +125,7 @@ test("an issue reassigned during the capacity probe is not sent to its former ca
   let asked = false;
 
   const work = new AssignedWork({
+    offersEnabled: true,
     api: {
       async assignedIssues() {
         return { items: [issue], next: undefined };
@@ -186,6 +188,7 @@ test("a stalled capacity check leaves other captains and Ready for agents answer
   const sent = Promise.withResolvers<string>();
 
   const work = new AssignedWork({
+    offersEnabled: true,
     api: f.api,
     ledger: f.ledger,
     reminderMs: 4 * HOUR,
@@ -240,6 +243,7 @@ test("a new assignment comes before reminders on an earlier page", async () => {
   );
 
   const work = new AssignedWork({
+    offersEnabled: true,
     api: {
       async assignedIssues(_accounts, _since, cursor) {
         return cursor

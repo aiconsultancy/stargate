@@ -91,7 +91,7 @@ export function startAgentDispatch(
   });
 
   const requestConfig = dispatch.assignmentRequests;
-  const readyOffers = dispatch.readyOffers ?? true;
+  const offersEnabled = dispatch.enabled && dispatch.readyOffers !== false;
 
   const messenger = new IrcDispatchMessenger(
     client,
@@ -105,7 +105,7 @@ export function startAgentDispatch(
 
   if (requestConfig === null) {
     assignedWork = disabledAssignedWork;
-  } else if (requestConfig) {
+  } else if (dispatch.enabled && requestConfig) {
     assignmentRequests = new IrcAssignmentRequests(
       client,
       requestConfig.shipChannels,
@@ -119,7 +119,7 @@ export function startAgentDispatch(
       log,
       reminderMs: requestConfig.reminderSeconds * 1000,
       captainIntervalMs: 5 * 60 * 1000,
-      readyOffers,
+      offersEnabled,
     });
   }
 
@@ -130,8 +130,8 @@ export function startAgentDispatch(
       answerTimeoutMs: dispatch.answerTimeoutSeconds * 1000,
       decisionOutcomeDms: dispatch.decisionOutcomeDms ?? false,
       issueDispatch: dispatch.enabled,
-      readyOffers,
-      recheckIdentity: "socketPath" in dispatch.api,
+      offersEnabled,
+      recheckIdentity: api.usesEnrolledIdentity,
       retryLadderMs: dispatch.retryLadderSeconds.map(
         (seconds) => seconds * 1000,
       ),
@@ -157,7 +157,7 @@ export function startAgentDispatch(
       return;
     }
 
-    if (!readyOffers) {
+    if (!offersEnabled) {
       return;
     }
 
@@ -175,7 +175,7 @@ export function startAgentDispatch(
     }
   };
 
-  if (dispatch.enabled && (assignmentRequests || readyOffers)) {
+  if (assignmentRequests || offersEnabled) {
     ship.dispatchListener = listener;
   }
 

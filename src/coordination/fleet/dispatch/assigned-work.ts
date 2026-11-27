@@ -37,7 +37,7 @@ export class AssignedWork {
       requests: AssignmentRequests;
       reminderMs: number;
       captainIntervalMs: number;
-      readyOffers?: boolean;
+      offersEnabled: boolean;
       log: Logger;
       now?: () => number;
     },
@@ -134,7 +134,7 @@ export class AssignedWork {
       if (
         (last !== undefined && now() - last < reminderMs) ||
         (recent !== undefined && now() - recent < captainIntervalMs) ||
-        (this.options.readyOffers !== false &&
+        (this.options.offersEnabled &&
           offer?.state === "accepting" &&
           offer.offer?.captain === captain.userId)
       ) {

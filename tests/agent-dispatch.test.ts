@@ -906,6 +906,34 @@ test("a signing proxy that changes identity cannot resume a pending assignment",
   expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_A);
 });
 
+test("losing the signing identity cancels an in-flight assigned work scan", async () => {
+  const f = await fixture({ recheckIdentity: true });
+  const scans: AbortSignal[] = [];
+
+  const dispatcher = f.open(f.ledger, false, {
+    start(_captains, scan) {
+      scans.push(scan);
+    },
+    drain() {},
+  });
+
+  const enrolled = f.api.identity;
+
+  await dispatcher.step(signal);
+
+  expect(scans.map((scan) => scan.aborted)).toEqual([false]);
+
+  f.api.identity = { ...enrolled, userId: "different-rear-admiral" };
+  await dispatcher.step(signal);
+
+  expect(scans.map((scan) => scan.aborted)).toEqual([true]);
+
+  f.api.identity = enrolled;
+  await dispatcher.step(signal);
+
+  expect(scans.map((scan) => scan.aborted)).toEqual([true, false]);
+});
+
 test("an answer before the first poll confirms the identity, then assigns", async () => {
   const f = await fixture();
   f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
