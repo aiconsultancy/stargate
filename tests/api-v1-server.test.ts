@@ -80,11 +80,13 @@ const features = [
   { key: "api", label: "Fleet API", enabled: true, defaultEnabled: false },
 ];
 
+const crewDetail = { ship: ship.id, member, taskText: "full" as const };
+
 const reads: Pick<ApiV1Source, "fleet" | "ship" | "crew"> = {
   fleet: async () => overview,
   ship: async (id) => (id === ship.id ? ship : undefined),
   crew: async (id, name) =>
-    id === ship.id && name === member.id ? { ship: id, member } : undefined,
+    id === ship.id && name === member.id ? crewDetail : undefined,
 };
 
 const source: ApiV1Source = {
@@ -447,7 +449,7 @@ test("routes return source data, handle encoded IDs and HEAD, and contain source
     expect(await detail.json()).toEqual(ship);
     expect(
       await (await server.get("/api/v1/ships/explorer/crew/engineer")).json(),
-    ).toEqual({ ship: "explorer", member });
+    ).toEqual(crewDetail);
     const head = await server.get("/api/v1/ships/explorer", { method: "HEAD" });
     expect(head.status).toBe(200);
     expect(await head.text()).toBe("");
@@ -520,7 +522,7 @@ test("HTTP detail deadlines release the handlers but retain capacity for uncoope
   const readingCrew = mock(async () => {
     await held.promise;
 
-    return { ship: ship.id, member };
+    return crewDetail;
   });
 
   const server = await startFixture({
@@ -614,7 +616,7 @@ test.each([
         ...source,
         fleet: () => read(overview),
         ship: () => read(ship),
-        crew: () => read({ ship: ship.id, member }),
+        crew: () => read(crewDetail),
       },
       timing: { requestMs: 160 },
       fleetReadMs: 40,

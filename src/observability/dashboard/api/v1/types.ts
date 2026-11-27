@@ -320,6 +320,8 @@ export type V1ShipDetail = V1Ship & {
 export type V1CrewDetail = {
   ship: string;
   member: V1CrewMember;
+  /** Whether the read returned complete stored task text or the bounded view. */
+  taskText: "full" | "preview";
 };
 
 /** A crew read failed; it did not establish whether the member exists. */
