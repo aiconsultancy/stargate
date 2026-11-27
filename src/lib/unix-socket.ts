@@ -192,20 +192,23 @@ export function checkPrivateDirectory(
 }
 
 /** Check an explicitly trusted service's private or group-accessible socket. */
-export function checkOwnedServiceSocket(path: string, ownerUid: number): void {
+export function checkServiceSocket(path: string): void {
   checkNormalised(path, "service socket");
+  const uid = currentUid({});
   const directory = dirname(path);
-  checkAncestors(directory, ownerUid);
+  checkAncestors(directory, uid);
   const parent = lstatSync(directory);
   const socket = lstatSync(path);
 
+  const sharedGroup =
+    socket.gid === process.getgid?.() && parent.gid === socket.gid;
+
   if (
     !parent.isDirectory() ||
-    (parent.uid !== 0 && parent.uid !== ownerUid) ||
+    (parent.uid !== 0 && parent.uid !== socket.uid) ||
     (parent.mode & 0o027) !== 0 ||
     !socket.isSocket() ||
-    socket.uid !== ownerUid ||
-    socket.gid !== parent.gid ||
+    (socket.uid !== uid && !sharedGroup) ||
     (socket.mode & 0o007) !== 0
   ) {
     throw new Error("Service socket ownership or permissions are unsafe");

@@ -214,7 +214,7 @@ The optional top-level `agentDispatch` object lets the rear admiral's IRC
 gateway poll the Subspace API and offer issues to the fleet's captains. It
 is off by default (`enabled: false`) and every key requires a restart. Keys:
 `enabled`, `fleet`, `api.baseUrl`, `api.tokenEnv`, `api.headersEnv`,
-`api.socketPath`, `api.relayOwnerUid` (decision-only relay),
+`api.socketPath`, `decisionRelay.socketPath` (optional separate connection for outcomes),
 `messaging.type`, `messaging.registration`, `messaging.channel`,
 `captainAccounts`, `decisionOutcomeDms` (default off), `pollIntervalSeconds` (default 120),
 `answerTimeoutSeconds` (default 300) and `retryLadderSeconds` (default

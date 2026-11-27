@@ -103,6 +103,10 @@ export type AssignmentMode =
 export type AgentDispatcherOptions = {
   settings: DispatchSettings;
   api: DispatchApi;
+  decisionApi?: Pick<
+    DispatchApi,
+    "me" | "decisionOutcomes" | "acknowledgeDecisionOutcome"
+  >;
   messenger: DispatchMessenger;
   ledger: DispatchLedger;
   assignmentMode: AssignmentMode;
@@ -372,7 +376,8 @@ export class DispatchPolling {
   }
 
   private async pollDecisionOutcomes(fleetId: string, signal: AbortSignal) {
-    const { api, ledger, messenger } = this.options;
+    const { decisionApi, ledger, messenger } = this.options;
+    const api = decisionApi ?? this.options.api;
 
     if (
       !api.decisionOutcomes ||
@@ -381,6 +386,8 @@ export class DispatchPolling {
     ) {
       throw new Error("Decision outcome delivery is not available");
     }
+
+    await this.checkDecisionRelay(fleetId, signal);
 
     const page = await api.decisionOutcomes(
       fleetId,
@@ -410,6 +417,7 @@ export class DispatchPolling {
           return;
         }
 
+        await this.checkDecisionRelay(fleetId, signal);
         await api.acknowledgeDecisionOutcome(fleetId, outcome.id, signal);
         ledger.clearDecisionOutcomeSent(outcome.id);
       } catch (error) {
@@ -428,6 +436,27 @@ export class DispatchPolling {
     }
 
     this.decisionOutcomeCursor = page.next;
+  }
+
+  private async checkDecisionRelay(fleetId: string, signal: AbortSignal) {
+    const { decisionApi } = this.options;
+
+    if (!decisionApi) {
+      return;
+    }
+
+    const identity = await decisionApi.me(signal);
+
+    if (
+      identity.kind !== "agent" ||
+      identity.agentRank !== "rearAdmiral" ||
+      identity.fleetId !== fleetId ||
+      identity.userId !== this.verifiedUser
+    ) {
+      throw new Error(
+        "Decision relay identity does not match the confirmed rear admiral",
+      );
+    }
   }
 
   /** Captains are the roster's agents of rank captain, with their chat accounts. */

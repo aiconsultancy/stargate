@@ -15,8 +15,7 @@ private network. Existing HTTPS and loopback origins remain supported.
 
 - `agentDispatch.decisionOutcomeDms` enables decision-outcome DMs to recording
   captains when Subspace serves the outcome feed. The default is off. A
-  decision-only deployment can use a separate Unix relay with an explicit
-  socket owner UID.
+  deployment can opt in to a separate Unix relay for decision outcomes.
 
 - New off-by-default Teams options: `attachmentFileHosts` enables document
   receipt from exact tenant SharePoint hosts in personal chats.

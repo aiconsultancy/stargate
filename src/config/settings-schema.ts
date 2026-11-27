@@ -328,16 +328,9 @@ export const reservedAuthenticatedRequestHeaders = new Set([
   "transfer-encoding",
 ]);
 
-/** Legacy bearer, an enrolled signing proxy, or a decision-only relay. */
+/** Direct bearer or the enrolled rear admiral's local signing proxy. */
 export const agentDispatchApiSchema = Schema.Union([
-  settingsStruct({
-    socketPath: absolutePath,
-    relayOwnerUid: Schema.optional(
-      Schema.Int.check(
-        Schema.isBetween({ minimum: 0, maximum: 4_294_967_294 }),
-      ),
-    ),
-  }),
+  settingsStruct({ socketPath: absolutePath }),
   settingsStruct({
     /** API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback. */
     baseUrl: secureLocalOrHttpsURL,
@@ -362,13 +355,10 @@ export const agentDispatchApiSchema = Schema.Union([
   }),
 ]);
 
-/** Issue dispatch uses the enrolled rear admiral's signing socket. */
+/** An ordinary local signing socket must belong to the dispatching rear admiral. */
 export function dispatchTargetIssue(
   target: string | { registration: { id: string; account: string } },
-  dispatch: {
-    enabled: boolean;
-    api: typeof agentDispatchApiSchema.Type;
-  },
+  api: typeof agentDispatchApiSchema.Type | undefined,
   officers: readonly {
     rank: string;
     socketPath?: string | undefined;
@@ -376,8 +366,6 @@ export function dispatchTargetIssue(
     ircNick?: string | undefined;
   }[],
 ): { code: "custom"; path: string[]; message: string } | undefined {
-  const { api } = dispatch;
-
   if (typeof target === "string") {
     return {
       code: "custom",
@@ -386,18 +374,8 @@ export function dispatchTargetIssue(
     };
   }
 
-  if (!("socketPath" in api)) {
+  if (!api || !("socketPath" in api)) {
     return;
-  }
-
-  if (api.relayOwnerUid !== undefined) {
-    return dispatch.enabled
-      ? {
-          code: "custom",
-          path: ["agentDispatch", "api", "relayOwnerUid"],
-          message: "An external relay supports decision outcomes only",
-        }
-      : undefined;
   }
 
   const rear = target.registration;

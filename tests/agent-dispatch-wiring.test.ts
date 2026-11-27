@@ -178,24 +178,20 @@ test("configuration: signed dispatch requires this gateway's enrolled rear admir
   expect(refusal({ irc, agentDispatch, subspaceAgents })).toBe("accepted");
 });
 
-test("configuration: a trusted external socket is available only for decision outcomes", () => {
+test("configuration: decision delivery can share the issue connection or use a separate relay", () => {
   const irc = [admiralIrc()];
+  const decisionRelay = { socketPath: "/run/example/decision-relay/api.sock" };
 
-  const agentDispatch = {
-    ...dispatchRaw,
-    enabled: false,
-    decisionOutcomeDms: true,
-    api: {
-      socketPath: "/run/example/decision-relay/api.sock",
-      relayOwnerUid: 1500,
-    },
-  };
-
-  expect(refusal({ irc, agentDispatch })).toBe("accepted");
+  const both = { ...dispatchRaw, decisionOutcomeDms: true, decisionRelay };
+  expect(refusal({ irc, agentDispatch: both })).toBe("accepted");
   expect(
-    refusal({ irc, agentDispatch: { ...agentDispatch, enabled: true } }),
-  ).toContain("An external relay supports decision outcomes only");
-  expect(refusal({ agentDispatch })).toContain("must name an IRC registration");
+    refusal({ irc, agentDispatch: { ...both, api: undefined } }),
+  ).toContain("require an API connection");
+  const decisions = { ...both, enabled: false, api: undefined };
+  expect(refusal({ irc, agentDispatch: decisions })).toBe("accepted");
+  expect(refusal({ agentDispatch: decisions })).toContain(
+    "must name an IRC registration",
+  );
 });
 
 test("configuration: enabled dispatch needs the rear admiral's own IRC registration and channel", () => {
@@ -340,18 +336,20 @@ test("startAgentDispatch: absent or disabled opens, listens to and contacts noth
   expect(existsSync(join(directory, "agent-dispatch.sqlite"))).toBe(false);
 });
 
-test("startAgentDispatch: a decision relay cannot start issue dispatch", async () => {
+test("startAgentDispatch: issue dispatch needs its own connection when there is a decision relay", async () => {
   const dataDirectory = await tempDirectory();
 
   const config = Schema.decodeUnknownSync(agentDispatchSchema)({
     ...dispatchRaw,
+    enabled: false,
     decisionOutcomeDms: true,
-    api: { socketPath: "/run/example/decisions/api.sock", relayOwnerUid: 1500 },
+    api: undefined,
+    decisionRelay: { socketPath: "/run/example/decisions/api.sock" },
   });
 
   expect(() =>
     startAgentDispatch({
-      config,
+      config: { ...config, enabled: true },
       irc: [],
       ship: () => {
         throw new Error("Unexpected ship lookup");
@@ -360,7 +358,7 @@ test("startAgentDispatch: a decision relay cannot start issue dispatch", async (
       allowed: () => true,
       log: silent,
     }),
-  ).toThrow("An external relay supports decision outcomes only");
+  ).toThrow("Agent dispatch requires an API connection");
   expect(existsSync(join(dataDirectory, "agent-dispatch.sqlite"))).toBe(false);
 });
 

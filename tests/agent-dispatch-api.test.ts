@@ -75,12 +75,6 @@ test("the dispatch client uses the enrolled officer's Unix proxy without a beare
 });
 
 test("the decision relay is checked again before every request", async () => {
-  const uid = process.getuid?.();
-
-  if (uid === undefined) {
-    throw new Error("This test requires POSIX Unix sockets");
-  }
-
   const directory = await mkdtemp(
     join(await realpath(tmpdir()), "dispatch-relay-"),
   );
@@ -107,11 +101,8 @@ test("the decision relay is checked again before every request", async () => {
 
   try {
     await chmod(socketPath, 0o660);
-    const api = new SubspaceApi({ socketPath, relayOwnerUid: uid });
+    const api = new SubspaceApi({ socketPath, decisionRelay: true });
     expect((await api.me(signal)).userId).toBe(REAR_ADMIRAL);
-    await expect(
-      new SubspaceApi({ socketPath, relayOwnerUid: uid + 1 }).me(signal),
-    ).rejects.toThrow("decision relay socket is missing or unsafe");
     await chmod(socketPath, 0o666);
     await expect(api.me(signal)).rejects.toThrow(
       "decision relay socket is missing or unsafe",
@@ -120,20 +111,20 @@ test("the decision relay is checked again before every request", async () => {
     const alias = join(socketDirectory, "alias.sock");
     await symlink(socketPath, alias);
     await expect(
-      new SubspaceApi({ socketPath: alias, relayOwnerUid: uid }).me(signal),
+      new SubspaceApi({ socketPath: alias, decisionRelay: true }).me(signal),
     ).rejects.toThrow("decision relay socket is missing or unsafe");
     const aliasDirectory = join(directory, "alias-directory");
     await symlink(socketDirectory, aliasDirectory);
     await expect(
       new SubspaceApi({
         socketPath: join(aliasDirectory, "relay.sock"),
-        relayOwnerUid: uid,
+        decisionRelay: true,
       }).me(signal),
     ).rejects.toThrow("decision relay socket is missing or unsafe");
     await expect(
       new SubspaceApi({
         socketPath: `${socketDirectory}/./relay.sock`,
-        relayOwnerUid: uid,
+        decisionRelay: true,
       }).me(signal),
     ).rejects.toThrow("decision relay socket is missing or unsafe");
     await chmod(socketDirectory, 0o770);

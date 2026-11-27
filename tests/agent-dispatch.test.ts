@@ -9,6 +9,8 @@ import {
   CAPTAIN_C,
   CREW_A,
   capturedLog,
+  Clock,
+  FakeApi,
   type Fixture,
   FLEET,
   fixture,
@@ -23,6 +25,40 @@ import {
 } from "./agent-dispatch-fixture";
 
 afterEach(removeDirectories);
+
+test("issue dispatch and decision outcomes use separate connections and the same admiral identity", async () => {
+  const relay = new FakeApi(new Clock());
+
+  const f = await fixture({ decisionOutcomeDms: true, decisionApi: relay });
+  const id = "00000000-0000-4000-8000-000000000018";
+  relay.pendingOutcomes.set(id, {
+    id,
+    recordedByUserId: CAPTAIN_A,
+    identifier: "D-00042-NAV",
+    status: "accepted",
+  });
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  const identity = relay.identity;
+  relay.identity = { ...identity, userId: CAPTAIN_B };
+
+  await f.dispatcher.step(signal);
+  expect(f.ledger.tracked("i1")?.offer).toBeDefined();
+  expect(relay.calls).not.toContain(`decision outcomes ${FLEET}`);
+  expect(f.chat.decisionDms).toEqual([]);
+
+  relay.identity = identity;
+  await f.dispatcher.step(signal);
+  expect(f.chat.decisionDms).toEqual([
+    {
+      account: "example-captain-a",
+      identifier: "D-00042-NAV",
+      status: "accepted",
+    },
+  ]);
+  expect(f.api.calls).not.toContain(`decision outcomes ${FLEET}`);
+  expect(f.api.acknowledgedOutcomes).toEqual([]);
+  expect(relay.acknowledgedOutcomes).toEqual([id]);
+});
 
 test("decision outcomes wait for the recording captain and retry a receipt after restart", async () => {
   const f = await fixture({ decisionOutcomeDms: true });
