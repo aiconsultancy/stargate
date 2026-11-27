@@ -133,7 +133,7 @@ const normalisePeerInput = Schema.decodeUnknownSync(peerMessageInputSchema, {
 
 /** Shown to the caller: names the cause and a workaround, never internals. */
 export const fleetChatTurnRequired =
-  "Fleet tools, including stargate_dm with via, work only in a turn started by a chat message (IRC, Slack or Teams). A turn woken by a crew DM or notice has none. Ask in your ship channel or tag the other captain on IRC instead.";
+  "Fleet tools, including stargate_dm with via, work only in a turn that answers a chat request to this captain on IRC or in a linked Teams conversation. This turn does not, for example because a crew DM or notice woke it. Ask in your ship channel or tag the other captain on IRC instead.";
 
 /** Bind fleet calls to an executing native input and matching tool payload. */
 export function fleetAuthorizer(

@@ -250,7 +250,7 @@ test("the fleet authoriser binds a peer DM to a running chat job's native input"
       },
     },
     "ses_owner",
-    ["slack-key", "irc-key"],
+    ["teams-key", "irc-key"],
   );
 
   await expect(
@@ -304,6 +304,9 @@ test("the fleet authoriser refuses a turn without a running chat job with an act
   }
 
   expect(fleetChatTurnRequired).not.toMatch(/ses_|msg_|job|raw details/i);
+  // Only IRC and linked Teams jobs are bound: never name Slack as eligible.
+  expect(fleetChatTurnRequired).not.toMatch(/slack/i);
+  expect(fleetChatTurnRequired).toContain("IRC or in a linked Teams");
 });
 
 test("a peer DM from a turn woken without a chat message returns the reason through fleet control", async () => {

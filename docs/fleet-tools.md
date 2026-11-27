@@ -31,13 +31,16 @@ permission proof. During an active turn, that engine can invoke operations the
 gateway policy explicitly permits. Keep this policy, gateway credentials and
 the evidence database outside engine write access.
 
-Fleet tools, including `stargate_dm` with `via`, work only in a turn started by
-a chat message: an IRC, Slack or Teams request that the gateway is still
-running. A turn woken by a crew DM, crew hand-back or other notice has no such
-request, so every fleet operation refuses with a message saying so. The
-refusal is not an outage, and retrying in the same turn cannot succeed. Ask in
-the ship channel or tag the other captain on IRC instead, or make the call
-from the next turn a chat message starts.
+Fleet tools, including `stargate_dm` with `via`, work only in a turn that
+answers a chat request the gateway is still running: an IRC request to this
+captain, or a request in a related Teams conversation that shares the IRC
+gateway's pinned backend (see `results` below). Slack-started turns do not
+qualify. Any other turn is refused with a message saying so, for example a
+turn woken by a crew DM, crew hand-back or other notice, including one queued
+behind a running chat request. The refusal is not an outage, and retrying in
+the same turn cannot succeed. Ask in the ship channel or tag the other captain
+on IRC instead, or make the call from the next turn that answers such a
+request.
 
 ## Configure the gateway and plugin
 
