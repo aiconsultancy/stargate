@@ -203,14 +203,16 @@ test.each([
   },
 );
 
-test.each([
-  { limit: 1, foreignCount: 0, evict: true },
-  { limit: 1, foreignCount: 1, evict: true },
-  { limit: undefined, foreignCount: 127, evict: true },
-  { limit: undefined, foreignCount: 128, evict: true },
-  { limit: undefined, foreignCount: 128, evict: false },
-])(
-  "an evicted matching writer can still publish detached output (pending $limit, foreign $foreignCount, evict $evict)",
+test.each(
+  [
+    { limit: 1, foreignCount: 0, evict: true },
+    { limit: 1, foreignCount: 1, evict: true },
+    { limit: undefined, foreignCount: 127, evict: true },
+    { limit: undefined, foreignCount: 128, evict: true },
+    { limit: undefined, foreignCount: 128, evict: false },
+  ].map((row) => ({ ...row, budget: row.limit ?? "default" })),
+)(
+  "an evicted matching writer can still publish detached output (budget $budget, foreign $foreignCount, evict $evict)",
   async ({ limit, foreignCount, evict }) => {
     const parent = Promise.withResolvers<string>();
     const f = fixture(parent.promise, limit);
@@ -269,19 +271,28 @@ test.each([
   },
 );
 
-test.each([
-  { limit: undefined, count: 127, foreignFirst: false },
-  { limit: undefined, count: 128, foreignFirst: false },
-  { limit: 1, count: 1, foreignFirst: false },
-  { limit: 1, count: 1, foreignFirst: true },
-  { limit: 2, count: 1, foreignFirst: false },
-  { limit: 2, count: 1, foreignFirst: true },
-  { limit: 1, count: 1, foreignFirst: false, fence: true },
-  { limit: 1, count: 1, foreignFirst: false, fenceReal: true },
-  { limit: 1, count: 1, foreignFirst: false, settleReal: true },
-  { limit: 1, count: 1, foreignFirst: false, resolveForeign: true },
-])(
-  "witness capacity ($limit, foreign $count, foreign first $foreignFirst, fence $fence, fence real $fenceReal, settle real $settleReal, unrelated parent $resolveForeign)",
+test.each(
+  [
+    { limit: undefined, count: 127, foreignFirst: false },
+    { limit: undefined, count: 128, foreignFirst: false },
+    { limit: 1, count: 1, foreignFirst: false },
+    { limit: 1, count: 1, foreignFirst: true },
+    { limit: 2, count: 1, foreignFirst: false },
+    { limit: 2, count: 1, foreignFirst: true },
+    { limit: 1, count: 1, foreignFirst: false, fence: true },
+    { limit: 1, count: 1, foreignFirst: false, fenceReal: true },
+    { limit: 1, count: 1, foreignFirst: false, settleReal: true },
+    { limit: 1, count: 1, foreignFirst: false, resolveForeign: true },
+  ].map((row) => ({
+    fence: false,
+    fenceReal: false,
+    settleReal: false,
+    resolveForeign: false,
+    ...row,
+    budget: row.limit ?? "default",
+  })),
+)(
+  "witness capacity (budget $budget, foreign $count, foreign first $foreignFirst, fence $fence, fence real $fenceReal, settle real $settleReal, unrelated parent $resolveForeign)",
   async (row) => {
     const parent = Promise.withResolvers<string>();
     const f = fixture(parent.promise, row.limit);
