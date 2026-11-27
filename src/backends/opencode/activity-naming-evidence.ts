@@ -28,6 +28,7 @@ export type NamingSegment = {
   proofs: TimedProof[];
   // A witness never proves a link; it may only choose the detached owner.
   witnesses?: TimedProof[];
+  witnessOverflow?: true;
   proofOverflow?: true;
   droppedProofScopes?: Set<ProofScope>;
 };
@@ -99,11 +100,12 @@ export class ActivityNamingEvidence {
       return;
     }
 
-    if (witnesses.length >= this.limit) {
-      witnesses.shift();
-    }
+    const evicted =
+      witnesses.length >= this.limit ? witnesses.shift() : undefined;
 
     witnesses.push(proof);
+
+    return evicted;
   }
 
   public discard(id: string, held: HeldNames) {
@@ -185,6 +187,8 @@ export class ActivityNamingEvidence {
 
     for (const segment of segments) {
       segment.droppedProofScopes?.delete(scope);
+      // An exact spill may belong to another writer. Wait for native ancestry.
+      live ||= segment.witnessOverflow === true;
       segment.proofs = segment.proofs.filter(keep);
 
       if (segment.witnesses) {

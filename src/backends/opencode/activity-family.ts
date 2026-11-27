@@ -165,6 +165,9 @@ export class OpenCodeActivityFamilies {
             this.finish(id, child, "cancelled", true);
           }
         },
+        witness: (id, { session, scope, order, log }, start) => {
+          this.calls.spillWitness(session, scope, id, order, start, log);
+        },
       },
     );
     source.signal.addEventListener(
@@ -459,7 +462,7 @@ export class OpenCodeActivityFamilies {
 
     return resolveAttribution(
       this.calls,
-      { id, parent },
+      { id, parent, ...(segment.witnessOverflow && { spill: first }) },
       inferred,
       naming,
       this.queue.window(segment),

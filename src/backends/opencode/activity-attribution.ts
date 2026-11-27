@@ -4,6 +4,7 @@ import {
   type ActivityIncarnation,
   type CallTiming,
   type CallWindow,
+  type WitnessStart,
   callPrecedesStart,
   openedInWindow,
 } from "./activity-call-evidence";
@@ -38,26 +39,42 @@ type Attribution = {
   callId: string | null;
 };
 
-export function detachedAttribution(owner: TurnActivityLog) {
+export function detachedAttribution(
+  owner: TurnActivityLog,
+  witnessOnly = false,
+) {
   return {
     owner,
     detached: true,
     callId: null,
     ambiguous: false,
-    witnessOnly: false,
+    witnessOnly,
     proof: undefined,
   };
 }
 
 export function resolveAttribution(
   calls: ActivityCallEvidence,
-  { id, parent }: { id: string; parent: string },
+  { id, parent, spill }: { id: string; parent: string; spill?: WitnessStart },
   inferred: TurnActivityLog | undefined,
   naming: ReturnType<ActivityRecoveryQueues<never>["naming"]>,
   window: CallWindow,
   lineage: WeakMap<TurnActivityLog, ActivityIncarnation>,
 ) {
   const proof = naming.first ?? naming.witness;
+
+  if (!proof && spill) {
+    const owner = calls.spilledWitness(
+      parent,
+      id,
+      spill,
+      (log) => lineage.get(log)?.active !== false && log.retained?.() !== false,
+    );
+
+    if (owner) {
+      return detachedAttribution(owner, true);
+    }
+  }
 
   const competing =
     proof !== undefined &&

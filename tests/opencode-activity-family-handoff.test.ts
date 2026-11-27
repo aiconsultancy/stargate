@@ -12,7 +12,10 @@ const main = "ses_root";
 const child = "ses_child";
 const other = "ses_other_root";
 
-function fixture(parent: Promise<string> = Promise.resolve(main)) {
+function fixture(
+  parent: Promise<string> = Promise.resolve(main),
+  pending?: number,
+) {
   const stop = new AbortController();
   const hub = createActivityHub();
   const reads: string[] = [];
@@ -32,7 +35,7 @@ function fixture(parent: Promise<string> = Promise.resolve(main)) {
       },
       async *log() {},
     },
-    {},
+    pending === undefined ? {} : { pending },
     () => now,
   );
 
@@ -116,6 +119,103 @@ function fixture(parent: Promise<string> = Promise.resolve(main)) {
       hub.turns("officer")?.turns.filter((turn) => turn.session?.id === child),
   };
 }
+
+test.each([
+  { limit: undefined, count: 127, foreignFirst: false },
+  { limit: undefined, count: 128, foreignFirst: false },
+  { limit: 1, count: 1, foreignFirst: false },
+  { limit: 1, count: 1, foreignFirst: true },
+  { limit: 2, count: 1, foreignFirst: false },
+  { limit: 2, count: 1, foreignFirst: true },
+  { limit: 1, count: 1, foreignFirst: false, fence: true },
+  { limit: 1, count: 1, foreignFirst: false, fenceReal: true },
+  { limit: 1, count: 1, foreignFirst: false, settleReal: true },
+  { limit: 1, count: 1, foreignFirst: false, resolveForeign: true },
+])(
+  "witness capacity ($limit, foreign $count, foreign first $foreignFirst, fence $fence, fence real $fenceReal, settle real $settleReal, unrelated parent $resolveForeign)",
+  async (row) => {
+    const parent = Promise.withResolvers<string>();
+    const f = fixture(parent.promise, row.limit);
+
+    try {
+      const realScope = { active: true };
+
+      const root = f.root(
+        main,
+        row.fenceReal || row.settleReal ? realScope : undefined,
+      );
+
+      const foreign = Array.from({ length: row.count }, (_, index) => {
+        const id = `ses_other_${index}`;
+        const scope = { active: true };
+
+        return { id, scope, log: f.root(id, row.fence ? scope : undefined) };
+      });
+
+      f.call(root, main, "real", 50);
+
+      for (const { id, log } of foreign) {
+        f.call(log, id, "foreign", 51);
+      }
+
+      f.start(40, "Observed child text");
+      f.advance(300);
+
+      if (!row.foreignFirst) {
+        f.name(root, main, "real");
+      }
+
+      for (const { id, log } of foreign) {
+        f.name(log, id, "foreign");
+      }
+
+      if (row.foreignFirst) {
+        f.name(root, main, "real");
+      }
+
+      f.end();
+      expect(f.reads).toEqual([child]);
+
+      if (row.fence) {
+        for (const { id, scope } of foreign) {
+          f.families.fence(id, scope);
+        }
+      }
+
+      if (row.fenceReal) {
+        f.families.fence(main, realScope);
+      }
+
+      if (row.settleReal) {
+        f.families.settled(main, root);
+        root.end("completed");
+      }
+
+      parent.resolve(row.resolveForeign ? "ses_unrelated" : main);
+      await setImmediate();
+
+      const expected =
+        row.fenceReal || row.resolveForeign
+          ? []
+          : [
+              {
+                session: { parent: null },
+                requests: [],
+                status: "cancelled",
+                lost: true,
+                items: [{ text: "Observed child text" }],
+              },
+            ];
+
+      expect(f.childTurns()).toMatchObject(expected);
+      f.advance(1701);
+      expect(f.childTurns()).toMatchObject(expected);
+    } finally {
+      parent.resolve(main);
+      f.stop.abort();
+    }
+  },
+);
 
 test.each([
   {

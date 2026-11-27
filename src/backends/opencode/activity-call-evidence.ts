@@ -28,7 +28,14 @@ const resumes = (value: unknown) =>
 
 type Range = { first: number; last: number };
 
-type NamedCalls = { orders: Map<number, number | undefined>; dropped?: Range };
+export type WitnessStart = { readonly order: number };
+
+type NamedCalls = {
+  orders: Map<number, number | undefined>;
+  // Do not keep the candidate (or its writer) alive after the segment leaves.
+  witnesses?: Map<number, WeakMap<WitnessStart, TurnActivityLog>>;
+  dropped?: Range;
+};
 
 type NamedCapacity = { count: number; saturated?: Range };
 
@@ -257,6 +264,7 @@ class ScopeEvidence {
       if (oldest !== undefined) {
         calls.dropped = extend(calls.dropped, { first: oldest, last: oldest });
         calls.orders.delete(oldest);
+        calls.witnesses?.delete(oldest);
       }
     }
 
@@ -268,6 +276,38 @@ class ScopeEvidence {
       parents.set(session, calls);
       this.named.set(child, parents);
     }
+  }
+
+  public spillWitness(
+    session: string,
+    child: string,
+    order: number,
+    start: WitnessStart,
+    writer: TurnActivityLog,
+  ) {
+    const calls = this.named.get(child)?.get(session);
+
+    if (calls?.orders.has(order)) {
+      calls.witnesses ??= new Map();
+      const spilled = calls.witnesses;
+      const owners = spilled.get(order) ?? new WeakMap();
+      owners.set(start, writer);
+      spilled.set(order, owners);
+    }
+  }
+
+  public spilledWitness(
+    session: string,
+    child: string,
+    start: WitnessStart,
+    accepts: (writer: TurnActivityLog) => boolean,
+  ) {
+    return this.named
+      .get(child)
+      ?.get(session)
+      ?.witnesses?.values()
+      .map((owners) => owners.get(start))
+      .find((writer) => writer !== undefined && accepts(writer));
   }
 
   public retire(
@@ -306,6 +346,7 @@ class ScopeEvidence {
     for (const [order, created] of calls.orders) {
       if (order <= through && callPrecedesStart(created, nativeStart)) {
         calls.orders.delete(order);
+        calls.witnesses?.delete(order);
       }
     }
 
@@ -552,6 +593,43 @@ export class ActivityCallEvidence {
     const call = owned?.calls.get(key) ?? owned?.launches.get(key);
 
     return call?.timing;
+  }
+
+  /** Spill within the existing exact-name bound; never into hashed evidence. */
+  public spillWitness(
+    session: string,
+    scope: ActivityIncarnation | undefined,
+    child: string,
+    order: number,
+    start: WitnessStart,
+    writer: TurnActivityLog,
+  ) {
+    this.scope(scope)?.spillWitness(session, child, order, start, writer);
+  }
+
+  public spilledWitness(
+    session: string,
+    child: string,
+    start: WitnessStart,
+    accepts: (writer: TurnActivityLog) => boolean,
+  ) {
+    const unscoped = this.unscoped.spilledWitness(
+      session,
+      child,
+      start,
+      accepts,
+    );
+
+    return (
+      unscoped ??
+      this.incarnations
+        .entries()
+        .filter(([scope]) => scope.active)
+        .map(([, index]) =>
+          index.spilledWitness(session, child, start, accepts),
+        )
+        .find((writer) => writer !== undefined)
+    );
   }
 
   public competing(

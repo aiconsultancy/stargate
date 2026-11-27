@@ -2,6 +2,7 @@ import type { SessionLogItem } from "@opencode/client";
 import {
   type ActivityIncarnation,
   type EarlierCallRange,
+  type WitnessStart,
   callPrecedesStart,
   openedInWindow,
 } from "./activity-call-evidence";
@@ -59,6 +60,7 @@ type Segment<E extends Event> = NamingSegment & {
 };
 
 export type PendingActivity<E extends Event> = HeldNames & {
+  id: string;
   segments: Segment<E>[];
   lifecycle: ActivityLifecycleBuffer;
   lifecycleSeq?: number;
@@ -97,6 +99,7 @@ export const activityQueueDefaults = {
 type Removal<E extends Event> = {
   start(id: string, order: number, nativeStart?: number): void;
   candidate(id: string, pending: PendingActivity<E>, headOnly?: true): void;
+  witness?(id: string, proof: TimedProof, start: WitnessStart): void;
 };
 
 export class ActivityRecoveryQueues<E extends Event> {
@@ -158,6 +161,7 @@ export class ActivityRecoveryQueues<E extends Event> {
       }
 
       pending = {
+        id,
         segments: [],
         lifecycle: new ActivityLifecycleBuffer(),
         floor,
@@ -201,7 +205,7 @@ export class ActivityRecoveryQueues<E extends Event> {
         // A successor may be eligible even if a queued predecessor rejects it.
         this.evidence.hold(pending, proof);
       } else {
-        this.offerSegment(segment, proof);
+        this.offerSegment(pending.id, segment, proof);
       }
     } else if (
       proof.order >
@@ -222,7 +226,7 @@ export class ActivityRecoveryQueues<E extends Event> {
     return { after: floor, through: first.order, ...(earlier && { earlier }) };
   }
 
-  private offerSegment(segment: Segment<E>, proof: TimedProof) {
+  private offerSegment(id: string, segment: Segment<E>, proof: TimedProof) {
     if (proof.seenAt >= segment.expires || proof.scope?.active === false) {
       return;
     }
@@ -231,7 +235,12 @@ export class ActivityRecoveryQueues<E extends Event> {
       bindName(segment, proof);
     } else {
       // An in-time name can expose detached output without ever proving a link.
-      this.evidence.witness(segment, proof);
+      const evicted = this.evidence.witness(segment, proof);
+
+      if (evicted && this.removed?.witness) {
+        segment.witnessOverflow = true;
+        this.removed.witness(id, evicted, segment.first);
+      }
     }
   }
 
@@ -331,7 +340,10 @@ export class ActivityRecoveryQueues<E extends Event> {
     // Publish known names and post-loss output before releasing an expired head.
     if (
       head &&
-      (pending.postLoss || head.proofs.length > 0 || head.witnesses?.length)
+      (pending.postLoss ||
+        head.proofs.length > 0 ||
+        head.witnesses?.length ||
+        head.witnessOverflow)
     ) {
       this.admit(id);
 
@@ -526,7 +538,7 @@ export class ActivityRecoveryQueues<E extends Event> {
               this.window(opened),
             )
           ) {
-            this.offerSegment(opened, proof);
+            this.offerSegment(id, opened, proof);
           }
 
           return false;
