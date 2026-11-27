@@ -828,6 +828,7 @@ export async function runAcpTurn(spec: AcpRunSpec): Promise<AcpRunOutcome> {
     : undefined;
 
   const connectionOptions: AcpStdioConnectionOptions = {
+    isCancelled: () => spec.signal.aborted,
     onNotification: (method, params) => {
       collector.handleNotification(method, params);
     },

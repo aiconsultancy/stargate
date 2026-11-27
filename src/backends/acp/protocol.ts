@@ -191,6 +191,7 @@ export type AcpStdioConnectionOptions = {
   onRequest: AcpRequestHandler;
   interceptStdoutLine?: AcpLineInterceptor;
   onStderrLine?: (line: string) => void;
+  isCancelled?: () => boolean;
 };
 
 /**
@@ -430,7 +431,13 @@ export class AcpStdioConnection {
       const result = await this.options.onRequest(method, params);
 
       if (!this.closed) {
-        this.writeMessage({ jsonrpc: "2.0", id, result });
+        const reply =
+          method === "session/request_permission" &&
+          this.options.isCancelled?.()
+            ? { outcome: { outcome: "cancelled" } }
+            : result;
+
+        this.writeMessage({ jsonrpc: "2.0", id, result: reply });
       }
     } catch {
       if (!this.closed) {
