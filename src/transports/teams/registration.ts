@@ -60,9 +60,40 @@ function activityTenantMatches(activity: TeamsActivity, expected: string) {
   );
 }
 
+function conversationAccess(
+  config: TeamsConfig,
+  scope: string,
+  personal: boolean,
+) {
+  const { access } = config;
+
+  if (access.deniedChannels.includes(scope)) {
+    return;
+  }
+
+  if (personal) {
+    return "personal";
+  }
+
+  if (access.channels.includes(scope)) {
+    return "listed";
+  }
+
+  return config.fleetPolicy?.role === "rear_admiral" &&
+    access.allowInstalledConversations === true
+    ? "installed"
+    : undefined;
+}
+
 export function allowedActivity(config: TeamsConfig, activity: TeamsActivity) {
   const user = activity.from.aadObjectId?.toLowerCase();
   const channel = activity.channelData?.channel?.id ?? activity.conversation.id;
+
+  const conversation = conversationAccess(
+    config,
+    channel,
+    activity.conversation.conversationType === "personal",
+  );
 
   return Boolean(
     user &&
@@ -75,12 +106,12 @@ export function allowedActivity(config: TeamsConfig, activity: TeamsActivity) {
     activity.from.role !== "bot" &&
     config.access.users.some((id) => id.toLowerCase() === user) &&
     !config.access.deniedUsers.some((id) => id.toLowerCase() === user) &&
-    !config.access.deniedChannels.includes(channel) &&
-    (activity.conversation.conversationType === "personal" ||
-      (config.access.channels.includes(channel) &&
-        (hasBotMention(activity) ||
-          (config.access.allowUnmentionedConversations === true &&
-            !mentionsAnyBot(activity))))),
+    conversation &&
+    (conversation === "personal" ||
+      hasBotMention(activity) ||
+      (conversation === "listed" &&
+        config.access.allowUnmentionedConversations === true &&
+        !mentionsAnyBot(activity))),
   );
 }
 
@@ -372,15 +403,17 @@ export class TeamsRegistration {
 
     return Boolean(
       reference &&
-      (reference.personal ||
-        this.config.access.channels.includes(reference.scope)) &&
+      conversationAccess(
+        this.config,
+        reference.scope,
+        reference.personal !== 0,
+      ) &&
       this.config.access.users.some(
         (id) => id.toLowerCase() === user.toLowerCase(),
       ) &&
       !this.config.access.deniedUsers.some(
         (id) => id.toLowerCase() === user.toLowerCase(),
-      ) &&
-      !this.config.access.deniedChannels.includes(reference.scope),
+      ),
     );
   }
   private async send(conversation: string, text: string, replyToId?: string) {
