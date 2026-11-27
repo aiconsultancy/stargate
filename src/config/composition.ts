@@ -56,7 +56,12 @@ import {
 import { transcriptionSchema } from "../chat/transcription/config";
 import { waitingSchema } from "./waiting";
 
-import { type BackendConfig, backendSchema } from "../backends/config";
+import {
+  type BackendConfig,
+  acpBackendSchema,
+  antigravityBackendSchema,
+  backendSchema,
+} from "../backends/config";
 
 export { dispatchPrimaryApi } from "./settings-schema";
 
@@ -75,6 +80,8 @@ export { piCrewBackendSchema, piDurableBackendSchema };
 export { claudeBackendSchema, claudeToolNames };
 
 export { codexBackendSchema };
+
+export { acpBackendSchema, antigravityBackendSchema };
 
 // HTTP is permitted only for Tailscale names/addresses. Public routes need TLS.
 const pairingOrigin = settingsURL

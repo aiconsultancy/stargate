@@ -1783,7 +1783,13 @@
         "src/backends/claude/executable.ts",
         "src/backends/claude/turn.ts",
         "src/backends/codex/config.ts",
-        "src/backends/codex/preflight.ts"
+        "src/backends/codex/preflight.ts",
+        "src/backends/acp.ts",
+        "src/backends/acp/policy.ts",
+        "src/backends/acp/protocol.ts",
+        "src/backends/acp/runtime.ts",
+        "src/backends/antigravity.ts",
+        "src/backends/antigravity/support.ts"
       ],
       "public": [
         "src/backend.ts",
