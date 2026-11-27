@@ -17,7 +17,7 @@ import {
   ircDispatchAnswer,
 } from "./irc";
 import { DispatchLedger } from "./ledger";
-import type { AssignedWorkPoller } from "./polling";
+import type { AssignmentMode } from "./polling";
 
 /** What the gateway runtime supplies to agent dispatch. */
 export type AgentDispatchHost = {
@@ -42,11 +42,6 @@ export type AgentDispatchRuntime = {
   log: Logger;
   run(signal: AbortSignal): Promise<void>;
   close(): void;
-};
-
-const disabledAssignedWork: AssignedWorkPoller = {
-  start() {},
-  drain() {},
 };
 
 /**
@@ -101,26 +96,31 @@ export function startAgentDispatch(
   );
 
   let assignmentRequests: IrcAssignmentRequests | undefined;
-  let assignedWork: AssignedWorkPoller | undefined;
+  let assignmentMode: AssignmentMode;
 
-  if (requestConfig === null) {
-    assignedWork = disabledAssignedWork;
-  } else if (dispatch.enabled && requestConfig) {
+  if (!dispatch.enabled || requestConfig === null) {
+    assignmentMode = { kind: "off" };
+  } else if (requestConfig === undefined) {
+    assignmentMode = { kind: "legacy" };
+  } else {
     assignmentRequests = new IrcAssignmentRequests(
       client,
       requestConfig.shipChannels,
       host.allowed,
       messenger,
     );
-    assignedWork = new AssignedWork({
-      api,
-      ledger,
-      requests: assignmentRequests,
-      log,
-      reminderMs: requestConfig.reminderSeconds * 1000,
-      captainIntervalMs: 5 * 60 * 1000,
-      offersEnabled,
-    });
+    assignmentMode = {
+      kind: "requests",
+      work: new AssignedWork({
+        api,
+        ledger,
+        requests: assignmentRequests,
+        log,
+        reminderMs: requestConfig.reminderSeconds * 1000,
+        captainIntervalMs: 5 * 60 * 1000,
+        offersEnabled,
+      }),
+    };
   }
 
   const dispatcher = new AgentDispatcher({
@@ -129,7 +129,6 @@ export function startAgentDispatch(
       pollIntervalMs: dispatch.pollIntervalSeconds * 1000,
       answerTimeoutMs: dispatch.answerTimeoutSeconds * 1000,
       decisionOutcomeDms: dispatch.decisionOutcomeDms ?? false,
-      issueDispatch: dispatch.enabled,
       offersEnabled,
       recheckIdentity: api.usesEnrolledIdentity,
       retryLadderMs: dispatch.retryLadderSeconds.map(
@@ -141,7 +140,7 @@ export function startAgentDispatch(
       sameAccount: (a, b) => client.fold(a) === client.fold(b),
     },
     api,
-    ...(assignedWork !== undefined && { assignedWork }),
+    assignmentMode,
     messenger,
     ledger,
     log,

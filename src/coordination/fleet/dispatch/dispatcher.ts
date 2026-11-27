@@ -185,7 +185,7 @@ export class AgentDispatcher {
     try {
       await this.dispatchLoop(signal);
     } finally {
-      await this.options.assignedWork?.drain();
+      await this.polling.drainAssignments();
     }
   }
 

@@ -21,6 +21,7 @@ import {
   UndeliverableIssue,
 } from "../src/coordination/fleet/dispatch/dispatcher";
 import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
+import type { AssignedWorkPoller } from "../src/coordination/fleet/dispatch/polling";
 import type { IssueLabel } from "../src/coordination/fleet/dispatch/protocol";
 
 export const FLEET = "00000000-0000-4000-8000-0000000000f1";
@@ -887,7 +888,7 @@ export async function fixture(options: FixtureOptions = {}) {
   const open = (
     ledger = new DispatchLedger(path),
     readyOffers = true,
-    assignedWork?: AgentDispatcherOptions["assignedWork"],
+    assignedWork?: AssignedWorkPoller,
   ) =>
     new AgentDispatcher({
       settings: {
@@ -895,7 +896,6 @@ export async function fixture(options: FixtureOptions = {}) {
         pollIntervalMs: 2 * MINUTE,
         answerTimeoutMs: 5 * MINUTE,
         decisionOutcomeDms: options.decisionOutcomeDms ?? false,
-        issueDispatch: true,
         offersEnabled: readyOffers,
         recheckIdentity: options.recheckIdentity ?? false,
         retryLadderMs: options.ladder ?? [HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR],
@@ -905,7 +905,9 @@ export async function fixture(options: FixtureOptions = {}) {
       api: client,
       messenger: chat,
       ledger,
-      ...(assignedWork && { assignedWork }),
+      assignmentMode: assignedWork
+        ? { kind: "requests", work: assignedWork }
+        : { kind: "legacy" },
       now: clock.now,
       log: options.log ?? silent,
       ...(options.wait ? { wait: options.wait } : {}),

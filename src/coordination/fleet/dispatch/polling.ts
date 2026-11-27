@@ -79,7 +79,6 @@ export type DispatchSettings = {
   pollIntervalMs: number;
   answerTimeoutMs: number;
   decisionOutcomeDms: boolean;
-  issueDispatch: boolean;
   offersEnabled: boolean;
   recheckIdentity: boolean;
   /** Waits between rounds; one more round than entries, then give up. */
@@ -96,13 +95,17 @@ export interface AssignedWorkPoller {
   drain(): Promise<void> | void;
 }
 
+export type AssignmentMode =
+  | { kind: "off" }
+  | { kind: "legacy" }
+  | { kind: "requests"; work: AssignedWorkPoller };
+
 export type AgentDispatcherOptions = {
   settings: DispatchSettings;
   api: DispatchApi;
   messenger: DispatchMessenger;
   ledger: DispatchLedger;
-  /** Omitted for the legacy assignment notices. */
-  assignedWork?: AssignedWorkPoller;
+  assignmentMode: AssignmentMode;
   /** Injectable clock (ms since the epoch). */
   now?: () => number;
   /**
@@ -188,15 +191,35 @@ export class DispatchPolling {
     this.now = now;
     this.finish = finish;
 
-    const work = options.assignedWork;
-    this.pollAssignmentMode = work
-      ? (signal) => {
-          work.start(
+    const mode = options.assignmentMode;
+
+    switch (mode.kind) {
+      case "off":
+        this.pollAssignmentMode = () => {};
+
+        break;
+      case "legacy":
+        this.pollAssignmentMode = this.pollAssigned.bind(this);
+
+        break;
+      case "requests":
+        this.pollAssignmentMode = (signal) => {
+          mode.work.start(
             this.eligibleCaptains(),
             AbortSignal.any([signal, this.assignmentIdentity.signal]),
           );
-        }
-      : this.pollAssigned.bind(this);
+        };
+
+        break;
+    }
+  }
+
+  public async drainAssignments() {
+    const mode = this.options.assignmentMode;
+
+    if (mode.kind === "requests") {
+      await mode.work.drain();
+    }
   }
 
   private get settings() {
@@ -285,19 +308,17 @@ export class DispatchPolling {
 
     this.roster = this.captainsOf(roster, readAt);
 
-    if (this.settings.issueDispatch) {
-      try {
-        await this.pollAssignmentMode(signal);
+    try {
+      await this.pollAssignmentMode(signal);
 
-        this.cleared("assigned");
-      } catch (error) {
-        signal.throwIfAborted();
-        this.apiFailed(
-          "assigned",
-          "Agent dispatch could not read assignments",
-          error,
-        );
-      }
+      this.cleared("assigned");
+    } catch (error) {
+      signal.throwIfAborted();
+      this.apiFailed(
+        "assigned",
+        "Agent dispatch could not read assignments",
+        error,
+      );
     }
 
     if (this.offersEnabled) {
