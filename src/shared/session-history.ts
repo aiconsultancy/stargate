@@ -64,7 +64,7 @@ export const piHistoryPrefix = "pi:";
 
 export const historySessionSchema = exactStruct({
   id,
-  harness: Schema.Literals(["opencode", "pi-durable"]),
+  harness: Schema.Literals(["opencode", "pi-durable", "claude"]),
   kind: Schema.Literals(["captain", "crew", "subagent", "conversation"]),
   /** Short Stargate member ID for captain and crew roots. */
   member: Schema.optional(codePoints(0, 64)),
@@ -203,14 +203,31 @@ export interface SessionHistory {
   ): Promise<HistoryEntryPage>;
 }
 
-/** Clip one part body; the flag tells the viewer that text was cut. */
+/** Clip one part body to HISTORY_TEXT code points and UTF-16 units; never split a surrogate pair. */
 export function clipHistory(text: string): {
   text: string;
   truncated?: true;
 } {
   const characters = Array.from(text);
 
-  return characters.length > HISTORY_TEXT
-    ? { text: characters.slice(0, HISTORY_TEXT).join(""), truncated: true }
-    : { text };
+  if (characters.length > HISTORY_TEXT) {
+    const sliced = characters.slice(0, HISTORY_TEXT).join("");
+
+    return {
+      text:
+        sliced.length > HISTORY_TEXT
+          ? sliced.slice(0, HISTORY_TEXT).replace(/[\uD800-\uDBFF]$/, "")
+          : sliced,
+      truncated: true,
+    };
+  }
+
+  if (text.length > HISTORY_TEXT) {
+    return {
+      text: text.slice(0, HISTORY_TEXT).replace(/[\uD800-\uDBFF]$/, ""),
+      truncated: true,
+    };
+  }
+
+  return { text };
 }

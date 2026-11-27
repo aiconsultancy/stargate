@@ -229,7 +229,7 @@ describe("history RPC output validation", () => {
     { sessions: [{ ...session, extra: true }] },
     { sessions: [{ ...session, member: emoji(65) }] },
     { sessions: [{ ...session, member: null }] },
-    { sessions: [{ ...session, harness: "claude" }] },
+    { sessions: [{ ...session, harness: "unknown-harness" }] },
     { sessions: [{ ...session, createdAt: -1 }] },
     { sessions: [{ ...session, createdAt: 1.5 }] },
     { sessions: [{ ...session, updatedAt: 2 ** 53 }] },

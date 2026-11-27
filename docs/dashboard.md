@@ -203,7 +203,7 @@ refused; access is never widened.
 | OpenCode               | Captain, crew, conversations | Child sessions     |
 | Pi Durable bot         | Conversations                | None               |
 | Pi Durable crew member | The member's conversation    | Recorded task runs |
-| Claude bot             | Not available                | Not available      |
+| Claude bot             | Conversations                | None               |
 | Codex bot              | Not available                | Not available      |
 | Module                 | Not available                | Not available      |
 

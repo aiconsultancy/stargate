@@ -20,6 +20,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import {
   type Options,
+  type Query,
   type SDKUserMessage,
   type SpawnOptions,
   type SpawnedProcess,
@@ -42,7 +43,9 @@ import {
 import { ClaudeActivity } from "./claude/activity";
 import type { claudeBackendSchema } from "./claude/config";
 import { claudeCLI, versionFailure } from "./claude/executable";
+import { createClaudeHistory } from "./claude/history";
 import { ClaudeTurn, claudeFailure } from "./claude/turn";
+import type { SessionHistory } from "../shared/session-history";
 import { secret } from "../lib/credentials";
 import {
   compareVersions,
@@ -298,15 +301,22 @@ class ClaudeProcess implements SpawnedProcess {
   }
 }
 
+/** Grace window for SDK `query.interrupt()` before escalating to `SIGTERM`. */
+const INTERRUPT_GRACE_MS = 150;
+
 type Run = {
   controller: AbortController;
   process?: ClaudeProcess;
+  query?: Query;
   done: Promise<void>;
   /** Value of the turn marker in every process this turn starts. */
   turn: string;
   /** Start time of the CLI; marked processes cannot be older. */
   since: number;
   record: string;
+  settled: boolean;
+  /** Request graceful SDK interrupt, escalating to SIGTERM after INTERRUPT_GRACE_MS. */
+  stop?: () => void;
 };
 
 /** A running CLI, kept on disk so a later process can stop what it left. */
@@ -332,6 +342,7 @@ export type ClaudeRuntime = {
 
 export class ClaudeBackend implements AgentBackend {
   public readonly supportsAttachments = true;
+  public readonly history: SessionHistory;
   private readonly runs = new Map<string, Run>();
   /** Titles for sessions whose first turn has not started in this process. */
   private readonly titles = new Map<string, string>();
@@ -345,7 +356,9 @@ export class ClaudeBackend implements AgentBackend {
     private readonly records: string,
     private readonly runtime: ClaudeRuntime,
     private readonly activity?: TurnActivityRecorder,
-  ) {}
+  ) {
+    this.history = createClaudeHistory(home, config.model);
+  }
 
   private get grace() {
     return this.runtime.graceMs ?? 5000;
@@ -466,6 +479,7 @@ export class ClaudeBackend implements AgentBackend {
       turn: crypto.randomUUID(),
       since: 0,
       record: join(this.records, `${id}.json`),
+      settled: false,
     };
 
     env[turnVariable] = run.turn;
@@ -473,11 +487,33 @@ export class ClaudeBackend implements AgentBackend {
     const finished = Promise.withResolvers<void>();
     run.done = finished.promise;
 
-    const stop = () => {
+    let hardStopTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const hardStop = () => {
+      clearTimeout(hardStopTimer);
       run.controller.abort();
       run.process?.kill("SIGTERM");
     };
 
+    const stop = () => {
+      if (run.query && !run.settled) {
+        void run.query.interrupt().catch(() => {});
+
+        if (hardStopTimer === undefined) {
+          hardStopTimer = setTimeout(
+            hardStop,
+            Math.min(this.grace, INTERRUPT_GRACE_MS),
+          );
+          hardStopTimer.unref?.();
+        }
+
+        return;
+      }
+
+      hardStop();
+    };
+
+    run.stop = stop;
     signal.addEventListener("abort", stop, { once: true });
 
     try {
@@ -605,7 +641,10 @@ export class ClaudeBackend implements AgentBackend {
       let settle: ReturnType<typeof setTimeout> | undefined;
 
       try {
-        for await (const frame of query({ prompt: messages(), options })) {
+        const activeQuery = query({ prompt: messages(), options });
+        run.query = activeQuery;
+
+        for await (const frame of activeQuery) {
           const decision = turn.add(frame, stage);
 
           if (turn.session !== undefined && turn.session !== id) {
@@ -623,9 +662,10 @@ export class ClaudeBackend implements AgentBackend {
           }
 
           if (turn.result && !settle) {
+            run.settled = true;
             answered.resolve();
             // Background work can keep the CLI alive; it ends with the turn.
-            settle = setTimeout(stop, this.grace);
+            settle = setTimeout(hardStop, this.grace);
           }
         }
       } catch (error) {
@@ -640,6 +680,8 @@ export class ClaudeBackend implements AgentBackend {
         }
       } finally {
         clearTimeout(settle);
+        clearTimeout(hardStopTimer);
+        run.settled = true;
         answered.resolve();
         // Any caller abort (Stop, turn timeout, shutdown) cancels.
         // A stop by the backend itself, such as a lost CLI, fails.
@@ -668,7 +710,7 @@ export class ClaudeBackend implements AgentBackend {
       return turn.answer();
     } catch (error) {
       // A failed turn must not leave its CLI running.
-      stop();
+      hardStop();
       signal.throwIfAborted();
 
       if (
@@ -822,8 +864,13 @@ export class ClaudeBackend implements AgentBackend {
     const run = this.runs.get(sessionId);
 
     if (run) {
-      run.controller.abort();
-      run.process?.kill("SIGTERM");
+      if (run.stop) {
+        run.stop();
+      } else {
+        run.controller.abort();
+        run.process?.kill("SIGTERM");
+      }
+
       await run.done;
 
       return;
@@ -837,8 +884,12 @@ export class ClaudeBackend implements AgentBackend {
     const runs = [...this.runs.values()];
 
     for (const run of runs) {
-      run.controller.abort();
-      run.process?.kill("SIGTERM");
+      if (run.stop) {
+        run.stop();
+      } else {
+        run.controller.abort();
+        run.process?.kill("SIGTERM");
+      }
     }
 
     await Promise.all(runs.map((run) => run.done));
