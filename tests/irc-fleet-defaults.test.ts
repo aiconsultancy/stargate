@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { effectiveIrcConfig, ircSchema } from "../src/config";
-import { sendFleetPeerMessage } from "../src/coordination/fleet/fleet-irc";
+import {
+  peerIrcDisconnected,
+  peerRecipientUnconfirmed,
+  sendFleetPeerMessage,
+} from "../src/coordination/fleet/fleet-irc";
+import { IrcUnavailable } from "../src/transports/irc/client";
 import {
   FleetError,
   peerMessageInputSchema,
@@ -101,6 +106,7 @@ test("peer DM uses the verified current nick and sends only to the selected room
       return "phoenix-current";
     },
     recipientGuard: () => () => true,
+    registered: true,
     waitReady: async () => {},
     budget: () => 300,
     multiline: undefined,
@@ -198,7 +204,7 @@ test("peer DM uses the verified current nick and sends only to the selected room
   expect(sent).toHaveLength(2);
 });
 
-test("a peer DM says when IRC cannot confirm the recipient captain is online", async () => {
+test("a peer DM says whether the recipient or this gateway's IRC connection is unavailable", async () => {
   const config = effective(input());
 
   const target = config.fleetControl?.targets.find(
@@ -218,6 +224,7 @@ test("a peer DM says when IRC cannot confirm the recipient captain is online", a
       throw new Error("IRC recipient is not online under that account");
     },
     recipientGuard: () => () => true,
+    registered: true,
     waitReady: async () => {},
     budget: () => 300,
     multiline: undefined,
@@ -236,20 +243,44 @@ test("a peer DM says when IRC cannot confirm the recipient captain is online", a
     via: "ship",
   });
 
-  const failure = await sendFleetPeerMessage(
-    () => config,
-    client,
-    target,
-    message,
-    () => true,
-    AbortSignal.timeout(1000),
-  ).catch((error: unknown) => error);
+  const rows = [
+    {
+      registered: true,
+      error: new Error("IRC recipient is not online under that account"),
+      text: peerRecipientUnconfirmed,
+    },
+    {
+      registered: true,
+      error: new Error("IRC account lookup timed out"),
+      text: peerRecipientUnconfirmed,
+    },
+    // The client clears registration before it rejects with IrcUnavailable.
+    {
+      registered: false,
+      error: new IrcUnavailable(),
+      text: peerIrcDisconnected,
+    },
+  ];
 
-  expect(failure).toBeInstanceOf(FleetError);
-  expect(failure).toHaveProperty(
-    "message",
-    "IRC could not confirm that the recipient captain is online under its configured account. Try again later or ask in your ship channel.",
-  );
+  for (const row of rows) {
+    const failure = await sendFleetPeerMessage(
+      () => config,
+      {
+        ...client,
+        registered: row.registered,
+        verifiedNick: async (): Promise<string> => {
+          throw row.error;
+        },
+      },
+      target,
+      message,
+      () => true,
+      AbortSignal.timeout(1000),
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(FleetError);
+    expect(failure).toHaveProperty("message", row.text);
+  }
 
   const cancelled = new AbortController();
   cancelled.abort();

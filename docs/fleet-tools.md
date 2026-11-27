@@ -297,4 +297,5 @@ Fleet peer messages carry agent identity and no approval authority. Use
 A peer DM, like every fleet tool, needs a turn started by a chat message; see
 the opening of this page. When IRC cannot confirm that the recipient captain
 is online under its configured account, the tool says so instead of returning
-an opaque failure.
+an opaque failure. When this gateway's own IRC connection is down, it says
+that instead, since nothing is then known about the recipient.

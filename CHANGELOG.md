@@ -15,7 +15,8 @@ Fleet tools called in a turn that answers no IRC or linked Teams chat request,
 such as one woken by a crew DM, now say so and suggest a workaround, instead
 of "Fleet operation unavailable; raw details withheld." A
 cross-ship `stargate_dm` also says when IRC cannot confirm that the recipient
-captain is online. See [fleet tools](docs/fleet-tools.md).
+captain is online, or when this gateway is not connected to IRC. See
+[fleet tools](docs/fleet-tools.md).
 
 ### Feature flags
 
