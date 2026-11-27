@@ -1585,3 +1585,40 @@ test("git add failing on an unchanged checkout is still a failure", async () => 
     ),
   ).rejects.toThrow("Untracked files unavailable");
 });
+
+test("git diff failing on an unchanged checkout is still a failure", async () => {
+  const directory = await checkout();
+  await writeFile(join(directory, "new"), "new\n");
+  // Untracked but never indexed, so never checked again.
+  await mkdir(join(directory, "inner"));
+  await git(join(directory, "inner"), "init", "--quiet");
+
+  // Every untracked file stays readable: nothing to compute again.
+  const reader = createCheckoutDiffReader((at, reading) => {
+    const live = checkoutGit(at, reading);
+
+    return {
+      ...live,
+      isolated: <T>(
+        head: string | null,
+        use: (checkout: IsolatedCheckout, stream: IsolatedStream) => Promise<T>,
+      ) =>
+        live.isolated(head, (isolated, stream) =>
+          use(isolated, (args, env, onData, stdin) =>
+            args.includes("diff")
+              ? Promise.resolve(128)
+              : stream(args, env, onData, stdin),
+          ),
+        ),
+    };
+  });
+
+  for (const request of [
+    { kind: "list", start: 0 },
+    { kind: "patch", path: "new", offset: 0 },
+  ] as const) {
+    await expect(reader(directory, input(request), signal)).rejects.toThrow(
+      "Git state unavailable.",
+    );
+  }
+});
