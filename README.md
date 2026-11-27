@@ -44,12 +44,13 @@ then run the last two commands from the unpacked directory. See
 
 Choose a backend first:
 
-| Backend                                                 | What to set up                                                                                                       |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| [Pi Durable](docs/configuration.md#pi-durable)          | Supply a supported OpenAI or Anthropic model ID and its API key. Pi runs in Stargate, with no separate agent server. |
-| [OpenCode V2](docs/configuration.md#opencode-v2)        | Start and authenticate your own V2 server. Stargate connects to its URL and uses a directory on that server.         |
-| [Claude Code](docs/claude.md) or [Codex](docs/codex.md) | Configure an explicit provider endpoint and credential reference. Follow the backend guide after app setup.          |
-| [Custom module](docs/configuration.md#custom-adapters)  | Load a trusted local adapter implementing the Stargate backend contract.                                             |
+| Backend                                                                                                    | What to set up                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [Pi Durable](docs/configuration.md#pi-durable)                                                             | Supply a supported OpenAI or Anthropic model ID and its API key. Pi runs in Stargate, with no separate agent server. |
+| [OpenCode V2](docs/configuration.md#opencode-v2)                                                           | Start and authenticate your own V2 server. Stargate connects to its URL and uses a directory on that server.         |
+| [Claude Code](docs/claude.md) or [Codex](docs/codex.md)                                                    | Configure an explicit provider endpoint and credential reference. Follow the backend guide after app setup.          |
+| [ACP](docs/configuration.md#acp-agent-client-protocol) or [Antigravity](docs/configuration.md#antigravity) | Point to an installed ACP agent (or `agy` >= 1.5.1) with explicit `permissionPolicy` (default `deny`).               |
+| [Custom module](docs/configuration.md#custom-adapters)                                                     | Load a trusted local adapter implementing the Stargate backend contract.                                             |
 
 For Slack, run the wizard in your terminal. It offers OpenCode and Pi Durable,
 builds the Slack app manifest, and collects tokens without echoing them.

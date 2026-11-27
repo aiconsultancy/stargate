@@ -1739,6 +1739,25 @@ export async function start(configPath: string) {
         return [];
       }
 
+      if (backend.type === "acp") {
+        return Object.values(backend.secretEnv);
+      }
+
+      if (backend.type === "antigravity") {
+        if (backend.auth.method === "gemini-api-key") {
+          return [backend.auth.apiKeyEnv];
+        }
+
+        if (
+          backend.auth.method === "agent-platform" &&
+          backend.auth.apiKeyEnv !== undefined
+        ) {
+          return [backend.auth.apiKeyEnv];
+        }
+
+        return [];
+      }
+
       if (backend.provider) {
         return [backend.provider.apiKeyEnv];
       }

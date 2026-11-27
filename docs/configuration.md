@@ -326,6 +326,70 @@ sandbox by default, with approval policy `never` and no network;
 CLI gets a minimal environment and a private `CODEX_HOME`. See
 [Codex SDK backend](codex.md) for setup, sandbox, recovery and limits.
 
+### ACP (Agent Client Protocol)
+
+`backend.type: "acp"` runs an explicit operator-configured ACP agent executable
+over JSON-RPC 2.0 stdio (for example GitHub Copilot CLI, Gemini CLI, or another
+ACP-compatible harness).
+
+- `directory`: absolute starting working directory (**not an OS sandbox**).
+- `command`: absolute path to the ACP agent executable (never resolved through
+  `PATH`).
+- `args`: optional argument list (default `[]`, max 64).
+- `flavor`: `"generic"` (default) or `"copilot"` (enables Copilot CLI's
+  `github.com/copilot/sessionEvent` subagent delta filtering and lost-session
+  recovery).
+- `model`, `reasoningEffort`, `mode`, `authMethodId`: optional ACP session
+  parameters (`model`, `thought_level`, `session/set_mode`, `authenticate`).
+- `permissionPolicy`: `"deny"` (default, fail closed), `"workspace-write"`, or
+  `"allow-all"`. Stargate never selects `allow_always`. `workspace-write`
+  approves `read`, `search`, `think`, and `fetch` tool calls anywhere and
+  allows file mutations strictly contained within canonical `directory` and
+  `extraRoots` (following symlinks); it denies shell/execute commands and
+  unknown paths. This policy only governs permission requests the agent sends;
+  it is not an OS sandbox.
+- `extraRoots`: optional list of additional allowed write roots for
+  `workspace-write` (default `[]`, max 16).
+- `resumeMethod`: `"load"` (default), `"resume"`, or `"none"`.
+- `cancelBehavior`: `"wait-for-prompt"` (default) or `"interrupt"`.
+- `env`: optional non-secret literal environment variables for the child.
+- `secretEnv`: optional map of child variable name to host environment variable
+  name; values are never stored in JSON.
+
+Note: a generic ACP child inherits the base non-secret environment (`inherited()`),
+including `HOME`. Do not point `command` at an adapter that reads host
+credentials you want isolated; use the dedicated `claude`, `codex`, or
+`antigravity` backends when isolated config homes are required.
+
+### Antigravity
+
+`backend.type: "antigravity"` runs Google's official Antigravity ACP CLI
+(`agy acp` >= 1.5.1) over Stargate's ACP runtime with an isolated private
+`GEMINI_HOME` under `<dataDirectory>/<bot>/<namespace>/antigravity/`, browser
+suppression (`BROWSER=/bin/false`), and fail-closed defaults.
+
+- `directory`: absolute starting working directory (not a host boundary on its
+  own).
+- `executable`: absolute path to the `agy` binary (verified `>= 1.5.1`).
+- `auth`: explicit sign-in method (ambient `GEMINI_API_KEY` and `GOOGLE_*`
+  host variables are excluded):
+  - `{ "method": "gemini-api-key", "apiKeyEnv": "…" }`
+  - `{ "method": "agent-platform", "apiKeyEnv"?: "…", "gcpProject"?: "…", "gcpLocation"?: "…" }`
+  - `{ "method": "oauth-personal" }`
+  - `{ "method": "oauth-business", "gcpProject": "…", "gcpLocation": "…" }`
+    Headless browser launches are suppressed; an unauthenticated OAuth profile
+    fails closed with an `auth` error. To populate OAuth tokens for a private
+    profile, run `agy acp --login --gemini-dir <private GEMINI_HOME> --app-data-dir antigravity-acp`
+    interactively as the Stargate OS user.
+- `model`, `thinkingLevel`, `systemPrompt`: optional model ID, `thought_level`
+  config option, and system-prompt append (`_meta.antigravity.systemPrompt.append`).
+- `permissionPolicy`: `"deny"` (default), `"workspace-write"`, or `"allow-all"`
+  (Antigravity always runs in `default` session mode so every action is routed
+  through Stargate's live policy).
+- `sandbox`: `true` by default (`--sandbox`).
+- `disableTelemetry`: `true` by default (`--disable-telemetry`).
+- `extraRoots`: optional extra roots for `workspace-write` (default `[]`, max 16).
+
 ### Custom adapters
 
 Use `backend.type: "module"`, an absolute `module` path, and an `options`

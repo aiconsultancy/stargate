@@ -881,7 +881,7 @@ export class IrcShip {
               ) {
                 const row = this.store.requestProgress(identity.key, job.id)[0];
                 text = row
-                  ? `${row.failure ? "Request ended: " + row.failure + ". " : ""}${turnProgressText({ stage: row.stage, observedAt: row.observedAt, disconnected: row.disconnected, ...((this.config.backend.type === "claude" || this.config.backend.type === "codex") && { backend: this.config.backend.type }) })}`
+                  ? `${row.failure ? "Request ended: " + row.failure + ". " : ""}${turnProgressText({ stage: row.stage, observedAt: row.observedAt, disconnected: row.disconnected, ...((this.config.backend.type === "claude" || this.config.backend.type === "codex" || this.config.backend.type === "acp" || this.config.backend.type === "antigravity") && { backend: this.config.backend.type }) })}`
                   : `Stargate request is ${job.status}. Backend activity is unconfirmed.`;
               }
 

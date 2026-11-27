@@ -21,7 +21,7 @@ export type TurnProgress = {
   stage: TurnStage;
   observedAt: number;
   disconnected?: boolean;
-  backend?: "claude" | "codex";
+  backend?: "claude" | "codex" | "acp" | "antigravity";
 };
 
 export function turnProgressText(progress?: TurnProgress) {
@@ -40,6 +40,10 @@ function backendName(backend: string | undefined) {
       return "Claude";
     case "codex":
       return "Codex";
+    case "acp":
+      return "ACP";
+    case "antigravity":
+      return "Antigravity";
     default:
       return "OpenCode";
   }

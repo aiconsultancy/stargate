@@ -258,6 +258,8 @@ export type V1Backend =
   | "pi-durable"
   | "claude"
   | "codex"
+  | "acp"
+  | "antigravity"
   | "module";
 
 export type V1RequestProgress = {

@@ -164,7 +164,15 @@ type IrcBackend =
       sessionID?: string | undefined;
       permissions: FleetPermission[];
     }
-  | { type: "pi-durable" | "claude" | "codex" | "module" };
+  | {
+      type:
+        | "pi-durable"
+        | "claude"
+        | "codex"
+        | "acp"
+        | "antigravity"
+        | "module";
+    };
 
 type RequiredCodec<T, E> = Schema.Codec<T, E> & {
   readonly "~type.optionality": "required";
