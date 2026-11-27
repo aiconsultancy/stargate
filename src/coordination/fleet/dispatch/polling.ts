@@ -81,6 +81,7 @@ export type DispatchSettings = {
   answerTimeoutMs: number;
   decisionOutcomeDms?: boolean;
   issueDispatch?: boolean;
+  readyOffers?: boolean;
   /** Waits between rounds; one more round than entries, then give up. */
   retryLadderMs: readonly number[];
   /** IRC (or other transport) account for an API agent name. */
@@ -207,7 +208,7 @@ export class DispatchPolling {
     if (status === 401 || status === 403) {
       this.warnOnce(
         "credential",
-        "Agent dispatch: the Subspace API refused the rear admiral's credential; provision a valid bearer token in agentDispatch.api.tokenEnv. Retrying at each poll",
+        "Agent dispatch: the Subspace API refused the rear admiral's credential; check the configured rear admiral identity. Retrying at each poll",
         { status },
       );
 
@@ -277,7 +278,12 @@ export class DispatchPolling {
           error,
         );
       }
+    }
 
+    if (
+      this.settings.issueDispatch !== false &&
+      this.settings.readyOffers !== false
+    ) {
       try {
         await this.pollReady(signal);
         this.cleared("ready");

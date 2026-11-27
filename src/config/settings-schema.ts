@@ -326,3 +326,30 @@ export const reservedAuthenticatedRequestHeaders = new Set([
   "host",
   "transfer-encoding",
 ]);
+
+/** Legacy bearer or the enrolled rear admiral's local signing proxy. */
+export const agentDispatchApiSchema = Schema.Union([
+  settingsStruct({ socketPath: absolutePath }),
+  settingsStruct({
+    /** API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback. */
+    baseUrl: secureLocalOrHttpsURL,
+    /** Variable holding the rear admiral agent's bearer token. */
+    tokenEnv: envName,
+    /** Extra headers for private access (for example a zero-trust service token). */
+    headersEnv: settingsRecord(
+      Schema.String.check(
+        settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/),
+      ).check(
+        settingsRefine(
+          (name) =>
+            !reservedAuthenticatedRequestHeaders.has(name.toLowerCase()),
+          {
+            message:
+              "This header is set by Stargate; use tokenEnv for the bearer token",
+          },
+        ),
+      ),
+      envName,
+    ).pipe(settingsDefault({})),
+  }),
+]);

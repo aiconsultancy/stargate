@@ -136,6 +136,15 @@ is configurable from 3,600 through 604,800 seconds. Use
 Ready for agents. Omitting the setting preserves one-time command-channel
 notices for existing configurations.
 
+Set `readyOffers: false` to run assigned work requests without starting
+offers for unassigned Ready for agents issues.
+
+For an enrolled fleet, set `api` to
+`{ "socketPath": "/run/example/rear-admiral/api.sock" }` using the rear
+admiral's existing `subspaceAgents` signing proxy. The proxy signs each
+request with the enrolled identity. Bearer and header environment settings
+apply to direct API connections.
+
 | Key                      | Default                                     | Meaning                                                                                                                                                                                                           |
 | ------------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`                | `false`                                     | The feature flag. Off: no ledger file, no chat listener and no API request. A disabled section is not cross-checked against the IRC registrations.                                                                |

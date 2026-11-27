@@ -1,4 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   DispatchApiError,
   SubspaceApi,
@@ -37,6 +40,39 @@ function client(
     timeoutMs: 20,
   });
 }
+
+test("the dispatch client uses the enrolled officer's Unix proxy without a bearer in the request", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dispatch-api-"));
+  const socketPath = join(directory, "officer.sock");
+
+  const server = Bun.serve({
+    unix: socketPath,
+    fetch(request) {
+      expect(new URL(request.url).pathname).toBe("/api/v1/me");
+      expect(request.headers.has("authorization")).toBe(false);
+
+      return Response.json({
+        userId: REAR_ADMIRAL,
+        kind: "agent",
+        agentRank: "rearAdmiral",
+        fleetId: FLEET,
+      });
+    },
+  });
+
+  try {
+    const api = new SubspaceApi({ socketPath, env: {} });
+    expect(await api.me(signal)).toEqual({
+      userId: REAR_ADMIRAL,
+      kind: "agent",
+      agentRank: "rearAdmiral",
+      fleetId: FLEET,
+    });
+  } finally {
+    await server.stop(true);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 /** No log line may carry a credential value or an authorisation header. */
 function expectNoSecrets(lines: readonly string[]) {

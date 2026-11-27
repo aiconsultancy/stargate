@@ -79,9 +79,7 @@ export function startAgentDispatch(
   );
 
   const api = new SubspaceApi({
-    baseUrl: dispatch.api.baseUrl,
-    tokenEnv: dispatch.api.tokenEnv,
-    headersEnv: dispatch.api.headersEnv,
+    ...dispatch.api,
     ...(host.fetch && { fetch: host.fetch }),
     ...(host.env && { env: host.env }),
   });
@@ -118,6 +116,7 @@ export function startAgentDispatch(
       answerTimeoutMs: dispatch.answerTimeoutSeconds * 1000,
       decisionOutcomeDms: dispatch.decisionOutcomeDms ?? false,
       issueDispatch: dispatch.enabled,
+      readyOffers: dispatch.readyOffers ?? true,
       retryLadderMs: dispatch.retryLadderSeconds.map(
         (seconds) => seconds * 1000,
       ),
@@ -145,6 +144,10 @@ export function startAgentDispatch(
     if (message.tags.has(assignmentCapacityTag)) {
       assignmentRequests?.receive(message);
 
+      return;
+    }
+
+    if (dispatch.readyOffers === false) {
       return;
     }
 
