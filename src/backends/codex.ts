@@ -1,44 +1,35 @@
-import { constants, existsSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, writeFileSync } from "node:fs";
 import {
   chmod,
-  lstat,
   mkdir,
   mkdtemp,
-  open,
   readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import {
-  Codex,
-  type CodexOptions,
-  type ThreadOptions,
-  type UserInput,
-} from "@openai/codex-sdk";
 import { Option, Schema } from "effect";
 import {
   type Attachment,
   checkAttachments,
 } from "../chat/attachments/attachments";
-import {
-  type AgentBackend,
-  type BackendContext,
-  type PromptSourceContext,
-  type TextSink,
-  sourceLine,
-} from "./backend";
-import type { codexBackendSchema } from "./codex/config";
 import { secret } from "../lib/credentials";
 import {
   AttachmentInputUnavailable,
   BackendFailure,
-  type BackendFailureKind,
-  statusKind,
 } from "../shared/request-failure";
-import type { TurnProgress, TurnStage } from "../shared/turn-progress";
+import type { TurnStage } from "../shared/turn-progress";
+import {
+  type ActivityRequest,
+  type AgentBackend,
+  type BackendContext,
+  type TurnActivityLog,
+  type TurnActivityRecorder,
+  sourceLine,
+} from "./backend";
 import {
   type TurnMarker,
   bootTicks,
@@ -54,15 +45,28 @@ import {
   linkFree,
   nativeCodex,
   trustedPath,
-  trustedUtilities,
   writableRoots,
 } from "./codex-paths";
+import {
+  CodexAppServerClient,
+  CodexAppServerRpcError,
+  type CodexAppServerUserInput,
+  type CodexConfigObject,
+  CodexTurn,
+  codexAppServerArgs,
+  codexFailureKind,
+  codexSandboxPolicy,
+  decodeThreadResponse,
+  decodeTurnResponse,
+  notificationIds,
+} from "./codex/app-server";
+import type { codexBackendSchema } from "./codex/config";
 
 export { nativeCodex } from "./codex-paths";
 
-type Config = typeof codexBackendSchema.Type;
+export { CodexTurn, codexFailureKind } from "./codex/app-server";
 
-type CodexConfig = NonNullable<CodexOptions["config"]>;
+type Config = typeof codexBackendSchema.Type;
 
 /** Fixed, safe failure text produced by this adapter. */
 class CodexTurnError extends Error {}
@@ -71,12 +75,15 @@ class CodexTurnError extends Error {}
 // Can be lost with the process. Never report that nothing ran.
 const crashed = { ran: true } as const;
 
+/** Bounded wait for `turn/interrupt` before forcing SIGTERM on cancel. */
+const INTERRUPT_GRACE_MS = 100;
+
 /** Conversation and thread IDs are UUIDs: never options, paths or flags. */
 const maximumID = "ffffffff-ffff-ffff-ffff-ffffffffffff";
 
 const idSchema = Schema.String.check(
   Schema.isUUID(),
-  // Zod accepted the max UUID only in lowercase; preserve existing ID spelling.
+  // Preserve existing ID spelling.
   Schema.makeFilter((id) => id.toLowerCase() !== maximumID || id === maximumID),
 );
 
@@ -99,111 +106,13 @@ export function codexDirectories(data: string) {
     records: join(data, "codex-runs"),
     /** An empty `ZDOTDIR`: zsh tool commands never read `~/.zshenv`. */
     shell: join(data, "codex-shell"),
-    /** Stargate's per-turn launchers; see `codexLauncher`. */
-    bin: join(data, "codex-bin"),
   };
-}
-
-const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
-
-/**
- * Stargate's `codexPathOverride`. The SDK exposes neither the CLI process nor
- * its output stream, and a process that the CLI starts can inherit that
- * output and keep it open. The launcher `exec`s the CLI, which stays the
- * SDK's child (its signals and exit status are unchanged), but sends the
- * CLI's output through an unlinked FIFO to `cat`. Only `cat` then holds
- * Stargate's stdout and stderr, and it carries the turn marker, so the turn
- * clean-up always closes them. The CLI's stderr is discarded; Stargate never
- * uses it.
- *
- * The launcher runs before the sandbox with the key in its environment, so
- * every command is an absolute path: `utilities` from `trustedUtilities`
- * and the native CLI. Nothing is looked up through `PATH`.
- */
-export function codexLauncher(
-  cli: string,
-  utilities: Record<"sh" | "mkfifo" | "cat" | "rm", string>,
-) {
-  const tool = (name: keyof typeof utilities) => shellQuote(utilities[name]);
-
-  if (!/^\/[A-Za-z0-9._+/-]+$/.test(utilities.sh)) {
-    throw new Error("Codex launcher shell path is not usable");
-  }
-
-  return [
-    `#!${utilities.sh}`,
-    "set -eu",
-    // The turn's private TMPDIR; `set -u` fails when it is unset.
-    'out="$TMPDIR/stargate-codex-output"',
-    `${tool("mkfifo")} -m 600 "$out"`,
-    `${tool("cat")} "$out" &`,
-    // Returns once cat has opened the FIFO. Removing its path then keeps
-    // Every other process out.
-    'exec 3>"$out"',
-    `${tool("rm")} -f "$out"`,
-    `exec ${shellQuote(cli)} "$@" >&3 3>&- 2>/dev/null`,
-    "",
-  ].join("\n");
-}
-
-/**
- * Fails closed unless `path` is the launcher just written: a regular file
- * of Stargate's user with mode 0700 and exactly the `expected` content, in a
- * directory of Stargate's user with mode 0700, with no symbolic link anywhere on
- * its path. Run immediately before a turn.
- */
-export async function verifyLauncher(path: string, expected: string) {
-  const uid = process.getuid?.();
-  const directory = await lstat(dirname(path));
-  const file = await lstat(path);
-
-  if (
-    !(await linkFree(path)) ||
-    !directory.isDirectory() ||
-    directory.uid !== uid ||
-    (directory.mode & 0o777) !== 0o700 ||
-    !file.isFile() ||
-    file.uid !== uid ||
-    (file.mode & 0o777) !== 0o700 ||
-    (await readFile(path, "utf8")) !== expected
-  ) {
-    throw new CodexTurnError("Codex launcher failed verification");
-  }
-}
-
-/**
- * Creates the launcher at its canonical `path` and verifies it: no symbolic
- * link on the way, no existing file, and never through a link
- * (`O_EXCL | O_NOFOLLOW`).
- */
-export async function writeLauncher(path: string, script: string) {
-  if (!(await linkFree(dirname(path)))) {
-    throw new CodexTurnError("Codex launcher failed verification");
-  }
-
-  const file = await open(
-    path,
-    constants.O_WRONLY |
-      constants.O_CREAT |
-      constants.O_EXCL |
-      constants.O_NOFOLLOW,
-    0o700,
-  );
-
-  try {
-    await file.writeFile(script);
-  } finally {
-    await file.close();
-  }
-
-  await verifyLauncher(path, script);
 }
 
 /**
  * The CLI's environment: the shared non-secret allowlist, a private
  * `CODEX_HOME` for this namespace (so `~/.codex`, its login and its config
- * are never used) and the proxy key under a Stargate variable. The SDK passes
- * nothing else from Stargate's environment.
+ * are never used) and the proxy key under a Stargate variable.
  */
 export function codexEnvironment(
   config: Config,
@@ -225,14 +134,13 @@ export function codexEnvironment(
 }
 
 /**
- * `--config` overrides. Command-line overrides are Codex's highest layer
- * below managed policy, so `CODEX_HOME` or project configuration cannot
- * redirect the endpoint or key. The rest turns off what loads instructions
- * or code from outside Stargate's configuration (skills, AGENTS.md, plugins,
- * shell start-up files), subagents, and optional network traffic.
+ * `--config` overrides passed to `codex app-server`. Command-line overrides
+ * sit above `CODEX_HOME` and project configuration, so nothing can redirect
+ * the endpoint or key, and project `.codex/config.toml` stays untrusted even
+ * under `workspace-write`.
  */
-export function codexConfig(config: Config): CodexConfig {
-  return {
+export function codexConfig(config: Config): CodexConfigObject {
+  const overrides: Record<string, CodexConfigObject[string]> = {
     model_provider: "stargate",
     model_providers: {
       stargate: {
@@ -243,20 +151,16 @@ export function codexConfig(config: Config): CodexConfig {
         requires_openai_auth: false,
       },
     },
-    ...(!config.projectDocs && { project_doc_max_bytes: 0 }),
-    ...(config.systemPrompt && { developer_instructions: config.systemPrompt }),
+    web_search: "disabled",
     skills: { include_instructions: false },
     agents: { enabled: false },
     features: {
-      // Code and instructions from outside Stargate's configuration.
       plugins: false,
       remote_plugin: false,
       apps: false,
       hooks: false,
       memories: false,
-      // Login shell start-up files.
       shell_snapshot: false,
-      // Tools with no use in a gateway turn.
       goals: false,
       tool_suggest: false,
       image_generation: false,
@@ -276,23 +180,22 @@ export function codexConfig(config: Config): CodexConfig {
     // Workspace-write: `directory` and the turn's TMPDIR, not shared /tmp.
     sandbox_workspace_write: { exclude_slash_tmp: true },
   };
-}
 
-/** Thread options: sandbox, approval and network are always explicit. */
-export function codexThreadOptions(config: Config): ThreadOptions {
-  return {
-    model: config.model,
-    sandboxMode: config.sandbox,
-    // Never ask: a request to leave the sandbox is refused, not approved.
-    approvalPolicy: "never",
-    workingDirectory: config.directory,
-    skipGitRepoCheck: true,
-    networkAccessEnabled: config.network,
-    webSearchMode: "disabled",
-    ...(config.reasoningEffort && {
-      modelReasoningEffort: config.reasoningEffort,
-    }),
-  };
+  if (config.sandbox !== "read-only") {
+    overrides["projects"] = {
+      [config.directory]: { trust_level: "untrusted" },
+    };
+  }
+
+  if (!config.projectDocs) {
+    overrides["project_doc_max_bytes"] = 0;
+  }
+
+  if (config.systemPrompt) {
+    overrides["developer_instructions"] = config.systemPrompt;
+  }
+
+  return overrides;
 }
 
 const imageTypes: Record<string, string> = {
@@ -334,170 +237,16 @@ export function codexInput(
   return { text: parts.join("\n\n"), images };
 }
 
-const startedEvent = Schema.Struct({
-  type: Schema.Literal("thread.started"),
-  thread_id: Schema.String,
-});
-
-const itemEvent = Schema.Struct({
-  type: Schema.Literals(["item.started", "item.updated", "item.completed"]),
-  item: Schema.Struct({
-    id: Schema.String,
-    type: Schema.String,
-    text: Schema.optional(Schema.String),
-  }),
-});
-
-const endEvent = Schema.Struct({
-  type: Schema.Literals(["turn.completed", "turn.failed", "error"]),
-  // `error` carries `message`; `turn.failed` carries `error.message`.
-  message: Schema.optional(Schema.String),
-  error: Schema.optional(Schema.Struct({ message: Schema.String })),
-});
-
-const decodeStartedEvent = Schema.decodeUnknownOption(startedEvent);
-const decodeItemEvent = Schema.decodeUnknownOption(itemEvent);
-const decodeEndEvent = Schema.decodeUnknownOption(endEvent);
-
-const isTurnStarted = Schema.is(
-  Schema.Struct({ type: Schema.Literal("turn.started") }),
-);
-
-/** Items that mean the turn did work outside the model. */
-const workItems = new Set([
-  "command_execution",
-  "file_change",
-  "mcp_tool_call",
-  "web_search",
-]);
-
-/**
- * The category and HTTP status that a Codex error message names. Only
- * these two values are kept: the message can quote the provider.
- */
-export function codexFailureKind(
-  message: string,
-): { kind: BackendFailureKind; status?: number } | undefined {
-  const status =
-    /\bstatus(?: code)?:? ([1-5]\d\d)\b/i.exec(message)?.[1] ??
-    /\b([45]\d\d) (?:Bad Request|Unauthorized|Payment Required|Forbidden|Not Found|Request Timeout|Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)\b/i.exec(
-      message,
-    )?.[1];
-
-  if (status) {
-    return { kind: statusKind(Number(status)), status: Number(status) };
-  }
-
-  if (/usage limit|rate limit|quota|too many requests/i.test(message)) {
-    return { kind: "quota" };
-  }
-
-  if (/unauthorized|api key|authentication|access token/i.test(message)) {
-    return { kind: "auth" };
-  }
-
-  if (/timed out|timeout/i.test(message)) {
-    return { kind: "timeout" };
-  }
-
-  if (
-    /error sending request|connection (?:refused|reset|closed)|stream disconnected|dns error|network/i.test(
-      message,
-    )
-  ) {
-    return { kind: "network" };
-  }
-
-  return undefined;
-}
-
-/**
- * Visible text of one turn: agent messages only, never reasoning, commands,
- * tool output or error items. Failure text is never kept.
- */
-export class CodexTurn {
-  private readonly messages = new Map<string, string>();
-  public thread: string | undefined;
-  public result: { ok: boolean } | undefined;
-  /** A command, file change or tool call was seen. */
-  public worked = false;
-  /** What the failure event named, without its text. */
-  public failure: ReturnType<typeof codexFailureKind>;
-
-  /** Returns true when the visible text may have changed. */
-  public add(raw: unknown, stage?: (stage: TurnStage) => void): boolean {
-    if (stage && isTurnStarted(raw)) {
-      stage("model");
-    }
-
-    const started = decodeStartedEvent(raw);
-
-    if (Option.isSome(started)) {
-      this.thread = started.value.thread_id;
-
-      return false;
-    }
-
-    const item = decodeItemEvent(raw);
-
-    if (Option.isSome(item)) {
-      const { id, type, text } = item.value.item;
-      const worked = workItems.has(type);
-
-      if (item.value.type === "item.started") {
-        if (type === "reasoning") {
-          stage?.("reasoning");
-        } else if (worked) {
-          stage?.("tool");
-        } else if (type === "agent_message") {
-          stage?.("reply");
-        }
-      }
-
-      if (worked) {
-        this.worked = true;
-      }
-
-      if (type !== "agent_message" || text === undefined) {
-        return false;
-      }
-
-      if (this.messages.get(id) === text) {
-        return false;
-      }
-
-      this.messages.set(id, text);
-
-      return true;
-    }
-
-    const end = decodeEndEvent(raw);
-
-    if (Option.isSome(end)) {
-      this.result = { ok: end.value.type === "turn.completed" };
-      const message = end.value.error?.message ?? end.value.message;
-
-      if (!this.result.ok && message) {
-        this.failure = codexFailureKind(message) ?? this.failure;
-      }
-    }
-
-    return false;
-  }
-
-  public answer(): string {
-    return [...this.messages.values()].filter(Boolean).join("\n\n");
-  }
-}
-
 type Run = {
-  /** Aborted to cancel the turn; never handed to the SDK itself. */
   controller: AbortController;
   done: Promise<void>;
   marker: TurnMarker;
-  /** Turn start in clock ticks; no process of the turn is older. */
   since: number;
   record: string;
+  client?: CodexAppServerClient;
+  threadId?: string;
+  turnId?: string;
+  settled: boolean;
 };
 
 /** A turn in progress, kept on disk so a later process can stop it. */
@@ -517,15 +266,14 @@ const decodeThread = Schema.decodeUnknownSync(threadSchema, {
 });
 
 /**
- * Test seams: a fake CLI for the launcher to start (production uses the
- * SDK's bundled binary), the SIGTERM-to-SIGKILL grace period, extra child
- * variables, and the system directories for `PATH`.
+ * Test seams: a fake CLI executable (production uses the pinned `@openai/codex`
+ * binary), SIGTERM-to-SIGKILL grace period, extra child variables, and system
+ * directories for `PATH`.
  */
 export type CodexRuntime = {
   executable?: string;
   graceMs?: number;
   environment?: Record<string, string>;
-  /** Replaces the system directories of `codexSearchPath`. */
   searchDirectories?: readonly string[];
 };
 
@@ -539,14 +287,11 @@ export class CodexBackend implements AgentBackend {
 
   private constructor(
     private readonly config: Config,
-    /** This namespace's data directory; see `codexDirectories`. */
     private readonly data: string,
     private readonly runtime: CodexRuntime,
-    /** The CLI that each turn's launcher `exec`s. */
     private readonly cli: string,
-    private readonly utilities: Awaited<ReturnType<typeof trustedUtilities>>,
-    /** The CLI's fixed `PATH`; see `codexSearchPath`. */
     private readonly searchPath: string,
+    private readonly activity?: TurnActivityRecorder,
   ) {
     ({ threads: this.threads, records: this.records } = codexDirectories(data));
   }
@@ -562,8 +307,6 @@ export class CodexBackend implements AgentBackend {
   ) {
     // Fail at startup, not on the first turn, when the key is missing.
     secret(config.provider.apiKeyEnv);
-    // From here on Stargate uses only the canonical form of each path that it
-    // Writes, checks or runs, and refuses links that could change later.
     const write = config.sandbox === "workspace-write";
 
     const directory = write
@@ -575,7 +318,6 @@ export class CodexBackend implements AgentBackend {
     const canonical = { ...config, directory };
     // Nothing that runs outside the sandbox may be writable from inside it.
     await checkCodexPaths(canonical, data);
-    const utilities = await trustedUtilities();
     const directories = codexDirectories(data);
 
     for (const path of Object.values(directories)) {
@@ -588,10 +330,6 @@ export class CodexBackend implements AgentBackend {
       await chmod(path, 0o700);
     }
 
-    // Launchers are written per turn; none from earlier runs is kept.
-    await rm(directories.bin, { recursive: true, force: true });
-    await mkdir(directories.bin, { mode: 0o700 });
-    await chmod(directories.bin, 0o700);
     const native = nativeCodex();
 
     const helpers = existsSync(native.helpers)
@@ -603,30 +341,28 @@ export class CodexBackend implements AgentBackend {
       data,
       runtime,
       await trustedPath(runtime.executable ?? native.executable, roots),
-      utilities,
       await codexSearchPath(
         config.extraPath,
         helpers,
         roots,
         runtime.searchDirectories,
       ),
+      context.activity,
     );
   }
 
-  public async createSession({
+  public createSession({
     signal,
   }: Parameters<AgentBackend["createSession"]>[0]) {
     signal.throwIfAborted();
 
     if (this.closed) {
-      throw new Error("Codex backend is closing");
+      return Promise.reject(new CodexTurnError("Codex backend is closing"));
     }
 
-    // Codex assigns the thread ID on the first turn; Stargate maps to it.
-    return crypto.randomUUID();
+    return Promise.resolve(crypto.randomUUID());
   }
 
-  /** The Codex thread of a conversation in this namespace, if it started. */
   private async thread(id: string) {
     try {
       return decodeThread(
@@ -641,16 +377,199 @@ export class CodexBackend implements AgentBackend {
     }
   }
 
-  public async prompt(
+  private beginActivity(
     sessionId: string,
-    text: string,
-    signal: AbortSignal,
-    onText?: TextSink,
-    _onInput?: (id: string) => void,
-    files: readonly Attachment[] = [],
-    context?: PromptSourceContext,
-    onProgress?: (value: TurnProgress) => void,
+    activityRequests?: () => readonly ActivityRequest[],
+  ): TurnActivityLog | undefined {
+    if (!this.activity) {
+      return undefined;
+    }
+
+    let links: readonly ActivityRequest[] | undefined;
+
+    try {
+      links = activityRequests?.();
+    } catch {
+      // Best-effort links.
+    }
+
+    try {
+      return this.activity.begin(links, sessionId);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async openThread(
+    client: CodexAppServerClient,
+    mapped: string | undefined,
   ): Promise<string> {
+    const threadParams = {
+      model: this.config.model,
+      modelProvider: "stargate",
+      cwd: this.config.directory,
+      approvalPolicy: "never",
+      sandbox: this.config.sandbox,
+    };
+
+    const threadRaw = mapped
+      ? await client.request(
+          "thread/resume",
+          { ...threadParams, threadId: mapped, excludeTurns: true },
+          30_000,
+        )
+      : await client.request("thread/start", threadParams, 30_000);
+
+    const threadDecoded = Option.getOrUndefined(
+      decodeThreadResponse(threadRaw),
+    );
+
+    if (!threadDecoded || !isID(threadDecoded.thread.id)) {
+      throw new CodexTurnError("Codex thread identity is not valid");
+    }
+
+    const threadId = threadDecoded.thread.id;
+
+    if (mapped !== undefined && threadId !== mapped) {
+      throw new CodexTurnError("Codex thread identity changed");
+    }
+
+    return threadId;
+  }
+
+  private async prepareTemporaryWorkspace(input: {
+    text: string;
+    images: Attachment[];
+  }): Promise<{ temporary: string; promptItems: CodexAppServerUserInput[] }> {
+    let temporary = await mkdtemp(join(tmpdir(), "stargate-codex-"));
+    const roots = writableRoots(this.config);
+
+    try {
+      temporary = await trustedPath(temporary, roots);
+      await checkCodexPaths(this.config, this.data, temporary);
+
+      for (const path of Object.values(codexDirectories(this.data))) {
+        if (!(await linkFree(path))) {
+          throw new Error("Codex data directories must not be symbolic links");
+        }
+      }
+    } catch (error) {
+      await rm(temporary, { recursive: true, force: true }).catch(() => {});
+      throw new CodexTurnError((error as Error).message);
+    }
+
+    const promptItems: CodexAppServerUserInput[] = [
+      { type: "text", text: input.text, text_elements: [] },
+    ];
+
+    for (const [index, image] of input.images.entries()) {
+      const path = join(
+        temporary,
+        `attachment-${index + 1}${imageTypes[image.mime]}`,
+      );
+
+      await writeFile(path, image.data, { mode: 0o600 });
+      promptItems.push({ type: "localImage", path });
+    }
+
+    return { temporary, promptItems };
+  }
+
+  private async teardownClient(client: CodexAppServerClient | undefined) {
+    if (!client) {
+      return;
+    }
+
+    client.endInput();
+    client.closePipes();
+    const graceTimer = new AbortController();
+    await Promise.race([
+      client.done,
+      delay(Math.min(this.grace, 250), undefined, {
+        signal: graceTimer.signal,
+      }).catch(() => {}),
+    ]);
+    graceTimer.abort();
+
+    if (client.running) {
+      client.kill("SIGTERM");
+    }
+  }
+
+  private async startTurn(
+    client: CodexAppServerClient,
+    threadId: string,
+    inputId: string,
+    promptItems: CodexAppServerUserInput[],
+  ): Promise<string> {
+    const turnRaw = await client.request(
+      "turn/start",
+      {
+        threadId,
+        clientUserMessageId: inputId,
+        input: promptItems,
+        cwd: this.config.directory,
+        approvalPolicy: "never",
+        sandboxPolicy: codexSandboxPolicy(this.config),
+        model: this.config.model,
+        effort: this.config.reasoningEffort ?? null,
+      },
+      30_000,
+    );
+
+    const turnDecoded = Option.getOrUndefined(decodeTurnResponse(turnRaw));
+
+    if (!turnDecoded) {
+      throw new CodexTurnError("Codex turn/start returned no turn ID");
+    }
+
+    return turnDecoded.turn.id;
+  }
+
+  private spawnAppServer(
+    env: Record<string, string>,
+    temporary: string,
+    markerValue: string,
+    onNotification: (method: string, params: unknown) => void,
+    onFailure: () => void,
+  ): CodexAppServerClient {
+    const childEnv: Record<string, string> = {
+      ...env,
+      PATH: this.searchPath,
+      TMPDIR: temporary,
+      [turnVariable]: markerValue,
+      ...this.runtime.environment,
+    };
+
+    const child = spawn(
+      this.cli,
+      codexAppServerArgs(codexConfig(this.config)),
+      {
+        cwd: this.config.directory,
+        env: childEnv,
+        stdio: ["pipe", "pipe", "ignore"],
+      },
+    );
+
+    return new CodexAppServerClient(child, onNotification, onFailure);
+  }
+
+  public async prompt(
+    ...args: Parameters<AgentBackend["prompt"]>
+  ): Promise<string> {
+    const [
+      sessionId,
+      text,
+      signal,
+      onText,
+      onInput,
+      files = [],
+      context,
+      onProgress,
+      _liveProgress,
+      activityRequests,
+    ] = args;
+
     const stage = onProgress
       ? (value: TurnStage) => {
           onProgress({
@@ -664,7 +583,7 @@ export class CodexBackend implements AgentBackend {
     signal.throwIfAborted();
 
     if (this.closed) {
-      throw new Error("Codex backend is closing");
+      throw new CodexTurnError("Codex backend is closing");
     }
 
     if (!isID(sessionId)) {
@@ -683,6 +602,7 @@ export class CodexBackend implements AgentBackend {
     );
 
     const env = codexEnvironment(this.config, this.data);
+    const inputId = crypto.randomUUID();
 
     const run: Run = {
       controller: new AbortController(),
@@ -690,6 +610,7 @@ export class CodexBackend implements AgentBackend {
       marker: { variable: turnVariable, value: crypto.randomUUID() },
       since: 0,
       record: join(this.records, `${id}.json`),
+      settled: false,
     };
 
     this.runs.set(id, run);
@@ -701,31 +622,19 @@ export class CodexBackend implements AgentBackend {
     };
 
     signal.addEventListener("abort", stop, { once: true });
-    /**
-     * The SDK's signal, aborted only while its event stream is open. Once
-     * the stream ends early, the SDK has dropped the child's error listener
-     * but not the child's abort listener, so a later abort would raise an
-     * unhandled error. Leftover processes are stopped by marker instead.
-     */
-    const sdk = new AbortController();
-    let live = false;
-    let temporary: string | undefined;
-    let launcher: string | undefined;
-    let recorded = false;
-    /**
-     * The SDK only sends SIGTERM and then waits for the CLI's output to
-     * end, which a CLI that ignores SIGTERM never does. Cancellation
-     * therefore also starts the bounded clean-up of every marked process,
-     * the CLI included, without waiting for the stream. If the stream has
-     * still not ended shortly after that, the turn stops waiting for it.
-     */
-    let reaping: Promise<void> | undefined;
-    const abandon = Promise.withResolvers<"abandon">();
 
-    const cancel = () => {
-      if (live) {
-        sdk.abort();
-      }
+    let temporary: string | undefined;
+    let recorded = false;
+    let reaping: Promise<void> | undefined;
+    let hardCancelTimer: ReturnType<typeof setTimeout> | undefined;
+    const turnDone = Promise.withResolvers<void>();
+
+    const forceCancel = () => {
+      clearTimeout(hardCancelTimer);
+      run.client?.abort(new CodexTurnError("Codex turn cancelled"));
+      run.client?.closePipes();
+      run.client?.kill("SIGTERM");
+      turnDone.resolve();
 
       if (!recorded || reaping !== undefined) {
         return;
@@ -737,50 +646,38 @@ export class CodexBackend implements AgentBackend {
         run.since,
         this.grace,
       ).catch(() => {});
-      void reaping
-        .then(() =>
-          delay(Math.min(this.grace, 1000), undefined, { ref: false }),
-        )
-        .then(() => {
-          abandon.resolve("abandon");
-        });
+    };
+
+    const cancel = () => {
+      if (run.client && run.threadId && run.turnId && !run.settled) {
+        const waitMs = Math.min(this.grace, INTERRUPT_GRACE_MS);
+
+        void run.client
+          .request(
+            "turn/interrupt",
+            { threadId: run.threadId, turnId: run.turnId },
+            waitMs,
+          )
+          .catch(() => {})
+          .finally(forceCancel);
+
+        hardCancelTimer = setTimeout(forceCancel, waitMs);
+        hardCancelTimer.unref?.();
+
+        return;
+      }
+
+      forceCancel();
     };
 
     run.controller.signal.addEventListener("abort", cancel, { once: true });
+    const activityLog = this.beginActivity(id, activityRequests);
 
     try {
-      // Never resume a thread that an earlier process is still running.
       await this.stopOrphan(id, AbortSignal.timeout(5000));
-      temporary = await mkdtemp(join(tmpdir(), "stargate-codex-"));
-      const roots = writableRoots(this.config);
-
-      // Again for each turn, on canonical paths only.
-      try {
-        temporary = await trustedPath(temporary, roots);
-        await checkCodexPaths(this.config, this.data, temporary);
-
-        for (const path of Object.values(codexDirectories(this.data))) {
-          if (!(await linkFree(path))) {
-            throw new Error(
-              "Codex data directories must not be symbolic links",
-            );
-          }
-        }
-      } catch (error) {
-        throw new CodexTurnError((error as Error).message);
-      }
-
-      const prompt: UserInput[] = [{ type: "text", text: input.text }];
-
-      for (const [index, image] of input.images.entries()) {
-        const path = join(
-          temporary,
-          `attachment-${index + 1}${imageTypes[image.mime]}`,
-        );
-
-        await writeFile(path, image.data, { mode: 0o600 });
-        prompt.push({ type: "local_image", path });
-      }
+      const prepared = await this.prepareTemporaryWorkspace(input);
+      temporary = prepared.temporary;
+      const promptItems = prepared.promptItems;
 
       const mapped = await this.thread(id);
       run.since = await bootTicks();
@@ -792,119 +689,97 @@ export class CodexBackend implements AgentBackend {
       recorded = true;
       signal.throwIfAborted();
       run.controller.signal.throwIfAborted();
-      // A new launcher for each turn, checked immediately before it runs.
-      launcher = join(
-        codexDirectories(this.data).bin,
-        `${run.marker.value}.sh`,
-      );
-      await writeLauncher(launcher, codexLauncher(this.cli, this.utilities));
+      onInput?.(inputId);
 
-      const codex = new Codex({
-        env: {
-          ...env,
-          PATH: this.searchPath,
-          // A private temporary directory per turn, removed afterwards.
-          TMPDIR: temporary,
-          [turnVariable]: run.marker.value,
-          ...this.runtime.environment,
+      const turn = new CodexTurn(activityLog);
+      const buffered: { method: string; params: unknown }[] = [];
+
+      const applyNotification = (method: string, params: unknown) => {
+        const ids = notificationIds(params);
+
+        if (run.threadId === undefined || ids.threadId !== run.threadId) {
+          return;
+        }
+
+        if (run.turnId === undefined) {
+          buffered.push({ method, params });
+
+          return;
+        }
+
+        if (ids.turnId !== run.turnId) {
+          return;
+        }
+
+        const changed = turn.addNotification(method, params, stage);
+
+        if (changed && onText) {
+          const visible = turn.answer();
+
+          if (visible) {
+            onText(visible);
+          }
+        }
+
+        if (turn.result) {
+          run.settled = true;
+          turnDone.resolve();
+        }
+      };
+
+      const client = this.spawnAppServer(
+        env,
+        temporary,
+        run.marker.value,
+        applyNotification,
+        () => {
+          turnDone.resolve();
         },
-        config: codexConfig(this.config),
-        codexPathOverride: launcher,
-      });
+      );
 
-      const options = codexThreadOptions(this.config);
+      run.client = client;
 
-      const thread = mapped
-        ? codex.resumeThread(mapped, options)
-        : codex.startThread(options);
+      await client.request(
+        "initialize",
+        {
+          clientInfo: { name: "stargate", title: "Stargate", version: "0.1.0" },
+          capabilities: null,
+        },
+        30_000,
+      );
+      client.notify("initialized", {});
 
-      const turn = new CodexTurn();
-      let known = mapped;
-      let settle: ReturnType<typeof setTimeout> | undefined;
-      live = true;
+      const threadId = await this.openThread(client, mapped);
+      run.threadId = threadId;
+      signal.throwIfAborted();
+      run.controller.signal.throwIfAborted();
 
-      const { events } = await thread.runStreamed(prompt, {
-        signal: sdk.signal,
-      });
+      const turnId = await this.startTurn(
+        client,
+        threadId,
+        inputId,
+        promptItems,
+      );
 
-      const stream = events[Symbol.asyncIterator]();
-      let open = true;
-
-      try {
-        for (;;) {
-          const next = stream.next();
-          const step = await Promise.race([next, abandon.promise]);
-
-          if (step === "abandon") {
-            // Clean-up ran and the stream still did not end: stop waiting.
-            next.catch(() => {});
-            break;
-          }
-
-          if (step.done) {
-            open = false;
-            break;
-          }
-
-          const event = step.value;
-          // Leaving the loop closes the stream: no SDK abort after that.
-          live = false;
-          const changed = turn.add(event, stage);
-
-          if (turn.thread !== undefined && turn.thread !== known) {
-            if (known !== undefined || !isID(turn.thread)) {
-              throw new CodexTurnError("Codex thread identity changed");
-            }
-
-            // Synchronous: the mapping exists before the turn continues.
-            writeFileSync(
-              join(this.threads, `${id}.json`),
-              JSON.stringify({ thread: turn.thread }),
-              { mode: 0o600 },
-            );
-            known = turn.thread;
-          }
-
-          if (changed && onText) {
-            const visible = turn.answer();
-
-            if (visible) {
-              onText(visible);
-            }
-          }
-
-          if (turn.result && !settle)
-          // A CLI that does not exit after its result is stopped.
-          {
-            settle = setTimeout(stop, this.grace);
-          }
-
-          live = true;
-
-          if (run.controller.signal.aborted) {
-            sdk.abort();
-          }
-        }
-      } catch (error) {
-        // The result completes the turn; a later teardown error does not.
-        if (signal.aborted || error instanceof CodexTurnError) {
-          throw error;
-        }
-
-        // The CLI ended without a result; SDK errors carry its stderr.
-        if (!turn.result) {
-          throw new BackendFailure("crash", crashed);
-        }
-      } finally {
-        live = false;
-        clearTimeout(settle);
-
-        // Closes the SDK's stream, now or once a pending read settles.
-        if (open) {
-          stream.return(undefined).catch(() => {});
-        }
+      if (mapped === undefined) {
+        writeFileSync(
+          join(this.threads, `${id}.json`),
+          JSON.stringify({ thread: threadId }),
+          { mode: 0o600 },
+        );
       }
 
+      run.turnId = turnId;
+
+      for (const frame of buffered.splice(0)) {
+        applyNotification(frame.method, frame.params);
+      }
+
+      if (!turn.result) {
+        await turnDone.promise;
+      }
+
+      run.settled = true;
       signal.throwIfAborted();
 
       if (!turn.result) {
@@ -920,10 +795,11 @@ export class CodexBackend implements AgentBackend {
           : new CodexTurnError("Codex turn failed");
       }
 
+      activityLog?.end("completed");
+
       return turn.answer();
     } catch (error) {
-      // The SDK SIGTERMs its CLI when the stream closes early; the marker
-      // Clean-up below stops whatever remains.
+      activityLog?.end(signal.aborted ? "cancelled" : "failed");
       signal.throwIfAborted();
 
       if (
@@ -934,14 +810,27 @@ export class CodexBackend implements AgentBackend {
         throw error;
       }
 
-      // SDK errors carry the CLI's stderr; never forward them.
-      throw new CodexTurnError("Codex turn failed");
+      if (error instanceof CodexAppServerRpcError) {
+        const failure = codexFailureKind(error.errorMessage);
+
+        if (failure) {
+          throw new BackendFailure(failure.kind, {
+            status: failure.status,
+            ran: false,
+          });
+        }
+      }
+
+      throw new BackendFailure("crash", crashed);
     } finally {
+      clearTimeout(hardCancelTimer);
       signal.removeEventListener("abort", stop);
       run.controller.signal.removeEventListener("abort", cancel);
+
+      await this.teardownClient(run.client);
+
       await reaping;
 
-      // Stop every verified process of the turn that is still left.
       if (recorded) {
         await stopTurnProcesses(
           systemProcesses,
@@ -953,10 +842,6 @@ export class CodexBackend implements AgentBackend {
 
       if (temporary) {
         await rm(temporary, { recursive: true, force: true }).catch(() => {});
-      }
-
-      if (launcher) {
-        await rm(launcher, { force: true }).catch(() => {});
       }
 
       if (recorded) {
@@ -971,11 +856,6 @@ export class CodexBackend implements AgentBackend {
     }
   }
 
-  /**
-   * Stop what a turn of an earlier Stargate process left running: processes of
-   * Stargate's user that carry its marker and started after it began, each
-   * checked again immediately before its signal. Linux only.
-   */
   private async stopOrphan(id: string, signal: AbortSignal) {
     const path = join(this.records, `${id}.json`);
     let record: typeof recordSchema.Type;

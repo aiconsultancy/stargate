@@ -17,7 +17,7 @@ One process
   │                                       Claude adapter → Agent SDK → CLI
   └─ Bot D: Socket Mode + Web API → routing/access → durable queue
                                                    ↓
-                                          Codex adapter → Codex SDK → CLI
+                                          Codex adapter → app-server CLI
 ```
 
 `config.ts` validates input and resolves environment references. `setup.ts`
@@ -330,35 +330,30 @@ Records of running CLIs let `interrupt` stop what an earlier Stargate process
 left: the group only while its recorded leader still matches, other
 processes only by that check. See [Claude backend](claude.md).
 
-The Codex adapter starts one Codex CLI per turn (`codex exec`) through the
-pinned Codex SDK, with a minimal environment and a private `CODEX_HOME` per
-namespace. Command-line `--config` overrides define the only model provider
-(the configured proxy), the sandbox (`read-only` by default), approval
-policy `never`, and turn off project instructions, skills, plugins, hooks,
-subagents and optional network traffic. `createSession` allocates a Stargate
-UUID; the first turn's `thread.started` event stores the Codex thread ID,
-and later turns resume it. Previews and the answer are the completed agent
-messages of the turn; failures carry fixed causes, never CLI stderr. The
-CLI shares Stargate's process group and its sandbox uses new sessions and PID
-namespaces, so clean-up uses only the turn marker (`STARGATE_CODEX_TURN`) and
-the same verified per-process signals as Claude, from the shared
-`backends/cli-agent.ts` module. Cancellation starts that clean-up at once,
-not after the SDK's stream ends, because the SDK only sends `SIGTERM` and
-then waits for the CLI's output. The SDK exposes no process or stream
-handle, so Stargate's `sh` launcher (`codexPathOverride`) `exec`s the CLI with
-its output through an unlinked FIFO and a marked `cat`: only marked
-processes hold Stargate's pipes, and the clean-up closes them. The launcher
-is written (`O_EXCL | O_NOFOLLOW`) and verified per turn at its canonical
-path and runs root-owned system utilities by absolute path; after
-validation every path that Stargate writes, checks or runs is used only in
-canonical form, and changeable symbolic links are refused; `codex-paths.ts`
-refuses a `workspace-write` directory that overlaps Stargate's data,
-installation, the SDK packages or the home directory. The CLI never sees
+The Codex adapter starts one `codex app-server` process per turn over stdio
+JSON-RPC 2.0 using the pinned `@openai/codex` native binary, with a minimal
+environment and a private `CODEX_HOME` per namespace. Command-line `-c`
+overrides define the only model provider (the configured proxy), pin
+`projects."<dir>".trust_level = "untrusted"` under writable sandboxes, and
+turn off project instructions, skills, plugins, hooks, subagents, web search
+and optional network traffic; `thread/start` and `turn/start` set approval
+policy `never` and the explicit sandbox policy (`readOnly` by default).
+`createSession` allocates a Stargate UUID; once `turn/start` succeeds on the
+first turn, Stargate stores the Codex thread ID and later turns resume it via
+`thread/resume`. Previews stream `item/agentMessage/delta` chunks and completed
+agent messages; failures carry fixed causes, never CLI stderr. The CLI shares
+Stargate's process group and its sandbox uses new sessions and PID namespaces,
+so cancellation first sends `turn/interrupt` (bounded by a 100 ms grace
+window), closes the child stdio pipes directly, sends `SIGTERM`, and cleans up
+marked processes (`STARGATE_CODEX_TURN`) via the shared `backends/cli-agent.ts`
+module. After validation every path that Stargate writes, checks or runs is
+used only in canonical form, and changeable symbolic links are refused;
+`codex-paths.ts` refuses a `workspace-write` directory that overlaps Stargate's
+data, installation, the SDK packages or the home directory. The CLI never sees
 the operator's `PATH`: it gets a fixed one built at start-up from the SDK
-helper directory, root-controlled system directories (every program
-checked over its full link chain) and the checked `extraPath`. The turn stops
-waiting for a stream that is still open shortly after the clean-up. Run
-records hold only the marker and start time. See [Codex backend](codex.md).
+helper directory, root-controlled system directories (every program checked
+over its full link chain) and the checked `extraPath`. Run records hold only
+the marker and start time. See [Codex backend](codex.md).
 
 `startActivity` is an optional, request-scoped reporting capability. Its
 `ActivityWatch` reads bounded visible journal facts and can finish or cancel
