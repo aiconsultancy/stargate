@@ -328,12 +328,13 @@ safety checks fail, `git.error` is `Git status requires a safe temporary directo
 Each `git` object may carry these optional fields, added without changing the
 existing ones:
 
-| Field      | Meaning                                                                 |
-| ---------- | ----------------------------------------------------------------------- |
-| `worktree` | Absolute path of the checkout on the fleet VM                           |
-| `commit`   | Full object ID of `HEAD`; null when unborn or unknown                   |
-| `dirty`    | `changedFiles > 0`; absent when the count is unknown                    |
-| `source`   | `captain` (the crew plugin) or `gateway` (the Fleet API process itself) |
+| Field         | Meaning                                                                     |
+| ------------- | --------------------------------------------------------------------------- |
+| `worktree`    | Absolute path of the checkout on the fleet VM                               |
+| `commit`      | Full object ID of `HEAD`; null when unborn or unknown                       |
+| `dirty`       | `changedFiles > 0`; absent when the count is unknown                        |
+| `source`      | `captain` (the crew plugin) or `gateway` (the Fleet API process itself)     |
+| `fingerprint` | Crew members only: the [crew diff](#crew-diffs) `fingerprint` of this state |
 
 Without a captain report, the gateway's own reader below applies.
 Checkout Git status counts changed gitlinks and skips worktree dirt inside
@@ -413,7 +414,14 @@ and `pullRequest: null` has a settled lookup with no matching PR. A failed
 or incomplete refresh retains the last successful lookup result.
 
 A crew member's `git` also carries `fingerprint`, the checkout state its
-[diff](#crew-diffs) belongs to; the project checkout's does not.
+[diff](#crew-diffs) belongs to; the project checkout's does not. It is the
+diff's `fingerprint` for the same state in every mode, and the `ship` event
+carries each new value. The captain computes it in the poll that reads the
+rest of the crew member's Git state. That poll reads `origin/HEAD` with one
+`git for-each-ref`, which also names the base when the branch has no
+upstream, so the fingerprint costs one Git process for a branch with an
+upstream and none without. It also reads the size and modification time of
+the index and of each path status names.
 
 ### Crew diffs
 
@@ -484,14 +492,15 @@ untracked nested repository, with or without commits, is listed as a
 `submodule`: `added` and `untracked`, with zero line counts, no patch and no
 content. It is never indexed and Git never runs inside it, on every Git
 version. An untracked path that Git will not index, such as a file under
-`.GIT/`, is listed the same way, without `kind`.
+`.GIT/`, or an untracked file that the captain's user may not read, such as
+one with mode 000, is listed the same way, without `kind` or `size`.
 
 `path` is decoded as UTF-8, with U+FFFD for each byte that is not valid
 UTF-8. Such a file is still read, sized and fingerprinted by the bytes of
 its name. Two names that decode alike are listed as two entries, but the
 file route's `path` reaches only one of them: an entry with a Git diff
-before an untracked path outside Git's index (a nested repository or a
-file Git refused), then the first in byte order. So with a nested
+before an untracked path outside Git's index (a nested repository, a
+file Git refused or a file it could not read), then the first in byte order. So with a nested
 repository `n\xE8` and a file `n\xE9`, a request for `n\uFFFD` returns the
 file.
 

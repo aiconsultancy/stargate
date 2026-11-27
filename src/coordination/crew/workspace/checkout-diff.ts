@@ -5,13 +5,16 @@ import {
   type CheckoutDiff,
   type CheckoutDiffFile,
   type CheckoutDiffInput,
-  type DiffEntry,
-  DiffOutputParser,
-  type DiffPlan,
   type DiffSide,
   diffLimits,
   utf8Prefix,
 } from "../reporting/fleet-status";
+import {
+  type DiffEntry,
+  DiffOutputParser,
+  type DiffPlan,
+  type DiffSettle,
+} from "./diff-output";
 import {
   type CheckoutGit,
   type Git,
@@ -27,6 +30,7 @@ import {
   type IsolatedCheckout,
   type IsolatedStream,
   WorktreeChanged,
+  openable,
   readWorktree,
   worktreeSize,
 } from "./git-status";
@@ -154,6 +158,10 @@ function patchPage(entry: DiffEntry, offset: number, limit: number) {
   };
 }
 
+/** A list's patch for an entry: its first 64 KiB, if it has hunks. */
+const inlinePatch = (entry: DiffEntry) =>
+  entry.size > 0 ? patchPage(entry, 0, diffLimits.inlinePatch) : undefined;
+
 /** Byte order, as Git sorts paths. */
 const byPath = (entries: DiffEntry[]) =>
   entries
@@ -259,12 +267,39 @@ class IntentFailed extends Error {
   }
 }
 
+/** Untracked files Git can read, in batches like the fingerprint's. */
+async function readable(directory: string, untracked: Snapshot["untracked"]) {
+  const files = [...untracked].flatMap(([bytes, { nested }]) =>
+    nested ? [] : [bytes],
+  );
+
+  const kept = new Set<string>();
+
+  for (let start = 0; start < files.length; start += 64) {
+    const batch = files.slice(start, start + 64);
+
+    const open = await Promise.all(
+      batch.map((bytes) => openable(directory, Buffer.from(bytes, "latin1"))),
+    );
+
+    for (const [index, bytes] of batch.entries()) {
+      if (open[index]) {
+        kept.add(bytes);
+      }
+    }
+  }
+
+  return kept;
+}
+
 /**
  * Index a copy of the checkout's index with untracked files as intent-to-add.
  * A nested repository never reaches Git: some versions index it as a gitlink
- * that `git diff` then cannot read, and Git never runs inside it.
+ * that `git diff` then cannot read, and Git never runs inside it. Nor does
+ * a file this user may not open, whose read would fail the whole diff.
  */
 async function intentIndex(
+  directory: string,
   checkout: IsolatedCheckout,
   stream: IsolatedStream,
   untracked: Snapshot["untracked"],
@@ -310,9 +345,7 @@ async function intentIndex(
     GIT_ALTERNATE_OBJECT_DIRECTORIES: checkout.objects,
   };
 
-  const files = new Set(
-    [...untracked].flatMap(([bytes, { nested }]) => (nested ? [] : [bytes])),
-  );
+  const files = await readable(directory, untracked);
 
   const unindexed = (indexed: Set<string>) => ({
     env,
@@ -391,9 +424,9 @@ async function intentIndex(
 }
 
 /**
- * Untracked paths outside Git's index: nested repositories, and files Git
- * refused. Each is listed all the same, with neither patch nor content:
- * nothing status shows is left out (SUB-70).
+ * Untracked paths outside Git's index: nested repositories, files Git
+ * refused and files it could not read. Each is listed all the same, with
+ * neither patch nor content: nothing status shows is left out (SUB-70).
  */
 function refused(
   untracked: Snapshot["untracked"],
@@ -434,11 +467,19 @@ type Pass = {
   base: Origin | null;
   stream: IsolatedStream;
   worktree: boolean;
+  /** True for a Git entry whose hunks Git stopped before reading. */
+  unread: (index: number) => boolean;
+};
+
+/** Hunk windows to keep, and optionally when Git may stop early. */
+type PatchReading = {
+  plan: (entries: PassEntry[]) => DiffPlan;
+  settle?: DiffSettle;
 };
 
 /**
- * Run Git's diff once for the mode, then build the answer from it. With a
- * planner, patches are read too, keeping the windows it plans.
+ * Run Git's diff once for the mode, then build the answer from it. With
+ * `reading`, patches are read too, keeping the windows it plans.
  */
 async function diffPass<T>(
   git: Git,
@@ -446,9 +487,9 @@ async function diffPass<T>(
   mode: CheckoutDiffInput["mode"],
   state: Snapshot,
   build: (pass: Pass) => Promise<T>,
-  planner?: (entries: PassEntry[]) => DiffPlan,
+  reading?: PatchReading,
 ) {
-  const patches = planner !== undefined;
+  const patches = reading !== undefined;
   const head = state.head.oid;
   let base: Origin | null = null;
 
@@ -470,7 +511,7 @@ async function diffPass<T>(
     const old = mode === "working" ? (head ?? empty) : (base?.commit ?? empty);
 
     const { env, unindexed } = worktree
-      ? await intentIndex(checkout, stream, state.untracked)
+      ? await intentIndex(directory, checkout, stream, state.untracked)
       : { env: {}, unindexed: [] };
 
     // Git's entries, then the untracked paths outside its index.
@@ -482,13 +523,14 @@ async function diffPass<T>(
     // Only Git's own entries have hunks to plan.
     const parser = new DiffOutputParser(
       patches,
-      planner &&
+      reading &&
         ((entries) =>
           new Map(
-            [...planner(all(entries))].filter(
+            [...reading.plan(all(entries))].filter(
               ([index]) => index < entries.length,
             ),
           )),
+      reading?.settle,
     );
 
     const diff = checkout.command([
@@ -521,14 +563,16 @@ async function diffPass<T>(
     }
 
     parser.end();
+    const { read, entries } = parser;
 
     return build({
       directory,
-      entries: all(parser.entries),
+      entries: all(entries),
       snapshot: state,
       base,
       stream,
       worktree,
+      unread: (index) => index >= read && index < entries.length,
     });
   });
 }
@@ -550,8 +594,12 @@ async function listPage(
       continue;
     }
 
-    const patch =
-      entry.size > 0 ? patchPage(entry, 0, diffLimits.inlinePatch) : undefined;
+    // Git stopped before this file: the next page starts with it.
+    if (pass.unread(index)) {
+      break;
+    }
+
+    const patch = inlinePatch(entry);
 
     const bytes = Buffer.byteLength(patch?.patch ?? "");
 
@@ -698,6 +746,9 @@ function computeDiff(
 
   if (request.kind === "list") {
     const window = { from: 0, to: diffLimits.inlinePatch + 4 };
+    let first: number | undefined;
+    let firstRead = false;
+    let used = 0;
 
     return diffPass(
       git,
@@ -708,12 +759,29 @@ function computeDiff(
         request.start > 0 && request.start >= pass.entries.length
           ? absent
           : listPage(pass, request.start, byPath(pass.entries)),
-      (entries) =>
-        new Map(
-          byPath(entries)
-            .slice(request.start, request.start + diffLimits.files)
-            .map((index) => [index, window]),
-        ),
+      {
+        plan: (entries) => {
+          const page = byPath(entries).slice(
+            request.start,
+            request.start + diffLimits.files,
+          );
+
+          first = page.find((index) => entries[index]?.unindexed !== true);
+
+          return new Map(page.map((index) => [index, window]));
+        },
+        /*
+         * Git writes files in byte order, the page's order. Once the page's
+         * first file is read and the patches read pass its budget, no later
+         * file is on this page: Git stops, and the next page starts there.
+         */
+        settle: (index, entry) => {
+          firstRead ||= index === first;
+          used += Buffer.byteLength(inlinePatch(entry)?.patch ?? "");
+
+          return !firstRead || used <= diffLimits.listPatches;
+        },
+      },
     );
   }
 
@@ -762,22 +830,24 @@ function computeDiff(
                 },
         };
       },
-      (entries) => {
-        target = find(entries);
+      {
+        plan: (entries) => {
+          target = find(entries);
 
-        return new Map(
-          target < 0
-            ? []
-            : [
-                [
-                  target,
-                  {
-                    from: request.offset,
-                    to: request.offset + diffLimits.page + 4,
-                  },
+          return new Map(
+            target < 0
+              ? []
+              : [
+                  [
+                    target,
+                    {
+                      from: request.offset,
+                      to: request.offset + diffLimits.page + 4,
+                    },
+                  ],
                 ],
-              ],
-        );
+          );
+        },
       },
     );
   }

@@ -1,6 +1,7 @@
 import { afterAll, expect, spyOn, test } from "bun:test";
 import {
   appendFile,
+  chmod,
   mkdir,
   mkdtemp,
   open,
@@ -17,13 +18,16 @@ import { join } from "node:path";
 import {
   type CheckoutDiff,
   type CheckoutDiffInput,
-  DiffOutputParser,
   diffLimits,
   statusEntries,
   utf8Prefix,
 } from "../src/coordination/crew/reporting/fleet-status";
 import { createCheckoutDiffReader } from "../src/coordination/crew/workspace/checkout-diff";
-import { createCrewGitReader } from "../src/coordination/crew/workspace/git-state";
+import { DiffOutputParser } from "../src/coordination/crew/workspace/diff-output";
+import {
+  type CheckoutGit,
+  createCrewGitReader,
+} from "../src/coordination/crew/workspace/git-state";
 import {
   spawnGit,
   streamGit,
@@ -371,31 +375,61 @@ test("committed and working modes split the branch at HEAD", async () => {
   expect(bytesOf(await content(directory, "file.txt")).toString()).toBe("c\n");
 });
 
-test("the fingerprint moves with HEAD, the index, origin and any changed file", async () => {
+/** Each mode's fingerprint and crew Git state's, which must be one value. */
+async function fingerprints(directory: string) {
+  const modes = await Promise.all(
+    (["branch", "committed", "working"] as const).map(
+      async (mode) => (await listed(directory, { mode })).fingerprint,
+    ),
+  );
+
+  // A new reader each time: a poll's answer is cached for 15 seconds.
+  const state = await createCrewGitReader(checkoutGit)(directory, signal);
+
+  return [...modes, state?.fingerprint];
+}
+
+test("the fingerprint is one value for crew Git state and every mode, and moves with each change", async () => {
   const directory = await checkout({ "file.txt": "a\n" });
   await mkdir(join(directory, "dir"));
   await writeFile(join(directory, "dir", "untracked"), "1\n");
   const seen = new Set<string>();
 
   const next = async () => {
-    const { fingerprint } = await listed(directory);
-    expect(seen.has(fingerprint)).toBe(false);
-    seen.add(fingerprint);
+    const [fingerprint, ...rest] = await fingerprints(directory);
+    expect(rest).toEqual([fingerprint, fingerprint, fingerprint]);
+    expect(seen.has(fingerprint ?? "")).toBe(false);
+    seen.add(fingerprint ?? "");
 
-    return fingerprint;
+    return fingerprint ?? "";
   };
 
   const first = await next();
-  expect((await listed(directory)).fingerprint).toBe(first);
+  expect(await fingerprints(directory)).toEqual(Array(4).fill(first));
 
-  // The same size: only the modification time differs.
-  await writeFile(join(directory, "dir", "untracked"), "2\n");
+  // A tracked file's size, then only its modification time.
+  await writeFile(join(directory, "file.txt"), "ab\n");
+  await next();
+  await writeFile(join(directory, "file.txt"), "ba\n");
+  await utimes(join(directory, "file.txt"), 1, 1);
+  await next();
+
+  // An untracked file's size, then only its modification time.
+  await writeFile(join(directory, "dir", "untracked"), "12\n");
+  await next();
+  await writeFile(join(directory, "dir", "untracked"), "21\n");
   await utimes(join(directory, "dir", "untracked"), 1, 1);
   await next();
+
+  // The index, HEAD's commit, then HEAD's branch at the same commit.
   await git(directory, "add", "dir/untracked");
   await next();
   await git(directory, "commit", "-qm", "c");
   await next();
+  await git(directory, "checkout", "-q", "-b", "other");
+  await next();
+
+  // The origin/HEAD commit.
   await git(directory, "update-ref", "refs/remotes/origin/main", "HEAD");
   await next();
 
@@ -404,6 +438,60 @@ test("the fingerprint moves with HEAD, the index, origin and any changed file", 
     kind: "stale",
     fingerprint: [...seen].at(-1) ?? "",
   });
+});
+
+test("a crew Git poll reads origin/HEAD once, for its base and the fingerprint", async () => {
+  const directory = await checkout({ "file.txt": "a\n" });
+  const main = await git(directory, "rev-parse", "origin/main");
+  const commands: string[] = [];
+
+  const counted: CheckoutGit = (path, reading) => {
+    const opened = checkoutGit(path, reading);
+
+    return {
+      ...opened,
+      command: (args) => {
+        commands.push(args[0] ?? "");
+
+        return opened.command(args);
+      },
+    };
+  };
+
+  // Without an upstream, the base is origin/HEAD's branch.
+  expect(await createCrewGitReader(counted)(directory, signal)).toMatchObject({
+    base: "origin/main",
+    ahead: 0,
+    behind: 0,
+  });
+  expect(commands).toEqual([
+    "rev-parse",
+    "rev-parse",
+    "for-each-ref",
+    "remote",
+    "rev-list",
+  ]);
+
+  // An annotated tag, and a tag of a tag, peel to the commit.
+  await git(directory, "tag", "-a", "-m", "one", "one", "origin/main");
+  await git(directory, "tag", "-a", "-m", "two", "two", "one");
+
+  for (const tag of ["one", "two"]) {
+    await git(
+      directory,
+      "update-ref",
+      "--no-deref",
+      "refs/remotes/origin/HEAD",
+      `refs/tags/${tag}`,
+    );
+
+    const [fingerprint, ...rest] = await fingerprints(directory);
+    expect(rest).toEqual([fingerprint, fingerprint, fingerprint]);
+    expect((await listed(directory)).base).toEqual({
+      ref: "origin/HEAD",
+      commit: main,
+    });
+  }
 });
 
 test("a checkout that keeps changing is retried once, then marked unstable or stale", async () => {
@@ -639,6 +727,77 @@ test("an untracked path Git will not index is listed without bytes; the rest kee
   expect(bytesOf(await content(directory, "a*")).toString()).toBe("star\n");
 });
 
+// Root reads a file of any mode.
+test.skipIf(process.getuid?.() === 0)(
+  "an untracked file Git cannot read is listed without bytes; the rest keep patches",
+  async () => {
+    const directory = await checkout();
+    await writeFile(join(directory, "locked"), "secret\n", { mode: 0o000 });
+    await writeFile(join(directory, "other"), "ok\n");
+    await symlink("locked", join(directory, "link"));
+
+    for (const mode of ["branch", "working"] as const) {
+      const result = await listed(directory, { mode });
+
+      expect(result.files).toEqual([
+        {
+          path: "link",
+          previousPath: null,
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          untracked: true,
+          kind: "symlink",
+          size: 6,
+          patch: "@@ -0,0 +1 @@\n+locked\n\\ No newline at end of file\n",
+        },
+        {
+          path: "locked",
+          previousPath: null,
+          status: "added",
+          additions: 0,
+          deletions: 0,
+          untracked: true,
+          patch: null,
+        },
+        {
+          path: "other",
+          previousPath: null,
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          untracked: true,
+          size: 3,
+          patch: "@@ -0,0 +1 @@\n+ok\n",
+        },
+      ]);
+
+      const rest = { mode, at: result.fingerprint };
+
+      expect(
+        await readDiff(
+          directory,
+          input({ kind: "patch", path: "locked", offset: 0 }, rest),
+          signal,
+        ),
+      ).toMatchObject({
+        kind: "patch",
+        file: { path: "locked", patch: null, untracked: true },
+      });
+      expect((await content(directory, "locked", "new", 0, rest)).kind).toBe(
+        "absent",
+      );
+    }
+
+    // Readable again, it has a patch like any other file.
+    await chmod(join(directory, "locked"), 0o644);
+    expect((await listed(directory)).files[1]).toMatchObject({
+      path: "locked",
+      patch: "@@ -0,0 +1 @@\n+secret\n",
+    });
+  },
+);
+
 test("binary and empty files answer with bytes; each side exists only where the file does", async () => {
   const directory = await checkout({ "old.bin": "\0old" });
   await unlink(join(directory, "old.bin"));
@@ -817,6 +976,74 @@ test("a list page ends before the file that would pass 4 MiB, and at 1,000 files
   expect(last.kind === "list" && last.files.map(({ path }) => path)).toEqual([
     "f1000",
   ]);
+});
+
+test("a list keeps patch bytes only up to its 4 MiB page, then stops Git", async () => {
+  const directory = await checkout();
+  const big = `${"y".repeat(99)}\n`.repeat(700);
+
+  const names = Array.from(
+    { length: 150 },
+    (_, index) => `big-${String(index).padStart(3, "0")}`,
+  );
+
+  for (const name of names) {
+    await writeFile(join(directory, name), big);
+  }
+
+  const parsers: DiffOutputParser[] = [];
+  const { feed } = DiffOutputParser.prototype;
+
+  const spy = spyOn(DiffOutputParser.prototype, "feed").mockImplementation(
+    function (this: DiffOutputParser, chunk: Buffer) {
+      if (!parsers.includes(this)) {
+        parsers.push(this);
+      }
+
+      return feed.call(this, chunk);
+    },
+  );
+
+  try {
+    const perPage = Math.floor(diffLimits.listPatches / diffLimits.inlinePatch);
+
+    for (const start of [0, perPage]) {
+      parsers.length = 0;
+      const page = await list(directory, {}, start);
+
+      if (page.kind !== "list") {
+        throw new Error(page.kind);
+      }
+
+      // The pages are as before: whole files, each with its first 64 KiB.
+      expect(page.files.map(({ path }) => path)).toEqual(
+        names.slice(start, start + perPage),
+      );
+      expect(page.files.every(({ patchNext }) => patchNext !== undefined)).toBe(
+        true,
+      );
+
+      expect(parsers.length).toBe(1);
+      const [parser] = parsers;
+
+      const kept =
+        parser?.entries.reduce((sum, entry) => sum + entry.keptBytes, 0) ?? 0;
+
+      // About one page, not 64 KiB for each of the 150 files.
+      expect(kept).toBeGreaterThan(
+        diffLimits.listPatches - diffLimits.inlinePatch,
+      );
+      expect(kept).toBeLessThanOrEqual(
+        diffLimits.listPatches + 2 * diffLimits.inlinePatch,
+      );
+
+      // Git stopped one file past the page; later files were never read.
+      expect(parser?.done).toBe(true);
+      expect(parser?.read).toBe(start + perPage + 1);
+    }
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test("an unborn branch has no head; without origin there is no base", async () => {

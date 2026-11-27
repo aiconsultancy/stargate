@@ -107,7 +107,10 @@ private network. Existing HTTPS and loopback origins remain supported.
   its `/file` route are on whenever `api` is configured, by the owner's
   decision, an exception to the flag rule for large features. They serve
   crew worktree patches and file bytes unredacted; the gateway feature
-  `api.crewDiffs` reports them. A crew member's `git` gains `fingerprint`.
+  `api.crewDiffs` reports them. A crew member's `git` gains `fingerprint`,
+  the diff's fingerprint for the same state in every mode, which the `ship`
+  event carries as it changes
+  ([docs](docs/api.md#crew-diffs)).
 
 - Unmasked Fleet API crew text: none. By owner decision this behaviour change
   ships without a flag, an exception to the flag rule for large features.
