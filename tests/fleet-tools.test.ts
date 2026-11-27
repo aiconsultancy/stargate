@@ -242,12 +242,14 @@ const runningJob: Job = {
 
 test("the fleet authoriser binds a peer DM to a running chat job's native input", async () => {
   const checks: unknown[] = [];
+  let normalise: ((raw: unknown) => unknown) | undefined;
 
   const authorize = fleetAuthorizer(
     { permissionCandidates: (key) => (key === "irc-key" ? [runningJob] : []) },
     {
       async toolBelongsToInput(...args) {
         checks.push(args);
+        normalise = args[4]?.normaliseInput;
 
         return true;
       },
@@ -275,8 +277,15 @@ test("the fleet authoriser binds a peer DM to a running chat job's native input"
       id: "tool-call",
       tool: "stargate_dm",
       input: peerRequest.input,
+      normaliseInput: expect.any(Function),
     },
   ]);
+
+  // The native call omits the defaulted delivery; the decoder restores it and
+  // Refuses excess properties, as the peer DM tool does.
+  const raw = { op: "send", to: target.id, text: "Hello", via: "ship" };
+  expect(normalise?.(raw)).toEqual(peerRequest.input);
+  expect(() => normalise?.({ ...raw, project: "stargate" })).toThrow();
 });
 
 test("the fleet authoriser refuses a turn without a running chat job with an actionable reason", async () => {
