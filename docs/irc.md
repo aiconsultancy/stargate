@@ -915,9 +915,11 @@ requests in the same thread, an ordinary notice and the final replies.
 ### Agent dispatch tags
 
 With [agent dispatch](agent-dispatch.md) enabled, the rear admiral's gateway
-writes `+stargate/dispatch=<kind>,<value>` requests to captains in the fleet
-command channel, and captains answer with a `NOTICE` that replies to the
-offer. Only a request from the captain's rear admiral, an enrolled fleet
+writes `+stargate/dispatch=<kind>,<value>` requests to captains. Ready for
+agents offers and legacy assignment notices use the fleet command channel.
+Captains answer an offer with a `NOTICE` that replies to it. Capacity-aware
+assignment requests use the captain’s ship channel, with a passive capacity
+probe before the request. Only a request from the captain's rear admiral, an enrolled fleet
 agent that is a `fleetControl.targets` entry with `role: "rear_admiral"`, is
 never dropped by `access.peerTurnsPerHour` (it still counts towards it). A
 request `PRIVMSG` carries only fixed text built from the marker; the

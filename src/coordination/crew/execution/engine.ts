@@ -570,14 +570,47 @@ export class CrewEngine {
   }
 
   private freeForDispatch(id: string): boolean {
-    const active = this.state.activeTask(id);
-
     return (
       !this.drain() &&
       !this.state.controlled(id) &&
-      (!active || (active.status === "completed" && !active.notifying)) &&
       this.state.queuedTasks(id).length === 0
     );
+  }
+
+  private async priorAssignmentSettled(
+    task: CrewTask | null,
+    peer: Peer,
+    member: CrewMember,
+    session: CrewSession | undefined,
+    signal: AbortSignal,
+  ) {
+    if (!task || task.status === "completed") {
+      return !task?.notifying;
+    }
+
+    if (
+      task.status !== "running" ||
+      task.notifying ||
+      task.workerSessionID !== peer.sessionID
+    ) {
+      return false;
+    }
+
+    if (member.backend) {
+      return this.pi.hasCommittedResult(task, member, signal);
+    }
+
+    if (!this.connectResults || session?.outcome !== "succeeded") {
+      return false;
+    }
+
+    await this.readSuccessfulTask(
+      task,
+      await this.connectResults(session, signal),
+      signal,
+    );
+
+    return true;
   }
 
   /** A passive capacity check using the same quota policy as an actual start. */
@@ -594,6 +627,8 @@ export class CrewEngine {
       }
 
       try {
+        const task = this.state.activeTask(member.id);
+
         const session = member.backend
           ? undefined
           : await this.sessions.get({ sessionID: peer.sessionID }, { signal });
@@ -604,11 +639,25 @@ export class CrewEngine {
 
         if (
           !(await this.usageBlock(member.id, session?.model)) &&
-          (await this.idle(peer, signal))
+          (await this.idle(peer, signal, true)) &&
+          (await this.priorAssignmentSettled(
+            task,
+            peer,
+            member,
+            session,
+            signal,
+          ))
         ) {
           signal.throwIfAborted();
+          const current = this.state.activeTask(member.id);
 
-          if (this.freeForDispatch(member.id)) {
+          if (
+            this.freeForDispatch(member.id) &&
+            current?.id === task?.id &&
+            !current?.notifying &&
+            (current?.status === task?.status ||
+              current?.status === "completed")
+          ) {
             return true;
           }
         }
@@ -3481,13 +3530,18 @@ export class CrewEngine {
     }
   }
 
-  private async idle(peer: Peer, signal: AbortSignal): Promise<boolean> {
+  private async idle(
+    peer: Peer,
+    signal: AbortSignal,
+    passive = false,
+  ): Promise<boolean> {
     if (this.member(peer.crewID).backend) {
       return this.pi.idle(
         peer,
         this.member(peer.crewID),
         this.options.worktrees[peer.crewID] ?? "",
         signal,
+        passive,
       );
     }
 
@@ -3972,6 +4026,19 @@ export class CrewEngine {
     }
   }
 
+  private readSuccessfulTask(
+    task: CrewTask,
+    api: ResultAPI,
+    signal: AbortSignal,
+  ) {
+    return readTaskResult(
+      api,
+      task,
+      signal,
+      this.member(task.crewID).agent ?? task.crewID,
+    );
+  }
+
   private async reconcileResult(
     task: CrewTask,
     caller: CrewCaller,
@@ -4042,12 +4109,7 @@ export class CrewEngine {
       const connection: Promise<ResultAPI> = connect(session, signal);
       const api = await connection;
 
-      const result = await readTaskResult(
-        api,
-        task,
-        signal,
-        this.member(task.crewID).agent ?? task.crewID,
-      );
+      const result = await this.readSuccessfulTask(task, api, signal);
 
       signal.throwIfAborted();
 

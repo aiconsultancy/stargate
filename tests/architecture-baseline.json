@@ -11,7 +11,7 @@
     "src/runtime.ts"
   ],
   "sourceFiles": 350,
-  "sourceEdges": 1448,
+  "sourceEdges": 1449,
   "rootFiles": ["src/config.ts", "src/main.ts"],
   "largestCycle": 0,
   "cycleComponents": [],

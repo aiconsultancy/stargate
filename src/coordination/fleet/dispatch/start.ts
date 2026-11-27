@@ -89,7 +89,6 @@ export function startAgentDispatch(
   const assignmentRequests = requestConfig
     ? new IrcAssignmentRequests(
         client,
-        target.channel,
         requestConfig.shipChannels,
         host.allowed,
       )
@@ -104,6 +103,7 @@ export function startAgentDispatch(
           log,
           reminderMs: requestConfig.reminderSeconds * 1000,
           answerMs: dispatch.answerTimeoutSeconds * 1000,
+          readyOffers: dispatch.readyOffers ?? true,
         })
       : requestConfig === null
         ? null
@@ -117,6 +117,7 @@ export function startAgentDispatch(
       decisionOutcomeDms: dispatch.decisionOutcomeDms ?? false,
       issueDispatch: dispatch.enabled,
       readyOffers: dispatch.readyOffers ?? true,
+      recheckIdentity: "socketPath" in dispatch.api,
       retryLadderMs: dispatch.retryLadderSeconds.map(
         (seconds) => seconds * 1000,
       ),

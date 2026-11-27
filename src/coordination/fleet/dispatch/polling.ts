@@ -82,6 +82,7 @@ export type DispatchSettings = {
   decisionOutcomeDms?: boolean;
   issueDispatch?: boolean;
   readyOffers?: boolean;
+  recheckIdentity?: boolean;
   /** Waits between rounds; one more round than entries, then give up. */
   retryLadderMs: readonly number[];
   /** IRC (or other transport) account for an API agent name. */
@@ -162,6 +163,7 @@ export class DispatchPolling {
    * is that fleet's rear admiral. Nothing is written to the API before.
    */
   private verifiedFleet: string | undefined;
+  private verifiedUser: string | undefined;
   private readonly warned = new Set<string>();
   private readonly options: PollingPort["options"];
   private readonly now: PollingPort["now"];
@@ -243,7 +245,7 @@ export class DispatchPolling {
       return;
     }
 
-    if (!(await this.checkIdentity(roster, signal))) {
+    if (!(await this.checkIdentity(roster.id, signal))) {
       return;
     }
 
@@ -266,7 +268,7 @@ export class DispatchPolling {
                   captain.registeredAccount === captain.account)),
           );
 
-          await this.options.assignedWork?.poll(captains, signal);
+          this.options.assignedWork?.start(captains, signal);
         }
 
         this.cleared("assigned");
@@ -443,9 +445,9 @@ export class DispatchPolling {
    * Assignments and comments must be the rear admiral's own, in this fleet:
    * the identity's fleet ID must be the roster's, never absent.
    */
-  private async checkIdentity(roster: FleetRoster, signal: AbortSignal) {
-    if (this.verifiedFleet !== undefined) {
-      return this.verifiedFleet === roster.id;
+  private async checkIdentity(fleet: string, signal: AbortSignal) {
+    if (this.verifiedFleet !== undefined && !this.settings.recheckIdentity) {
+      return this.verifiedFleet === fleet;
     }
 
     try {
@@ -454,7 +456,8 @@ export class DispatchPolling {
       if (
         me.kind !== "agent" ||
         me.agentRank !== "rearAdmiral" ||
-        me.fleetId !== roster.id
+        me.fleetId !== fleet ||
+        (this.verifiedUser !== undefined && me.userId !== this.verifiedUser)
       ) {
         this.warnOnce(
           "identity",
@@ -464,7 +467,8 @@ export class DispatchPolling {
         return false;
       }
 
-      this.verifiedFleet = roster.id;
+      this.verifiedFleet = fleet;
+      this.verifiedUser = me.userId;
       this.cleared("identity");
 
       return true;
@@ -487,7 +491,7 @@ export class DispatchPolling {
    */
   public async identityConfirmed(signal: AbortSignal) {
     if (this.verifiedFleet !== undefined) {
-      return true;
+      return this.checkIdentity(this.verifiedFleet, signal);
     }
 
     let roster: FleetRoster;
@@ -505,7 +509,7 @@ export class DispatchPolling {
       return false;
     }
 
-    return this.checkIdentity(roster, signal);
+    return this.checkIdentity(roster.id, signal);
   }
 
   /**

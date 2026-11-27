@@ -845,6 +845,7 @@ export async function tempDirectory() {
 }
 
 export type FixtureOptions = {
+  recheckIdentity?: boolean;
   ladder?: number[];
   decisionOutcomeDms?: boolean;
   enrolled?: string[];
@@ -883,13 +884,19 @@ export async function fixture(options: FixtureOptions = {}) {
       })
     : api;
 
-  const open = (ledger = new DispatchLedger(path)) =>
+  const open = (
+    ledger = new DispatchLedger(path),
+    readyOffers = true,
+    assignedWork?: AgentDispatcherOptions["assignedWork"],
+  ) =>
     new AgentDispatcher({
       settings: {
         fleet: "example-fleet",
         pollIntervalMs: 2 * MINUTE,
         answerTimeoutMs: 5 * MINUTE,
         decisionOutcomeDms: options.decisionOutcomeDms ?? false,
+        readyOffers,
+        recheckIdentity: options.recheckIdentity ?? false,
         retryLadderMs: options.ladder ?? [HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR],
         captainAccount: (name) => `example-${name}`,
         enrolled: (account) => enrolled.has(account),
@@ -897,6 +904,7 @@ export async function fixture(options: FixtureOptions = {}) {
       api: client,
       messenger: chat,
       ledger,
+      ...(assignedWork && { assignedWork }),
       now: clock.now,
       log: options.log ?? silent,
       ...(options.wait ? { wait: options.wait } : {}),

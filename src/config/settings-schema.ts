@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { isLoopbackHost } from "../lib/loopback";
+import { fold } from "../transports/irc/protocol";
 import {
   Effect,
   RegExp as EffectRegExp,
@@ -353,3 +354,49 @@ export const agentDispatchApiSchema = Schema.Union([
     ).pipe(settingsDefault({})),
   }),
 ]);
+
+/** The local signing socket must belong to the rear admiral running dispatch. */
+export function dispatchTargetIssue(
+  target: string | { registration: { id: string; account: string } },
+  api: typeof agentDispatchApiSchema.Type,
+  officers: readonly {
+    rank: string;
+    socketPath?: string | undefined;
+    registration?: string | undefined;
+    ircNick?: string | undefined;
+  }[],
+): { code: "custom"; path: string[]; message: string } | undefined {
+  if (typeof target === "string") {
+    return {
+      code: "custom",
+      path: ["agentDispatch", "messaging"],
+      message: target,
+    };
+  }
+
+  if (!("socketPath" in api)) {
+    return;
+  }
+
+  const rear = target.registration;
+
+  const owned = officers.some(
+    (officer) =>
+      officer.rank === "rearAdmiral" &&
+      officer.socketPath === api.socketPath &&
+      (officer.registration
+        ? officer.registration === rear.id
+        : fold(officer.ircNick ?? "") === fold(rear.account)),
+  );
+
+  if (!owned) {
+    return {
+      code: "custom",
+      path: ["agentDispatch", "api", "socketPath"],
+      message:
+        "Use the enrolled rear admiral's signing socket from subspaceAgents",
+    };
+  }
+
+  return undefined;
+}

@@ -1,9 +1,20 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import pino from "pino";
 import { AssignedWork } from "../src/coordination/fleet/dispatch/assigned-work";
 import type { DispatchIssue } from "../src/coordination/fleet/dispatch/api";
 import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
-import { CAPTAIN_A, CAPTAIN_B, Clock, HOUR } from "./agent-dispatch-fixture";
+import {
+  CAPTAIN_A,
+  CAPTAIN_B,
+  Clock,
+  HOUR,
+  MINUTE,
+  answer,
+  fixture,
+  removeDirectories,
+} from "./agent-dispatch-fixture";
+
+afterEach(removeDirectories);
 
 const captain = { userId: CAPTAIN_A, account: "captain-a", name: "captain-a" };
 const signal = new AbortController().signal;
@@ -151,6 +162,115 @@ test("an issue reassigned during the capacity probe is not sent to its former ca
       ledger.lastAssignmentRequest(issue.id, captain.userId),
     ).toBeUndefined();
     expect(asked).toBe(false);
+  } finally {
+    ledger.close();
+  }
+});
+
+test("a stalled capacity check leaves other captains and Ready for agents answers free to proceed", async () => {
+  const f = await fixture();
+  f.api.add({
+    id: "slow",
+    identifier: "PRJ-1",
+    assigneeId: CAPTAIN_A,
+    stateType: "backlog",
+  });
+  f.api.add({
+    id: "ready",
+    identifier: "PRJ-2",
+    assigneeId: CAPTAIN_B,
+    stateType: "unstarted",
+  });
+  f.api.add({ id: "offer", identifier: "PRJ-3", readyForAgents: true });
+  const slow = Promise.withResolvers<boolean>();
+  const sent = Promise.withResolvers<string>();
+
+  const work = new AssignedWork({
+    api: f.api,
+    ledger: f.ledger,
+    reminderMs: 4 * HOUR,
+    answerMs: 5 * MINUTE,
+    requests: {
+      async hasCapacity(target) {
+        return target.userId === CAPTAIN_A ? slow.promise : true;
+      },
+      async ask(_target, ticket) {
+        sent.resolve(ticket.identifier);
+
+        return true;
+      },
+    },
+    log: pino({ level: "silent" }),
+    now: f.clock.now,
+  });
+
+  const dispatcher = f.open(f.ledger, true, work);
+
+  try {
+    await dispatcher.step(signal);
+    expect(await sent.promise).toBe("PRJ-2");
+    await answer({ ...f, dispatcher }, "accept");
+    expect(f.api.issues.get("offer")?.assigneeId).toBe(CAPTAIN_A);
+  } finally {
+    slow.resolve(false);
+    await work.drain();
+    f.ledger.close();
+  }
+});
+
+test("a new assignment comes before a reminder even if the API lists the reminder first", async () => {
+  const clock = new Clock();
+  const ledger = new DispatchLedger(":memory:");
+  const old = pending();
+  const fresh = pending({ id: "issue-2", identifier: "EX-2" });
+  const oversized = pending({ id: "issue-3", identifier: "EX-3" });
+  const asked: string[] = [];
+  ledger.recordAssignmentRequest(
+    old.id,
+    captain.userId,
+    old.identifier,
+    clock.now() - 5 * HOUR,
+  );
+
+  const work = new AssignedWork({
+    api: {
+      async assignedIssues() {
+        return { items: [old, oversized, fresh], next: undefined };
+      },
+      async issue(id) {
+        return [old, oversized, fresh].find((candidate) => candidate.id === id);
+      },
+    },
+    ledger,
+    reminderMs: 4 * HOUR,
+    answerMs: 5 * MINUTE,
+    requests: {
+      async hasCapacity() {
+        return true;
+      },
+      async ask(_target, ticket) {
+        if (ticket.id === oversized.id) {
+          return "skip";
+        }
+
+        asked.push(ticket.identifier);
+
+        return true;
+      },
+    },
+    log: pino({ level: "silent" }),
+    now: clock.now,
+  });
+
+  try {
+    await work.poll([captain], signal);
+    expect(asked).toEqual(["EX-2"]);
+    expect(
+      ledger.lastAssignmentRequest(oversized.id, captain.userId),
+    ).toBeUndefined();
+    clock.advance(6 * MINUTE);
+    await work.poll([captain], signal);
+    expect(asked).toEqual(["EX-2", "EX-1"]);
   } finally {
     ledger.close();
   }

@@ -383,6 +383,49 @@ test("fixture evidence: a restart mid-offer keeps waiting for the same offer", a
   expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_A);
 });
 
+test("assigned-only mode suspends existing Ready for agents timers and answers", async () => {
+  const f = await fixture();
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  f.api.add({ id: "i2", identifier: "PRJ-2", readyForAgents: true });
+  f.ledger.save({
+    issue: "i2",
+    identifier: "PRJ-2",
+    title: "Fixture issue",
+    state: "clearing",
+    round: 0,
+    start: 0,
+    order: [],
+    position: 0,
+    updatedAt: f.clock.now(),
+  });
+  const offer = f.chat.lastOffer();
+
+  const oldAnswer = {
+    account: offer.account,
+    offerID: offer.offerID,
+    answer: "accept" as const,
+    replyTo: offer.messageID,
+    at: f.clock.now(),
+  };
+
+  f.ledger.close();
+  const ledger = new DispatchLedger(f.path);
+  const restarted = f.open(ledger, false);
+
+  try {
+    await restarted.answer(oldAnswer, signal);
+    f.clock.advance(10 * MINUTE);
+    await restarted.step(signal);
+    expect(f.chat.transcript()).toEqual(["offer PRJ-1 -> example-captain-a"]);
+    expect(f.api.edits).toEqual([]);
+    expect(ledger.tracked("i2")?.state).toBe("clearing");
+    expect(f.api.issues.get("i2")?.readyForAgents).toBe(true);
+  } finally {
+    ledger.close();
+  }
+});
+
 test("a restart after a deadline passed moves on to the next captain", async () => {
   const f = await fixture();
   f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
@@ -770,6 +813,23 @@ test("an answer after a restart writes nothing until this process confirms its A
   expect(f.api.edits).toHaveLength(1);
   expect(f.chat.statuses()).toEqual(["accepted"]);
   ledger.close();
+});
+
+test("a signing proxy that changes identity cannot resume a pending assignment", async () => {
+  const f = await fixture({ recheckIdentity: true });
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  const enrolled = f.api.identity;
+
+  f.api.identity = { ...enrolled, userId: "different-rear-admiral" };
+  await accept(f, f.dispatcher);
+  expect(f.api.edits).toEqual([]);
+  expect(f.ledger.tracked("i1")).toMatchObject({ state: "accepting" });
+
+  f.api.identity = enrolled;
+  f.clock.advance(2 * MINUTE);
+  await f.dispatcher.step(signal);
+  expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_A);
 });
 
 test("an answer before the first poll confirms the identity, then assigns", async () => {

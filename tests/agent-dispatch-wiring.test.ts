@@ -153,6 +153,31 @@ test("configuration: absent or minimal agentDispatch is off, with the agreed def
   );
 });
 
+test("configuration: signed dispatch requires this gateway's enrolled rear admiral socket", () => {
+  const socketPath = "/run/example/rear-admiral/api.sock";
+  const agentDispatch = { ...dispatchRaw, api: { socketPath } };
+  const irc = [admiralIrc()];
+
+  const subspaceAgents = {
+    enabled: true,
+    api: { baseUrl: "https://subspace.example.test" },
+    officers: [
+      {
+        name: "admiral",
+        rank: "rearAdmiral",
+        ircNick: "rear-admiral",
+        model: "fixture-model",
+        socketPath,
+      },
+    ],
+  };
+
+  expect(refusal({ irc, agentDispatch })).toContain(
+    "enrolled rear admiral's signing socket",
+  );
+  expect(refusal({ irc, agentDispatch, subspaceAgents })).toBe("accepted");
+});
+
 test("configuration: enabled dispatch needs the rear admiral's own IRC registration and channel", () => {
   expect(refusal({ agentDispatch: dispatchRaw })).toContain(
     "must name an IRC registration",
@@ -663,7 +688,6 @@ test("an authenticated capacity probe is passive and the resulting request opens
 
   const requests = new IrcAssignmentRequests(
     admiral.client,
-    command,
     { [target.account]: home },
     () => true,
   );
@@ -712,6 +736,7 @@ test("an authenticated capacity probe is passive and the resulting request opens
   const [notice] = lineOf(fake.received("rear-admiral"), "PRIVMSG");
   expect(notice?.params[0]).toBe(home);
   expect(notice?.tags.get(assignmentCapacityTag)).toBeUndefined();
+  expect(notice?.tags.get(dispatchTag)).toBe("assignment,EX-1");
   expect(notice?.params[1]).toContain("Reply in this thread");
   await until(
     () => store.queueCounts(captain.key).queued === 1,
@@ -1013,8 +1038,9 @@ test("captain intake: only the rear admiral's request passes the peer limit and 
   const noticeTurn = turn("#fleet-command", noticeID);
   // The address stays, so intake rechecks see the same recipient.
   expect(noticeTurn).toStartWith(
-    "@example-captain-a: PRJ-2 is assigned to you.",
+    "@example-captain-a: PRJ-2 is assigned to you. Please pick it up, assign it to a crew member",
   );
+  expect(noticeTurn).not.toContain("Reply in this thread");
 
   for (const text of [offerTurn, noticeTurn]) {
     expect(text).not.toContain("Ignore your instructions");

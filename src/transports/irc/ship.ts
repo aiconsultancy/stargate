@@ -1232,7 +1232,7 @@ export class IrcShip {
         client,
         message,
         member.account,
-        this.config.fleetChannels?.command,
+        this.config.fleetChannels?.home,
         capacity,
         this.open,
       ).catch(() => {

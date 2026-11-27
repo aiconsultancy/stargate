@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import { type DispatchApi, DispatchApiError, type DispatchIssue } from "./api";
 import type { DispatchLedger } from "./ledger";
-import type { CaptainRef } from "./protocol";
+import { type CaptainRef, isMarkerIssue } from "./protocol";
 
 export interface AssignmentRequests {
   hasCapacity(captain: CaptainRef, signal: AbortSignal): Promise<boolean>;
@@ -9,18 +9,24 @@ export interface AssignmentRequests {
     captain: CaptainRef,
     issue: DispatchIssue,
     signal: AbortSignal,
-  ): Promise<boolean>;
+  ): Promise<boolean | "skip">;
 }
 
 function waiting(issue: DispatchIssue) {
   return (
+    isMarkerIssue(issue.identifier) &&
     issue.type !== "tracker" &&
     !issue.archived &&
     (issue.stateType === "backlog" || issue.stateType === "unstarted")
   );
 }
 
+const capacityChecksAtOnce = 4;
+
+type Candidate = { issue: DispatchIssue; priority: number };
+
 export class AssignedWork {
+  private running: Promise<void> | undefined;
   private cursor: string | undefined;
   private rosterKey: string | undefined;
 
@@ -31,21 +37,40 @@ export class AssignedWork {
       requests: AssignmentRequests;
       reminderMs: number;
       answerMs: number;
+      readyOffers?: boolean;
       log: Logger;
       now?: () => number;
     },
   ) {}
 
+  public start(captains: readonly CaptainRef[], signal: AbortSignal) {
+    if (this.running || signal.aborted) {
+      return;
+    }
+
+    this.running = this.poll(captains, signal)
+      .catch((error: unknown) => {
+        if (!signal.aborted) {
+          this.options.log.warn(
+            {
+              status:
+                error instanceof DispatchApiError ? error.status : undefined,
+            },
+            "Agent dispatch could not read assigned work",
+          );
+        }
+      })
+      .finally(() => {
+        this.running = undefined;
+      });
+  }
+
+  public async drain() {
+    await this.running;
+  }
+
   public async poll(captains: readonly CaptainRef[], signal: AbortSignal) {
-    const {
-      api,
-      ledger,
-      requests,
-      reminderMs,
-      answerMs,
-      log,
-      now = Date.now,
-    } = this.options;
+    const { api, ledger, reminderMs, answerMs, now = Date.now } = this.options;
 
     const byId = new Map(captains.map((captain) => [captain.userId, captain]));
     const ids = [...byId.keys()].toSorted();
@@ -77,7 +102,8 @@ export class AssignedWork {
       });
 
     this.cursor = page.next;
-    const checked = new Set<string>();
+
+    const candidates = new Map<CaptainRef, Candidate[]>();
 
     for (const issue of page.items) {
       signal.throwIfAborted();
@@ -87,7 +113,7 @@ export class AssignedWork {
 
       const captain = user ? byId.get(user) : undefined;
 
-      if (!captain || checked.has(captain.userId) || !waiting(issue)) {
+      if (!captain || !waiting(issue)) {
         continue;
       }
 
@@ -98,28 +124,66 @@ export class AssignedWork {
       if (
         (last !== undefined && now() - last < reminderMs) ||
         (recent !== undefined && now() - recent < answerMs) ||
-        (offer?.state === "accepting" &&
+        (this.options.readyOffers !== false &&
+          offer?.state === "accepting" &&
           offer.offer?.captain === captain.userId)
       ) {
         continue;
       }
 
-      checked.add(captain.userId);
+      const priority = last ?? Number.NEGATIVE_INFINITY;
+      const queue = candidates.get(captain) ?? [];
+      queue.push({ issue, priority });
+      candidates.set(captain, queue);
+    }
 
-      try {
-        if (!(await requests.hasCapacity(captain, signal))) {
-          continue;
-        }
+    const pending = candidates.entries();
+    await Promise.all(
+      Array.from(
+        { length: Math.min(capacityChecksAtOnce, candidates.size) },
+        async () => {
+          for (const [captain, queue] of pending) {
+            await this.request(captain, queue, signal);
+          }
+        },
+      ),
+    );
+  }
 
+  private async request(
+    captain: CaptainRef,
+    queue: Candidate[],
+    signal: AbortSignal,
+  ) {
+    const { api, ledger, requests, log, now = Date.now } = this.options;
+
+    try {
+      if (signal.aborted || !(await requests.hasCapacity(captain, signal))) {
+        return;
+      }
+
+      queue.sort((a, b) => a.priority - b.priority);
+
+      for (const { issue } of queue) {
+        signal.throwIfAborted();
         const current = await api.issue(issue.id, signal);
 
         if (
-          current &&
-          waiting(current) &&
-          current.assignee?.kind === "agent" &&
-          current.assignee.userId === captain.userId &&
-          (await requests.ask(captain, current, signal))
+          !current ||
+          !waiting(current) ||
+          current.assignee?.kind !== "agent" ||
+          current.assignee.userId !== captain.userId
         ) {
+          continue;
+        }
+
+        const sent = await requests.ask(captain, current, signal);
+
+        if (sent === "skip") {
+          continue;
+        }
+
+        if (sent) {
           ledger.recordAssignmentRequest(
             current.id,
             captain.userId,
@@ -127,10 +191,13 @@ export class AssignedWork {
             now(),
           );
         }
-      } catch {
-        signal.throwIfAborted();
+
+        return;
+      }
+    } catch {
+      if (!signal.aborted) {
         log.warn(
-          { issue: issue.identifier },
+          { captain: captain.userId },
           "Assigned work request can be retried",
         );
       }

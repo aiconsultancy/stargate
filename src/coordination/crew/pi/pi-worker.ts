@@ -428,29 +428,9 @@ export class PiCrewWorkers {
     }
 
     const expected = this.reconcile(current);
-    const conversationID = this.state.piTaskConversation(expected.id);
-
-    if (!conversationID || !this.factory.recover) {
-      return expected;
-    }
 
     try {
-      const hash = createHash("sha256").update(member.id).digest("hex");
-
-      const dataDirectory = join(
-        await realpath(resolve(this.stateDirectory)),
-        "pi",
-        hash,
-      );
-
-      signal.throwIfAborted();
-
-      const answer = await this.factory.recover(
-        { dataDirectory },
-        conversationID,
-        expected.inputID,
-        signal,
-      );
+      const answer = await this.committedAnswer(expected, member, signal);
 
       signal.throwIfAborted();
 
@@ -468,11 +448,54 @@ export class PiCrewWorkers {
     return this.closed ? expected : (this.state.task(task.id) ?? expected);
   }
 
+  /** A capacity probe reads the committed receipt without adopting or publishing it. */
+  public async hasCommittedResult(
+    task: CrewTask,
+    member: CrewMember,
+    signal: AbortSignal,
+  ) {
+    return (
+      !this.closed &&
+      !this.observed(task) &&
+      (await this.committedAnswer(task, member, signal)) !== undefined
+    );
+  }
+
+  private async committedAnswer(
+    task: CrewTask,
+    member: CrewMember,
+    signal: AbortSignal,
+  ) {
+    const conversationID = this.state.piTaskConversation(task.id);
+
+    if (!conversationID || !this.factory.recover) {
+      return;
+    }
+
+    const hash = createHash("sha256").update(member.id).digest("hex");
+
+    const dataDirectory = join(
+      await realpath(resolve(this.stateDirectory)),
+      "pi",
+      hash,
+    );
+
+    signal.throwIfAborted();
+
+    return this.factory.recover(
+      { dataDirectory },
+      conversationID,
+      task.inputID,
+      signal,
+    );
+  }
+
   public async idle(
     peer: Peer,
     member: CrewMember,
     directory: string,
     signal: AbortSignal,
+    passive = false,
   ): Promise<boolean> {
     if (executions.has(this.key(peer)) || notifications.has(this.key(peer))) {
       return false;
@@ -485,7 +508,14 @@ export class PiCrewWorkers {
     }
 
     try {
-      const backend = await this.backend(member, directory);
+      const backend = await (passive
+        ? this.backends.get(member.id)
+        : this.backend(member, directory));
+
+      if (!backend || (passive && !backend.waitForIdle)) {
+        return false;
+      }
+
       await backend.waitForIdle?.(
         conversationID,
         AbortSignal.any([signal, AbortSignal.timeout(100)]),

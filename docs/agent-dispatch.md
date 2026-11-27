@@ -31,9 +31,8 @@ under `src/coordination/fleet/dispatch/`.
    to retry.
 
 Ready for agents offers and their outcomes remain visible in fleet command.
-Fleet command also carries the passive capacity check as an IRC tag. It
-starts no agent turn. The resulting request and reply belong to the ship
-channel.
+Ship channels carry the passive capacity check as an IRC tag, followed by
+the request when crew are available. The check starts no agent turn.
 
 ## Decision outcomes by direct message
 
@@ -137,7 +136,8 @@ Ready for agents. Omitting the setting preserves one-time command-channel
 notices for existing configurations.
 
 Set `readyOffers: false` to run assigned work requests without starting
-offers for unassigned Ready for agents issues.
+or continuing offers for unassigned Ready for agents issues. Existing offers
+and their timers remain dormant and resume if you re-enable Ready for agents.
 
 For an enrolled fleet, set `api` to
 `{ "socketPath": "/run/example/rear-admiral/api.sock" }` using the rear
@@ -149,8 +149,8 @@ apply to direct API connections.
 | ------------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`                | `false`                                     | The feature flag. Off: no ledger file, no chat listener and no API request. A disabled section is not cross-checked against the IRC registrations.                                                                |
 | `fleet`                  | Required                                    | The fleet's slug or UUID in the Subspace API.                                                                                                                                                                     |
-| `api.baseUrl`            | Required                                    | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
-| `api.tokenEnv`           | Required                                    | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
+| `api.baseUrl`            | Direct mode only, required                  | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
+| `api.tokenEnv`           | Direct mode only, required                  | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
 | `api.headersEnv`         | `{}`                                        | Extra request headers for a private access layer: header name → environment variable name. `Authorization`, `Accept`, `Content-Type`, `Content-Length`, `Host`, `Connection` and `Transfer-Encoding` are refused. |
 | `messaging.type`         | `"irc"`                                     | The messaging system. Only `irc` is accepted.                                                                                                                                                                     |
 | `messaging.registration` | Required                                    | ID of the rear admiral's IRC registration (`fleetPolicy.role: "rear_admiral"`).                                                                                                                                   |
@@ -162,14 +162,17 @@ apply to direct API connections.
 
 A captain is addressed only when its IRC account is in the rear admiral
 registration's `fleetPolicy.agentAccounts`; Stargate logs once and skips a
-captain that is not. `stargate config check` checks that the token and header
-variables are present when the feature is enabled.
+captain that is not. `stargate config check` checks the credentials for the
+selected API connection.
 
 ## Credentials
 
 The dispatcher calls the API as the rear admiral, so assignments, comments
-and flag changes are recorded as the rear admiral's. Before enabling it, an
-operator must provision, on the fleet VM:
+and flag changes are recorded as the rear admiral's. When the rear admiral
+is enrolled, point `api.socketPath` at its signing proxy on this gateway.
+Stargate rechecks the identity before writes in socket mode.
+
+For a direct API connection using a bearer token, provision on the fleet VM:
 
 1. **A registered API agent identity** for the rear admiral: rank
    `rearAdmiral`, linked to this fleet so that `GET /api/v1/me` returns its
@@ -203,8 +206,9 @@ Every `pollIntervalSeconds`, after the first poll at start:
 
 - the fleet roster (`GET /api/v1/fleets/{fleet}`): captains and whether the
   API marks each available;
-- issues assigned to those captains (`assignee=<id>` for each, with
-  `updatedSince` five minutes before the newest change already seen);
+- issues assigned to those captains. Legacy notices scan recent changes,
+  overlapping the last scan by five minutes. Capacity-aware requests scan
+  assigned Backlog and Todo issues again so they can send reminders;
 - unassigned issues flagged for agents (`readyForAgents=true&assignee=none`),
   kept when their project's initiative, or that initiative's nearest ancestor
   with a fleet, belongs to this fleet;
@@ -215,9 +219,10 @@ Every `pollIntervalSeconds`, after the first poll at start:
 
 Each poll reads at most 50 pages (of 100 issues) of an issue list. A longer
 list goes on from the API's cursor at the next poll, so no list is too long
-to make progress. The ledger keeps the place in the assignment list, so a
-restart goes on from it; the ready list starts again after a restart.
-Initiatives and projects are read whole, up to 500 pages each; a longer
+to make progress. The ledger keeps the legacy assignment cursor across
+restarts. The Ready list and capacity-aware scans start at the first page after
+a restart. Request timestamps persist, so a restart does not reset reminder
+intervals. Initiatives and projects are read whole, up to 500 pages each; a longer
 list leaves fleet membership unknown, which holds offers (see below).
 
 ## Offers and answers

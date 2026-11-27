@@ -37,6 +37,7 @@ import { decodeSettings } from "./settings-errors";
 import {
   absolutePath,
   agentDispatchApiSchema,
+  dispatchTargetIssue,
   envName,
   reservedAuthenticatedRequestHeaders,
   secureLocalOrHttpsURL,
@@ -783,14 +784,14 @@ const configCheck = (liveNotificationPolicy = false) =>
     ) => {
       // A disabled section is inert: it names nothing that must exist yet.
       if (agentDispatchActive(agentDispatch)) {
-        const target = agentDispatchTarget(agentDispatch, irc);
+        const issue = dispatchTargetIssue(
+          agentDispatchTarget(agentDispatch, irc),
+          agentDispatch.api,
+          subspaceAgents?.officers ?? [],
+        );
 
-        if (typeof target === "string") {
-          context.addIssue({
-            code: "custom",
-            path: ["agentDispatch", "messaging"],
-            message: target,
-          });
+        if (issue) {
+          context.addIssue(issue);
         }
       }
 

@@ -450,7 +450,11 @@ export function isDispatchRequest(message: IrcMessage) {
 
   const marker = parseDispatchMarker(message.tags.get(dispatchTag));
 
-  return marker?.kind === "offer" || marker?.kind === "assigned";
+  return (
+    marker?.kind === "offer" ||
+    marker?.kind === "assigned" ||
+    marker?.kind === "assignment"
+  );
 }
 
 /**
@@ -500,8 +504,8 @@ export function dispatchRequestTurn(
   const marker = parseDispatchMarker(message.tags.get(dispatchTag));
   const address = /^@[^\s:,]+[:,] ?/.exec(admittedText)?.[0] ?? "";
 
-  if (marker?.kind === "assigned") {
-    return `${address}${dispatchTurnText(marker.issue)}`;
+  if (marker?.kind === "assigned" || marker?.kind === "assignment") {
+    return `${address}${dispatchTurnText(marker.issue, undefined, marker.kind === "assignment")}`;
   }
 
   if (marker?.kind === "offer") {
@@ -580,13 +584,13 @@ export class IrcAssignmentRequests implements AssignmentRequests {
     string,
     {
       account: string;
+      channel: string;
       resolve: (available: boolean) => void;
     }
   >();
 
   public constructor(
     private readonly client: CapacityClient,
-    private readonly command: string,
     private readonly shipChannels: Readonly<Record<string, string>>,
     private readonly allowed: () => boolean,
   ) {}
@@ -606,13 +610,7 @@ export class IrcAssignmentRequests implements AssignmentRequests {
       message.tags.get(assignmentCapacityTag) ?? "",
     );
 
-    if (
-      message.command !== "TAGMSG" ||
-      !account ||
-      !mark?.[2] ||
-      this.client.fold(message.params[0] ?? "") !==
-        this.client.fold(this.command)
-    ) {
+    if (message.command !== "TAGMSG" || !account || !mark?.[2]) {
       return;
     }
 
@@ -620,6 +618,8 @@ export class IrcAssignmentRequests implements AssignmentRequests {
 
     if (
       request &&
+      this.client.fold(message.params[0] ?? "") ===
+        this.client.fold(request.channel) &&
       this.client.fold(account) === this.client.fold(request.account)
     ) {
       request.resolve(mark[1] === "yes");
@@ -632,7 +632,6 @@ export class IrcAssignmentRequests implements AssignmentRequests {
     if (
       !home ||
       !this.client.inChannel(home) ||
-      !this.client.inChannel(this.command) ||
       !this.client.hasCap("message-tags") ||
       !this.client.hasCap("echo-message")
     ) {
@@ -649,6 +648,7 @@ export class IrcAssignmentRequests implements AssignmentRequests {
 
     this.pending.set(nonce, {
       account: captain.account,
+      channel: home,
       resolve: result.resolve,
     });
 
@@ -661,14 +661,11 @@ export class IrcAssignmentRequests implements AssignmentRequests {
     try {
       const sending = this.client.send(
         "TAGMSG",
-        [this.command],
+        [home],
         {
           [assignmentCapacityTag]: `ask,${nonce},${captain.account}`,
         },
-        () =>
-          !stopped.aborted &&
-          this.allowed() &&
-          this.client.inChannel(this.command),
+        () => !stopped.aborted && this.allowed() && this.client.inChannel(home),
       );
 
       return await Promise.race([
@@ -694,13 +691,13 @@ export class IrcAssignmentRequests implements AssignmentRequests {
 
     const nick = await this.client.verifiedNick(captain.account);
     const sameRecipient = this.client.recipientGuard(captain.account, nick);
-    const tags = { [dispatchTag]: `assigned,${issue.identifier}` };
+    const tags = { [dispatchTag]: `assignment,${issue.identifier}` };
     const text = dispatchText.assignmentRequest(nick, issue.identifier);
 
     if (
       Buffer.byteLength(text) > this.client.budget("PRIVMSG", channel, tags)
     ) {
-      return false;
+      return "skip" as const;
     }
 
     const message = await this.client.publish(
@@ -723,7 +720,7 @@ export async function answerAssignmentCapacity(
   client: CapacityClient,
   message: IrcMessage,
   account: string,
-  command: string | undefined,
+  home: string | undefined,
   available: (signal: AbortSignal) => Promise<boolean>,
   allowed: () => boolean,
 ) {
@@ -733,10 +730,10 @@ export async function answerAssignmentCapacity(
 
   if (
     message.command !== "TAGMSG" ||
-    !command ||
+    !home ||
     !mark?.[1] ||
     !mark[2] ||
-    client.fold(message.params[0] ?? "") !== client.fold(command) ||
+    client.fold(message.params[0] ?? "") !== client.fold(home) ||
     client.fold(mark[2]) !== client.fold(account)
   ) {
     return;
@@ -747,10 +744,10 @@ export async function answerAssignmentCapacity(
 
   await client.send(
     "TAGMSG",
-    [command],
+    [home],
     {
       [assignmentCapacityTag]: `${ready && !signal.aborted ? "yes" : "no"},${mark[1]}`,
     },
-    () => allowed() && client.inChannel(command),
+    () => allowed() && client.inChannel(home),
   );
 }
