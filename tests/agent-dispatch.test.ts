@@ -1,5 +1,8 @@
-import { afterEach, expect, test } from "bun:test";
-import { DispatchApiError } from "../src/coordination/fleet/dispatch/api";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import {
+  DecisionRelayError,
+  DispatchApiError,
+} from "../src/coordination/fleet/dispatch/api";
 import type { AgentDispatcher } from "../src/coordination/fleet/dispatch/dispatcher";
 import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
 import {
@@ -44,11 +47,19 @@ test("issue dispatch and decision outcomes use separate connections and the same
     status: "accepted",
   });
   f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+
+  const missingSocket = "The decision relay socket is missing or unsafe";
+  spyOn(relay, "me").mockRejectedValueOnce(
+    new DecisionRelayError(missingSocket),
+  );
+  await f.dispatcher.step(signal);
+  expect(lines.join("\n")).toContain(missingSocket);
+  expect(f.ledger.tracked("i1")?.offer).toBeDefined();
+
   const identity = relay.identity;
   relay.identity = { ...identity, userId: CAPTAIN_B };
 
   await f.dispatcher.step(signal);
-  expect(f.ledger.tracked("i1")?.offer).toBeDefined();
   expect(relay.calls).not.toContain(`decision outcomes ${FLEET}`);
   expect(f.chat.decisionDms).toEqual([]);
   expect(lines.join("\n")).toContain(

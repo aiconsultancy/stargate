@@ -182,7 +182,7 @@ export class DispatchPolling {
    */
   private verifiedFleet: string | undefined;
   private verifiedUser: string | undefined;
-  private readonly warned = new Set<string>();
+  private readonly warned = new Map<string, string>();
   private readonly options: PollingPort["options"];
   private readonly now: PollingPort["now"];
   private readonly finish: PollingPort["finish"];
@@ -241,13 +241,13 @@ export class DispatchPolling {
     this.assignmentIdentity = new AbortController();
   }
 
-  /** Log a problem once until it clears; never logs bodies or secrets. */
+  /** Log a problem once until the warning clears or changes. */
   public warnOnce(key: string, message: string, detail: LogDetail = {}) {
-    if (this.warned.has(key)) {
+    if (this.warned.get(key) === message) {
       return;
     }
 
-    this.warned.add(key);
+    this.warned.set(key, message);
     this.options.log.warn(detail, message);
   }
 

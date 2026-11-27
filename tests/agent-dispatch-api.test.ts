@@ -112,14 +112,28 @@ test("a separate service UID needs the gateway group and a protected parent for 
 
   expect(check).not.toThrow();
 
-  paths.set(path, { ...socket, gid: 2001 });
-  expect(check).toThrow("ownership or permissions");
-  paths.set(path, { ...socket, isSocket: () => false });
-  expect(check).toThrow("ownership or permissions");
+  for (const untrustedSocket of [
+    { ...socket, gid: 2001 },
+    { ...socket, mode: 0o666 },
+    { ...socket, isSocket: () => false },
+  ]) {
+    paths.set(path, untrustedSocket);
+    expect(check).toThrow("ownership or permissions");
+  }
+
   paths.set(path, socket);
 
-  paths.set("/run/service", { ...parent, uid: 3000 });
-  expect(check).toThrow("ownership or permissions");
+  for (const untrustedDirectory of [
+    { ...parent, uid: 3000 },
+    { ...parent, uid },
+    { ...parent, gid: 2001 },
+    { ...parent, mode: 0o770 },
+    { ...parent, mode: 0o751 },
+  ]) {
+    paths.set("/run/service", untrustedDirectory);
+    expect(check).toThrow("ownership or permissions");
+  }
+
   paths.set("/run/service", parent);
 
   paths.set("/run", directory(0, gid, 0o3777));
