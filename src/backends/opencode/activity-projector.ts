@@ -1,4 +1,4 @@
-import type { OpenCodeClient } from "@opencode/client";
+import type { OpenCodeClient, SessionLogItem } from "@opencode/client";
 import type { ActivityError, ActivityItem, TurnActivityLog } from "../backend";
 
 export const activityEvents = [
@@ -36,6 +36,45 @@ export type ActivityEvent = Exclude<
   ActivityFrame,
   { type: "server.connected" }
 >;
+
+export const activityFamilyEvents = [
+  ...activityEvents,
+  "session.created",
+  "session.execution.started",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+] as const;
+
+export const subscribeActivityFamily = (
+  events: OpenCodeClient["event"],
+  signal: AbortSignal,
+) => events.subscribe({ types: activityFamilyEvents, signal });
+
+type Frame =
+  ReturnType<typeof subscribeActivityFamily> extends AsyncIterable<infer F>
+    ? F
+    : never;
+
+export type ActivityFamilyEvent = Exclude<Frame, { type: "server.connected" }>;
+
+export type ActivityPacket = {
+  event: ActivityEvent;
+  at: number;
+  order: number;
+};
+
+const itemEvents = new Set<string>(activityEvents);
+const familyEvents = new Set<string>(activityFamilyEvents);
+
+export const isFamilyLogItem = (
+  event: SessionLogItem,
+): event is Extract<SessionLogItem, ActivityFamilyEvent> =>
+  familyEvents.has(event.type);
+
+export const isActivityEvent = (
+  event: ActivityFamilyEvent,
+): event is ActivityEvent => itemEvents.has(event.type);
 
 function activityError(error: {
   type: string;

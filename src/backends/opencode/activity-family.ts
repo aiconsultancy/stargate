@@ -1,4 +1,3 @@
-import type { OpenCodeClient, SessionLogItem } from "@opencode/client";
 import type { ActivityOutcome, TurnActivityLog } from "../backend";
 import {
   childSessionID,
@@ -22,8 +21,10 @@ import {
 } from "./activity-child-executions";
 import {
   type ActivityEvent,
+  type ActivityFamilyEvent,
   ActivityProjector,
-  activityEvents,
+  isActivityEvent,
+  isFamilyLogItem,
 } from "./activity-projector";
 import {
   ActivityRecoveryQueues,
@@ -48,32 +49,13 @@ export { activityOutcome, nativeActivityReads } from "./activity-replay-gap";
 
 export type { ActivityIncarnation } from "./activity-call-evidence";
 
-export const activityFamilyEvents = [
-  ...activityEvents,
-  "session.created",
-  "session.execution.started",
-  "session.execution.succeeded",
-  "session.execution.failed",
-  "session.execution.interrupted",
-] as const;
-
-export const subscribeActivityFamily = (
-  events: OpenCodeClient["event"],
-  signal: AbortSignal,
-) => events.subscribe({ types: activityFamilyEvents, signal });
-
-type Frame =
-  ReturnType<typeof subscribeActivityFamily> extends AsyncIterable<infer F>
-    ? F
-    : never;
-
-export type ActivityFamilyEvent = Exclude<Frame, { type: "server.connected" }>;
-
-export type ActivityPacket = {
-  event: ActivityEvent;
-  at: number;
-  order: number;
-};
+export {
+  type ActivityFamilyEvent,
+  type ActivityPacket,
+  activityFamilyEvents,
+  isActivityEvent,
+  subscribeActivityFamily,
+} from "./activity-projector";
 
 type Packet = QueuedPacket<ActivityFamilyEvent>;
 
@@ -121,18 +103,6 @@ type ObservedRoot = {
   dropped: boolean;
   open: ReadonlySet<{ log: TurnActivityLog }>;
 };
-
-const itemEvents = new Set<string>(activityEvents);
-const familyEvents = new Set<string>(activityFamilyEvents);
-
-const isFamilyLogItem = (
-  event: SessionLogItem,
-): event is Extract<SessionLogItem, ActivityFamilyEvent> =>
-  familyEvents.has(event.type);
-
-export const isActivityEvent = (
-  event: ActivityFamilyEvent,
-): event is ActivityEvent => itemEvents.has(event.type);
 
 /** Correlates native ancestry with collector-owned turns, never wall-clock proximity. */
 export class OpenCodeActivityFamilies {
