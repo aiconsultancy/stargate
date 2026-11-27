@@ -371,6 +371,26 @@ test("only the matching native parent can supply a detached witness", () => {
   }
 });
 
+test("refreshing a witness keeps its slot and leaves other writers in the pool", () => {
+  const f = namingHandoffFixture();
+
+  try {
+    f.start(10, 10, 0);
+    f.name(1, 20, 300);
+    f.name(2, 21, 300, "ses_other_parent");
+    f.name(3, 22, 300);
+
+    expect(f.queue.naming(f.pending, () => true).witness?.order).toBe(3);
+    expect(
+      f.queue.naming(f.pending, ({ session }) => session === "ses_other_parent")
+        .witness?.order,
+    ).toBe(2);
+    expect(f.queue.peek(f.id)?.segments[0]?.witnesses).toHaveLength(2);
+  } finally {
+    f.queue.close();
+  }
+});
+
 function recoveryFixture() {
   const id = "ses_child";
 

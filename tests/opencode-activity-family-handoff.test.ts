@@ -96,6 +96,15 @@ function fixture(
         owner,
       );
     },
+    launch(owner: TurnActivityLog, session: string, id: string, at: number) {
+      emit(
+        "session.tool.called",
+        session,
+        { id, input: { agent: "explore" } },
+        at,
+        owner,
+      );
+    },
     create() {
       emit("session.created", child, { parentID: main }, 2);
     },
@@ -119,6 +128,80 @@ function fixture(
       hub.turns("officer")?.turns.filter((turn) => turn.session?.id === child),
   };
 }
+
+test.each([
+  [1, 1],
+  [1, 2],
+  [128, 128],
+  [128, 129],
+] as const)(
+  "repeated witness stays publishable after overflow (capacity %i, names %i)",
+  async (capacity, names) => {
+    const parent = Promise.withResolvers<string>();
+    const f = fixture(parent.promise, capacity === 1 ? capacity : undefined);
+
+    try {
+      const real = f.root();
+
+      const started = Array.from(
+        { length: Math.min(names, capacity) },
+        (_, i) => `real_${i}`,
+      );
+
+      const fallback = names > capacity;
+
+      for (const id of started) {
+        f.call(real, main, id, 50);
+      }
+
+      // Keep the initial open call until it is named by using a fallback launch.
+      if (fallback) {
+        f.launch(real, main, "real_extra", 50);
+      }
+
+      const foreign = Array.from({ length: capacity }, (_, index) => {
+        const session = `${other}_${index}`;
+        const log = f.root(session);
+        f.call(log, session, "foreign", 51);
+
+        return { session, log };
+      });
+
+      f.start(40, "Observed child text");
+      f.advance(300);
+
+      for (const id of started) {
+        f.name(real, main, id);
+      }
+
+      if (fallback) {
+        f.name(real, main, "real_extra");
+      }
+
+      for (const { session, log } of foreign) {
+        f.name(log, session, "foreign");
+      }
+
+      f.end();
+      expect(real.retained?.()).toBe(true);
+      expect(f.reads).toEqual([child]);
+      parent.resolve(main);
+      await setImmediate();
+      expect(f.childTurns()).toMatchObject([
+        {
+          session: { parent: null },
+          requests: [],
+          status: "cancelled",
+          lost: true,
+          items: [{ text: "Observed child text" }],
+        },
+      ]);
+    } finally {
+      parent.resolve(main);
+      f.stop.abort();
+    }
+  },
+);
 
 test.each([
   { limit: undefined, count: 127, foreignFirst: false },

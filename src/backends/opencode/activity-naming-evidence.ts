@@ -92,11 +92,14 @@ export class ActivityNamingEvidence {
 
     // The native parent may not be known yet. Keep one hint per writer.
     // Cap the segment's witness pool at the configured pending-name limit.
-    if (
-      witnesses.some(
-        ({ session, log }) => session === proof.session && log === proof.log,
-      )
-    ) {
+    const existing = witnesses.findIndex(
+      ({ session, log }) => session === proof.session && log === proof.log,
+    );
+
+    if (existing !== -1) {
+      // Refresh the exact order without giving this writer another slot.
+      witnesses[existing] = proof;
+
       return;
     }
 
