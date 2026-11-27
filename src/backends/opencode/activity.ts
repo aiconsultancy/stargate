@@ -6,15 +6,18 @@ import type {
   TurnActivityRecorder,
 } from "../backend";
 import {
-  type ActivityEvent,
-  ActivityProjector,
-  subscribeActivity,
-} from "./activity-projector";
+  OpenCodeActivityFamilies,
+  isActivityEvent,
+  subscribeActivityFamily,
+} from "./activity-family";
+import { type ActivityEvent, ActivityProjector } from "./activity-projector";
 import type { OpenCodeTurnObserver } from "./opencode";
 
 type Event = ActivityEvent;
 
 type Source = Parameters<OpenCodeTurnObserver>[0];
+
+type Packet = { event: Event; at: number; order: number };
 
 /** Trailing frames can follow the idle signal on the shared stream. */
 export const settleGraceMs = 500;
@@ -38,14 +41,19 @@ class TurnCollector {
     string,
     "checking" | "owned" | "excluded"
   >();
-  private readonly held = new Map<string, { event: Event; at: number }[]>();
+  private readonly held = new Map<string, Packet[]>();
   private readonly projector = new ActivityProjector();
 
   public constructor(
     private readonly recorder: TurnActivityRecorder,
     private readonly source: Source,
-  ) {
-    void this.consume();
+    private readonly families: OpenCodeActivityFamilies,
+    private readonly detach: () => void,
+  ) {}
+
+  public shutdown() {
+    this.stop.abort();
+    this.detach();
   }
 
   public submitted(input: string) {
@@ -59,7 +67,8 @@ class TurnCollector {
         // An unavailable request link must not affect prompt submission.
       }
 
-      this.log = this.recorder.begin(requests);
+      this.log = this.recorder.begin(requests, this.source.sessionID);
+      this.families.track(this.source.sessionID, this.log);
     }
   }
 
@@ -72,54 +81,31 @@ class TurnCollector {
     const log = this.log;
 
     if (!log) {
-      this.stop.abort();
+      this.shutdown();
 
       return;
     }
 
+    this.families.settled(this.source.sessionID, log);
     log.end(outcome);
     void this.settle();
   }
 
   private async settle() {
-    await delay(settleGraceMs);
+    await delay(settleGraceMs, undefined, { signal: this.stop.signal }).catch(
+      () => {},
+    );
     // Open ownership checks make one final read against settled history.
-    this.stop.abort();
+    this.shutdown();
   }
 
-  private async consume() {
-    let retryMs = 250;
-    let connections = 0;
-
-    while (!this.stop.signal.aborted) {
-      try {
-        for await (const frame of subscribeActivity(
-          this.source.events,
-          this.stop.signal,
-        )) {
-          if (frame.type === "server.connected") {
-            if (++connections > 1) {
-              this.log?.reconnected();
-            }
-
-            retryMs = 250;
-            continue;
-          }
-
-          this.receive(frame);
-        }
-      } catch {
-        /* Reattach below; the turn itself is unaffected. */
-      }
-
-      await delay(retryMs, undefined, { signal: this.stop.signal }).catch(
-        () => {},
-      );
-      retryMs = Math.min(retryMs * 2, 10_000);
-    }
+  public reconnected() {
+    this.log?.reconnected();
   }
 
-  private receive(event: Event) {
+  public receive(packet: Packet) {
+    const { event } = packet;
+
     // Frames before submission cannot belong to this input.
     if (
       this.input === undefined ||
@@ -135,16 +121,14 @@ class TurnCollector {
       return;
     }
 
-    const at = Date.now();
-
     if (owner === "owned") {
-      this.apply(event, at);
+      this.apply(packet);
 
       return;
     }
 
     const held = this.held.get(assistant) ?? [];
-    held.push({ event, at });
+    held.push(packet);
     this.held.set(assistant, held);
 
     if (owner === undefined) {
@@ -168,7 +152,14 @@ class TurnCollector {
       final ||= this.stop.signal.aborted;
 
       const owned = await this.source
-        .owns(assistant, input, AbortSignal.timeout(ownershipReadMs))
+        .owns(
+          assistant,
+          input,
+          AbortSignal.any([
+            this.source.lifetime,
+            AbortSignal.timeout(ownershipReadMs),
+          ]),
+        )
         .catch(() => null);
 
       if (typeof owned === "boolean" || final) {
@@ -190,15 +181,99 @@ class TurnCollector {
     this.owners.set(assistant, owned ? "owned" : "excluded");
 
     if (owned) {
-      for (const { event, at } of held) {
-        this.apply(event, at);
+      for (const packet of held) {
+        this.apply(packet);
       }
     }
   }
 
-  private apply(event: Event, now: number) {
-    if (this.log) {
-      this.projector.apply(this.log, event, now);
+  private apply({ event, at, order }: Packet) {
+    if (this.log && !this.source.lifetime.aborted) {
+      this.projector.apply(this.log, event, at);
+      this.families.owned(this.log, event, order);
+    }
+  }
+}
+
+/** A single subscription per backend, not per child or prompt. */
+class OfficerActivity {
+  private readonly turns = new Set<TurnCollector>();
+  private readonly families: OpenCodeActivityFamilies;
+
+  public constructor(
+    private readonly source: Pick<
+      Source,
+      "events" | "lifetime" | "parent" | "active" | "log"
+    >,
+  ) {
+    this.families = new OpenCodeActivityFamilies({
+      signal: source.lifetime,
+      parent: (id, signal) => source.parent(id, signal),
+      active: (signal) => source.active(signal),
+      log: (sessionID, after, signal) =>
+        source.log({ sessionID, after, follow: false }, { signal }),
+    });
+    source.lifetime.addEventListener(
+      "abort",
+      () => {
+        for (const turn of this.turns) {
+          turn.shutdown();
+        }
+      },
+      { once: true },
+    );
+    void this.consume();
+  }
+
+  public turn(recorder: TurnActivityRecorder, source: Source) {
+    const collector = new TurnCollector(recorder, source, this.families, () => {
+      this.turns.delete(collector);
+    });
+
+    this.turns.add(collector);
+
+    return collector;
+  }
+
+  private async consume() {
+    const signal = this.source.lifetime;
+    let retry = 250;
+    let connections = 0;
+
+    while (!signal.aborted) {
+      try {
+        for await (const event of subscribeActivityFamily(
+          this.source.events,
+          signal,
+        )) {
+          if (event.type === "server.connected") {
+            if (++connections > 1) {
+              for (const turn of this.turns) {
+                turn.reconnected();
+              }
+
+              await this.families.reconnected();
+            }
+
+            retry = 250;
+            continue;
+          }
+
+          const at = Date.now();
+          const order = this.families.receive(event, at);
+
+          if (isActivityEvent(event)) {
+            for (const turn of this.turns) {
+              turn.receive({ event, at, order });
+            }
+          }
+        }
+      } catch {
+        // Reattach below without changing reply or progress collection.
+      }
+
+      await delay(retry, undefined, { signal, ref: false }).catch(() => {});
+      retry = Math.min(retry * 2, 10_000);
     }
   }
 }
@@ -207,8 +282,24 @@ class TurnCollector {
 export function openCodeTurnObserver(
   recorder: TurnActivityRecorder,
 ): OpenCodeTurnObserver {
+  const backends = new WeakMap<AbortSignal, OfficerActivity>();
+
   return (source) => {
-    const collector = new TurnCollector(recorder, source);
+    let backend = backends.get(source.lifetime);
+
+    if (!backend) {
+      const { events, lifetime } = source;
+      backend = new OfficerActivity({
+        events,
+        lifetime,
+        parent: source.parent,
+        active: source.active,
+        log: source.log,
+      });
+      backends.set(source.lifetime, backend);
+    }
+
+    const collector = backend.turn(recorder, source);
 
     return {
       submitted: (input) => {

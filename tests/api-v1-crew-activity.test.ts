@@ -357,6 +357,64 @@ test("a late task attribution is a turn update", async () => {
   expect(snapshot(hub, "mario").turns[0]?.task).toEqual(task);
 });
 
+test("late root task attribution updates retained descendants and later children only in that family", async () => {
+  const hub = createActivityHub();
+  const crew = hub.crewRecorder("captain");
+  crew.roster?.(["mario"]);
+
+  const subscription = subscribeActivity(
+    hub,
+    config,
+    new URLSearchParams("crew=captain/mario"),
+  );
+
+  if (subscription.status !== 200) {
+    throw new Error("Unexpected subscription");
+  }
+
+  let received = "";
+
+  const stop = subscription.watch((bytes) => {
+    received += decoder.decode(bytes);
+  });
+
+  try {
+    const root = crew.begin(start("mario"));
+    const child = root.child?.(null, "ses_child");
+    const grandchild = child?.child?.("nested", "ses_grandchild");
+    // Another crew task's root is not in this family.
+    crew.begin(start("mario"));
+    root.end("completed");
+    child?.end("completed");
+    const task = { id: "task_2", inputId: "msg_2", project: "web" };
+    root.attribute(task);
+    grandchild?.child?.("post-attribution", "ses_late");
+    await flushed();
+
+    const turns = snapshot(hub, "mario").turns;
+    expect(turns.map((turn) => turn.task)).toEqual([
+      task,
+      task,
+      task,
+      null,
+      task,
+    ]);
+    const changes = activityEvents(received).map((event) => event.change);
+    expect(
+      changes.flatMap((change) =>
+        change.type === "turn-updated" ? [change.turn.task] : [],
+      ),
+    ).toEqual([task, task, task]);
+    expect(
+      changes.flatMap((change) =>
+        change.type === "turn-ended" ? [change.turn.task] : [],
+      ),
+    ).toEqual([null, null]);
+  } finally {
+    stop();
+  }
+});
+
 test("crew subscriptions validate before a stream is opened", () => {
   const hub = createActivityHub();
   const crew = hub.crewRecorder("captain");
@@ -682,6 +740,7 @@ test("a replacement recorder fences the retired one, whose turns still settle", 
   // The replacement backend writes: the retired one is fenced.
   const next = hub.crewRecorder("captain");
   next.roster?.(["mario", "luigi"]);
+  expect(open.child?.(null, "ses_old_descendant")).toBeUndefined();
   const fenced = retired.begin(start("mario"));
   fenced.update("a", 1, () => text("duplicate"));
   fenced.end("completed");

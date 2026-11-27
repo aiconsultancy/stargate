@@ -1,21 +1,33 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { OpenCodeClient } from "@opencode/client";
-import { Predicate, Schema } from "effect";
+import { Schema } from "effect";
 import {
   type CrewTurns,
   type CrewTurnsInput,
   type CrewTurnsTask,
   crewTurnsSchema,
 } from "../../coordination/crew/reporting/fleet-status";
-import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
 import { createReadSlot } from "../../lib/read-deadline";
 import type {
   ActivityOutcome,
   CrewTurnRecorder,
   CrewTurnTask,
 } from "../backend";
-import { ActivityProjector, activityEvents } from "./activity-projector";
-import { ExecutionHistory } from "./crew-executions";
+import {
+  type ActivityFamilyEvent,
+  type ActivityFamilyReads,
+  type ActivityPacket,
+  OpenCodeActivityFamilies,
+  activityOutcome,
+  isActivityEvent,
+  subscribeActivityFamily,
+} from "./activity-family";
+import { ActivityProjector } from "./activity-projector";
+import {
+  ExecutionHistory,
+  boundarySeq,
+  staleBoundary,
+} from "./crew-executions";
 import {
   HeldFrames,
   type Peer,
@@ -26,60 +38,6 @@ import {
   isPending,
   kept,
 } from "./crew-messages";
-import { owningInput } from "./input-origin";
-import type { OpenCodeCrewActivity } from "./opencode";
-
-const settledEvents = [
-  "session.execution.succeeded",
-  "session.execution.failed",
-  "session.execution.interrupted",
-] as const;
-
-const startedEvent = "session.execution.started";
-
-const subscribe = (events: OpenCodeClient["event"], signal: AbortSignal) =>
-  events.subscribe({
-    types: [...activityEvents, ...settledEvents, startedEvent],
-    signal,
-  });
-
-type Frame =
-  ReturnType<typeof subscribe> extends AsyncIterable<infer F> ? F : never;
-
-type Event = Exclude<Frame, { type: "server.connected" }>;
-
-const outcomes: Record<(typeof settledEvents)[number], ActivityOutcome> = {
-  "session.execution.succeeded": "completed",
-  "session.execution.failed": "failed",
-  "session.execution.interrupted": "cancelled",
-};
-
-const isSettled = (
-  event: Event,
-): event is Extract<Event, { type: (typeof settledEvents)[number] }> =>
-  Object.hasOwn(outcomes, event.type);
-
-/**
- * A boundary's position in its session's durable log: OpenCode keys
- * session events' durable log by session ID, and `seq` only increases
- * within it. Undefined when the frame carries no such position.
- */
-function boundarySeq(event: unknown) {
-  const durable: unknown = Predicate.hasProperty(event, "durable")
-    ? event.durable
-    : undefined;
-
-  const session: unknown = Predicate.hasProperty(event, "data")
-    ? Predicate.hasProperty(event.data, "sessionID") && event.data.sessionID
-    : undefined;
-
-  return Predicate.hasProperty(durable, "seq") &&
-    Predicate.hasProperty(durable, "aggregateID") &&
-    durable.aggregateID === session &&
-    Number.isSafeInteger(durable.seq)
-    ? Number(durable.seq)
-    : undefined;
-}
 
 const decodeTurns = Schema.decodeUnknownSync(crewTurnsSchema);
 
@@ -129,6 +87,7 @@ const ownershipReadMs = 10_000;
 
 export type CrewActivitySource = {
   events: OpenCodeClient["event"];
+  family: ActivityFamilyReads;
   /** The crew plugin's `crewTurns`; an older plugin rejects the method. */
   turns(input: CrewTurnsInput, signal: AbortSignal): Promise<unknown>;
   /** The input owning an assistant message; undefined when not provable yet. */
@@ -180,6 +139,7 @@ export class CrewActivityCollector {
   private supported: boolean | undefined;
   private consuming = false;
   private signal: AbortSignal | undefined;
+  private families: OpenCodeActivityFamilies | undefined;
   /** Aborted: nothing late begins, attributes or writes a turn. */
   private closed = false;
 
@@ -267,6 +227,11 @@ export class CrewActivityCollector {
 
       return;
     }
+
+    this.families = new OpenCodeActivityFamilies({
+      ...this.source.family,
+      signal,
+    });
 
     signal.addEventListener(
       "abort",
@@ -435,9 +400,12 @@ export class CrewActivityCollector {
 
     for (const [id, peer] of next) {
       if (!this.sessions.has(id) && !this.fenced.has(id)) {
+        this.families?.peer(id);
+
         const session: Session = {
           id,
           peer,
+          incarnation: { active: true },
           open: new Set(),
           messages: new SessionMessages(() => {
             this.forgotten += 1;
@@ -457,6 +425,7 @@ export class CrewActivityCollector {
   private drop(session: Session) {
     session.dropped = true;
     this.sessions.delete(session.id);
+    this.families?.fence(session.id, session.incarnation);
 
     for (const pending of session.messages.waiting()) {
       this.held.release(pending);
@@ -496,10 +465,14 @@ export class CrewActivityCollector {
 
     while (!signal.aborted) {
       try {
-        for await (const frame of subscribe(this.source.events, signal)) {
+        for await (const frame of subscribeActivityFamily(
+          this.source.events,
+          signal,
+        )) {
           if (frame.type === "server.connected") {
             if (++connections > 1) {
-              this.reconnected();
+              // Do not place frames from the new connection against old turns.
+              await this.reconnected();
             }
 
             retryMs = 250;
@@ -521,31 +494,60 @@ export class CrewActivityCollector {
     for (const session of this.sessions.values()) {
       // Boundaries in the gap are unseen: no open interval spans it.
       session.history.reconnected();
-
-      for (const turn of session.open) {
-        turn.log.reconnected();
-      }
     }
+
+    const open = [...this.sessions.values()].filter(
+      (session) =>
+        session.startSeq !== undefined ||
+        session.open.size > 0 ||
+        session.messages.waits(session.execution),
+    );
+
+    return this.families?.reconcileRoots(open, (session, result) => {
+      if (result?.kind === "settled" && !staleBoundary(session, result.seq)) {
+        this.settle(session, result.outcome, result.seq);
+
+        return;
+      }
+
+      this.settle(session, "cancelled", undefined, true);
+
+      if (result?.kind === "start" && !staleBoundary(session, result.seq)) {
+        this.started(session, result.seq);
+      }
+    });
   }
 
-  private receive(event: Event, at: number) {
+  private receive(event: ActivityFamilyEvent, at: number) {
     const session = this.sessions.get(event.data.sessionID);
+
+    const parent =
+      event.type === "session.created" && event.data.parentID
+        ? this.sessions.get(event.data.parentID)
+        : undefined;
+
+    const deferred = parent?.messages.waits(parent.execution)
+      ? parent.execution
+      : undefined;
+
+    const order = this.families?.receive(event, at, deferred) ?? 0;
 
     // Not a current root peer session of this registration's own plugin.
     if (!session || this.closed) {
       return;
     }
 
-    if (isSettled(event) || event.type === startedEvent) {
-      // A replayed or older boundary changes nothing.
-      if (this.stale(session, event)) {
+    const outcome = activityOutcome(event.type);
+
+    if (outcome || event.type === "session.execution.started") {
+      const seq = boundarySeq(event);
+
+      if (staleBoundary(session, seq)) {
         return;
       }
 
-      const seq = boundarySeq(event);
-
-      if (isSettled(event)) {
-        this.settle(session, outcomes[event.type], seq);
+      if (outcome) {
+        this.settle(session, outcome, seq);
       } else {
         this.started(session, seq);
       }
@@ -553,19 +555,25 @@ export class CrewActivityCollector {
       return;
     }
 
+    if (!isActivityEvent(event)) {
+      return;
+    }
+
+    const packet = { event, at, order };
+
     const assistant = event.data.assistantMessageID;
     const entry = session.messages.get(assistant);
 
     if (entry && "log" in entry) {
       if (kept(entry)) {
-        entry.projector.apply(entry.log, event, at);
+        this.apply(entry, packet);
       }
 
       return;
     }
 
     if (isPending(entry)) {
-      this.held.hold(entry, event, at);
+      this.held.hold(entry, packet);
 
       return;
     }
@@ -590,6 +598,7 @@ export class CrewActivityCollector {
       forced: false,
       deadline: undefined,
       settled: late?.outcome,
+      lost: late?.lost,
       position: late?.position ?? session.execution,
       arrival: ++session.arrivals,
       timer: setTimeout(() => {
@@ -602,7 +611,7 @@ export class CrewActivityCollector {
     session.messages.track(pending, (oldest) => {
       this.force(oldest);
     });
-    this.held.hold(pending, event, at);
+    this.held.hold(pending, packet);
 
     if (this.resolving < this.options.resolving) {
       void this.resolve(pending);
@@ -617,37 +626,29 @@ export class CrewActivityCollector {
     }
   }
 
-  private settle(session: Session, outcome: ActivityOutcome, seq?: number) {
-    session.history.settled(session.execution, seq, outcome);
+  private settle(
+    session: Session,
+    outcome: ActivityOutcome,
+    seq?: number,
+    lost?: true,
+  ) {
+    const position = session.execution;
+    session.history.settled(position, seq, outcome, lost);
     session.execution += 1;
-    this.endOpen(session, outcome);
+    delete session.startSeq;
+    this.endOpen(session, outcome, lost);
 
     for (const pending of session.messages.waiting()) {
-      pending.settled ??= outcome;
+      if (pending.position === position) {
+        pending.settled = outcome;
+
+        if (lost) {
+          pending.lost = true;
+        }
+      }
     }
 
     this.prune();
-  }
-
-  /**
-   * Native boundaries apply in their session's durable order: one at or
-   * below the latest applied sequence is a replay or arrived late. One
-   * without a durable sequence of this session is applied unfenced.
-   */
-  private stale(session: Session, event: Event) {
-    const seq = boundarySeq(event);
-
-    if (seq === undefined) {
-      return false;
-    }
-
-    if (seq <= session.boundary) {
-      return true;
-    }
-
-    session.boundary = seq;
-
-    return false;
   }
 
   /**
@@ -658,22 +659,31 @@ export class CrewActivityCollector {
    * sequence and records no interval: unseen executions may lie between.
    */
   private started(session: Session, seq: number | undefined) {
-    if (session.open.size > 0 || session.messages.waits(session.execution)) {
-      this.settle(session, "cancelled");
+    if (
+      session.startSeq !== undefined ||
+      session.open.size > 0 ||
+      session.messages.waits(session.execution)
+    ) {
+      this.settle(session, "cancelled", undefined, true);
+    }
+
+    if (seq !== undefined) {
+      session.startSeq = seq;
     }
 
     session.history.started(seq);
   }
 
   /** Every turn of the running execution ends with its outcome. */
-  private endOpen(session: Session, outcome: ActivityOutcome) {
+  private endOpen(session: Session, outcome: ActivityOutcome, lost?: true) {
     const open = [...session.open];
     session.open.clear();
 
     for (const turn of open) {
       if (!turn.ended) {
         turn.ended = true;
-        turn.log.end(outcome);
+        this.families?.settled(session.id, turn.log);
+        turn.log.end(outcome, lost);
       }
     }
   }
@@ -889,6 +899,12 @@ export class CrewActivityCollector {
       arrival: pending.arrival,
     };
 
+    this.families?.track(
+      session.id,
+      turn.log,
+      session.incarnation,
+      pending.position === session.execution,
+    );
     this.awaitTask(turn);
 
     return turn;
@@ -1021,11 +1037,19 @@ export class CrewActivityCollector {
 
     session.messages.place(assistant, turn);
 
-    for (const { event, at } of pending.frames) {
-      turn.projector.apply(turn.log, event, at);
+    for (const packet of pending.frames) {
+      this.apply(turn, packet);
     }
 
     this.held.release(pending);
+
+    if (!session.messages.waits(pending.position)) {
+      this.families?.placed(
+        session.id,
+        pending.position,
+        (joined ? turns : [...turns, turn]).map((candidate) => candidate.log),
+      );
+    }
 
     if (task && turn.input === input) {
       this.attributeTurn(turn, task);
@@ -1034,34 +1058,14 @@ export class CrewActivityCollector {
     // A settled execution's own turn is over at once.
     if (!running && !joined && !turn.ended) {
       turn.ended = true;
-      turn.log.end(pending.settled ?? "completed");
+      turn.log.end(pending.settled ?? "completed", pending.lost);
     }
 
     return true;
   }
-}
 
-/** Collect one registration's crew turns into `recorder`. */
-export const crewActivityStarter =
-  (recorder: CrewTurnRecorder): OpenCodeCrewActivity =>
-  (client, directory, signal) => {
-    openCodeCrewActivity(client, directory, recorder).start(signal);
-  };
-
-/** A registration's crew collector over its OpenCode client and crew plugin. */
-export function openCodeCrewActivity(
-  client: OpenCodeClient,
-  directory: () => string,
-  recorder: CrewTurnRecorder,
-) {
-  return new CrewActivityCollector(recorder, {
-    events: client.event,
-    turns: (input, signal) =>
-      client.rpc(CrewReporting).crewTurns(input, {
-        location: { directory: directory() },
-        signal,
-      }),
-    owner: (sessionID, assistant, signal) =>
-      owningInput(client, sessionID, signal, assistant),
-  });
+  private apply(turn: Turn, { event, at, order }: ActivityPacket) {
+    turn.projector.apply(turn.log, event, at);
+    this.families?.owned(turn.log, event, order);
+  }
 }

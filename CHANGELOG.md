@@ -105,6 +105,15 @@ mockups from a fleet's preview service. Standalone Stargate leaves it off.
 - Unmasked Fleet API crew text: none. By owner decision this behaviour change
   ships without a flag, an exception to the flag rule for large features.
 
+- No new flag: OpenCode officer and crew activity follow proven sub-sessions
+  after the root returns. Crew descendants inherit their root's verified
+  task, including late attribution. A turn whose observation is lost may
+  end `cancelled` with `lost: true`; no new status is introduced.
+  If early child frames overflow the in-memory buffer, Stargate recovers
+  durable content from the native log or marks the gap `unavailable`.
+  By owner decision this ships without a flag, an exception to the flag
+  rule for large features.
+
 ### Changes
 
 - Fleet API Git state: when `HEAD` cannot be read again after a good status
@@ -132,6 +141,13 @@ mockups from a fleet's preview service. Standalone Stargate leaves it off.
   the pending batch evicted against the turns as they were, so a late change
   that takes one family over the budget no longer evicts an older one that
   fits.
+
+- OpenCode child activity keeps a durable replay fence after evicted session
+  history is compacted, so a replayed execution cannot spend a new subagent
+  call's proof or take the place of its fresh transcript.
+- A foreign writer ending no longer discards buffered OpenCode child activity
+  before native ancestry is known. An exact, matching witness can still show
+  a detached transcript after the parent's dashboard turn has been evicted.
 
 - Teams sends pasted screenshots to the model. The gateway accepts PNG, JPEG, GIF
   and WebP sources up to 10 MiB and prepares inline image previews for replies.

@@ -159,12 +159,17 @@ test("two consecutive turns on one agent never mix", async () => {
   const hub = createActivityHub();
   const stream = eventStream();
   const observe = openCodeTurnObserver(hub.recorder("captain"));
+  const lifetime = new AbortController();
   // Placement proof: each assistant message answers exactly one input.
   const answers: Record<string, string> = { a1: "in-1", a2: "in-2" };
 
   const source = {
     sessionID: "session",
     events: stream.events,
+    lifetime: lifetime.signal,
+    parent: async () => undefined,
+    active: async () => ({}),
+    async *log() {},
     owns: async (assistant: string, input: string) =>
       answers[assistant] === input,
   };
@@ -271,7 +276,9 @@ test("two consecutive turns on one agent never mix", async () => {
     content: [{ type: "text", text: "file.txt" }],
   });
   expect(turns[0]?.items[0]).toMatchObject({ id: "i1", text: "first reply" });
-  // Every subscriber detached once the turns settled.
+  // The observer remains live for child turns until the backend closes.
+  expect(stream.subscribers()).toBe(1);
+  lifetime.abort();
   await until(() => stream.subscribers() === 0);
 });
 
@@ -442,6 +449,37 @@ test("activity retention counts roots per agent and evicts children with their r
     { session: { id: "next" } },
   ]);
   next.end("completed");
+});
+
+test("running child pins an ended root under family pressure", () => {
+  const hub = createActivityHub({ turnsPerAgent: 1, turns: 1 });
+  const recorder = hub.recorder("captain");
+  const root = recorder.begin(undefined, "root");
+  root.end("completed");
+  const child = root.child?.(null, "child");
+  recorder.begin(undefined, "pressure").end("completed");
+
+  expect(snapshot(hub, "captain").turns).toMatchObject([
+    { status: "completed", session: { id: "root" } },
+    { status: "running", session: { id: "child" } },
+  ]);
+  child?.end("completed");
+  expect(snapshot(hub, "captain").turns).toEqual([]);
+});
+
+test("a late child call link counts toward settled family bytes", () => {
+  const hub = createActivityHub({ bytes: 500 });
+  const root = hub.recorder("captain").begin(undefined, "parent-session");
+  const child = root.child?.(null, "child-session");
+  root.end("completed");
+  child?.end("completed");
+  expect(snapshot(hub, "captain").turns).toHaveLength(2);
+  child?.link?.("x".repeat(500));
+  expect(snapshot(hub, "captain").turns).toHaveLength(2);
+
+  // A late link is batched, but any eviction pass flushes its new size first.
+  hub.recorder("claude").begin();
+  expect(snapshot(hub, "captain").turns).toEqual([]);
 });
 
 test("IRC request lookups return the matching Claude family in retained order", () => {

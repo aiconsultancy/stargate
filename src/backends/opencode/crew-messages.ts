@@ -3,7 +3,8 @@ import type {
   CrewTurnActivityLog,
   CrewTurnTask,
 } from "../backend";
-import type { ActivityEvent, ActivityProjector } from "./activity-projector";
+import type { ActivityIncarnation, ActivityPacket } from "./activity-family";
+import type { ActivityProjector } from "./activity-projector";
 import type { ExecutionHistory } from "./crew-executions";
 
 /** A worker session's identity; a change fences the session for good. */
@@ -29,13 +30,11 @@ export type Turn = {
   arrival: number;
 };
 
-export type HeldFrame = { event: ActivityEvent; at: number };
-
 /** Frames of one assistant message, waiting for ownership and attribution. */
 export type Pending = {
   session: Session;
   assistant: string;
-  frames: HeldFrame[];
+  frames: ActivityPacket[];
   /** UTF-8 bytes of the held frames' serialized `data`. */
   bytes: number;
   /** Its owner is known. */
@@ -51,6 +50,7 @@ export type Pending = {
   deadline: number | undefined;
   /** The execution settled while this message waited. */
   settled: ActivityOutcome | undefined;
+  lost?: true | undefined;
   /** The session's execution when the message's first frame arrived. */
   position: number;
   arrival: number;
@@ -60,6 +60,7 @@ export type Pending = {
 export type Session = {
   id: string;
   peer: Peer;
+  incarnation: ActivityIncarnation;
   /** Turns of the running execution; its settlement ends them all. */
   open: Set<Turn>;
   messages: SessionMessages;
@@ -69,6 +70,7 @@ export type Session = {
   boundary: number;
   /** Recently settled executions with both durable bounds witnessed. */
   history: ExecutionHistory;
+  startSeq?: number;
   arrivals: number;
   /** No longer a peer: late resolutions change nothing. */
   dropped: boolean;
@@ -305,9 +307,9 @@ export class HeldFrames {
     this.pendings.add(pending);
   }
 
-  public hold(pending: Pending, event: ActivityEvent, at: number) {
-    const bytes = Buffer.byteLength(JSON.stringify(event.data));
-    pending.frames.push({ event, at });
+  public hold(pending: Pending, packet: ActivityPacket) {
+    const bytes = Buffer.byteLength(JSON.stringify(packet.event.data));
+    pending.frames.push(packet);
     pending.bytes += bytes;
 
     if (this.pendings.has(pending)) {

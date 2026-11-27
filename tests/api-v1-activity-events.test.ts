@@ -863,6 +863,47 @@ test("a Claude root subscription follows child changes in sequence order", async
   }
 });
 
+test("root and exact-child subscriptions converge after a late call link", async () => {
+  const hub = createActivityHub();
+  const root = hub.recorder("captain").begin(undefined, "parent-session");
+  const child = root.child?.(null, "child-session");
+  const [parent, initial] = snapshot(hub, "captain").turns;
+  const rootView = watch(hub, `agent=captain&turn=${parent?.id ?? ""}`);
+  const childView = watch(hub, `agent=captain&turn=${initial?.id ?? ""}`);
+
+  try {
+    child?.end("cancelled", true);
+    child?.link?.("verified-call");
+    child?.link?.("not-a-replacement");
+    await flushed();
+
+    const [ended, linked] = childView.events();
+    expect(rootView.events()).toEqual(childView.events());
+    expect(childView.events()).toHaveLength(2);
+    expect(ended?.change).toMatchObject({
+      type: "turn-ended",
+      turn: { lost: true, session: { parent: { callId: null } } },
+    });
+    expect(linked?.seq ?? 0).toBeGreaterThan(ended?.seq ?? Infinity);
+    expect(linked?.change).toMatchObject({
+      type: "turn-updated",
+      turn: { lost: true, session: { parent: { callId: "verified-call" } } },
+    });
+
+    if (linked?.change.type !== "turn-updated") {
+      throw new Error("Expected a link update");
+    }
+
+    expect(snapshot(hub, "captain").turns[1]).toEqual({
+      ...linked.change.turn,
+      items: [],
+    });
+  } finally {
+    childView.stop();
+    rootView.stop();
+  }
+});
+
 test("a Claude child subscription follows only that child's events in sequence order", async () => {
   const hub = createActivityHub();
   const root = hub.recorder("claude").begin(undefined, "root");
@@ -911,48 +952,77 @@ const sessionEvents = (events: V1AgentActivityEvent[]) => {
   ]);
 };
 
-test("a root's scoped watch follows a child admitted unlinked after its eviction", async () => {
-  const hub = createActivityHub({ bytes: 1000 });
-  const recorder = hub.recorder("claude");
-  const parent = recorder.begin(undefined, "parent");
-  const parentId = snapshot(hub, "claude").turns[0]?.id ?? "";
-  const viewer = watch(hub, `agent=claude&turn=${parentId}`);
+test.each(["before admission", "during admission"] as const)(
+  "a root's scoped watch follows a child admitted unlinked after eviction %s",
+  async (when) => {
+    const hub = createActivityHub({ bytes: 1000 });
+    const recorder = hub.recorder("claude");
+    const requests = [{ channel: "#Bridge", msgid: "parent-request" }];
+    const parent = recorder.begin(requests, "parent");
+    const parentId = snapshot(hub, "claude").turns[0]?.id ?? "";
+    const viewer = watch(hub, `agent=claude&turn=${parentId}`);
 
-  try {
-    parent.end("completed");
-    // The parent outgrows the budget; the batch window has not measured it.
-    parent.update("late", 1, () => text("x".repeat(5000)));
-    const child = parent.child?.("call", "child");
-    recorder.begin(undefined, "unrelated").end("completed");
-    child?.update("k", 2, () => text("child"));
-    child?.end("completed");
-    await flushed();
+    try {
+      parent.end("completed");
+      // The parent outgrows the budget; the batch window has not measured it.
+      parent.update("late", 1, () => text("x".repeat(5000)));
 
-    // Drained first, the parent goes and the child begins as its own root.
-    expect(snapshot(hub, "claude").turns[0]?.session).toEqual({
-      id: "child",
-      parent: null,
-    });
-    expect(sessionEvents(viewer.events())).toEqual([
-      ["parent", "turn-ended"],
-      ["parent", "item"],
-      ["child", "turn-started"],
-      ["child", "item"],
-      ["child", "turn-ended"],
-    ]);
-    expect(viewer.text()).not.toContain('"audience"');
-    // A new watch of the evicted parent answers as before.
-    expect(
-      subscribeActivity(
-        hub,
-        config,
-        new URLSearchParams(`agent=claude&turn=${parentId}`),
-      ).status,
-    ).toBe(404);
-  } finally {
-    viewer.stop();
-  }
-});
+      if (when === "before admission") {
+        recorder.begin(undefined, "unrelated").end("completed");
+        expect(
+          snapshot(hub, "claude").turns.some(({ id }) => id === parentId),
+        ).toBe(false);
+      }
+
+      const child = parent.child?.("call", "child");
+      child?.update("k", 2, () => text("child"));
+      child?.end("completed");
+      await flushed();
+
+      expect(
+        readActivity(
+          hub,
+          config,
+          "claude",
+          new URLSearchParams({
+            request: "parent-request",
+            channel: "#Bridge",
+          }),
+        ),
+      ).toMatchObject({
+        status: 200,
+        body: {
+          turns: [
+            {
+              session: { id: "child", parent: null },
+              requests,
+              items: [{ text: "child" }],
+            },
+          ],
+        },
+      });
+      expect(sessionEvents(viewer.events())).toEqual([
+        ["parent", "turn-ended"],
+        ["parent", "item"],
+        ["child", "turn-started"],
+        ["child", "item"],
+        ["child", "turn-ended"],
+      ]);
+      expect(viewer.text()).toContain('"text":"child"');
+      expect(viewer.text()).not.toContain('"audience"');
+      // A new watch of the evicted parent answers as before.
+      expect(
+        subscribeActivity(
+          hub,
+          config,
+          new URLSearchParams(`agent=claude&turn=${parentId}`),
+        ).status,
+      ).toBe(404);
+    } finally {
+      viewer.stop();
+    }
+  },
+);
 
 test("a root's scoped watch follows nested children of an unlinked child", async () => {
   const hub = createActivityHub({ bytes: 1000 });
@@ -1033,7 +1103,7 @@ test("a further split keeps live root watches but not a closed inherited watch",
 
       child?.end("completed");
       child?.update("late", 2, () => text(oversize));
-      child?.child?.("call", "grandchild").end("completed");
+      child?.child?.("call", "grandchild")?.end("completed");
       await flushed();
 
       for (const viewer of [ancestor, current]) {

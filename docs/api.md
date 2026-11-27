@@ -645,7 +645,7 @@ array is empty for other transports or when the original IRC message ID is
 unknown. Requests queued before link data was recorded are not backfilled.
 A follow-up steered into an already-running input is not a new turn and is
 not included in these links.
-Claude child turns have `requests: []`: the IRC message started the root,
+Child turns have `requests: []`: the IRC message started the root,
 not the subagent. `session.parent.turnId` names each child's immediate
 parent. A child admitted unlinked, below, is the exception.
 
@@ -666,9 +666,9 @@ are measured once per 150 ms batch, and before any turn begins or ends, so
 eviction never uses a stale size: a turn they push over the budget is
 evicted at the end of that batch, or sooner. A pending batch is evicted
 against the turns as they were before the turn began or ended, and only then
-does that turn count. If that drain evicts the parent of a child about to
-begin, the child is admitted unlinked: it is a root of its own, keeps its
-`session.id`, has `session.parent: null` and copies its family's
+does that turn count. If the parent of a proven child was already evicted,
+including by that drain, the child is admitted unlinked: it is a root of its
+own, keeps its `session.id`, has `session.parent: null` and copies its family's
 `requests`, so the snapshot and the request lookup still show it. A child
 of a retained parent links to it as usual. A family is evicted together;
 running families do not count toward those global limits. A settled family
@@ -676,9 +676,118 @@ that exceeds either global limit on its own is evicted first, before any
 older family. Eviction does not limit a running family's child turns: they
 are bounded only by the query's own turns and tool calls. No content is cut.
 OpenCode turns appear when the input is submitted and include output only
-once transcript placement proves it belongs to that turn. Claude recording
-starts at query submission, after stopping orphans, probing the CLI version,
-and creating the private temporary directory with `mkdtemp`.
+once transcript placement proves it belongs to that turn. OpenCode officer
+and crew collectors follow native sub-sessions on the same event stream as
+their roots. A child needs native ancestry and either an owned `subagent`
+call naming it or a single unambiguous running parent. Early child frames
+wait in a bounded buffer and replay in arrival order once the parent is
+proven. Ancestry lookups use at most eight concurrent reads per collector;
+eligible candidates wait in the same buffer for a free slot. Before
+admission, it holds up to 128 waiting candidates, expires unproven frames
+after two seconds, and budgets 256 KiB for payload frames. Once proven,
+children under a running root have no additional session-count admission
+cap. Retention applies to the settled family, with oversized families
+removed before older fitting families. When the buffer fills before admission,
+the collector reads missing durable frames from the native log; if any
+frames cannot be recovered, the child shows `unavailable: ["activity.frames"]`.
+Live frames for a published child bypass the candidate byte limit and are
+merged in order with recovered frames, without duplicating durable items.
+Transient output is kept and oversized items are paged. A failed content
+read does not discard held frames or change a witnessed outcome. It marks
+missing content, not an unknown outcome.
+OpenCode children have their own session and turn IDs. Their `callId` may
+start as `null` and fill once in a `turn-updated`. Each busy period of a
+reused child is a separate turn; a follow-up that joins an already-running
+child does not move it to a different parent. The child records its own
+outcome and can keep running after the root reply.
+If competing calls or a saturated name index for the same native parent
+and incarnation prevent proving ownership,
+an admitted child's `session.parent` stays `null`. It does not count as a
+standalone root against the 16-root limit, but it still counts toward the
+global settled turn and byte limits.
+A start that began before a call in native time cannot belong to that call,
+even if the call appeared first on the stream. Without a native start time,
+an earlier call can still leave a later start ambiguous.
+A parent with no remaining exact names keeps its saturation record only
+while its activity writer is retained.
+
+Known child assistant messages and frames strictly inside a witnessed child
+execution's durable bounds stay with their original execution; frames
+for an evicted turn are dropped. Native event IDs deduplicate streamed
+deltas, and the child session's durable cursor survives candidate expiry
+and reconnect while the parent is tracked. An item with no witnessed
+message association falls back to the current admitted child execution and
+does not inherit an older outcome. A delta without a native ID cannot be
+deduplicated. The delta ID window can forget old IDs, not transcript text.
+After a child session starts a new execution, an unsequenced delta for an
+unknown assistant message is withheld; the final text can still arrive in
+the durable message-end frame. Writer associations are released when the
+hub evicts the turn. The collector retains routing markers for up to 512
+evicted child sessions and only an exact durable position for up to 4,096
+older sessions. Replayed positions at or below that fence cannot spend a
+new call's proof. When an exact position is lost, the collector retains the
+highest native event time from the discarded boundaries, using the latest
+observed native time when a discarded boundary is undated. An unrecognized
+session created after that time does not need to prove freshness; a replayed
+creation at or before it does not exempt the session. For a start that needs
+proof, the child's native `created` must be at least the parent's
+`session.tool.input.started` time, or `session.tool.called` time if the input
+start was not seen. No gateway timestamp or log read is used for this check.
+A non-empty string `sessionID` or `task_id` means the call resumes a session.
+
+A named child can still appear after the pending window. OpenCode 2.3.2
+can return from the naming call while the child runs in the background,
+so a waiting name has no time-based expiry; the bounded candidate queue,
+reconnect and crew fencing can still clear it. Fencing removes that writer's
+names, but leaves buffered frames with unresolved ancestry for the native
+parent read to settle. Native time establishes order,
+not causation. If a start is older than the call or cannot be proven fresh,
+the call shows
+`unavailable: ["activity.child-attribution"]`. The unproven frames appear in
+an unscoped activity snapshot or stream as a separate turn with no parent,
+request or crew task, and no claimed native outcome. A proven start for the
+same waiting call clears the marker. A sequenced start with a missing,
+non-finite or non-positive timestamp stays uncertain even for a brand-new
+child; unsequenced live frames do not have that durable timestamp requirement.
+An in-time name from the matching native parent whose call opened after the
+child's native start can show the buffered child immediately as a detached
+turn, even if the parent's dashboard turn has been evicted. It cannot attach
+the turn or establish a native outcome; a fenced writer cannot show it.
+On deployments that retain no native
+events, bounded transcript recovery still shows a visible gap rather than
+reconstructing missing frames. The durable fence does not reject unsequenced
+frames associated with an admitted execution's known assistant messages.
+
+After a stream reconnect, the collector uses bounded reads of native
+execution boundaries to check whether a child is still in the same busy
+period or a native outcome is known. The stream can pause for the active
+sample and up to `ceil(children / 8) × 2 seconds` of paged log reads. A
+running sample proves continuity only if the log covers every durable
+position up to its watermark, or the watermark equals the cursor, and no
+new lifecycle boundary is seen. Reconnect does not reconstruct the
+transcript. If neither continuity nor an outcome is proven, the old turn
+ends `cancelled` with `lost: true`, meaning observation was lost, not that
+the native session was interrupted. A newer start seen by the log may
+establish that loss but can still be admitted once from the live stream.
+A live start after a loss gets its own two-second naming window, even if
+an earlier start for the same session is still waiting or recovering frames.
+An expired start cannot take a new name. While it drains, the collector can
+hold a bounded number of names and check their original arrival time against
+the next start's own window. The latest known native start among the expired
+periods excludes earlier calls; a missing start time does not reset that cutoff.
+Surviving calls up through the last untimed expiry can compete but cannot attach
+a turn. With no timed cutoff, the whole earlier range is competition-only.
+A valid name within the window can still attach the turn and its witnessed outcome.
+Output beyond the old cursor without a new start, or buffered
+output from a start whose window or candidate budget closes without
+proof, appears in a separate detached turn with no parent, request, crew
+task or claimed native outcome. Frames that cannot be kept or recovered
+are marked `activity.frames`. The lost marker also appears if a new
+native start reveals a missed settlement or crew ownership is lost.
+
+Claude recording starts at query submission, after stopping orphans,
+probing the CLI version, and creating the private temporary directory with
+`mkdtemp`.
 
 #### Live activity events
 
@@ -715,11 +824,11 @@ shapes:
 | `change.type`  | Payload                                                 |
 | -------------- | ------------------------------------------------------- |
 | `turn-started` | `turn`: the turn without `items`                        |
-| `turn-updated` | `turn`: after a reattachment, usage or crew task update |
+| `turn-updated` | `turn`: after reattachment, usage, task or call linking |
 | `turn-ended`   | `turn`: with its outcome, `endedAt` and settled `usage` |
 | `item`         | `item`: the item, or its identity and `paged`           |
 
-All turn upserts include `requests`, starting with `turn-started`. Claude
+All turn upserts include `requests`, starting with `turn-started`. OpenCode and Claude
 root and child events share the officer's `agentId`, sequence and generation;
 their turn upserts include `session` exactly as in the snapshot.
 
@@ -758,16 +867,16 @@ To follow an officer without a gap:
    when the stream opens, so a snapshot fetched earlier can miss changes.
    Keep the stream's `agent-activity` events.
 2. Fetch `/api/v1/agents/<id>/activity`.
-3. Apply each kept or later event whose `seq` is above that agent's snapshot
-   `cursor.seq`, replacing the turn or item with the same ID. Drop the rest:
-   the snapshot already holds them. `seq` and the cursor are per agent: with
-   several `agent` values, events from different officers interleave, and
-   each is compared only with its own agent's cursor and events.
-4. Refetch that agent's snapshot and apply again from step 3 when an event's
-   `generation` differs from its cursor's (the gateway restarted) or its `seq`
-   is not above the same agent's previous event. When the stream closes,
-   start again from step 1. The server never drops an event from an open
-   stream; it closes the stream instead.
+3. For each kept or later event, compare `generation` with that agent's
+   cursor first. If they differ (the gateway restarted), refetch that
+   agent's snapshot before comparing sequence numbers. Ignore buffered
+   events from the superseded generation.
+4. Within the same generation, drop events whose `seq` is at or below
+   that agent's cursor. Apply newer events by replacing the turn or item
+   with the same ID, then advance the cursor to that `seq`. With several
+   `agent` values, compare each event only with its own agent's cursor.
+   When the stream closes, start again from step 1. The server never
+   drops an event from an open stream; it closes the stream instead.
 
 ### Crew activity
 
@@ -789,10 +898,12 @@ Its answer is bounded by the crew's load-time limit of 50 member contexts:
 at most 50 members, 50 peer sessions (one per member and project) and
 50 × 17 tasks (each context's active task and its latest 16 settled ones);
 a larger answer is refused as malformed.
-Only root worker sessions of configured OpenCode members with a ready peer
-session are collected: not Pi workers, removed members or pending
-reservations, and sub-sessions not yet. A session that changes member,
-project or crew namespace is no longer collected. A task's resume inputs
+Only configured OpenCode members with a ready peer session provide roots:
+not Pi workers, removed members or pending reservations. Their proven
+sub-sessions follow the same family rules as the officer route. A session
+that changes member, project or crew namespace is no longer collected.
+Replacing or removing a peer stops observation of its descendants; a
+replacement cannot adopt an old descendant's execution. A task's resume inputs
 are attributed for each member's latest 64 tasks; an older task's
 assignment input still is.
 
@@ -812,10 +923,17 @@ A crew turn covers one execution of the worker session, as an officer's
 turn does, and ends when the execution settles, with its outcome. A DM,
 notice or callback steered into the running execution never ends a turn.
 If a settle is missed, the session's next native execution start ends its
-open turns `cancelled`, and so do messages of that execution still waiting
-to be placed. Starts and settlements apply in their session's durable
-order: a replayed or late one, of any age, changes nothing. One without a
-durable sequence for its session is applied as it comes.
+open turns `cancelled` with `lost: true`, including turns whose messages were
+still waiting to be placed. Starts and settlements apply in their session's
+durable order: a replayed or late one, of any age, changes nothing. One
+without a durable sequence for its session is applied as it comes.
+After reconnect, newer stream frames wait while bounded reads check the
+durable boundary of the current execution. Being active is not proof that
+it is the same execution: the log's watermark must equal the cursor or be
+covered by durable frames with no intervening boundary. If the log proves
+a settlement, its old crew root turns get that outcome. If neither a
+settlement nor continuation can be proven, those turns end `cancelled`
+with `lost: true` before the new execution's output is placed.
 
 An execution's messages are placed in the order their first frames arrived.
 Output whose owning input is not known yet appears after up to 2 seconds,
@@ -848,9 +966,9 @@ seen through a delta, when its execution is older than those 16, or when
 either bound of its execution was not seen with a durable sequence, for
 example a start without one, after a reconnect or when the session became
 a peer mid-execution. A settle missed and inferred from the next start
-bounds nothing either, since unseen executions may lie between. A turn opened by a message whose owner cannot
-be proven keeps `task: null`, and a later task message of the execution
-opens its own turn.
+bounds nothing either, since unseen executions may lie between. A turn
+opened by a message whose owner cannot be proven keeps `task: null`, and
+a later task message of the execution opens its own turn.
 
 Output waiting for its owner is held up to 256 KiB per message and 4 MiB in
 total, counted as each frame's serialized data without its small envelope;
@@ -882,11 +1000,14 @@ Each crew turn adds:
   task's own worker session and member, otherwise `null`: crew mail,
   notices, compaction or an input that could not be proven. A turn whose
   task lookup was slow starts with `null` and is updated once, with a
-  `turn-updated` event, also when the turn has already ended: that event
-  then shows the ended turn, and an end in the same window still arrives as
-  `turn-ended`. `project` is the crew
-  project key, `null` for the captain's default project.
-- `session`: `{ id, parent }`, the worker session; `parent` is `null`.
+  `turn-updated` event, also when the turn has
+  already ended: that event then shows the ended turn, and an end in the
+  same window still arrives as `turn-ended`. `project` is the crew
+  project key, `null` for the captain's default project. Children inherit
+  their root's task, including attribution that arrives after they ended;
+  no child makes its own task lookup.
+- `session`: `{ id, parent }`, the worker or child session. `parent` is
+  `null` for a root and `{ turnId, callId }` for a child.
 
 Each member keeps its own last 16 root turns and their children, apart from
 the officer's. Its settled families count towards the same global 256-turn
@@ -906,104 +1027,8 @@ snapshot.
 
 ## Events
 
-Use a streaming browser `fetch` with an `Authorization` header. A connection
-gets a `fleet` event with host and gateway information, followed by the
-initial `ship` details. One shared poller reads the overview every three
-seconds while clients are connected and publishes a `fleet` event when the
-overview or gateway metadata changes, independently of ship details.
-In the event stream, overview reads have a 25-second deadline,
-and host and gateway enrichment and individual ship details each have a
-20-second deadline. Over HTTP, every read ends one second before the request
-deadline, so a fallback or an error can still be sent. Within that, `GET
-/api/v1/fleet` stops waiting for crew reads 5 seconds before its own deadline
-(14 seconds by default) and reports any captain that hasn't answered as
-unavailable. The fleet overview, ship detail, and crew detail routes share
-eight HTTP read slots. These routes answer 503 when all eight slots are occupied.
-An event stream request holds a read slot only while it is checked, and
-moves to a stream place once it opens.
-When an overview read fails or times out, the poller can republish the last
-successful overview with `overviewStale: true` and its original `generatedAt`.
-That fallback expires 75 seconds after the successful read and is discarded
-when the configured ship roster or a ship's backend identity changes. The
-poller also discards in-flight overviews from before the change. On expiry,
-the server closes the streams so clients can reconnect for a fresh
-snapshot. Once a stream has received a `fleet` frame, a change to the ship
-roster or to a ship's backend identity also closes it, and the client
-reconnects for a fresh snapshot. Host and
-heartbeat events continue while the poller waits for a stalled overview.
-At three times a read's deadline, another attempt can start. Each overview,
-enrichment, host metrics, crew sample, ship detail and OpenCode `fleetStatus`
-probe slot allows one outstanding abandoned read alongside the current
-attempt. If the first
-overview stalls, host and heartbeat events can arrive before the initial
-fleet frame. The host timer waits up to one second for a fresh sample and
-uses the latest snapshot if the read is still pending. The snapshot omits
-disk usage until the first successful host sample. Changed details emit a
-full `ship` event with `detailUpdatedAt`. Reused crew data retains its
-observation time, even when other detail changes. Timestamp-only refreshes emit
-`ship-sampled` with `id` and `detailUpdatedAt`. Clients can use this event
-to update the timestamp on the cached detail. If a refresh fails,
-`detailStale` is set to `true` on the last successful detail, which keeps
-its original sample time, including across reconnects. When the captain is
-unavailable, retained detail reports `available: false` and includes the
-current error if supplied. A detail failure
-before the first successful detail emits an unavailable `ship` with an
-`error` field. A successful refresh clears `detailStale`. An overview
-availability transition supersedes in-flight detail reads for that ship.
-When a ship becomes available and has no successful detail cached, the
-poller waits for a new detail read as the superseded read drains. Removal or a
-change of backend identity discards cached detail for that ship. A replacement
-backend has its own detail read slot. Availability activity follows the
-overview. The stream sends `host` every ten seconds and `heartbeat` every
-fifteen seconds.
-
-The overview and ship details share one crew read per ship. When availability
-is unknown, the caller waits for that result for up to 20 seconds. During a
-refresh, a caller can use a recent sample after one second. A sample up to
-23 seconds old at the start of a refresh remains usable until the shared read
-completes. A failed sample can also be served with its `error` field set.
-A disconnected caller cancels its own wait.
-Fleet API shutdown cancels shared crew reads. A committed configuration
-reload invalidates cached crew samples and cancels reads for retired backends.
-Unchanged backends keep their in-flight reads, including reads shared with
-HTTP requests.
-After a shared read fails or reaches its deadline, the overview marks the
-ship unavailable and retains its last successful crew counts if available.
-Ordinary OpenCode `fleetStatus` probes, which ask for no task text, start
-with a 400 ms budget that doubles after a timeout, up to 6.4 seconds, leaving
-time for ordinary crew status. Timeouts count toward the pause below at the
-maximum budget. Task text reads have no probe budget, and their timeouts
-never double it: they wait for the caller's crew deadline. Ordinary and task
-text probes run separately, each with its own drain bound and pause, and
-neither waits behind the other. Concurrent callers with the same filter share
-one probe. Three consecutive failures of one kind pause that kind of probe
-for one minute; an explicit missing-method response to the initial request
-pauses both.
-A failed re-ask counts as one task text failure, and so does a task text probe
-ended by its last caller's crew deadline, in either request. A disconnect
-counts nothing, even if the plugin ignores the abort and Stargate later
-abandons the probe. A caller leaving while another waits does not end the
-probe. A re-ask answered after the deadline caches nothing. A member ID the
-crew plugin would reject is never sent to it: the crew member route answers
-`404` when admitted, or `503` when every HTTP read slot is busy.
-
-Activity includes newly observed task outcomes, even if the task also
-started between polls. Discovering an existing PR after startup or Git
-recovery does not generate activity.
-
-A frame contains an `event:` line, one `data:` line with JSON, and a blank line.
-
-```text
-event: heartbeat
-data: {"at":1730000000000}
-
-```
-
-Up to eight clients can stream at once, with or without
-[`agent-activity`](#live-activity-events) subscriptions. Further connections
-receive 503, and streams that fall behind are closed; a closed stream's
-place is free at once, even if its reader stopped reading. Reconnect for a
-new snapshot. There is no event replay.
+See [Fleet API v1 events](api-events.md) for stream frames, polling and
+deadlines, shared reads, and reconnect behaviour.
 
 ## Host limits
 
