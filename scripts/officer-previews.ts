@@ -178,6 +178,15 @@ async function serveMcp(socket: string, staging: string) {
   }
 }
 
+function systemFailure(operation: string, error: unknown) {
+  const code =
+    error instanceof Error && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "unknown";
+
+  console.error(`The preview publisher could not ${operation} (${code}).`);
+}
+
 function serveBroker(
   root: string,
   sockets: string,
@@ -253,9 +262,7 @@ function serveBroker(
             return Response.json({ error: error.message }, { status: 400 });
           }
 
-          console.error(
-            "The preview publisher could not update its managed storage.",
-          );
+          systemFailure("update its managed storage", error);
 
           return Response.json(
             { error: "Could not update the preview." },
@@ -270,10 +277,8 @@ function serveBroker(
   setInterval(() => {
     try {
       collect();
-    } catch {
-      console.error(
-        "The preview publisher could not clean up expired previews.",
-      );
+    } catch (error) {
+      systemFailure("clean up expired previews", error);
     }
   }, 15_000);
 }

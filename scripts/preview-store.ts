@@ -7,6 +7,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
@@ -82,6 +83,13 @@ export function previewStore(root: string, baseUrl: string) {
       }
 
       symlinkSync(relative(directory, bundle), pointer);
+
+      if (active.includes(name)) {
+        // Give any open Caddy reads a grace period starting at replacement.
+        const old = join(directory, readlinkSync(target));
+        utimesSync(old, now / 1000, now / 1000);
+      }
+
       renameSync(pointer, target);
     } catch (error) {
       rmSync(pointer, { force: true });

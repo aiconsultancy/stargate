@@ -1,11 +1,14 @@
 import { expect, test } from "bun:test";
 import {
+  link,
   mkdtemp,
   mkdir,
   readFile,
+  readdir,
   realpath,
   rm,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -104,6 +107,10 @@ test("an officer can publish, replace and withdraw only its own static mockup", 
 
     await writeFile(join(demo, "bundle.js.map"), "private source");
 
+    await mkdir(join(demo, "@slot~example"));
+    await writeFile(join(demo, "@slot~example", "feed.xml"), "<feed/>");
+    await writeFile(join(demo, "x".repeat(77) + ".js.map"), "private source");
+
     const first = await mcp("publish", "demo");
     expect(first).toContain(`${baseUrl}p/atlas/demo/`);
     expect(first).toContain("expiresAt");
@@ -126,6 +133,11 @@ test("an officer can publish, replace and withdraw only its own static mockup", 
     expect(
       await readFile(join(live, "atlas", "demo", "index.html"), "utf8"),
     ).toContain("Revised");
+
+    const hardlink = join(demo, "hardlinked.html");
+    await link(index, hardlink);
+    expect(await mcp("publish", "demo")).toContain("without hard links");
+    await rm(hardlink);
 
     await symlink(index, join(demo, "linked.html"));
     expect(await mcp("publish", "demo")).toContain(
@@ -175,6 +187,54 @@ test("the publisher validates contributed paths and retires expired links", asyn
     expect(await readFile(content, "utf8")).toContain("Demo");
     store.collect(Date.parse(receipt.expiresAt) + 1);
     await expect(readFile(content)).rejects.toThrow();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a replaced bundle gets a full grace interval and resubmission can reuse a capped slot", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sg-retention-"));
+
+  try {
+    const store = previewStore(root, "https://previews.example.com/");
+    const output = new Map([["index.html", Buffer.from("<h1>Demo</h1>")]]);
+    const first = store.publish("atlas", "demo", output);
+    const bundles = join(root, "bundles");
+    const [old] = await readdir(bundles);
+
+    if (!old) {
+      throw new Error("The initial bundle was not stored");
+    }
+
+    const oldBundle = join(bundles, old);
+
+    const past = new Date(
+      Date.parse(first.expiresAt) - 8 * 24 * 60 * 60 * 1000,
+    );
+
+    await utimes(oldBundle, past, past);
+    const replacement = store.publish("atlas", "demo", output);
+
+    const publishedAt =
+      Date.parse(replacement.expiresAt) - 7 * 24 * 60 * 60 * 1000;
+
+    expect(replacement.url).toBe(first.url);
+    store.collect(publishedAt + 30_000);
+    expect(await readFile(join(oldBundle, "index.html"), "utf8")).toContain(
+      "Demo",
+    );
+    store.collect(publishedAt + 65_000);
+    await expect(readFile(join(oldBundle, "index.html"))).rejects.toThrow();
+
+    for (let index = 1; index < 20; index += 1) {
+      store.publish("atlas", `demo-${index}`, output);
+    }
+
+    expect(() => store.publish("atlas", "extra", output)).toThrow(
+      "20 live previews",
+    );
+    expect(store.publish("atlas", "demo", output).url).toBe(first.url);
+    expect(store.unpublish("atlas", "missing").unpublished).toBe(true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

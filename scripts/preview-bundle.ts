@@ -9,10 +9,10 @@ export const previewName = Schema.String.check(
   Schema.isPattern(previewNamePattern),
 );
 
-const segments = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}$/;
+const segments = /^[A-Za-z0-9_@~-][A-Za-z0-9_.@~-]{0,79}$/;
 
 const assets =
-  /\.(html|css|m?js|json|webmanifest|txt|svg|png|jpe?g|gif|webp|ico|avif|woff2?|ttf|mp4|webm|mp3|wav)$/i;
+  /\.(html|css|m?js|json|webmanifest|txt|xml|wasm|pdf|svg|png|jpe?g|gif|webp|ico|avif|woff2?|ttf|otf|mp4|webm|mp3|wav)$/i;
 
 const maxFiles = 256;
 const maxBytes = 10 * 1024 * 1024;
@@ -38,7 +38,7 @@ function checkPath(path: string) {
     !assets.test(path)
   ) {
     throw new PreviewRefused(
-      "Use ordinary static asset names, with up to eight path components.",
+      `Unsupported asset ${JSON.stringify(path.slice(0, 200))}. Use a supported extension and up to eight ordinary path components.`,
     );
   }
 }
@@ -116,20 +116,20 @@ export async function readBundle(
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       const local = join(directory, entry.name);
 
-      if (!segments.test(entry.name)) {
-        throw new PreviewRefused(
-          "Remove hidden files and directories from the staged bundle.",
-        );
-      }
-
       if (entry.isDirectory()) {
+        if (!segments.test(entry.name)) {
+          throw new PreviewRefused(
+            `Unsupported staged directory ${JSON.stringify(path.slice(0, 200))}.`,
+          );
+        }
+
         await walk(local, path, depth + 1);
         continue;
       }
 
       if (!entry.isFile()) {
         throw new PreviewRefused(
-          "The staged bundle must contain regular files and directories only.",
+          `The staged bundle must contain regular files and directories only. Check ${JSON.stringify(path.slice(0, 200))}.`,
         );
       }
 
