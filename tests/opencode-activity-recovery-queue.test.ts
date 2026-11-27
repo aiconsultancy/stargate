@@ -317,6 +317,43 @@ test("budget closure of an expired post-loss head does not retire its calls", ()
   }
 });
 
+test("a late name is not handed off from an expired predecessor without a loss", () => {
+  const f = namingHandoffFixture();
+
+  try {
+    delete f.pending.postLoss;
+    f.start(10, 10, 0);
+    f.start(20, 20, 100);
+    f.name(5, 5, 2050);
+    f.drain(2060);
+
+    expect(f.naming().first).toBeUndefined();
+  } finally {
+    f.queue.close();
+  }
+});
+
+test("budget closure drops a held name if the successor's deadline also passed", () => {
+  const f = namingHandoffFixture();
+
+  try {
+    f.start(10, 10, 0);
+    f.start(20, 20, 100);
+    f.name(5, 5, 2150);
+
+    const heldAtDrain: string[][] = [];
+
+    f.closeByBudget(2150, () => {
+      heldAtDrain.push(f.pending.provisional.map(({ callId }) => callId));
+    });
+
+    expect(heldAtDrain).toEqual([["5"], []]);
+    expect(f.queue.peek(f.id)).toBeUndefined();
+  } finally {
+    f.queue.close();
+  }
+});
+
 test("only the matching native parent can supply a detached witness", () => {
   const f = namingHandoffFixture();
 
