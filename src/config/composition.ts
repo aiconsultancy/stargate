@@ -627,6 +627,7 @@ export const teamsSchema = settingsStruct({
   tenantId: settingsUUID,
   socketPath: absolutePath,
   access: settingsStruct({
+    allowInstalledConversations: Schema.optional(Schema.Boolean),
     allowUnmentionedConversations: Schema.optional(Schema.Boolean),
     users: Schema.mutable(Schema.Array(settingsUUID)).check(
       Schema.isMinLength(1),
@@ -672,6 +673,18 @@ export const teamsSchema = settingsStruct({
     .pipe(settingsDefault(1_800_000)),
 }).check(
   settingsCheck((value, context) => {
+    if (
+      value.access.allowInstalledConversations &&
+      value.fleetPolicy?.role !== "rear_admiral"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["access", "allowInstalledConversations"],
+        message:
+          "Installed Teams conversations require a rear admiral registration",
+      });
+    }
+
     if (
       value.approvalUsers.some((user) => !value.access.users.includes(user))
     ) {

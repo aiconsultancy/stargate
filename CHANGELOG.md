@@ -20,6 +20,8 @@ private network. Existing HTTPS and loopback origins remain supported.
   receipt from exact tenant SharePoint hosts in personal chats.
   `access.allowUnmentionedConversations` allows messages without a bot mention in explicitly
   listed conversations.
+- `access.allowInstalledConversations`, off by default, lets a rear admiral
+  answer verified mentions in Teams conversations where the bot is installed.
 - Default change: channel and group-chat messages require this bot's @mention.
   Incoming activities must identify this registration's Teams bot recipient.
   Teams quoted previews provide untrusted context for admitted requests.
