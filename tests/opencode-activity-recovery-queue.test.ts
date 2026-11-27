@@ -438,6 +438,48 @@ test("an expired head with only a spilled witness still gets an admission attemp
   }
 });
 
+test("fencing a writer prunes its proofs, witnesses and provisional names only", () => {
+  const f = namingHandoffFixture();
+  const fenced = { active: true };
+  const live = { active: true };
+
+  try {
+    f.start(10, 10, 0);
+    f.name(1, 5, 300, "ses_fenced", fenced);
+    f.name(2, 5, 300, "ses_live", live);
+    f.name(3, 20, 300, "ses_fenced", fenced);
+    f.name(4, 20, 300, "ses_live", live);
+    f.name(11, 20, 300, "ses_fenced", fenced);
+    f.name(12, 20, 300, "ses_live", live);
+
+    // Deliberately ignore scope activity so a stale entry cannot hide in the filter.
+    const naming = (scope: ActivityIncarnation) =>
+      f.queue.naming(f.pending, (proof) => proof.scope === scope);
+
+    const provisional = () =>
+      f.queue.peek(f.id)?.provisional.map(({ callId }) => callId);
+
+    expect(naming(fenced)).toMatchObject({
+      first: { callId: "1" },
+      witness: { callId: "3" },
+    });
+    expect(provisional()).toEqual(["11", "12"]);
+
+    fenced.active = false;
+    f.queue.fence(fenced);
+
+    expect(naming(fenced).first).toBeUndefined();
+    expect(naming(fenced).witness).toBeUndefined();
+    expect(provisional()).toEqual(["12"]);
+    expect(naming(live)).toMatchObject({
+      first: { callId: "2" },
+      witness: { callId: "4" },
+    });
+  } finally {
+    f.queue.close();
+  }
+});
+
 function recoveryFixture() {
   const id = "ses_child";
 
