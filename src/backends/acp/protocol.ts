@@ -428,13 +428,18 @@ export class AcpStdioConnection {
   ): Promise<void> {
     try {
       const result = await this.options.onRequest(method, params);
-      this.writeMessage({ jsonrpc: "2.0", id, result });
+
+      if (!this.closed) {
+        this.writeMessage({ jsonrpc: "2.0", id, result });
+      }
     } catch {
-      this.writeMessage({
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32_603, message: "Client request handler failed" },
-      });
+      if (!this.closed) {
+        this.writeMessage({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32_603, message: "Client request handler failed" },
+        });
+      }
     }
   }
 

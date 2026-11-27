@@ -37,7 +37,7 @@ const RAW_INPUT_PATH_KEYS = [
 ] as const;
 
 const READ_ONLY_KINDS = new Set(["read", "search", "think", "fetch"]);
-const MUTATING_KINDS = new Set(["edit", "delete", "move"]);
+const MUTATING_KINDS = new Set(["edit", "delete"]);
 
 export type AcpChangedPaths = readonly string[] | "unknown";
 

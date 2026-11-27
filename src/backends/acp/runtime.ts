@@ -798,9 +798,17 @@ export async function runAcpTurn(spec: AcpRunSpec): Promise<AcpRunOutcome> {
     since = recordProcessStart(child.pid, spec.recordPath, spec.turnMarker);
   } catch (error) {
     try {
-      child.kill("SIGKILL");
+      if (child.pid !== undefined) {
+        process.kill(-child.pid, "SIGKILL");
+      } else {
+        child.kill("SIGKILL");
+      }
     } catch {
-      // Already exited.
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Already exited.
+      }
     }
 
     throw error;
