@@ -235,17 +235,6 @@ export class ActivityRecoveryQueues<E extends Event> {
     }
   }
 
-  public hasProofFrom(pending: PendingActivity<E>, session: string) {
-    return (
-      pending.provisional.some((proof) => proof.session === session) ||
-      pending.segments.some(
-        ({ proofs, witnesses }) =>
-          witnesses?.some((proof) => proof.session === session) === true ||
-          proofs.some((proof) => proof.session === session),
-      )
-    );
-  }
-
   public naming(
     pending: PendingActivity<E>,
     accepts: (proof: NamingProof) => boolean,
@@ -307,14 +296,15 @@ export class ActivityRecoveryQueues<E extends Event> {
 
   public fence(scope: ActivityIncarnation) {
     this.evidence.fence(scope);
+    const orphaned = new Set<string>();
 
-    for (const pending of this.queues.values()) {
-      pending.droppedProofs?.delete(scope);
-
-      for (const segment of pending.segments) {
-        segment.droppedProofScopes?.delete(scope);
+    for (const [id, pending] of this.queues) {
+      if (this.evidence.discardWriter(pending, pending.segments, scope)) {
+        orphaned.add(id);
       }
     }
+
+    return orphaned;
   }
 
   public expire() {
