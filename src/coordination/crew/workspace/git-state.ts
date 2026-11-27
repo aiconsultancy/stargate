@@ -9,7 +9,13 @@ import {
   parseAheadBehind,
   statusEntries,
 } from "../reporting/fleet-status";
-import type { IsolatedCheckout, IsolatedStream } from "./git-status";
+import {
+  type IsolatedCheckout,
+  type IsolatedStream,
+  originHeadArgs,
+  originHeadRef,
+  parseOriginHead,
+} from "./git-status";
 
 // Read-only checkout state for the Fleet API, read as the captain.
 const gitStateTTL = 15_000;
@@ -49,7 +55,6 @@ export async function output(git: Git, args: string[]) {
 
 export type Origin = { ref: string; commit: string };
 
-const originHead = "refs/remotes/origin/HEAD";
 const objectId = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 /**
@@ -60,7 +65,6 @@ const objectId = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 export type OriginHead = { target: string; short: string; commit: string };
 
 const originFields = [
-  "refname",
   "symref",
   "symref:short",
   "objectname",
@@ -74,21 +78,10 @@ const originFields = [
  * fingerprint share. Only a tag of a tag takes a second, to peel it.
  */
 export async function readOriginHead(git: Git): Promise<OriginHead> {
-  const text = await output(git, [
-    "for-each-ref",
-    `--format=${originFields.map((field) => `%(${field})`).join("%00")}`,
-    originHead,
-  ]);
+  const text = await output(git, originHeadArgs(originFields));
 
-  // The pattern matches refs below it as well: only origin/HEAD counts.
-  const [, target = "", short = "", oid = "", type = "", peeled = "", inner] =
-    text
-      ?.split("\n")
-      .map((line) => line.split("\0"))
-      .find(
-        (fields) =>
-          fields[0] === originHead && fields.length === originFields.length,
-      ) ?? [];
+  const [target = "", short = "", oid = "", type = "", peeled = "", inner] =
+    parseOriginHead(text ?? "", originFields);
 
   let commit = "";
 
@@ -108,7 +101,7 @@ export async function readOriginHead(git: Git): Promise<OriginHead> {
               "--verify",
               "-q",
               "--end-of-options",
-              `${originHead}^{commit}`,
+              `${originHeadRef}^{commit}`,
             ])) ?? "");
       break;
     }

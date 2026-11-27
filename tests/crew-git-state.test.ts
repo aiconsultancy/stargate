@@ -198,6 +198,7 @@ test.each([
   ["is absent", null],
   ["dangles", null],
   ["is not a symref", null],
+  ["is absent below a symref", null],
 ] as const)(
   "with no upstream and an origin/HEAD that %s, both readers agree on the base, without an error",
   async (kind, base) => {
@@ -211,6 +212,16 @@ test.each([
 
     if (target) {
       await git(directory, "symbolic-ref", "refs/remotes/origin/HEAD", target);
+    }
+
+    // The for-each-ref pattern also matches this ref, which is not origin/HEAD.
+    if (kind === "is absent below a symref") {
+      await git(
+        directory,
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD/x",
+        "refs/remotes/origin/main",
+      );
     }
 
     if (kind === "is not a symref") {

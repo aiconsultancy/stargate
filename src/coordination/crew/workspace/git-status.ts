@@ -195,6 +195,31 @@ export const fleetGitOptions = [
   "submodule.recurse=false",
 ];
 
+/** Both Git readers find the default branch through this ref. */
+export const originHeadRef = "refs/remotes/origin/HEAD";
+
+/** The for-each-ref arguments that print `fields` of `origin/HEAD`. */
+export function originHeadArgs(fields: readonly string[]) {
+  const format = ["refname", ...fields].map((field) => `%(${field})`);
+
+  return ["for-each-ref", `--format=${format.join("%00")}`, originHeadRef];
+}
+
+/**
+ * The `fields` of `origin/HEAD` from `originHeadArgs(fields)` output, or none
+ * when it is absent. for-each-ref skips an `origin/HEAD` that points to a
+ * missing ref.
+ */
+export function parseOriginHead(stdout: string, fields: readonly string[]) {
+  // The pattern matches refs below it as well: only origin/HEAD counts.
+  const line = stdout
+    .split("\n")
+    .map((text) => text.split("\0"))
+    .find(([ref]) => ref === originHeadRef);
+
+  return line?.slice(1, fields.length + 1) ?? [];
+}
+
 const statusArgs = [
   "status",
   "--porcelain=v1",

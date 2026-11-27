@@ -27,7 +27,9 @@ import {
   fleetGitEnv,
   fleetGitOptions,
   guardFleetHead,
+  originHeadArgs,
   outsideCheckout,
+  parseOriginHead,
   privateStatusDirectory,
   removeStatusDirectory,
   statusDataDirectory,
@@ -479,27 +481,18 @@ function emptyState(checkedAt: number): V1Git {
   };
 }
 
-const originHead = "refs/remotes/origin/HEAD";
+const branchField = ["symref:short"];
 
 /**
- * The branch `origin/HEAD` names, as the crew plugin's reader finds it, or
- * null. for-each-ref skips an `origin/HEAD` that points to a missing ref, so
- * that case has no base rather than a failed comparison.
+ * The branch `origin/HEAD` names, read as the crew plugin's reader reads it,
+ * or null. A dangling `origin/HEAD` has no base rather than a failed
+ * comparison.
  */
 async function defaultBranch(
   run: (...args: string[]) => Promise<{ code: number; stdout: string }>,
 ) {
-  const result = await run(
-    "for-each-ref",
-    "--format=%(refname)%00%(symref:short)",
-    originHead,
-  );
-
-  // The pattern matches refs below it as well: only origin/HEAD counts.
-  const short = result.stdout
-    .split("\n")
-    .map((line) => line.split("\0"))
-    .find(([ref, , extra]) => ref === originHead && extra === undefined)?.[1];
+  const result = await run(...originHeadArgs(branchField));
+  const [short] = parseOriginHead(result.stdout, branchField);
 
   return result.code === 0 && short ? short : null;
 }
