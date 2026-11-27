@@ -569,6 +569,57 @@ export class CrewEngine {
     };
   }
 
+  private freeForDispatch(id: string): boolean {
+    const active = this.state.activeTask(id);
+
+    return (
+      !this.drain() &&
+      !this.state.controlled(id) &&
+      (!active || (active.status === "completed" && !active.notifying)) &&
+      this.state.queuedTasks(id).length === 0
+    );
+  }
+
+  /** A passive capacity check using the same quota policy as an actual start. */
+  public async hasDispatchCapacity(signal: AbortSignal): Promise<boolean> {
+    if (this.drain()) {
+      return false;
+    }
+
+    for (const member of this.options.team.crew) {
+      const peer = this.state.peer(member.id);
+
+      if (peer?.status !== "ready" || !this.freeForDispatch(member.id)) {
+        continue;
+      }
+
+      try {
+        const session = member.backend
+          ? undefined
+          : await this.sessions.get({ sessionID: peer.sessionID }, { signal });
+
+        if (session) {
+          this.validPeer(session, peer);
+        }
+
+        if (
+          !(await this.usageBlock(member.id, session?.model)) &&
+          (await this.idle(peer, signal))
+        ) {
+          signal.throwIfAborted();
+
+          if (this.freeForDispatch(member.id)) {
+            return true;
+          }
+        }
+      } catch {
+        signal.throwIfAborted();
+      }
+    }
+
+    return false;
+  }
+
   public async quota(input: unknown, caller: CrewCaller) {
     await this.authorize(caller);
 

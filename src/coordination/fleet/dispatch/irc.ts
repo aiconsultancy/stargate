@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import type { IrcConfig } from "../../../config";
@@ -7,7 +8,8 @@ import {
   fold,
   validMsgid,
 } from "../../../transports/irc/protocol";
-import type { DecisionOutcome } from "./api";
+import type { DecisionOutcome, DispatchIssue } from "./api";
+import type { AssignmentRequests } from "./assigned-work";
 import {
   type CaptainRef,
   type DispatchAnswerInput,
@@ -556,4 +558,199 @@ export async function sendDispatchAnswer(
 
   signal.throwIfAborted();
   await client.send("NOTICE", [offer.channel, text], tags, allowed);
+}
+
+export const assignmentCapacityTag = "+stargate/assignment-capacity";
+const timeoutMs = 5000;
+
+type CapacityClient = Pick<
+  IrcClient,
+  | "fold"
+  | "budget"
+  | "hasCap"
+  | "inChannel"
+  | "publish"
+  | "recipientGuard"
+  | "send"
+  | "verifiedNick"
+>;
+
+export class IrcAssignmentRequests implements AssignmentRequests {
+  private readonly pending = new Map<
+    string,
+    {
+      account: string;
+      resolve: (available: boolean) => void;
+    }
+  >();
+
+  public constructor(
+    private readonly client: CapacityClient,
+    private readonly command: string,
+    private readonly shipChannels: Readonly<Record<string, string>>,
+    private readonly allowed: () => boolean,
+  ) {}
+
+  private home(captain: CaptainRef) {
+    const account = this.client.fold(captain.account);
+
+    return Object.entries(this.shipChannels).find(
+      ([name]) => this.client.fold(name) === account,
+    )?.[1];
+  }
+
+  public receive(message: IrcMessage) {
+    const account = message.tags.get("account");
+
+    const mark = /^(yes|no),([a-f0-9]{16})$/u.exec(
+      message.tags.get(assignmentCapacityTag) ?? "",
+    );
+
+    if (
+      message.command !== "TAGMSG" ||
+      !account ||
+      !mark?.[2] ||
+      this.client.fold(message.params[0] ?? "") !==
+        this.client.fold(this.command)
+    ) {
+      return;
+    }
+
+    const request = this.pending.get(mark[2]);
+
+    if (
+      request &&
+      this.client.fold(account) === this.client.fold(request.account)
+    ) {
+      request.resolve(mark[1] === "yes");
+    }
+  }
+
+  public async hasCapacity(captain: CaptainRef, signal: AbortSignal) {
+    const home = this.home(captain);
+
+    if (
+      !home ||
+      !this.client.inChannel(home) ||
+      !this.client.inChannel(this.command) ||
+      !this.client.hasCap("message-tags") ||
+      !this.client.hasCap("echo-message")
+    ) {
+      return false;
+    }
+
+    const nonce = randomBytes(8).toString("hex");
+    const stopped = AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]);
+    const result = Promise.withResolvers<boolean>();
+
+    const cancel = () => {
+      result.resolve(false);
+    };
+
+    this.pending.set(nonce, {
+      account: captain.account,
+      resolve: result.resolve,
+    });
+
+    if (stopped.aborted) {
+      cancel();
+    }
+
+    stopped.addEventListener("abort", cancel, { once: true });
+
+    try {
+      const sending = this.client.send(
+        "TAGMSG",
+        [this.command],
+        {
+          [assignmentCapacityTag]: `ask,${nonce},${captain.account}`,
+        },
+        () =>
+          !stopped.aborted &&
+          this.allowed() &&
+          this.client.inChannel(this.command),
+      );
+
+      return await Promise.race([
+        sending.then(() => result.promise),
+        result.promise,
+      ]);
+    } finally {
+      this.pending.delete(nonce);
+      stopped.removeEventListener("abort", cancel);
+    }
+  }
+
+  public async ask(
+    captain: CaptainRef,
+    issue: DispatchIssue,
+    signal: AbortSignal,
+  ) {
+    const channel = this.home(captain);
+
+    if (!channel || !isMarkerIssue(issue.identifier)) {
+      return false;
+    }
+
+    const nick = await this.client.verifiedNick(captain.account);
+    const sameRecipient = this.client.recipientGuard(captain.account, nick);
+    const tags = { [dispatchTag]: `assigned,${issue.identifier}` };
+    const text = dispatchText.assignmentRequest(nick, issue.identifier);
+
+    if (
+      Buffer.byteLength(text) > this.client.budget("PRIVMSG", channel, tags)
+    ) {
+      return false;
+    }
+
+    const message = await this.client.publish(
+      channel,
+      text,
+      tags,
+      () =>
+        !signal.aborted &&
+        this.allowed() &&
+        sameRecipient() &&
+        this.client.inChannel(channel),
+    );
+
+    return validMsgid(message);
+  }
+}
+
+/** Passive request addressed to this captain by the authenticated rear admiral. */
+export async function answerAssignmentCapacity(
+  client: CapacityClient,
+  message: IrcMessage,
+  account: string,
+  command: string | undefined,
+  available: (signal: AbortSignal) => Promise<boolean>,
+  allowed: () => boolean,
+) {
+  const mark = /^ask,([a-f0-9]{16}),([^,]+)$/u.exec(
+    message.tags.get(assignmentCapacityTag) ?? "",
+  );
+
+  if (
+    message.command !== "TAGMSG" ||
+    !command ||
+    !mark?.[1] ||
+    !mark[2] ||
+    client.fold(message.params[0] ?? "") !== client.fold(command) ||
+    client.fold(mark[2]) !== client.fold(account)
+  ) {
+    return;
+  }
+
+  const signal = AbortSignal.timeout(timeoutMs - 1000);
+  const ready = await available(signal).catch(() => false);
+
+  await client.send(
+    "TAGMSG",
+    [command],
+    {
+      [assignmentCapacityTag]: `${ready && !signal.aborted ? "yes" : "no"},${mark[1]}`,
+    },
+    () => allowed() && client.inChannel(command),
+  );
 }

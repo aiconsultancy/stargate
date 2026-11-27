@@ -13,7 +13,9 @@ import {
   ircSchema,
 } from "../src/config";
 import {
+  IrcAssignmentRequests,
   IrcDispatchMessenger,
+  assignmentCapacityTag,
   ircDispatchAnswer,
   ircDispatchOffer,
   isDispatchRequest,
@@ -601,6 +603,122 @@ function captainIrc(port: number, raw: Record<string, unknown> = {}) {
     ...raw,
   };
 }
+
+test("an authenticated capacity probe is passive and the resulting request opens a turn in the ship channel", async () => {
+  const fake = new FakeIrcServer({
+    accounts: {
+      "rear-admiral": "admiral-pass",
+      "example-captain-a": "captain-pass",
+    },
+  }).start();
+
+  cleanup.push(() => fake.stop());
+  const directory = await tempDirectory();
+  const store = openStore(join(directory, "assignment.sqlite"));
+  cleanup.push(() => store.close());
+  const command = "#fleet-command";
+  const home = "#example-captain-a";
+  const timing = { reconnectMinMs: 20, intervalMs: 5, burst: 10 };
+
+  const admiralShip = await IrcShip.create(
+    Schema.decodeUnknownSync(ircSchema)({
+      ...admiralIrc(fake.port),
+      channels: [command, home],
+      fleetPolicy: policy("rear_admiral", ["example-captain-a"]),
+    }),
+    store,
+    silent,
+    { env: { STARGATE_IRC_REAR_ADMIRAL: "admiral-pass" }, timing },
+  );
+
+  const captainShip = await IrcShip.create(
+    Schema.decodeUnknownSync(ircSchema)(captainIrc(fake.port)),
+    store,
+    silent,
+    { env: { STARGATE_IRC_CAPTAIN: "captain-pass" }, timing },
+  );
+
+  cleanup.push(() => admiralShip.close());
+  cleanup.push(() => captainShip.close());
+  const [admiral] = admiralShip.registrations;
+  const [captain] = captainShip.registrations;
+
+  if (!admiral || !captain) {
+    throw new Error("missing registration");
+  }
+
+  let ready = false;
+  let probes = 0;
+  captain.assignmentCapacity = async () => {
+    probes++;
+
+    return ready;
+  };
+
+  const target = {
+    userId: CAPTAIN_A,
+    name: "captain-a",
+    account: "example-captain-a",
+  };
+
+  const requests = new IrcAssignmentRequests(
+    admiral.client,
+    command,
+    { [target.account]: home },
+    () => true,
+  );
+
+  admiralShip.dispatchListener = (message) => requests.receive(message);
+  admiralShip.start(() => true);
+  captainShip.start(() => true);
+
+  await until(
+    () =>
+      [admiral, captain].every(
+        ({ client }) => client.inChannel(command) && client.inChannel(home),
+      ),
+    5000,
+    "officers joined",
+  );
+
+  const signal = AbortSignal.timeout(8000);
+  expect(await requests.hasCapacity(target, signal)).toBe(false);
+  expect(probes).toBe(1);
+  expect(store.queueCounts(captain.key).queued).toBe(0);
+
+  ready = true;
+  expect(await requests.hasCapacity(target, signal)).toBe(true);
+  expect(probes).toBe(2);
+  expect(store.queueCounts(captain.key).queued).toBe(0);
+  expect(
+    await requests.ask(
+      target,
+      {
+        id: "fixture",
+        identifier: "EX-1",
+        title: "Fixture",
+        projectId: "project",
+        version: 1,
+        updatedAt: "2026-11-24T00:00:00.000Z",
+        assignee: null,
+        readyForAgents: false,
+        stateType: "unstarted",
+        archived: false,
+      },
+      signal,
+    ),
+  ).toBe(true);
+
+  const [notice] = lineOf(fake.received("rear-admiral"), "PRIVMSG");
+  expect(notice?.params[0]).toBe(home);
+  expect(notice?.tags.get(assignmentCapacityTag)).toBeUndefined();
+  expect(notice?.params[1]).toContain("Reply in this thread");
+  await until(
+    () => store.queueCounts(captain.key).queued === 1,
+    5000,
+    "assignment turn admitted",
+  );
+}, 15_000);
 
 test("rear admiral intake: an answer reaches the dispatcher only past the registration's account and channel rules", async () => {
   const fake = new FakeIrcServer({

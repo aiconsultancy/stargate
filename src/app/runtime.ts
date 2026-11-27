@@ -393,6 +393,22 @@ function subspaceAgents(
   );
 }
 
+function wireIrcGateway(
+  registration: IrcRegistration,
+  gateway: Gateway,
+  backend: AgentBackend,
+) {
+  if (backend.assignmentCapacity) {
+    registration.assignmentCapacity = backend.assignmentCapacity.bind(backend);
+  }
+
+  registration.stopTurn = (conversation, thread) =>
+    gateway.stopTurn(conversation, thread);
+  registration.operatorQuestion = gateway.operatorQuestion.bind(gateway);
+  registration.answerQuestion = (input, control) =>
+    gateway.answerQuestion(input, control);
+}
+
 /**
  * Process ownership as one scope. Workers start only after every bot has
  * connected. Finalizers run in reverse order: one shared gate closes Slack
@@ -1012,12 +1028,7 @@ export function serve(
             drain,
           );
 
-          registration.stopTurn = (conversation, thread) =>
-            gateway.stopTurn(conversation, thread);
-          registration.operatorQuestion =
-            gateway.operatorQuestion.bind(gateway);
-          registration.answerQuestion = (input, control) =>
-            gateway.answerQuestion(input, control);
+          wireIrcGateway(registration, gateway, resource.backend);
 
           return {
             registration,

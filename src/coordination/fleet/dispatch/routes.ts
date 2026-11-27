@@ -19,11 +19,17 @@ export const dispatchRoutes = {
     assignees: readonly string[],
     updatedSince: string | undefined,
     cursor?: string,
+    waitingOnly = false,
   ) => {
     const query = new URLSearchParams();
 
     for (const id of assignees) {
       query.append("assignee", id);
+    }
+
+    if (waitingOnly) {
+      query.append("stateType", "backlog");
+      query.append("stateType", "unstarted");
     }
 
     if (updatedSince !== undefined) {

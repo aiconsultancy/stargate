@@ -8,8 +8,14 @@ import {
 import { agentDispatchActive } from "../../../config/composition";
 import type { IrcShip } from "../../../transports/irc/ship";
 import { SubspaceApi } from "./api";
+import { AssignedWork } from "./assigned-work";
 import { AgentDispatcher } from "./dispatcher";
-import { IrcDispatchMessenger, ircDispatchAnswer } from "./irc";
+import {
+  IrcAssignmentRequests,
+  IrcDispatchMessenger,
+  assignmentCapacityTag,
+  ircDispatchAnswer,
+} from "./irc";
 import { DispatchLedger } from "./ledger";
 
 /** What the gateway runtime supplies to agent dispatch. */
@@ -72,6 +78,39 @@ export function startAgentDispatch(
     join(host.dataDirectory, "agent-dispatch.sqlite"),
   );
 
+  const api = new SubspaceApi({
+    baseUrl: dispatch.api.baseUrl,
+    tokenEnv: dispatch.api.tokenEnv,
+    headersEnv: dispatch.api.headersEnv,
+    ...(host.fetch && { fetch: host.fetch }),
+    ...(host.env && { env: host.env }),
+  });
+
+  const requestConfig = dispatch.assignmentRequests;
+
+  const assignmentRequests = requestConfig
+    ? new IrcAssignmentRequests(
+        client,
+        target.channel,
+        requestConfig.shipChannels,
+        host.allowed,
+      )
+    : undefined;
+
+  const assignedWork =
+    requestConfig && assignmentRequests
+      ? new AssignedWork({
+          api,
+          ledger,
+          requests: assignmentRequests,
+          log,
+          reminderMs: requestConfig.reminderSeconds * 1000,
+          answerMs: dispatch.answerTimeoutSeconds * 1000,
+        })
+      : requestConfig === null
+        ? null
+        : undefined;
+
   const dispatcher = new AgentDispatcher({
     settings: {
       fleet: dispatch.fleet,
@@ -87,13 +126,8 @@ export function startAgentDispatch(
         enrolled.some((entry) => client.fold(entry) === client.fold(account)),
       sameAccount: (a, b) => client.fold(a) === client.fold(b),
     },
-    api: new SubspaceApi({
-      baseUrl: dispatch.api.baseUrl,
-      tokenEnv: dispatch.api.tokenEnv,
-      headersEnv: dispatch.api.headersEnv,
-      ...(host.fetch && { fetch: host.fetch }),
-      ...(host.env && { env: host.env }),
-    }),
+    api,
+    ...(assignedWork !== undefined && { assignedWork }),
     messenger: new IrcDispatchMessenger(
       client,
       target.channel,
@@ -108,6 +142,12 @@ export function startAgentDispatch(
     message,
     caseFold,
   ) => {
+    if (message.tags.has(assignmentCapacityTag)) {
+      assignmentRequests?.receive(message);
+
+      return;
+    }
+
     const answer = ircDispatchAnswer(
       message,
       target.channel,

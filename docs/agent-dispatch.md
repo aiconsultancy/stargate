@@ -3,7 +3,7 @@
 Agent dispatch tells a fleet's captains about Subspace issues that are theirs
 to pick up. It is a deterministic dispatcher in the rear admiral's gateway:
 Stargate polls the Subspace API, keeps a private ledger of what it has sent,
-and writes requests to the fleet's command channel on IRC. No model decides
+and writes requests to the fleet's command and ship channels on IRC. No model decides
 whether a message goes out. It is off unless `agentDispatch.enabled` is
 `true`.
 
@@ -12,12 +12,14 @@ under `src/coordination/fleet/dispatch/`.
 
 ## What it does
 
-1. **Assigned to a captain.** When an issue is assigned to an agent whose rank
-   is captain in this fleet, that captain alone is asked, in the command
-   channel, to pick the issue up, assign it to a crew member and get it done.
-   Assignments to the rear admiral, to crew or to people send nothing. Each
-   (issue, assignee) pair is announced once; a later reassignment to a
-   different captain announces it to that captain.
+1. **Assigned to a captain.** With `assignmentRequests` configured, the rear
+   admiral asks a captain to take their Backlog or Todo issue in the captain's
+   ship channel. The captain's gateway first checks for an idle crew member
+   with no queued work and no usage cooldown. The request asks the captain
+   to reply in its thread and move the issue to In Progress when work starts.
+   A still-waiting issue is eligible for a reminder after four hours, when
+   crew are available again. Trackers and assignments to crew, the rear
+   admiral or people are skipped.
 2. **Ready for agents.** When an unassigned issue in this fleet is flagged
    _Ready for agents_, the rear admiral offers it to the captains one at a
    time. Each captain has `answerTimeoutSeconds` (default 5 minutes) to accept
@@ -28,8 +30,10 @@ under `src/coordination/fleet/dispatch/`.
    clears _Ready for agents_ and says so in the channel. Flag the issue again
    to retry.
 
-Both behaviours are visible to everyone in the command channel: the request,
-the answer and the outcome.
+Ready for agents offers and their outcomes remain visible in fleet command.
+Fleet command also carries the passive capacity check as an IRC tag. It
+starts no agent turn. The resulting request and reply belong to the ship
+channel.
 
 ## Decision outcomes by direct message
 
@@ -114,12 +118,23 @@ that changes it is refused as restart-only.
       "channel": "#example-command"
     },
     "captainAccounts": { "example-captain": "example-captain-irc" },
+    "assignmentRequests": {
+      "reminderSeconds": 14400,
+      "shipChannels": { "example-captain-irc": "#example-ship" }
+    },
     "pollIntervalSeconds": 120,
     "answerTimeoutSeconds": 300,
     "retryLadderSeconds": [3600, 10800, 21600, 43200]
   }
 }
 ```
+
+`assignmentRequests.shipChannels` maps authenticated IRC accounts to ship
+channels. The rear admiral must join those channels. The reminder interval
+is configurable from 3,600 through 604,800 seconds. Use
+`"assignmentRequests": null` to disable assigned work requests while keeping
+Ready for agents. Omitting the setting preserves one-time command-channel
+notices for existing configurations.
 
 | Key                      | Default                                     | Meaning                                                                                                                                                                                                           |
 | ------------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -315,3 +315,14 @@ export const piProviderSchema = settingsStruct({
   baseURL: secureLocalOrHttpsURL,
   apiKeyEnv: envName,
 });
+
+/** Headers that the API client owns or that no proxy needs from config. */
+export const reservedAuthenticatedRequestHeaders = new Set([
+  "accept",
+  "authorization",
+  "connection",
+  "content-length",
+  "content-type",
+  "host",
+  "transfer-encoding",
+]);

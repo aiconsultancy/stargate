@@ -491,6 +491,16 @@ export class OpenCodeBackend implements AgentBackend {
     }
   }
 
+  public assignmentCapacity(signal: AbortSignal) {
+    return this.client.rpc(CrewReporting).assignmentCapacity(
+      {},
+      {
+        location: { directory: this.config.directory },
+        signal,
+      },
+    );
+  }
+
   public crewStatus(input: CrewStatusInput, signal: AbortSignal) {
     return this.crewStatusProbe.crewStatus(input, signal);
   }

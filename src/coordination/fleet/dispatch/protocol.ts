@@ -131,10 +131,12 @@ function minutes(seconds: number) {
   return value === 1 ? "1 minute" : `${value} minutes`;
 }
 
+export type CaptainRef = { userId: string; name: string; account: string };
+
 export type IssueLabel = { identifier: string; title: string };
 
 const assignedAsk =
-  "is assigned to you. Please pick it up, assign it to a crew member and get it done.";
+  "is assigned to you. Please pick it up if crew can take it. Reply in this thread to say whether you can take it. If you can, move it to In Progress when work starts.";
 
 /** Why an acceptance was refused at the assignment write. */
 export type RefusedReason = "captain" | "account";
@@ -152,6 +154,8 @@ const refusedText: Record<RefusedReason, string> = {
  */
 export const dispatchText = {
   assigned: (nick: string, issue: string) =>
+    `@${nick}: ${issue} is assigned to you. Please pick it up, assign it to a crew member and get it done.`,
+  assignmentRequest: (nick: string, issue: string) =>
     `@${nick}: ${issue} ${assignedAsk}`,
   offer: (
     nick: string,

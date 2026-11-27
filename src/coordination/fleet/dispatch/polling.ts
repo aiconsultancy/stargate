@@ -6,10 +6,16 @@ import {
   type DispatchIssue,
   type FleetRoster,
 } from "./api";
+import type { AssignedWork } from "./assigned-work";
 import type { AssignmentWalk, DispatchLedger, TrackedIssue } from "./ledger";
-import type { DispatchOutcome, IssueLabel, WithdrawReason } from "./protocol";
+import type {
+  CaptainRef,
+  DispatchOutcome,
+  IssueLabel,
+  WithdrawReason,
+} from "./protocol";
 
-export type CaptainRef = { userId: string; name: string; account: string };
+export type { CaptainRef } from "./protocol";
 
 export type DispatchEvent = {
   kind: DispatchOutcome | "gave-up";
@@ -89,6 +95,8 @@ export type AgentDispatcherOptions = {
   api: DispatchApi;
   messenger: DispatchMessenger;
   ledger: DispatchLedger;
+  /** Undefined preserves legacy assignment notices. Null disables them. */
+  assignedWork?: AssignedWork | null;
   /** Injectable clock (ms since the epoch). */
   now?: () => number;
   /**
@@ -242,7 +250,24 @@ export class DispatchPolling {
 
     if (this.settings.issueDispatch !== false) {
       try {
-        await this.pollAssigned(signal);
+        if (this.options.assignedWork === undefined) {
+          await this.pollAssigned(signal);
+        } else {
+          const captains = [...this.roster.captains.values()].filter(
+            (captain) =>
+              captain.available &&
+              captain.reachable &&
+              (!captain.registeredAccount ||
+                (this.settings.sameAccount?.(
+                  captain.registeredAccount,
+                  captain.account,
+                ) ??
+                  captain.registeredAccount === captain.account)),
+          );
+
+          await this.options.assignedWork?.poll(captains, signal);
+        }
+
         this.cleared("assigned");
       } catch (error) {
         signal.throwIfAborted();
@@ -612,7 +637,7 @@ export class DispatchPolling {
 
       const assignee = issue.assignee;
 
-      if (assignee?.kind !== "agent") {
+      if (assignee?.kind !== "agent" || issue.type === "tracker") {
         continue;
       }
 

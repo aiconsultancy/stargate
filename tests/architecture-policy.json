@@ -1606,6 +1606,7 @@
       "layer": "slices",
       "files": [
         "src/dispatch/api.ts",
+        "src/coordination/fleet/dispatch/assigned-work.ts",
         "src/dispatch/dispatcher.ts",
         "src/dispatch/irc.ts",
         "src/dispatch/ledger.ts",

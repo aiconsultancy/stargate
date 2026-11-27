@@ -14,6 +14,8 @@ import {
   outboxMaxAgeMs,
 } from "../../coordination/crew/messaging/irc-rpc";
 import {
+  answerAssignmentCapacity,
+  assignmentCapacityTag,
   dispatchRequestTurn,
   ircDispatchOffer,
   isDecisionOutcomeDm,
@@ -75,6 +77,7 @@ import { ircLines } from "./text";
 export type IrcRegistration = IrcMember & {
   /** Set by the runtime: stop the active turn of one request. */
   stopTurn?: (conversation: string, thread: string) => boolean;
+  assignmentCapacity?: (signal: AbortSignal) => Promise<boolean>;
   operatorQuestion?: (
     actor: string,
     text: string,
@@ -947,6 +950,22 @@ export class IrcShip {
             return;
           }
 
+          if (
+            message.command === "TAGMSG" &&
+            message.tags.has(assignmentCapacityTag)
+          ) {
+            if (!replay) {
+              this.receiveAssignmentCapacity(
+                registration,
+                identity,
+                client,
+                message,
+              );
+            }
+
+            return;
+          }
+
           this.mirrorIncoming(identity, client, message, replay);
 
           // The audit channel is never a conversation: no turn, no Stop.
@@ -1183,6 +1202,43 @@ export class IrcShip {
     return new Date(
       Math.max(Number.isFinite(at) ? at : oldest, oldest),
     ).toISOString();
+  }
+
+  private receiveAssignmentCapacity(
+    registration: IrcRegistration,
+    member: IrcMember,
+    client: IrcClient,
+    message: IrcMessage,
+  ) {
+    if (
+      !this.open() ||
+      member.role !== "captain" ||
+      !ircDispatchAnswerAllowed(message, {
+        config: this.config,
+        member,
+        fold: client.fold,
+        joined: (channel) => client.inChannel(channel),
+      })
+    ) {
+      return;
+    }
+
+    this.dispatchListener?.(message, client.fold);
+    const sender = message.tags.get("account");
+    const capacity = registration.assignmentCapacity;
+
+    if (sender && capacity && isRearAdmiral(this.config, sender, client.fold)) {
+      void answerAssignmentCapacity(
+        client,
+        message,
+        member.account,
+        this.config.fleetChannels?.command,
+        capacity,
+        this.open,
+      ).catch(() => {
+        this.log.warn("Assignment capacity reply was not delivered");
+      });
+    }
   }
 
   private receive(

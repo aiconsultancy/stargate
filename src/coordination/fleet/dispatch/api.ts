@@ -33,6 +33,7 @@ export type DispatchIssue = {
   readyForAgents: boolean | undefined;
   stateType: string;
   archived: boolean;
+  type?: string;
 };
 
 export type DispatchIdentity = {
@@ -77,6 +78,7 @@ export interface DispatchApi {
     updatedSince: string | undefined,
     cursor: string | undefined,
     signal: AbortSignal,
+    waitingOnly?: boolean,
   ): Promise<ListingPart<DispatchIssue>>;
   readyIssues(
     cursor: string | undefined,
@@ -128,6 +130,7 @@ const issueSchema = Schema.Struct({
   id: Schema.String,
   identifier: Schema.String,
   title: Schema.String,
+  type: Schema.optional(Schema.String),
   projectId: Schema.String,
   version: Schema.Finite,
   updatedAt: Schema.String,
@@ -218,6 +221,7 @@ export function toDispatchIssue(value: unknown): DispatchIssue {
       : null,
     readyForAgents: issue.readyForAgents,
     stateType: issue.state.type,
+    ...(issue.type && { type: issue.type }),
     archived: issue.archivedAt !== undefined && issue.archivedAt !== null,
   };
 }
@@ -528,13 +532,20 @@ export class SubspaceApi implements DispatchApi {
     updatedSince: string | undefined,
     cursor: string | undefined,
     signal: AbortSignal,
+    waitingOnly?: boolean,
   ) {
     if (assignees.length === 0) {
       return { items: [], next: undefined };
     }
 
     return this.issueListing(
-      (page) => dispatchRoutes.assignedIssues(assignees, updatedSince, page),
+      (page) =>
+        dispatchRoutes.assignedIssues(
+          assignees,
+          updatedSince,
+          page,
+          waitingOnly,
+        ),
       cursor,
       signal,
     );
