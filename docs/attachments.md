@@ -195,6 +195,7 @@ Caddy. Standalone Stargate does not start these services.
 - Stage the built site in a named subdirectory under the configured mockup
   staging directory. Put a non-empty `index.html` at the root and use relative
   asset URLs. A bundle can contain up to 256 files and 10 MiB of static assets.
+  The uploader skips JavaScript and CSS source maps.
 - Call `publish` with the directory name. The service serves a copy for seven
   days. Publishing with the same name updates the same URL and renews the
   expiry. One captain can keep up to 20 live previews.

@@ -6,7 +6,12 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { Result, Schema } from "effect";
-import { officerRequestLines } from "./officer-stdio";
+import {
+  decodeOfficerRequest,
+  initialOfficerProtocolVersion,
+  officerProtocolVersion,
+  officerRequestLines,
+} from "./officer-stdio";
 import { type PreviewBrowser, renderMarkdownPreview } from "./markdown-preview";
 
 import { RestFiles } from "./officer-rest-files";
@@ -14,8 +19,6 @@ import { RestFiles } from "./officer-rest-files";
 const fileLimit = 10 * 1024 * 1024;
 const legacyUploadLimit = 25_000_000;
 const textLimit = 65_536;
-const versions = new Set(["2025-03-26", "2025-06-18", "2025-11-25"]);
-const initialVersion = "2025-03-26";
 
 const chatTypes = new Map([
   ["md", "text/markdown"],
@@ -167,22 +170,6 @@ const toolResult = Schema.Struct({
   ),
 });
 
-const requestSchema = Schema.fromJsonString(
-  Schema.Struct({
-    id: Schema.optionalKey(
-      Schema.NullOr(Schema.Union([Schema.String, Schema.Finite])),
-    ),
-    method: Schema.String,
-    params: Schema.optionalKey(
-      Schema.Struct({
-        protocolVersion: Schema.optionalKey(Schema.String),
-        name: Schema.optionalKey(Schema.String),
-        arguments: Schema.optionalKey(Schema.Unknown),
-      }),
-    ),
-  }),
-);
-
 type Relay = ({ socket: string } | { port: number } | { endpoint: string }) & {
   actor?: string;
 };
@@ -331,7 +318,7 @@ function eventMessage(response: Response, raw: string) {
 }
 
 class IssueReader {
-  private version = initialVersion;
+  private version = initialOfficerProtocolVersion;
   private session: string | null = null;
 
   public constructor(
@@ -978,7 +965,7 @@ async function serve(config: Config) {
   const invalid = { error: { code: -32_600, message: "Invalid request" } };
 
   for await (const line of officerRequestLines(legacy ? 8192 : 400_000)) {
-    const parsed = Schema.decodeUnknownResult(requestSchema)(line);
+    const parsed = decodeOfficerRequest(line);
     let id: string | number | null = null;
     let reply: Record<string, unknown> = invalid;
 
@@ -992,14 +979,11 @@ async function serve(config: Config) {
       id = request.id;
 
       if (request.method === "initialize") {
-        const requested = request.params?.protocolVersion;
-
-        const protocolVersion =
-          requested && versions.has(requested) ? requested : initialVersion;
-
         reply = {
           result: {
-            protocolVersion,
+            protocolVersion: officerProtocolVersion(
+              request.params?.protocolVersion,
+            ),
             capabilities: { tools: {} },
             serverInfo: { name: "officer-files", version: "1" },
           },

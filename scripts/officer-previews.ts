@@ -1,7 +1,11 @@
 import { chmodSync, lstatSync, unlinkSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { DateTime, Result, Schema } from "effect";
-import { officerRequestLines } from "./officer-stdio";
+import {
+  decodeOfficerRequest,
+  officerProtocolVersion,
+  officerRequestLines,
+} from "./officer-stdio";
 import {
   PreviewRefused,
   bundleSchema,
@@ -13,7 +17,6 @@ import {
 } from "./preview-bundle";
 import { previewStore } from "./preview-store";
 
-const protocolVersions = new Set(["2025-11-25", "2025-06-18", "2025-03-26"]);
 const nameSchema = Schema.Struct({ name: previewName });
 
 const decodeName = Schema.decodeUnknownResult(nameSchema, {
@@ -32,25 +35,6 @@ const commandSchema = Schema.Union([
 const decodeCommand = Schema.decodeUnknownResult(commandSchema, {
   onExcessProperty: "error",
 });
-
-const decodeRpc = Schema.decodeUnknownResult(
-  Schema.fromJsonString(
-    Schema.Struct({
-      jsonrpc: Schema.Literal("2.0"),
-      id: Schema.optionalKey(
-        Schema.Union([Schema.String, Schema.Number, Schema.Null]),
-      ),
-      method: Schema.String,
-      params: Schema.optionalKey(
-        Schema.Struct({
-          protocolVersion: Schema.optionalKey(Schema.String),
-          name: Schema.optionalKey(Schema.String),
-          arguments: Schema.optionalKey(Schema.Unknown),
-        }),
-      ),
-    }),
-  ),
-);
 
 const decodeBrokerError = Schema.decodeUnknownResult(
   Schema.Struct({ error: Schema.String }),
@@ -122,7 +106,7 @@ async function callTool(
 
 async function serveMcp(socket: string, staging: string) {
   for await (const line of officerRequestLines(8192)) {
-    const parsed = decodeRpc(line);
+    const parsed = decodeOfficerRequest(line);
 
     if (Result.isFailure(parsed)) {
       console.log(
@@ -144,15 +128,11 @@ async function serveMcp(socket: string, staging: string) {
     const reply = { jsonrpc: "2.0", id };
 
     if (method === "initialize") {
-      const version = params?.protocolVersion ?? "";
-
       console.log(
         JSON.stringify({
           ...reply,
           result: {
-            protocolVersion: protocolVersions.has(version)
-              ? version
-              : "2025-03-26",
+            protocolVersion: officerProtocolVersion(params?.protocolVersion),
             capabilities: { tools: {} },
             serverInfo: { name: "stargate_serve", version: "1" },
           },

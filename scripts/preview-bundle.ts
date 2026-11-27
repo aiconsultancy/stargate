@@ -133,6 +133,11 @@ export async function readBundle(
         );
       }
 
+      // Source maps can embed the original source. Keep them out of the served copy.
+      if (/\.(css|m?js)\.map$/i.test(path)) {
+        continue;
+      }
+
       checkPath(path);
       signal.throwIfAborted();
 
