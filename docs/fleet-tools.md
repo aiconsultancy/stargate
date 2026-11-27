@@ -33,8 +33,9 @@ the evidence database outside engine write access.
 
 Fleet tools, including `stargate_dm` with `via`, work only in a turn that
 answers a chat request the gateway is still running: an IRC request to this
-captain, or a request in a related Teams conversation that shares the IRC
-gateway's pinned backend (see `results` below). Slack-started turns do not
+captain, or a request in a linked Teams conversation. A linked Teams
+registration has the same pinned OpenCode session and backend fingerprint as
+the IRC gateway; this does not need `results`. Slack-started turns do not
 qualify. Any other turn is refused with a message saying so, for example a
 turn woken by a crew DM, crew hand-back or other notice, including one queued
 behind a running chat request. The refusal is not an outage, and retrying in
@@ -68,7 +69,7 @@ evidence ledger and explicit fleet destinations:
 
 `results` is optional and defaults to off. Enable it on the dispatching IRC
 gateway and every participating captain gateway to return settled outcomes to
-the original IRC/Teams conversation. Related Teams registrations must share
+the original IRC/Teams conversation. Linked Teams registrations must share
 the same pinned backend and fingerprint as the dispatching IRC gateway.
 For a new fleet setup, add the registration's explicit `fleetChannels` metadata
 and each target's real `role` to use the [role-aware IRC defaults](irc.md#configured-fleet-defaults).
@@ -294,8 +295,9 @@ With `peerMessages` enabled, `stargate_dm` advertises `via: "ship"` or
 without `@` or control characters. Omit `via` for local-team mail.
 Fleet peer messages carry agent identity and no approval authority. Use
 `fleet_dispatch` for work that needs a retained instruction or review context.
-A peer DM, like every fleet tool, needs a turn started by a chat message; see
-the opening of this page. When IRC cannot confirm that the recipient captain
-is online under its configured account, the tool says so instead of returning
-an opaque failure. When this gateway's own IRC connection is down, it says
-that instead, since nothing is then known about the recipient.
+A peer DM, like every fleet tool, needs a turn that answers an IRC or linked
+Teams chat request; see the opening of this page. When IRC cannot confirm that
+the recipient captain is online under its configured account, the tool says so
+instead of returning an opaque failure. When this gateway's own IRC connection
+is down, it says that instead, since nothing is then known about the
+recipient.
