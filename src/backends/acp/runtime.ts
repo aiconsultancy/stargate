@@ -57,7 +57,7 @@ const COPILOT_LOST_SESSION_MARKERS = [
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 const DEFAULT_CANCEL_TIMEOUT_MS = 5000;
-const DEFAULT_REPLAY_IDLE_MS = 350;
+const DEFAULT_REPLAY_IDLE_MS = 1500;
 
 export type AcpRunSpec = {
   readonly sessionId: string;
@@ -792,7 +792,20 @@ export async function runAcpTurn(spec: AcpRunSpec): Promise<AcpRunOutcome> {
     detached: true,
   });
 
-  const since = recordProcessStart(child.pid, spec.recordPath, spec.turnMarker);
+  let since = 0;
+
+  try {
+    since = recordProcessStart(child.pid, spec.recordPath, spec.turnMarker);
+  } catch (error) {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Already exited.
+    }
+
+    throw error;
+  }
+
   let activeNativeSessionId: string | undefined;
   let promptDispatched = false;
   let conn!: AcpStdioConnection;
@@ -812,6 +825,10 @@ export async function runAcpTurn(spec: AcpRunSpec): Promise<AcpRunOutcome> {
     },
     onRequest: (method, params) => {
       if (method === "session/request_permission") {
+        if (spec.signal.aborted) {
+          return Promise.resolve({ outcome: { outcome: "cancelled" } });
+        }
+
         const decoded = decodePermissionRequest(params);
 
         if (Option.isSome(decoded)) {

@@ -20,7 +20,22 @@ import {
 } from "./protocol";
 
 const MAX_ACP_CHANGED_PATHS = 256;
-const RAW_INPUT_PATH_KEYS = ["path", "filePath", "file_path"] as const;
+
+const RAW_INPUT_PATH_KEYS = [
+  "path",
+  "filePath",
+  "file_path",
+  "source",
+  "from",
+  "destination",
+  "dest",
+  "to",
+  "newPath",
+  "new_path",
+  "targetPath",
+  "target_path",
+] as const;
+
 const READ_ONLY_KINDS = new Set(["read", "search", "think", "fetch"]);
 const MUTATING_KINDS = new Set(["edit", "delete", "move"]);
 

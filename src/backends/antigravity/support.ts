@@ -234,6 +234,10 @@ export function antigravityEnvironment(
     env["GOOGLE_CLOUD_LOCATION"] = config.auth.gcpLocation;
   }
 
+  env["HOME"] = profile.geminiHome;
+  env["XDG_CONFIG_HOME"] = join(profile.geminiHome, ".config");
+  env["XDG_DATA_HOME"] = join(profile.geminiHome, ".local", "share");
+  env["XDG_CACHE_HOME"] = join(profile.geminiHome, ".cache");
   env["GEMINI_HOME"] = profile.geminiHome;
   env["AGY_ACP_FORCE_FILE_STORAGE"] = "1";
   env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";

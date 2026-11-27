@@ -257,6 +257,8 @@ export class AcpBackend implements AgentBackend {
 
       const nativeSessionId = await this.readNativeSession(sessionId);
 
+      let copilotLostSession = false;
+
       const spec: AcpRunSpec = {
         sessionId,
         nativeSessionId,
@@ -280,6 +282,18 @@ export class AcpBackend implements AgentBackend {
         graceMs: this.graceMs,
         startupTimeoutMs: this.overrides.startupTimeoutMs,
         replayIdleMs: this.overrides.replayIdleMs,
+        classifyError: (error) => {
+          if (
+            this.config.flavor === "copilot" &&
+            isCopilotLostSessionError(error)
+          ) {
+            copilotLostSession = true;
+
+            return new BackendFailure("crash", { ran: true });
+          }
+
+          return;
+        },
         onText,
         onProgress,
         activity: this.activity,
@@ -293,14 +307,10 @@ export class AcpBackend implements AgentBackend {
 
         return outcome.answer;
       } catch (error) {
-        if (
-          this.config.flavor === "copilot" &&
-          isCopilotLostSessionError(error)
-        ) {
+        if (copilotLostSession) {
           await rm(join(this.sessionsDir, `${sessionId}.json`), {
             force: true,
           });
-          throw new BackendFailure("crash", { ran: true });
         }
 
         throw error;
