@@ -68,7 +68,7 @@ export function resolveAttribution(
       parent,
       id,
       spill,
-      (log) => lineage.get(log)?.active !== false && log.retained?.() !== false,
+      (log) => lineage.get(log)?.active !== false,
     );
 
     if (owner) {

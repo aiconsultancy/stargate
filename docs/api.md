@@ -751,7 +751,8 @@ non-finite or non-positive timestamp stays uncertain even for a brand-new
 child; unsequenced live frames do not have that durable timestamp requirement.
 An in-time name from the matching native parent whose call opened after the
 child's native start can show the buffered child immediately as a detached
-turn. It cannot attach the turn or establish a native outcome.
+turn, even if the parent's dashboard turn has been evicted. It cannot attach
+the turn or establish a native outcome; a fenced writer cannot show it.
 On deployments that retain no native
 events, bounded transcript recovery still shows a visible gap rather than
 reconstructing missing frames. The durable fence does not reject unsequenced

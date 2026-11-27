@@ -136,6 +136,9 @@ mockups from a fleet's preview service. Standalone Stargate leaves it off.
 - OpenCode child activity keeps a durable replay fence after evicted session
   history is compacted, so a replayed execution cannot spend a new subagent
   call's proof or take the place of its fresh transcript.
+- A foreign writer ending no longer discards buffered OpenCode child activity
+  before native ancestry is known. An exact, matching witness can still show
+  a detached transcript after the parent's dashboard turn has been evicted.
 
 - Teams sends pasted screenshots to the model. The gateway accepts PNG, JPEG, GIF
   and WebP sources up to 10 MiB and prepares inline image previews for replies.

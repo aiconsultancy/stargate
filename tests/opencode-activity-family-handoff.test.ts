@@ -204,6 +204,72 @@ test.each([
 );
 
 test.each([
+  { limit: 1, foreignCount: 0, evict: true },
+  { limit: 1, foreignCount: 1, evict: true },
+  { limit: undefined, foreignCount: 127, evict: true },
+  { limit: undefined, foreignCount: 128, evict: true },
+  { limit: undefined, foreignCount: 128, evict: false },
+])(
+  "an evicted matching writer can still publish detached output (pending $limit, foreign $foreignCount, evict $evict)",
+  async ({ limit, foreignCount, evict }) => {
+    const parent = Promise.withResolvers<string>();
+    const f = fixture(parent.promise, limit);
+
+    try {
+      const real = f.root();
+      f.call(real, main, "real", 50);
+
+      const foreign = Array.from({ length: foreignCount }, (_, index) => {
+        const session = `${other}_${index}`;
+        const log = f.root(session);
+        f.call(log, session, "foreign", 51);
+
+        return { session, log };
+      });
+
+      f.start(40, "Observed child text");
+      f.advance(300);
+      f.name(real, main, "real");
+
+      for (const { session, log } of foreign) {
+        f.name(log, session, "foreign");
+      }
+
+      f.end();
+
+      if (evict) {
+        f.families.settled(main, real);
+        real.end("completed");
+
+        for (let index = 0; index < 24; index += 1) {
+          const session = `ses_churn_${index}`;
+          const log = f.root(session);
+          f.families.settled(session, log);
+          log.end("completed");
+        }
+      }
+
+      expect(real.retained?.()).toBe(!evict);
+      expect(f.reads).toEqual([child]);
+      parent.resolve(main);
+      await setImmediate();
+      expect(f.childTurns()).toMatchObject([
+        {
+          session: { parent: null },
+          requests: [],
+          status: "cancelled",
+          lost: true,
+          items: [{ text: "Observed child text" }],
+        },
+      ]);
+    } finally {
+      parent.resolve(main);
+      f.stop.abort();
+    }
+  },
+);
+
+test.each([
   { limit: undefined, count: 127, foreignFirst: false },
   { limit: undefined, count: 128, foreignFirst: false },
   { limit: 1, count: 1, foreignFirst: false },
