@@ -290,7 +290,8 @@ and separately approved live-proof steps.
   Slack bot registration, at most one IRC registration and one Stargate process
   owner; each transport delivers only replies to its own inputs.
 - Claude Agent SDK backends deliver only each turn's own reply: no
-  transcript catch-up, dashboard history or pinned captain session.
+  transcript catch-up or pinned captain session (read-only dashboard history
+  is available).
 - Responses render Markdown, with no tool output or reasoning, at most 60,000
   Unicode characters; OpenCode transcript replies are not clipped. Streaming,
   `/cron`, and its interactive controls are supported. See

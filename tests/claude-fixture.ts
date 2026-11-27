@@ -423,6 +423,22 @@ async function answer(text: string) {
     await stubborn(text.includes("detached"));
   }
 
+  if (text.includes("wait-interrupt")) {
+    stream({ type: "message_start", message: { id: "msg_wait" } });
+    stream({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    stream({
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "Waiting" },
+    });
+
+    return;
+  }
+
   if (text.includes("hang")) {
     // A tool command in the same process group must stop with the CLI.
     const child = spawn("sleep", ["600"], { stdio: "ignore" });

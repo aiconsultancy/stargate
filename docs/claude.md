@@ -244,9 +244,10 @@ attachment notice.
 
 ## Cancellation and recovery
 
-Stop, the turn time limit and shutdown send `SIGTERM` to the Claude Code
-process group. The turn then fails with the normal notice. Tool effects are
-not undone.
+Stop, the turn time limit and shutdown first send an SDK `interrupt` control
+request, then escalate to `SIGTERM` on the Claude Code process group after a
+short grace window (at most 150 ms). The turn then fails with the normal notice.
+Tool effects are not undone.
 
 No process of a turn outlives it. Claude Code runs Bash commands in their own
 sessions, outside its process group, so every process of a turn inherits a
@@ -284,8 +285,9 @@ default `KillMode` also stops these processes when the service stops.
 
 ## Limits
 
-- No dashboard session history, transcript catch-up or `watch`. Only the
-  turn's own reply is delivered. Claude Code background work ends with the
+- No transcript catch-up or `watch`. Only the turn's own reply is delivered
+  (read-only dashboard session history is available from the namespace's
+  private `CLAUDE_CONFIG_DIR`). Claude Code background work ends with the
   turn, at most five seconds after its result.
 - No pinned shared captain session (`sessionID`), crew status, quota, pairing,
   crew activity reports or maintenance notices.
