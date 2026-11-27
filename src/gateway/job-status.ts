@@ -25,3 +25,12 @@ export const jobStatuses = [
 ] as const;
 
 export type JobStatus = (typeof jobStatuses)[number];
+
+const sqlList = (statuses: readonly JobStatus[]) =>
+  statuses.map((status) => `'${status}'`).join(",");
+
+/** SQL list: no reply is stored yet; the backend may still run this job. */
+export const pendingJobs = sqlList(["queued", "running"]);
+
+/** SQL list: not delivered or failed yet; later jobs of the thread wait. */
+export const unfinishedJobs = sqlList(["queued", "running", "responding"]);

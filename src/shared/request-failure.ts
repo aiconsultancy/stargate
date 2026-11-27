@@ -15,6 +15,12 @@ export class AttachmentInputUnavailable extends Error {}
 
 export class PromptNotSubmitted extends Error {}
 
+export class CompactionOutputLimit extends Error {
+  public constructor(public readonly beforeAdmission: boolean) {
+    super("OpenCode compaction reached the output token limit");
+  }
+}
+
 export class PendingBackendQuestion extends PromptNotSubmitted {}
 
 /**
@@ -142,6 +148,7 @@ export type ProviderFailure =
 export type RequestFailure =
   | "timeout"
   | "pending-question"
+  | "compaction-output-limit"
   | "cancelled"
   | "backend"
   | "context"
@@ -253,6 +260,10 @@ const failures = {
     text: "Stargate reached the request time limit and requested cancellation. Work may have run; it was not repeated. Check agent state before trying again. For longer work, increase turnTimeoutMs or split the request.",
   },
   cancelled: { title: "Stop requested", text: cancellationNotice },
+  "compaction-output-limit": {
+    title: "Agent session needs recovery",
+    text: "OpenCode could not finish the session summary within its output token limit. Stargate held further work for this session. Ask an operator to recover it before trying again.",
+  },
   "pending-question": {
     title: "Earlier question needs an answer",
     text: "OpenCode is waiting on a question from earlier work. Stargate did not submit this request. Answer the earlier question in its own thread or ask an operator to resolve it in OpenCode, then resend this request.",

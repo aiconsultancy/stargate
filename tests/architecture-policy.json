@@ -1248,6 +1248,7 @@
         "src/gateway/irc-admission.ts",
         "src/gateway/job-status.ts",
         "src/gateway/ports.ts",
+        "src/gateway/queue-admission.ts",
         "src/gateway/store-types.ts",
         "src/gateway/row-codec.ts",
         "src/gateway/store-schema.ts",

@@ -80,6 +80,41 @@ export interface OpenCodeHistoryClient {
   rpc(definition: typeof CrewReporting): OpenCodeHistoryReporting;
 }
 
+export function hitCompactionOutputLimit(message: SessionMessageInfo) {
+  // The public SDK groups length and other failures under compaction.failed.
+  // Match the engine's fixed error only, never a provider error or chat text.
+  return (
+    message.type === "compaction" &&
+    message.status === "failed" &&
+    message.error.type === "compaction.failed" &&
+    message.error.message ===
+      "Compaction summary reached the output token limit"
+  );
+}
+
+export async function hasFailedCompaction(
+  client: Pick<OpenCodeHistoryClient, "message">,
+  sessionID: string,
+  signal: AbortSignal,
+) {
+  const { data } = await client.message.list(
+    { sessionID, order: "desc", type: "compaction", limit: 32 },
+    { signal },
+  );
+
+  for (const message of data) {
+    if (hitCompactionOutputLimit(message)) {
+      return true;
+    }
+
+    if (message.type === "compaction" && message.status === "completed") {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 const decodeDescribe = Schema.decodeUnknownSync(historyDescribeInputSchema);
 const decodeChildren = Schema.decodeUnknownSync(historyChildrenInputSchema);
 const decodeEntries = Schema.decodeUnknownSync(historyEntriesInputSchema);

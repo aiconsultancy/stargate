@@ -1,4 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import pino from "pino";
 import {
   type AgentBackend,
@@ -7,7 +10,10 @@ import {
 } from "../src/backends/backend";
 import { SlackGateway as Gateway } from "./slack-gateway-fixture";
 import type { TransportDelivery } from "../src/gateway/ports";
-import { PromptNotSubmitted } from "../src/shared/request-failure";
+import {
+  CompactionOutputLimit,
+  PromptNotSubmitted,
+} from "../src/shared/request-failure";
 import { handleSlackRequest } from "../src/transports/slack/slack";
 import { openStore } from "../src/app/open-store";
 import { type Store } from "../src/gateway/store";
@@ -822,4 +828,133 @@ test("a job that another writer finished during delivery is left as it is", asyn
   expect(lines).toHaveLength(1);
   expect(lines[0]).toContain('"transition":"sent"');
   expect(lines[0]).toContain("Job transition refused; nothing was written");
+});
+
+test("a compaction failure reports the current turn and holds only its session", async () => {
+  const f = fixture();
+  const signal = AbortSignal.timeout(5000);
+  f.backend.prompt = async (session) => {
+    if (session === "session-1") {
+      throw new CompactionOutputLimit(false);
+    }
+
+    return "Healthy session";
+  };
+
+  expect(f.gateway.accept(event())).toBe(true);
+  await f.gateway.process(f.next(), signal);
+  expect(f.delivered[0]).toContain(
+    "Stargate held further work for this session",
+  );
+
+  const followUp = event("hold this", "2.000");
+  expect(
+    f.gateway.accept({
+      ...followUp,
+      event: { ...followUp.event, type: "message", thread_ts: "1.000" },
+    }),
+  ).toBe(true);
+  expect(f.gateway.accept(event("<@UBOT> other conversation", "3.000"))).toBe(
+    true,
+  );
+  const ready = f.next();
+
+  expect(ready.text).toBe("other conversation");
+  await f.gateway.process(ready, signal);
+  expect(f.delivered.at(-1)).toBe("Healthy session");
+  expect(f.store.ready(f.gateway.key, Date.now(), 10)).toEqual([]);
+});
+
+test("an already failed native session leaves unsubmitted work queued", async () => {
+  const f = fixture();
+  f.backend.checkPromptAdmission = async () => {
+    throw new CompactionOutputLimit(true);
+  };
+
+  expect(f.gateway.accept(event())).toBe(true);
+  const job = f.next();
+  await f.gateway.process(job, AbortSignal.timeout(5000));
+  expect(f.store.jobByEvent(job.botKey, job.eventId)?.status).toBe("queued");
+  expect(f.store.ready(f.gateway.key, Date.now(), 10)).toEqual([]);
+  expect(f.prompts).toHaveLength(0);
+  expect(f.delivered).toEqual([]);
+});
+
+test("a shared pin holds other transports and stays held when reopening the store", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stargate-compaction-hold-"));
+  const path = join(directory, "gateway.sqlite");
+  const pin = "original-native-session";
+  const otherPin = "operator-replacement";
+
+  const queued = {
+    eventId: "request",
+    user: "operator",
+    channel: "channel",
+    thread: "thread",
+    text: "Synthetic queued request",
+  };
+
+  const now = Date.now();
+
+  try {
+    const original = openStore(path);
+
+    try {
+      expect(
+        original.enqueue({ ...queued, botKey: "teams", conversation: "teams" }),
+      ).toBe(true);
+      expect(
+        original.enqueue({ ...queued, botKey: "irc", conversation: "irc" }),
+      ).toBe(true);
+      const [teams] = original.ready("teams", now, 1, true, false, pin);
+      const [irc] = original.ready("irc", now, 1, true, false, pin);
+
+      if (!teams || !irc) {
+        throw new Error("Missing queued fixture");
+      }
+
+      expect(original.running(teams.id, teams.text, pin)).toBe(true);
+      expect(original.running(irc.id, irc.text, pin)).toBe(false);
+      expect(original.holdCompaction(pin).recorded).toBe(true);
+      expect(original.holdCompaction(pin).recorded).toBe(false);
+      original.respond(
+        teams.id,
+        ["Recovery required"],
+        "compaction-output-limit",
+      );
+      expect(original.ready("teams", now, 1, true, false, pin)[0]?.status).toBe(
+        "responding",
+      );
+    } finally {
+      original.close();
+    }
+
+    const reopened = openStore(path);
+
+    try {
+      expect(reopened.ready("irc", now, 1, true, false, pin)).toEqual([]);
+      expect(
+        reopened.ready("irc", now, 1, true, false, otherPin)[0]?.status,
+      ).toBe("queued");
+
+      expect(
+        reopened.enqueue({
+          ...queued,
+          botKey: "irc",
+          conversation: "irc",
+          eventId: "cancelled-follow-up",
+        }),
+      ).toBe(true);
+      const cancelled = reopened.cancelTurn("irc", "irc", "thread");
+
+      expect(cancelled).toBeDefined();
+      expect(reopened.ready("irc", now, 10, true, false, pin)).toMatchObject([
+        { id: cancelled, status: "responding", failure: "cancelled" },
+      ]);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    await rm(directory, { recursive: true });
+  }
 });

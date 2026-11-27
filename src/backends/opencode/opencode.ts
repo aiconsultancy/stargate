@@ -64,6 +64,7 @@ import { quotaObservationSchema, quotaSnapshotSchema } from "../quota/quota";
 import {
   BackendFailure,
   type BackendFailureKind,
+  CompactionOutputLimit,
   PendingBackendQuestion,
   PromptNotSubmitted,
   connectionFailure,
@@ -73,7 +74,11 @@ import type { TurnProgress, TurnStage } from "../../shared/turn-progress";
 import type { UpdateSnapshot } from "../../automation/maintenance/update-notice";
 import { OpenCodeNotices } from "./notices";
 import { OpenCodeCrewStatus } from "./crew-status";
-import { OpenCodeHistory } from "./opencode-history";
+import {
+  OpenCodeHistory,
+  hasFailedCompaction,
+  hitCompactionOutputLimit,
+} from "./opencode-history";
 import { OpenCodeQuestions } from "./questions";
 import { OpenCodeReviews } from "./reviews";
 
@@ -912,6 +917,20 @@ export class OpenCodeBackend implements AgentBackend {
     return { status: "uncertain" };
   }
 
+  public async checkPromptAdmission(sessionId: string, signal: AbortSignal) {
+    try {
+      if (await hasFailedCompaction(this.client, sessionId, signal)) {
+        throw new CompactionOutputLimit(true);
+      }
+    } catch (error) {
+      if (!signal.aborted && connectionFailure(error)) {
+        throw new BackendFailure("network", { ran: false });
+      }
+
+      throw error;
+    }
+  }
+
   public async prompt(
     sessionId: string,
     text: string,
@@ -1364,6 +1383,7 @@ export class OpenCodeBackend implements AgentBackend {
       // Read backwards to the submitted input; do not resend earlier replies.
       const history: (InputBoundaryRecord & {
         reply?: Reply;
+        compactionLimit: boolean;
       })[] = [];
 
       const boundaries = new InputBoundaryReader(
@@ -1387,6 +1407,7 @@ export class OpenCodeBackend implements AgentBackend {
         for (const message of page.data) {
           history.push({
             ...(await boundaries.record(message)),
+            compactionLimit: hitCompactionOutputLimit(message),
             ...(message.type === "assistant" && {
               reply: {
                 succeeded:
@@ -1416,6 +1437,10 @@ export class OpenCodeBackend implements AgentBackend {
 
             for (const record of history.toReversed()) {
               owner = fold.next(record) ?? owner;
+
+              if (record.compactionLimit && owner === input.id) {
+                throw new CompactionOutputLimit(false);
+              }
 
               if (record.reply && owner === input.id) {
                 replies.push(record.reply);

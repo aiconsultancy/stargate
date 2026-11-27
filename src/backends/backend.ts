@@ -237,6 +237,8 @@ export interface AgentBackend {
     title: string;
     signal: AbortSignal;
   }): Promise<string>;
+  /** Read native state before the gateway submits a new turn. */
+  checkPromptAdmission?(sessionId: string, signal: AbortSignal): Promise<void>;
   prompt(
     sessionId: string,
     text: string,
