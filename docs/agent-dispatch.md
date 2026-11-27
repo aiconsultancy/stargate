@@ -150,12 +150,30 @@ admiral's existing `subspaceAgents` signing proxy. The proxy signs each
 request with the enrolled identity. Bearer and header environment settings
 apply to direct API connections.
 
+For decision outcomes only, a separately managed relay can authenticate as
+the rear admiral. Enable `decisionOutcomeDms` with `enabled: false` and set
+`api` to `{ "socketPath": "/run/example/decisions/api.sock", "relayOwnerUid": 1500 }`.
+Use the relay service's actual UID. Give the relay a private socket directory
+or a dedicated group for gateway access. The directory and socket must share
+that group, with no access for other users. Only the directory owner may
+replace the socket. Use a normalised absolute path. The directory can belong
+to root or the relay UID. Its ancestors must belong to root or the relay UID,
+and group or other write access requires a sticky directory. Stargate checks
+the socket before each request and reports a missing or unsafe socket as a
+relay error. Configure the relay to allow only the identity and fleet lookup,
+outcome feed and delivery receipt routes for this fleet.
+
+The officer-tools manifest advertises `decisionOutcomeDms: 1` for installers
+that commission the gateway's decision outcome delivery capability.
+
 | Key                      | Default                                     | Meaning                                                                                                                                                                                                           |
 | ------------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`                | `false`                                     | The feature flag. Off: no ledger file, no chat listener and no API request. A disabled section is not cross-checked against the IRC registrations.                                                                |
 | `fleet`                  | Required                                    | The fleet's slug or UUID in the Subspace API.                                                                                                                                                                     |
 | `api.baseUrl`            | Direct mode only, required                  | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
 | `api.tokenEnv`           | Direct mode only, required                  | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
+| `api.socketPath`         | Socket mode only, required                  | Absolute path to the signing socket.                                                                                                                                                                              |
+| `api.relayOwnerUid`      | Omitted                                     | Expected socket owner for a separately managed relay. Available for decision outcomes with issue dispatch disabled.                                                                                               |
 | `api.headersEnv`         | `{}`                                        | Extra request headers for a private access layer: header name → environment variable name. `Authorization`, `Accept`, `Content-Type`, `Content-Length`, `Host`, `Connection` and `Transfer-Encoding` are refused. |
 | `messaging.type`         | `"irc"`                                     | The messaging system. Only `irc` is accepted.                                                                                                                                                                     |
 | `messaging.registration` | Required                                    | ID of the rear admiral's IRC registration (`fleetPolicy.role: "rear_admiral"`).                                                                                                                                   |

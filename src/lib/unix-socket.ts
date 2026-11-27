@@ -1,5 +1,5 @@
 // Adapted from CFP Starfleet Teams 0.4.0; transport logic is independent of Claude Code.
-// Unix socket listeners for the Teams endpoint and the fleet bus.
+// Unix socket listeners and trust checks for local services.
 //
 // Each socket lives in a directory that only its ship's user can write
 // (tmpfiles.d creates it with mode 2750), so no other local user can create,
@@ -188,6 +188,27 @@ export function checkPrivateDirectory(
 
   if (options.mode === 0o600 && (stats.mode & 0o7777) !== 0o700) {
     throw new Error(`private socket directory ${dir} must have mode 0700`);
+  }
+}
+
+/** Check an explicitly trusted service's private or group-accessible socket. */
+export function checkOwnedServiceSocket(path: string, ownerUid: number): void {
+  checkNormalised(path, "service socket");
+  const directory = dirname(path);
+  checkAncestors(directory, ownerUid);
+  const parent = lstatSync(directory);
+  const socket = lstatSync(path);
+
+  if (
+    !parent.isDirectory() ||
+    (parent.uid !== 0 && parent.uid !== ownerUid) ||
+    (parent.mode & 0o027) !== 0 ||
+    !socket.isSocket() ||
+    socket.uid !== ownerUid ||
+    socket.gid !== parent.gid ||
+    (socket.mode & 0o007) !== 0
+  ) {
+    throw new Error("Service socket ownership or permissions are unsafe");
   }
 }
 

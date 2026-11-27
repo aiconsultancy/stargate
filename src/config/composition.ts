@@ -799,7 +799,7 @@ const configCheck = (liveNotificationPolicy = false) =>
       if (agentDispatchActive(agentDispatch)) {
         const issue = dispatchTargetIssue(
           agentDispatchTarget(agentDispatch, irc),
-          agentDispatch.api,
+          agentDispatch,
           subspaceAgents?.officers ?? [],
         );
 

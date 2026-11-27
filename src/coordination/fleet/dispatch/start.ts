@@ -58,6 +58,14 @@ export function startAgentDispatch(
     return;
   }
 
+  if (
+    dispatch.enabled &&
+    "relayOwnerUid" in dispatch.api &&
+    dispatch.api.relayOwnerUid !== undefined
+  ) {
+    throw new Error("An external relay supports decision outcomes only");
+  }
+
   const target = agentDispatchTarget(dispatch, host.irc);
 
   if (typeof target === "string") {
