@@ -1,5 +1,8 @@
-import { afterEach, expect, test } from "bun:test";
-import { DispatchApiError } from "../src/coordination/fleet/dispatch/api";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import {
+  DecisionRelayError,
+  DispatchApiError,
+} from "../src/coordination/fleet/dispatch/api";
 import type { AgentDispatcher } from "../src/coordination/fleet/dispatch/dispatcher";
 import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
 import {
@@ -9,6 +12,8 @@ import {
   CAPTAIN_C,
   CREW_A,
   capturedLog,
+  Clock,
+  FakeApi,
   type Fixture,
   FLEET,
   fixture,
@@ -23,6 +28,57 @@ import {
 } from "./agent-dispatch-fixture";
 
 afterEach(removeDirectories);
+
+test("issue dispatch and decision outcomes use separate connections and the same admiral identity", async () => {
+  const relay = new FakeApi(new Clock());
+  const { log, lines } = capturedLog();
+
+  const f = await fixture({
+    decisionOutcomeDms: true,
+    decisionApi: relay,
+    log,
+  });
+
+  const id = "00000000-0000-4000-8000-000000000018";
+  relay.pendingOutcomes.set(id, {
+    id,
+    recordedByUserId: CAPTAIN_A,
+    identifier: "D-00042-NAV",
+    status: "accepted",
+  });
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+
+  const missingSocket = "The decision relay socket is missing or unsafe";
+  spyOn(relay, "me").mockRejectedValueOnce(
+    new DecisionRelayError(missingSocket),
+  );
+  await f.dispatcher.step(signal);
+  expect(lines.join("\n")).toContain(missingSocket);
+  expect(f.ledger.tracked("i1")?.offer).toBeDefined();
+
+  const identity = relay.identity;
+  relay.identity = { ...identity, userId: CAPTAIN_B };
+
+  await f.dispatcher.step(signal);
+  expect(relay.calls).not.toContain(`decision outcomes ${FLEET}`);
+  expect(f.chat.decisionDms).toEqual([]);
+  expect(lines.join("\n")).toContain(
+    "The decision relay identity does not match the confirmed rear admiral",
+  );
+
+  relay.identity = identity;
+  await f.dispatcher.step(signal);
+  expect(f.chat.decisionDms).toEqual([
+    {
+      account: "example-captain-a",
+      identifier: "D-00042-NAV",
+      status: "accepted",
+    },
+  ]);
+  expect(f.api.calls).not.toContain(`decision outcomes ${FLEET}`);
+  expect(f.api.acknowledgedOutcomes).toEqual([]);
+  expect(relay.acknowledgedOutcomes).toEqual([id]);
+});
 
 test("decision outcomes wait for the recording captain and retry a receipt after restart", async () => {
   const f = await fixture({ decisionOutcomeDms: true });

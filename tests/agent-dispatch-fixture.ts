@@ -849,6 +849,7 @@ export type FixtureOptions = {
   recheckIdentity?: boolean;
   ladder?: number[];
   decisionOutcomeDms?: boolean;
+  decisionApi?: AgentDispatcherOptions["decisionApi"];
   enrolled?: string[];
   path?: string;
   /** Use the real HTTP client over `FakeSubspaceHttp` instead of `FakeApi`. */
@@ -903,6 +904,7 @@ export async function fixture(options: FixtureOptions = {}) {
         enrolled: (account) => enrolled.has(account),
       },
       api: client,
+      ...(options.decisionApi && { decisionApi: options.decisionApi }),
       messenger: chat,
       ledger,
       assignmentMode: assignedWork

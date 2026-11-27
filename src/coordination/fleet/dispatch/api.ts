@@ -1,4 +1,5 @@
 import { Result, Schema } from "effect";
+import { checkServiceSocket } from "../../../lib/unix-socket";
 import { commentBody, dispatchRoutes, issueEdit } from "./routes";
 
 /** A PATCH body built by `issueEdit`. */
@@ -121,6 +122,16 @@ export class DispatchApiError extends Error {
   ) {
     super(message);
     this.name = "DispatchApiError";
+  }
+}
+
+export class DecisionRelayError extends DispatchApiError {
+  public constructor(
+    message:
+      | "The decision relay socket is missing or unsafe"
+      | "The decision relay identity does not match the confirmed rear admiral",
+  ) {
+    super(undefined, message);
   }
 }
 
@@ -258,6 +269,8 @@ export type SubspaceApiOptions = (
   | {
       /** Local proxy that signs each request as the enrolled rear admiral. */
       socketPath: string;
+      /** Use a separate service socket for decision outcomes. */
+      decisionRelay?: true | undefined;
     }
 ) & {
   env?: NodeJS.ProcessEnv;
@@ -280,7 +293,19 @@ export class SubspaceApi implements DispatchApi {
     if ("socketPath" in options) {
       this.base = "http://localhost";
       this.socketPath = options.socketPath;
-      this.authorize = () => {};
+      const { socketPath, decisionRelay } = options;
+
+      this.authorize = !decisionRelay
+        ? () => {}
+        : () => {
+            try {
+              checkServiceSocket(socketPath);
+            } catch {
+              throw new DecisionRelayError(
+                "The decision relay socket is missing or unsafe",
+              );
+            }
+          };
     } else {
       this.base = options.baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
       this.authorize = (headers) => {

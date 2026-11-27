@@ -36,9 +36,12 @@ import {
 import { decodeSettings } from "./settings-errors";
 import {
   absolutePath,
-  agentDispatchApiSchema,
+  agentDispatchConnections,
+  checkAgentDispatchConnections,
+  dispatchPrimaryApi,
   dispatchTargetIssue,
   envName,
+  normalisedPath,
   reservedAuthenticatedRequestHeaders,
   secureLocalOrHttpsURL,
   settingsCheck,
@@ -54,6 +57,8 @@ import { transcriptionSchema } from "../chat/transcription/config";
 import { waitingSchema } from "./waiting";
 
 import { type BackendConfig, backendSchema } from "../backends/config";
+
+export { dispatchPrimaryApi } from "./settings-schema";
 
 const userRule = Schema.Union([
   Schema.Literal("*"),
@@ -253,7 +258,7 @@ export const agentDispatchSchema = settingsStruct({
   fleet: Schema.String.check(
     settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/),
   ),
-  api: agentDispatchApiSchema,
+  ...agentDispatchConnections,
   readyOffers: Schema.optional(Schema.Boolean),
   messaging: settingsStruct({
     /** IRC is the only messaging system today. */
@@ -276,8 +281,6 @@ export const agentDispatchSchema = settingsStruct({
       }),
     ),
   ),
-  /** Send resolved decision notices to the recording captain by IRC DM. */
-  decisionOutcomeDms: Schema.optional(Schema.Boolean),
   /** Subspace agent name to chat account; an unlisted name is its own account. */
   captainAccounts: settingsRecord(
     Schema.String.check(settingsPattern(/^[A-Za-z0-9-]{1,64}$/)),
@@ -293,7 +296,7 @@ export const agentDispatchSchema = settingsStruct({
   retryLadderSeconds: Schema.mutable(Schema.Array(dispatchSeconds(60, 604_800)))
     .check(Schema.isMaxLength(10))
     .pipe(settingsDefault([...agentDispatchDefaults.retryLadderSeconds])),
-});
+}).check(checkAgentDispatchConnections);
 
 export type AgentDispatchConfig = typeof agentDispatchSchema.Type;
 
@@ -338,12 +341,6 @@ export function agentDispatchTarget(
 
   return { registration, channel: joined };
 }
-
-const normalisedPath = absolutePath.check(
-  settingsRefine((path) => resolve(path) === path, {
-    message: "An absolute normalised path is required",
-  }),
-);
 
 const subspaceLine = (maximum: number) =>
   Schema.Trim.check(Schema.isMinCodePoints(1))
@@ -799,7 +796,7 @@ const configCheck = (liveNotificationPolicy = false) =>
       if (agentDispatchActive(agentDispatch)) {
         const issue = dispatchTargetIssue(
           agentDispatchTarget(agentDispatch, irc),
-          agentDispatch.api,
+          dispatchPrimaryApi(agentDispatch),
           subspaceAgents?.officers ?? [],
         );
 
