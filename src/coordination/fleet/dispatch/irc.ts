@@ -2,7 +2,11 @@ import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import type { IrcConfig } from "../../../config";
-import { type IrcClient, IrcUnavailable } from "../../../transports/irc/client";
+import {
+  type IrcClient,
+  IrcDeliveryUnconfirmed,
+  IrcUnavailable,
+} from "../../../transports/irc/client";
 import {
   type IrcMessage,
   fold,
@@ -346,16 +350,27 @@ export class IrcDispatchMessenger implements DispatchMessenger {
 
     const sameRecipient = this.client.recipientGuard(captain.account, nick);
 
-    const message = await this.client.publish(
-      channel,
-      text,
-      tags,
-      () =>
-        !signal.aborted &&
-        this.allowed() &&
-        sameRecipient() &&
-        this.client.inChannel(channel),
-    );
+    const message = await this.client
+      .publish(
+        channel,
+        text,
+        tags,
+        () =>
+          !signal.aborted &&
+          this.allowed() &&
+          sameRecipient() &&
+          this.client.inChannel(channel),
+      )
+      .catch((error: unknown): undefined => {
+        if (
+          error instanceof IrcDeliveryUnconfirmed ||
+          (error instanceof IrcUnavailable && !error.notSent)
+        ) {
+          return;
+        }
+
+        throw error;
+      });
 
     return validMsgid(message) ? true : ("unconfirmed" as const);
   }

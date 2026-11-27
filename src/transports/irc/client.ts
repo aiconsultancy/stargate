@@ -18,6 +18,7 @@ import {
   utf8Bytes,
   validMsgid,
 } from "./protocol";
+import { IrcDeliveryUnconfirmed } from "./send-errors";
 import {
   IrcStatus,
   type StatusResult,
@@ -26,6 +27,8 @@ import {
   formatStatusMetadataSet,
   statusMetadataSupported,
 } from "./status";
+
+export { IrcDeliveryUnconfirmed } from "./send-errors";
 
 const line = (names: readonly string[]) =>
   formatMessage("JOIN", [names.join(",")]);
@@ -984,7 +987,7 @@ export class IrcClient {
           result.reject(
             this.unqueue(item)
               ? new IrcSendExpired()
-              : new Error("IRC delivery unconfirmed"),
+              : new IrcDeliveryUnconfirmed(),
           );
         }, this.timing.confirmMs);
 

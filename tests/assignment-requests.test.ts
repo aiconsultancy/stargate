@@ -81,7 +81,7 @@ test("assigned work waits for crew and reminds a captain only while the issue is
         expect(target).toEqual(captain);
         asks.push(ticket.identifier);
 
-        return true;
+        return "unconfirmed";
       },
     },
     ledger,

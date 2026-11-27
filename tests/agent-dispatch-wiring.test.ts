@@ -665,7 +665,13 @@ test("an authenticated capacity probe is passive and the resulting request opens
   cleanup.push(() => store.close());
   const command = "#fleet-command";
   const home = "#example-captain-a";
-  const timing = { reconnectMinMs: 20, intervalMs: 5, burst: 10 };
+
+  const timing = {
+    reconnectMinMs: 20,
+    intervalMs: 5,
+    burst: 10,
+    confirmMs: 250,
+  };
 
   const admiralShip = await IrcShip.create(
     Schema.decodeUnknownSync(ircSchema)({
@@ -708,11 +714,18 @@ test("an authenticated capacity probe is passive and the resulting request opens
     account: "example-captain-a",
   };
 
+  const messenger = new IrcDispatchMessenger(
+    admiral.client,
+    command,
+    () => true,
+    silent,
+  );
+
   const requests = new IrcAssignmentRequests(
     admiral.client,
     { [target.account]: home },
     () => true,
-    new IrcDispatchMessenger(admiral.client, command, () => true, silent),
+    messenger,
   );
 
   admiralShip.dispatchListener = (message) => requests.receive(message);
@@ -782,6 +795,21 @@ test("an authenticated capacity probe is passive and the resulting request opens
   expect(
     store.jobByEvent(captain.key, `${home}:${threaded}`)?.replyParent,
   ).toBe(threaded);
+
+  fake.holdMessageConfirmation.add(`rear-admiral ${home}`);
+  expect(
+    await messenger.assignmentRequest(
+      target,
+      { identifier: "EX-3", title: "Fixture" },
+      home,
+      signal,
+    ),
+  ).toBe("unconfirmed");
+  await until(
+    () => store.queueCounts(captain.key).queued === 3,
+    5000,
+    "unconfirmed assignment was admitted",
+  );
 }, 15_000);
 
 test("rear admiral intake: an answer reaches the dispatcher only past the registration's account and channel rules", async () => {

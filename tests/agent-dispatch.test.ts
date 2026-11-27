@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { DispatchApiError } from "../src/coordination/fleet/dispatch/api";
 import type { AgentDispatcher } from "../src/coordination/fleet/dispatch/dispatcher";
 import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
 import {
@@ -421,6 +422,55 @@ test("assigned-only mode suspends existing Ready for agents timers and answers",
     expect(f.api.edits).toEqual([]);
     expect(ledger.tracked("i2")?.state).toBe("clearing");
     expect(f.api.issues.get("i2")?.readyForAgents).toBe(true);
+  } finally {
+    ledger.close();
+  }
+});
+
+test("a pending acceptance remains in the legacy scan when Ready offers turn off", async () => {
+  const f = await fixture();
+  await f.dispatcher.step(signal);
+  f.clock.advance(10 * MINUTE);
+  f.api.add({ id: "i1", identifier: "PRJ-1", assigneeId: CAPTAIN_A });
+  const firstUpdate = f.api.issues.get("i1")?.updatedAt;
+  const now = f.clock.now();
+
+  f.ledger.save({
+    issue: "i1",
+    identifier: "PRJ-1",
+    title: "Fixture",
+    state: "accepting",
+    round: 0,
+    start: 0,
+    order: [CAPTAIN_A],
+    position: 0,
+    updatedAt: now,
+    offer: {
+      id: "offer-fixture",
+      captain: CAPTAIN_A,
+      account: "example-captain-a",
+      askedAt: now,
+      deadline: now + MINUTE,
+    },
+  });
+  f.api.issue = async () => {
+    throw new DispatchApiError(503, "fixture detail unavailable");
+  };
+
+  f.clock.advance(10 * MINUTE);
+  f.api.add({ id: "i2", identifier: "PRJ-2", assigneeId: CAPTAIN_B });
+  await f.dispatcher.step(signal);
+  expect(f.ledger.cursor).toBe(firstUpdate);
+  expect(f.ledger.tracked("i1")?.state).toBe("accepting");
+  f.ledger.close();
+  const ledger = new DispatchLedger(f.path);
+
+  try {
+    await f.open(ledger, false).step(signal);
+    expect(f.chat.transcript()).toContain(
+      "assigned PRJ-1 -> example-captain-a",
+    );
+    expect(ledger.tracked("i1")?.state).toBe("accepting");
   } finally {
     ledger.close();
   }

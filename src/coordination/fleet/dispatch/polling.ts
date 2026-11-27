@@ -139,6 +139,12 @@ const cursorOverlapMs = 5 * 60_000;
 /** A behaviour 1 notice for an unreachable captain is retried this long. */
 const noticeRetryMs = 24 * 3_600_000;
 
+function earlierUpdate(hold: string | undefined, updated: string) {
+  return hold === undefined || Date.parse(updated) < Date.parse(hold)
+    ? updated
+    : hold;
+}
+
 function errorStatus(error: unknown) {
   return error instanceof DispatchApiError ? error.status : undefined;
 }
@@ -681,6 +687,7 @@ export class DispatchPolling {
         offered?.state === "accepting" &&
         offered.offer?.captain === captain.userId
       ) {
+        hold = earlierUpdate(hold, issue.updatedAt);
         continue;
       }
 
@@ -737,12 +744,7 @@ export class DispatchPolling {
           "Agent dispatch notified a captain of an assignment",
         );
       } else if (fresh) {
-        if (
-          hold === undefined ||
-          Date.parse(issue.updatedAt) < Date.parse(hold)
-        ) {
-          hold = issue.updatedAt;
-        }
+        hold = earlierUpdate(hold, issue.updatedAt);
       } else {
         ledger.recordNotified(
           issue.id,
