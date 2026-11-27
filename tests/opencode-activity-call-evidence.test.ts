@@ -248,3 +248,37 @@ test("retiring a witnessed child removes only the portion of its named range tha
     evidence.competing(parent, undefined, child, { ...window, through: 4 }),
   ).toBe(false);
 });
+
+test("native retirement preserves an earlier-arriving name opened after the retired start", () => {
+  const evidence = new ActivityCallEvidence(2);
+  const owner = log();
+  evidence.open(parent, undefined, owner, "successor", 1, { created: 4 });
+  expect(evidence.name(parent, undefined, owner, "successor", child)).toBe(1);
+  evidence.open(parent, undefined, owner, "predecessor", 2, { created: 1 });
+  expect(evidence.name(parent, undefined, owner, "predecessor", child)).toBe(2);
+
+  evidence.discardStart(child, 2, 3);
+  expect(evidence.competing(parent, undefined, child, window)).toBe(true);
+  expect(
+    evidence.competing(parent, undefined, child, {
+      ...window,
+      after: 1,
+      through: 2,
+    }),
+  ).toBe(false);
+});
+
+test("native retirement cannot exclude a compressed name without its time", () => {
+  const evidence = new ActivityCallEvidence(1);
+  const owner = log();
+  evidence.open(parent, undefined, owner, "compressed", 1, { created: 4 });
+  expect(evidence.name(parent, undefined, owner, "compressed", child)).toBe(1);
+  evidence.open(parent, undefined, owner, "newer", 4, { created: 5 });
+  expect(evidence.name(parent, undefined, owner, "newer", child)).toBe(4);
+
+  evidence.discardStart(child, 2, 3);
+  expect(evidence.competing(parent, undefined, child, window)).toBe(true);
+
+  evidence.discardStart(child, 2);
+  expect(evidence.competing(parent, undefined, child, window)).toBe(false);
+});
