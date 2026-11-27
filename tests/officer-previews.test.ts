@@ -99,6 +99,9 @@ test("an officer can publish, replace and withdraw only its own static mockup", 
 
     expect(ready?.status).toBe(200);
     await writeFile(index, "<h1>First version</h1>");
+    await writeFile(join(demo, "robots.txt"), "User-agent: *");
+    await writeFile(join(demo, "site.webmanifest"), "{}");
+
     const first = await mcp("publish", "demo");
     expect(first).toContain(`${baseUrl}p/atlas/demo/`);
     expect(first).toContain("expiresAt");

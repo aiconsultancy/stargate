@@ -12,7 +12,7 @@ export const previewName = Schema.String.check(
 const segments = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}$/;
 
 const assets =
-  /\.(html|css|m?js|json|svg|png|jpe?g|gif|webp|ico|avif|woff2?|ttf|mp4|webm|mp3|wav)$/i;
+  /\.(html|css|m?js|json|webmanifest|txt|svg|png|jpe?g|gif|webp|ico|avif|woff2?|ttf|mp4|webm|mp3|wav)$/i;
 
 const maxFiles = 256;
 const maxBytes = 10 * 1024 * 1024;

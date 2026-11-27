@@ -204,7 +204,23 @@ function serveBroker(
   baseUrl: string,
   owners: string[],
 ) {
-  const store = previewStore(root, baseUrl);
+  const url = new URL(baseUrl);
+
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.pathname !== "/" ||
+    (url.protocol !== "https:" &&
+      (url.protocol !== "http:" || url.hostname !== "127.0.0.1"))
+  ) {
+    throw new Error(
+      "Use a dedicated HTTPS origin or an HTTP loopback origin for the preview base URL.",
+    );
+  }
+
+  const store = previewStore(root, url.href);
 
   function collect() {
     store.collect(DateTime.toEpochMillis(DateTime.nowUnsafe()));
