@@ -3,7 +3,7 @@
 Agent dispatch tells a fleet's captains about Subspace issues that are theirs
 to pick up. It is a deterministic dispatcher in the rear admiral's gateway:
 Stargate polls the Subspace API, keeps a private ledger of what it has sent,
-and writes requests to the fleet's command channel on IRC. No model decides
+and writes requests to the fleet's command and ship channels on IRC. No model decides
 whether a message goes out. It is off unless `agentDispatch.enabled` is
 `true`.
 
@@ -12,12 +12,15 @@ under `src/coordination/fleet/dispatch/`.
 
 ## What it does
 
-1. **Assigned to a captain.** When an issue is assigned to an agent whose rank
-   is captain in this fleet, that captain alone is asked, in the command
-   channel, to pick the issue up, assign it to a crew member and get it done.
-   Assignments to the rear admiral, to crew or to people send nothing. Each
-   (issue, assignee) pair is announced once; a later reassignment to a
-   different captain announces it to that captain.
+1. **Assigned to a captain.** With `assignmentRequests` configured, the rear
+   admiral asks a captain to take their Backlog or Todo issue in the captain's
+   ship channel. The captain's gateway first checks for an idle crew member
+   with no queued work and no usage cooldown. The request asks the captain
+   to reply in its thread and move the issue to In Progress when work starts.
+   A still-waiting issue is eligible for a reminder after four hours, when
+   crew are available again. That includes assigned trackers in Backlog or
+   Todo. The rear admiral leaves at least five minutes between requests to
+   the same captain. Assignments to crew, the rear admiral or people are skipped.
 2. **Ready for agents.** When an unassigned issue in this fleet is flagged
    _Ready for agents_, the rear admiral offers it to the captains one at a
    time. Each captain has `answerTimeoutSeconds` (default 5 minutes) to accept
@@ -28,8 +31,13 @@ under `src/coordination/fleet/dispatch/`.
    clears _Ready for agents_ and says so in the channel. Flag the issue again
    to retry.
 
-Both behaviours are visible to everyone in the command channel: the request,
-the answer and the outcome.
+Ready for agents offers and their outcomes remain visible in fleet command.
+Ship channels carry the passive capacity check as a
+`+stargate/assignment-capacity` TAGMSG. An authenticated captain's gateway
+answers with a `yes` or `no` tag carrying the probe nonce. The check starts
+no agent turn. Upgrade the captains with the rear admiral so the crew plugin
+can answer. A request with an uncertain server receipt waits until its next
+reminder window before it can repeat.
 
 ## Decision outcomes by direct message
 
@@ -114,6 +122,10 @@ that changes it is refused as restart-only.
       "channel": "#example-command"
     },
     "captainAccounts": { "example-captain": "example-captain-irc" },
+    "assignmentRequests": {
+      "reminderSeconds": 14400,
+      "shipChannels": { "example-captain-irc": "#example-ship" }
+    },
     "pollIntervalSeconds": 120,
     "answerTimeoutSeconds": 300,
     "retryLadderSeconds": [3600, 10800, 21600, 43200]
@@ -121,12 +133,29 @@ that changes it is refused as restart-only.
 }
 ```
 
+`assignmentRequests.shipChannels` maps authenticated IRC accounts to ship
+channels. The rear admiral must join those channels. The reminder interval
+is configurable from 3,600 through 604,800 seconds. Use
+`"assignmentRequests": null` to disable assigned work requests while keeping
+Ready for agents. Omitting the setting preserves one-time command-channel
+notices for existing configurations.
+
+Set `readyOffers: false` to run assigned work requests without starting
+or continuing offers for unassigned Ready for agents issues. Existing offers
+and their timers remain dormant and resume if you re-enable Ready for agents.
+
+For an enrolled fleet, set `api` to
+`{ "socketPath": "/run/example/rear-admiral/api.sock" }` using the rear
+admiral's existing `subspaceAgents` signing proxy. The proxy signs each
+request with the enrolled identity. Bearer and header environment settings
+apply to direct API connections.
+
 | Key                      | Default                                     | Meaning                                                                                                                                                                                                           |
 | ------------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`                | `false`                                     | The feature flag. Off: no ledger file, no chat listener and no API request. A disabled section is not cross-checked against the IRC registrations.                                                                |
 | `fleet`                  | Required                                    | The fleet's slug or UUID in the Subspace API.                                                                                                                                                                     |
-| `api.baseUrl`            | Required                                    | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
-| `api.tokenEnv`           | Required                                    | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
+| `api.baseUrl`            | Direct mode only, required                  | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
+| `api.tokenEnv`           | Direct mode only, required                  | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
 | `api.headersEnv`         | `{}`                                        | Extra request headers for a private access layer: header name → environment variable name. `Authorization`, `Accept`, `Content-Type`, `Content-Length`, `Host`, `Connection` and `Transfer-Encoding` are refused. |
 | `messaging.type`         | `"irc"`                                     | The messaging system. Only `irc` is accepted.                                                                                                                                                                     |
 | `messaging.registration` | Required                                    | ID of the rear admiral's IRC registration (`fleetPolicy.role: "rear_admiral"`).                                                                                                                                   |
@@ -138,14 +167,17 @@ that changes it is refused as restart-only.
 
 A captain is addressed only when its IRC account is in the rear admiral
 registration's `fleetPolicy.agentAccounts`; Stargate logs once and skips a
-captain that is not. `stargate config check` checks that the token and header
-variables are present when the feature is enabled.
+captain that is not. `stargate config check` checks the credentials for the
+selected API connection.
 
 ## Credentials
 
 The dispatcher calls the API as the rear admiral, so assignments, comments
-and flag changes are recorded as the rear admiral's. Before enabling it, an
-operator must provision, on the fleet VM:
+and flag changes are recorded as the rear admiral's. When the rear admiral
+is enrolled, point `api.socketPath` at its signing proxy on this gateway.
+Stargate rechecks the identity before writes in socket mode.
+
+For a direct API connection using a bearer token, provision on the fleet VM:
 
 1. **A registered API agent identity** for the rear admiral: rank
    `rearAdmiral`, linked to this fleet so that `GET /api/v1/me` returns its
@@ -179,8 +211,9 @@ Every `pollIntervalSeconds`, after the first poll at start:
 
 - the fleet roster (`GET /api/v1/fleets/{fleet}`): captains and whether the
   API marks each available;
-- issues assigned to those captains (`assignee=<id>` for each, with
-  `updatedSince` five minutes before the newest change already seen);
+- issues assigned to those captains. Legacy notices scan recent changes,
+  overlapping the last scan by five minutes. Capacity-aware requests scan
+  assigned Backlog and Todo issues, including trackers, so they can send reminders;
 - unassigned issues flagged for agents (`readyForAgents=true&assignee=none`),
   kept when their project's initiative, or that initiative's nearest ancestor
   with a fleet, belongs to this fleet;
@@ -191,9 +224,10 @@ Every `pollIntervalSeconds`, after the first poll at start:
 
 Each poll reads at most 50 pages (of 100 issues) of an issue list. A longer
 list goes on from the API's cursor at the next poll, so no list is too long
-to make progress. The ledger keeps the place in the assignment list, so a
-restart goes on from it; the ready list starts again after a restart.
-Initiatives and projects are read whole, up to 500 pages each; a longer
+to make progress. The ledger keeps the legacy assignment cursor across
+restarts. The Ready list and capacity-aware scans start at the first page after
+a restart. Request timestamps persist, so a restart does not reset reminder
+intervals. Initiatives and projects are read whole, up to 500 pages each; a longer
 list leaves fleet membership unknown, which holds offers (see below).
 
 ## Offers and answers

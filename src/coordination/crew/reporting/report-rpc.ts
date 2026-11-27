@@ -165,6 +165,10 @@ export const CrewReporting = Rpc.define({
       input: portable(cronEvaluateInputSchema),
       output: portable(cronEvaluationSchema),
     },
+    assignmentCapacity: {
+      input: portable(Schema.Struct({})),
+      output: portable(Schema.Boolean),
+    },
     status: {
       input: portable(crewStatusInputSchema),
       output: portable(crewStatusSchema),

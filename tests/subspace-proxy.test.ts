@@ -4,6 +4,7 @@ import { chmod, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { decodeJwt } from "jose";
+import { SubspaceApi } from "../src/coordination/fleet/dispatch/api";
 import { runApiRequest, runMcpBridge } from "../src/subspace/bridge";
 import {
   type AgentKey,
@@ -111,6 +112,34 @@ async function officers(
     lines,
   };
 }
+
+test("dispatch requests through the officer proxy get the enrolled signature", async () => {
+  const name = "example-admiral";
+
+  const { stub, socket, keyOf } = await officers([name], () =>
+    Response.json({
+      userId: "officer",
+      kind: "agent",
+      agentRank: "rearAdmiral",
+      fleetId: "fleet",
+    }),
+  );
+
+  const api = new SubspaceApi({ socketPath: socket(name), env: {} });
+  const identity = await api.me(AbortSignal.timeout(3000));
+  expect(identity.agentRank).toBe("rearAdmiral");
+
+  const sent = forwarded(stub)[0] ?? none;
+  const officer = await keyOf(name);
+
+  const signed = await verifyAgentToken(
+    bearer(sent),
+    officer.certificate,
+    stub.url,
+  );
+
+  expect(signed.payload.sub).toBe(officer.fingerprint);
+});
 
 test("proxy: each officer's socket signs as that officer, whatever the caller sends", async () => {
   const { stub, socket, keyOf } = await officers();

@@ -103,6 +103,7 @@ export class DispatchLedger {
         at INTEGER NOT NULL, sent INTEGER NOT NULL,
         PRIMARY KEY(issue, assignee)
       );
+      CREATE INDEX IF NOT EXISTS dispatch_notified_captain ON dispatch_notified(assignee, sent, at);
       CREATE TABLE IF NOT EXISTS dispatch_decision_outcomes (
         id TEXT PRIMARY KEY
       );
@@ -234,6 +235,40 @@ export class DispatchLedger {
         "INSERT OR IGNORE INTO dispatch_notified(issue, assignee, identifier, at, sent) VALUES(?,?,?,?,?)",
       )
       .run(issue, assignee, identifier, Math.floor(at), sent ? 1 : 0);
+  }
+
+  public lastAssignmentRequest(
+    issue: string,
+    assignee: string,
+  ): number | undefined {
+    return this.db
+      .query<{ at: number }, [string, string]>(
+        "SELECT at FROM dispatch_notified WHERE issue=? AND assignee=? AND sent=1",
+      )
+      .get(issue, assignee)?.at;
+  }
+
+  public lastRequestForCaptain(assignee: string): number | undefined {
+    return (
+      this.db
+        .query<{ at: number | null }, [string]>(
+          "SELECT max(at) AS at FROM dispatch_notified WHERE assignee=? AND sent=1",
+        )
+        .get(assignee)?.at ?? undefined
+    );
+  }
+
+  public recordAssignmentRequest(
+    issue: string,
+    assignee: string,
+    identifier: string,
+    at: number,
+  ) {
+    this.db
+      .query(
+        "INSERT INTO dispatch_notified(issue, assignee, identifier, at, sent) VALUES(?,?,?,?,1) ON CONFLICT(issue,assignee) DO UPDATE SET identifier=excluded.identifier, at=excluded.at, sent=1",
+      )
+      .run(issue, assignee, identifier, Math.floor(at));
   }
 
   public decisionOutcomeSent(id: string) {

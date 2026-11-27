@@ -342,6 +342,38 @@ export function piSessionHistory(
   };
 }
 
+/** A cold isolated worker can be inspected without opening its scheduling runtime. */
+export function storedPiIdle(
+  dataDirectory: string,
+  sessionID: number,
+  signal: AbortSignal,
+) {
+  signal.throwIfAborted();
+  const db = new Database(join(dataDirectory, "pi.sqlite"), { create: false });
+
+  try {
+    // Let SQLite attach any WAL sidecars, then forbid writes on this connection.
+    db.run("PRAGMA query_only = ON");
+
+    // One SQLite snapshot; the schema and conversation must match.
+    // Unsettled work in this worker's store also prevents an idle result.
+    const row = db
+      .query<{ idle: number }, [number, number]>(`
+      SELECT EXISTS(SELECT 1 FROM durable_schema WHERE singleton = 1 AND version = ?)
+        AND EXISTS(SELECT 1 FROM conversations WHERE id = ?)
+        AND NOT EXISTS(SELECT 1 FROM tasks WHERE status <> 'terminal')
+        AND NOT EXISTS(SELECT 1 FROM submissions WHERE status IN ('queued', 'placed')) AS idle
+    `)
+      .get(CURRENT_SQLITE_SCHEMA_VERSION, sessionID);
+
+    signal.throwIfAborted();
+
+    return row?.idle === 1;
+  } finally {
+    db.close();
+  }
+}
+
 /** Like receipt recovery: no providers, extensions, or scheduling runtime.
  * readOnly makes scheduler.open() skip recovery writes and wake/reconcile;
  * resume() rejects. Entries use storage.scanEntries() on the read line.
