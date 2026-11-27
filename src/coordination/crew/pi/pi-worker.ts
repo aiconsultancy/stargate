@@ -9,7 +9,7 @@ import type {
 } from "../../../backends/backend";
 import type { piDurableBackendSchema } from "../../../backends/pi/config";
 import type { SessionHistory } from "../../../shared/session-history";
-import { crewTaskTextLimit } from "../../../shared/crew-status";
+import { truncateCrewTaskText } from "../../../shared/crew-status";
 import {
   piDefinitionPath,
   piMemberDefinition,
@@ -453,7 +453,7 @@ export class PiCrewWorkers {
       if (answer !== undefined) {
         return this.state.recoverResult(
           expected,
-          answer.trim().slice(0, crewTaskTextLimit) ||
+          truncateCrewTaskText(answer.trim()) ||
             "Worker finished without a text result.",
         );
       }
@@ -818,7 +818,7 @@ export class PiCrewWorkers {
         this.state.complete(
           task.id,
           peer.sessionID,
-          answer.trim().slice(0, crewTaskTextLimit) ||
+          truncateCrewTaskText(answer.trim()) ||
             "Worker finished without a text result.",
         );
       } catch {

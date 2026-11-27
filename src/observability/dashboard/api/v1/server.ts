@@ -511,7 +511,8 @@ export async function startApiV1Server(options: Options) {
         ];
 
   options.signal.throwIfAborted();
-  const hostRequestMs = options.timing?.requestMs ?? apiRequestMs;
+  const { headersMs, requestMs, streams } = options.timing ?? {};
+  const hostRequestMs = requestMs ?? apiRequestMs;
 
   const httpReadMs = Math.max(
     1,
@@ -594,8 +595,8 @@ export async function startApiV1Server(options: Options) {
     }),
   };
 
-  const operatorReaders = fleetReaders(core, options.timing?.streams);
-  const officerReaders = fleetReaders(officerCore, options.timing?.streams);
+  const operatorReaders = fleetReaders(core, streams);
+  const officerReaders = fleetReaders(officerCore, streams);
 
   /** People: a private network peer, browser origin rules and the fleet token. */
   async function operatorRequest(
@@ -658,6 +659,11 @@ export async function startApiV1Server(options: Options) {
   const servers: ApiServer[] = [];
   let operatorServer: ApiServer | undefined;
 
+  const timing = {
+    ...(headersMs !== undefined && { headersMs }),
+    ...(requestMs !== undefined && { requestMs }),
+  };
+
   const stopReaders = () => {
     lifetime.abort();
     host.stop();
@@ -670,7 +676,7 @@ export async function startApiV1Server(options: Options) {
       operatorServer = await startApiServer({
         listen,
         routes,
-        ...(options.timing && { timing: options.timing }),
+        timing,
         signal: AbortSignal.any([lifetime.signal, options.signal]),
         fleet: operatorRequest,
       }).catch(() => {
@@ -684,7 +690,7 @@ export async function startApiV1Server(options: Options) {
     for (const officer of officers) {
       const server = await startApiServer({
         listen: { unix: officer.socketPath, group: true },
-        ...(options.timing && { timing: options.timing }),
+        timing,
         signal: AbortSignal.any([lifetime.signal, options.signal]),
         fleet: (request, _address, target) =>
           officerRequest(officerCore, officerReaders, request, target),

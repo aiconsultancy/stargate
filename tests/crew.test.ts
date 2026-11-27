@@ -59,6 +59,7 @@ import {
   noticeTools,
 } from "../src/automation/maintenance/update-notice";
 import { waitingSettingsPath } from "../src/config/waiting-overrides";
+import { crewTaskTextLimit } from "../src/shared/crew-status";
 import { bot, event, identity } from "./fixtures";
 import { copyCrewDatabase } from "./fixtures/database-reuse";
 
@@ -4091,6 +4092,31 @@ test.each([
     await f.close();
   }
 });
+
+test.each([false, true])(
+  "reconciliation bounds exact result evidence by code points (overflow: %s)",
+  async (overflow) => {
+    const f = await fixture(customTeam);
+
+    try {
+      const task = await assignedTask(f);
+      const result = "😀".repeat(crewTaskTextLimit) + (overflow ? "x" : "");
+      const input = uncertainResult(f, task, result);
+
+      if (overflow) {
+        await expect(f.engine.run(input, f.captain())).rejects.toThrow(
+          "no state changed",
+        );
+        expect(f.engine.state.task(task.id)?.status).toBe("uncertain");
+      } else {
+        await f.engine.run(input, f.captain());
+        expect(f.engine.state.task(task.id)?.result).toBe(result);
+      }
+    } finally {
+      await f.close();
+    }
+  },
+);
 
 test("reconciliation evidence paginates and rejects conflicting idempotent retries", async () => {
   const f = await fixture(customTeam);

@@ -37,8 +37,9 @@ tool check across context records. File contents stay opaque, including quoted
 `Instructions from:` examples; they are never parsed as an additional block.
 
 Normal skill, compaction and model records do not prevent recovery. Only visible
-answer text is stored, up to 64,000 characters, as for Pi worker results. Stargate
-does not use private reasoning as a result.
+answer text is stored, up to 64,000 code points (an astral character is never
+split), as for Pi worker results. Stargate does not use private reasoning as a
+result.
 
 Recovery can complete `running` and `uncertain` tasks. It updates only the same
 retained task tuple and status; concurrent explicit completion takes precedence.
@@ -102,7 +103,9 @@ operator SQL to release a blocked crew slot. Captains use the existing
 1. Inspect the member and its exact task ownership. Local state remains readable
    when native execution is unknown.
 2. Try `status` or verified result reconciliation first. Keep a completed result;
-   do not abandon it because another task is blocked.
+   do not abandon it because another task is blocked. Reconciliation refuses a
+   final answer over 64,000 code points before hashing; it never clips the
+   evidence.
 3. Inspect workspace changes and save work that must be kept.
 4. Explicitly abandon the exact blocked task, with a reason and retry key.
 5. Dispatch fresh work only after the normal native-idle checks pass. Abandoning

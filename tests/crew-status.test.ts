@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -15,12 +15,16 @@ import { fleetCrewFullStatusSchema } from "../src/coordination/crew/reporting/fl
 import { MemberActivityStore } from "../src/coordination/crew/reporting/member-activity";
 import { teamSchema } from "../src/coordination/crew/team";
 import { redactCredentials } from "../src/lib/credentials";
-import { activityText } from "../src/coordination/crew/reporting/member-activity";
 import {
   dashboardCrewMembers,
   dashboardCrewSummary,
 } from "../src/observability/dashboard/dashboard-projection";
-import { crewStatusSchema, crewTaskTextLimit } from "../src/shared/crew-status";
+import {
+  codePointHead,
+  crewStatusSchema,
+  crewTaskTextLimit,
+  truncateCrewTaskText,
+} from "../src/shared/crew-status";
 import { CrewUI, crewStatusView } from "../src/transports/slack/crew-ui";
 import type { CronView, SlackAck } from "../src/automation/cron/ui";
 import { bot, identity } from "./fixtures";
@@ -375,15 +379,71 @@ test("ordinary task summary and progress replace a surrogate split at the displa
   }
 });
 
+test("code-point head keeps the astral pair at the 64,000-code-point boundary", () => {
+  const exact = `${"a".repeat(crewTaskTextLimit - 1)}😀`;
+  expect(codePointHead(exact, crewTaskTextLimit)).toBe(exact);
+  expect(codePointHead(`${exact}😀`, crewTaskTextLimit)).toBe(exact);
+});
+
+test("code-point head handles small limits without splitting an astral character", () => {
+  expect(codePointHead("short", 5)).toBe("short");
+  expect(codePointHead("a😀b", 2)).toBe("a😀");
+  expect(codePointHead("😀", 0)).toBe("");
+});
+
+test.each([
+  [-1, ""],
+  [-Infinity, ""],
+  [0.5, ""],
+  [1.5, "😀"],
+  [NaN, ""],
+  [Infinity, "😀abc"],
+] as const)("code-point head handles a limit of %p", (limit, expected) => {
+  expect(codePointHead("😀abc", limit)).toBe(expected);
+});
+
+test("code-point head stops iteration at the floored fractional limit", () => {
+  const input = `😀${"a".repeat(100_000)}`;
+  const iterate = String.prototype[Symbol.iterator];
+  let reads = 0;
+
+  const spy = spyOn(String.prototype, Symbol.iterator).mockImplementation(
+    function (this: string) {
+      const iterator = iterate.call(this);
+
+      if (this === input) {
+        const next = iterator.next.bind(iterator);
+
+        iterator.next = () => {
+          reads += 1;
+
+          if (reads > 2) {
+            throw new Error("Read past the two-code-point prefix");
+          }
+
+          return next();
+        };
+      }
+
+      return iterator;
+    },
+  );
+
+  try {
+    expect(codePointHead(input, 2.5)).toBe("😀a");
+    expect(reads).toBe(2);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
 test("stored task text is cut at 64,000 code points without splitting a surrogate pair", async () => {
   const f = await fixture();
 
   try {
-    expect(activityText("short")).toBe("short");
-
     // One unit, then pairs: the cut lands mid-pair in UTF-16 units.
     const astral = `x${"😀".repeat(70_000)}`;
-    const cut = activityText(astral);
+    const cut = truncateCrewTaskText(astral);
     expect(Array.from(cut)).toHaveLength(crewTaskTextLimit);
     expect(cut).toBe(`x${"😀".repeat(crewTaskTextLimit - 1)}`);
     expect(cut.isWellFormed()).toBe(true);
@@ -394,7 +454,7 @@ test("stored task text is cut at 64,000 code points without splitting a surrogat
     expect(() => dispatch({ ...input, text: `${cut}😀` })).toThrow();
 
     // Only the head is scanned, however long the input is.
-    expect(activityText("a".repeat(10_000_000))).toBe(
+    expect(truncateCrewTaskText("a".repeat(10_000_000))).toBe(
       "a".repeat(crewTaskTextLimit),
     );
 

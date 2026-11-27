@@ -25,6 +25,7 @@ import {
 } from "../src/coordination/crew/execution/result";
 import type { CrewTask } from "../src/coordination/crew/execution/state";
 import { settingsIssues } from "../src/config/settings-schema";
+import { crewTaskTextLimit } from "../src/shared/crew-status";
 import { settingsCanonical } from "./settings-cases";
 
 const team = {
@@ -417,7 +418,7 @@ test("recovery acknowledgements retain field paths in native and Standard input"
   }
 });
 
-test("automatic evidence retains MissingTaskResult identity, UTF16 clipping and raw resume proof", async () => {
+test("automatic evidence retains MissingTaskResult identity, code-point clipping and raw resume proof", async () => {
   const task: CrewTask = {
     id: "task_fixture",
     crewID: "worker",
@@ -466,19 +467,31 @@ test("automatic evidence retains MissingTaskResult identity, UTF16 clipping and 
     MissingTaskResult,
   );
 
+  const underLimit = `a${"😀".repeat(32_000)}`;
+
   const final: ResultMessage = {
     id: "final",
     type: "assistant",
     agent: "worker",
     finish: "stop",
     time: { created: 3, completed: 4 },
-    content: [{ type: "text", text: " a" + "😀".repeat(32_000) + " " }],
+    content: [{ type: "text", text: ` ${underLimit} ` }],
   };
 
   data = [final, input];
-  const text = await readTaskResult(api, task, signal);
-  expect(text.length).toBe(64_000);
-  expect(text.charCodeAt(63_999)).toBe(0xd8_3d);
+  expect(await readTaskResult(api, task, signal)).toBe(underLimit);
+
+  const atLimit = `a${"😀".repeat(crewTaskTextLimit - 1)}`;
+  data = [
+    { ...final, content: [{ type: "text", text: ` ${atLimit}😀 ` }] },
+    input,
+  ];
+
+  const clipped = await readTaskResult(api, task, signal);
+  expect(Array.from(clipped)).toHaveLength(crewTaskTextLimit);
+  expect(clipped).toBe(atLimit);
+  expect(clipped.isWellFormed()).toBe(true);
+
   data = [
     final,
     {
