@@ -8,6 +8,8 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
 The optional `stargate_serve` officer MCP server publishes and withdraws static
 mockups from a fleet's preview service. Standalone Stargate leaves it off.
+It accepts a dedicated HTTP origin for fleets that serve previews over a
+private network. Existing HTTPS and loopback origins remain supported.
 
 ### Feature flags
 

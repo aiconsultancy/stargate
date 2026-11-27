@@ -201,11 +201,10 @@ function serveBroker(
     url.search ||
     url.hash ||
     url.pathname !== "/" ||
-    (url.protocol !== "https:" &&
-      (url.protocol !== "http:" || url.hostname !== "127.0.0.1"))
+    (url.protocol !== "https:" && url.protocol !== "http:")
   ) {
     throw new Error(
-      "Use a dedicated HTTPS origin or an HTTP loopback origin for the preview base URL.",
+      "Use a dedicated HTTP or HTTPS origin without a path for the preview base URL.",
     );
   }
 
