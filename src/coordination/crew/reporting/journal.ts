@@ -2,13 +2,14 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { Effect, Schema } from "effect";
 import { redactCredentials } from "../../../lib/credentials";
+import { crewTaskTextLimit } from "../../../shared/crew-status";
 
 export const journalInputSchema = Schema.Union([
   Schema.Struct({
     op: Schema.Literal("append"),
     text: Schema.Trim.check(
       Schema.isMinCodePoints(1),
-      Schema.isMaxCodePoints(64_000),
+      Schema.isMaxCodePoints(crewTaskTextLimit),
     ),
   }),
   Schema.Struct({

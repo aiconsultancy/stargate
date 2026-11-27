@@ -6,6 +6,9 @@ The shared officer file, repository refresh and GitHub tools run on Bun. Update
 existing file registrations to `scripts/officer-files.ts` after installing the
 reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
+The optional `stargate_serve` officer MCP server publishes and withdraws static
+mockups from a fleet's preview service. Standalone Stargate leaves it off.
+
 ### Feature flags
 
 - `agentDispatch.decisionOutcomeDms` enables decision-outcome DMs to recording
@@ -180,6 +183,9 @@ reviewed Stargate dependencies. See [attachments](docs/attachments.md).
   deadline reports crew status as unavailable. Fleet API text fields keep
   control and bidirectional formatting characters; clients that print them
   must escape them.
+- Fleet API v1 crew detail includes `taskText: "full"` when it returns the
+  complete stored task text, or `"preview"` on officer sockets and after a
+  legacy plugin fallback. Only `"full"` confirms completeness to a client.
 - Crew activity keeps the first 64,000 code points of the assignment summary
   and the last 64,000 of progress. For multi-project dispatches the assignment
   is validated on its own before Stargate adds the project preamble; the

@@ -24,6 +24,8 @@ import {
 } from "../src/coordination/crew/messaging/messaging";
 import { piCrewExtension } from "../src/coordination/crew/pi/pi-extension";
 import { CrewReporting } from "../src/coordination/crew/reporting/report-rpc";
+import { journalInputSchema } from "../src/coordination/crew/reporting/journal";
+import { crewTaskTextLimit } from "../src/shared/crew-status";
 import { waitingInputSchema } from "../src/coordination/crew/controls/waiting";
 import { crewLink } from "../src/transports/irc/crew-link";
 import { settingsIssues } from "../src/config/settings-schema";
@@ -43,7 +45,7 @@ test("mail and DM keep trim, code-point bounds, defaults and meaningful paths", 
     op: "inbox",
     limit: 20,
   });
-  const text = "😀".repeat(64_000);
+  const text = "😀".repeat(crewTaskTextLimit);
   expect(
     Schema.decodeUnknownSync(mailInputSchema)({ ...send, text: ` ${text} ` }),
   ).toHaveProperty("text", text);
@@ -74,6 +76,16 @@ test("mail and DM keep trim, code-point bounds, defaults and meaningful paths", 
   expect(missing.issues).toContainEqual(
     expect.objectContaining({ path: ["to"] }),
   );
+});
+
+test("journal entries accept the crew text limit in code points", () => {
+  const decode = Schema.decodeUnknownSync(journalInputSchema);
+  const text = "😀".repeat(crewTaskTextLimit);
+  expect(decode({ op: "append", text: ` ${text} ` })).toEqual({
+    op: "append",
+    text,
+  });
+  expect(() => decode({ op: "append", text: `${text}x` })).toThrow();
 });
 
 test("OpenCode DM decodes defaults; mail/history flatten fields without top-level defaults", async () => {

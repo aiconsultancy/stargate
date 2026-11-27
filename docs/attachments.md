@@ -166,8 +166,8 @@ an existing upload, an outbox file, or new text. The file must be Markdown or
 plain text. The returned marker points to a labelled PNG preview. Include it
 and the original file name in the Teams reply. The renderer accepts up to 32,000 UTF-8 bytes,
 produces an indexed PNG up to 22,000 bytes and supports pages 1 through 100.
-If the tool reports several
-pages, set `page` on subsequent calls. Do not supply a chat upload ID for a
+Tables with up to eight columns reserve space for their labels. Longer values can use the remaining width and wrap across lines.
+If the tool reports several pages, set `page` on subsequent calls. Do not supply a chat upload ID for a
 preview.
 
 To enable this tool, pass `--playwright` with the absolute path to the
@@ -185,3 +185,31 @@ bun --config=/dev/null --no-env-file --no-install scripts/markdown-preview.ts \
 
 Use `--chromium` when the installation selects a specific reviewed executable.
 Prepare the resulting PNG from staging to get its publication marker.
+
+### Live mockup previews
+
+The optional `stargate_serve` officer MCP server publishes static sites. The
+Subspace fleet installer configures its publishing service, officer sockets and
+Caddy. Standalone Stargate does not start these services.
+
+- Stage the built site in a named subdirectory under the configured mockup
+  staging directory. Put a non-empty `index.html` at the root and use relative
+  asset URLs. A bundle can contain up to 256 files and 10 MiB of static assets.
+  Supported assets include HTML, CSS, JavaScript, JSON, text, web manifests, XML,
+  WebAssembly, PDF, images, fonts and common browser audio and video formats.
+  Names can contain letters, digits, underscores, hyphens, an at sign or tilde,
+  and non-leading periods. The uploader skips JavaScript and CSS source maps.
+- Call `publish` with the directory name. The service serves a copy for seven
+  days. Publishing with the same name updates the same URL and renews the
+  expiry. One captain can keep up to 20 live previews.
+- Call `unpublish` with the name to remove it. Repeating the call is safe.
+  Captains manage only the previews
+  owned by the officer identity bound to their local publishing socket.
+
+Installer integrations require `mockupPreviews: 1` in
+`scripts/officer-tools-contract.json`. Run `scripts/officer-previews.ts broker
+<storage> <sockets> <base-url/> <captain>...` under a dedicated publisher account.
+Each captain uses `scripts/officer-previews.ts mcp <socket> <staging>` with its
+own socket. Create each socket directory owned by the publisher, with the
+captain's primary group, the setgid bit and no group write access. Serve only
+the managed `public/p/` tree through a private, preview-only browser origin.

@@ -254,11 +254,7 @@ export const agentDispatchDefaults = {
   retryLadderSeconds: [3600, 10_800, 21_600, 43_200],
 } as const;
 
-/**
- * Deterministic agent dispatch on the rear admiral's gateway (see
- * docs/agent-dispatch.md). Stargate polls the Subspace API over outbound
- * HTTPS only; nothing here listens for connections.
- */
+/** Outbound Subspace polling on the rear admiral's gateway. See docs/agent-dispatch.md. */
 export const agentDispatchSchema = settingsStruct({
   enabled: Schema.Boolean.pipe(settingsDefault(false)),
   /** Fleet slug or UUID in the Subspace API. */
@@ -317,9 +313,10 @@ export const agentDispatchSchema = settingsStruct({
 
 export type AgentDispatchConfig = typeof agentDispatchSchema.Type;
 
-function agentDispatchActive(
+export function agentDispatchActive(
   config: AgentDispatchConfig | undefined,
-): config is AgentDispatchConfig {
+): config is AgentDispatchConfig &
+  ({ enabled: true } | { decisionOutcomeDms: true }) {
   return config?.enabled === true || config?.decisionOutcomeDms === true;
 }
 

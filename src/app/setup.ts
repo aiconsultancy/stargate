@@ -22,7 +22,10 @@ import {
   configSchema,
   reloadConfigSchema,
 } from "../config";
-import type { SubspaceAgentsConfig } from "../config/composition";
+import {
+  type SubspaceAgentsConfig,
+  agentDispatchActive,
+} from "../config/composition";
 import { checkIrcCredentials } from "../transports/irc/credential-preflight";
 import {
   type NotifyConfig,
@@ -161,10 +164,7 @@ export async function checkCredentials(
     await checkIrcCredentials(registration, env);
   }
 
-  if (
-    agentDispatch?.enabled === true ||
-    agentDispatch?.decisionOutcomeDms === true
-  ) {
+  if (agentDispatchActive(agentDispatch)) {
     for (const name of [
       agentDispatch.api.tokenEnv,
       ...Object.values(agentDispatch.api.headersEnv),
