@@ -6,7 +6,6 @@ import {
   type DispatchIssue,
   type FleetRoster,
 } from "./api";
-import type { AssignedWork } from "./assigned-work";
 import type { AssignmentWalk, DispatchLedger, TrackedIssue } from "./ledger";
 import type {
   CaptainRef,
@@ -92,13 +91,18 @@ export type DispatchSettings = {
   sameAccount?(a: string, b: string): boolean;
 };
 
+export interface AssignedWorkPoller {
+  start(captains: readonly CaptainRef[], signal: AbortSignal): void;
+  drain(): Promise<void> | void;
+}
+
 export type AgentDispatcherOptions = {
   settings: DispatchSettings;
   api: DispatchApi;
   messenger: DispatchMessenger;
   ledger: DispatchLedger;
-  /** Undefined preserves legacy assignment notices. Null disables them. */
-  assignedWork?: AssignedWork | null;
+  /** Omitted for the legacy assignment notices. */
+  assignedWork?: AssignedWorkPoller;
   /** Injectable clock (ms since the epoch). */
   now?: () => number;
   /**
@@ -168,11 +172,25 @@ export class DispatchPolling {
   private readonly options: PollingPort["options"];
   private readonly now: PollingPort["now"];
   private readonly finish: PollingPort["finish"];
+  private readonly pollAssignmentMode: (
+    signal: AbortSignal,
+  ) => Promise<void> | void;
+  public readonly offersEnabled: boolean;
 
   public constructor({ options, now, finish }: PollingPort) {
     this.options = options;
     this.now = now;
     this.finish = finish;
+    this.offersEnabled =
+      options.settings.issueDispatch !== false &&
+      options.settings.readyOffers !== false;
+
+    const work = options.assignedWork;
+    this.pollAssignmentMode = work
+      ? (signal) => {
+          work.start(this.eligibleCaptains(), signal);
+        }
+      : this.pollAssigned.bind(this);
   }
 
   private get settings() {
@@ -253,23 +271,7 @@ export class DispatchPolling {
 
     if (this.settings.issueDispatch !== false) {
       try {
-        if (this.options.assignedWork === undefined) {
-          await this.pollAssigned(signal);
-        } else {
-          const captains = [...this.roster.captains.values()].filter(
-            (captain) =>
-              captain.available &&
-              captain.reachable &&
-              (!captain.registeredAccount ||
-                (this.settings.sameAccount?.(
-                  captain.registeredAccount,
-                  captain.account,
-                ) ??
-                  captain.registeredAccount === captain.account)),
-          );
-
-          this.options.assignedWork?.start(captains, signal);
-        }
+        await this.pollAssignmentMode(signal);
 
         this.cleared("assigned");
       } catch (error) {
@@ -282,10 +284,7 @@ export class DispatchPolling {
       }
     }
 
-    if (
-      this.settings.issueDispatch !== false &&
-      this.settings.readyOffers !== false
-    ) {
+    if (this.offersEnabled) {
       try {
         await this.pollReady(signal);
         this.cleared("ready");
@@ -317,6 +316,24 @@ export class DispatchPolling {
     this.options.ledger.prune(this.now());
   }
 
+  private eligibleCaptain(captain: Captain) {
+    const account = captain.registeredAccount;
+
+    return (
+      captain.available &&
+      captain.reachable &&
+      (!account ||
+        (this.settings.sameAccount?.(account, captain.account) ??
+          account === captain.account))
+    );
+  }
+
+  private eligibleCaptains() {
+    return [...(this.roster?.captains.values() ?? [])].filter((captain) =>
+      this.eligibleCaptain(captain),
+    );
+  }
+
   private async pollDecisionOutcomes(fleetId: string, signal: AbortSignal) {
     const { api, ledger, messenger } = this.options;
 
@@ -340,16 +357,10 @@ export class DispatchPolling {
       try {
         if (!ledger.decisionOutcomeSent(outcome.id)) {
           const captain = this.roster?.captains.get(outcome.recordedByUserId);
-          const account = captain?.registeredAccount;
 
           if (
-            !captain?.available ||
-            !account ||
-            !captain.reachable ||
-            !(
-              this.settings.sameAccount?.(account, captain.account) ??
-              account === captain.account
-            ) ||
+            !captain?.registeredAccount ||
+            !this.eligibleCaptain(captain) ||
             !(await messenger.decisionOutcome(captain, outcome, signal))
           ) {
             continue;
@@ -666,7 +677,7 @@ export class DispatchPolling {
       const offered = ledger.tracked(issue.id);
 
       if (
-        this.settings.readyOffers !== false &&
+        this.offersEnabled &&
         offered?.state === "accepting" &&
         offered.offer?.captain === captain.userId
       ) {

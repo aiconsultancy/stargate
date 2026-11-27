@@ -28,6 +28,7 @@ export class AssignedWork {
   private running: Promise<void> | undefined;
   private cursor: string | undefined;
   private rosterKey: string | undefined;
+  private candidates = new Map<string, Map<string, Candidate>>();
 
   public constructor(
     private readonly options: {
@@ -84,6 +85,7 @@ export class AssignedWork {
     if (rosterKey !== this.rosterKey) {
       this.rosterKey = rosterKey;
       this.cursor = undefined;
+      this.candidates.clear();
     }
 
     if (ids.length === 0) {
@@ -91,7 +93,9 @@ export class AssignedWork {
     }
 
     const page = await api
-      .assignedIssues(ids, undefined, this.cursor, signal, true)
+      .assignedIssues(ids, undefined, this.cursor, signal, {
+        waitingOnly: true,
+      })
       .catch((error: unknown) => {
         if (
           this.cursor &&
@@ -99,16 +103,17 @@ export class AssignedWork {
           error.status === 400
         ) {
           this.cursor = undefined;
+          this.candidates.clear();
 
-          return api.assignedIssues(ids, undefined, undefined, signal, true);
+          return api.assignedIssues(ids, undefined, undefined, signal, {
+            waitingOnly: true,
+          });
         }
 
         throw error;
       });
 
     this.cursor = page.next;
-
-    const candidates = new Map<CaptainRef, Candidate[]>();
 
     for (const issue of page.items) {
       signal.throwIfAborted();
@@ -137,18 +142,34 @@ export class AssignedWork {
       }
 
       const priority = last ?? Number.NEGATIVE_INFINITY;
-      const queue = candidates.get(captain) ?? [];
-      queue.push({ issue, priority });
-      candidates.set(captain, queue);
+
+      const queue =
+        this.candidates.get(captain.userId) ?? new Map<string, Candidate>();
+
+      queue.set(issue.id, { issue, priority });
+      this.candidates.set(captain.userId, queue);
     }
 
+    // A captain's first eligible request is chosen across the whole scan.
+    // This prevents a fixed poll interval from stranding later pages.
+    if (this.cursor) {
+      return;
+    }
+
+    const candidates = this.candidates;
+    this.candidates = new Map();
     const pending = candidates.entries();
+
     await Promise.all(
       Array.from(
         { length: Math.min(capacityChecksAtOnce, candidates.size) },
         async () => {
-          for (const [captain, queue] of pending) {
-            await this.request(captain, queue, signal);
+          for (const [userId, queue] of pending) {
+            const captain = byId.get(userId);
+
+            if (captain) {
+              await this.request(captain, [...queue.values()], signal);
+            }
           }
         },
       ),

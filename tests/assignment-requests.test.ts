@@ -57,10 +57,10 @@ test("assigned work waits for crew and reminds a captain only while the issue is
 
   const work = new AssignedWork({
     api: {
-      async assignedIssues(accounts, since, _cursor, _signal, waitingOnly) {
+      async assignedIssues(accounts, since, _cursor, _signal, filter) {
         expect(accounts).toEqual([CAPTAIN_A]);
         expect(since).toBeUndefined();
-        expect(waitingOnly).toBe(true);
+        expect(filter?.waitingOnly).toBe(true);
 
         return { items: [archived, issue], next: undefined };
       },
@@ -218,7 +218,7 @@ test("a stalled capacity check leaves other captains and Ready for agents answer
   }
 });
 
-test("a new assignment comes before a reminder even if the API lists the reminder first", async () => {
+test("a new assignment comes before reminders on an earlier page", async () => {
   const clock = new Clock();
   const ledger = new DispatchLedger(":memory:");
   const old = pending();
@@ -241,8 +241,10 @@ test("a new assignment comes before a reminder even if the API lists the reminde
 
   const work = new AssignedWork({
     api: {
-      async assignedIssues() {
-        return { items: [old, unreadable, oversized, fresh], next: undefined };
+      async assignedIssues(_accounts, _since, cursor) {
+        return cursor
+          ? { items: [fresh], next: undefined }
+          : { items: [old, unreadable, oversized], next: "next" };
       },
       async issue(id) {
         if (id === unreadable.id) {
@@ -275,11 +277,14 @@ test("a new assignment comes before a reminder even if the API lists the reminde
 
   try {
     await work.poll([captain], signal);
+    expect(asked).toEqual([]);
+    await work.poll([captain], signal);
     expect(asked).toEqual(["EX-2"]);
     expect(
       ledger.lastAssignmentRequest(oversized.id, captain.userId),
     ).toBeUndefined();
     clock.advance(6 * MINUTE);
+    await work.poll([captain], signal);
     await work.poll([captain], signal);
     expect(asked).toEqual(["EX-2", "EX-1"]);
   } finally {

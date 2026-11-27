@@ -432,6 +432,28 @@ for (const variant of ["absent", "enabled: false"] as const) {
   });
 }
 
+test("runtime: disabling both issue modes leaves decisions enabled without reading issues", async () => {
+  const admiral = await serveAdmiral({
+    ...dispatchRaw,
+    assignmentRequests: null,
+    readyOffers: false,
+    decisionOutcomeDms: true,
+  });
+
+  await until(
+    () =>
+      admiral.http.requests.some(({ path }) =>
+        path.includes("decision-outcomes"),
+      ),
+    5000,
+    "decision feed read",
+  );
+  expect(
+    admiral.http.requests.some(({ path }) => path.includes("/issues")),
+  ).toBe(false);
+  await admiral.stop();
+});
+
 test("runtime: decision outcome DMs work with issue dispatch off", async () => {
   const admiral = await serveAdmiral({
     ...dispatchRaw,

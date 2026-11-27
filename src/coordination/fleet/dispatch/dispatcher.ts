@@ -85,13 +85,6 @@ export class AgentDispatcher {
     return this.options.settings;
   }
 
-  private get offersEnabled() {
-    return (
-      this.settings.issueDispatch !== false &&
-      this.settings.readyOffers !== false
-    );
-  }
-
   private same(a: string, b: string) {
     return this.settings.sameAccount
       ? this.settings.sameAccount(a, b)
@@ -164,7 +157,7 @@ export class AgentDispatcher {
 
   /** Earliest time any timer is due, if any. */
   private nextDue(): number | undefined {
-    if (!this.offersEnabled) {
+    if (!this.polling.offersEnabled) {
       return;
     }
 
@@ -295,7 +288,7 @@ export class AgentDispatcher {
   private async timers(signal: AbortSignal) {
     // Nothing moves until this process has read the roster: at a poll, or
     // Before an acceptance write as a confirmed identity.
-    if (!this.offersEnabled || !this.polling.roster) {
+    if (!this.polling.offersEnabled || !this.polling.roster) {
       return;
     }
 
@@ -679,7 +672,7 @@ export class AgentDispatcher {
   }
 
   private async handleAnswer(input: DispatchAnswerInput, signal: AbortSignal) {
-    if (!this.offersEnabled) {
+    if (!this.polling.offersEnabled) {
       return;
     }
 

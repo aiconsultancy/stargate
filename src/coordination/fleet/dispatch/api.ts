@@ -78,7 +78,7 @@ export interface DispatchApi {
     updatedSince: string | undefined,
     cursor: string | undefined,
     signal: AbortSignal,
-    waitingOnly?: boolean,
+    filter?: { waitingOnly?: boolean },
   ): Promise<ListingPart<DispatchIssue>>;
   readyIssues(
     cursor: string | undefined,
@@ -544,7 +544,7 @@ export class SubspaceApi implements DispatchApi {
     updatedSince: string | undefined,
     cursor: string | undefined,
     signal: AbortSignal,
-    waitingOnly?: boolean,
+    filter?: { waitingOnly?: boolean },
   ) {
     if (assignees.length === 0) {
       return { items: [], next: undefined };
@@ -556,7 +556,7 @@ export class SubspaceApi implements DispatchApi {
           assignees,
           updatedSince,
           page,
-          waitingOnly,
+          filter?.waitingOnly,
         ),
       cursor,
       signal,

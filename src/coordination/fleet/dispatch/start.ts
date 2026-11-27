@@ -17,6 +17,7 @@ import {
   ircDispatchAnswer,
 } from "./irc";
 import { DispatchLedger } from "./ledger";
+import type { AssignedWorkPoller } from "./polling";
 
 /** What the gateway runtime supplies to agent dispatch. */
 export type AgentDispatchHost = {
@@ -41,6 +42,11 @@ export type AgentDispatchRuntime = {
   log: Logger;
   run(signal: AbortSignal): Promise<void>;
   close(): void;
+};
+
+const disabledAssignedWork: AssignedWorkPoller = {
+  start() {},
+  drain() {},
 };
 
 /**
@@ -94,29 +100,28 @@ export function startAgentDispatch(
     log,
   );
 
-  const assignmentRequests = requestConfig
-    ? new IrcAssignmentRequests(
-        client,
-        requestConfig.shipChannels,
-        host.allowed,
-        messenger,
-      )
-    : undefined;
+  let assignmentRequests: IrcAssignmentRequests | undefined;
+  let assignedWork: AssignedWorkPoller | undefined;
 
-  const assignedWork =
-    requestConfig && assignmentRequests
-      ? new AssignedWork({
-          api,
-          ledger,
-          requests: assignmentRequests,
-          log,
-          reminderMs: requestConfig.reminderSeconds * 1000,
-          captainIntervalMs: 5 * 60 * 1000,
-          readyOffers,
-        })
-      : requestConfig === null
-        ? null
-        : undefined;
+  if (requestConfig === null) {
+    assignedWork = disabledAssignedWork;
+  } else if (requestConfig) {
+    assignmentRequests = new IrcAssignmentRequests(
+      client,
+      requestConfig.shipChannels,
+      host.allowed,
+      messenger,
+    );
+    assignedWork = new AssignedWork({
+      api,
+      ledger,
+      requests: assignmentRequests,
+      log,
+      reminderMs: requestConfig.reminderSeconds * 1000,
+      captainIntervalMs: 5 * 60 * 1000,
+      readyOffers,
+    });
+  }
 
   const dispatcher = new AgentDispatcher({
     settings: {
@@ -170,7 +175,7 @@ export function startAgentDispatch(
     }
   };
 
-  if (dispatch.enabled) {
+  if (dispatch.enabled && (assignmentRequests || readyOffers)) {
     ship.dispatchListener = listener;
   }
 
