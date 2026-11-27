@@ -450,6 +450,13 @@ test("the OpenCode source line carries k=captain only for a peer captain", async
     async fetch(request) {
       const url = new URL(request.url);
 
+      if (
+        url.pathname.endsWith("/message") &&
+        url.searchParams.get("type") === "compaction"
+      ) {
+        return Response.json({ data: [], cursor: {} });
+      }
+
       if (url.pathname.endsWith("/prompt")) {
         const body = (await request.json()) as { id: string; text: string };
         lines.push(body.text.split("\n")[0] ?? "");

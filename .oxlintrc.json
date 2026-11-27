@@ -1173,7 +1173,7 @@
         "eslint/max-statements": [
           "error",
           {
-            "max": 203
+            "max": 202
           }
         ]
       }
@@ -1250,7 +1250,7 @@
         "eslint/complexity": [
           "error",
           {
-            "max": 161
+            "max": 155
           }
         ]
       }

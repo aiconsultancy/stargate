@@ -64,6 +64,7 @@ import { quotaObservationSchema, quotaSnapshotSchema } from "../quota/quota";
 import {
   BackendFailure,
   type BackendFailureKind,
+  CompactionOutputLimit,
   PendingBackendQuestion,
   PromptNotSubmitted,
   connectionFailure,
@@ -73,7 +74,11 @@ import type { TurnProgress, TurnStage } from "../../shared/turn-progress";
 import type { UpdateSnapshot } from "../../automation/maintenance/update-notice";
 import { OpenCodeNotices } from "./notices";
 import { OpenCodeCrewStatus } from "./crew-status";
-import { OpenCodeHistory } from "./opencode-history";
+import {
+  OpenCodeHistory,
+  hasFailedCompaction,
+  hitCompactionOutputLimit,
+} from "./opencode-history";
 import { OpenCodeQuestions } from "./questions";
 import { OpenCodeReviews } from "./reviews";
 
@@ -1319,6 +1324,12 @@ export class OpenCodeBackend implements AgentBackend {
       }
 
       signal.throwIfAborted();
+
+      if (await hasFailedCompaction(this.client, sessionId, signal)) {
+        throw new CompactionOutputLimit(true);
+      }
+
+      signal.throwIfAborted();
       const id = SessionMessage.ID.create();
       onInput?.(id);
       signal.throwIfAborted();
@@ -1364,6 +1375,7 @@ export class OpenCodeBackend implements AgentBackend {
       // Read backwards to the submitted input; do not resend earlier replies.
       const history: (InputBoundaryRecord & {
         reply?: Reply;
+        compactionLimit: boolean;
       })[] = [];
 
       const boundaries = new InputBoundaryReader(
@@ -1387,6 +1399,7 @@ export class OpenCodeBackend implements AgentBackend {
         for (const message of page.data) {
           history.push({
             ...(await boundaries.record(message)),
+            compactionLimit: hitCompactionOutputLimit(message),
             ...(message.type === "assistant" && {
               reply: {
                 succeeded:
@@ -1416,6 +1429,10 @@ export class OpenCodeBackend implements AgentBackend {
 
             for (const record of history.toReversed()) {
               owner = fold.next(record) ?? owner;
+
+              if (record.compactionLimit && owner === input.id) {
+                throw new CompactionOutputLimit(false);
+              }
 
               if (record.reply && owner === input.id) {
                 replies.push(record.reply);

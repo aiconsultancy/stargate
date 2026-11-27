@@ -259,6 +259,11 @@ and separately approved live-proof steps.
   turns and a 30-minute turn timeout (maximum one hour).
 - Replies persist separately from execution; Slack retries do not rerun tools.
   Up to eight delivery attempts use bounded exponential delays.
+- If OpenCode reaches the output limit while summarising a session, Stargate
+  reports the current failure and holds further turns for that native session.
+  The hold survives gateway restarts. Stored replies can still be delivered,
+  and other sessions can still take work. After inspecting the original session
+  and its queue, commission a fresh native root before resuming a pinned agent.
 - A stopped process can leave tool outcomes unknown. On restart, Stargate attempts
   to interrupt surviving work and reports the interrupted request rather than
   automatically running it again. Transcript/session state remains available.

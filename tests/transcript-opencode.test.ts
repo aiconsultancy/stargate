@@ -559,6 +559,10 @@ test("OpenCode prompt pages with cursors only, records its input, and types miss
         return new Response(null, { status: 404 });
       }
 
+      if (url.searchParams.get("type") === "compaction") {
+        return Response.json({ data: [], cursor: {} });
+      }
+
       lists.push(url.searchParams);
 
       // The protocol keeps the first page's order inside its cursor.

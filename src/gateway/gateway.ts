@@ -74,6 +74,7 @@ import {
   type AttachmentInputFailure,
   AttachmentInputUnavailable,
   BackendFailure,
+  CompactionOutputLimit,
   PendingBackendQuestion,
   PromptNotSubmitted,
   type RequestFailure,
@@ -206,6 +207,10 @@ function errorFailure(
 
   if (error instanceof PendingBackendQuestion) {
     return "pending-question";
+  }
+
+  if (error instanceof CompactionOutputLimit) {
+    return "compaction-output-limit";
   }
 
   if (error instanceof ThreadContextUnavailable) {
@@ -1336,6 +1341,7 @@ export class Gateway {
           this.config.concurrency + used,
           this.backend.sessionID !== undefined,
           hold,
+          this.backend.sessionID,
         )
         .filter((job) => !hold || job.status !== "queued");
 
@@ -1984,6 +1990,68 @@ export class Gateway {
     }
   }
 
+  private resolveTurnFailure(input: {
+    job: number;
+    session: string | undefined;
+    error: unknown;
+    cancelled: boolean;
+    interrupted: boolean;
+    timedOut: boolean;
+    attachmentFailure: AttachmentInputFailure | undefined;
+    activity: ActivityHandle | undefined;
+    stopActivity: boolean;
+  }) {
+    const {
+      job,
+      session,
+      error,
+      cancelled,
+      interrupted,
+      timedOut,
+      attachmentFailure,
+      activity,
+      stopActivity,
+    } = input;
+
+    if (stopActivity) {
+      activity?.cancel();
+    } else if (!interrupted) {
+      activity?.finish();
+    }
+
+    const noInput =
+      error instanceof PromptNotSubmitted ||
+      (error instanceof CompactionOutputLimit && error.beforeAdmission);
+
+    if (error instanceof CompactionOutputLimit && session) {
+      const { recorded, requeued } = this.store.holdCompaction(
+        session,
+        error.beforeAdmission ? job : undefined,
+      );
+
+      if (recorded) {
+        this.log.warn(
+          { job },
+          "OpenCode compaction reached the output limit; session intake held",
+        );
+      }
+
+      if (requeued) {
+        return;
+      }
+    }
+
+    const failure: RequestFailure = cancelled
+      ? "cancelled"
+      : interrupted
+        ? "interrupted"
+        : timedOut
+          ? "timeout"
+          : errorFailure(error, attachmentFailure);
+
+    return { failure, noInput };
+  }
+
   private async processTurn(
     held: Job,
     shutdown: AbortSignal,
@@ -2082,7 +2150,7 @@ export class Gateway {
         return;
       }
 
-      if (!this.store.running(job.id, job.text)) {
+      if (!this.store.running(job.id, job.text, this.backend.sessionID)) {
         return;
       }
 
@@ -2536,27 +2604,26 @@ export class Gateway {
             keep = deferred ? 0 : output.length;
           }
         } catch (error) {
-          if (
-            cancellation.signal.aborted ||
-            maintenanceFailure.signal.aborted
-          ) {
-            activity?.cancel();
-          } else if (!shutdown.aborted) {
-            activity?.finish();
+          const result = this.resolveTurnFailure({
+            job: job.id,
+            session,
+            error,
+            cancelled: cancellation.signal.aborted,
+            interrupted: shutdown.aborted,
+            timedOut: budget.controller.signal.aborted,
+            attachmentFailure: attachments.failure,
+            activity,
+            stopActivity:
+              cancellation.signal.aborted || maintenanceFailure.signal.aborted,
+          });
+
+          if (!result) {
+            return;
           }
 
-          if (error instanceof PromptNotSubmitted) {
-            admitted = false;
-          }
-
+          admitted &&= !result.noInput;
           silent = false;
-          failure = cancellation.signal.aborted
-            ? "cancelled"
-            : shutdown.aborted
-              ? "interrupted"
-              : budget.controller.signal.aborted
-                ? "timeout"
-                : errorFailure(error, attachments.failure);
+          failure = result.failure;
           // Category, provider status and backend only: never error text.
           const detail = providerFailure(failure);
           this.log.warn(
