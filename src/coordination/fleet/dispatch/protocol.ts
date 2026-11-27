@@ -139,7 +139,7 @@ const legacyAssignedAsk =
   "is assigned to you. Please pick it up, assign it to a crew member and get it done.";
 
 const assignedAsk =
-  "is assigned to you. Please pick it up if crew can take it. Reply in this thread to say whether you can take it. If you can, move it to In Progress when work starts.";
+  "is assigned to you. Please pick it up if crew can take it. Reply in this thread to say whether you can take it. Move an ordinary issue to In Progress when work starts. For a tracker, coordinate its open children and let their work set its state.";
 
 /** Why an acceptance was refused at the assignment write. */
 export type RefusedReason = "captain" | "account";
