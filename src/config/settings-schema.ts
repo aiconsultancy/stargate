@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { isLoopbackHost } from "../lib/loopback";
+import { fold } from "../transports/irc/protocol";
 import {
   Effect,
   RegExp as EffectRegExp,
@@ -315,3 +316,87 @@ export const piProviderSchema = settingsStruct({
   baseURL: secureLocalOrHttpsURL,
   apiKeyEnv: envName,
 });
+
+/** Headers that the API client owns or that no proxy needs from config. */
+export const reservedAuthenticatedRequestHeaders = new Set([
+  "accept",
+  "authorization",
+  "connection",
+  "content-length",
+  "content-type",
+  "host",
+  "transfer-encoding",
+]);
+
+/** Legacy bearer or the enrolled rear admiral's local signing proxy. */
+export const agentDispatchApiSchema = Schema.Union([
+  settingsStruct({ socketPath: absolutePath }),
+  settingsStruct({
+    /** API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback. */
+    baseUrl: secureLocalOrHttpsURL,
+    /** Variable holding the rear admiral agent's bearer token. */
+    tokenEnv: envName,
+    /** Extra headers for private access (for example a zero-trust service token). */
+    headersEnv: settingsRecord(
+      Schema.String.check(
+        settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/),
+      ).check(
+        settingsRefine(
+          (name) =>
+            !reservedAuthenticatedRequestHeaders.has(name.toLowerCase()),
+          {
+            message:
+              "This header is set by Stargate; use tokenEnv for the bearer token",
+          },
+        ),
+      ),
+      envName,
+    ).pipe(settingsDefault({})),
+  }),
+]);
+
+/** The local signing socket must belong to the rear admiral running dispatch. */
+export function dispatchTargetIssue(
+  target: string | { registration: { id: string; account: string } },
+  api: typeof agentDispatchApiSchema.Type,
+  officers: readonly {
+    rank: string;
+    socketPath?: string | undefined;
+    registration?: string | undefined;
+    ircNick?: string | undefined;
+  }[],
+): { code: "custom"; path: string[]; message: string } | undefined {
+  if (typeof target === "string") {
+    return {
+      code: "custom",
+      path: ["agentDispatch", "messaging"],
+      message: target,
+    };
+  }
+
+  if (!("socketPath" in api)) {
+    return;
+  }
+
+  const rear = target.registration;
+
+  const owned = officers.some(
+    (officer) =>
+      officer.rank === "rearAdmiral" &&
+      officer.socketPath === api.socketPath &&
+      (officer.registration
+        ? officer.registration === rear.id
+        : fold(officer.ircNick ?? "") === fold(rear.account)),
+  );
+
+  if (!owned) {
+    return {
+      code: "custom",
+      path: ["agentDispatch", "api", "socketPath"],
+      message:
+        "Use the enrolled rear admiral's signing socket from subspaceAgents",
+    };
+  }
+
+  return undefined;
+}

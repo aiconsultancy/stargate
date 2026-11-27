@@ -157,7 +157,7 @@ export class AgentDispatcher {
 
   /** Earliest time any timer is due, if any. */
   private nextDue(): number | undefined {
-    if (this.settings.issueDispatch === false) {
+    if (!this.polling.offersEnabled || !this.polling.roster) {
       return;
     }
 
@@ -181,6 +181,15 @@ export class AgentDispatcher {
    */
   public async run(signal: AbortSignal) {
     this.runSignal = signal;
+
+    try {
+      await this.dispatchLoop(signal);
+    } finally {
+      await this.polling.drainAssignments();
+    }
+  }
+
+  private async dispatchLoop(signal: AbortSignal) {
     let nextPoll = this.now();
 
     while (!signal.aborted) {
@@ -279,11 +288,15 @@ export class AgentDispatcher {
   private async timers(signal: AbortSignal) {
     // Nothing moves until this process has read the roster: at a poll, or
     // Before an acceptance write as a confirmed identity.
-    if (this.settings.issueDispatch === false || !this.polling.roster) {
+    if (!this.polling.offersEnabled) {
       return;
     }
 
     for (const tracked of this.options.ledger.active()) {
+      if (!this.polling.roster) {
+        return;
+      }
+
       signal.throwIfAborted();
       const retry = this.retryAt.get(tracked.issue);
 
@@ -663,6 +676,10 @@ export class AgentDispatcher {
   }
 
   private async handleAnswer(input: DispatchAnswerInput, signal: AbortSignal) {
+    if (!this.polling.offersEnabled) {
+      return;
+    }
+
     const tracked = this.options.ledger.byOffer(input.offerID);
     const offer = tracked?.offer;
 

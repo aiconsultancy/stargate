@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { DispatchApiError } from "../src/coordination/fleet/dispatch/api";
 import type { AgentDispatcher } from "../src/coordination/fleet/dispatch/dispatcher";
 import { DispatchLedger } from "../src/coordination/fleet/dispatch/ledger";
 import {
@@ -75,6 +76,30 @@ test("decision outcomes wait for the recording captain and retry a receipt after
   } finally {
     ledger.close();
   }
+});
+
+test("a changed signing identity holds a sent decision receipt until it is restored", async () => {
+  const f = await fixture({ decisionOutcomeDms: true, recheckIdentity: true });
+  const id = "00000000-0000-4000-8000-000000000011";
+  f.api.pendingOutcomes.set(id, {
+    id,
+    recordedByUserId: CAPTAIN_A,
+    identifier: "D-00042-NAV",
+    status: "accepted",
+  });
+
+  const identity = f.api.identity;
+  let reads = 0;
+  f.api.me = async () =>
+    ++reads === 2 ? { ...identity, kind: "human" } : identity;
+  await f.dispatcher.step(signal);
+  expect(f.chat.decisionDms).toHaveLength(1);
+  expect(f.api.acknowledgedOutcomes).toEqual([]);
+  expect(f.ledger.decisionOutcomeSent(id)).toBe(true);
+
+  await f.dispatcher.step(signal);
+  expect(f.chat.decisionDms).toHaveLength(1);
+  expect(f.api.acknowledgedOutcomes).toEqual([id]);
 });
 
 test("first start records existing assignments without sending anything", async () => {
@@ -381,6 +406,98 @@ test("fixture evidence: a restart mid-offer keeps waiting for the same offer", a
     signal,
   );
   expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_A);
+});
+
+test("assigned-only mode suspends existing Ready for agents timers and answers", async () => {
+  const f = await fixture();
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  f.api.add({ id: "i2", identifier: "PRJ-2", readyForAgents: true });
+  f.ledger.save({
+    issue: "i2",
+    identifier: "PRJ-2",
+    title: "Fixture issue",
+    state: "clearing",
+    round: 0,
+    start: 0,
+    order: [],
+    position: 0,
+    updatedAt: f.clock.now(),
+  });
+  const offer = f.chat.lastOffer();
+
+  const oldAnswer = {
+    account: offer.account,
+    offerID: offer.offerID,
+    answer: "accept" as const,
+    replyTo: offer.messageID,
+    at: f.clock.now(),
+  };
+
+  f.ledger.close();
+  const ledger = new DispatchLedger(f.path);
+  const restarted = f.open(ledger, false);
+
+  try {
+    await restarted.answer(oldAnswer, signal);
+    f.clock.advance(10 * MINUTE);
+    await restarted.step(signal);
+    expect(f.chat.transcript()).toEqual(["offer PRJ-1 -> example-captain-a"]);
+    expect(f.api.edits).toEqual([]);
+    expect(ledger.tracked("i2")?.state).toBe("clearing");
+    expect(f.api.issues.get("i2")?.readyForAgents).toBe(true);
+  } finally {
+    ledger.close();
+  }
+});
+
+test("a pending acceptance remains in the legacy scan when Ready offers turn off", async () => {
+  const f = await fixture();
+  await f.dispatcher.step(signal);
+  f.clock.advance(10 * MINUTE);
+  f.api.add({ id: "i1", identifier: "PRJ-1", assigneeId: CAPTAIN_A });
+  const firstUpdate = f.api.issues.get("i1")?.updatedAt;
+  const now = f.clock.now();
+
+  f.ledger.save({
+    issue: "i1",
+    identifier: "PRJ-1",
+    title: "Fixture",
+    state: "accepting",
+    round: 0,
+    start: 0,
+    order: [CAPTAIN_A],
+    position: 0,
+    updatedAt: now,
+    offer: {
+      id: "offer-fixture",
+      captain: CAPTAIN_A,
+      account: "example-captain-a",
+      askedAt: now,
+      deadline: now + MINUTE,
+    },
+  });
+  f.api.issue = async () => {
+    throw new DispatchApiError(503, "fixture detail unavailable");
+  };
+
+  f.clock.advance(10 * MINUTE);
+  f.api.add({ id: "i2", identifier: "PRJ-2", assigneeId: CAPTAIN_B });
+  await f.dispatcher.step(signal);
+  expect(f.ledger.cursor).toBe(firstUpdate);
+  expect(f.ledger.tracked("i1")?.state).toBe("accepting");
+  f.ledger.close();
+  const ledger = new DispatchLedger(f.path);
+
+  try {
+    await f.open(ledger, false).step(signal);
+    expect(f.chat.transcript()).toContain(
+      "assigned PRJ-1 -> example-captain-a",
+    );
+    expect(ledger.tracked("i1")?.state).toBe("accepting");
+  } finally {
+    ledger.close();
+  }
 });
 
 test("a restart after a deadline passed moves on to the next captain", async () => {
@@ -770,6 +887,51 @@ test("an answer after a restart writes nothing until this process confirms its A
   expect(f.api.edits).toHaveLength(1);
   expect(f.chat.statuses()).toEqual(["accepted"]);
   ledger.close();
+});
+
+test("a signing proxy that changes identity cannot resume a pending assignment", async () => {
+  const f = await fixture({ recheckIdentity: true });
+  f.api.add({ id: "i1", identifier: "PRJ-1", readyForAgents: true });
+  await f.dispatcher.step(signal);
+  const enrolled = f.api.identity;
+
+  f.api.identity = { ...enrolled, userId: "different-rear-admiral" };
+  await accept(f, f.dispatcher);
+  expect(f.api.edits).toEqual([]);
+  expect(f.ledger.tracked("i1")).toMatchObject({ state: "accepting" });
+
+  f.api.identity = enrolled;
+  f.clock.advance(2 * MINUTE);
+  await f.dispatcher.step(signal);
+  expect(f.api.issues.get("i1")?.assigneeId).toBe(CAPTAIN_A);
+});
+
+test("losing the signing identity cancels an in-flight assigned work scan", async () => {
+  const f = await fixture({ recheckIdentity: true });
+  const scans: AbortSignal[] = [];
+
+  const dispatcher = f.open(f.ledger, false, {
+    start(_captains, scan) {
+      scans.push(scan);
+    },
+    drain() {},
+  });
+
+  const enrolled = f.api.identity;
+
+  await dispatcher.step(signal);
+
+  expect(scans.map((scan) => scan.aborted)).toEqual([false]);
+
+  f.api.identity = { ...enrolled, userId: "different-rear-admiral" };
+  await dispatcher.step(signal);
+
+  expect(scans.map((scan) => scan.aborted)).toEqual([true]);
+
+  f.api.identity = enrolled;
+  await dispatcher.step(signal);
+
+  expect(scans.map((scan) => scan.aborted)).toEqual([true, false]);
 });
 
 test("an answer before the first poll confirms the identity, then assigns", async () => {

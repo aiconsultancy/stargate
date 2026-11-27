@@ -1606,6 +1606,7 @@
       "layer": "slices",
       "files": [
         "src/dispatch/api.ts",
+        "src/coordination/fleet/dispatch/assigned-work.ts",
         "src/dispatch/dispatcher.ts",
         "src/dispatch/irc.ts",
         "src/dispatch/ledger.ts",
@@ -1936,6 +1937,7 @@
         "src/irc/filehost.ts",
         "src/irc/protocol.ts",
         "src/irc/routing.ts",
+        "src/transports/irc/send-errors.ts",
         "src/irc/ship.ts",
         "src/transports/irc/ship-transport.ts",
         "src/irc/status.ts",

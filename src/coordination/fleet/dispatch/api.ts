@@ -33,6 +33,7 @@ export type DispatchIssue = {
   readyForAgents: boolean | undefined;
   stateType: string;
   archived: boolean;
+  type?: string;
 };
 
 export type DispatchIdentity = {
@@ -77,6 +78,7 @@ export interface DispatchApi {
     updatedSince: string | undefined,
     cursor: string | undefined,
     signal: AbortSignal,
+    filter?: { waitingOnly?: boolean },
   ): Promise<ListingPart<DispatchIssue>>;
   readyIssues(
     cursor: string | undefined,
@@ -128,6 +130,7 @@ const issueSchema = Schema.Struct({
   id: Schema.String,
   identifier: Schema.String,
   title: Schema.String,
+  type: Schema.optional(Schema.String),
   projectId: Schema.String,
   version: Schema.Finite,
   updatedAt: Schema.String,
@@ -218,6 +221,7 @@ export function toDispatchIssue(value: unknown): DispatchIssue {
       : null,
     readyForAgents: issue.readyForAgents,
     stateType: issue.state.type,
+    ...(issue.type && { type: issue.type }),
     archived: issue.archivedAt !== undefined && issue.archivedAt !== null,
   };
 }
@@ -244,13 +248,18 @@ const issuePageBudget = 50;
 const maxReferencePages = 500;
 const maxBodyBytes = 8 * 1024 * 1024;
 
-export type SubspaceApiOptions = {
-  /** API origin, optionally ending in `/api`; routes add `/api/v1`. */
-  baseUrl: string;
-  /** Environment variable holding the rear admiral's bearer token. */
-  tokenEnv: string;
-  /** Extra request headers, each read from an environment variable. */
-  headersEnv: Readonly<Record<string, string>>;
+export type SubspaceApiOptions = (
+  | {
+      /** API origin, optionally ending in /api. */
+      baseUrl: string;
+      tokenEnv: string;
+      headersEnv: Readonly<Record<string, string>>;
+    }
+  | {
+      /** Local proxy that signs each request as the enrolled rear admiral. */
+      socketPath: string;
+    }
+) & {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   fetch?: typeof fetch;
@@ -259,16 +268,49 @@ export type SubspaceApiOptions = {
 /** HTTPS client for the Subspace API. Never logs requests or responses. */
 export class SubspaceApi implements DispatchApi {
   private readonly base: string;
-  private readonly env: NodeJS.ProcessEnv;
+  private readonly socketPath: string | undefined;
+  private readonly authorize: (headers: Headers) => void;
   private readonly fetcher: typeof fetch;
-  public constructor(private readonly options: SubspaceApiOptions) {
-    this.base = options.baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
-    this.env = options.env ?? process.env;
+  private readonly timeoutMs: number;
+
+  public constructor(options: SubspaceApiOptions) {
     this.fetcher = options.fetch ?? fetch;
+    this.timeoutMs = options.timeoutMs ?? 20_000;
+
+    if ("socketPath" in options) {
+      this.base = "http://localhost";
+      this.socketPath = options.socketPath;
+      this.authorize = () => {};
+    } else {
+      this.base = options.baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
+      this.authorize = (headers) => {
+        this.addCredentials(headers, options);
+      };
+    }
+  }
+
+  public get usesEnrolledIdentity() {
+    return this.socketPath !== undefined;
   }
 
   private headers(body: boolean) {
-    const token = this.env[this.options.tokenEnv]?.trim();
+    const headers = new Headers({ accept: "application/json" });
+
+    if (body) {
+      headers.set("content-type", "application/json");
+    }
+
+    this.authorize(headers);
+
+    return headers;
+  }
+
+  private addCredentials(
+    headers: Headers,
+    options: Extract<SubspaceApiOptions, { tokenEnv: string }>,
+  ) {
+    const env = options.env ?? process.env;
+    const token = env[options.tokenEnv]?.trim();
 
     if (!token) {
       throw new DispatchApiError(
@@ -277,17 +319,10 @@ export class SubspaceApi implements DispatchApi {
       );
     }
 
-    const headers = new Headers({
-      accept: "application/json",
-      authorization: `Bearer ${token}`,
-    });
+    headers.set("authorization", `Bearer ${token}`);
 
-    if (body) {
-      headers.set("content-type", "application/json");
-    }
-
-    for (const [name, variable] of Object.entries(this.options.headersEnv)) {
-      const value = this.env[variable]?.trim();
+    for (const [name, variable] of Object.entries(options.headersEnv)) {
+      const value = env[variable]?.trim();
 
       if (!value) {
         throw new DispatchApiError(
@@ -298,8 +333,6 @@ export class SubspaceApi implements DispatchApi {
 
       headers.set(name, value);
     }
-
-    return headers;
   }
 
   /**
@@ -317,13 +350,11 @@ export class SubspaceApi implements DispatchApi {
     try {
       response = await this.fetcher(`${this.base}${path}`, {
         method,
+        ...(this.socketPath !== undefined && { unix: this.socketPath }),
         headers: this.headers(body !== undefined),
         ...(body !== undefined && { body: JSON.stringify(body) }),
         redirect: "error",
-        signal: AbortSignal.any([
-          signal,
-          AbortSignal.timeout(this.options.timeoutMs ?? 20_000),
-        ]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]),
       });
     } catch (error) {
       if (error instanceof DispatchApiError) {
@@ -528,13 +559,20 @@ export class SubspaceApi implements DispatchApi {
     updatedSince: string | undefined,
     cursor: string | undefined,
     signal: AbortSignal,
+    filter?: { waitingOnly?: boolean },
   ) {
     if (assignees.length === 0) {
       return { items: [], next: undefined };
     }
 
     return this.issueListing(
-      (page) => dispatchRoutes.assignedIssues(assignees, updatedSince, page),
+      (page) =>
+        dispatchRoutes.assignedIssues(
+          assignees,
+          updatedSince,
+          page,
+          filter?.waitingOnly,
+        ),
       cursor,
       signal,
     );

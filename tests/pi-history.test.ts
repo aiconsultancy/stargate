@@ -21,6 +21,7 @@ import {
   mapPiHistory,
   piSessionHistory,
   readPiHistory,
+  storedPiIdle,
 } from "../src/backends/pi/pi-history";
 import {
   HISTORY_PARTS,
@@ -365,6 +366,9 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
   const db = new Database(f.path);
 
   try {
+    const signal = new AbortController().signal;
+    expect(storedPiIdle(f.directory, Number(f.id), signal)).toBe(true);
+
     const task: TaskRecord<null, { phase: string }, null> = {
       id: 100_000 as TaskId<null>,
       conversationId: Number(f.id) as ConversationId,
@@ -397,6 +401,7 @@ test("Pi read-only reopen leaves running tasks, conversations and entries unchan
       ].map((table) => db.query(`SELECT * FROM ${table} ORDER BY rowid`).all());
 
     const before = snapshot();
+    expect(storedPiIdle(f.directory, Number(f.id), signal)).toBe(false);
 
     const page = await readPiHistory(
       f.directory,

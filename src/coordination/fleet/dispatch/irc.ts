@@ -1,13 +1,19 @@
+import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import type { IrcConfig } from "../../../config";
-import { type IrcClient, IrcUnavailable } from "../../../transports/irc/client";
+import {
+  type IrcClient,
+  IrcDeliveryUnconfirmed,
+  IrcUnavailable,
+} from "../../../transports/irc/client";
 import {
   type IrcMessage,
   fold,
   validMsgid,
 } from "../../../transports/irc/protocol";
-import type { DecisionOutcome } from "./api";
+import type { DecisionOutcome, DispatchIssue } from "./api";
+import type { AssignmentRequests } from "./assigned-work";
 import {
   type CaptainRef,
   type DispatchAnswerInput,
@@ -191,7 +197,10 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     return validMsgid(messageId);
   }
 
-  private tags(marker: DispatchMarker, replyTo?: string) {
+  private tags(
+    marker: DispatchMarker,
+    replyTo?: string,
+  ): Record<string, string> {
     if (!this.client.hasCap("message-tags")) {
       return {};
     }
@@ -310,6 +319,60 @@ export class IrcDispatchMessenger implements DispatchMessenger {
     await this.title(issue, undefined);
 
     return true;
+  }
+
+  public async assignmentRequest(
+    captain: CaptainRef,
+    issue: IssueLabel,
+    channel: string,
+    signal: AbortSignal,
+  ) {
+    this.carried(issue);
+    const nick = await this.nick(captain);
+
+    if (!nick) {
+      return false;
+    }
+
+    const tags = this.tags({ kind: "assignment", issue: issue.identifier });
+
+    if (!(dispatchTag in tags)) {
+      throw new Error("IRC message-tags unavailable");
+    }
+
+    const text = dispatchText.assignmentRequest(nick, issue.identifier);
+
+    if (
+      Buffer.byteLength(text) > this.client.budget("PRIVMSG", channel, tags)
+    ) {
+      return "skip" as const;
+    }
+
+    const sameRecipient = this.client.recipientGuard(captain.account, nick);
+
+    const message = await this.client
+      .publish(
+        channel,
+        text,
+        tags,
+        () =>
+          !signal.aborted &&
+          this.allowed() &&
+          sameRecipient() &&
+          this.client.inChannel(channel),
+      )
+      .catch((error: unknown): undefined => {
+        if (
+          error instanceof IrcDeliveryUnconfirmed ||
+          (error instanceof IrcUnavailable && !error.notSent)
+        ) {
+          return;
+        }
+
+        throw error;
+      });
+
+    return validMsgid(message) ? true : ("unconfirmed" as const);
   }
 
   public async offer(
@@ -448,7 +511,11 @@ export function isDispatchRequest(message: IrcMessage) {
 
   const marker = parseDispatchMarker(message.tags.get(dispatchTag));
 
-  return marker?.kind === "offer" || marker?.kind === "assigned";
+  return (
+    marker?.kind === "offer" ||
+    marker?.kind === "assigned" ||
+    marker?.kind === "assignment"
+  );
 }
 
 /**
@@ -498,8 +565,8 @@ export function dispatchRequestTurn(
   const marker = parseDispatchMarker(message.tags.get(dispatchTag));
   const address = /^@[^\s:,]+[:,] ?/.exec(admittedText)?.[0] ?? "";
 
-  if (marker?.kind === "assigned") {
-    return `${address}${dispatchTurnText(marker.issue)}`;
+  if (marker?.kind === "assigned" || marker?.kind === "assignment") {
+    return `${address}${dispatchTurnText(marker.issue, undefined, marker.kind === "assignment")}`;
   }
 
   if (marker?.kind === "offer") {
@@ -556,4 +623,159 @@ export async function sendDispatchAnswer(
 
   signal.throwIfAborted();
   await client.send("NOTICE", [offer.channel, text], tags, allowed);
+}
+
+export const assignmentCapacityTag = "+stargate/assignment-capacity";
+const timeoutMs = 5000;
+
+type CapacityClient = Pick<IrcClient, "fold" | "hasCap" | "inChannel" | "send">;
+
+export class IrcAssignmentRequests implements AssignmentRequests {
+  private readonly pending = new Map<
+    string,
+    {
+      account: string;
+      channel: string;
+      resolve: (available: boolean) => void;
+    }
+  >();
+
+  public constructor(
+    private readonly client: CapacityClient,
+    private readonly shipChannels: Readonly<Record<string, string>>,
+    private readonly allowed: () => boolean,
+    private readonly messenger: Pick<IrcDispatchMessenger, "assignmentRequest">,
+  ) {}
+
+  private home(captain: CaptainRef) {
+    const account = this.client.fold(captain.account);
+
+    return Object.entries(this.shipChannels).find(
+      ([name]) => this.client.fold(name) === account,
+    )?.[1];
+  }
+
+  public receive(message: IrcMessage) {
+    const account = message.tags.get("account");
+
+    const mark = /^(yes|no),([a-f0-9]{16})$/u.exec(
+      message.tags.get(assignmentCapacityTag) ?? "",
+    );
+
+    if (message.command !== "TAGMSG" || !account || !mark?.[2]) {
+      return;
+    }
+
+    const request = this.pending.get(mark[2]);
+
+    if (
+      request &&
+      this.client.fold(message.params[0] ?? "") ===
+        this.client.fold(request.channel) &&
+      this.client.fold(account) === this.client.fold(request.account)
+    ) {
+      request.resolve(mark[1] === "yes");
+    }
+  }
+
+  public async hasCapacity(captain: CaptainRef, signal: AbortSignal) {
+    const home = this.home(captain);
+
+    if (
+      !home ||
+      !this.client.inChannel(home) ||
+      !this.client.hasCap("message-tags") ||
+      !this.client.hasCap("echo-message")
+    ) {
+      return false;
+    }
+
+    const nonce = randomBytes(8).toString("hex");
+    const stopped = AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]);
+    const result = Promise.withResolvers<boolean>();
+
+    const cancel = () => {
+      result.resolve(false);
+    };
+
+    this.pending.set(nonce, {
+      account: captain.account,
+      channel: home,
+      resolve: result.resolve,
+    });
+
+    if (stopped.aborted) {
+      cancel();
+    }
+
+    stopped.addEventListener("abort", cancel, { once: true });
+
+    try {
+      const sending = this.client.send(
+        "TAGMSG",
+        [home],
+        {
+          [assignmentCapacityTag]: `ask,${nonce},${captain.account}`,
+        },
+        () => !stopped.aborted && this.allowed() && this.client.inChannel(home),
+      );
+
+      return await Promise.race([
+        sending.then(() => result.promise),
+        result.promise,
+      ]);
+    } finally {
+      this.pending.delete(nonce);
+      stopped.removeEventListener("abort", cancel);
+    }
+  }
+
+  public async ask(
+    captain: CaptainRef,
+    issue: DispatchIssue,
+    signal: AbortSignal,
+  ) {
+    const home = this.home(captain);
+
+    return home
+      ? this.messenger.assignmentRequest(captain, issue, home, signal)
+      : false;
+  }
+}
+
+/** Passive request addressed to this captain by the authenticated rear admiral. */
+export async function answerAssignmentCapacity(
+  client: CapacityClient,
+  message: IrcMessage,
+  account: string,
+  home: string | undefined,
+  available: (signal: AbortSignal) => Promise<boolean>,
+  allowed: () => boolean,
+) {
+  const mark = /^ask,([a-f0-9]{16}),([^,]+)$/u.exec(
+    message.tags.get(assignmentCapacityTag) ?? "",
+  );
+
+  if (
+    message.command !== "TAGMSG" ||
+    !home ||
+    !mark?.[1] ||
+    !mark[2] ||
+    client.fold(message.params[0] ?? "") !== client.fold(home) ||
+    client.fold(mark[2]) !== client.fold(account)
+  ) {
+    return;
+  }
+
+  const signal = AbortSignal.timeout(timeoutMs - 1000);
+  const ready = await available(signal).catch(() => false);
+
+  await client.send(
+    "TAGMSG",
+    [home],
+    {
+      [assignmentCapacityTag]: `${ready && !signal.aborted ? "yes" : "no"},${mark[1]}`,
+    },
+    () => allowed() && client.inChannel(home),
+  );
 }

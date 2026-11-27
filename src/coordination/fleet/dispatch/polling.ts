@@ -7,9 +7,14 @@ import {
   type FleetRoster,
 } from "./api";
 import type { AssignmentWalk, DispatchLedger, TrackedIssue } from "./ledger";
-import type { DispatchOutcome, IssueLabel, WithdrawReason } from "./protocol";
+import type {
+  CaptainRef,
+  DispatchOutcome,
+  IssueLabel,
+  WithdrawReason,
+} from "./protocol";
 
-export type CaptainRef = { userId: string; name: string; account: string };
+export type { CaptainRef } from "./protocol";
 
 export type DispatchEvent = {
   kind: DispatchOutcome | "gave-up";
@@ -73,8 +78,9 @@ export type DispatchSettings = {
   fleet: string;
   pollIntervalMs: number;
   answerTimeoutMs: number;
-  decisionOutcomeDms?: boolean;
-  issueDispatch?: boolean;
+  decisionOutcomeDms: boolean;
+  offersEnabled: boolean;
+  recheckIdentity: boolean;
   /** Waits between rounds; one more round than entries, then give up. */
   retryLadderMs: readonly number[];
   /** IRC (or other transport) account for an API agent name. */
@@ -84,11 +90,22 @@ export type DispatchSettings = {
   sameAccount?(a: string, b: string): boolean;
 };
 
+export interface AssignedWorkPoller {
+  start(captains: readonly CaptainRef[], signal: AbortSignal): void;
+  drain(): Promise<void> | void;
+}
+
+export type AssignmentMode =
+  | { kind: "off" }
+  | { kind: "legacy" }
+  | { kind: "requests"; work: AssignedWorkPoller };
+
 export type AgentDispatcherOptions = {
   settings: DispatchSettings;
   api: DispatchApi;
   messenger: DispatchMessenger;
   ledger: DispatchLedger;
+  assignmentMode: AssignmentMode;
   /** Injectable clock (ms since the epoch). */
   now?: () => number;
   /**
@@ -125,6 +142,12 @@ const cursorOverlapMs = 5 * 60_000;
 /** A behaviour 1 notice for an unreachable captain is retried this long. */
 const noticeRetryMs = 24 * 3_600_000;
 
+function earlierUpdate(hold: string | undefined, updated: string) {
+  return hold === undefined || Date.parse(updated) < Date.parse(hold)
+    ? updated
+    : hold;
+}
+
 function errorStatus(error: unknown) {
   return error instanceof DispatchApiError ? error.status : undefined;
 }
@@ -153,19 +176,64 @@ export class DispatchPolling {
    * is that fleet's rear admiral. Nothing is written to the API before.
    */
   private verifiedFleet: string | undefined;
+  private verifiedUser: string | undefined;
   private readonly warned = new Set<string>();
   private readonly options: PollingPort["options"];
   private readonly now: PollingPort["now"];
   private readonly finish: PollingPort["finish"];
+  private readonly pollAssignmentMode: (
+    signal: AbortSignal,
+  ) => Promise<void> | void;
+  private assignmentIdentity = new AbortController();
 
   public constructor({ options, now, finish }: PollingPort) {
     this.options = options;
     this.now = now;
     this.finish = finish;
+
+    const mode = options.assignmentMode;
+
+    switch (mode.kind) {
+      case "off":
+        this.pollAssignmentMode = () => {};
+
+        break;
+      case "legacy":
+        this.pollAssignmentMode = this.pollAssigned.bind(this);
+
+        break;
+      case "requests":
+        this.pollAssignmentMode = (signal) => {
+          mode.work.start(
+            this.eligibleCaptains(),
+            AbortSignal.any([signal, this.assignmentIdentity.signal]),
+          );
+        };
+
+        break;
+    }
+  }
+
+  public async drainAssignments() {
+    const mode = this.options.assignmentMode;
+
+    if (mode.kind === "requests") {
+      await mode.work.drain();
+    }
   }
 
   private get settings() {
     return this.options.settings;
+  }
+
+  public get offersEnabled() {
+    return this.settings.offersEnabled;
+  }
+
+  private invalidateRoster() {
+    this.roster = undefined;
+    this.assignmentIdentity.abort();
+    this.assignmentIdentity = new AbortController();
   }
 
   /** Log a problem once until it clears; never logs bodies or secrets. */
@@ -199,7 +267,7 @@ export class DispatchPolling {
     if (status === 401 || status === 403) {
       this.warnOnce(
         "credential",
-        "Agent dispatch: the Subspace API refused the rear admiral's credential; provision a valid bearer token in agentDispatch.api.tokenEnv. Retrying at each poll",
+        "Agent dispatch: the Subspace API refused the rear admiral's credential; check the configured rear admiral identity. Retrying at each poll",
         { status },
       );
 
@@ -234,25 +302,26 @@ export class DispatchPolling {
       return;
     }
 
-    if (!(await this.checkIdentity(roster, signal))) {
+    if (!(await this.checkIdentity(roster.id, signal))) {
       return;
     }
 
     this.roster = this.captainsOf(roster, readAt);
 
-    if (this.settings.issueDispatch !== false) {
-      try {
-        await this.pollAssigned(signal);
-        this.cleared("assigned");
-      } catch (error) {
-        signal.throwIfAborted();
-        this.apiFailed(
-          "assigned",
-          "Agent dispatch could not read assignments",
-          error,
-        );
-      }
+    try {
+      await this.pollAssignmentMode(signal);
 
+      this.cleared("assigned");
+    } catch (error) {
+      signal.throwIfAborted();
+      this.apiFailed(
+        "assigned",
+        "Agent dispatch could not read assignments",
+        error,
+      );
+    }
+
+    if (this.offersEnabled) {
       try {
         await this.pollReady(signal);
         this.cleared("ready");
@@ -284,6 +353,24 @@ export class DispatchPolling {
     this.options.ledger.prune(this.now());
   }
 
+  private eligibleCaptain(captain: Captain) {
+    const account = captain.registeredAccount;
+
+    return (
+      captain.available &&
+      captain.reachable &&
+      (!account ||
+        (this.settings.sameAccount?.(account, captain.account) ??
+          account === captain.account))
+    );
+  }
+
+  private eligibleCaptains() {
+    return [...(this.roster?.captains.values() ?? [])].filter((captain) =>
+      this.eligibleCaptain(captain),
+    );
+  }
+
   private async pollDecisionOutcomes(fleetId: string, signal: AbortSignal) {
     const { api, ledger, messenger } = this.options;
 
@@ -307,22 +394,20 @@ export class DispatchPolling {
       try {
         if (!ledger.decisionOutcomeSent(outcome.id)) {
           const captain = this.roster?.captains.get(outcome.recordedByUserId);
-          const account = captain?.registeredAccount;
 
           if (
-            !captain?.available ||
-            !account ||
-            !captain.reachable ||
-            !(
-              this.settings.sameAccount?.(account, captain.account) ??
-              account === captain.account
-            ) ||
+            !captain?.registeredAccount ||
+            !this.eligibleCaptain(captain) ||
             !(await messenger.decisionOutcome(captain, outcome, signal))
           ) {
             continue;
           }
 
           ledger.recordDecisionOutcomeSent(outcome.id);
+        }
+
+        if (!(await this.identityConfirmed(signal))) {
+          return;
         }
 
         await api.acknowledgeDecisionOutcome(fleetId, outcome.id, signal);
@@ -412,9 +497,15 @@ export class DispatchPolling {
    * Assignments and comments must be the rear admiral's own, in this fleet:
    * the identity's fleet ID must be the roster's, never absent.
    */
-  private async checkIdentity(roster: FleetRoster, signal: AbortSignal) {
-    if (this.verifiedFleet !== undefined) {
-      return this.verifiedFleet === roster.id;
+  private async checkIdentity(fleet: string, signal: AbortSignal) {
+    if (this.verifiedFleet !== undefined && !this.settings.recheckIdentity) {
+      if (this.verifiedFleet === fleet) {
+        return true;
+      }
+
+      this.invalidateRoster();
+
+      return false;
     }
 
     try {
@@ -423,8 +514,10 @@ export class DispatchPolling {
       if (
         me.kind !== "agent" ||
         me.agentRank !== "rearAdmiral" ||
-        me.fleetId !== roster.id
+        me.fleetId !== fleet ||
+        (this.verifiedUser !== undefined && me.userId !== this.verifiedUser)
       ) {
+        this.invalidateRoster();
         this.warnOnce(
           "identity",
           "Agent dispatch is idle: the API token is not this fleet's rear admiral agent (GET /api/v1/me). Retrying at each poll",
@@ -433,12 +526,14 @@ export class DispatchPolling {
         return false;
       }
 
-      this.verifiedFleet = roster.id;
+      this.verifiedFleet = fleet;
+      this.verifiedUser = me.userId;
       this.cleared("identity");
 
       return true;
     } catch (error) {
       signal.throwIfAborted();
+      this.invalidateRoster();
       this.apiFailed(
         "me",
         "Agent dispatch cannot confirm its API identity",
@@ -456,7 +551,7 @@ export class DispatchPolling {
    */
   public async identityConfirmed(signal: AbortSignal) {
     if (this.verifiedFleet !== undefined) {
-      return true;
+      return this.checkIdentity(this.verifiedFleet, signal);
     }
 
     let roster: FleetRoster;
@@ -474,7 +569,7 @@ export class DispatchPolling {
       return false;
     }
 
-    return this.checkIdentity(roster, signal);
+    return this.checkIdentity(roster.id, signal);
   }
 
   /**
@@ -631,9 +726,11 @@ export class DispatchPolling {
       const offered = ledger.tracked(issue.id);
 
       if (
+        this.offersEnabled &&
         offered?.state === "accepting" &&
         offered.offer?.captain === captain.userId
       ) {
+        hold = earlierUpdate(hold, issue.updatedAt);
         continue;
       }
 
@@ -690,12 +787,7 @@ export class DispatchPolling {
           "Agent dispatch notified a captain of an assignment",
         );
       } else if (fresh) {
-        if (
-          hold === undefined ||
-          Date.parse(issue.updatedAt) < Date.parse(hold)
-        ) {
-          hold = issue.updatedAt;
-        }
+        hold = earlierUpdate(hold, issue.updatedAt);
       } else {
         ledger.recordNotified(
           issue.id,

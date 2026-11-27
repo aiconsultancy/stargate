@@ -36,7 +36,10 @@ import {
 import { decodeSettings } from "./settings-errors";
 import {
   absolutePath,
+  agentDispatchApiSchema,
+  dispatchTargetIssue,
   envName,
+  reservedAuthenticatedRequestHeaders,
   secureLocalOrHttpsURL,
   settingsCheck,
   settingsDefault,
@@ -237,17 +240,6 @@ const dispatchSeconds = (minimum: number, maximum: number) =>
     .check(Schema.isGreaterThanOrEqualTo(minimum))
     .check(Schema.isLessThanOrEqualTo(maximum));
 
-/** Headers that the dispatch client owns or that no proxy needs from config. */
-const reservedDispatchHeaders = new Set([
-  "accept",
-  "authorization",
-  "connection",
-  "content-length",
-  "content-type",
-  "host",
-  "transfer-encoding",
-]);
-
 export const agentDispatchDefaults = {
   pollIntervalSeconds: 120,
   answerTimeoutSeconds: 300,
@@ -261,27 +253,8 @@ export const agentDispatchSchema = settingsStruct({
   fleet: Schema.String.check(
     settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/),
   ),
-  api: settingsStruct({
-    /** API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback. */
-    baseUrl: secureLocalOrHttpsURL,
-    /** Variable holding the rear admiral agent's bearer token. */
-    tokenEnv: envName,
-    /** Extra headers for private access (for example a zero-trust service token). */
-    headersEnv: settingsRecord(
-      Schema.String.check(
-        settingsPattern(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/),
-      ).check(
-        settingsRefine(
-          (name) => !reservedDispatchHeaders.has(name.toLowerCase()),
-          {
-            message:
-              "This header is set by Stargate; use tokenEnv for the bearer token",
-          },
-        ),
-      ),
-      envName,
-    ).pipe(settingsDefault({})),
-  }),
+  api: agentDispatchApiSchema,
+  readyOffers: Schema.optional(Schema.Boolean),
   messaging: settingsStruct({
     /** IRC is the only messaging system today. */
     type: Schema.Literal("irc").pipe(settingsDefault("irc")),
@@ -292,6 +265,17 @@ export const agentDispatchSchema = settingsStruct({
     /** Defaults to the registration's fleetChannels.command. */
     channel: Schema.optional(ircChannel),
   }),
+  /** Omitted preserves legacy notices, null switches assigned work off. */
+  assignmentRequests: Schema.optional(
+    Schema.NullOr(
+      settingsStruct({
+        reminderSeconds: dispatchSeconds(3600, 604_800).pipe(
+          settingsDefault(14_400),
+        ),
+        shipChannels: settingsRecord(ircAccount, ircChannel),
+      }),
+    ),
+  ),
   /** Send resolved decision notices to the recording captain by IRC DM. */
   decisionOutcomeDms: Schema.optional(Schema.Boolean),
   /** Subspace agent name to chat account; an unlisted name is its own account. */
@@ -372,7 +356,7 @@ const subspaceLine = (maximum: number) =>
 
 /** Headers the Subspace signing proxy and enrolment set or always drop. */
 const reservedSubspaceHeaders = new Set([
-  ...reservedDispatchHeaders,
+  ...reservedAuthenticatedRequestHeaders,
   "cookie",
   "origin",
   "x-subspace-agent",
@@ -800,14 +784,14 @@ const configCheck = (liveNotificationPolicy = false) =>
     ) => {
       // A disabled section is inert: it names nothing that must exist yet.
       if (agentDispatchActive(agentDispatch)) {
-        const target = agentDispatchTarget(agentDispatch, irc);
+        const issue = dispatchTargetIssue(
+          agentDispatchTarget(agentDispatch, irc),
+          agentDispatch.api,
+          subspaceAgents?.officers ?? [],
+        );
 
-        if (typeof target === "string") {
-          context.addIssue({
-            code: "custom",
-            path: ["agentDispatch", "messaging"],
-            message: target,
-          });
+        if (issue) {
+          context.addIssue(issue);
         }
       }
 

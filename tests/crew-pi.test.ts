@@ -811,6 +811,34 @@ test("a failed Pi harness open is retried, not cached for the process", async ()
   }
 });
 
+test("an assignment capacity probe finds an idle cold Pi worker without opening its runtime", async () => {
+  const f = await fixture();
+  let reopened: CrewEngine | undefined;
+
+  try {
+    await f.engine.run({ op: "ensure", crew: "twiki" }, f.caller());
+    await f.engine.close();
+    const before = [...f.lifecycle];
+
+    reopened = await CrewEngine.open(
+      f.options,
+      f.sessions,
+      f.mailer,
+      undefined,
+      Object.assign(f.factory, {
+        async storedIdle() {
+          return true;
+        },
+      }),
+    );
+    expect(await reopened.hasDispatchCapacity(f.caller().signal)).toBe(true);
+    expect(f.lifecycle).toEqual(before);
+  } finally {
+    await reopened?.close();
+    await f.close();
+  }
+});
+
 test("a new owner reopens a Pi store only after the last owner closed it", async () => {
   const f = await fixture();
   const gate = Promise.withResolvers<void>();
