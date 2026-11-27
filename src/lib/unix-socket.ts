@@ -191,27 +191,51 @@ export function checkPrivateDirectory(
   }
 }
 
-/** Check an explicitly trusted service's private or group-accessible socket. */
-export function checkServiceSocket(path: string): void {
-  checkNormalised(path, "service socket");
-  const uid = currentUid({});
-  const directory = dirname(path);
-  checkAncestors(directory, uid);
-  const parent = lstatSync(directory);
-  const socket = lstatSync(path);
+type SocketPathStats = Pick<
+  Stats,
+  "uid" | "gid" | "mode" | "isDirectory" | "isSocket" | "isSymbolicLink"
+>;
 
-  const sharedGroup =
-    socket.gid === process.getgid?.() && parent.gid === socket.gid;
+type SocketPathReader = (path: string) => SocketPathStats | undefined;
+
+type ServiceSocketOwner = {
+  uid: number;
+  gid: number | undefined;
+  stat: SocketPathReader;
+};
+
+/** Check an explicitly trusted service's private or group-accessible socket. */
+export function checkServiceSocket(
+  path: string,
+  {
+    uid = currentUid({}),
+    gid = process.getgid?.(),
+    stat = lstatOrUndefined,
+  }: Partial<ServiceSocketOwner> = {},
+): void {
+  checkNormalised(path, "service socket");
+  const directory = dirname(path);
+  checkAncestors(directory, uid, stat);
+  const anchor = stat(dirname(directory));
+  const parent = stat(directory);
+  const socket = stat(path);
 
   if (
-    !parent.isDirectory() ||
+    !anchor ||
+    !parent?.isDirectory() ||
+    !socket?.isSocket() ||
     (parent.uid !== 0 && parent.uid !== socket.uid) ||
     (parent.mode & 0o027) !== 0 ||
-    !socket.isSocket() ||
-    (socket.uid !== uid && !sharedGroup) ||
+    (socket.uid !== uid && (socket.gid !== gid || parent.gid !== gid)) ||
     (socket.mode & 0o007) !== 0
   ) {
     throw new Error("Service socket ownership or permissions are unsafe");
+  }
+
+  // A sticky, setgid parent can give any new entry the gateway group.
+  // Only a root or gateway-owned directory can safely use a writable parent.
+  if (parent.uid !== 0 && parent.uid !== uid && (anchor.mode & 0o022) !== 0) {
+    throw new Error("Service socket directory needs a non-writable parent");
   }
 }
 
@@ -223,12 +247,16 @@ export function checkServiceSocket(path: string): void {
 // It, but its sticky bit stops them renaming or removing an entry they do not own.
 // That is enough because the entry below it is always owned by root or this user:
 // Every ancestor and the socket directory itself must be.
-function checkAncestors(dir: string, uid: number): void {
+function checkAncestors(
+  dir: string,
+  uid: number,
+  stat: SocketPathReader = lstatOrUndefined,
+): void {
   let current = dir;
 
   while (current !== dirname(current)) {
     current = dirname(current);
-    const stats = lstatOrUndefined(current);
+    const stats = stat(current);
 
     if (!stats) {
       throw new Error(`socket directory ${dir} does not exist`);

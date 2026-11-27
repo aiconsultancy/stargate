@@ -43,7 +43,10 @@ reminder window before it can repeat.
 
 Set `agentDispatch.decisionOutcomeDms` to `true` when the Subspace API
 serves the decision outcome feed. The default is off. It works without
-`agentDispatch.enabled`, which switches on issue dispatch. The dispatcher sends
+`agentDispatch.enabled`, which switches on issue dispatch. Both features can
+share `api` or use a [separate relay for decisions](#configuration). When
+both are on, both connections must confirm the same rear admiral and fleet.
+Decision-only installations with a relay can omit `api`. The dispatcher sends
 each accepted or rejected proposal to the active captain who recorded it.
 It checks that the fleet roster's `ircNick` matches the operator's configured
 captain account and confirms who holds that account before sending. For fleets
@@ -152,6 +155,7 @@ apply to direct API connections.
 
 To give decision delivery a separate connection, enable `decisionOutcomeDms`
 and set `decisionRelay` to `{ "socketPath": "/run/example/decisions/api.sock" }`.
+Stargate uses `decisionRelay` only when `decisionOutcomeDms` is on.
 With issue dispatch enabled, `api` supplies the issue connection and both
 connections must authenticate as the same rear admiral. For decision delivery
 alone, set `enabled: false` and omit `api`. With no `decisionRelay`, decision
@@ -162,7 +166,9 @@ socket directory and socket must use the gateway's dedicated primary group.
 The directory must belong to root or to the socket owner. Its ancestors
 must belong to root or the gateway user, and group or other write access
 requires a sticky directory. The socket directory forbids group write
-access, and both directory and socket forbid access for other users.
+access, and both directory and socket forbid access for other users. If the
+socket directory belongs to a separate relay user, its immediate parent
+also forbids group and other write access.
 Stargate checks the socket before each request. Configure the relay to allow
 only the identity and fleet lookup, outcome feed and delivery receipt routes
 for this fleet.
@@ -174,9 +180,9 @@ that commission the gateway's decision outcome delivery capability.
 | -------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`                  | `false`                                     | Enables issue dispatch. With both `enabled` and `decisionOutcomeDms` off, the gateway opens no ledger, registers no listener and makes no API requests.                                                           |
 | `fleet`                    | Required                                    | The fleet's slug or UUID in the Subspace API.                                                                                                                                                                     |
-| `api.baseUrl`              | Direct mode only, required                  | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
-| `api.tokenEnv`             | Direct mode only, required                  | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
-| `api.socketPath`           | Socket mode only, required                  | Absolute path to the signing socket.                                                                                                                                                                              |
+| `api.baseUrl`              | Required for a direct `api`                 | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
+| `api.tokenEnv`             | Required for a direct `api`                 | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
+| `api.socketPath`           | Required for a Unix socket `api`            | Absolute path to the signing socket.                                                                                                                                                                              |
 | `decisionRelay.socketPath` | Omitted                                     | Absolute path to a separate relay for decision outcomes.                                                                                                                                                          |
 | `api.headersEnv`           | `{}`                                        | Extra request headers for a private access layer: header name → environment variable name. `Authorization`, `Accept`, `Content-Type`, `Content-Length`, `Host`, `Connection` and `Transfer-Encoding` are refused. |
 | `messaging.type`           | `"irc"`                                     | The messaging system. Only `irc` is accepted.                                                                                                                                                                     |

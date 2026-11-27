@@ -1,4 +1,4 @@
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { isLoopbackHost } from "../lib/loopback";
 import { fold } from "../transports/irc/protocol";
 import {
@@ -284,6 +284,12 @@ const absolutePath = Schema.String.check(
   settingsRefine(isAbsolute, { message: "Use an absolute path" }),
 );
 
+export const normalisedPath = absolutePath.check(
+  settingsRefine((path) => resolve(path) === path, {
+    message: "An absolute normalised path is required",
+  }),
+);
+
 const envName = Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/));
 
 export { absolutePath, envName };
@@ -357,7 +363,9 @@ const agentDispatchApiSchema = Schema.Union([
 
 export const agentDispatchConnections = {
   api: Schema.optional(agentDispatchApiSchema),
-  decisionRelay: Schema.optional(settingsStruct({ socketPath: absolutePath })),
+  decisionRelay: Schema.optional(
+    settingsStruct({ socketPath: normalisedPath }),
+  ),
   /** Send resolved decision notices to the recording captain by IRC DM. */
   decisionOutcomeDms: Schema.optional(Schema.Boolean),
 };

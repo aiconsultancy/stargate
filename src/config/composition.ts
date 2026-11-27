@@ -41,6 +41,7 @@ import {
   dispatchPrimaryApi,
   dispatchTargetIssue,
   envName,
+  normalisedPath,
   reservedAuthenticatedRequestHeaders,
   secureLocalOrHttpsURL,
   settingsCheck,
@@ -340,12 +341,6 @@ export function agentDispatchTarget(
 
   return { registration, channel: joined };
 }
-
-const normalisedPath = absolutePath.check(
-  settingsRefine((path) => resolve(path) === path, {
-    message: "An absolute normalised path is required",
-  }),
-);
 
 const subspaceLine = (maximum: number) =>
   Schema.Trim.check(Schema.isMinCodePoints(1))

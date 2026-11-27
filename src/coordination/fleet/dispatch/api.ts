@@ -125,6 +125,16 @@ export class DispatchApiError extends Error {
   }
 }
 
+export class DecisionRelayError extends DispatchApiError {
+  public constructor(
+    message:
+      | "The decision relay socket is missing or unsafe"
+      | "The decision relay identity does not match the confirmed rear admiral",
+  ) {
+    super(undefined, message);
+  }
+}
+
 const nullableString = Schema.optional(Schema.NullOr(Schema.String));
 
 const issueSchema = Schema.Struct({
@@ -291,8 +301,7 @@ export class SubspaceApi implements DispatchApi {
             try {
               checkServiceSocket(socketPath);
             } catch {
-              throw new DispatchApiError(
-                undefined,
+              throw new DecisionRelayError(
                 "The decision relay socket is missing or unsafe",
               );
             }

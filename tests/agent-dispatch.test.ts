@@ -28,8 +28,14 @@ afterEach(removeDirectories);
 
 test("issue dispatch and decision outcomes use separate connections and the same admiral identity", async () => {
   const relay = new FakeApi(new Clock());
+  const { log, lines } = capturedLog();
 
-  const f = await fixture({ decisionOutcomeDms: true, decisionApi: relay });
+  const f = await fixture({
+    decisionOutcomeDms: true,
+    decisionApi: relay,
+    log,
+  });
+
   const id = "00000000-0000-4000-8000-000000000018";
   relay.pendingOutcomes.set(id, {
     id,
@@ -45,6 +51,9 @@ test("issue dispatch and decision outcomes use separate connections and the same
   expect(f.ledger.tracked("i1")?.offer).toBeDefined();
   expect(relay.calls).not.toContain(`decision outcomes ${FLEET}`);
   expect(f.chat.decisionDms).toEqual([]);
+  expect(lines.join("\n")).toContain(
+    "The decision relay identity does not match the confirmed rear admiral",
+  );
 
   relay.identity = identity;
   await f.dispatcher.step(signal);

@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 import {
   type DecisionOutcome,
+  DecisionRelayError,
   type DispatchApi,
   DispatchApiError,
   type DispatchIssue,
@@ -258,7 +259,7 @@ export class DispatchPolling {
    * Log a failed API call once until that step succeeds again. A refused
    * credential (401 or 403) gets one plain line of its own: it needs an
    * operator, and every later poll tries again at the usual interval.
-   * Only the HTTP status is logged, never a header, token or body.
+   * Warnings never include API headers, credentials or response bodies.
    */
   public apiFailed(
     key: string,
@@ -266,6 +267,12 @@ export class DispatchPolling {
     error: unknown,
     detail: LogDetail = {},
   ) {
+    if (error instanceof DecisionRelayError) {
+      this.warnOnce(key, error.message);
+
+      return;
+    }
+
     const status = errorStatus(error);
 
     if (status === 401 || status === 403) {
@@ -453,8 +460,8 @@ export class DispatchPolling {
       identity.fleetId !== fleetId ||
       identity.userId !== this.verifiedUser
     ) {
-      throw new Error(
-        "Decision relay identity does not match the confirmed rear admiral",
+      throw new DecisionRelayError(
+        "The decision relay identity does not match the confirmed rear admiral",
       );
     }
   }

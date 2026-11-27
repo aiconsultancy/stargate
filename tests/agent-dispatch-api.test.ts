@@ -6,6 +6,7 @@ import {
   DispatchApiError,
   SubspaceApi,
 } from "../src/coordination/fleet/dispatch/api";
+import { checkServiceSocket } from "../src/lib/unix-socket";
 import {
   ACCESS,
   answer,
@@ -72,6 +73,59 @@ test("the dispatch client uses the enrolled officer's Unix proxy without a beare
     await server.stop(true);
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("a separate service UID needs the gateway group and a protected parent for its relay", () => {
+  const uid = 1000;
+  const gid = 1001;
+  const serviceUid = 2000;
+
+  const directory = (owner: number, group: number, mode: number) => ({
+    uid: owner,
+    gid: group,
+    mode,
+    isDirectory: () => true,
+    isSocket: () => false,
+    isSymbolicLink: () => false,
+  });
+
+  const parent = directory(serviceUid, gid, 0o750);
+
+  const socket = {
+    ...parent,
+    mode: 0o660,
+    isDirectory: () => false,
+    isSocket: () => true,
+  };
+
+  const path = "/run/service/relay.sock";
+
+  const paths = new Map([
+    ["/", directory(0, 0, 0o755)],
+    ["/run", directory(0, 0, 0o755)],
+    ["/run/service", parent],
+    [path, socket],
+  ]);
+
+  const check = () =>
+    checkServiceSocket(path, { uid, gid, stat: (name) => paths.get(name) });
+
+  expect(check).not.toThrow();
+
+  paths.set(path, { ...socket, gid: 2001 });
+  expect(check).toThrow("ownership or permissions");
+  paths.set(path, { ...socket, isSocket: () => false });
+  expect(check).toThrow("ownership or permissions");
+  paths.set(path, socket);
+
+  paths.set("/run/service", { ...parent, uid: 3000 });
+  expect(check).toThrow("ownership or permissions");
+  paths.set("/run/service", parent);
+
+  paths.set("/run", directory(0, gid, 0o3777));
+  expect(check).toThrow("non-writable parent");
+  paths.set("/run/service", { ...parent, uid: 0 });
+  expect(check).not.toThrow();
 });
 
 test("the decision relay is checked again before every request", async () => {
