@@ -31,22 +31,6 @@ export const ANTIGRAVITY_AUTH_STDOUT_PREFIX =
 
 const NATIVE_CLI_NO_BROWSER_PREFIX = "No browser available";
 
-/** Ambient Google / Gemini credentials that must never leak into isolated profiles. */
-const strippedAmbientKeys = new Set([
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY",
-  "GOOGLE_CLOUD_PROJECT",
-  "GOOGLE_CLOUD_LOCATION",
-  "GOOGLE_APPLICATION_CREDENTIALS",
-  "GEMINI_HOME",
-  "AGY_ACP_FORCE_FILE_STORAGE",
-  "AGY_CLI_DISABLE_AUTO_UPDATE",
-  "BROWSER",
-  "PYTHONUNBUFFERED",
-  "ELECTRON_RUN_AS_NODE",
-  "CHROME_CRASHPAD_PIPE_NAME",
-]);
-
 export function parseAntigravityVersion(
   raw: string | null | undefined,
 ): readonly [number, number, number] | undefined {
@@ -217,8 +201,9 @@ export async function prepareAntigravityProfile(
 }
 
 /**
- * Minimal child environment for `agy acp`: inherits only non-secret base vars,
- * strips ambient Google/Gemini credentials, pins private `GEMINI_HOME` and
+ * Minimal child environment for `agy acp`: inherits only the non-secret base
+ * allowlist from `inherited()` (ambient `GEMINI_API_KEY` and `GOOGLE_*`
+ * variables are excluded automatically), pins private `GEMINI_HOME` and
  * `TMPDIR`, disables auto-update and suppresses interactive browser launches.
  */
 export function antigravityEnvironment(
@@ -226,13 +211,9 @@ export function antigravityEnvironment(
   profile: AntigravityProfile,
   parent: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  for (const [key, value] of Object.entries(inherited(parent))) {
-    if (!strippedAmbientKeys.has(key.toUpperCase())) {
-      env[key] = value;
-    }
-  }
+  const env: Record<string, string> = {
+    ...inherited(parent),
+  };
 
   if (config.auth.method === "gemini-api-key") {
     env["GEMINI_API_KEY"] = secret(config.auth.apiKeyEnv, parent);

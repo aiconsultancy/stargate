@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { Option } from "effect";
+import packageJson from "../../../package.json" with { type: "json" };
 import type {
   ActivityItem,
   ActivityOutcome,
@@ -874,7 +875,11 @@ export async function runAcpTurn(spec: AcpRunSpec): Promise<AcpRunOutcome> {
       "initialize",
       {
         protocolVersion: ACP_PROTOCOL_VERSION,
-        clientInfo: { name: "stargate", title: "Stargate", version: "0.1.0" },
+        clientInfo: {
+          name: "stargate",
+          title: "Stargate",
+          version: packageJson.version,
+        },
         clientCapabilities: clientCapabilitiesFor(spec.flavor),
       },
       timeoutMs,

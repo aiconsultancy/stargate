@@ -223,6 +223,15 @@ export class AcpStdioConnection {
       });
     });
 
+    child.stdin.on("error", () => {
+      this.failAll(new AcpTransportError("ACP stdin pipe error"));
+    });
+    child.stdout.on("error", () => {
+      this.failAll(new AcpTransportError("ACP stdout pipe error"));
+    });
+    child.stderr.on("error", () => {
+      // Ignore stderr pipe errors during teardown.
+    });
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       this.consumeStdout(chunk);
