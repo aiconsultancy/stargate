@@ -6,6 +6,9 @@ The shared officer file, repository refresh and GitHub tools run on Bun. Update
 existing file registrations to `scripts/officer-files.ts` after installing the
 reviewed Stargate dependencies. See [attachments](docs/attachments.md).
 
+The optional `stargate_serve` officer MCP server publishes and withdraws static
+mockups from a fleet's preview service. Standalone Stargate leaves it off.
+
 ### Feature flags
 
 - `agentDispatch.decisionOutcomeDms` enables decision-outcome DMs to recording
