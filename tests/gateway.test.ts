@@ -867,7 +867,7 @@ test("a compaction failure reports the current turn and holds only its session",
 
 test("an already failed native session leaves unsubmitted work queued", async () => {
   const f = fixture();
-  f.backend.prompt = async () => {
+  f.backend.checkPromptAdmission = async () => {
     throw new CompactionOutputLimit(true);
   };
 
@@ -876,6 +876,7 @@ test("an already failed native session leaves unsubmitted work queued", async ()
   await f.gateway.process(job, AbortSignal.timeout(5000));
   expect(f.store.jobByEvent(job.botKey, job.eventId)?.status).toBe("queued");
   expect(f.store.ready(f.gateway.key, Date.now(), 10)).toEqual([]);
+  expect(f.prompts).toHaveLength(0);
   expect(f.delivered).toEqual([]);
 });
 

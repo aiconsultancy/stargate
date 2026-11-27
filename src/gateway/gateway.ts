@@ -2052,6 +2052,39 @@ export class Gateway {
     return { failure, noInput };
   }
 
+  private async ensureTurnSession(
+    session: string | undefined,
+    pinned: string | undefined,
+    job: Job,
+    title: string,
+    signal: AbortSignal,
+  ) {
+    if (session) {
+      return session;
+    }
+
+    const created = await this.backend.createSession({
+      key: job.conversation,
+      title,
+      signal,
+    });
+
+    if (pinned && created !== pinned) {
+      throw new Error("Pinned session identity changed");
+    }
+
+    if (!pinned) {
+      // A new unpinned session's transcript starts with this turn.
+      this.store.saveSession(
+        job.conversation,
+        created,
+        this.backend.transcript ? "" : undefined,
+      );
+    }
+
+    return created;
+  }
+
   private async processTurn(
     held: Job,
     shutdown: AbortSignal,
@@ -2333,27 +2366,16 @@ export class Gateway {
             }
           }
 
-          if (!session) {
-            session = await this.backend.createSession({
-              key: job.conversation,
-              title: `${botDisplayName(config)} (${job.deferDelivery ? "scheduled" : transport.name} ${job.channel})`,
-              signal,
-            });
+          session = await this.ensureTurnSession(
+            session,
+            pinned,
+            job,
+            `${botDisplayName(config)} (${job.deferDelivery ? "scheduled" : transport.name} ${job.channel})`,
+            signal,
+          );
 
-            if (pinned) {
-              if (session !== pinned) {
-                throw new Error("Pinned session identity changed");
-              }
-            } else {
-              // A new unpinned session's transcript starts with this turn.
-              this.store.saveSession(
-                job.conversation,
-                session,
-                this.backend.transcript ? "" : undefined,
-              );
-            }
-          }
-
+          signal.throwIfAborted();
+          await this.backend.checkPromptAdmission?.(session, signal);
           signal.throwIfAborted();
 
           if (!pinned && transport.sessionReady) {

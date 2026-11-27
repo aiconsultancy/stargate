@@ -285,6 +285,9 @@ test("an OpenCode server that cannot be reached is a network failure; nothing ra
       backend.createSession({ key: "thread", title: "Slack", signal }),
     ),
   ).toBe("provider:network:0:idle");
+  expect(await failureOf(backend.checkPromptAdmission(session, signal))).toBe(
+    "provider:network:0:idle",
+  );
   expect(await failureOf(backend.prompt(session, "hello", signal))).toBe(
     "provider:network:0:idle",
   );
@@ -318,10 +321,6 @@ test("a lost history read after the turn ran never says that nothing ran", async
         }
 
         if (url.pathname.endsWith("/message")) {
-          if (url.searchParams.get("type") === "compaction") {
-            return Response.json({ data: [], cursor: {} });
-          }
-
           if (++reads === failAt) {
             await server.stop(true);
 
@@ -423,7 +422,7 @@ test("uses native history to refuse a new prompt after an output-limit failure",
 
   try {
     const error = await backend
-      .prompt("session", "hello", AbortSignal.timeout(5000))
+      .checkPromptAdmission("session", AbortSignal.timeout(5000))
       .catch((error: unknown) => error);
 
     expect(error).toBeInstanceOf(CompactionOutputLimit);
@@ -441,6 +440,7 @@ test("a newer successful compaction supersedes an earlier history failure", asyn
   );
 
   try {
+    await backend.checkPromptAdmission("session", AbortSignal.timeout(5000));
     expect(
       await backend.prompt("session", "hello", AbortSignal.timeout(5000)),
     ).toBe("Final answer");

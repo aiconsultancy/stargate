@@ -917,6 +917,20 @@ export class OpenCodeBackend implements AgentBackend {
     return { status: "uncertain" };
   }
 
+  public async checkPromptAdmission(sessionId: string, signal: AbortSignal) {
+    try {
+      if (await hasFailedCompaction(this.client, sessionId, signal)) {
+        throw new CompactionOutputLimit(true);
+      }
+    } catch (error) {
+      if (!signal.aborted && connectionFailure(error)) {
+        throw new BackendFailure("network", { ran: false });
+      }
+
+      throw error;
+    }
+  }
+
   public async prompt(
     sessionId: string,
     text: string,
@@ -1321,12 +1335,6 @@ export class OpenCodeBackend implements AgentBackend {
           delay(2000, undefined, { signal: timer.signal }),
         ]);
         timer.abort();
-      }
-
-      signal.throwIfAborted();
-
-      if (await hasFailedCompaction(this.client, sessionId, signal)) {
-        throw new CompactionOutputLimit(true);
       }
 
       signal.throwIfAborted();
