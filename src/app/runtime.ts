@@ -55,16 +55,12 @@ import type {
   SubspaceAgentsRuntime,
 } from "../subspace/start";
 import { abortable } from "../lib/effect";
+import { FleetControl } from "../coordination/fleet/control";
 import {
-  FleetControl,
-  type FleetControlOptions,
-} from "../coordination/fleet/control";
-import { fleetRequestAction } from "../coordination/fleet/permissions";
-import {
-  FleetError,
-  peerMessageInputSchema,
-} from "../coordination/fleet/protocol";
-import { FleetResults, fleetOrigin } from "../coordination/fleet/results";
+  FleetResults,
+  fleetAuthorizer,
+  fleetOrigin,
+} from "../coordination/fleet/results";
 import {
   sendFleetAssignment,
   sendFleetPeerMessage,
@@ -126,59 +122,6 @@ import {
   type UpdateSnapshot,
   buildUpdateSnapshot,
 } from "../automation/maintenance/update-notice";
-
-const normalisePeerInput = Schema.decodeUnknownSync(peerMessageInputSchema, {
-  onExcessProperty: "error",
-});
-
-/** Shown to the caller: names the cause and a workaround, never internals. */
-export const fleetChatTurnRequired =
-  "Fleet tools, including stargate_dm with via, work only in a turn that answers a chat request to this captain on IRC or in a linked Teams conversation. This turn does not, for example because a crew DM or notice woke it. Ask in your ship channel or tag the other captain on IRC instead.";
-
-/** Bind fleet calls to an executing native input and matching tool payload. */
-export function fleetAuthorizer(
-  store: Pick<Store, "permissionCandidates">,
-  backend: Pick<AgentBackend, "toolBelongsToInput">,
-  pin: string,
-  keys: readonly string[],
-): FleetControlOptions["authorize"] {
-  return async (caller, signal, request) => {
-    const { action } = fleetRequestAction(request);
-    const peerMessage = request.operation === "peer-message";
-
-    const expected = {
-      agent: caller.agent,
-      id: caller.id,
-      tool: peerMessage ? "stargate_dm" : action,
-      input: request.input,
-      ...(peerMessage && { normaliseInput: normalisePeerInput }),
-    };
-
-    for (const key of keys) {
-      for (const job of store.permissionCandidates(key)) {
-        if (
-          job.input &&
-          (await backend.toolBelongsToInput?.(
-            pin,
-            caller.messageID,
-            job.input,
-            signal,
-            expected,
-          ))
-        ) {
-          return {
-            botKey: job.botKey,
-            eventId: job.eventId,
-            sessionID: pin,
-            inputID: job.input,
-          };
-        }
-      }
-    }
-
-    throw new FleetError(fleetChatTurnRequired);
-  };
-}
 
 export function lockInstance(path: string) {
   const lock = new Database(path, { create: true });

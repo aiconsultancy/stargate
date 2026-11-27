@@ -41,7 +41,10 @@ import {
   fleetControlSchema,
 } from "../src/coordination/fleet/protocol";
 import { sendFleetAssignment } from "../src/coordination/fleet/fleet-irc";
-import { fleetAuthorizer, fleetChatTurnRequired } from "../src/app/runtime";
+import {
+  fleetAuthorizer,
+  fleetChatTurnRequired,
+} from "../src/coordination/fleet/results";
 import type { Job } from "../src/gateway/store-types";
 import {
   authenticateActivityRequest,

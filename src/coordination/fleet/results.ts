@@ -3,12 +3,15 @@ import { Result, Schema } from "effect";
 import type { AgentBackend } from "../../backends/backend";
 import { type ReplyChunk, replyText } from "../../shared/slack-format";
 import type { Job, Store } from "../../gateway/store";
-import type { FleetControl } from "./control";
+import type { FleetControl, FleetControlOptions } from "./control";
+import { fleetRequestAction } from "./permissions";
 import {
   type FleetCompletion,
+  FleetError,
   type FleetOrigin,
   type VerifiedSource,
   nativeMakerSchema,
+  peerMessageInputSchema,
 } from "./protocol";
 
 /** Resolve by immutable ingress identity and native input, never latest chat. */
@@ -28,6 +31,59 @@ export function fleetOrigin(
   }
 
   return { ...source.origin, sessionID, inputID: job.input };
+}
+
+const normalisePeerInput = Schema.decodeUnknownSync(peerMessageInputSchema, {
+  onExcessProperty: "error",
+});
+
+/** Shown to the caller: names the cause and a workaround, never internals. */
+export const fleetChatTurnRequired =
+  "Fleet tools, including stargate_dm with via, work only in a turn that answers a chat request to this captain on IRC or in a linked Teams conversation. This turn does not, for example because a crew DM or notice woke it. Ask in your ship channel or tag the other captain on IRC instead.";
+
+/** Bind fleet calls to an executing native input and matching tool payload. */
+export function fleetAuthorizer(
+  store: Pick<Store, "permissionCandidates">,
+  backend: Pick<AgentBackend, "toolBelongsToInput">,
+  pin: string,
+  keys: readonly string[],
+): FleetControlOptions["authorize"] {
+  return async (caller, signal, request) => {
+    const { action } = fleetRequestAction(request);
+    const peerMessage = request.operation === "peer-message";
+
+    const expected = {
+      agent: caller.agent,
+      id: caller.id,
+      tool: peerMessage ? "stargate_dm" : action,
+      input: request.input,
+      ...(peerMessage && { normaliseInput: normalisePeerInput }),
+    };
+
+    for (const key of keys) {
+      for (const job of store.permissionCandidates(key)) {
+        if (
+          job.input &&
+          (await backend.toolBelongsToInput?.(
+            pin,
+            caller.messageID,
+            job.input,
+            signal,
+            expected,
+          ))
+        ) {
+          return {
+            botKey: job.botKey,
+            eventId: job.eventId,
+            sessionID: pin,
+            inputID: job.input,
+          };
+        }
+      }
+    }
+
+    throw new FleetError(fleetChatTurnRequired);
+  };
 }
 
 /** Trusted gateway recovery only. No IPC operation can manufacture completion. */
