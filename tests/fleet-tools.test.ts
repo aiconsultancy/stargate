@@ -288,6 +288,97 @@ test("the fleet authoriser binds a peer DM to a running chat job's native input"
   expect(() => normalise?.({ ...raw, project: "stargate" })).toThrow();
 });
 
+test("the fleet authoriser checks every linked source key and names each operation's native tool", async () => {
+  // A Teams follow-up timer turn runs as its own job on the linked Teams key.
+  const timerJob: Job = {
+    ...runningJob,
+    id: 2,
+    eventId: "teams-timer:1",
+    botKey: "teams-key",
+    input: "msg_timer_input",
+    fleet: { kind: "timer", originEvent: "teams-event" },
+  };
+
+  const checks: unknown[][] = [];
+
+  const authorize = fleetAuthorizer(
+    {
+      permissionCandidates: (key) =>
+        key === "irc-key"
+          ? [runningJob]
+          : key === "teams-key"
+            ? [timerJob]
+            : [],
+    },
+    {
+      async toolBelongsToInput(...args) {
+        checks.push(args);
+
+        return args[2] === "msg_timer_input";
+      },
+    },
+    "ses_owner",
+    ["irc-key", "teams-key"],
+  );
+
+  const timer: FleetRequest = {
+    operation: "timer",
+    caller: caller(),
+    input: { op: "status" },
+  };
+
+  await expect(authorize(timer.caller, signal(), timer)).resolves.toEqual({
+    botKey: "teams-key",
+    eventId: "teams-timer:1",
+    sessionID: "ses_owner",
+    inputID: "msg_timer_input",
+  });
+  // The IRC chat job is asked first and does not own the call.
+  expect(checks.map((args) => args[2])).toEqual([
+    "msg_chat_input",
+    "msg_timer_input",
+  ]);
+
+  for (const args of checks) {
+    expect(args[4]).toEqual({
+      agent: "native-agent",
+      id: "tool-call",
+      tool: "stargate_timer",
+      input: { op: "status" },
+    });
+  }
+
+  const tools: unknown[] = [];
+
+  const named = fleetAuthorizer(
+    { permissionCandidates: () => [runningJob] },
+    {
+      async toolBelongsToInput(...args) {
+        tools.push(args[4]?.tool);
+
+        return true;
+      },
+    },
+    "ses_owner",
+    ["irc-key"],
+  );
+
+  const requests: FleetRequest[] = [
+    { operation: "status", caller: caller(), input: {} },
+    {
+      operation: "defer-result",
+      caller: caller(),
+      input: { taskID: "task_0123abcd-0123-4567-89ab-0123456789ab" },
+    },
+  ];
+
+  for (const request of requests) {
+    await named(request.caller, signal(), request);
+  }
+
+  expect(tools).toEqual(["fleet_status", "fleet_defer_result"]);
+});
+
 test("the fleet authoriser refuses a turn without a running chat job with an actionable reason", async () => {
   const refusals = [
     fleetAuthorizer(
