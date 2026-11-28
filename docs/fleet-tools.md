@@ -39,11 +39,12 @@ the report of a returned fleet result (see `results` below), or a
 registration has the same pinned OpenCode session and backend fingerprint as
 the IRC gateway; this does not need `results`. Slack-started turns do not
 qualify. Any other turn is refused with a message saying so, for example a
-turn woken by a crew DM, crew hand-back, crew completion or other notice,
-including one queued behind a running chat request. The refusal is not an
-outage, and retrying in the same turn cannot succeed. Ask in the ship channel
-or tag the other captain on IRC instead, or make the call from the next turn
-that qualifies. A crew completion wake can still return a
+turn woken by a crew DM, crew hand-back, crew completion or other notice. A
+crew DM or completion that continues a qualifying request the gateway is still
+running counts as part of that request. The refusal is not an outage, and
+retrying in the same turn cannot succeed. Ask in the ship channel or tag the
+other captain on IRC instead, or make the call from the next turn that
+qualifies. A crew completion wake can still return a
 [deferred crew result](#deferred-crew-results) in its final answer, which
 needs no fleet tool.
 
