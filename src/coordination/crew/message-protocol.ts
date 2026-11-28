@@ -18,6 +18,10 @@ export function taskEnvelopePayload(text: string | undefined) {
   return prefix === undefined ? undefined : line.slice(prefix.length);
 }
 
+export function crewCompletionMessageID(taskID: string) {
+  return `msg_${createHash("sha256").update(`crew-completion\0${taskID}`).digest("hex")}`;
+}
+
 type TaskBinding = {
   id: string;
   inputID: string;

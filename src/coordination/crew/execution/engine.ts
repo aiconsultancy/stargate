@@ -180,6 +180,7 @@ export const crewOptionsSchema = settingsStruct({
   allowCrewExpansion: Schema.optional(Schema.Boolean),
   exclusiveWorkerInput: Schema.optional(Schema.Boolean),
   feedbackEnabled: Schema.optional(Schema.Boolean),
+  completionWake: Schema.optional(Schema.Boolean),
   mesijCommand: directory,
   /** The one native captain root; earlier roots stay history. */
   captainSessionID: Schema.optional(
@@ -4024,6 +4025,69 @@ export class CrewEngine {
       controller.abort();
       await observed;
     }
+  }
+
+  /** Observe assigned work without promoting, interrupting or replaying it. */
+  public async pollCompletionWakes(signal: AbortSignal) {
+    const pin = this.options.captainSessionID;
+
+    if (!pin || !this.options.completionWake || this.drain()) {
+      return;
+    }
+
+    for (const member of this.options.team.crew) {
+      const task = this.state.activeTask(member.id);
+
+      if (task?.originCaptainID !== pin || task.status !== "running") {
+        continue;
+      }
+
+      await this.observeCompletion(task, signal).catch(() => {
+        signal.throwIfAborted();
+      });
+    }
+
+    await this.state.completionWakes.deliver(pin, this.sessions, signal);
+  }
+
+  private async observeCompletion(task: CrewTask, signal: AbortSignal) {
+    const member = this.member(task.crewID);
+
+    if (member.backend) {
+      await this.piRecover(task, signal);
+
+      return;
+    }
+
+    const connect = this.connectResults;
+    const peer = this.state.peer(task.crewID);
+
+    if (!connect || peer?.sessionID !== task.workerSessionID) {
+      return;
+    }
+
+    const session = await this.sessions.get(
+      { sessionID: peer.sessionID },
+      { signal },
+    );
+
+    this.validPeer(session, peer);
+
+    if (
+      session.outcome !== "succeeded" ||
+      !(await this.idle(peer, signal, true))
+    ) {
+      return;
+    }
+
+    const result = await this.readSuccessfulTask(
+      task,
+      await connect(session, signal),
+      signal,
+    );
+
+    signal.throwIfAborted();
+    this.state.recoverResult(task, result);
   }
 
   private readSuccessfulTask(

@@ -33,13 +33,19 @@ import {
 } from "../backend";
 import type { opencodeBackendSchema } from "./config";
 import { redactCredentials, secret } from "../../lib/credentials";
-import { crewMessageMetadataKey } from "../../coordination/crew/message-protocol";
+import {
+  crewCompletionMessageID,
+  crewMessageMetadataKey,
+} from "../../coordination/crew/message-protocol";
 import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
 import {
   cronEvaluationSchema,
   cronModelSchema,
 } from "../../automation/cron/advanced";
-import type { NativeMaker } from "../../coordination/fleet/protocol";
+import type {
+  FleetReviewEvidence,
+  NativeMaker,
+} from "../../coordination/fleet/protocol";
 import {
   InputBoundaryFold,
   type InputBoundaryRecord,
@@ -1547,6 +1553,76 @@ export class OpenCodeBackend implements AgentBackend {
     this.lifetime.abort();
 
     return Promise.resolve();
+  }
+
+  public async readCrewCompletion(
+    sessionID: string,
+    originInputID: string,
+    taskID: string,
+    signal: AbortSignal,
+  ): Promise<FleetReviewEvidence | undefined> {
+    if (sessionID !== this.sessionID) {
+      return undefined;
+    }
+
+    const wakeID = crewCompletionMessageID(taskID);
+
+    const wake = await this.client.session.message.get(
+      { sessionID, messageID: wakeID },
+      { signal },
+    );
+
+    const metadata =
+      wake.type === "synthetic"
+        ? wake.metadata?.[crewMessageMetadataKey]
+        : undefined;
+
+    if (
+      wake.id !== wakeID ||
+      wake.type !== "synthetic" ||
+      wake.description !== "Crew task completed" ||
+      typeof metadata !== "object" ||
+      metadata === null ||
+      !("sourceTaskID" in metadata) ||
+      metadata["sourceTaskID"] !== taskID ||
+      boundaryRecord(wake, sessionID).input !== originInputID
+    ) {
+      return undefined;
+    }
+
+    const history = await this.readTranscript(sessionID, wakeID, signal);
+
+    for (const entry of history.entries) {
+      if (entry.input !== originInputID) {
+        continue;
+      }
+
+      const message = await this.client.session.message.get(
+        { sessionID, messageID: entry.id },
+        { signal },
+      );
+
+      if (
+        message.type !== "assistant" ||
+        message.finish !== "stop" ||
+        message.time.completed === undefined ||
+        message.error
+      ) {
+        continue;
+      }
+
+      const maker: NativeMaker = {
+        messageID: message.id,
+        agent: message.agent,
+        provider: message.model.providerID,
+        model: message.model.id,
+        ...(message.model.variant && { variant: message.model.variant }),
+      };
+
+      return { resultText: entry.text, makers: [maker] };
+    }
+
+    return undefined;
   }
 
   public async executionMakers(

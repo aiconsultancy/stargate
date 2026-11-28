@@ -603,6 +603,7 @@ function subspaceAgentsIssues(
 
 /** Bot Framework transport: exact sender IDs, no credential values in config. */
 export const teamsSchema = settingsStruct({
+  followUpTimers: Schema.optional(Schema.Boolean),
   livePresence: Schema.optional(Schema.Boolean),
   incomingImages: Schema.optional(Schema.Boolean),
   attachmentFileHosts: Schema.optional(
@@ -691,10 +692,16 @@ export const teamsSchema = settingsStruct({
       });
     }
 
-    if (value.approvalUsers.length > 0 && value.backend.type !== "opencode") {
+    if (
+      (value.approvalUsers.length > 0 && value.backend.type !== "opencode") ||
+      (value.followUpTimers &&
+        (value.backend.type !== "opencode" || !value.backend.sessionID))
+    ) {
       context.addIssue({
         code: "custom",
-        message: "Teams approvals require OpenCode",
+        message: value.followUpTimers
+          ? "Teams follow-up timers require a pinned OpenCode session"
+          : "Teams approvals require OpenCode",
       });
     }
   }),

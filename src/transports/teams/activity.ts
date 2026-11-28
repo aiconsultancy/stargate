@@ -24,6 +24,9 @@ export const activitySchema = Schema.Struct({
     Schema.isMinCodePoints(1),
     Schema.isMaxCodePoints(512),
   ),
+  replyToId: Schema.optional(
+    Schema.String.check(Schema.isBetweenCodePoints(1, 512)),
+  ),
   channelId: Schema.Literal("msteams"),
   serviceUrl: Schema.String.check(Schema.makeFilter(isAllowedServiceUrl)),
   from: account,

@@ -193,6 +193,13 @@ export interface AgentBackend {
     binding: FleetReviewBinding,
     signal: AbortSignal,
   ): Promise<FleetReviewEvidence | undefined>;
+  /** Read the public answer to the verified crew-completion wake for this assignment. */
+  readCrewCompletion?(
+    sessionID: string,
+    originInputID: string,
+    taskID: string,
+    signal: AbortSignal,
+  ): Promise<FleetReviewEvidence | undefined>;
   /** Reported native makers for this exact submitted input, never config guesses. */
   executionMakers?(
     sessionID: string,

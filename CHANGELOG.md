@@ -13,6 +13,11 @@ private network. Existing HTTPS and loopback origins remain supported.
 
 ### Feature flags
 
+- New off-by-default follow-up flags: the crew plugin's `completionWake`
+  wakes pinned captains on verified crew results, and the fleet plugin's
+  `deferredResults` enables deferred fleet replies. Teams `followUpTimers`
+  and fleet plugin `timers` enable one-shot follow-ups.
+
 - `agentDispatch.decisionOutcomeDms` enables decision-outcome DMs to recording
   captains when Subspace serves the outcome feed. The default is off.
 - `agentDispatch.decisionRelay` optionally gives those DMs a separate Unix

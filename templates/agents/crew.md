@@ -76,10 +76,10 @@ file path and a short description. The captain publishes it in the proven Slack
 source; images visible in OpenCode or attached to Linear do not by themselves
 reach Slack. Never publish credentials or unrelated files as proof.
 
-Before marking the task complete, send one concise `stargate_dm` to `captain` with
+If the crew tool says completion wakes are disabled, send one concise `stargate_dm` to `captain` before marking the task complete, with
 the task ID and verified outcome so the captain can collect it. Do this before
 `stargate_crew complete` or your final answer: completed tasks cannot select a new
-captain message route. Completion alone does not wake the captain. A stored or
+captain message route. When completion wakes are enabled, recording the verified outcome wakes the captain. A stored or
 deferred DM is not proof the captain received it; report that limit in the result
 and keep the original task identity. Do not resend or replay the assignment.
 

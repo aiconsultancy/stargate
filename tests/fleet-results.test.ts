@@ -73,6 +73,18 @@ type Call = { input: string; text: string; context?: PromptSourceContext };
 class Native implements AgentBackend {
   readonly calls: Call[] = [];
   readonly makers = new Map<string, NativeMaker[]>();
+  readonly finishedCrew = new Map<
+    string,
+    { inputID: string; resultText: string; makers: NativeMaker[] }
+  >();
+
+  async readCrewCompletion(sessionID: string, inputID: string, taskID: string) {
+    const result = this.finishedCrew.get(taskID);
+
+    return sessionID === this.sessionID && result?.inputID === inputID
+      ? result
+      : undefined;
+  }
   active: Call | undefined;
   handler: (call: Call) => Promise<string> = async () => "Done";
   pending: {
@@ -418,6 +430,15 @@ async function world(
     account: backend.account,
     permissions: [{ action: "*", resource: "*", effect: "allow" }],
     allowDispatch: true,
+    deferResult(origin, taskID) {
+      const job = store.jobByEvent(origin.botKey, origin.eventId);
+
+      if (job?.fleet?.kind !== "assignment" || job.input !== origin.inputID) {
+        throw new Error("No exact active fleet assignment");
+      }
+
+      store.fleet.deferResult(job.id, taskID);
+    },
     ownership: { lockCommand },
     origin: (source) => fleetOrigin(store, backend.sessionID, source),
     async authorize(caller) {
@@ -431,7 +452,12 @@ async function world(
               job.input,
             ))
           ) {
-            return;
+            return {
+              botKey: job.botKey,
+              eventId: job.eventId,
+              sessionID: backend.sessionID,
+              inputID: job.input,
+            };
           }
         }
       }
@@ -685,6 +711,74 @@ test("fleet results: real authenticated Teams -> IRC dispatch -> captain complet
   });
   expect(
     f.ownerStore.ready(f.teamsGateway.key, Number.MAX_SAFE_INTEGER, 100),
+  ).toHaveLength(0);
+  expect(f.captain.calls).toHaveLength(1);
+});
+
+test("deferred crew work returns only the final outcome, to its original Teams activity", async () => {
+  const f = await world();
+  const taskID = "task_00000000-0000-4000-8000-000000000001";
+  f.captain.handler = async () => {
+    expect(
+      await f.captain.tool(
+        f.receiver,
+        join(f.directory, "captain.sock"),
+        "defer-result",
+        { taskID },
+      ),
+    ).toMatchObject({ state: "deferred", taskID });
+
+    return "The crew is working.";
+  };
+
+  await f.begin();
+  await f.processNext(f.targetIrc.gateway, f.captainStore);
+  await f.targetResults.poll(signal());
+  await f.ownerResults.poll(signal());
+  expect(
+    f.ownerStore.ready(f.teamsGateway.key, Number.MAX_SAFE_INTEGER, 10),
+  ).toHaveLength(0);
+
+  f.captain.finishedCrew.set(taskID, {
+    inputID: "captain-input-1",
+    resultText: "The verified preview is published.",
+    makers: [
+      {
+        messageID: "captain-final",
+        agent: "captain",
+        provider: "native-provider",
+        model: "actual-model",
+      },
+    ],
+  });
+
+  const recovery = new FleetResults({
+    control: f.receiver,
+    store: f.captainStore,
+    botKey: f.targetIrc.registration.key,
+    sessionID: f.captain.sessionID,
+    account: f.captain.account,
+    backend: f.captain,
+  });
+
+  await recovery.poll(signal());
+  await f.ownerResults.poll(signal());
+  const job = await f.processNext(f.teamsGateway, f.ownerStore);
+  expect(job.fleet).toMatchObject({
+    kind: "result",
+    completion: {
+      text: "The verified preview is published.",
+      outcome: "completed",
+      makers: [{ messageID: "captain-final" }],
+    },
+  });
+  expect(f.sent.at(-1)).toMatchObject({
+    conversation: f.original.conversation.id,
+    activity: { replyToId: f.original.id },
+  });
+  await f.ownerResults.poll(signal());
+  expect(
+    f.ownerStore.ready(f.teamsGateway.key, Number.MAX_SAFE_INTEGER, 10),
   ).toHaveLength(0);
   expect(f.captain.calls).toHaveLength(1);
 });
