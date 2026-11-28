@@ -1,10 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionSyntheticInput } from "@opencode/client/promise";
-import {
-  crewCompletionMessageID,
-  crewMessageMetadataKey,
-} from "../message-protocol";
+import { crewCompletionInput } from "../message-protocol";
 import { redactCredentials } from "../../../lib/credentials";
 import { CrewError, type CrewID, type CrewTask } from "../pending";
 import type { MemberActivityStore } from "../reporting/member-activity";
@@ -946,6 +943,14 @@ export class CrewCompletionWakes {
       .run(task.id, task.crewID, task.originCaptainID, task.originInputID);
   }
 
+  public enabled(pin: string): boolean {
+    return (
+      this.db
+        .query("SELECT 1 FROM crew_completion_wake_pins WHERE session=?")
+        .get(pin) !== null
+    );
+  }
+
   public async deliver(
     pin: string,
     sessions: {
@@ -964,27 +969,7 @@ export class CrewCompletionWakes {
 
     for (const wake of pending) {
       signal.throwIfAborted();
-      // Native OpenCode inbox admission deduplicates by session, type and ID.
-      const id = crewCompletionMessageID(wake.id);
-      await sessions.synthetic(
-        {
-          sessionID: pin,
-          id,
-          text: `Stargate recorded a verified result for ${wake.crewID}'s task ${wake.id}. Read the result with stargate_crew status. Continue the existing request without repeating the assignment.`,
-          description: "Crew task completed",
-          metadata: {
-            [crewMessageMetadataKey]: {
-              sourceTaskID: wake.id,
-              originCaptainID: pin,
-              ...(wake.originInputID && { originInputID: wake.originInputID }),
-              messageID: id,
-            },
-          },
-          delivery: "queue",
-          resume: true,
-        },
-        { signal },
-      );
+      await sessions.synthetic(crewCompletionInput(pin, wake), { signal });
       this.db
         .query("UPDATE crew_completion_wakes SET delivered=1 WHERE id=?")
         .run(wake.id);

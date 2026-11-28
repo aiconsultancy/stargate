@@ -328,6 +328,7 @@ export interface CrewAgents {
 
 export type CrewResult = {
   status: string;
+  completionWakeEnabled?: boolean;
   diagnostic?: string;
   peers?: Peer[];
   task?: CrewTask;
@@ -1723,6 +1724,9 @@ export class CrewEngine {
           status: task.status,
           task,
           notices: this.state.notices(task.id, 0),
+          completionWakeEnabled: this.state.completionWakes.enabled(
+            task.originCaptainID,
+          ),
         };
       }
 
