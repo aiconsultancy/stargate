@@ -379,6 +379,57 @@ test("the fleet authoriser checks every linked source key and names each operati
   expect(tools).toEqual(["fleet_status", "fleet_defer_result"]);
 });
 
+test("the fleet authoriser checks every running job on a key, not just the first", async () => {
+  // A Teams key can run a chat job and a follow-up timer job at once.
+  const teamsChat: Job = {
+    ...runningJob,
+    eventId: "teams-event",
+    botKey: "teams-key",
+    input: "msg_teams_chat_input",
+  };
+
+  const timerJob: Job = {
+    ...runningJob,
+    id: 2,
+    eventId: "teams-timer:1",
+    botKey: "teams-key",
+    input: "msg_timer_input",
+    fleet: { kind: "timer", originEvent: "teams-event" },
+  };
+
+  const checked: unknown[] = [];
+
+  const authorize = fleetAuthorizer(
+    {
+      permissionCandidates: (key) =>
+        key === "teams-key" ? [teamsChat, timerJob] : [],
+    },
+    {
+      async toolBelongsToInput(...args) {
+        checked.push(args[2]);
+
+        return args[2] === "msg_timer_input";
+      },
+    },
+    "ses_owner",
+    ["teams-key"],
+  );
+
+  const timer: FleetRequest = {
+    operation: "timer",
+    caller: caller(),
+    input: { op: "status" },
+  };
+
+  await expect(authorize(timer.caller, signal(), timer)).resolves.toEqual({
+    botKey: "teams-key",
+    eventId: "teams-timer:1",
+    sessionID: "ses_owner",
+    inputID: "msg_timer_input",
+  });
+  expect(checked).toEqual(["msg_teams_chat_input", "msg_timer_input"]);
+});
+
 test("the fleet authoriser refuses a turn without a running chat job with an actionable reason", async () => {
   const refusals = [
     fleetAuthorizer(
