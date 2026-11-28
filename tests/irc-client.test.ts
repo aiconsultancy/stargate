@@ -534,6 +534,39 @@ test("irc client: direct messages go only to a nick proven to hold the account",
   await until(() => client.boundNick("carol") === undefined, 2000, "logout");
 });
 
+test("irc client: verifiedNick rejects with IrcUnavailable while unregistered, also across a disconnect", async () => {
+  const fake = server();
+  const { client, controller, running } = start(fake);
+  await client.waitReady(2000);
+  await until(() => client.inChannel("#galactica"), 2000, "join");
+
+  // Peer DMs read registered when a lookup rejects: pin what they see.
+  const rejected = (lookup: Promise<string>) =>
+    lookup.then(
+      () => {
+        throw new Error("Expected the lookup to reject");
+      },
+      (error: unknown) => ({ error, registered: client.registered }),
+    );
+
+  fake.mute("galactica");
+  const pending = rejected(client.verifiedNick("alice"));
+  await until(
+    () => lineOf(fake.received("galactica"), "WHOIS").length === 1,
+    2000,
+    "WHOIS written",
+  );
+  fake.drop("galactica");
+  const dropped = await pending;
+  expect(dropped.error).toBeInstanceOf(IrcUnavailable);
+  expect(dropped.registered).toBe(false);
+  controller.abort();
+  await running;
+  const stopped = await rejected(client.verifiedNick("alice"));
+  expect(stopped.error).toBeInstanceOf(IrcUnavailable);
+  expect(stopped.registered).toBe(false);
+});
+
 test("irc delivery: a queued direct line is dropped if its recipient quits first", async () => {
   const fake = server();
   const received: IrcMessage[] = [];

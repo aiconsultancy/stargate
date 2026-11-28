@@ -42,6 +42,11 @@ import {
 } from "../src/coordination/fleet/protocol";
 import { sendFleetAssignment } from "../src/coordination/fleet/fleet-irc";
 import {
+  fleetAuthorizer,
+  fleetChatTurnRequired,
+} from "../src/coordination/fleet/results";
+import type { Job } from "../src/gateway/store-types";
+import {
   authenticateActivityRequest,
   BotFrameworkKeyStore,
 } from "../src/transports/teams/botframework-auth";
@@ -202,6 +207,303 @@ test("peer DM IPC requires an exact captain target, native pin and separate gran
       ),
     ).rejects.toThrow("policy refuses");
     expect(calls).toEqual([target.account]);
+  } finally {
+    await runtime.close();
+  }
+});
+
+const peerRequest: FleetRequest = {
+  operation: "peer-message",
+  caller: caller(),
+  input: {
+    op: "send",
+    to: target.id,
+    text: "Hello",
+    via: "ship",
+    delivery: "steer",
+  },
+};
+
+const runningJob: Job = {
+  id: 1,
+  eventId: "irc-event",
+  botKey: "irc-key",
+  conversation: "#owner",
+  channel: "#owner",
+  thread: "irc-event",
+  user: "jac",
+  text: "Please tell the other captain",
+  status: "running",
+  response: null,
+  sent: 0,
+  attempts: 0,
+  input: "msg_chat_input",
+};
+
+test("the fleet authoriser binds a peer DM to a running chat job's native input", async () => {
+  const checks: unknown[] = [];
+  let normalise: ((raw: unknown) => unknown) | undefined;
+
+  const authorize = fleetAuthorizer(
+    { permissionCandidates: (key) => (key === "irc-key" ? [runningJob] : []) },
+    {
+      async toolBelongsToInput(...args) {
+        checks.push(args);
+        normalise = args[4]?.normaliseInput;
+
+        return true;
+      },
+    },
+    "ses_owner",
+    ["teams-key", "irc-key"],
+  );
+
+  await expect(
+    authorize(peerRequest.caller, signal(), peerRequest),
+  ).resolves.toEqual({
+    botKey: "irc-key",
+    eventId: "irc-event",
+    sessionID: "ses_owner",
+    inputID: "msg_chat_input",
+  });
+  expect(checks).toHaveLength(1);
+  expect(checks[0]).toMatchObject([
+    "ses_owner",
+    "msg_native_assistant",
+    "msg_chat_input",
+    expect.anything(),
+    {
+      agent: "native-agent",
+      id: "tool-call",
+      tool: "stargate_dm",
+      input: peerRequest.input,
+      normaliseInput: expect.any(Function),
+    },
+  ]);
+
+  // The native call omits the defaulted delivery; the decoder restores it and
+  // Refuses excess properties, as the peer DM tool does.
+  const raw = { op: "send", to: target.id, text: "Hello", via: "ship" };
+  expect(normalise?.(raw)).toEqual(peerRequest.input);
+  expect(() => normalise?.({ ...raw, project: "stargate" })).toThrow();
+});
+
+test("the fleet authoriser checks every linked source key and names each operation's native tool", async () => {
+  // A Teams follow-up timer turn runs as its own job on the linked Teams key.
+  const timerJob: Job = {
+    ...runningJob,
+    id: 2,
+    eventId: "teams-timer:1",
+    botKey: "teams-key",
+    input: "msg_timer_input",
+    fleet: { kind: "timer", originEvent: "teams-event" },
+  };
+
+  const checks: unknown[][] = [];
+
+  const authorize = fleetAuthorizer(
+    {
+      permissionCandidates: (key) =>
+        key === "irc-key"
+          ? [runningJob]
+          : key === "teams-key"
+            ? [timerJob]
+            : [],
+    },
+    {
+      async toolBelongsToInput(...args) {
+        checks.push(args);
+
+        return args[2] === "msg_timer_input";
+      },
+    },
+    "ses_owner",
+    ["irc-key", "teams-key"],
+  );
+
+  const timer: FleetRequest = {
+    operation: "timer",
+    caller: caller(),
+    input: { op: "status" },
+  };
+
+  await expect(authorize(timer.caller, signal(), timer)).resolves.toEqual({
+    botKey: "teams-key",
+    eventId: "teams-timer:1",
+    sessionID: "ses_owner",
+    inputID: "msg_timer_input",
+  });
+  // The IRC chat job is asked first and does not own the call.
+  expect(checks.map((args) => args[2])).toEqual([
+    "msg_chat_input",
+    "msg_timer_input",
+  ]);
+
+  for (const args of checks) {
+    expect(args[4]).toEqual({
+      agent: "native-agent",
+      id: "tool-call",
+      tool: "stargate_timer",
+      input: { op: "status" },
+    });
+  }
+
+  const tools: unknown[] = [];
+
+  const named = fleetAuthorizer(
+    { permissionCandidates: () => [runningJob] },
+    {
+      async toolBelongsToInput(...args) {
+        tools.push(args[4]?.tool);
+
+        return true;
+      },
+    },
+    "ses_owner",
+    ["irc-key"],
+  );
+
+  const requests: FleetRequest[] = [
+    { operation: "status", caller: caller(), input: {} },
+    {
+      operation: "defer-result",
+      caller: caller(),
+      input: { taskID: "task_0123abcd-0123-4567-89ab-0123456789ab" },
+    },
+  ];
+
+  for (const request of requests) {
+    await named(request.caller, signal(), request);
+  }
+
+  expect(tools).toEqual(["fleet_status", "fleet_defer_result"]);
+});
+
+test("the fleet authoriser checks every running job on a key, not just the first", async () => {
+  // A Teams key can run a chat job and a follow-up timer job at once.
+  const teamsChat: Job = {
+    ...runningJob,
+    eventId: "teams-event",
+    botKey: "teams-key",
+    input: "msg_teams_chat_input",
+  };
+
+  const timerJob: Job = {
+    ...runningJob,
+    id: 2,
+    eventId: "teams-timer:1",
+    botKey: "teams-key",
+    input: "msg_timer_input",
+    fleet: { kind: "timer", originEvent: "teams-event" },
+  };
+
+  const checked: unknown[] = [];
+
+  const authorize = fleetAuthorizer(
+    {
+      permissionCandidates: (key) =>
+        key === "teams-key" ? [teamsChat, timerJob] : [],
+    },
+    {
+      async toolBelongsToInput(...args) {
+        checked.push(args[2]);
+
+        return args[2] === "msg_timer_input";
+      },
+    },
+    "ses_owner",
+    ["teams-key"],
+  );
+
+  const timer: FleetRequest = {
+    operation: "timer",
+    caller: caller(),
+    input: { op: "status" },
+  };
+
+  await expect(authorize(timer.caller, signal(), timer)).resolves.toEqual({
+    botKey: "teams-key",
+    eventId: "teams-timer:1",
+    sessionID: "ses_owner",
+    inputID: "msg_timer_input",
+  });
+  expect(checked).toEqual(["msg_teams_chat_input", "msg_timer_input"]);
+});
+
+test("the fleet authoriser refuses a turn without a running chat job with an actionable reason", async () => {
+  const refusals = [
+    fleetAuthorizer(
+      { permissionCandidates: () => [] },
+      { toolBelongsToInput: async () => true },
+      "ses_owner",
+      ["irc-key"],
+    ),
+    fleetAuthorizer(
+      { permissionCandidates: () => [runningJob] },
+      { toolBelongsToInput: async () => false },
+      "ses_owner",
+      ["irc-key"],
+    ),
+  ];
+
+  for (const authorize of refusals) {
+    const failure = await authorize(
+      peerRequest.caller,
+      signal(),
+      peerRequest,
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(FleetError);
+    expect(failure).toHaveProperty("message", fleetChatTurnRequired);
+  }
+
+  expect(fleetChatTurnRequired).not.toMatch(/ses_|msg_|job|raw details/i);
+  // Only IRC and linked Teams jobs are bound: never name Slack as eligible.
+  expect(fleetChatTurnRequired).not.toMatch(/slack/i);
+  expect(fleetChatTurnRequired).toContain(
+    "runs for an IRC or linked Teams conversation",
+  );
+  // The other turns the gateway runs there, and the follow-up it does not.
+  expect(fleetChatTurnRequired).toContain("a fleet result to report");
+  expect(fleetChatTurnRequired).toContain("a Teams follow-up timer");
+  expect(fleetChatTurnRequired).toContain("crew completion");
+});
+
+test("a peer DM from a turn woken without a chat message returns the reason through fleet control", async () => {
+  const runtime = await fixture();
+  const calls: string[] = [];
+
+  try {
+    const { socketPath } = await runtime.open("ses_owner", {
+      config: {
+        socketPath: join(runtime.directory, "ses_owner.sock"),
+        statePath: runtime.statePath,
+        targets: [{ ...target, role: "captain" }],
+      },
+      permissions: [
+        { action: "fleet_peer_message", resource: target.id, effect: "allow" },
+      ],
+      authorize: fleetAuthorizer(
+        { permissionCandidates: () => [] },
+        { toolBelongsToInput: async () => true },
+        "ses_owner",
+        ["irc-key"],
+      ),
+      peerMessage: async (peer) => {
+        calls.push(peer.account);
+
+        return peer.channel;
+      },
+    });
+
+    const failure = await fleetRequest(socketPath, peerRequest, signal()).catch(
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(FleetError);
+    expect(failure).toHaveProperty("message", fleetChatTurnRequired);
+    expect(String(failure)).not.toContain("raw details withheld");
+    expect(calls).toEqual([]);
   } finally {
     await runtime.close();
   }

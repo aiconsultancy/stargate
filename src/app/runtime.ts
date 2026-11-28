@@ -59,12 +59,12 @@ import {
   FleetControl,
   type FleetControlOptions,
 } from "../coordination/fleet/control";
-import { fleetRequestAction } from "../coordination/fleet/permissions";
+import { FleetError } from "../coordination/fleet/protocol";
 import {
-  FleetError,
-  peerMessageInputSchema,
-} from "../coordination/fleet/protocol";
-import { FleetResults, fleetOrigin } from "../coordination/fleet/results";
+  FleetResults,
+  fleetAuthorizer,
+  fleetOrigin,
+} from "../coordination/fleet/results";
 import {
   sendFleetAssignment,
   sendFleetPeerMessage,
@@ -126,60 +126,6 @@ import {
   type UpdateSnapshot,
   buildUpdateSnapshot,
 } from "../automation/maintenance/update-notice";
-
-const normalisePeerInput = Schema.decodeUnknownSync(peerMessageInputSchema, {
-  onExcessProperty: "error",
-});
-
-/** Bind fleet calls to an executing native input and matching tool payload. */
-function fleetAuthorizer(
-  store: Pick<Store, "permissionCandidates">,
-  backend: Pick<AgentBackend, "toolBelongsToInput">,
-  pin: string,
-  keys: readonly string[],
-): FleetControlOptions["authorize"] {
-  return async (caller, signal, request) => {
-    const { action } = fleetRequestAction(request);
-    const peerMessage = request.operation === "peer-message";
-
-    const toolAliases: Partial<Record<typeof request.operation, string>> = {
-      "peer-message": "stargate_dm",
-      timer: "stargate_timer",
-    };
-
-    const expected = {
-      agent: caller.agent,
-      id: caller.id,
-      tool: toolAliases[request.operation] ?? action,
-      input: request.input,
-      ...(peerMessage && { normaliseInput: normalisePeerInput }),
-    };
-
-    for (const key of keys) {
-      for (const job of store.permissionCandidates(key)) {
-        if (
-          job.input &&
-          (await backend.toolBelongsToInput?.(
-            pin,
-            caller.messageID,
-            job.input,
-            signal,
-            expected,
-          ))
-        ) {
-          return {
-            botKey: job.botKey,
-            eventId: job.eventId,
-            sessionID: pin,
-            inputID: job.input,
-          };
-        }
-      }
-    }
-
-    throw new Error("Fleet caller is not an active native input");
-  };
-}
 
 function teamsSharingPin(
   registrations: readonly TeamsRegistration[],

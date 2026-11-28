@@ -223,7 +223,6 @@
     "private:src/runtime.ts -> src/cron-ui.ts",
     "private:src/runtime.ts -> src/dispatch/irc.ts",
     "private:src/runtime.ts -> src/fleet/control.ts",
-    "private:src/runtime.ts -> src/fleet/permissions.ts",
     "private:src/runtime.ts -> src/fleet/results.ts",
     "private:src/runtime.ts -> src/interactions.ts",
     "private:src/runtime.ts -> src/nightly/crews.ts",
@@ -237,7 +236,6 @@
     "private:src/slack.ts -> src/thread-context.ts",
     "private:src/store.ts -> src/background-questions.ts",
     "private:src/gateway/irc-admission.ts -> src/irc/burst.ts",
-    "rule-three:extract:src/fleet/permissions.ts",
     "shared-dependency:src/mentions.ts -> src/settings-schema.ts",
     "shared-dependency:src/reactions.ts -> src/settings-schema.ts",
     "shared-dependency:src/slack-format.ts -> src/markdown-chunks.ts"

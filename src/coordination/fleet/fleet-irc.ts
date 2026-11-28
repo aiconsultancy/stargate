@@ -80,6 +80,14 @@ export async function sendFleetAssignment(
   await client.sendBatch(channel, lines, {}, guard);
 }
 
+/** Shown when WHOIS cannot prove the recipient captain holds its account now. */
+export const peerRecipientUnconfirmed =
+  "IRC could not confirm that the recipient captain is online under its configured account. Try again later or ask in your ship channel.";
+
+/** Shown when this gateway's own IRC connection is down: nothing about the peer. */
+export const peerIrcDisconnected =
+  "This gateway is not connected to IRC right now. Try again later.";
+
 /** Route through the caller's own gateway, using a verified current nickname. */
 export async function sendFleetPeerMessage(
   configuration: () => IrcConfig,
@@ -88,6 +96,7 @@ export async function sendFleetPeerMessage(
     inChannel(channel: string): boolean;
     verifiedNick(account: string): Promise<string>;
     recipientGuard(account: string, nick: string): () => boolean;
+    readonly registered: boolean;
   },
   target: FleetTarget,
   input: PeerMessageInput,
@@ -129,7 +138,21 @@ export async function sendFleetPeerMessage(
     );
   }
 
-  const nick = await client.verifiedNick(target.account);
+  const nick = await client.verifiedNick(target.account).catch(() => {
+    signal.throwIfAborted();
+
+    /*
+     * As in agent dispatch, a failure of this connection says nothing about the
+     * recipient. verifiedNick rejects with IrcUnavailable only while this client
+     * is unregistered: a new lookup is refused then, and a disconnect clears
+     * registration before it rejects pending lookups. So reading registered
+     * tells the two cases apart without importing the transport's error class
+     * into this slice.
+     */
+    throw new FleetError(
+      client.registered ? peerRecipientUnconfirmed : peerIrcDisconnected,
+    );
+  });
 
   if (/[@\s\p{Cc}]/u.test(nick)) {
     throw new FleetError(

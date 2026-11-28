@@ -4,8 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Result, Schema } from "effect";
 import { effectiveIrcConfig, ircSchema } from "../src/config";
-import { sendFleetPeerMessage } from "../src/coordination/fleet/fleet-irc";
-import { peerMessageInputSchema } from "../src/coordination/fleet/protocol";
+import {
+  peerIrcDisconnected,
+  peerRecipientUnconfirmed,
+  sendFleetPeerMessage,
+} from "../src/coordination/fleet/fleet-irc";
+import { IrcUnavailable } from "../src/transports/irc/client";
+import {
+  FleetError,
+  peerMessageInputSchema,
+} from "../src/coordination/fleet/protocol";
 import { fleetInstructions } from "../src/coordination/fleet/fleet-policy";
 import {
   fold,
@@ -76,6 +84,32 @@ function input(account = "discovery") {
   };
 }
 
+/** A registered IRC client double for peer DMs; tests override what they probe. */
+function peerClient(
+  config: ReturnType<typeof effective>,
+  overrides: Partial<Parameters<typeof sendFleetPeerMessage>[1]> = {},
+): Parameters<typeof sendFleetPeerMessage>[1] {
+  return {
+    fold,
+    inChannel: (channel: string) => config.channels.includes(channel),
+    verifiedNick: async () => {
+      throw new Error("Unexpected WHOIS");
+    },
+    recipientGuard: () => () => true,
+    registered: true,
+    waitReady: async () => {},
+    budget: () => 300,
+    multiline: undefined,
+    privmsg: async () => {
+      throw new Error("Unexpected message");
+    },
+    sendBatch: async () => {
+      throw new Error("Expected one message");
+    },
+    ...overrides,
+  };
+}
+
 test("peer DM uses the verified current nick and sends only to the selected room", async () => {
   const config = effective(input());
 
@@ -89,31 +123,17 @@ test("peer DM uses the verified current nick and sends only to the selected room
 
   const sent: [string, string][] = [];
 
-  const client = {
-    fold,
-    inChannel: (channel: string) => config.channels.includes(channel),
+  const client = peerClient(config, {
     verifiedNick: async (account: string) => {
       expect(account).toBe("phoenix");
 
       return "phoenix-current";
     },
-    recipientGuard: () => () => true,
-    waitReady: async () => {},
-    budget: () => 300,
-    multiline: undefined,
-    privmsg: async (
-      channel: string,
-      text: string,
-      _tags?: Record<string, string>,
-      guard?: () => boolean,
-    ) => {
+    privmsg: async (channel, text, _tags, guard) => {
       expect(guard?.()).toBe(true);
       sent.push([channel, text]);
     },
-    sendBatch: async () => {
-      throw new Error("Expected one message");
-    },
-  };
+  });
 
   for (const via of ["ship", "command"]) {
     const message = Schema.decodeUnknownSync(peerMessageInputSchema)({
@@ -193,6 +213,93 @@ test("peer DM uses the verified current nick and sends only to the selected room
   ).rejects.toThrow("no longer allowed");
 
   expect(sent).toHaveLength(2);
+});
+
+test("a peer DM says whether the recipient or this gateway's IRC connection is unavailable", async () => {
+  const config = effective(input());
+
+  const target = config.fleetControl?.targets.find(
+    ({ id }) => id === "phoenix",
+  );
+
+  if (!target) {
+    throw new Error("Missing test target");
+  }
+
+  const sent: string[] = [];
+
+  const client = peerClient(config, {
+    privmsg: async (_channel, text) => {
+      sent.push(text);
+    },
+  });
+
+  const message = Schema.decodeUnknownSync(peerMessageInputSchema)({
+    op: "send",
+    to: "phoenix",
+    text: "Hello",
+    via: "ship",
+  });
+
+  const rows = [
+    {
+      registered: true,
+      error: new Error("IRC recipient is not online under that account"),
+      text: peerRecipientUnconfirmed,
+    },
+    {
+      registered: true,
+      error: new Error("IRC account lookup timed out"),
+      text: peerRecipientUnconfirmed,
+    },
+    // The client clears registration before it rejects with IrcUnavailable.
+    {
+      registered: false,
+      error: new IrcUnavailable(),
+      text: peerIrcDisconnected,
+    },
+  ];
+
+  for (const row of rows) {
+    const failure = await sendFleetPeerMessage(
+      () => config,
+      {
+        ...client,
+        registered: row.registered,
+        verifiedNick: async (): Promise<string> => {
+          throw row.error;
+        },
+      },
+      target,
+      message,
+      () => true,
+      AbortSignal.timeout(1000),
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(FleetError);
+    expect(failure).toHaveProperty("message", row.text);
+  }
+
+  const cancelled = new AbortController();
+  cancelled.abort();
+
+  const aborted = await sendFleetPeerMessage(
+    () => config,
+    {
+      ...client,
+      verifiedNick: async (): Promise<string> => {
+        throw new Error("IRC account lookup timed out");
+      },
+    },
+    target,
+    message,
+    () => true,
+    cancelled.signal,
+  ).catch((error: unknown) => error);
+
+  // A gone caller gets its own abort reason, not a WHOIS or peer-DM refusal.
+  expect(aborted).toBe(cancelled.signal.reason);
+  expect(sent).toEqual([]);
 });
 
 test("a peer DM wakes only its explicitly addressed captain, even when the body names another", () => {
