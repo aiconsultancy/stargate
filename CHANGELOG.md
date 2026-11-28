@@ -11,12 +11,12 @@ mockups from a fleet's preview service. Standalone Stargate leaves it off.
 It accepts a dedicated HTTP origin for fleets that serve previews over a
 private network. Existing HTTPS and loopback origins remain supported.
 
-Fleet tools called in a turn that answers no IRC or linked Teams chat request,
-such as one woken by a crew DM, now say so and suggest a workaround, instead
-of "Fleet operation unavailable; raw details withheld." A
-cross-ship `stargate_dm` also says when IRC cannot confirm that the recipient
-captain is online, or when this gateway is not connected to IRC. See
-[fleet tools](docs/fleet-tools.md).
+Fleet tools called in a turn the gateway is not running for an IRC or linked
+Teams conversation, such as one woken by a crew DM or crew completion, now say
+so and suggest a workaround, instead of "Fleet operation unavailable; raw
+details withheld." A cross-ship `stargate_dm` also says when IRC cannot
+confirm that the recipient captain is online, or when this gateway is not
+connected to IRC. See [fleet tools](docs/fleet-tools.md).
 
 ### Feature flags
 
