@@ -18,6 +18,35 @@ export function taskEnvelopePayload(text: string | undefined) {
   return prefix === undefined ? undefined : line.slice(prefix.length);
 }
 
+export function crewCompletionMessageID(taskID: string) {
+  return `msg_${createHash("sha256").update(`crew-completion\0${taskID}`).digest("hex")}`;
+}
+
+/** Native OpenCode deduplicates synthetic admission by session, type and ID. */
+export function crewCompletionInput(
+  pin: string,
+  wake: { id: string; crewID: string; originInputID: string | null },
+) {
+  const id = crewCompletionMessageID(wake.id);
+
+  return {
+    sessionID: pin,
+    id,
+    text: `Stargate recorded a verified result for ${wake.crewID}'s task ${wake.id}. Read the result with stargate_crew status. Continue the existing request without repeating the assignment.`,
+    description: "Crew task completed",
+    metadata: {
+      [crewMessageMetadataKey]: {
+        sourceTaskID: wake.id,
+        originCaptainID: pin,
+        ...(wake.originInputID && { originInputID: wake.originInputID }),
+        messageID: id,
+      },
+    },
+    delivery: "queue" as const,
+    resume: true,
+  };
+}
+
 type TaskBinding = {
   id: string;
   inputID: string;

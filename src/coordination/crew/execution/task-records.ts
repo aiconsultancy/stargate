@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
+import type { SessionSyntheticInput } from "@opencode/client/promise";
+import { crewCompletionInput } from "../message-protocol";
 import { redactCredentials } from "../../../lib/credentials";
 import { CrewError, type CrewID, type CrewTask } from "../pending";
 import type { MemberActivityStore } from "../reporting/member-activity";
@@ -93,6 +95,7 @@ export class CrewTaskRecords {
     private readonly path: string,
     private readonly reporting: ReportingStore,
     private readonly activity: MemberActivityStore,
+    private readonly wakeCompleted?: (task: CrewTask) => void,
   ) {}
 
   public peer(crewID: CrewID): Peer | null {
@@ -815,6 +818,7 @@ export class CrewTaskRecords {
           .run(result, id);
         this.reporting.record(task, "result", result);
         this.activity.phase({ ...task, status: "completed" }, "completed");
+        this.wakeCompleted?.(task);
       })
       .immediate();
   }
@@ -847,6 +851,7 @@ export class CrewTaskRecords {
         if (changed.changes) {
           this.reporting.record(task, "result", result);
           this.activity.phase(task, "completed");
+          this.wakeCompleted?.(task);
         }
 
         return task;
@@ -896,5 +901,78 @@ export class CrewTaskRecords {
         "UPDATE tasks SET notifying=notifying-1 WHERE id=? AND notifying>0",
       )
       .run(taskID);
+  }
+}
+
+type Wake = Pick<
+  CrewTask,
+  "id" | "crewID" | "originCaptainID" | "originInputID"
+>;
+
+/** Written in the task completion transaction; old completions are not replayed. */
+export class CrewCompletionWakes {
+  public constructor(private readonly db: Database) {
+    db.run(`CREATE TABLE IF NOT EXISTS crew_completion_wake_pins (
+      session TEXT PRIMARY KEY
+    );
+    CREATE TABLE IF NOT EXISTS crew_completion_wakes (
+      id TEXT PRIMARY KEY, crewID TEXT NOT NULL, originCaptainID TEXT NOT NULL,
+      originInputID TEXT, delivered INTEGER NOT NULL DEFAULT 0
+    )`);
+  }
+
+  /** The captain location owns this policy, even when a worker writes the result. */
+  public configure(pin: string, enabled: boolean) {
+    if (enabled) {
+      this.db
+        .query("INSERT OR IGNORE INTO crew_completion_wake_pins VALUES (?)")
+        .run(pin);
+    } else {
+      this.db
+        .query("DELETE FROM crew_completion_wake_pins WHERE session=?")
+        .run(pin);
+    }
+  }
+
+  public record(task: Wake) {
+    this.db
+      .query(
+        `INSERT OR IGNORE INTO crew_completion_wakes (id,crewID,originCaptainID,originInputID)
+        SELECT ?1,?2,?3,?4 WHERE EXISTS (SELECT 1 FROM crew_completion_wake_pins WHERE session=?3)`,
+      )
+      .run(task.id, task.crewID, task.originCaptainID, task.originInputID);
+  }
+
+  public enabled(pin: string): boolean {
+    return (
+      this.db
+        .query("SELECT 1 FROM crew_completion_wake_pins WHERE session=?")
+        .get(pin) !== null
+    );
+  }
+
+  public async deliver(
+    pin: string,
+    sessions: {
+      synthetic(
+        input: SessionSyntheticInput,
+        request?: { signal: AbortSignal },
+      ): Promise<unknown>;
+    },
+    signal: AbortSignal,
+  ) {
+    const pending = this.db
+      .query<Wake, [string]>(
+        "SELECT id,crewID,originCaptainID,originInputID FROM crew_completion_wakes WHERE originCaptainID=? AND delivered=0 ORDER BY rowid LIMIT 16",
+      )
+      .all(pin);
+
+    for (const wake of pending) {
+      signal.throwIfAborted();
+      await sessions.synthetic(crewCompletionInput(pin, wake), { signal });
+      this.db
+        .query("UPDATE crew_completion_wakes SET delivered=1 WHERE id=?")
+        .run(wake.id);
+    }
   }
 }

@@ -21,6 +21,7 @@ import { fleetRequest } from "../../../src/coordination/fleet/client";
 import {
   callerSchema,
   dispatchInputSchema,
+  deferResultInputSchema,
   FleetError,
   peerDestinationSchema,
   peerMessageInputSchema,
@@ -29,6 +30,7 @@ import {
   reviewInputBranches,
   reviewInputSchema,
   statusInputSchema,
+  timerInputSchema,
   verifyInputSchema,
 } from "../../../src/coordination/fleet/protocol";
 
@@ -38,6 +40,8 @@ const optionsSchema = settingsStruct({
   ),
   reviews: Schema.Boolean.pipe(settingsDefault(false)),
   peerMessages: Schema.Boolean.pipe(settingsDefault(false)),
+  timers: Schema.Boolean.pipe(settingsDefault(false)),
+  deferredResults: Schema.Boolean.pipe(settingsDefault(false)),
 });
 
 /** Keep native validation and the original object/union tool presentations. */
@@ -90,6 +94,7 @@ function isPeerInput(input: unknown): boolean {
 
 function peerDmInput(input: Info["input"]) {
   const standard = "~standard" in input ? input["~standard"] : undefined;
+
   if (
     typeof standard !== "object" ||
     standard === null ||
@@ -101,9 +106,11 @@ function peerDmInput(input: Info["input"]) {
   }
 
   const local = standard as StandardSchemaV1.Props & StandardJSONSchemaV1.Props;
+
   const validatePeer = Schema.decodeUnknownResult(peerMessageInputSchema, {
     onExcessProperty: "error",
   });
+
   const project = (options: { target: StandardJSONSchemaV1.Target }) => {
     const json = local.jsonSchema.input(options);
 
@@ -224,6 +231,38 @@ export async function installFleetTools(ctx: ToolHost) {
           };
         });
       }
+    }
+
+    if (options.deferredResults) {
+      editor.add({
+        name: "fleet_defer_result",
+        description:
+          "In the current fleet assignment, bind the final result to a crew task you just started and will continue when its completion wakes you. Call before ending your turn with progress. After the wake, verify the retained crew result, finish your work and give a final answer with the outcome. Stargate returns it to the original request.",
+        input: fleetToolInput(deferResultInputSchema),
+        options: { codemode: false, permission: "fleet_defer_result" },
+        execute: (input, context) =>
+          guard(context, "fleet_defer_result", "crew", {
+            operation: "defer-result",
+            input,
+            caller: caller(context),
+          }),
+      });
+    }
+
+    if (options.timers) {
+      editor.add({
+        name: "stargate_timer",
+        description:
+          "Set, cancel or inspect one durable follow-up in the current Teams conversation or channel thread. Use op=set when delegated work is still underway. The default is 30 minutes and admitted human replies in that thread reset it. Use a short reminder with the existing task or dispatch ID. On wake report the result, or give one concise progress update and set another timer if needed. Cancel after receiving the final result. Never repeat the assignment.",
+        input: fleetToolInput(timerInputSchema),
+        options: { codemode: false, permission: "stargate_timer" },
+        execute: (input, context) =>
+          guard(context, "stargate_timer", "teams", {
+            operation: "timer",
+            input,
+            caller: caller(context),
+          }),
+      });
     }
 
     if (options.reviews) {

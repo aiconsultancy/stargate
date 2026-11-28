@@ -22,6 +22,7 @@ import { CrewDrainRecords } from "./drain-records";
 import { ReportingStore } from "../reporting/reporting";
 import {
   type AbandonExpected,
+  CrewCompletionWakes,
   CrewTaskRecords,
   type Peer,
   type StatusRequest,
@@ -89,6 +90,7 @@ export class CrewState {
   private readonly drainRecords: CrewDrainRecords;
   private readonly taskRecords: CrewTaskRecords;
   public readonly reporting: ReportingStore;
+  public readonly completionWakes: CrewCompletionWakes;
   public readonly activity: MemberActivityStore;
   public readonly turns: CrewTurnStore;
   public readonly mailRoutes: MailRoutes;
@@ -106,11 +108,17 @@ export class CrewState {
     this.turns = new CrewTurnStore(db);
     this.mailRoutes = new MailRoutes(db);
     this.ircSessions = new IrcSessions(db);
+    this.completionWakes = new CrewCompletionWakes(db);
     this.taskRecords = new CrewTaskRecords(
       db,
       path,
       this.reporting,
       this.activity,
+      (task) => {
+        if (!this.reporting.isReport(task.id)) {
+          this.completionWakes.record(task);
+        }
+      },
     );
   }
 

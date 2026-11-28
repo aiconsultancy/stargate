@@ -34,6 +34,8 @@ import { QueueAdmission } from "./queue-admission";
 import type { TurnProgress } from "../shared/turn-progress";
 import { UpdateNotices } from "../automation/maintenance/update-notice";
 
+import { TeamsTimers } from "./teams-timers";
+
 export { TranscriptConflict } from "./captain-transcript-store";
 
 export { jobStatuses, pendingJobs, unfinishedJobs } from "./job-status";
@@ -80,6 +82,7 @@ export class Store {
   public readonly attachmentRecords: AttachmentRecords;
   public readonly activityRecords: ActivityRecords;
   public readonly fleet: FleetJobRecords;
+  public readonly teamsTimers: TeamsTimers;
   public readonly threadFollowUps: ThreadFollowUpRecords;
   public readonly transcript: TranscriptRecords;
   public readonly irc: IrcOperations;
@@ -102,6 +105,7 @@ export class Store {
     this.attachmentRecords = new AttachmentRecords(this.db);
     this.activityRecords = new ActivityRecords(this.db);
     this.fleet = new FleetJobRecords(this.db);
+    this.teamsTimers = new TeamsTimers(this.db, this);
     this.transcript = new TranscriptRecords(this.db);
     this.captainTranscripts = new CaptainTranscriptRecords(this.db);
     this.irc = createIrcRecords(this.db);
