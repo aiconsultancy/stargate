@@ -52,6 +52,7 @@ import {
   capturedLog,
   FakeApi,
   FakeSubspaceHttp,
+  FLEET,
   removeDirectories,
   silent,
   TOKEN,
@@ -176,6 +177,33 @@ test("configuration: signed dispatch requires this gateway's enrolled rear admir
     "enrolled rear admiral's signing socket",
   );
   expect(refusal({ irc, agentDispatch, subspaceAgents })).toBe("accepted");
+});
+
+test("configuration: decision delivery can share the issue connection or use a separate relay", () => {
+  const irc = [admiralIrc()];
+  const decisionRelay = { socketPath: "/run/example/decision-relay/api.sock" };
+
+  const both = { ...dispatchRaw, decisionOutcomeDms: true, decisionRelay };
+  expect(refusal({ irc, agentDispatch: both })).toBe("accepted");
+  expect(
+    refusal({
+      irc,
+      agentDispatch: {
+        ...both,
+        decisionRelay: {
+          socketPath: "/run/example/../api.sock",
+        },
+      },
+    }),
+  ).toContain("An absolute normalised path is required");
+  expect(
+    refusal({ irc, agentDispatch: { ...both, api: undefined } }),
+  ).toContain("require an API connection");
+  const decisions = { ...both, enabled: false, api: undefined };
+  expect(refusal({ irc, agentDispatch: decisions })).toBe("accepted");
+  expect(refusal({ agentDispatch: decisions })).toContain(
+    "must name an IRC registration",
+  );
 });
 
 test("configuration: enabled dispatch needs the rear admiral's own IRC registration and channel", () => {
@@ -320,6 +348,32 @@ test("startAgentDispatch: absent or disabled opens, listens to and contacts noth
   expect(existsSync(join(directory, "agent-dispatch.sqlite"))).toBe(false);
 });
 
+test("startAgentDispatch: issue dispatch needs its own connection when there is a decision relay", async () => {
+  const dataDirectory = await tempDirectory();
+
+  const config = Schema.decodeUnknownSync(agentDispatchSchema)({
+    ...dispatchRaw,
+    enabled: false,
+    decisionOutcomeDms: true,
+    api: undefined,
+    decisionRelay: { socketPath: "/run/example/decisions/api.sock" },
+  });
+
+  expect(() =>
+    startAgentDispatch({
+      config: { ...config, enabled: true },
+      irc: [],
+      ship: () => {
+        throw new Error("Unexpected ship lookup");
+      },
+      dataDirectory,
+      allowed: () => true,
+      log: silent,
+    }),
+  ).toThrow("Agent dispatch requires an API connection");
+  expect(existsSync(join(dataDirectory, "agent-dispatch.sqlite"))).toBe(false);
+});
+
 function fakeBackend(pinned: string): AgentBackend {
   return {
     sessionID: pinned,
@@ -382,7 +436,10 @@ async function serveAdmiral(
             timing: { reconnectMinMs: 20, intervalMs: 5, burst: 10 },
           }),
         agentDispatch: {
-          fetch: http.fetch,
+          fetch: ((input, init) =>
+            init && "unix" in init
+              ? fetch(input, init)
+              : http.fetch(input, init)) as typeof fetch,
           env: { DISPATCH_TOKEN: TOKEN, DISPATCH_ACCESS: ACCESS },
         },
       },
@@ -474,6 +531,64 @@ test("runtime: decision outcome DMs work with issue dispatch off", async () => {
   ).toBe(false);
   await admiral.stop();
 });
+
+for (const enabled of [false, true]) {
+  test(`runtime: the dedicated decision relay works with issue dispatch ${enabled ? "on" : "off"}`, async () => {
+    const directory = await realpath(await tempDirectory());
+    const socketPath = join(directory, "relay.sock");
+    const api = new FakeApi(new Clock());
+    const paths: string[] = [];
+    const outcomePath = `/api/v1/fleets/${FLEET}/decision-outcomes`;
+
+    const server = Bun.serve({
+      unix: socketPath,
+      async fetch(request) {
+        const path = new URL(request.url).pathname;
+        paths.push(path);
+
+        if (path === "/api/v1/me") {
+          return Response.json(await api.me());
+        }
+
+        if (path === "/api/v1/fleets/example-fleet") {
+          return Response.json(
+            await api.fleet("example-fleet", request.signal),
+          );
+        }
+
+        if (path === outcomePath) {
+          return Response.json(await api.decisionOutcomes(FLEET));
+        }
+
+        return new Response(null, { status: 404 });
+      },
+    });
+
+    cleanup.push(() => server.stop(true));
+    await chmod(socketPath, 0o660);
+
+    const admiral = await serveAdmiral({
+      ...dispatchRaw,
+      enabled,
+      api: enabled ? dispatchRaw.api : undefined,
+      decisionOutcomeDms: true,
+      decisionRelay: { socketPath },
+    });
+
+    await until(() => paths.includes(outcomePath), 5000, "relay feed read");
+    expect(paths).toEqual(
+      enabled
+        ? ["/api/v1/me", outcomePath]
+        : ["/api/v1/fleets/example-fleet", "/api/v1/me", outcomePath],
+    );
+    const primaryPaths = admiral.http.requests.map(({ path }) => path);
+    expect(primaryPaths.some((path) => path.includes("/issues"))).toBe(enabled);
+    expect(
+      primaryPaths.some((path) => path.includes("decision-outcomes")),
+    ).toBe(false);
+    await admiral.stop();
+  });
+}
 
 test("runtime end to end: an offer in the command channel, an answer reply from the asked account, one assignment", async () => {
   const admiral = await serveAdmiral(

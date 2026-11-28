@@ -495,6 +495,20 @@ args = ["${join(root, "mcp")}"]
     runtime,
   );
 
+  // Under workspace-write, project `.codex/config.toml` stays untrusted and
+  // Never runs MCP servers or notify hooks.
+  const writable = await open(
+    project,
+    join(data, "writable"),
+    baseURL,
+    { sandbox: "workspace-write" },
+    runtime,
+  );
+
+  expect(await writable.prompt(await session(writable), "Hi", signal())).toBe(
+    "Fixture reply",
+  );
+
   const png = Uint8Array.from(
     atob(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",

@@ -1610,6 +1610,13 @@ test("namespaced native definitions keep short crew, mail, journal and task iden
     expect(task.crewID).toBe("mario");
     const worker = f.worker(task.workerSessionID);
     expect(worker.agent).toBe("galactica-crew-mario");
+
+    const status = () =>
+      f.engine.run({ op: "status", taskID: task.id }, worker);
+
+    expect((await status()).completionWakeEnabled).toBe(false);
+    f.engine.state.completionWakes.configure(task.originCaptainID, true);
+    expect((await status()).completionWakeEnabled).toBe(true);
     expect(
       (await f.engine.journal({ op: "append", text: "Verified" }, worker)).entry
         ?.member,

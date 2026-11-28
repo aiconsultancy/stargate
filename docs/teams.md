@@ -60,11 +60,22 @@ scope even when the activity's conversation ID is different. Denied users and
 channels override the allow lists. Wildcards are not supported for Teams.
 Registration IDs and socket paths must be unique within the gateway.
 
+For a registration with `fleetPolicy.role: "rear_admiral"`, set
+`access.allowInstalledConversations: true` to accept a verified mention of
+that bot in a Teams channel or group where it is installed. The default is
+off. Tenant, human and deny rules still apply. Messages without a mention
+still need an explicit channel entry and `allowUnmentionedConversations`.
+For those mentions, the allowed human can use any conversation where the
+bot is installed. Keep the human allow list limited to the intended users.
+The gateway trusts the authenticated Teams activity for the conversation.
+It can reply to conversations it learned from that intake.
+
 The activity must identify the configured bot and tenant. If it carries tenant IDs in
 both conversation and channel data, both must agree. Bot senders, self messages,
 missing human object IDs and unsupported activity types are refused. Access is
-checked again before work and delivery; removing a permitted channel also
-blocks replies to its previously stored conversation references.
+checked again before work and delivery. A channel deny blocks replies to its
+previously stored references. Where access depends on a channel allow list,
+removing the entry also blocks replies.
 
 ### Quoted messages
 
@@ -249,6 +260,27 @@ human permission decision for this input, and an earlier human's permission
 token cannot authorise it. Source evidence and rank remain separate from
 human approval. Unknown or interrupted work is reported as uncertain without
 repeating the assignment.
+
+## One-shot follow-up timers
+
+The pinned OpenCode officer can call `stargate_timer` with `op: "set"` when a
+Teams request is waiting on work. `minutes` defaults to 30 and an optional
+short `note` can hold the existing task or dispatch reference. One timer is
+pending per Teams registration and conversation or channel thread. An admitted
+human message in that scope restarts the countdown. Transport duplicates and
+agent messages leave the deadline alone. `op: "status"` reads the deadline and
+`op: "cancel"` removes it before it fires.
+
+When the timer fires, Stargate queues one agent-context turn on the same
+pin. Reply in the original conversation with the result, or give a brief
+progress update and set another timer if needed. Cancel a pending timer once
+its final result arrives. Timer turns carry no approval authority. The original
+Teams access checks still apply.
+
+Enable `followUpTimers: true` on the Teams registration and `timers: true` in
+the related `stargate.fleet` plugin options. The registrations must share their
+pinned OpenCode session. Grant `stargate_timer` on `teams` in the native profile
+and `fleet_timer` on `teams` in the fleet gateway policy.
 
 ## Typing and progress
 

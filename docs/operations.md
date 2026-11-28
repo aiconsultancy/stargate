@@ -259,6 +259,11 @@ and separately approved live-proof steps.
   turns and a 30-minute turn timeout (maximum one hour).
 - Replies persist separately from execution; Slack retries do not rerun tools.
   Up to eight delivery attempts use bounded exponential delays.
+- If OpenCode reaches the output limit while summarising a session, Stargate
+  reports the current failure and holds further turns for that native session.
+  The hold survives gateway restarts. Stored replies can still be delivered,
+  and other sessions can still take work. After inspecting the original session
+  and its queue, commission a fresh native root before resuming a pinned agent.
 - A stopped process can leave tool outcomes unknown. On restart, Stargate attempts
   to interrupt surviving work and reports the interrupted request rather than
   automatically running it again. Transcript/session state remains available.
@@ -285,7 +290,8 @@ and separately approved live-proof steps.
   Slack bot registration, at most one IRC registration and one Stargate process
   owner; each transport delivers only replies to its own inputs.
 - Claude Agent SDK backends deliver only each turn's own reply: no
-  transcript catch-up, dashboard history or pinned captain session.
+  transcript catch-up or pinned captain session (read-only dashboard history
+  is available).
 - Responses render Markdown, with no tool output or reasoning, at most 60,000
   Unicode characters; OpenCode transcript replies are not clipped. Streaming,
   `/cron`, and its interactive controls are supported. See

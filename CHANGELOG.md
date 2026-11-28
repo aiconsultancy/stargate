@@ -20,13 +20,23 @@ captain is online, or when this gateway is not connected to IRC. See
 
 ### Feature flags
 
+- New off-by-default follow-up flags: the crew plugin's `completionWake`
+  wakes pinned captains on verified crew results, and the fleet plugin's
+  `deferredResults` enables deferred fleet replies. Teams `followUpTimers`
+  and fleet plugin `timers` enable one-shot follow-ups.
+
 - `agentDispatch.decisionOutcomeDms` enables decision-outcome DMs to recording
   captains when Subspace serves the outcome feed. The default is off.
+- `agentDispatch.decisionRelay` optionally gives those DMs a separate Unix
+  relay. When omitted, decision delivery uses the usual connection. The
+  officer-tools contract advertises `decisionOutcomeDms: 1` for installers.
 
 - New off-by-default Teams options: `attachmentFileHosts` enables document
   receipt from exact tenant SharePoint hosts in personal chats.
   `access.allowUnmentionedConversations` allows messages without a bot mention in explicitly
   listed conversations.
+- `access.allowInstalledConversations`, off by default, lets a rear admiral
+  answer verified mentions in Teams conversations where the bot is installed.
 - Default change: channel and group-chat messages require this bot's @mention.
   Incoming activities must identify this registration's Teams bot recipient.
   Teams quoted previews provide untrusted context for admitted requests.

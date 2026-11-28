@@ -5,9 +5,9 @@
 Stargate is a Bun/TypeScript gateway for Slack, Teams, and IRC. One process
 hosts multiple app registrations. Built-in backends connect to OpenCode V2,
 embed Pi Durable, run Claude Code through the Claude Agent SDK
-(`docs/claude.md`), or run the Codex CLI through the Codex SDK
-(`docs/codex.md`); trusted local modules can implement the same adapter
-interface.
+(`docs/claude.md`), run the Codex CLI through the Codex SDK (`docs/codex.md`),
+or run ACP / Antigravity agents (`docs/configuration.md#acp-agent-client-protocol`);
+trusted local modules can implement the same adapter interface.
 
 Read `README.md` for setup, `docs/operations.md` for limits, and
 `docs/design.md` for architecture. Use `docs/cliproxyapi.md` when configuring

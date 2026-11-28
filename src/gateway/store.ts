@@ -29,13 +29,16 @@ import { QuestionRecords } from "../chat/questions/store";
 import { type RequestFailure, failureText } from "../shared/request-failure";
 import type { ReplyChunk } from "../shared/slack-format";
 import type { Incoming, Job } from "./store-types";
-import type { JobStatus } from "./job-status";
+import { type JobStatus, pendingJobs, unfinishedJobs } from "./job-status";
+import { QueueAdmission } from "./queue-admission";
 import type { TurnProgress } from "../shared/turn-progress";
 import { UpdateNotices } from "../automation/maintenance/update-notice";
 
+import { TeamsTimers } from "./teams-timers";
+
 export { TranscriptConflict } from "./captain-transcript-store";
 
-export { jobStatuses } from "./job-status";
+export { jobStatuses, pendingJobs, unfinishedJobs } from "./job-status";
 
 export type {
   CaptainCursor,
@@ -45,15 +48,6 @@ export type {
   JobStatus,
   ThreadFollowUp,
 };
-
-const sqlList = (statuses: readonly JobStatus[]) =>
-  statuses.map((status) => `'${status}'`).join(",");
-
-/** SQL list: no reply is stored yet; the backend may still run this job. */
-export const pendingJobs = sqlList(["queued", "running"]);
-
-/** SQL list: not delivered or failed yet; later jobs of the thread wait. */
-export const unfinishedJobs = sqlList(["queued", "running", "responding"]);
 
 /** Status of a stored reply: a deferred source needs no delivery. */
 const storedReplyStatus =
@@ -88,12 +82,14 @@ export class Store {
   public readonly attachmentRecords: AttachmentRecords;
   public readonly activityRecords: ActivityRecords;
   public readonly fleet: FleetJobRecords;
+  public readonly teamsTimers: TeamsTimers;
   public readonly threadFollowUps: ThreadFollowUpRecords;
   public readonly transcript: TranscriptRecords;
   public readonly irc: IrcOperations;
   private readonly captainTranscripts: CaptainTranscriptRecords;
   private readonly ircAdmission: IrcAdmission;
   private readonly db: Database;
+  private readonly admission: QueueAdmission;
   public readonly updateNotices: UpdateNotices;
   public constructor(
     path: string,
@@ -103,11 +99,13 @@ export class Store {
     this.backgroundCases = new BackgroundCases(this.db);
     this.updateNotices = new UpdateNotices(this.db);
     initializeStoreSchema(this.db);
+    this.admission = new QueueAdmission(this.db);
     this.questions = new QuestionRecords(this.db);
     this.meta = new MetaRecords(this.db);
     this.attachmentRecords = new AttachmentRecords(this.db);
     this.activityRecords = new ActivityRecords(this.db);
     this.fleet = new FleetJobRecords(this.db);
+    this.teamsTimers = new TeamsTimers(this.db, this);
     this.transcript = new TranscriptRecords(this.db);
     this.captainTranscripts = new CaptainTranscriptRecords(this.db);
     this.irc = createIrcRecords(this.db);
@@ -435,43 +433,24 @@ export class Store {
     limit: number,
     serial = false,
     holdQueued = false,
+    pinnedSession?: string,
   ): Job[] {
-    return this.db
-      .query<StoredJob, (string | number)[]>(`SELECT * FROM jobs j
-      WHERE botKey = ? AND status IN ('queued','responding') AND retry_at <= ?
-      ${holdQueued ? "AND status='responding'" : ""}
-      AND NOT EXISTS (SELECT 1 FROM jobs earlier
-        WHERE earlier.conversation=j.conversation AND earlier.id < j.id
-         AND earlier.status IN (${unfinishedJobs})
-         AND NOT (j.notification_context IS NULL AND earlier.status='queued'
-           AND earlier.notification_held=1 AND (earlier.retry_at>? OR j.status='responding')))
-      AND NOT (j.notification_held=1 AND EXISTS (SELECT 1 FROM jobs later
-        WHERE later.conversation=j.conversation AND later.id>j.id
-        AND later.status IN ('running','responding')))
-      ${
-        serial
-          ? `AND (j.status!='queued' OR NOT EXISTS
-        (SELECT 1 FROM jobs pending WHERE pending.botKey=j.botKey
-        AND pending.id<j.id AND pending.status IN (${pendingJobs})
-        AND NOT (j.notification_context IS NULL AND pending.status='queued'
-          AND pending.notification_held=1 AND pending.retry_at>?)))`
-          : ""
-      }
-      ORDER BY id LIMIT ?`)
-      .all(botKey, now, now, ...(serial ? [now] : []), limit)
-      .map((item) => decodeStoredJob(item));
+    return this.admission.ready(
+      botKey,
+      now,
+      limit,
+      serial,
+      holdQueued,
+      pinnedSession,
+    );
   }
 
-  public running(id: number, expectedText?: string) {
-    return (
-      this.db
-        .query(
-          `UPDATE jobs SET status='running',notification_held=0
-           WHERE id=$id AND status='queued' AND cancel_requested=0
-             AND ($expected IS NULL OR text=$expected)`,
-        )
-        .run({ $id: id, $expected: expectedText ?? null }).changes > 0
-    );
+  public holdCompaction(session: string, unsubmittedJob?: number) {
+    return this.admission.holdCompaction(session, unsubmittedJob);
+  }
+
+  public running(id: number, expectedText?: string, pinnedSession?: string) {
+    return this.admission.running(id, expectedText, pinnedSession);
   }
 
   public started(id: number) {

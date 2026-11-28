@@ -24,7 +24,9 @@ test("worker locations observe a gateway poll only for the same daemon and pinne
   ] as const;
 
   const captain = await CrewState.open(...options, "ses_captain");
+
   const worker = await CrewState.open(...options, "ses_captain");
+
   const anotherPin = await CrewState.open(...options, "ses_other");
 
   try {

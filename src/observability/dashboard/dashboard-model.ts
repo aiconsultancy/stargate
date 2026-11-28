@@ -61,7 +61,14 @@ export type ShipSummary = {
   /** Configured registration ID; existing routes keep their own scope. */
   id: string;
   name: string;
-  backend: "opencode" | "pi-durable" | "claude" | "codex" | "module";
+  backend:
+    | "opencode"
+    | "pi-durable"
+    | "claude"
+    | "codex"
+    | "acp"
+    | "antigravity"
+    | "module";
   transport?: DashboardTransport["kind"];
   agent?: string;
   /** Null when this backend has no crew or its status read failed. */
@@ -116,7 +123,14 @@ export type ShipView = {
       mentionOnly?: boolean;
     };
     backend: {
-      type: "opencode" | "pi-durable" | "claude" | "codex" | "module";
+      type:
+        | "opencode"
+        | "pi-durable"
+        | "claude"
+        | "codex"
+        | "acp"
+        | "antigravity"
+        | "module";
       directory?: string;
       agent?: string;
       model?: string;

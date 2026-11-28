@@ -33,13 +33,19 @@ import {
 } from "../backend";
 import type { opencodeBackendSchema } from "./config";
 import { redactCredentials, secret } from "../../lib/credentials";
-import { crewMessageMetadataKey } from "../../coordination/crew/message-protocol";
+import {
+  crewCompletionMessageID,
+  crewMessageMetadataKey,
+} from "../../coordination/crew/message-protocol";
 import { CrewReporting } from "../../coordination/crew/reporting/report-rpc";
 import {
   cronEvaluationSchema,
   cronModelSchema,
 } from "../../automation/cron/advanced";
-import type { NativeMaker } from "../../coordination/fleet/protocol";
+import type {
+  FleetReviewEvidence,
+  NativeMaker,
+} from "../../coordination/fleet/protocol";
 import {
   InputBoundaryFold,
   type InputBoundaryRecord,
@@ -64,6 +70,7 @@ import { quotaObservationSchema, quotaSnapshotSchema } from "../quota/quota";
 import {
   BackendFailure,
   type BackendFailureKind,
+  CompactionOutputLimit,
   PendingBackendQuestion,
   PromptNotSubmitted,
   connectionFailure,
@@ -73,7 +80,11 @@ import type { TurnProgress, TurnStage } from "../../shared/turn-progress";
 import type { UpdateSnapshot } from "../../automation/maintenance/update-notice";
 import { OpenCodeNotices } from "./notices";
 import { OpenCodeCrewStatus } from "./crew-status";
-import { OpenCodeHistory } from "./opencode-history";
+import {
+  OpenCodeHistory,
+  hasFailedCompaction,
+  hitCompactionOutputLimit,
+} from "./opencode-history";
 import { OpenCodeQuestions } from "./questions";
 import { OpenCodeReviews } from "./reviews";
 
@@ -912,6 +923,20 @@ export class OpenCodeBackend implements AgentBackend {
     return { status: "uncertain" };
   }
 
+  public async checkPromptAdmission(sessionId: string, signal: AbortSignal) {
+    try {
+      if (await hasFailedCompaction(this.client, sessionId, signal)) {
+        throw new CompactionOutputLimit(true);
+      }
+    } catch (error) {
+      if (!signal.aborted && connectionFailure(error)) {
+        throw new BackendFailure("network", { ran: false });
+      }
+
+      throw error;
+    }
+  }
+
   public async prompt(
     sessionId: string,
     text: string,
@@ -1364,6 +1389,7 @@ export class OpenCodeBackend implements AgentBackend {
       // Read backwards to the submitted input; do not resend earlier replies.
       const history: (InputBoundaryRecord & {
         reply?: Reply;
+        compactionLimit: boolean;
       })[] = [];
 
       const boundaries = new InputBoundaryReader(
@@ -1387,6 +1413,7 @@ export class OpenCodeBackend implements AgentBackend {
         for (const message of page.data) {
           history.push({
             ...(await boundaries.record(message)),
+            compactionLimit: hitCompactionOutputLimit(message),
             ...(message.type === "assistant" && {
               reply: {
                 succeeded:
@@ -1416,6 +1443,10 @@ export class OpenCodeBackend implements AgentBackend {
 
             for (const record of history.toReversed()) {
               owner = fold.next(record) ?? owner;
+
+              if (record.compactionLimit && owner === input.id) {
+                throw new CompactionOutputLimit(false);
+              }
 
               if (record.reply && owner === input.id) {
                 replies.push(record.reply);
@@ -1522,6 +1553,76 @@ export class OpenCodeBackend implements AgentBackend {
     this.lifetime.abort();
 
     return Promise.resolve();
+  }
+
+  public async readCrewCompletion(
+    sessionID: string,
+    originInputID: string,
+    taskID: string,
+    signal: AbortSignal,
+  ): Promise<FleetReviewEvidence | undefined> {
+    if (sessionID !== this.sessionID) {
+      return undefined;
+    }
+
+    const wakeID = crewCompletionMessageID(taskID);
+
+    const wake = await this.client.session.message.get(
+      { sessionID, messageID: wakeID },
+      { signal },
+    );
+
+    const metadata =
+      wake.type === "synthetic"
+        ? wake.metadata?.[crewMessageMetadataKey]
+        : undefined;
+
+    if (
+      wake.id !== wakeID ||
+      wake.type !== "synthetic" ||
+      wake.description !== "Crew task completed" ||
+      typeof metadata !== "object" ||
+      metadata === null ||
+      !("sourceTaskID" in metadata) ||
+      metadata["sourceTaskID"] !== taskID ||
+      boundaryRecord(wake, sessionID).input !== originInputID
+    ) {
+      return undefined;
+    }
+
+    const history = await this.readTranscript(sessionID, wakeID, signal);
+
+    for (const entry of history.entries) {
+      if (entry.input !== originInputID) {
+        continue;
+      }
+
+      const message = await this.client.session.message.get(
+        { sessionID, messageID: entry.id },
+        { signal },
+      );
+
+      if (
+        message.type !== "assistant" ||
+        message.finish !== "stop" ||
+        message.time.completed === undefined ||
+        message.error
+      ) {
+        continue;
+      }
+
+      const maker: NativeMaker = {
+        messageID: message.id,
+        agent: message.agent,
+        provider: message.model.providerID,
+        model: message.model.id,
+        ...(message.model.variant && { variant: message.model.variant }),
+      };
+
+      return { resultText: entry.text, makers: [maker] };
+    }
+
+    return undefined;
   }
 
   public async executionMakers(

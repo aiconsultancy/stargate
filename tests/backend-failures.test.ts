@@ -2,7 +2,10 @@ import { expect, test } from "bun:test";
 import { Schema } from "effect";
 import { OpenCodeBackend } from "../src/backends/opencode/opencode";
 import { backendSchema } from "../src/config";
-import { BackendFailure } from "../src/shared/request-failure";
+import {
+  BackendFailure,
+  CompactionOutputLimit,
+} from "../src/shared/request-failure";
 
 type Assistant = {
   type?: "assistant" | "user";
@@ -12,8 +15,17 @@ type Assistant = {
   content?: { type: string; text?: string }[];
 };
 
-/** An OpenCode server whose turn ends with these assistant messages. */
-function openCode(messages: Assistant[]) {
+type Compaction = {
+  type: "compaction";
+  status: "failed" | "completed";
+  error?: { type: string; message: string };
+};
+
+/** An OpenCode server whose turn ends with these native messages. */
+function openCode(
+  messages: (Assistant | Compaction)[],
+  earlierCompactions: Compaction[] = [],
+) {
   let input = "";
   let prompts = 0;
 
@@ -39,6 +51,10 @@ function openCode(messages: Assistant[]) {
       }
 
       if (url.pathname.endsWith("/message")) {
+        if (url.searchParams.get("type") === "compaction") {
+          return Response.json({ data: earlierCompactions, cursor: {} });
+        }
+
         return Response.json({
           data: [
             ...messages
@@ -269,6 +285,9 @@ test("an OpenCode server that cannot be reached is a network failure; nothing ra
       backend.createSession({ key: "thread", title: "Slack", signal }),
     ),
   ).toBe("provider:network:0:idle");
+  expect(await failureOf(backend.checkPromptAdmission(session, signal))).toBe(
+    "provider:network:0:idle",
+  );
   expect(await failureOf(backend.prompt(session, "hello", signal))).toBe(
     "provider:network:0:idle",
   );
@@ -357,5 +376,77 @@ test("a lost history read after the turn ran never says that nothing ran", async
     } finally {
       await server.stop(true);
     }
+  }
+});
+
+const lengthFailure: Compaction = {
+  type: "compaction",
+  status: "failed",
+  error: {
+    type: "compaction.failed",
+    message: "Compaction summary reached the output token limit",
+  },
+};
+
+test("reports an output-limit compaction failure from the submitted native turn", async () => {
+  const { server, backend, submissions } = openCode([lengthFailure]);
+
+  try {
+    const error = await backend
+      .prompt("session", "hello", AbortSignal.timeout(5000))
+      .catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(CompactionOutputLimit);
+    expect(error).toMatchObject({ beforeAdmission: false });
+    expect(submissions()).toBe(1);
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("uses native history to refuse a new prompt after an output-limit failure", async () => {
+  const { server, backend, submissions } = openCode(
+    [],
+    [
+      {
+        type: "compaction",
+        status: "failed",
+        error: {
+          type: "compaction.interrupted",
+          message: "Compaction was interrupted",
+        },
+      },
+      lengthFailure,
+    ],
+  );
+
+  try {
+    const error = await backend
+      .checkPromptAdmission("session", AbortSignal.timeout(5000))
+      .catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(CompactionOutputLimit);
+    expect(error).toMatchObject({ beforeAdmission: true });
+    expect(submissions()).toBe(0);
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("a newer successful compaction supersedes an earlier history failure", async () => {
+  const { server, backend, submissions } = openCode(
+    [successfulReply],
+    [{ type: "compaction", status: "completed" }, lengthFailure],
+  );
+
+  try {
+    await backend.checkPromptAdmission("session", AbortSignal.timeout(5000));
+    expect(
+      await backend.prompt("session", "hello", AbortSignal.timeout(5000)),
+    ).toBe("Final answer");
+
+    expect(submissions()).toBe(1);
+  } finally {
+    await server.stop(true);
   }
 });

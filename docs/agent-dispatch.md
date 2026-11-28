@@ -43,7 +43,10 @@ reminder window before it can repeat.
 
 Set `agentDispatch.decisionOutcomeDms` to `true` when the Subspace API
 serves the decision outcome feed. The default is off. It works without
-`agentDispatch.enabled`, which switches on issue dispatch. The dispatcher sends
+`agentDispatch.enabled`, which switches on issue dispatch. Both features can
+share `api` or use a [separate relay for decisions](#configuration). When
+both are on, both connections must confirm the same rear admiral and fleet.
+Decision-only installations with a relay can omit `api`. The dispatcher sends
 each accepted or rejected proposal to the active captain who recorded it.
 It checks that the fleet roster's `ircNick` matches the operator's configured
 captain account and confirms who holds that account before sending. For fleets
@@ -150,20 +153,45 @@ admiral's existing `subspaceAgents` signing proxy. The proxy signs each
 request with the enrolled identity. Bearer and header environment settings
 apply to direct API connections.
 
-| Key                      | Default                                     | Meaning                                                                                                                                                                                                           |
-| ------------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`                | `false`                                     | The feature flag. Off: no ledger file, no chat listener and no API request. A disabled section is not cross-checked against the IRC registrations.                                                                |
-| `fleet`                  | Required                                    | The fleet's slug or UUID in the Subspace API.                                                                                                                                                                     |
-| `api.baseUrl`            | Direct mode only, required                  | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
-| `api.tokenEnv`           | Direct mode only, required                  | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
-| `api.headersEnv`         | `{}`                                        | Extra request headers for a private access layer: header name → environment variable name. `Authorization`, `Accept`, `Content-Type`, `Content-Length`, `Host`, `Connection` and `Transfer-Encoding` are refused. |
-| `messaging.type`         | `"irc"`                                     | The messaging system. Only `irc` is accepted.                                                                                                                                                                     |
-| `messaging.registration` | Required                                    | ID of the rear admiral's IRC registration (`fleetPolicy.role: "rear_admiral"`).                                                                                                                                   |
-| `messaging.channel`      | That registration's `fleetChannels.command` | The command channel. It must be one of the registration's channels.                                                                                                                                               |
-| `captainAccounts`        | `{}`                                        | Subspace agent name → IRC account, for a captain whose chat account differs from its agent name. An unlisted name is its own account.                                                                             |
-| `pollIntervalSeconds`    | `120`                                       | Seconds between polls, 30–3600.                                                                                                                                                                                   |
-| `answerTimeoutSeconds`   | `300`                                       | Seconds each captain has to answer an offer, 60–3600.                                                                                                                                                             |
-| `retryLadderSeconds`     | `[3600, 10800, 21600, 43200]`               | Waits between rounds, each 60–604800, at most 10 entries. There is one more round than entries; `[]` means a single round.                                                                                        |
+To give decision delivery a separate connection, enable `decisionOutcomeDms`
+and set `decisionRelay` to `{ "socketPath": "/run/example/decisions/api.sock" }`.
+Stargate uses `decisionRelay` only when `decisionOutcomeDms` is on.
+With issue dispatch enabled, `api` supplies the issue connection and both
+connections must authenticate as the same rear admiral. For decision delivery
+alone, set `enabled: false` and omit `api`. With no `decisionRelay`, decision
+outcomes use `api` as usual.
+
+Use a normalised absolute path. If the relay runs as a different user, its
+socket directory and socket must use the gateway's dedicated primary group.
+The directory must belong to root or to the socket owner. Its ancestors
+must belong to root or the gateway user, and group or other write access
+requires a sticky directory. The socket directory forbids group write
+access, and both directory and socket forbid access for other users. If the
+socket directory belongs to a separate relay user, its immediate parent
+also forbids group and other write access.
+Stargate checks the socket before each request. Configure the relay to allow
+only the identity and fleet lookup, outcome feed and delivery receipt routes
+for this fleet.
+
+The officer-tools manifest advertises `decisionOutcomeDms: 1` for installers
+that commission the gateway's decision outcome delivery capability.
+
+| Key                        | Default                                     | Meaning                                                                                                                                                                                                           |
+| -------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                  | `false`                                     | Enables issue dispatch. With both `enabled` and `decisionOutcomeDms` off, the gateway opens no ledger, registers no listener and makes no API requests.                                                           |
+| `fleet`                    | Required                                    | The fleet's slug or UUID in the Subspace API.                                                                                                                                                                     |
+| `api.baseUrl`              | Required for a direct `api`                 | API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback, with no credentials, query or fragment. Routes are under `/api/v1`.                                                                          |
+| `api.tokenEnv`             | Required for a direct `api`                 | Name of the environment variable that holds the rear admiral's bearer token. Never the token itself.                                                                                                              |
+| `api.socketPath`           | Required for a Unix socket `api`            | Absolute path to the signing socket.                                                                                                                                                                              |
+| `api.headersEnv`           | `{}`                                        | Extra request headers for a private access layer: header name → environment variable name. `Authorization`, `Accept`, `Content-Type`, `Content-Length`, `Host`, `Connection` and `Transfer-Encoding` are refused. |
+| `decisionRelay.socketPath` | Omitted                                     | Absolute path to a separate relay for decision outcomes.                                                                                                                                                          |
+| `messaging.type`           | `"irc"`                                     | The messaging system. Only `irc` is accepted.                                                                                                                                                                     |
+| `messaging.registration`   | Required                                    | ID of the rear admiral's IRC registration (`fleetPolicy.role: "rear_admiral"`).                                                                                                                                   |
+| `messaging.channel`        | That registration's `fleetChannels.command` | The command channel. It must be one of the registration's channels.                                                                                                                                               |
+| `captainAccounts`          | `{}`                                        | Subspace agent name → IRC account, for a captain whose chat account differs from its agent name. An unlisted name is its own account.                                                                             |
+| `pollIntervalSeconds`      | `120`                                       | Seconds between polls, 30–3600.                                                                                                                                                                                   |
+| `answerTimeoutSeconds`     | `300`                                       | Seconds each captain has to answer an offer, 60–3600.                                                                                                                                                             |
+| `retryLadderSeconds`       | `[3600, 10800, 21600, 43200]`               | Waits between rounds, each 60–604800, at most 10 entries. There is one more round than entries; `[]` means a single round.                                                                                        |
 
 A captain is addressed only when its IRC account is in the rear admiral
 registration's `fleetPolicy.agentAccounts`; Stargate logs once and skips a

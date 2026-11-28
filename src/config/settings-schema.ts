@@ -1,4 +1,4 @@
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { isLoopbackHost } from "../lib/loopback";
 import { fold } from "../transports/irc/protocol";
 import {
@@ -284,6 +284,12 @@ const absolutePath = Schema.String.check(
   settingsRefine(isAbsolute, { message: "Use an absolute path" }),
 );
 
+export const normalisedPath = absolutePath.check(
+  settingsRefine((path) => resolve(path) === path, {
+    message: "An absolute normalised path is required",
+  }),
+);
+
 const envName = Schema.String.check(settingsPattern(/^[A-Z_][A-Z0-9_]*$/));
 
 export { absolutePath, envName };
@@ -328,8 +334,8 @@ export const reservedAuthenticatedRequestHeaders = new Set([
   "transfer-encoding",
 ]);
 
-/** Legacy bearer or the enrolled rear admiral's local signing proxy. */
-export const agentDispatchApiSchema = Schema.Union([
+/** Direct bearer or the enrolled rear admiral's local signing proxy. */
+const agentDispatchApiSchema = Schema.Union([
   settingsStruct({ socketPath: absolutePath }),
   settingsStruct({
     /** API origin, optionally ending in `/api`. HTTPS, or HTTP on loopback. */
@@ -355,10 +361,50 @@ export const agentDispatchApiSchema = Schema.Union([
   }),
 ]);
 
-/** The local signing socket must belong to the rear admiral running dispatch. */
+export const agentDispatchConnections = {
+  api: Schema.optional(agentDispatchApiSchema),
+  decisionRelay: Schema.optional(
+    settingsStruct({ socketPath: normalisedPath }),
+  ),
+  /** Send resolved decision notices to the recording captain by IRC DM. */
+  decisionOutcomeDms: Schema.optional(Schema.Boolean),
+};
+
+type DispatchConnections = Schema.Struct.Type<
+  typeof agentDispatchConnections
+> & {
+  enabled: boolean;
+};
+
+function needsDispatchApi(config: DispatchConnections): boolean {
+  return (
+    config.enabled ||
+    Boolean(config.decisionOutcomeDms && !config.decisionRelay)
+  );
+}
+
+export const checkAgentDispatchConnections = settingsCheck<DispatchConnections>(
+  (config, context) => {
+    if (needsDispatchApi(config) && !config.api) {
+      context.addIssue({
+        code: "custom",
+        path: ["api"],
+        message:
+          "Issue dispatch or decision outcomes without a relay require an API connection",
+      });
+    }
+  },
+);
+
+/** The connection for issues and for decisions without a separate relay. */
+export function dispatchPrimaryApi(config: DispatchConnections | undefined) {
+  return config && needsDispatchApi(config) ? config.api : undefined;
+}
+
+/** An ordinary local signing socket must belong to the dispatching rear admiral. */
 export function dispatchTargetIssue(
   target: string | { registration: { id: string; account: string } },
-  api: typeof agentDispatchApiSchema.Type,
+  api: typeof agentDispatchApiSchema.Type | undefined,
   officers: readonly {
     rank: string;
     socketPath?: string | undefined;
@@ -374,7 +420,7 @@ export function dispatchTargetIssue(
     };
   }
 
-  if (!("socketPath" in api)) {
+  if (!api || !("socketPath" in api)) {
     return;
   }
 

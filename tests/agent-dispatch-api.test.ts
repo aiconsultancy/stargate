@@ -1,11 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DispatchApiError,
   SubspaceApi,
 } from "../src/coordination/fleet/dispatch/api";
+import { checkServiceSocket } from "../src/lib/unix-socket";
 import {
   ACCESS,
   answer,
@@ -68,6 +69,142 @@ test("the dispatch client uses the enrolled officer's Unix proxy without a beare
       agentRank: "rearAdmiral",
       fleetId: FLEET,
     });
+  } finally {
+    await server.stop(true);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a separate service UID needs the gateway group and a protected parent for its relay", () => {
+  const uid = 1000;
+  const gid = 1001;
+  const serviceUid = 2000;
+
+  const directory = (owner: number, group: number, mode: number) => ({
+    uid: owner,
+    gid: group,
+    mode,
+    isDirectory: () => true,
+    isSocket: () => false,
+    isSymbolicLink: () => false,
+  });
+
+  const parent = directory(serviceUid, gid, 0o750);
+
+  const socket = {
+    ...parent,
+    mode: 0o660,
+    isDirectory: () => false,
+    isSocket: () => true,
+  };
+
+  const path = "/run/service/relay.sock";
+
+  const paths = new Map([
+    ["/", directory(0, 0, 0o755)],
+    ["/run", directory(0, 0, 0o755)],
+    ["/run/service", parent],
+    [path, socket],
+  ]);
+
+  const check = () =>
+    checkServiceSocket(path, { uid, gid, stat: (name) => paths.get(name) });
+
+  expect(check).not.toThrow();
+
+  for (const untrustedSocket of [
+    { ...socket, gid: 2001 },
+    { ...socket, mode: 0o666 },
+    { ...socket, isSocket: () => false },
+  ]) {
+    paths.set(path, untrustedSocket);
+    expect(check).toThrow("ownership or permissions");
+  }
+
+  paths.set(path, socket);
+
+  for (const untrustedDirectory of [
+    { ...parent, uid: 3000 },
+    { ...parent, uid },
+    { ...parent, gid: 2001 },
+    { ...parent, mode: 0o770 },
+    { ...parent, mode: 0o751 },
+  ]) {
+    paths.set("/run/service", untrustedDirectory);
+    expect(check).toThrow("ownership or permissions");
+  }
+
+  paths.set("/run/service", parent);
+
+  paths.set("/run", directory(0, gid, 0o3777));
+  expect(check).toThrow("non-writable parent");
+  paths.set("/run/service", { ...parent, uid: 0 });
+  expect(check).not.toThrow();
+});
+
+test("the decision relay is checked again before every request", async () => {
+  const directory = await mkdtemp(
+    join(await realpath(tmpdir()), "dispatch-relay-"),
+  );
+
+  const socketDirectory = join(directory, "service");
+  const socketPath = join(socketDirectory, "relay.sock");
+  await mkdir(socketDirectory, { mode: 0o700 });
+
+  let requests = 0;
+
+  const server = Bun.serve({
+    unix: socketPath,
+    fetch() {
+      requests++;
+
+      return Response.json({
+        userId: REAR_ADMIRAL,
+        kind: "agent",
+        agentRank: "rearAdmiral",
+        fleetId: FLEET,
+      });
+    },
+  });
+
+  try {
+    await chmod(socketPath, 0o660);
+    const api = new SubspaceApi({ socketPath, decisionRelay: true });
+    expect((await api.me(signal)).userId).toBe(REAR_ADMIRAL);
+    await chmod(socketPath, 0o666);
+    await expect(api.me(signal)).rejects.toThrow(
+      "decision relay socket is missing or unsafe",
+    );
+    await chmod(socketPath, 0o660);
+    const alias = join(socketDirectory, "alias.sock");
+    await symlink(socketPath, alias);
+    await expect(
+      new SubspaceApi({ socketPath: alias, decisionRelay: true }).me(signal),
+    ).rejects.toThrow("decision relay socket is missing or unsafe");
+    const aliasDirectory = join(directory, "alias-directory");
+    await symlink(socketDirectory, aliasDirectory);
+    await expect(
+      new SubspaceApi({
+        socketPath: join(aliasDirectory, "relay.sock"),
+        decisionRelay: true,
+      }).me(signal),
+    ).rejects.toThrow("decision relay socket is missing or unsafe");
+    await expect(
+      new SubspaceApi({
+        socketPath: `${socketDirectory}/./relay.sock`,
+        decisionRelay: true,
+      }).me(signal),
+    ).rejects.toThrow("decision relay socket is missing or unsafe");
+    await chmod(socketDirectory, 0o770);
+    await expect(api.me(signal)).rejects.toThrow(
+      "decision relay socket is missing or unsafe",
+    );
+    await chmod(socketDirectory, 0o700);
+    await chmod(directory, 0o770);
+    await expect(api.me(signal)).rejects.toThrow(
+      "decision relay socket is missing or unsafe",
+    );
+    expect(requests).toBe(1);
   } finally {
     await server.stop(true);
     await rm(directory, { recursive: true, force: true });

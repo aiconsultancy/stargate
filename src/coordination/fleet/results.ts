@@ -52,10 +52,15 @@ export function fleetAuthorizer(
     const { action } = fleetRequestAction(request);
     const peerMessage = request.operation === "peer-message";
 
+    const toolAliases: Partial<Record<typeof request.operation, string>> = {
+      "peer-message": "stargate_dm",
+      timer: "stargate_timer",
+    };
+
     const expected = {
       agent: caller.agent,
       id: caller.id,
-      tool: peerMessage ? "stargate_dm" : action,
+      tool: toolAliases[request.operation] ?? action,
       input: request.input,
       ...(peerMessage && { normaliseInput: normalisePeerInput }),
     };
@@ -88,6 +93,7 @@ export function fleetAuthorizer(
 
 /** Trusted gateway recovery only. No IPC operation can manufacture completion. */
 export class FleetResults {
+  private readonly nextDeferredRead = new Map<number, number>();
   public constructor(
     private readonly options: {
       control: FleetControl;
@@ -162,7 +168,24 @@ export class FleetResults {
         throw new Error("Fleet completion delegation unavailable");
       }
 
-      const makers = job.makers ?? (await this.recoverMakers(job, signal));
+      const deferred = job.failure ? null : store.fleet.deferredResult(job.id);
+      const expired = deferred !== null && deferred.expires <= Date.now();
+
+      const followUp =
+        deferred && !expired && job.input
+          ? await this.readDeferred(job, job.input, deferred.task, signal)
+          : undefined;
+
+      if (deferred && !expired && !followUp) {
+        continue;
+      }
+
+      this.nextDeferredRead.delete(job.id);
+
+      const makers =
+        followUp?.makers ??
+        job.makers ??
+        (await this.recoverMakers(job, signal));
 
       const output = JSON.parse(job.response ?? "[]") as ReplyChunk[];
 
@@ -174,13 +197,15 @@ export class FleetResults {
         inputID: job.input ?? null,
         channel: delegation.target.channel,
         outcome:
-          !job.failure && job.input && makers.length > 0
+          !expired && !job.failure && job.input && makers.length > 0
             ? "completed"
             : "uncertain",
-        text: output
-          .map((item) => replyText(item))
-          .join("\n\n")
-          .slice(0, 12_000),
+        text: (
+          followUp?.resultText ??
+          (expired
+            ? "The deferred result was not confirmed before its deadline."
+            : output.map((item) => replyText(item)).join("\n\n"))
+        ).slice(0, 12_000),
         makers,
         humanApproval: false,
       };
@@ -262,6 +287,36 @@ export class FleetResults {
     }
 
     await control.pollReviews(signal);
+  }
+
+  private async readDeferred(
+    job: Job,
+    inputID: string,
+    taskID: string,
+    signal: AbortSignal,
+  ) {
+    const now = Date.now();
+
+    if ((this.nextDeferredRead.get(job.id) ?? 0) > now) {
+      return null;
+    }
+
+    this.nextDeferredRead.set(job.id, now + 5000);
+
+    const { backend, sessionID } = this.options;
+
+    try {
+      return await backend.readCrewCompletion?.(
+        sessionID,
+        inputID,
+        taskID,
+        AbortSignal.any([signal, AbortSignal.timeout(3000)]),
+      );
+    } catch {
+      signal.throwIfAborted();
+
+      return null;
+    }
   }
 
   public async work(signal: AbortSignal) {

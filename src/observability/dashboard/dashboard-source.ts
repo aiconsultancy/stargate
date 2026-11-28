@@ -786,7 +786,9 @@ export function dashboardSource(
           `${bot.backend.model.providerID}/${bot.backend.model.id}`
         : bot.backend.type === "pi-durable" ||
             bot.backend.type === "claude" ||
-            bot.backend.type === "codex"
+            bot.backend.type === "codex" ||
+            bot.backend.type === "acp" ||
+            bot.backend.type === "antigravity"
           ? bot.backend.model
           : undefined;
 

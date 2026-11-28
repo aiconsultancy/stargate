@@ -8,6 +8,9 @@ export function initializeStoreSchema(db: Database) {
     CREATE TABLE IF NOT EXISTS sessions (
       conversation TEXT PRIMARY KEY, session_id TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS compaction_holds (
+      session_id TEXT PRIMARY KEY
+    );
     CREATE TABLE IF NOT EXISTS jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       eventId TEXT NOT NULL, botKey TEXT NOT NULL,
@@ -202,6 +205,9 @@ export function initializeStoreSchema(db: Database) {
   }
 
   db.run("CREATE INDEX IF NOT EXISTS jobs_input ON jobs(botKey,input)");
+  column("jobs", "pinned_session", "TEXT");
+  db.run(`CREATE INDEX IF NOT EXISTS jobs_running_pin ON jobs(pinned_session)
+    WHERE status='running'`);
   // Newest native message accounted for in Slack; NULL needs a baseline.
   column("sessions", "cursor", "TEXT");
   // Server-wide settle events look up mappings by native session ID.

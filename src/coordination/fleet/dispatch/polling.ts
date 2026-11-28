@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 import {
   type DecisionOutcome,
+  DecisionRelayError,
   type DispatchApi,
   DispatchApiError,
   type DispatchIssue,
@@ -103,6 +104,10 @@ export type AssignmentMode =
 export type AgentDispatcherOptions = {
   settings: DispatchSettings;
   api: DispatchApi;
+  decisionApi?: Pick<
+    DispatchApi,
+    "me" | "decisionOutcomes" | "acknowledgeDecisionOutcome"
+  >;
   messenger: DispatchMessenger;
   ledger: DispatchLedger;
   assignmentMode: AssignmentMode;
@@ -177,7 +182,7 @@ export class DispatchPolling {
    */
   private verifiedFleet: string | undefined;
   private verifiedUser: string | undefined;
-  private readonly warned = new Set<string>();
+  private readonly warned = new Map<string, string>();
   private readonly options: PollingPort["options"];
   private readonly now: PollingPort["now"];
   private readonly finish: PollingPort["finish"];
@@ -236,13 +241,13 @@ export class DispatchPolling {
     this.assignmentIdentity = new AbortController();
   }
 
-  /** Log a problem once until it clears; never logs bodies or secrets. */
+  /** Log a problem once until the warning clears or changes. */
   public warnOnce(key: string, message: string, detail: LogDetail = {}) {
-    if (this.warned.has(key)) {
+    if (this.warned.get(key) === message) {
       return;
     }
 
-    this.warned.add(key);
+    this.warned.set(key, message);
     this.options.log.warn(detail, message);
   }
 
@@ -254,7 +259,7 @@ export class DispatchPolling {
    * Log a failed API call once until that step succeeds again. A refused
    * credential (401 or 403) gets one plain line of its own: it needs an
    * operator, and every later poll tries again at the usual interval.
-   * Only the HTTP status is logged, never a header, token or body.
+   * Warnings never include API headers, credentials or response bodies.
    */
   public apiFailed(
     key: string,
@@ -262,6 +267,12 @@ export class DispatchPolling {
     error: unknown,
     detail: LogDetail = {},
   ) {
+    if (error instanceof DecisionRelayError) {
+      this.warnOnce(key, error.message);
+
+      return;
+    }
+
     const status = errorStatus(error);
 
     if (status === 401 || status === 403) {
@@ -372,7 +383,8 @@ export class DispatchPolling {
   }
 
   private async pollDecisionOutcomes(fleetId: string, signal: AbortSignal) {
-    const { api, ledger, messenger } = this.options;
+    const { decisionApi, ledger, messenger } = this.options;
+    const api = decisionApi ?? this.options.api;
 
     if (
       !api.decisionOutcomes ||
@@ -381,6 +393,8 @@ export class DispatchPolling {
     ) {
       throw new Error("Decision outcome delivery is not available");
     }
+
+    await this.checkDecisionRelay(fleetId, signal);
 
     const page = await api.decisionOutcomes(
       fleetId,
@@ -410,6 +424,7 @@ export class DispatchPolling {
           return;
         }
 
+        await this.checkDecisionRelay(fleetId, signal);
         await api.acknowledgeDecisionOutcome(fleetId, outcome.id, signal);
         ledger.clearDecisionOutcomeSent(outcome.id);
       } catch (error) {
@@ -428,6 +443,27 @@ export class DispatchPolling {
     }
 
     this.decisionOutcomeCursor = page.next;
+  }
+
+  private async checkDecisionRelay(fleetId: string, signal: AbortSignal) {
+    const { decisionApi } = this.options;
+
+    if (!decisionApi) {
+      return;
+    }
+
+    const identity = await decisionApi.me(signal);
+
+    if (
+      identity.kind !== "agent" ||
+      identity.agentRank !== "rearAdmiral" ||
+      identity.fleetId !== fleetId ||
+      identity.userId !== this.verifiedUser
+    ) {
+      throw new DecisionRelayError(
+        "The decision relay identity does not match the confirmed rear admiral",
+      );
+    }
   }
 
   /** Captains are the roster's agents of rank captain, with their chat accounts. */

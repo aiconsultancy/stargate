@@ -486,6 +486,40 @@ export async function registrationFeatures(
         backend.projectDocs,
       ),
     );
+  } else if (backend.type === "acp") {
+    features.push(
+      flag(
+        "backend.permissionPolicy",
+        "ACP permission policy",
+        backend.permissionPolicy !== "deny",
+        false,
+        backend.permissionPolicy,
+      ),
+      flag(
+        "backend.flavor",
+        "ACP flavor",
+        backend.flavor !== "generic",
+        false,
+        backend.flavor,
+      ),
+    );
+  } else if (backend.type === "antigravity") {
+    features.push(
+      flag(
+        "backend.permissionPolicy",
+        "Antigravity permission policy",
+        backend.permissionPolicy !== "deny",
+        false,
+        backend.permissionPolicy,
+      ),
+      flag("backend.sandbox", "Antigravity sandbox", backend.sandbox, true),
+      flag(
+        "backend.disableTelemetry",
+        "Antigravity telemetry disabled",
+        backend.disableTelemetry,
+        true,
+      ),
+    );
   }
 
   return features;

@@ -489,7 +489,31 @@ export const reviewInputSchema = settingsDiscriminatedUnion(
   reviewInputBranches,
 );
 
+export const timerInputSchema = settingsStruct({
+  op: Schema.Literals(["set", "cancel", "status"]),
+  minutes: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1440 })),
+  ),
+  note: Schema.optional(Schema.String.check(Schema.isMaxCodePoints(500))),
+});
+
+export type TimerInput = typeof timerInputSchema.Type;
+
+export const deferResultInputSchema = settingsStruct({
+  taskID: Schema.String.check(settingsPattern(/^task_[a-f0-9-]{36}$/)),
+});
+
 export const requestSchema = settingsDiscriminatedUnion("operation", [
+  settingsStruct({
+    operation: Schema.Literal("defer-result"),
+    caller: callerSchema,
+    input: deferResultInputSchema,
+  }),
+  settingsStruct({
+    operation: Schema.Literal("timer"),
+    caller: callerSchema,
+    input: timerInputSchema,
+  }),
   settingsStruct({
     operation: Schema.Literal("verify"),
     caller: callerSchema,
@@ -672,6 +696,10 @@ export const fleetCompletionSchema = settingsStruct({
 export type FleetCompletion = typeof fleetCompletionSchema.Type;
 
 export const fleetJobSchema = settingsDiscriminatedUnion("kind", [
+  settingsStruct({
+    kind: Schema.Literal("timer"),
+    originEvent: Schema.String.check(Schema.isBetweenCodePoints(1, 4096)),
+  }),
   settingsStruct({
     kind: Schema.Literal("assignment"),
     dispatchID: identifier,

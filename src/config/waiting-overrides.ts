@@ -17,7 +17,15 @@ type WaitingRegistration = {
   waiting: WaitingSettings;
   backend:
     | { type: "opencode"; directory: string; agent?: string | undefined }
-    | { type: "pi-durable" | "claude" | "codex" | "module" };
+    | {
+        type:
+          | "pi-durable"
+          | "claude"
+          | "codex"
+          | "acp"
+          | "antigravity"
+          | "module";
+      };
 };
 
 const overrideSchema = settingsStruct({ delayMs: waitingDelaySchema });

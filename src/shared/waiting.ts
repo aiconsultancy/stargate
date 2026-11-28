@@ -3,7 +3,15 @@ type WaitingRegistration = {
   displayName?: string | undefined;
   backend:
     | { type: "opencode"; directory: string; agent?: string | undefined }
-    | { type: "pi-durable" | "claude" | "codex" | "module" };
+    | {
+        type:
+          | "pi-durable"
+          | "claude"
+          | "codex"
+          | "acp"
+          | "antigravity"
+          | "module";
+      };
 };
 
 export function botDisplayName<

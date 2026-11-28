@@ -66,6 +66,12 @@ export type FleetControlOptions = {
     signal: AbortSignal,
   ): Promise<string>;
   status?(): unknown;
+  deferResult?(origin: FleetOrigin, taskID: string): void;
+  timer?(
+    origin: FleetOrigin,
+    key: string,
+    input: Extract<FleetRequest, { operation: "timer" }>["input"],
+  ): unknown;
   /** Resolve the immutable authenticated ingress job and native input locally. */
   origin?(source: VerifiedSource): FleetOrigin | undefined;
   /** Transport test seam; production uses the kernel startup lock. */
@@ -545,83 +551,7 @@ export class FleetControl {
 
           signal.throwIfAborted();
 
-          if (value.operation === "peer-message") {
-            const target = this.options.config.targets.find(
-              (entry) =>
-                entry.id === value.input.to && entry.role === "captain",
-            );
-
-            if (
-              !this.options.peerMessage ||
-              !target ||
-              target.account === this.options.account
-            ) {
-              throw new FleetError(
-                "Peer messaging requires a configured remote captain.",
-              );
-            }
-
-            const channel = await this.options.peerMessage(
-              target,
-              value.input,
-              signal,
-            );
-
-            sendJson(response, 200, {
-              result: {
-                channel,
-                target: target.id,
-                state: "sent",
-                humanApproval: false,
-              },
-            });
-
-            return;
-          }
-
-          const result =
-            value.operation === "review"
-              ? !this.reviews
-                ? (() => {
-                    throw new FleetError("Review evidence is disabled");
-                  })()
-                : value.input.op === "start"
-                  ? await this.reviews.start(
-                      value.input,
-                      nativeOrigin ?? undefined,
-                      value.caller.agent,
-                      signal,
-                    )
-                  : {
-                      proof:
-                        this.ledger.reviewProof(
-                          value.input.id,
-                          this.options.account,
-                        ) ?? null,
-                      humanApproval: false,
-                    }
-              : value.operation === "verify"
-                ? this.ledger.verify(
-                    value.caller.sessionID,
-                    value.input.reference,
-                  )
-                : value.operation === "dispatch"
-                  ? await this.dispatch(value.input, value.caller, signal)
-                  : value.operation === "answer"
-                    ? await this.answerOffer(value.input, signal)
-                    : value.input.requestID
-                      ? (this.ledger.dispatch(
-                          value.caller.sessionID,
-                          value.input.requestID,
-                        ) ?? { state: "not_found", humanApproval: false })
-                      : {
-                          account: this.options.account,
-                          targets: this.options.config.targets,
-                          humanApproval: false,
-                          ...(this.options.status && {
-                            transport: await this.options.status(),
-                          }),
-                        };
+          const result = await this.execute(value, nativeOrigin, signal);
 
           sendJson(response, 200, { result });
         } catch (error) {
@@ -647,6 +577,101 @@ export class FleetControl {
       this.options.config.socketPath,
       this.options.ownership,
     );
+  }
+
+  private async execute(
+    request: FleetRequest,
+    origin: FleetOrigin | void,
+    signal: AbortSignal,
+  ) {
+    switch (request.operation) {
+      case "defer-result": {
+        if (!origin || !this.resultsEnabled || !this.options.deferResult) {
+          throw new FleetError("Deferred fleet results are unavailable.");
+        }
+
+        this.options.deferResult(origin, request.input.taskID);
+
+        return { state: "deferred", taskID: request.input.taskID };
+      }
+
+      case "timer": {
+        if (!origin || !this.options.timer) {
+          throw new FleetError("Teams follow-up timers are unavailable.");
+        }
+
+        return this.options.timer(origin, request.caller.id, request.input);
+      }
+
+      case "peer-message":
+        return this.sendPeer(request.input, signal);
+      case "review":
+        return this.review(request, origin, signal);
+      case "verify":
+        return this.ledger.verify(
+          request.caller.sessionID,
+          request.input.reference,
+        );
+      case "dispatch":
+        return this.dispatch(request.input, request.caller, signal);
+      case "answer":
+        return this.answerOffer(request.input, signal);
+      case "status":
+        return request.input.requestID
+          ? (this.ledger.dispatch(
+              request.caller.sessionID,
+              request.input.requestID,
+            ) ?? {
+              state: "not_found",
+              humanApproval: false,
+            })
+          : {
+              account: this.options.account,
+              targets: this.options.config.targets,
+              humanApproval: false,
+              ...(this.options.status && {
+                transport: await this.options.status(),
+              }),
+            };
+    }
+  }
+
+  private async sendPeer(input: PeerMessageInput, signal: AbortSignal) {
+    const target = this.options.config.targets.find(
+      (entry) => entry.id === input.to && entry.role === "captain",
+    );
+
+    if (
+      !this.options.peerMessage ||
+      !target ||
+      target.account === this.options.account
+    ) {
+      throw new FleetError(
+        "Peer messaging requires a configured remote captain.",
+      );
+    }
+
+    const channel = await this.options.peerMessage(target, input, signal);
+
+    return { channel, target: target.id, state: "sent", humanApproval: false };
+  }
+
+  private review(
+    { input, caller }: Extract<FleetRequest, { operation: "review" }>,
+    origin: FleetOrigin | void,
+    signal: AbortSignal,
+  ) {
+    if (!this.reviews) {
+      throw new FleetError("Review evidence is disabled");
+    }
+
+    return input.op === "start"
+      ? this.reviews.start(input, origin ?? undefined, caller.agent, signal)
+      : {
+          proof:
+            this.ledger.reviewProof(input.id, this.options.account) ?? null,
+          humanApproval: false,
+        };
   }
 
   public async close() {

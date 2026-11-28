@@ -4,11 +4,14 @@ import pino from "pino";
 import { maxAttachmentBytes } from "../src/chat/attachments/attachments";
 import { Gateway } from "../src/gateway/gateway";
 import { teamsSchema } from "../src/config";
+import { decodeSettings } from "../src/config/settings-errors";
 import { TeamsDocuments } from "../src/transports/teams/inbound-documents";
+import { allowedActivity } from "../src/transports/teams/registration";
 import {
   activity,
   APP_ID,
   HUMAN,
+  OTHER_HUMAN,
   registrationFixture,
   TENANT_ID,
 } from "./teams-support";
@@ -193,6 +196,111 @@ describe("Teams shared conversations and quoted replies", () => {
           conversation: { ...message.conversation, id: "other-conversation" },
         }),
       ).toBe(false);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  test("the installed conversation opt-in is limited to rear admirals and verified mentions", async () => {
+    const fixture = registrationFixture({ fleet: true });
+    const { config } = fixture;
+
+    const group = {
+      id: "installed-group",
+      conversationType: "groupChat",
+      tenantId: TENANT_ID,
+    } as const;
+
+    const message = activity({
+      conversation: group,
+      entities: [{ type: "mention", mentioned: { id: `28:${APP_ID}` } }],
+    });
+
+    try {
+      expect(allowedActivity(config, message)).toBe(false);
+      expect(allowedActivity(config, activity())).toBe(true);
+      config.access.allowInstalledConversations = true;
+      config.access.allowUnmentionedConversations = true;
+      expect(
+        decodeSettings(teamsSchema, config).access.allowInstalledConversations,
+      ).toBe(true);
+      const fleetPolicy = config.fleetPolicy;
+
+      if (!fleetPolicy) {
+        throw new Error("Rear admiral fixture is missing its policy");
+      }
+
+      const captain = {
+        ...config,
+        fleetPolicy: { ...fleetPolicy, role: "captain" as const },
+      };
+
+      expect(() => decodeSettings(teamsSchema, captain)).toThrow(
+        '["access","allowInstalledConversations"]: Installed Teams conversations require a rear admiral registration',
+      );
+      expect(allowedActivity(captain, message)).toBe(false);
+      expect(allowedActivity(config, message)).toBe(true);
+      expect(allowedActivity(config, activity())).toBe(true);
+      expect(
+        allowedActivity(
+          config,
+          activity({ conversation: { ...group, id: "allowed-channel" } }),
+        ),
+      ).toBe(true);
+
+      for (const denied of [
+        { ...message, entities: [] },
+        {
+          ...message,
+          entities: [{ type: "mention", mentioned: { id: `28:${secondBot}` } }],
+        },
+        { ...message, recipient: { id: `28:${secondBot}` } },
+        { ...message, from: { ...message.from, aadObjectId: secondBot } },
+        { ...message, from: { ...message.from, aadObjectId: OTHER_HUMAN } },
+        { ...message, from: { ...message.from, role: "bot" } },
+        { ...message, conversation: { ...group, tenantId: secondBot } },
+      ]) {
+        expect(allowedActivity(config, denied)).toBe(false);
+      }
+
+      config.access.deniedUsers.push(HUMAN);
+      expect(allowedActivity(config, message)).toBe(false);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  test("an authenticated mention can open a reply, and retiring access blocks delivery", async () => {
+    const fixture = registrationFixture({ fleet: true });
+    const group = "installed-group";
+
+    const message = activity({
+      conversation: {
+        id: group,
+        conversationType: "groupChat",
+        tenantId: TENANT_ID,
+      },
+      entities: [{ type: "mention", mentioned: { id: `28:${APP_ID}` } }],
+    });
+
+    try {
+      fixture.config.access.allowInstalledConversations = true;
+      expect(await fixture.registration.accept(message)).toBe(true);
+      await fixture.registration.delivery.post(group, message.id, "Reply");
+      expect(fixture.sent[0]?.activity.replyToId).toBe(message.id);
+
+      fixture.config.access.allowInstalledConversations = false;
+      await expect(
+        fixture.registration.delivery.post(group, message.id, "Disabled"),
+      ).rejects.toThrow("unavailable");
+      fixture.config.access.allowInstalledConversations = true;
+      fixture.config.access.deniedChannels.push(group);
+      expect(
+        await fixture.registration.accept({ ...message, id: "denied" }),
+      ).toBe(false);
+      await expect(
+        fixture.registration.delivery.post(group, message.id, "Denied"),
+      ).rejects.toThrow("unavailable");
     } finally {
       await fixture.close();
     }

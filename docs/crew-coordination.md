@@ -290,12 +290,19 @@ stop the underlying work. Gateway timeouts at or below 60 seconds can expire
 before this window; the default gateway timeout is 30 minutes. This bounds one
 wait, not the model's whole turn or another conversation's response latency.
 
-For an unsolicited completion report, send one concise `stargate_dm` to `captain`
-with the task ID and verified outcome **before** `complete` or the final answer.
-Completion alone does not wake the captain, and completed tasks cannot select
-a captain route for a new send. The captain may briefly see running while the
-worker records the result. Stored or deferred mail is not confirmed delivery;
-retain the original result for later collection, without resubmitting work.
+Pinned OpenCode captain profiles can opt in with `completionWake: true` in
+the `stargate.crew` plugin options. A successful, verified crew result records
+one durable wake for the assigning captain. The captain reads the retained
+result and continues the same work. The watcher can recover OpenCode final
+answers through the configured history API and observe committed Pi results.
+It does not wake replacement pins or replay older task history. For a fleet
+assignment that must continue across this wake, use
+[`fleet_defer_result`](fleet-tools.md#deferred-crew-results) before ending the
+original turn.
+
+When the option is disabled, use one concise `stargate_dm` to `captain` before
+`complete` or the final answer. Completed tasks cannot select a captain route
+for a new send. Stored or deferred mail is not confirmed delivery.
 
 Background shell completion notices are native context only when retained history
 proves a unique prior `shell` launch by the task-owned worker in the same original

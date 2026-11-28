@@ -11,7 +11,9 @@ type FleetAction =
   | "fleet_dispatch"
   | "fleet_status"
   | "fleet_peer_message"
-  | "fleet_answer_offer";
+  | "fleet_answer_offer"
+  | "fleet_timer"
+  | "fleet_defer_result";
 
 type ReviewAction = "fleet_review";
 
@@ -22,6 +24,8 @@ const actions: readonly (FleetAction | ReviewAction)[] = [
   "fleet_review",
   "fleet_answer_offer",
   "fleet_peer_message",
+  "fleet_timer",
+  "fleet_defer_result",
 ];
 
 // Deliberately smaller than a general native glob language. Punctuation that
@@ -98,6 +102,10 @@ export function fleetRequestAction(request: FleetRequest): {
   resource: string;
 } {
   switch (request.operation) {
+    case "defer-result":
+      return { action: "fleet_defer_result", resource: "crew" };
+    case "timer":
+      return { action: "fleet_timer", resource: "teams" };
     case "review":
       return {
         action: "fleet_review",

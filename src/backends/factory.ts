@@ -47,6 +47,18 @@ export async function createBackend(
       return CodexBackend.open(config, context);
     }
 
+    case "acp": {
+      const { AcpBackend } = await import("./acp");
+
+      return AcpBackend.open(config, context);
+    }
+
+    case "antigravity": {
+      const { AntigravityBackend } = await import("./antigravity");
+
+      return AntigravityBackend.open(config, context);
+    }
+
     case "module": {
       const plugin: unknown = await import(pathToFileURL(config.module).href);
 

@@ -55,7 +55,11 @@ import type {
   SubspaceAgentsRuntime,
 } from "../subspace/start";
 import { abortable } from "../lib/effect";
-import { FleetControl } from "../coordination/fleet/control";
+import {
+  FleetControl,
+  type FleetControlOptions,
+} from "../coordination/fleet/control";
+import { FleetError } from "../coordination/fleet/protocol";
 import {
   FleetResults,
   fleetAuthorizer,
@@ -122,6 +126,69 @@ import {
   type UpdateSnapshot,
   buildUpdateSnapshot,
 } from "../automation/maintenance/update-notice";
+
+function teamsSharingPin(
+  registrations: readonly TeamsRegistration[],
+  irc: IrcConfig,
+) {
+  return registrations.filter(
+    ({ config }) =>
+      config.backend.type === "opencode" &&
+      irc.backend.type === "opencode" &&
+      config.backend.sessionID === irc.backend.sessionID &&
+      backendFingerprint(config) === backendFingerprint(irc),
+  );
+}
+
+function fleetFollowUps(
+  store: Store,
+  relatedTeams: readonly TeamsRegistration[],
+  ircKey: string,
+  backend: AgentBackend,
+  pin: string,
+): Pick<FleetControlOptions, "deferResult" | "timer" | "origin" | "authorize"> {
+  const sourceKeys = [ircKey, ...relatedTeams.map((team) => team.key)];
+
+  return {
+    origin: (source) =>
+      source.origin && sourceKeys.includes(source.origin.botKey)
+        ? fleetOrigin(store, pin, source)
+        : undefined,
+    authorize: fleetAuthorizer(store, backend, pin, sourceKeys),
+    deferResult: (origin, taskID) => {
+      const job = store.jobByEvent(ircKey, origin.eventId);
+
+      if (
+        origin.botKey !== ircKey ||
+        job?.fleet?.kind !== "assignment" ||
+        job.status !== "running" ||
+        job.input !== origin.inputID ||
+        !backend.readCrewCompletion
+      ) {
+        throw new FleetError(
+          "Only an active fleet assignment can defer its result.",
+        );
+      }
+
+      store.fleet.deferResult(job.id, taskID);
+    },
+    timer: (origin, id, input) => {
+      const team = relatedTeams.find(
+        ({ key, config }) => key === origin.botKey && config.followUpTimers,
+      );
+
+      const job = team && store.jobByEvent(team.key, origin.eventId);
+
+      if (!job || job.input !== origin.inputID) {
+        throw new FleetError(
+          "Teams follow-up timer does not own this request.",
+        );
+      }
+
+      return store.teamsTimers.change(job, origin.sessionID, id, input);
+    },
+  };
+}
 
 export function lockInstance(path: string) {
   const lock = new Database(path, { create: true });
@@ -1033,12 +1100,7 @@ export function serve(
             throw new Error("Fleet primary registration unavailable");
           }
 
-          const relatedTeams = teamsRegistrations.filter(
-            (team) =>
-              team.config.backend.type === "opencode" &&
-              team.config.backend.sessionID === pin &&
-              backendFingerprint(team.config) === backendFingerprint(irc),
-          );
+          const relatedTeams = teamsSharingPin(teamsRegistrations, irc);
 
           const control = yield* Effect.acquireRelease(
             Effect.promise(() =>
@@ -1047,14 +1109,13 @@ export function serve(
                 sessionID: pin,
                 account: irc.account,
                 permissions,
-                origin: (source) =>
-                  source.origin &&
-                  [
-                    primary.key,
-                    ...relatedTeams.map((team) => team.key),
-                  ].includes(source.origin.botKey)
-                    ? fleetOrigin(store, pin, source)
-                    : undefined,
+                ...fleetFollowUps(
+                  store,
+                  relatedTeams,
+                  primary.key,
+                  entry.resource.backend,
+                  pin,
+                ),
                 allowDispatch:
                   irc.fleetPolicy?.capabilities.includes("dispatch") === true,
                 ...(entry.resource.backend.startReview &&
@@ -1068,10 +1129,6 @@ export function serve(
                         Promise.reject(new Error("Review backend unavailable")),
                     },
                   }),
-                authorize: fleetAuthorizer(store, entry.resource.backend, pin, [
-                  primary.key,
-                  ...relatedTeams.map((team) => team.key),
-                ]),
                 send: async (target, text, signal) => {
                   await sendFleetAssignment(
                     primary.client,
@@ -1686,6 +1743,25 @@ export async function start(configPath: string) {
       }
 
       if (backend.type === "module") {
+        return [];
+      }
+
+      if (backend.type === "acp") {
+        return Object.values(backend.secretEnv);
+      }
+
+      if (backend.type === "antigravity") {
+        if (backend.auth.method === "gemini-api-key") {
+          return [backend.auth.apiKeyEnv];
+        }
+
+        if (
+          backend.auth.method === "agent-platform" &&
+          backend.auth.apiKeyEnv !== undefined
+        ) {
+          return [backend.auth.apiKeyEnv];
+        }
+
         return [];
       }
 

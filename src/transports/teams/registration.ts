@@ -60,9 +60,40 @@ function activityTenantMatches(activity: TeamsActivity, expected: string) {
   );
 }
 
+function conversationAccess(
+  config: TeamsConfig,
+  scope: string,
+  personal: boolean,
+) {
+  const { access } = config;
+
+  if (access.deniedChannels.includes(scope)) {
+    return;
+  }
+
+  if (personal) {
+    return "personal";
+  }
+
+  if (access.channels.includes(scope)) {
+    return "listed";
+  }
+
+  return config.fleetPolicy?.role === "rear_admiral" &&
+    access.allowInstalledConversations === true
+    ? "installed"
+    : undefined;
+}
+
 export function allowedActivity(config: TeamsConfig, activity: TeamsActivity) {
   const user = activity.from.aadObjectId?.toLowerCase();
   const channel = activity.channelData?.channel?.id ?? activity.conversation.id;
+
+  const conversation = conversationAccess(
+    config,
+    channel,
+    activity.conversation.conversationType === "personal",
+  );
 
   return Boolean(
     user &&
@@ -75,12 +106,12 @@ export function allowedActivity(config: TeamsConfig, activity: TeamsActivity) {
     activity.from.role !== "bot" &&
     config.access.users.some((id) => id.toLowerCase() === user) &&
     !config.access.deniedUsers.some((id) => id.toLowerCase() === user) &&
-    !config.access.deniedChannels.includes(channel) &&
-    (activity.conversation.conversationType === "personal" ||
-      (config.access.channels.includes(channel) &&
-        (hasBotMention(activity) ||
-          (config.access.allowUnmentionedConversations === true &&
-            !mentionsAnyBot(activity))))),
+    conversation &&
+    (conversation === "personal" ||
+      hasBotMention(activity) ||
+      (conversation === "listed" &&
+        config.access.allowUnmentionedConversations === true &&
+        !mentionsAnyBot(activity))),
   );
 }
 
@@ -190,6 +221,31 @@ export class TeamsRegistration {
       key: this.key,
       allowed: (user, channel) => this.allowed(user, channel),
       source: (job) => {
+        if (job.fleet?.kind === "timer") {
+          const original = this.store.jobByEvent(
+            this.key,
+            job.fleet.originEvent,
+          );
+
+          return {
+            transport: "teams",
+            channel: job.channel,
+            thread: job.thread,
+            message: job.eventId,
+            user: config.id,
+            authority: "agent",
+            ...(original &&
+              this.sourceRecorder && {
+                reference: fleetSourceReference(
+                  "teams",
+                  this.key,
+                  job.channel,
+                  original.thread,
+                ),
+              }),
+          };
+        }
+
         const resultSource = fleetResultSource(job);
 
         if (resultSource) {
@@ -372,15 +428,17 @@ export class TeamsRegistration {
 
     return Boolean(
       reference &&
-      (reference.personal ||
-        this.config.access.channels.includes(reference.scope)) &&
+      conversationAccess(
+        this.config,
+        reference.scope,
+        reference.personal !== 0,
+      ) &&
       this.config.access.users.some(
         (id) => id.toLowerCase() === user.toLowerCase(),
       ) &&
       !this.config.access.deniedUsers.some(
         (id) => id.toLowerCase() === user.toLowerCase(),
-      ) &&
-      !this.config.access.deniedChannels.includes(reference.scope),
+      ),
     );
   }
   private async send(conversation: string, text: string, replyToId?: string) {
@@ -479,7 +537,7 @@ export class TeamsRegistration {
         ? "Inspect the attached file."
         : "Inspect the attached screenshot.");
 
-    const queued = this.store.enqueue({
+    const incoming = {
       eventId,
       botKey: this.key,
       conversation: JSON.stringify([this.key, conversation]),
@@ -493,7 +551,18 @@ export class TeamsRegistration {
       user,
       text: [request, quote.context].filter(Boolean).join("\n\n"),
       files,
-    });
+    };
+
+    const scope = JSON.stringify([
+      conversation,
+      activity.conversation.conversationType === "channel"
+        ? (activity.replyToId ?? activity.id)
+        : null,
+    ]);
+
+    const queued = this.config.followUpTimers
+      ? this.store.teamsTimers.admitHuman(incoming, scope)
+      : this.store.enqueue(incoming);
 
     if (queued) {
       prepared.remember?.();
@@ -607,7 +676,7 @@ export class TeamsRegistration {
 
     if (
       owner?.status !== "running" ||
-      owner.fleet?.kind === "result" ||
+      owner.fleet !== undefined ||
       owner.user !== row.user ||
       owner.channel !== row.conversation ||
       !currentReference?.personal ||
@@ -648,7 +717,7 @@ export class TeamsRegistration {
       for (const candidate of this.store.permissionCandidates(this.key)) {
         if (
           candidate.input &&
-          candidate.fleet?.kind !== "result" &&
+          !candidate.fleet &&
           this.config.approvalUsers.some(
             (id) => id.toLowerCase() === candidate.user,
           ) &&
@@ -808,6 +877,16 @@ export class TeamsRegistration {
     );
     this.loop = (async () => {
       while (!this.abort.signal.aborted) {
+        const pin = this.backend.sessionID;
+
+        if (open() && this.config.followUpTimers && pin) {
+          try {
+            this.store.teamsTimers.releaseDue(this.key, pin);
+          } catch {
+            this.log("Teams follow-up timer check unavailable");
+          }
+        }
+
         await this.pollApprovals().catch(() => {
           this.log("Teams permission check unavailable");
         });

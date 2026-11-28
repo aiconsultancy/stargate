@@ -255,6 +255,22 @@ unconfirmed. Inspect retained status, native history and destination before
 operator recovery; neither a new event ID nor a new request ID is a safe
 blind resend. Disabling results preserves existing receipt-only operation.
 
+## Deferred crew results
+
+Use `fleet_defer_result` with the crew `taskID` during its original correlated
+fleet assignment. A captain can then send progress and end the current turn.
+When that task finishes, the crew wake reaches the same captain, which checks
+the saved result and sends its final answer. The gateway verifies the exact
+task wake and its native origin before returning that answer to the source.
+Unknown results remain pending until evidence is available or the 24-hour
+deadline is reached. Confirm the existing task's status before trying to
+recover work.
+
+This requires durable fleet results, a pinned OpenCode captain with
+`completionWake: true`, `deferredResults: true` in its `stargate.fleet` plugin
+options, and the `fleet_defer_result` permission on `crew` both in the native
+profile and the fleet gateway policy.
+
 ## Gateway integration
 
 `FleetControl.open` takes `config`, the immutable `sessionID` and actual

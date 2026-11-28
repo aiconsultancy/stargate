@@ -193,6 +193,13 @@ export interface AgentBackend {
     binding: FleetReviewBinding,
     signal: AbortSignal,
   ): Promise<FleetReviewEvidence | undefined>;
+  /** Read the public answer to the verified crew-completion wake for this assignment. */
+  readCrewCompletion?(
+    sessionID: string,
+    originInputID: string,
+    taskID: string,
+    signal: AbortSignal,
+  ): Promise<FleetReviewEvidence | undefined>;
   /** Reported native makers for this exact submitted input, never config guesses. */
   executionMakers?(
     sessionID: string,
@@ -237,6 +244,8 @@ export interface AgentBackend {
     title: string;
     signal: AbortSignal;
   }): Promise<string>;
+  /** Read native state before the gateway submits a new turn. */
+  checkPromptAdmission?(sessionId: string, signal: AbortSignal): Promise<void>;
   prompt(
     sessionId: string,
     text: string,
